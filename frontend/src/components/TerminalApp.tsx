@@ -15,7 +15,7 @@ import { JoinRequests } from "../pages/JoinRequests";
 import { InviteMember } from "../pages/InviteMember";
 import { SearchView } from "./Search/SearchView";
 import { useAppStore } from "../stores/appStore";
-import { useUserGroupsWithChannels, usePendingInvites } from "../hooks/queries/useGroups";
+import { useUserGroupsWithChannels, usePendingInvites, useLeaveGroup } from "../hooks/queries/useGroups";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useLiveKitRealtime } from "../hooks/useLiveKitRealtime";
@@ -42,6 +42,7 @@ type View =
   | { type: "invites" }
   | { type: "join-requests"; group: GroupWithChannels }
   | { type: "invite-member"; group: GroupWithChannels }
+  | { type: "leave-group"; group: GroupWithChannels }
   | { type: "search" }
   | { type: "voice-channel"; channelName: string };
 
@@ -77,6 +78,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
   const { data: groupsWithChannels, isLoading: groupsLoading, error: groupsError } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
   const { data: pendingInvites = [] } = usePendingInvites();
+  const leaveGroupMutation = useLeaveGroup();
 
   console.log("about to use livekit realtime hook with selectedChannelId", selectedChannelId);
   // Maintain a LiveKit room connection for the active channel/conversation
@@ -307,6 +309,13 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         type: "system" as const,
         testId: "menu-item-join-requests",
       },
+      {
+        id: "leave-group",
+        label: "Leave Group",
+        action: () => push({ type: "leave-group", group }),
+        type: "system" as const,
+        testId: "menu-item-leave-group",
+      },
       goBackItem,
     ];
 
@@ -368,6 +377,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
       case "invites": return "Invites";
       case "join-requests": return `Join Requests : : ${currentView.group.name}`;
       case "invite-member": return `Invite Member : : ${currentView.group.name}`;
+      case "leave-group": return `Leave Group : : ${currentView.group.name}`;
       case "search": return "Search";
       case "voice-channel": return `[v] ${currentView.channelName}`;
       default: return "pollis";
@@ -532,6 +542,65 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
             </div>
           </div>
         );
+      case "leave-group":
+        return (
+          <div className="flex flex-col h-full">
+            <MenuPageHeader title="Leave Group" onBack={pop} />
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
+              <p className="text-xs font-mono text-center" style={{ color: "var(--c-text-dim)" }}>
+                Are you sure you want to leave <strong>{currentView.group.name}</strong>?
+                <br />
+                You will need a new invite to rejoin.
+              </p>
+              {leaveGroupMutation.isError && (
+                <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+                  {leaveGroupMutation.error instanceof Error ? leaveGroupMutation.error.message : "Failed to leave group"}
+                </p>
+              )}
+              <div className="flex gap-3">
+                <button
+                  data-testid="leave-group-confirm"
+                  onClick={async () => {
+                    try {
+                      await leaveGroupMutation.mutateAsync(currentView.group.id);
+                      setSelectedGroupId(null);
+                      setSelectedChannelId(null);
+                      setViewStack([{ type: "root" }]);
+                    } catch {
+                      // error shown via isError above
+                    }
+                  }}
+                  disabled={leaveGroupMutation.isPending}
+                  className="px-4 py-2 text-xs font-mono font-medium transition-colors"
+                  style={{
+                    background: "var(--c-accent)",
+                    color: "var(--c-bg)",
+                    border: "1px solid var(--c-border-active)",
+                    borderRadius: 4,
+                    opacity: leaveGroupMutation.isPending ? 0.5 : 1,
+                    cursor: leaveGroupMutation.isPending ? "not-allowed" : "pointer",
+                  }}
+                >
+                  {leaveGroupMutation.isPending ? "Leaving…" : "Yes, Leave"}
+                </button>
+                <button
+                  data-testid="leave-group-cancel"
+                  onClick={pop}
+                  className="px-4 py-2 text-xs font-mono font-medium transition-colors"
+                  style={{
+                    background: "transparent",
+                    color: "var(--c-accent)",
+                    border: "1px solid var(--c-border-active)",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        );
       case "search":
         return (
           <div className="flex flex-col h-full">
@@ -654,6 +723,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
                 case "invites": return "Invites";
                 case "join-requests": return `Join Requests : : ${v.group.name}`;
                 case "invite-member": return `Invite Member : : ${v.group.name}`;
+                case "leave-group": return `Leave Group : : ${v.group.name}`;
                 case "search": return "Search";
                 default: return null;
               }
