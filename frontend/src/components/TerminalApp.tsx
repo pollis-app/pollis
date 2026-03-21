@@ -501,7 +501,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         return (
           <div className="flex flex-col h-full">
             <MenuPageHeader title="Preferences" onBack={pop} />
-            <div className="flex-1 overflow-hidden">
+            <div className="flex-1 overflow-auto">
               <Preferences />
             </div>
           </div>
