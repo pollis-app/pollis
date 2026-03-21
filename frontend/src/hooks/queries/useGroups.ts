@@ -222,6 +222,28 @@ export function useCreateChannel() {
   });
 }
 
+export function useLeaveGroup() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async (groupId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("leave_group", { groupId, userId: currentUser.id });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
 export type PendingInvite = {
   id: string;
   group_id: string;

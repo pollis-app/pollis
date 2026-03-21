@@ -440,8 +440,23 @@ pub async fn leave_group(
 
     conn.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id, user_id],
+        libsql::params![group_id.clone(), user_id],
     ).await?;
+
+    // If no members remain, delete the group (cascades to channels, invites, etc.)
+    let mut remaining = conn.query(
+        "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+        libsql::params![group_id.clone()],
+    ).await?;
+    if let Some(row) = remaining.next().await? {
+        let count: i64 = row.get(0)?;
+        if count == 0 {
+            conn.execute(
+                "DELETE FROM groups WHERE id = ?1",
+                libsql::params![group_id],
+            ).await?;
+        }
+    }
 
     Ok(())
 }
