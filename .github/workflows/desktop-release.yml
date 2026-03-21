@@ -165,10 +165,52 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Install sops
+        run: |
+          curl -LO https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
+          chmod +x sops-v3.9.1.linux.amd64
+          sudo mv sops-v3.9.1.linux.amd64 /usr/local/bin/sops
+
+      - name: Decrypt production secrets
+        env:
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+        run: |
+          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
+          unset SOPS_AGE_KEY
+          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
+            | grep -v '^#' | grep -v '^[[:space:]]*$' >> $GITHUB_ENV
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Rename artifacts with version
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          for f in artifacts/pollis-macos/*.dmg; do
+            mv "$f" "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg"
+          done
+          for f in artifacts/pollis-windows/*.exe; do
+            mv "$f" "artifacts/pollis-windows/pollis-${VERSION}-windows.exe"
+          done
+          for f in artifacts/pollis-linux/*.AppImage; do
+            mv "$f" "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage"
+          done
+
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "artifacts/pollis-windows/pollis-${VERSION}-windows.exe" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
