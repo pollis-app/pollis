@@ -37,7 +37,10 @@ jobs:
           echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
           unset SOPS_AGE_KEY
           SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' >> $GITHUB_ENV
+            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
+              echo "::add-mask::${value}"
+              echo "${key}=${value}" >> $GITHUB_ENV
+            done
 
       - name: Install dependencies
         run: pnpm install
@@ -80,7 +83,10 @@ jobs:
           echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
           unset SOPS_AGE_KEY
           SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' >> $GITHUB_ENV
+            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
+              echo "::add-mask::${value}"
+              echo "${key}=${value}" >> $GITHUB_ENV
+            done
 
       - name: Install dependencies
         run: pnpm install
@@ -144,7 +150,10 @@ jobs:
           echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
           unset SOPS_AGE_KEY
           SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' >> $GITHUB_ENV
+            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
+              echo "::add-mask::${value}"
+              echo "${key}=${value}" >> $GITHUB_ENV
+            done
 
       - name: Install dependencies
         run: pnpm install
@@ -180,7 +189,10 @@ jobs:
           echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
           unset SOPS_AGE_KEY
           SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' >> $GITHUB_ENV
+            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
+              echo "::add-mask::${value}"
+              echo "${key}=${value}" >> $GITHUB_ENV
+            done
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -201,16 +213,16 @@ jobs:
           done
 
       - name: Upload to R2
-        env:
-          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
-          AWS_DEFAULT_REGION: auto
         run: |
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
           aws s3 cp "artifacts/pollis-windows/pollis-${VERSION}-windows.exe" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
           aws s3 cp "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
