@@ -432,7 +432,18 @@ pub async fn leave_group(
         return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
     };
 
-    if role == "owner" {
+    // Check how many members the group has
+    let mut count_rows = conn.query(
+        "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+        libsql::params![group_id.clone()],
+    ).await?;
+    let member_count: i64 = if let Some(row) = count_rows.next().await? {
+        row.get(0)?
+    } else {
+        0
+    };
+
+    if role == "owner" && member_count > 1 {
         return Err(Error::Other(anyhow::anyhow!(
             "owner must transfer ownership before leaving the group"
         )));
@@ -444,18 +455,11 @@ pub async fn leave_group(
     ).await?;
 
     // If no members remain, delete the group (cascades to channels, invites, etc.)
-    let mut remaining = conn.query(
-        "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
-        libsql::params![group_id.clone()],
-    ).await?;
-    if let Some(row) = remaining.next().await? {
-        let count: i64 = row.get(0)?;
-        if count == 0 {
-            conn.execute(
-                "DELETE FROM groups WHERE id = ?1",
-                libsql::params![group_id],
-            ).await?;
-        }
+    if member_count <= 1 {
+        conn.execute(
+            "DELETE FROM groups WHERE id = ?1",
+            libsql::params![group_id],
+        ).await?;
     }
 
     Ok(())
