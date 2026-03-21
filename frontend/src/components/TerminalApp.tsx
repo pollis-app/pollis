@@ -22,6 +22,7 @@ import { useLiveKitRealtime } from "../hooks/useLiveKitRealtime";
 import { VoiceBar } from "./Voice/VoiceBar";
 import { VoiceChannelView } from "./Voice/VoiceChannelView";
 import type { GroupWithChannels } from "../services/api";
+import { exit } from "@tauri-apps/plugin-process";
 import type { DMConversation } from "../types";
 
 // ─── View types ───────────────────────────────────────────────────────────────
@@ -214,6 +215,21 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         action: () => push({ type: "settings" }),
         type: "system",
         testId: "menu-item-settings",
+      },
+      { id: "__sep2__", label: "", type: "separator" },
+      {
+        id: "logout",
+        label: "Log out",
+        action: onLogout,
+        type: "system",
+        testId: "menu-item-logout",
+      },
+      {
+        id: "exit",
+        label: "Exit",
+        action: () => exit(0),
+        type: "system",
+        testId: "menu-item-exit",
       },
     ];
 
