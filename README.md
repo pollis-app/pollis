@@ -1,69 +1,37 @@
 # Pollis
 
-A desktop messaging app with end-to-end encryption. Think Slack, but nobody (including me) can read your messages. Built with Tauri 2 — native app on macOS/Linux/Windows with a Rust backend and React frontend.
+A desktop messaging app with end-to-end encryption. Think Slack, but nobody — including the people running it — can read your messages. Built with Tauri 2, so it's a native app on macOS, Linux, and Windows with a Rust backend and React frontend.
 
-![Pollis App](readme/new_app.png)
+![Pollis App](readme/hero.png)
 
 ## How it works
 
-The desktop app runs locally with a React frontend talking to a Rust (Tauri) backend. Messages are encrypted on-device using the Signal protocol before they leave your machine. The backend connects directly to Turso (libSQL) for group/channel metadata, and stores encrypted messages in a local SQLite database.
+Messages are encrypted on your device using the Signal protocol before they ever leave your machine. The backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the Tauri app is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
 
-**Stack:**
-- Desktop: Tauri 2 (Rust + React/TypeScript)
-- Local storage: SQLite (encrypted at rest via SQLCipher) via rusqlite
-- Remote DB: Turso (libSQL) — direct connection, no middleman server
-- Auth: Email OTP, session in OS keystore
-- Encryption: Signal Protocol (Ed25519, X25519, HKDF, AES-256-GCM, Double Ratchet)
-- Real-time: LiveKit (WebRTC data channels for message delivery pings)
+**Stack**
+- **Desktop**: Tauri 2 (Rust + React/TypeScript)
+- **Encryption**: Signal Protocol — X3DH key exchange, Double Ratchet, AES-256-GCM
+- **Remote DB**: Turso (libSQL) — direct from the app, no middleman
+- **Local DB**: SQLite via SQLCipher (encrypted at rest)
+- **Auth**: Email OTP, session stored in the OS keystore
+- **Real-time**: LiveKit (WebRTC data channels for message delivery)
+- **File storage**: Cloudflare R2
 
 ## Security model
 
-Pollis is designed so that the server — and anyone who operates it — cannot read your messages.
+The server only ever sees encrypted blobs. Turso stores group metadata, public keys, and ciphertext — never message content or private keys. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
 
-### What the server sees
+Forward secrecy is provided by the Double Ratchet: each message uses a unique derived key, so compromising one doesn't expose past messages.
 
-Turso (the remote database) stores:
-- User accounts, group/channel metadata, group membership
-- Public keys (Ed25519 identity keys, X25519 identity keys, signed prekeys, one-time prekeys)
-- Encrypted message envelopes (ciphertext only — opaque binary blobs)
-- Sender key distributions (encrypted per-recipient with X3DH)
+## Releases
 
-Turso **never** sees: message plaintext, private keys, or your local database contents.
+Builds for macOS (Universal), Windows, and Linux are published automatically on every version tag via GitHub Actions. Binaries are uploaded to Cloudflare R2, and a `latest.json` manifest is written alongside them. The marketing site at [pollis.com](https://pollis.com) reads that manifest on load to always show the current download links.
 
-### Encryption layers
+![Pollis UI](readme/new_app.png)
 
-**Message encryption — Signal Protocol sender keys**
+## Getting started
 
-Each user maintains a sender key per channel: a chain ID, a chain key, and an iteration counter. To send a message:
-
-1. The sender key chain advances via HMAC-SHA256 to derive a one-time message key.
-2. The message is encrypted with AES-256-GCM using that key.
-3. The ciphertext is written to Turso as a `message_envelope` row.
-
-Recipients decrypt by advancing their local copy of the sender's chain to the correct iteration.
-
-**Sender key distribution — X3DH**
-
-When a user sends their first message to a channel (or after a key rotation), they distribute their sender key state to each group member individually. Each distribution is encrypted with a fresh ephemeral key using X3DH (X25519 Diffie-Hellman + HKDF-SHA256 → AES-256-GCM). Only the intended recipient's private keys can decrypt it.
-
-**Local database — SQLCipher**
-
-The local SQLite database (which stores decrypted message content, Signal session state, and prekeys) is encrypted at rest using SQLCipher with a 256-bit AES key. That key is generated on first launch and stored in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service). An attacker with filesystem access to the database file cannot read it without also compromising the OS keystore.
-
-**Session tokens**
-
-Auth session tokens are stored exclusively in the OS keystore — never on disk as plaintext.
-
-### What this means in practice
-
-- Pollis operators cannot read your messages. The server only sees ciphertext.
-- A Turso database breach exposes metadata (who is in which group) and ciphertext, but not message content.
-- A compromised local machine (filesystem access only) cannot read your message history without also accessing the OS keystore.
-- Forward secrecy: each message uses a unique derived key. Compromising a chain key at iteration N does not expose messages sent before N.
-
-## Getting Started
-
-### What you need
+### Prerequisites
 
 - Node.js 18+
 - pnpm 10.25+
@@ -74,26 +42,18 @@ Auth session tokens are stored exclusively in the OS keystore — never on disk 
 ### Setup
 
 ```bash
-# Install JS dependencies
-pnpm install
-
-# Decrypt secrets → .env.development
-pnpm secrets:decrypt
+pnpm install          # Install JS dependencies
+pnpm secrets:decrypt  # Decrypt secrets → .env.development
 ```
 
 ### Running
 
 ```bash
-# Run the desktop app
-pnpm dev
-
-# Run frontend in browser only (no Tauri commands available)
-pnpm dev:frontend
+pnpm dev              # Full desktop app (Rust + React)
+pnpm dev:frontend     # Frontend only in browser (no Tauri commands)
 ```
 
 ### Testing with two users
-
-Use `POLLIS_DATA_DIR` to give the second instance its own local SQLite database and session:
 
 ```bash
 # Terminal 1 — user A
@@ -103,24 +63,29 @@ pnpm dev
 POLLIS_DATA_DIR=/tmp/pollis2 pnpm dev
 ```
 
-Sign into different accounts in each window. Both hit the same Turso database, so messages sent in one instance appear in real time in the other via LiveKit data channels.
+Both instances hit the same Turso database, so messages appear in real time across windows via LiveKit.
 
 ### Building
 
 ```bash
-# Build for current platform
-pnpm build
-
-# Platform-specific
-pnpm build:linux    # amd64
-pnpm build:macos    # universal binary (Intel + Apple Silicon)
-pnpm build:windows  # amd64
+pnpm build            # Current platform
+pnpm build:macos      # Universal binary (Intel + Apple Silicon)
+pnpm build:linux      # amd64 AppImage
+pnpm build:windows    # amd64 NSIS installer
 ```
 
 ## Project layout
 
 ```
-src-tauri/   # Rust backend (Tauri commands, DB, crypto)
-frontend/    # React app (Vite, TypeScript, TailwindCSS)
-website/     # Next.js marketing site
+src-tauri/   # Rust backend — Tauri commands, DB, Signal protocol, auth
+frontend/    # React app — Vite, TypeScript, TailwindCSS
+website/     # Next.js marketing site (legacy, hosted on Vercel)
+website-2/   # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
 ```
+
+## What's coming
+
+- **Auto-update** — in-app update prompts and one-click installs via the Tauri updater plugin, driven by the `latest.json` manifest already published on each release
+- **Voice and video calls** — LiveKit is already integrated for real-time messaging; call support is the natural next step
+- **macOS code signing and notarization** — so Gatekeeper stops complaining
+- **Broader platform availability** — currently open pre-alpha; working toward a stable public release
