@@ -79,8 +79,7 @@ pnpm build:windows    # amd64 NSIS installer
 ```
 src-tauri/   # Rust backend — Tauri commands, DB, Signal protocol, auth
 frontend/    # React app — Vite, TypeScript, TailwindCSS
-website/     # Next.js marketing site (legacy, hosted on Vercel)
-website-2/   # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
+website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
 ```
 
 ## What's coming
