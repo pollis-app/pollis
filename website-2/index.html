@@ -1,9 +1,116 @@
-<html>
-    <head>
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pollis — End-to-End Encrypted Messaging</title>
+    <meta name="description" content="Secure, private communication for teams and individuals. Your messages, your keys, your privacy." />
+    <meta name="theme-color" content="#0f1117" />
 
-    </head>
-    <body>
-        <div id="root"></div>
-        <script src="script.js"></script>
-    </body>
+    <!-- Open Graph -->
+    <meta property="og:title" content="Pollis — End-to-End Encrypted Messaging" />
+    <meta property="og:description" content="Secure, private communication for teams and individuals." />
+    <meta property="og:type" content="website" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap" rel="stylesheet" />
+
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Dot matrix background -->
+    <div id="dot-matrix-bg"></div>
+
+    <!-- Main content -->
+    <main>
+      <div class="hero">
+        <img src="pollis-brand-large.svg" alt="Pollis" class="brand-logo" width="320" height="122" />
+
+        <p class="tagline">End Unencrypted Messaging</p>
+
+        <p class="description">
+          Secure, private communication for teams and individuals.
+          <br />
+          Your messages, your keys, your privacy. Secured with end-to-end encryption and zero-knowledge architecture, based off the Signal protocol.
+        </p>
+
+        <div class="cta-group">
+          <a href="#download" class="btn btn-primary">Download</a>
+        </div>
+
+        <p class="status">Open preview — expect rough edges and no guarantees of data integrity.</p>
+      </div>
+
+      <!-- Download section -->
+      <section id="download" class="download-section">
+        <h2 class="download-heading">Download Pollis</h2>
+        <div class="download-grid">
+          <a class="download-card" href="https://cdn.pollis.com/releases/v1.0.41/pollis-v1.0.41-macos.dmg" data-platform="macos">
+            <svg class="download-icon" viewBox="-1.5 0 20 20" fill="currentColor" width="32" height="32" aria-hidden="true">
+              <g transform="translate(-102,-7439)"><g transform="translate(56,160)"><path d="M57.5708873,7282.19296 C58.2999598,7281.34797 58.7914012,7280.17098 58.6569121,7279 C57.6062792,7279.04 56.3352055,7279.67099 55.5818643,7280.51498 C54.905374,7281.26397 54.3148354,7282.46095 54.4735932,7283.60894 C55.6455696,7283.69593 56.8418148,7283.03894 57.5708873,7282.19296 M60.1989864,7289.62485 C60.2283111,7292.65181 62.9696641,7293.65879 63,7293.67179 C62.9777537,7293.74279 62.562152,7295.10677 61.5560117,7296.51675 C60.6853718,7297.73474 59.7823735,7298.94772 58.3596204,7298.97372 C56.9621472,7298.99872 56.5121648,7298.17973 54.9134635,7298.17973 C53.3157735,7298.17973 52.8162425,7298.94772 51.4935978,7298.99872 C50.1203933,7299.04772 49.0738052,7297.68074 48.197098,7296.46676 C46.4032359,7293.98379 45.0330649,7289.44985 46.8734421,7286.3899 C47.7875635,7284.87092 49.4206455,7283.90793 51.1942837,7283.88393 C52.5422083,7283.85893 53.8153044,7284.75292 54.6394294,7284.75292 C55.4635543,7284.75292 57.0106846,7283.67793 58.6366882,7283.83593 C59.3172232,7283.86293 61.2283842,7284.09893 62.4549652,7285.8199 C62.355868,7285.8789 60.1747177,7287.09489 60.1989864,7289.62485"/></g></g>
+            </svg>
+            <span class="download-platform">macOS</span>
+            <span class="download-detail">Universal (Apple Silicon + Intel)</span>
+          </a>
+          <a class="download-card" href="https://cdn.pollis.com/releases/v1.0.41/pollis-v1.0.41-windows.exe" data-platform="windows">
+            <svg class="download-icon" viewBox="0 0 20 20" fill="currentColor" width="32" height="32" aria-hidden="true">
+              <g transform="translate(-60,-7439)"><g transform="translate(56,160)"><path d="M13.1458647,7289.43426 C13.1508772,7291.43316 13.1568922,7294.82929 13.1619048,7297.46884 C16.7759398,7297.95757 20.3899749,7298.4613 23.997995,7299 C23.997995,7295.84873 24.002005,7292.71146 23.997995,7289.71311 C20.3809524,7289.71311 16.7649123,7289.43426 13.1458647,7289.43426 M4,7289.43526 L4,7296.22153 C6.72581454,7296.58933 9.45162907,7296.94113 12.1724311,7297.34291 C12.1774436,7294.71736 12.1704261,7292.0908 12.1704261,7289.46524 C9.44661654,7289.47024 6.72380952,7289.42627 4,7289.43526 M4,7281.84344 L4,7288.61071 C6.72581454,7288.61771 9.45162907,7288.57673 12.1774436,7288.57973 C12.1754386,7285.96017 12.1754386,7283.34361 12.1724311,7280.72405 C9.44461153,7281.06486 6.71679198,7281.42567 4,7281.84344 M24,7288.47179 C20.3879699,7288.48578 16.7759398,7288.54075 13.1619048,7288.55175 C13.1598997,7285.88921 13.1598997,7283.22967 13.1619048,7280.56914 C16.7689223,7280.01844 20.3839599,7279.50072 23.997995,7279 C24,7282.15826 23.997995,7285.31353 24,7288.47179"/></g></g>
+            </svg>
+            <span class="download-platform">Windows</span>
+            <span class="download-detail">64-bit installer</span>
+          </a>
+          <a class="download-card" href="https://cdn.pollis.com/releases/v1.0.41/pollis-v1.0.41-linux.AppImage" data-platform="linux">
+            <svg class="download-icon" viewBox="0 0 24 24" fill="currentColor" width="32" height="32" aria-hidden="true">
+              <path d="M14.62,8.35c-.42.28-1.75,1-1.95,1.19a.82.82,0,0,1-1.14,0c-.2-.16-1.53-.92-1.95-1.19s-.45-.7.08-.92a6.16,6.16,0,0,1,4.91,0c.49.21.51.6,0,.9m7.22,7.28A19.09,19.09,0,0,0,18,10a4.31,4.31,0,0,1-1.06-1.88c-.1-.33-.17-.67-.24-1A11.32,11.32,0,0,0,16,4.47,4.06,4.06,0,0,0,12.16,2,4.2,4.2,0,0,0,8.21,4.4a5.9,5.9,0,0,0-.46,1.34c-.17.76-.32,1.55-.5,2.32a3.38,3.38,0,0,1-1,1.71,19.53,19.53,0,0,0-3.88,5.35A6.09,6.09,0,0,0,2,16c-.19.66.29,1.12,1,1,.44-.09.88-.18,1.3-.31s.57,0,.67.35a6.73,6.73,0,0,0,4.24,4.5c4.12,1.56,8.93-.66,10-4.58.07-.27.17-.37.47-.27.46.14.93.24,1.4.35a.72.72,0,0,0,.92-.64,1.44,1.44,0,0,0-.16-.73"/>
+            </svg>
+            <span class="download-platform">Linux</span>
+            <span class="download-detail">AppImage (x86_64)</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- Footer links -->
+      <div class="footer-links">
+        <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
+            <g transform="translate(-140,-7559)"><g transform="translate(56,160)"><path d="M94,7399 C99.523,7399 104,7403.59 104,7409.253 C104,7413.782 101.138,7417.624 97.167,7418.981 C96.66,7419.082 96.48,7418.762 96.48,7418.489 C96.48,7418.151 96.492,7417.047 96.492,7415.675 C96.492,7414.719 96.172,7414.095 95.813,7413.777 C98.04,7413.523 100.38,7412.656 100.38,7408.718 C100.38,7407.598 99.992,7406.684 99.35,7405.966 C99.454,7405.707 99.797,7404.664 99.252,7403.252 C99.252,7403.252 98.414,7402.977 96.505,7404.303 C95.706,7404.076 94.85,7403.962 94,7403.958 C93.15,7403.962 92.295,7404.076 91.497,7404.303 C89.586,7402.977 88.746,7403.252 88.746,7403.252 C88.203,7404.664 88.546,7405.707 88.649,7405.966 C88.01,7406.684 87.619,7407.598 87.619,7408.718 C87.619,7412.646 89.954,7413.526 92.175,7413.785 C91.889,7414.041 91.63,7414.493 91.54,7415.156 C90.97,7415.418 89.522,7415.871 88.63,7414.304 C88.63,7414.304 88.101,7413.319 87.097,7413.247 C87.097,7413.247 86.122,7413.234 87.029,7413.87 C87.029,7413.87 87.684,7414.185 88.139,7415.37 C88.139,7415.37 88.726,7417.2 91.508,7416.58 C91.513,7417.437 91.522,7418.245 91.522,7418.489 C91.522,7418.76 91.338,7419.077 90.839,7418.982 C86.865,7417.627 84,7413.783 84,7409.253 C84,7403.59 88.478,7399 94,7399"/></g></g>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </main>
+
+    <footer>
+      <p id="year-copyright"></p>
+    </footer>
+    <script>
+      document.getElementById("year-copyright").textContent = `© ${new Date().getFullYear()} Pollis. All rights reserved.`;
+
+      // Fetch latest version from R2 and update download links
+      fetch("https://cdn.pollis.com/releases/latest.json")
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var cards = document.querySelectorAll(".download-card");
+          for (var i = 0; i < cards.length; i++) {
+            var platform = cards[i].getAttribute("data-platform");
+            if (data[platform]) {
+              cards[i].href = data[platform];
+            }
+          }
+          var heading = document.querySelector(".download-heading");
+          if (heading && data.version) {
+            heading.textContent = "Download Pollis " + data.version;
+          }
+        })
+        .catch(function() {
+          // Silently fall back to hardcoded links
+        });
+    </script>
+    <script src="script.js"></script>
+  </body>
 </html>

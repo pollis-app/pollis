@@ -1,348 +1,208 @@
-/**
- * Pure JavaScript implementation of an animated dot matrix
- * Supports customizable algorithms and direct DOM integration
- */
-const pulsingWaveAlgorithm = (grid, context) => {
-  const { deltaTime, rows, cols } = context;
-  const phaseIncrement = deltaTime;
-  
-  return grid.map((row, y) =>
-    row.map((cell, x) => {
-      if (cell.data?.phase === undefined) {
-        cell.data = { phase: Math.random() * Math.PI * 2 };
-      }
-      
-      let phase = cell.data.phase + phaseIncrement;
-      if (phase > Math.PI * 2) phase -= Math.PI * 2;
-      
-      const opacity = 0.2 + Math.sin(phase) * 0.3;
-      return { opacity, data: { phase } };
-    })
-  );
-};
+// ── Algorithms ────────────────────────────────────────────────────────────────
 
-const gameOfLifeAlgorithm = (grid, context) => {
-  const { rows, cols, time } = context;
-  
-  if (time < 0.1) {
-    return grid.map((row) =>
-      row.map(() => ({
-        opacity: Math.random() > 0.7 ? 1 : 0,
-        data: { alive: Math.random() > 0.7 },
-      }))
-    );
+function pulsingWaveAlgorithm(grid, ctx) {
+  const inc = ctx.deltaTime;
+  const rows = grid.length;
+  for (let y = 0; y < rows; y++) {
+    const row = grid[y];
+    const cols = row.length;
+    for (let x = 0; x < cols; x++) {
+      const cell = row[x];
+      let phase = (cell.data ? cell.data.phase : Math.random() * Math.PI * 2) + inc;
+      if (phase > 6.2832) { phase -= 6.2832; }
+      cell.opacity = 0.3 + Math.sin(phase) * 0.4;
+      cell.data = cell.data || {};
+      cell.data.phase = phase;
+    }
   }
-  
-  const updateInterval = 0.1;
-  const shouldUpdate = Math.floor(time / updateInterval) !== Math.floor((time - context.deltaTime) / updateInterval);
-  
-  if (!shouldUpdate) return grid;
-  
-  return grid.map((row, y) =>
-    row.map((cell, x) => {
-      let neighbors = 0;
-      
+  return grid;
+}
+
+function gameOfLifeAlgorithm(grid, ctx) {
+  const rows = grid.length;
+  if (rows === 0) { return grid; }
+  const cols = grid[0].length;
+
+  if (ctx.time < 0.05) {
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols; x++) {
+        const alive = Math.random() > 0.7;
+        grid[y][x].opacity = alive ? 1 : 0;
+        grid[y][x].data = { alive, generation: 0 };
+      }
+    }
+    return grid;
+  }
+
+  const updateInterval = 0.3;
+  if (Math.floor(ctx.time / updateInterval) === Math.floor((ctx.time - ctx.deltaTime) / updateInterval)) {
+    return grid;
+  }
+
+  const generation = ((grid[0][0].data && grid[0][0].data.generation) || 0) + 1;
+  const reseed = generation % 30 === 0;
+
+  // Copy alive state to avoid read-after-write
+  const alive = [];
+  for (let y = 0; y < rows; y++) {
+    alive[y] = [];
+    for (let x = 0; x < cols; x++) {
+      alive[y][x] = grid[y][x].data ? grid[y][x].data.alive : false;
+    }
+  }
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      let n = 0;
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) continue;
-          
-          const ny = (y + dy + rows) % rows;
-          const nx = (x + dx + cols) % cols;
-          
-          if (grid[ny][nx].data?.alive) neighbors++;
+          if (dx === 0 && dy === 0) { continue; }
+          if (alive[(y + dy + rows) % rows][(x + dx + cols) % cols]) { n++; }
         }
       }
-      
-      const alive = cell.data?.alive;
-      const newAlive = alive ? neighbors === 2 || neighbors === 3 : neighbors === 3;
-      
-      return { opacity: newAlive ? 1 : 0, data: { alive: newAlive } };
-    })
-  );
-};
+      let newAlive = alive[y][x] ? (n === 2 || n === 3) : n === 3;
+      if (reseed && Math.random() < 0.03) { newAlive = true; }
+      grid[y][x].opacity = newAlive ? 1 : 0;
+      grid[y][x].data = { alive: newAlive, generation };
+    }
+  }
+  return grid;
+}
 
-const mouseRippleAlgorithm = (grid, context) => {
-  const { mouse, cols, rows, deltaTime } = context;
-  
-  return grid.map((row, y) =>
-    row.map((cell, x) => {
-      let newOpacity = Math.max(0, cell.data?.rippleOpacity || 0 - deltaTime * 2);
-      
-      if (mouse) {
-        const cellWidth = 8; // dotSize + spacing
-        const mouseGridX = Math.floor(mouse.x / cellWidth);
-        const mouseGridY = Math.floor(mouse.y / cellWidth);
-        
-        const dx = x - mouseGridX;
-        const dy = y - mouseGridY;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance < 10) {
-          newOpacity = Math.max(newOpacity, 1 - distance / 10);
-        }
-      }
-      
-      return { opacity: newOpacity, data: { rippleOpacity: newOpacity } };
-    })
-  );
-};
+function flowingWaveAlgorithm(grid, ctx) {
+  const rows = grid.length;
+  const t2 = ctx.time * 2;
+  const pi2 = 6.2832;
+  for (let y = 0; y < rows; y++) {
+    const row = grid[y];
+    const cols = row.length;
+    for (let x = 0; x < cols; x++) {
+      const wX = Math.sin((x / cols) * pi2 + t2) * 0.5 + 0.5;
+      const wY = Math.cos((y / rows) * pi2 + t2) * 0.5 + 0.5;
+      row[x].opacity = (wX + wY) * 0.5;
+    }
+  }
+  return grid;
+}
 
-const flowingWaveAlgorithm = (grid, context) => {
-  const { time, cols, rows } = context;
-  
-  return grid.map((row, y) =>
-    row.map((cell, x) => {
-      const waveX = Math.sin((x / cols) * Math.PI * 2 + time * 2) * 0.5 + 0.5;
-      const waveY = Math.cos((y / rows) * Math.PI * 2 + time * 2) * 0.5 + 0.5;
-      const opacity = (waveX + waveY) / 2;
-      
-      return { opacity };
-    })
-  );
-};
+// ── DotMatrix ─────────────────────────────────────────────────────────────────
 
-/**
- * Creates an animated dot matrix component
- * @param {Object} options - Configuration options
- * @param {Function} options.algorithm - Grid algorithm to use
- * @param {number} [options.dotSize=6] - Size of each dot in pixels
- * @param {number} [options.spacing=2] - Spacing between dots in pixels
- * @param {string} [options.defaultColor="253, 186, 116"] - Default color (RGB)
- * @param {number} [options.speed=1.0] - Animation speed multiplier
- * @param {string} [options.className=""] - Container class name
- * @returns {Object} - { element: DOM element, stop: function to stop animation }
- */
-function createDotMatrix (options) {
-  // Default options
-  const {
-    algorithm,
-    dotSize = 6,
-    spacing = 2,
-    defaultColor = "253, 186, 116",
-    speed = 1.0,
-    className = "",
-  } = options;
+function createDotMatrix(options) {
+  const dotSize = options.dotSize || 6;
+  const spacing = options.spacing || 2;
+  const color = options.defaultColor || "253, 186, 116";
+  const speed = options.speed || 1.0;
+  const algorithm = options.algorithm;
+  const step = dotSize + spacing;
 
-  // Create container element
   const container = document.createElement('div');
-  container.style.position = 'absolute';
-  container.style.top = '0';
-  container.style.left = '0';
-  container.style.width = '100%';
-  container.style.height = '100%';
-  container.style.overflow = 'hidden';
-  container.style.zIndex = '1000';
-  container.className = className;
+  container.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;overflow:hidden;';
 
-  // Create canvas element
   const canvas = document.createElement('canvas');
-  canvas.style.position = 'absolute';
-  canvas.style.top = '0';
-  canvas.style.left = '0';
-  canvas.style.width = '100%';
-  canvas.style.height = '100%';
-  canvas.style.imageRendering = 'crisp-edges';
-  canvas.style.display = 'block';
+  canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;image-rendering:pixelated;';
   container.appendChild(canvas);
 
-  // Animation state
   let grid = [];
   let lastTime = 0;
   let startTime = 0;
-  let mouse = null;
-  let animationFrameId = null;
+  let rafId = null;
+  let cw = 0;
+  let ch = 0;
+  let cols = 0;
+  let rows = 0;
 
-  // Initialize grid with container dimensions
-  const initializeGrid = () => {
-    const containerRect = container.getBoundingClientRect();
-    const containerWidth = Math.max(containerRect.width, 100);
-    const containerHeight = Math.max(containerRect.height, 100);
-    
-    const totalDotWidth = dotSize + spacing;
-    const cols = Math.floor(containerWidth / totalDotWidth);
-    const rows = Math.floor(containerHeight / totalDotWidth);
-    
+  function initGrid(w, h) {
+    cols = Math.floor(w / step);
+    rows = Math.floor(h / step);
     grid = [];
     for (let y = 0; y < rows; y++) {
       grid[y] = [];
       for (let x = 0; x < cols; x++) {
-        grid[y][x] = { opacity: 0, color: defaultColor, data: null };
+        grid[y][x] = { opacity: 0, data: null };
       }
     }
-  };
+  }
 
-  // Draw grid to canvas
-  const drawGrid = () => {
-    const containerRect = container.getBoundingClientRect();
-    const containerWidth = Math.max(containerRect.width, 100);
-    const containerHeight = Math.max(containerRect.height, 100);
-    const totalDotWidth = dotSize + spacing;
-    const cols = Math.floor(containerWidth / totalDotWidth);
-    const rows = Math.floor(containerHeight / totalDotWidth);
-    
-    // Calculate positioning
-    const offsetX = (containerWidth - (cols * totalDotWidth - spacing)) / 2;
-    const offsetY = (containerHeight - (rows * totalDotWidth - spacing)) / 2;
-    
-    // Draw dots
+  function draw() {
+    if (rows === 0) { return; }
     const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    
-    ctx.clearRect(0, 0, containerWidth, containerHeight);
-    
+    if (!ctx) { return; }
+
+    const offX = (cw - (cols * step - spacing)) * 0.5;
+    const offY = (ch - (rows * step - spacing)) * 0.5;
+
+    ctx.clearRect(0, 0, cw, ch);
+
     for (let y = 0; y < rows; y++) {
+      const row = grid[y];
+      const py = offY + y * step;
       for (let x = 0; x < cols; x++) {
-        const cell = grid[y][x];
-        const posX = offsetX + x * totalDotWidth + dotSize / 2;
-        const posY = offsetY + y * totalDotWidth + dotSize / 2;
-        
-        const color = cell.color || defaultColor;
-        const opacity = Math.max(0, Math.min(1, cell.opacity));
-        
-        ctx.fillStyle = `rgba(${color}, ${opacity})`;
-        ctx.fillRect(
-          posX - dotSize / 2,
-          posY - dotSize / 2,
-          dotSize,
-          dotSize
-        );
+        const op = row[x].opacity;
+        if (op <= 0) { continue; }
+        ctx.fillStyle = `rgba(${color},${op > 1 ? 1 : op})`;
+        ctx.fillRect(offX + x * step, py, dotSize, dotSize);
       }
     }
-  };
+  }
 
-  // Animation loop
-  const animate = (timestamp) => {
-    if (startTime === 0) {
-      startTime = timestamp;
-      lastTime = timestamp;
-    }
-    
-    const deltaTime = (timestamp - lastTime) / 1000;
-    const time = (timestamp - startTime) / 1000;
-    lastTime = timestamp;
-    
-    const containerRect = container.getBoundingClientRect();
-    const containerWidth = Math.max(containerRect.width, 100);
-    const containerHeight = Math.max(containerRect.height, 100);
-    
-    // Update grid
-    const context = {
-      time,
-      deltaTime: deltaTime * speed,
-      speed,
-      cols: Math.floor(containerWidth / (dotSize + spacing)),
-      rows: Math.floor(containerHeight / (dotSize + spacing)),
-      mouse,
-    };
-    
-    grid = algorithm(grid, context);
-    
-    // Draw updated grid
-    drawGrid();
-    
-    animationFrameId = requestAnimationFrame(animate);
-  };
+  function animate(ts) {
+    if (startTime === 0) { startTime = ts; lastTime = ts; }
+    const dt = Math.min((ts - lastTime) / 1000, 0.1) * speed;
+    const time = (ts - startTime) / 1000;
+    lastTime = ts;
 
-  // Handle mouse events
-  const handleMouseMove = (e) => {
-    const containerRect = container.getBoundingClientRect();
-    mouse = {
-      x: e.clientX - containerRect.left,
-      y: e.clientY - containerRect.top
-    };
-  };
+    grid = algorithm(grid, { time, deltaTime: dt, speed, cols, rows });
+    draw();
+    rafId = requestAnimationFrame(animate);
+  }
 
-  const handleMouseLeave = () => {
-    mouse = null;
-  };
-
-  // Handle resize events
-  const handleResize = () => {
-    initializeGrid();
-    drawGrid();
-  };
-
-  // Initialize canvas
-  const initCanvas = () => {
-    const containerRect = container.getBoundingClientRect();
-    const containerWidth = Math.max(containerRect.width, 100);
-    const containerHeight = Math.max(containerRect.height, 100);
-    
+  function syncSize() {
+    const rect = container.getBoundingClientRect();
+    cw = Math.max(rect.width, 100);
+    ch = Math.max(rect.height, 100);
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = containerWidth * dpr;
-    canvas.height = containerHeight * dpr;
-    
-    // Scale context
+    canvas.width = cw * dpr;
+    canvas.height = ch * dpr;
     const ctx = canvas.getContext('2d');
-    if (ctx) {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-    
-    canvas.style.width = `${containerWidth}px`;
-    canvas.style.height = `${containerHeight}px`;
-    
-    // Initial grid setup
-    initializeGrid();
-  };
+    if (ctx) { ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    canvas.style.width = cw + 'px';
+    canvas.style.height = ch + 'px';
+    initGrid(cw, ch);
+  }
 
-  // Set up event listeners
-  container.addEventListener('mousemove', handleMouseMove);
-  container.addEventListener('mouseleave', handleMouseLeave);
-  window.addEventListener('resize', handleResize);
-  
-  // Resize observer for smoother resizing
-  const resizeObserver = new ResizeObserver(() => {
-    drawGrid();
+  window.addEventListener('resize', syncSize);
+  new ResizeObserver(syncSize).observe(container);
+
+  function start() {
+    syncSize();
+    startTime = 0;
+    rafId = requestAnimationFrame(animate);
+  }
+
+  function stop() {
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    window.removeEventListener('resize', syncSize);
+  }
+
+  return { element: container, start, stop };
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
+const bg = document.getElementById('dot-matrix-bg');
+
+if (bg) {
+  const algorithms = [gameOfLifeAlgorithm, pulsingWaveAlgorithm, flowingWaveAlgorithm];
+  const pick = algorithms[Math.floor(Math.random() * algorithms.length)];
+
+  const { element, start } = createDotMatrix({
+    algorithm: pick,
+    dotSize: 6,
+    spacing: 2,
+    defaultColor: '253, 186, 116',
+    speed: 0.5,
   });
-  resizeObserver.observe(container);
 
-  // Start animation
-  initCanvas();
-  startTime = performance.now();
-  lastTime = startTime;
-  animationFrameId = requestAnimationFrame(animate);
-
-  // Cleanup function
-  const stop = () => {
-    if (animationFrameId) {
-      cancelAnimationFrame(animationFrameId);
-      animationFrameId = null;
-    }
-    
-    container.removeEventListener('mousemove', handleMouseMove);
-    container.removeEventListener('mouseleave', handleMouseLeave);
-    window.removeEventListener('resize', handleResize);
-    resizeObserver.disconnect();
-  };
-
-  return { element: container, stop };
-};
-
-// Usage example:
-// const { element, stop } = createDotMatrix({
-//   algorithm: pulsingWaveAlgorithm,
-//   dotSize: 6,
-//   spacing: 2,
-//   defaultColor: "253, 186, 116",
-//   speed: 1.0
-// });
-//
-// document.body.appendChild(element);
-// // To stop when needed:
-// stop();
-
-
-const { element, stop } = createDotMatrix({
-  algorithm: pulsingWaveAlgorithm,
-  dotSize: 6,
-  spacing: 2,
-  defaultColor: "253, 186, 116",
-  speed: 1.0
-});
-
-const root = document.getElementById("root");
-
-root.appendChild(element);
-
-// To stop when needed:
-// stop();
+  bg.appendChild(element);
+  start();
+}
