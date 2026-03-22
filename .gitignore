@@ -67,6 +67,7 @@ node_modules/
 
 temp/
 .claude/
+.mcp.json
 
 src-tauri/target/
 dev-keystore.json
