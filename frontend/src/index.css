@@ -53,6 +53,7 @@
     font-size: var(--font-size-base);
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    border-radius: 10px;
   }
 
   #root {
@@ -61,6 +62,7 @@
     overflow: hidden;
     background: var(--c-bg);
     border-radius: 10px;
+    outline: none;
   }
 }
 

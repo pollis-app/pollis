@@ -11,8 +11,8 @@ interface WindowState {
   y: number;
 }
 
-const MIN_WIDTH = 800;
-const MIN_HEIGHT = 600;
+const MIN_WIDTH = 420;
+const MIN_HEIGHT = 360;
 
 function isValidWindowState(s: unknown): s is WindowState {
   if (!s || typeof s !== "object") {
@@ -35,15 +35,17 @@ function isValidWindowState(s: unknown): s is WindowState {
 
 export async function restoreWindowState(): Promise<void> {
   try {
+    const appWindow = getCurrentWindow();
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
+      await appWindow.center();
       return;
     }
     const parsed: unknown = JSON.parse(raw);
     if (!isValidWindowState(parsed)) {
+      await appWindow.center();
       return;
     }
-    const appWindow = getCurrentWindow();
     await appWindow.setSize(new LogicalSize(parsed.width, parsed.height));
     await appWindow.setPosition(new LogicalPosition(parsed.x, parsed.y));
   } catch {
