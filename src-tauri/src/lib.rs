@@ -94,6 +94,8 @@ pub fn run() {
             commands::livekit::get_livekit_url,
             commands::r2::upload_file,
             commands::r2::download_file,
+            commands::update::mark_update_required,
+            commands::update::is_update_required,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pollis");

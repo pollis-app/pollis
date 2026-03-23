@@ -6,3 +6,4 @@ pub mod dm;
 pub mod signal;
 pub mod livekit;
 pub mod r2;
+pub mod update;
