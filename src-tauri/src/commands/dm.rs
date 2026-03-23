@@ -450,3 +450,19 @@ pub async fn remove_user_from_dm_channel(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn leave_dm_channel(
+    dm_channel_id: String,
+    user_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let conn = state.remote_db.conn().await?;
+
+    conn.execute(
+        "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
+        libsql::params![dm_channel_id, user_id],
+    ).await?;
+
+    Ok(())
+}

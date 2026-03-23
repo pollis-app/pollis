@@ -5,6 +5,7 @@ import { CreateGroup } from './pages/CreateGroup';
 import { CreateChannel } from './pages/CreateChannel';
 import { SearchGroup } from './pages/SearchGroup';
 import { StartDM } from './pages/StartDM';
+import { LeaveDM } from './pages/LeaveDM';
 import { MainContent } from './components/Layout/MainContent';
 import { RouterLayout } from './components/Layout/RouterLayout';
 
@@ -92,6 +93,13 @@ const dmRoute = createRoute({
   component: MainContent,
 });
 
+// Leave DM confirmation route
+const leaveDMRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/c/$conversationId/leave',
+  component: LeaveDM,
+});
+
 // Create the route tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -104,6 +112,7 @@ const routeTree = rootRoute.addChildren([
   groupRoute,
   channelRoute,
   dmRoute,
+  leaveDMRoute,
 ]);
 
 // Create and export the router
