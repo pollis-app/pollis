@@ -40,23 +40,25 @@ pub async fn get_prekey_bundle(
     let spk_pub: String = row.get(2)?;
     let spk_sig: String = row.get(3)?;
 
-    // Try to claim a one-time pre-key
+    // Atomically claim a one-time prekey with a single UPDATE...RETURNING to
+    // prevent two concurrent callers from claiming the same key (closes #38).
     let mut opk_rows = conn.query(
-        "SELECT key_id, public_key FROM one_time_prekey
-         WHERE user_id = ?1 AND used = 0
-         LIMIT 1",
-        libsql::params![user_id.clone()],
+        "UPDATE one_time_prekey
+         SET used = 1
+         WHERE user_id = ?1
+           AND key_id = (
+             SELECT key_id FROM one_time_prekey
+             WHERE user_id = ?1 AND used = 0
+             ORDER BY key_id ASC
+             LIMIT 1
+           )
+         RETURNING key_id, public_key",
+        libsql::params![user_id.clone(), user_id.clone()],
     ).await?;
 
     let (opk_id, opk_pub) = if let Some(opk_row) = opk_rows.next().await? {
         let id: i64 = opk_row.get(0)?;
         let pub_key: String = opk_row.get(1)?;
-
-        conn.execute(
-            "UPDATE one_time_prekey SET used = 1 WHERE user_id = ?1 AND key_id = ?2",
-            libsql::params![user_id.clone(), id],
-        ).await?;
-
         (Some(id as u32), Some(pub_key))
     } else {
         (None, None)
