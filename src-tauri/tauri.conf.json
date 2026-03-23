@@ -39,7 +39,7 @@
       "icons/icon.icns"
     ],
     "macOS": {
-      "signingIdentity": null
+      "signingIdentity": "Developer ID Application: Daniel Kral (9JF7WWYMU2)"
     },
     "linux": {
       "deb": {
