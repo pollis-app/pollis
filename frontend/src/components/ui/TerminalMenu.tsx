@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ChevronRight, ArrowUp, ArrowDown } from "lucide-react";
+import { ChevronRight, ArrowUp, ArrowDown, MoreVertical } from "lucide-react";
 
 export interface TerminalMenuItem {
   id: string;
@@ -13,6 +13,9 @@ export interface TerminalMenuItem {
   testId?: string;
   // Unread count badge — shown next to label when > 0
   badge?: number;
+  // Secondary action rendered as a ⋮ button on the right of the row
+  secondaryAction?: () => void;
+  secondaryActionLabel?: string;
 }
 
 interface TerminalMenuProps {
@@ -226,6 +229,39 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                   </div>
                 )}
               </div>
+
+              {item.secondaryAction && (
+                <button
+                  data-testid={item.testId ? `${item.testId}-secondary` : undefined}
+                  aria-label={item.secondaryActionLabel ?? "More options"}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    item.secondaryAction!();
+                  }}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      item.secondaryAction!();
+                    }
+                  }}
+                  style={{
+                    background: "transparent",
+                    border: "1px solid var(--c-border)",
+                    borderRadius: "4px",
+                    cursor: "pointer",
+                    color: "var(--c-text-muted)",
+                    padding: "0.15rem 0.2rem",
+                    display: "flex",
+                    alignItems: "center",
+                    flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-border-active)"; (e.currentTarget as HTMLElement).style.color = "var(--c-text)"; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-border)"; (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
+                >
+                  <MoreVertical size={14} aria-hidden="true" />
+                </button>
+              )}
             </div>
           );
         })}
