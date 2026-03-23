@@ -5,18 +5,50 @@ import React, {
   useRef,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "./stores/appStore";
 import { EmailOTPAuth } from "./components/Auth/EmailOTPAuth";
 import { TerminalApp } from "./components/TerminalApp";
 import { TitleBar } from "./components/Layout/TitleBar";
 import { DotMatrix } from "./components/ui/DotMatrix";
 import { Card } from "./components/ui/Card";
+import { UpdateScreen } from "./components/UpdateScreen";
 import * as api from "./services/api";
 import { getPreference, applyPreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
 import type { User } from "./types";
 
-type AppState = "initializing" | "loading" | "email-auth" | "logout-confirm" | "identity-setup" | "ready";
+interface LatestJson {
+  version: string;
+  notes?: string;
+  macos?: string;
+  windows?: string;
+  linux?: string;
+}
+
+type AppState = "initializing" | "loading" | "email-auth" | "logout-confirm" | "identity-setup" | "update-required" | "ready";
+
+function semverIsOutdated(current: string, latest: string): boolean {
+  const parse = (v: string) => v.replace(/^v/, "").split(".").map(Number);
+  const [cMaj, cMin, cPatch] = parse(current);
+  const [lMaj, lMin, lPatch] = parse(latest);
+  if (lMaj !== cMaj) {
+    return lMaj > cMaj;
+  }
+  if (lMin !== cMin) {
+    return lMin > cMin;
+  }
+  return lPatch > cPatch;
+}
+
+async function fetchLatest(): Promise<LatestJson | null> {
+  try {
+    const res = await fetch("https://cdn.pollis.com/releases/latest.json");
+    return await res.json() as LatestJson;
+  } catch {
+    return null;
+  }
+}
 
 function MainApp() {
   const {
@@ -25,9 +57,21 @@ function MainApp() {
   } = useAppStore();
 
   const [appState, setAppState] = useState<AppState>("initializing");
+  const [latestJson, setLatestJson] = useState<LatestJson | null>(null);
+  const [currentVersion, setCurrentVersion] = useState<string>("");
 
   const checkStoredSession = useCallback(async () => {
     try {
+      // Check for required update before anything else
+      const [latest, version] = await Promise.all([fetchLatest(), getVersion()]);
+      setCurrentVersion(version);
+      if (latest && semverIsOutdated(version, latest.version)) {
+        setLatestJson(latest);
+        await invoke("mark_update_required");
+        setAppState("update-required");
+        return;
+      }
+
       const user = await api.getSession();
       if (user) {
         try {
@@ -129,6 +173,15 @@ function MainApp() {
     setAppState("email-auth");
     useAppStore.getState().logout();
   }, []);
+
+  if (appState === "update-required" && latestJson) {
+    return (
+      <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
+        <TitleBar />
+        <UpdateScreen currentVersion={currentVersion} latest={latestJson} />
+      </div>
+    );
+  }
 
   if (appState === "initializing") {
     return (
