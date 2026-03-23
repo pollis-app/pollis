@@ -16,9 +16,9 @@
       {
         "label": "main",
         "title": "Pollis",
-        "width": 540,
-        "height": 360,
-        "minWidth": 540,
+        "width": 650,
+        "height": 480,
+        "minWidth": 420,
         "minHeight": 360,
         "resizable": true,
         "fullscreen": false,
@@ -39,18 +39,7 @@
       "icons/icon.icns"
     ],
     "macOS": {
-      "signingIdentity": null,
-      "notarizationCredentials": {
-        "appleId": {
-          "envVariable": "APPLE_ID"
-        },
-        "appleIdPassword": {
-          "envVariable": "APPLE_PASSWORD"
-        },
-        "teamId": {
-          "envVariable": "APPLE_TEAM_ID"
-        }
-      }
+      "signingIdentity": null
     },
     "linux": {
       "deb": {
