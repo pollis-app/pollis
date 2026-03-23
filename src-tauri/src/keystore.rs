@@ -4,6 +4,9 @@ use crate::error::{Error, Result};
 /// so multiple instances don't stomp each other's session/identity keys.
 /// Production builds without POLLIS_DATA_DIR are unaffected.
 fn namespaced(key: &str) -> String {
+    #[cfg(debug_assertions)]
+    let key = format!("DEV:{key}");
+
     match std::env::var("POLLIS_DATA_DIR") {
         Ok(dir) => {
             let label = std::path::Path::new(&dir)
