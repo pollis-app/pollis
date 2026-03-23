@@ -2,6 +2,7 @@ mod config;
 pub mod db;
 mod error;
 mod keystore;
+pub mod realtime;
 mod signal;
 mod state;
 pub mod commands;
@@ -28,11 +29,28 @@ pub fn run() {
 
             let config = Config::from_env().map_err(|e| e.to_string())?;
 
+            // Capture the window handle before app is moved into the async block.
+            #[cfg(target_os = "linux")]
+            let main_window = app.get_webview_window("main");
+
             tauri::async_runtime::block_on(async move {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;
                 app.manage(Arc::new(state));
                 Ok::<(), String>(())
             })?;
+
+            // WebRTC is disabled by default in WebKitGTK and must be explicitly enabled.
+            // Without this, RTCPeerConnection is undefined in the JS context on Linux.
+            #[cfg(target_os = "linux")]
+            if let Some(window) = main_window {
+                use webkit2gtk::{SettingsExt, WebViewExt};
+                let _ = window.with_webview(|webview| {
+                    if let Some(settings) = webview.inner().settings() {
+                        settings.set_enable_webrtc(true);
+                        settings.set_enable_media_stream(true);
+                    }
+                });
+            }
 
             Ok(())
         })
@@ -92,6 +110,9 @@ pub fn run() {
             commands::signal::replenish_one_time_prekeys,
             commands::livekit::get_livekit_token,
             commands::livekit::get_livekit_url,
+            commands::livekit::subscribe_realtime,
+            commands::livekit::connect_rooms,
+            commands::livekit::publish_ping,
             commands::r2::upload_file,
             commands::r2::download_file,
         ])

@@ -58,6 +58,11 @@ dotenvy = "0.15"
 thiserror = "1"
 once_cell = "1"
 zeroize = { version = "1", features = ["derive"] }
+livekit = "0.7"
+bytes = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = { version = "2", features = ["v2_38"] }
 
 [profile.dev]
 incremental = true

@@ -1,14 +1,23 @@
-import { useEffect, useRef } from 'react';
-import { Room, RoomEvent } from 'livekit-client';
-import { invoke } from '@tauri-apps/api/core';
+import { useEffect, useRef, useMemo } from 'react';
+import { Channel, invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
-import { messageQueryKeys } from './queries/useMessages';
+import { messageQueryKeys, useDMConversations } from './queries/useMessages';
+import { usePreferences } from './queries/usePreferences';
+import { useUserGroupsWithChannels } from './queries/useGroups';
 
-// Module-level ref so useSendMessage can publish data pings without owning the connection
-export const livekitRoomRef: { current: Room | null } = { current: null };
+// Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
+// Add new variants here as new event types are added on the Rust side.
+type RealtimeEvent = {
+  type: 'new_message';
+  channel_id: string | null;
+  conversation_id: string | null;
+  sender_id: string;
+  sender_username: string | null;
+};
 
 export function useLiveKitRealtime() {
   const { isReady: isTauriReady } = useTauriReady();
@@ -21,165 +30,182 @@ export function useLiveKitRealtime() {
     incrementUnread,
   } = useAppStore();
 
-  const roomRef = useRef<Room | null>(null);
+  const { query: prefsQuery } = usePreferences();
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const { data: dmConversations } = useDMConversations();
 
-  // Track whether the app window is currently focused
-  const isWindowFocusedRef = useRef<boolean>(document.hasFocus());
+  // ── All room IDs this user should be connected to ─────────────────────────
+  // Derived from cached query data — no extra network calls.
 
-  // Keep window focus state in sync via event listeners
+  const allRoomIds = useMemo<string[]>(() => {
+    const ids: string[] = [];
+    if (groupsWithChannels) {
+      for (const group of groupsWithChannels) {
+        for (const channel of group.channels) {
+          ids.push(channel.id);
+        }
+      }
+    }
+    if (dmConversations) {
+      for (const conv of dmConversations) {
+        ids.push(conv.id);
+      }
+    }
+    return ids;
+  }, [groupsWithChannels, dmConversations]);
+
+  // ── Room name lookup (for notification titles) ────────────────────────────
+
+  const roomNameMapRef = useRef<Map<string, string>>(new Map());
   useEffect(() => {
-    const handleFocus = () => {
-      isWindowFocusedRef.current = true;
-    };
-    const handleBlur = () => {
-      isWindowFocusedRef.current = false;
-    };
-    window.addEventListener('focus', handleFocus);
-    window.addEventListener('blur', handleBlur);
-    return () => {
-      window.removeEventListener('focus', handleFocus);
-      window.removeEventListener('blur', handleBlur);
-    };
-  }, []);
+    const map = new Map<string, string>();
+    if (groupsWithChannels) {
+      for (const group of groupsWithChannels) {
+        for (const channel of group.channels) {
+          map.set(channel.id, `${group.name} / #${channel.name}`);
+        }
+      }
+    }
+    if (dmConversations) {
+      for (const conv of dmConversations) {
+        map.set(conv.id, conv.user2_identifier);
+      }
+    }
+    roomNameMapRef.current = map;
+  }, [groupsWithChannels, dmConversations]);
 
-  const activeRoomId = selectedChannelId ?? selectedConversationId;
+  // ── Refs to avoid stale closures in the channel handler ───────────────────
+  // The channel handler is created once; these refs always hold current values.
+
+  const selectedChannelIdRef = useRef<string | null>(selectedChannelId);
+  const selectedConversationIdRef = useRef<string | null>(selectedConversationId);
+  useEffect(() => { selectedChannelIdRef.current = selectedChannelId; }, [selectedChannelId]);
+  useEffect(() => { selectedConversationIdRef.current = selectedConversationId; }, [selectedConversationId]);
+
+  const isWindowFocusedRef = useRef<boolean>(true);
+
+  const allowNotificationsRef = useRef<boolean>(true);
+  useEffect(() => {
+    allowNotificationsRef.current = prefsQuery.data?.allow_desktop_notifications ?? true;
+  }, [prefsQuery.data?.allow_desktop_notifications]);
+
+  const notificationPermissionRef = useRef<boolean>(false);
+
+  // queryClient and incrementUnread change reference on every render but are
+  // stable in practice; keep refs so the handler doesn't need to be recreated.
+  const queryClientRef = useRef(queryClient);
+  useEffect(() => { queryClientRef.current = queryClient; }, [queryClient]);
+  const incrementUnreadRef = useRef(incrementUnread);
+  useEffect(() => { incrementUnreadRef.current = incrementUnread; }, [incrementUnread]);
+
+  // ── OS-level window focus via Tauri events ────────────────────────────────
+  // DOM focus/blur don't fire on minimize in Tauri — use the OS window events.
 
   useEffect(() => {
     if (!isTauriReady) {
       return;
     }
+    let unlistenFocus: (() => void) | undefined;
+    let unlistenBlur: (() => void) | undefined;
+    const setup = async () => {
+      const win = getCurrentWindow();
+      unlistenFocus = await win.listen('focus', () => { isWindowFocusedRef.current = true; });
+      unlistenBlur = await win.listen('blur', () => { isWindowFocusedRef.current = false; });
+    };
+    setup().catch((err) => { console.error('[realtime] window listener setup failed:', err); });
+    return () => {
+      unlistenFocus?.();
+      unlistenBlur?.();
+    };
+  }, [isTauriReady]);
 
-    // Allow connection when online or when kill-switch is off.
-    // 'offline' is not used as a gate here because navigator.onLine is
-    // unreliable in Tauri's WKWebView — all network goes through Rust.
-    if (!activeRoomId || !currentUser || networkStatus === 'kill-switch') {
+  // ── Notification permission cached on startup ─────────────────────────────
+  // Checked once so the channel handler stays synchronous.
+
+  useEffect(() => {
+    if (!isTauriReady) {
+      return;
+    }
+    const setup = async () => {
+      let granted = await isPermissionGranted();
+      if (!granted) {
+        const result = await requestPermission();
+        granted = result === 'granted';
+      }
+      notificationPermissionRef.current = granted;
+    };
+    setup().catch((err) => { console.error('[realtime] notification permission setup failed:', err); });
+  }, [isTauriReady]);
+
+  // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
+  // Recreated if the user identity changes (e.g. logout → login as someone else).
+
+  useEffect(() => {
+    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
       return;
     }
 
-    let cancelled = false;
+    const channel = new Channel<RealtimeEvent>();
 
-    const connect = async () => {
-      const url = await invoke<string>('get_livekit_url');
-
-      if (cancelled) {
+    channel.onmessage = (event) => {
+      if (event.type !== 'new_message') {
         return;
       }
 
-      if (!url || !url.trim()) {
-        // LiveKit not configured — skip silently
+      // Skip own messages — optimistic update already applied by useSendMessage.
+      if (event.sender_id === currentUser.id) {
         return;
       }
 
-      const token = await invoke<string>('get_livekit_token', {
-        roomName: activeRoomId,
-        identity: currentUser.id,
-        displayName: currentUser.username ?? currentUser.id,
-      });
+      const channelId = event.channel_id;
+      const conversationId = event.conversation_id;
+      const senderUsername = event.sender_username ?? 'Someone';
+      const incomingId = channelId ?? conversationId;
 
-      if (cancelled) {
-        return;
+      if (channelId && channelId === selectedChannelIdRef.current) {
+        queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
+      } else if (conversationId && conversationId === selectedConversationIdRef.current) {
+        queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
+      } else if (incomingId) {
+        incrementUnreadRef.current(incomingId);
       }
 
-      const room = new Room();
-
-      room.on(RoomEvent.DataReceived, (payload, _participant) => {
-        const text = new TextDecoder().decode(payload);
-
-        let data: Record<string, unknown>;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          return;
-        }
-
-        if (data.type !== 'new_message') {
-          return;
-        }
-
-        // Skip own messages — optimistic update already applied
-        if (data.senderId === currentUser.id) {
-          return;
-        }
-
-        const channelId = (data.channelId as string | null) ?? null;
-        const conversationId = (data.conversationId as string | null) ?? null;
-        const senderUsername = (data.senderUsername as string | null) ?? 'Someone';
-        const roomName = (data.roomName as string | null) ?? 'New message';
-
-        console.log('[LiveKit] ping received', { channelId, conversationId, selectedChannelId, selectedConversationId });
-
-        if (channelId && channelId === selectedChannelId) {
-          console.log('[LiveKit] invalidating channel messages', channelId);
-          queryClient.invalidateQueries({
-            queryKey: messageQueryKeys.channel(channelId),
-          });
-        } else if (conversationId && conversationId === selectedConversationId) {
-          console.log('[LiveKit] invalidating conversation messages', conversationId);
-          queryClient.invalidateQueries({
-            queryKey: messageQueryKeys.conversation(conversationId),
-          });
-        } else {
-          console.log('[LiveKit] ping did not match active channel/conversation — incrementing unread');
-
-          // Increment unread count for the non-active channel or conversation
-          const unreadId = channelId ?? conversationId;
-          if (unreadId) {
-            incrementUnread(unreadId);
-          }
-
-          // Fire a native OS notification only when the window is not focused
-          if (!isWindowFocusedRef.current && unreadId) {
-            void (async () => {
-              let permissionGranted = await isPermissionGranted();
-              if (!permissionGranted) {
-                const permission = await requestPermission();
-                permissionGranted = permission === 'granted';
-              }
-              if (permissionGranted) {
-                sendNotification({
-                  title: roomName,
-                  body: `${senderUsername}: New message`,
-                });
-              }
-            })();
-          }
-        }
-      });
-
-      console.log('[LiveKit] connecting to room', activeRoomId);
-      await room.connect(url, token);
-
-      if (cancelled) {
-        room.disconnect();
-        return;
+      if (!isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
+        const title = incomingId
+          ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
+          : 'New message';
+        sendNotification({ title, body: `${senderUsername}: New message` });
       }
-
-      console.log('[LiveKit] connected to room', activeRoomId);
-      roomRef.current = room;
-      livekitRoomRef.current = room;
     };
 
-    connect().catch((err) => {
-      console.error('[LiveKit] Failed to connect:', err);
+    invoke('subscribe_realtime', { onEvent: channel }).catch((err) => {
+      console.error('[realtime] subscribe_realtime failed:', err);
     });
 
     return () => {
-      cancelled = true;
-      if (roomRef.current) {
-        roomRef.current.disconnect();
-        roomRef.current = null;
-        livekitRoomRef.current = null;
-      }
+      // Disconnect all rooms when the user logs out or kill-switch activates.
+      invoke('connect_rooms', {
+        roomIds: [],
+        userId: currentUser.id,
+        username: currentUser.username ?? currentUser.id,
+      }).catch(() => {});
     };
-  }, [
-    isTauriReady,
-    activeRoomId,
-    currentUser?.id,
-    currentUser?.username,
-    networkStatus,
-    selectedChannelId,
-    selectedConversationId,
-    queryClient,
-    incrementUnread,
-  ]);
+  }, [isTauriReady, currentUser?.id, networkStatus]);
+
+  // ── Connect rooms whenever the room list changes ───────────────────────────
+  // Rust handles the diff — only connects new rooms, disconnects removed ones.
+
+  useEffect(() => {
+    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
+      return;
+    }
+
+    invoke('connect_rooms', {
+      roomIds: allRoomIds,
+      userId: currentUser.id,
+      username: currentUser.username ?? currentUser.id,
+    }).catch((err) => {
+      console.error('[realtime] connect_rooms failed:', err);
+    });
+  }, [isTauriReady, allRoomIds, currentUser?.id, currentUser?.username, networkStatus]);
 }
