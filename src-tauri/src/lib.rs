@@ -76,6 +76,7 @@ pub fn run() {
             commands::dm::get_dm_channel,
             commands::dm::add_user_to_dm_channel,
             commands::dm::remove_user_from_dm_channel,
+            commands::dm::leave_dm_channel,
             commands::messages::list_messages,
             commands::messages::send_message,
             commands::messages::poll_pending_messages,

@@ -450,3 +450,37 @@ pub async fn remove_user_from_dm_channel(
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn leave_dm_channel(
+    dm_channel_id: String,
+    user_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let conn = state.remote_db.conn().await?;
+
+    conn.execute(
+        "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
+        libsql::params![dm_channel_id.clone(), user_id],
+    ).await?;
+
+    // If no members remain, clean up the channel and all associated data
+    let mut rows = conn.query(
+        "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
+        libsql::params![dm_channel_id.clone()],
+    ).await?;
+
+    let remaining: i64 = if let Some(row) = rows.next().await? {
+        row.get(0)?
+    } else {
+        0
+    };
+
+    if remaining == 0 {
+        conn.execute("DELETE FROM message_envelope WHERE conversation_id = ?1", libsql::params![dm_channel_id.clone()]).await?;
+        conn.execute("DELETE FROM sender_key_dist WHERE channel_id = ?1", libsql::params![dm_channel_id.clone()]).await?;
+        conn.execute("DELETE FROM dm_channel WHERE id = ?1", libsql::params![dm_channel_id]).await?;
+    }
+
+    Ok(())
+}
