@@ -62,14 +62,16 @@ function MainApp() {
 
   const checkStoredSession = useCallback(async () => {
     try {
-      // Check for required update before anything else
-      const [latest, version] = await Promise.all([fetchLatest(), getVersion()]);
-      setCurrentVersion(version);
-      if (latest && semverIsOutdated(version, latest.version)) {
-        setLatestJson(latest);
-        await invoke("mark_update_required");
-        setAppState("update-required");
-        return;
+      // Check for required update before anything else (skip in dev)
+      if (!import.meta.env.DEV) {
+        const [latest, version] = await Promise.all([fetchLatest(), getVersion()]);
+        setCurrentVersion(version);
+        if (latest && semverIsOutdated(version, latest.version)) {
+          setLatestJson(latest);
+          await invoke("mark_update_required");
+          setAppState("update-required");
+          return;
+        }
       }
 
       const user = await api.getSession();
