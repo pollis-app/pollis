@@ -131,12 +131,14 @@ pub async fn replenish_one_time_prekeys(
     drop(db);
 
     let conn = state.remote_db.conn().await?;
+    let tx = conn.transaction().await?;
     for (id, pub_key) in &new_opks {
-        conn.execute(
+        tx.execute(
             "INSERT INTO one_time_prekey (user_id, key_id, public_key) VALUES (?1, ?2, ?3)",
             libsql::params![user_id.clone(), *id as i64, hex::encode(pub_key)],
         ).await?;
     }
+    tx.commit().await?;
 
     Ok(count)
 }
