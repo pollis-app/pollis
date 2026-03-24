@@ -169,6 +169,10 @@ if (!currentUser) {
 }
 ```
 
+### Component file organisation
+
+Reusable components live in their own files. Only keep a component co-located with its parent if it is exclusively a child of that parent and will never be used elsewhere (e.g. a `ListItem` used only by `List`).
+
 ### Comments go above their relevant line, not inline
 ```typescript
 // BAD

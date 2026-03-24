@@ -16,7 +16,8 @@ import { InviteMember } from "../pages/InviteMember";
 import { SearchView } from "./Search/SearchView";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, usePendingInvites, useLeaveGroup } from "../hooks/queries/useGroups";
-import { useLeaveDM, useLastMessage } from "../hooks/queries/useMessages";
+import { useLeaveDM } from "../hooks/queries/useMessages";
+import { LastMessagePreview } from "./Message/LastMessagePreview";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useLiveKitRealtime } from "../hooks/useLiveKitRealtime";
@@ -48,28 +49,6 @@ type View =
   | { type: "dm-settings"; conversationId: string }
   | { type: "search" }
   | { type: "voice-channel"; channelName: string };
-
-// ─── LastMessagePreview ───────────────────────────────────────────────────────
-
-interface LastMessagePreviewProps {
-  channelId?: string;
-  conversationId?: string;
-}
-
-const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelId, conversationId }) => {
-  const { data: message } = useLastMessage(channelId ?? null, conversationId ?? null);
-  if (!message?.content_decrypted) {
-    return null;
-  }
-  const text = message.content_decrypted;
-  const preview = text.length > 60 ? text.slice(0, 60) + "…" : text;
-  const sender = message.sender_username;
-  return (
-    <span>
-      {sender ? `${sender}: ${preview}` : preview}
-    </span>
-  );
-};
 
 // ─── TerminalApp ──────────────────────────────────────────────────────────────
 
