@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore;
+use crate::realtime::LiveKitState;
 
 #[derive(Clone)]
 pub struct OtpEntry {
@@ -18,6 +19,7 @@ pub struct AppState {
     pub local_db: Arc<Mutex<LocalDb>>,
     pub remote_db: Arc<RemoteDb>,
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
+    pub livekit: Arc<Mutex<LiveKitState>>,
     pub update_required: Arc<AtomicBool>,
 }
 
@@ -40,6 +42,7 @@ impl AppState {
             local_db: Arc::new(Mutex::new(local_db)),
             remote_db: Arc::new(remote_db),
             otp_store: Arc::new(Mutex::new(HashMap::new())),
+            livekit: Arc::new(Mutex::new(LiveKitState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
         })
     }

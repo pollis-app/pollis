@@ -6,6 +6,7 @@ import { applyAccentColor, applyFontSize } from "../../utils/colorUtils";
 export interface PreferencesData {
   accent_color?: string;
   font_size?: string;
+  allow_desktop_notifications?: boolean;
 }
 
 /**
@@ -43,6 +44,7 @@ export function usePreferences() {
       return {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
+        allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", true),
       };
     },
     enabled: !!currentUser,

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { usePreferences, applyPreferences } from "../hooks/queries/usePreferences";
 import { hslToHex } from "../utils/colorUtils";
 import { RangeSlider } from "../components/ui/RangeSlider";
+import { Switch } from "../components/ui/Switch";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -15,6 +16,7 @@ export const Preferences: React.FC = () => {
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
   const [fontSize, setFontSize] = useState<number>(15);
+  const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
 
   const { query, mutation } = usePreferences();
 
@@ -22,6 +24,9 @@ export const Preferences: React.FC = () => {
   useEffect(() => {
     if (query.data) {
       applyPreferences(query.data);
+      if (query.data.allow_desktop_notifications !== undefined) {
+        setAllowDesktopNotifications(query.data.allow_desktop_notifications);
+      }
     }
   }, [query.data]);
 
@@ -35,27 +40,32 @@ export const Preferences: React.FC = () => {
     if (!isNaN(fs)) { setFontSize(fs); }
   }, []);
 
-  const save = useCallback((newHue: number, newSat: number, newFs: number) => {
+  const save = useCallback((newHue: number, newSat: number, newFs: number, newNotifications: boolean) => {
     const accentHex = hslToHex(newHue, newSat, 62);
-    mutation.mutate({ accent_color: accentHex, font_size: String(newFs) });
+    mutation.mutate({ accent_color: accentHex, font_size: String(newFs), allow_desktop_notifications: newNotifications });
   }, [mutation]);
 
   const handleHue = (val: number) => {
     setHue(val);
     setRootVar("--accent-h", String(val));
-    save(val, saturation, fontSize);
+    save(val, saturation, fontSize, allowDesktopNotifications);
   };
 
   const handleSaturation = (val: number) => {
     setSaturation(val);
     setRootVar("--accent-s", `${val}%`);
-    save(hue, val, fontSize);
+    save(hue, val, fontSize, allowDesktopNotifications);
   };
 
   const handleFontSize = (val: number) => {
     setFontSize(val);
     setRootVar("--font-size-base", `${val}px`);
-    save(hue, saturation, val);
+    save(hue, saturation, val, allowDesktopNotifications);
+  };
+
+  const handleAllowDesktopNotifications = (val: boolean) => {
+    setAllowDesktopNotifications(val);
+    save(hue, saturation, fontSize, val);
   };
 
   const previewColor = `hsl(${hue} ${saturation}% 62%)`;
@@ -134,6 +144,23 @@ export const Preferences: React.FC = () => {
                 onChange={handleSaturation}
               />
             </div>
+          </section>
+
+          {/* Notifications */}
+          <section className="flex flex-col gap-4">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "var(--c-text-dim)", borderColor: "var(--c-border)" }}
+            >
+              Notifications
+            </h2>
+            <Switch
+              id="pref-desktop-notifications"
+              label="Desktop notifications"
+              checked={allowDesktopNotifications}
+              onChange={handleAllowDesktopNotifications}
+              description="Show a system notification when a message arrives in an unfocused window"
+            />
           </section>
 
           {/* Font size */}
