@@ -2,5 +2,8 @@
 rustflags = []
 
 [env]
-# Force C++17 to avoid C++20 iterator concepts issues with rust::Slice in webrtc-sys
-CXXFLAGS = "-std=c++17"
+# Force C++17 and add permissive flags to work around WebRTC header issues
+# -std=c++17: Avoids C++20 iterator concepts issues with rust::Slice
+# -fpermissive: Allows method names that shadow class names (Network() returning Network*)
+# -Wno-error=changes-meaning: Treats the specific shadowing warning as non-fatal
+CXXFLAGS = "-std=c++17 -fpermissive -Wno-error=changes-meaning"
