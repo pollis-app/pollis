@@ -1,6 +1,14 @@
 [build]
 rustflags = []
 
+[target.aarch64-apple-darwin]
+# Ensure Objective-C categories are loaded from static libs (fixes WebRTC crash)
+rustflags = ["-C", "link-arg=-ObjC"]
+
+[target.x86_64-apple-darwin]
+# Ensure Objective-C categories are loaded from static libs (fixes WebRTC crash)
+rustflags = ["-C", "link-arg=-ObjC"]
+
 [target.x86_64-pc-windows-msvc]
 # Use static CRT to match LiveKit WebRTC libraries (which use /MT)
 rustflags = ["-C", "target-feature=+crt-static"]
