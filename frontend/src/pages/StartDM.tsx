@@ -76,6 +76,7 @@ export const StartDM: React.FC<StartDMProps> = ({ onSuccess }) => {
           <Button
             data-testid="start-dm-submit-button"
             type="submit"
+            disabled={!identifier.trim()}
             isLoading={createDMMutation.isPending}
             loadingText="Starting…"
           >

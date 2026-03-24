@@ -159,7 +159,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
             return (
               <div
                 key={item.id}
-                style={{ borderTop: "1px solid var(--c-border)", margin: "4px 0" }}
+                style={{ borderTop: "2px solid var(--c-border)", margin: "0" }}
                 aria-hidden="true"
               />
             );

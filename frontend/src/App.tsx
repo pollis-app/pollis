@@ -17,6 +17,7 @@ import * as api from "./services/api";
 import { getPreference, applyPreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
 import type { User } from "./types";
+import { LoadingSpinner } from "./components/ui/LoaderSpinner";
 
 interface LatestJson {
   version: string;
@@ -322,18 +323,20 @@ function MainApp() {
         </div>
         <TitleBar />
         <div className="flex-1 flex items-center justify-center" style={{ position: "relative", zIndex: 1 }}>
-          <Card padding="lg" style={{ width: "100%", maxWidth: 360 }}>
+          <Card padding="lg" style={{ width: "clamp(280px, 100%, 400px)" }}>
             <div className="flex flex-col gap-3">
               <span
                 data-testid="identity-setup-message"
-                className="text-sm font-mono font-semibold"
+                className="font-mono font-semibold"
                 style={{ color: "var(--c-accent)" }}
               >
-                Pollis.
+                Welcome to Pollis
               </span>
-              <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
-                Setting up your encrypted identity
-                <IdentitySetupDots />
+              <p className="text-xs font-mono flex items-center gap-2" style={{ color: "var(--c-text)" }}>
+                <span>
+                  Setting up your encrypted identity
+                </span>
+                <LoadingSpinner size="sm" />
               </p>
             </div>
           </Card>
@@ -372,20 +375,5 @@ function MainApp() {
     </div>
   );
 }
-
-// ── Animated dots for the identity setup loading screen ──────────────────────
-
-const IdentitySetupDots: React.FC = () => {
-  const [count, setCount] = useState(0);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setCount((prev) => (prev + 1) % 4);
-    }, 400);
-    return () => clearInterval(interval);
-  }, []);
-
-  return <span aria-hidden="true">{".".repeat(count)}</span>;
-};
 
 export default MainApp;
