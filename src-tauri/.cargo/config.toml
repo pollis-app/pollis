@@ -1,9 +1,18 @@
 [build]
 rustflags = []
 
+[target.x86_64-pc-windows-msvc]
+# Use static CRT to match LiveKit WebRTC libraries (which use /MT)
+rustflags = ["-C", "target-feature=+crt-static"]
+
 [env]
 # Force C++17 and suppress warnings to work around WebRTC header issues
 # -std=c++17: Avoids C++20 iterator concepts issues with rust::Slice
 # -w: Suppress all warnings (prevents warning-as-error issues across GCC versions)
 # -fpermissive: Allows method names that shadow class names (Network() returning Network*)
 CXXFLAGS = "-std=c++17 -w -fpermissive"
+
+[target.x86_64-pc-windows-msvc.env]
+# Windows: Use /MT (static runtime) to match LiveKit WebRTC libraries
+# The prebuilt WebRTC libs from LiveKit use MT_StaticRelease
+CXXFLAGS = "/std:c++17 /MT /W0"
