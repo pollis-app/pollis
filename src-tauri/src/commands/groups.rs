@@ -723,9 +723,9 @@ pub async fn send_group_invite(
         return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
     }
 
-    // Look up invitee by username
+    // Look up invitee by username or email
     let mut user_rows = conn.query(
-        "SELECT id FROM users WHERE username = ?1",
+        "SELECT id FROM users WHERE username = ?1 OR email = ?1",
         libsql::params![invitee_identifier.clone()],
     ).await?;
     let invitee_id: String = if let Some(row) = user_rows.next().await? {
