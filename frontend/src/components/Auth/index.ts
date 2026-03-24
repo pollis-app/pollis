@@ -1,2 +1,0 @@
-export { ClerkAuth } from './ClerkAuth';
-
