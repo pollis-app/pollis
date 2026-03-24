@@ -347,6 +347,7 @@ pub async fn send_message(
     reply_to_id: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Message> {
+    state.check_not_outdated()?;
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 

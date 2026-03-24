@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -19,6 +20,7 @@ pub struct AppState {
     pub remote_db: Arc<RemoteDb>,
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
     pub livekit: Arc<Mutex<LiveKitState>>,
+    pub update_required: Arc<AtomicBool>,
 }
 
 impl AppState {
@@ -41,6 +43,14 @@ impl AppState {
             remote_db: Arc::new(remote_db),
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
+            update_required: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    pub fn check_not_outdated(&self) -> crate::error::Result<()> {
+        if self.update_required.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(crate::error::Error::ClientOutdated);
+        }
+        Ok(())
     }
 }

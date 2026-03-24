@@ -94,6 +94,7 @@ pub fn run() {
             commands::dm::get_dm_channel,
             commands::dm::add_user_to_dm_channel,
             commands::dm::remove_user_from_dm_channel,
+            commands::dm::leave_dm_channel,
             commands::messages::list_messages,
             commands::messages::send_message,
             commands::messages::poll_pending_messages,
@@ -115,6 +116,8 @@ pub fn run() {
             commands::livekit::publish_ping,
             commands::r2::upload_file,
             commands::r2::download_file,
+            commands::update::mark_update_required,
+            commands::update::is_update_required,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Pollis");

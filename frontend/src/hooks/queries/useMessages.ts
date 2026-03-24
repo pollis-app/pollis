@@ -216,6 +216,28 @@ export function useDMConversations() {
   });
 }
 
+export function useLeaveDM() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async (conversationId: string): Promise<void> => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('leave_dm_channel', {
+        dmChannelId: conversationId,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
 export function useCreateOrGetDMConversation() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);

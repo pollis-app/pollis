@@ -29,6 +29,9 @@ pub enum Error {
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 
+    #[error("client_outdated")]
+    ClientOutdated,
+
     #[error("{0}")]
     Other(#[from] anyhow::Error),
 }

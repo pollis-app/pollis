@@ -16,6 +16,7 @@ import { InviteMember } from "../pages/InviteMember";
 import { SearchView } from "./Search/SearchView";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, usePendingInvites, useLeaveGroup } from "../hooks/queries/useGroups";
+import { useLeaveDM } from "../hooks/queries/useMessages";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useLiveKitRealtime } from "../hooks/useLiveKitRealtime";
@@ -44,6 +45,7 @@ type View =
   | { type: "join-requests"; group: GroupWithChannels }
   | { type: "invite-member"; group: GroupWithChannels }
   | { type: "leave-group"; group: GroupWithChannels }
+  | { type: "dm-settings"; conversationId: string }
   | { type: "search" }
   | { type: "voice-channel"; channelName: string };
 
@@ -80,6 +82,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
   const { data: dmConversations = [] } = useDMConversations();
   const { data: pendingInvites = [] } = usePendingInvites();
   const leaveGroupMutation = useLeaveGroup();
+  const leaveDMMutation = useLeaveDM();
 
   console.log("about to use livekit realtime hook with selectedChannelId", selectedChannelId);
   // Maintain a LiveKit room connection for the active channel/conversation
@@ -351,6 +354,8 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         },
         badge: unreadCounts[c.id] ?? 0,
         testId: `dm-option-${c.id}`,
+        secondaryAction: () => push({ type: "dm-settings" as const, conversationId: c.id }),
+        secondaryActionLabel: `Settings for ${c.user2_identifier}`,
       })),
       { id: "__sep__", label: "", type: "separator" as const },
       {
@@ -394,6 +399,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
       case "join-requests": return `Join Requests : : ${currentView.group.name}`;
       case "invite-member": return `Invite Member : : ${currentView.group.name}`;
       case "leave-group": return `Leave Group : : ${currentView.group.name}`;
+      case "dm-settings": return "Conversation Settings";
       case "search": return "Search";
       case "voice-channel": return `[v] ${currentView.channelName}`;
       default: return "pollis";
@@ -617,6 +623,54 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
             </div>
           </div>
         );
+      case "dm-settings":
+        return (
+          <div className="flex flex-col h-full">
+            <MenuPageHeader title="Conversation Settings" onBack={pop} />
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
+              {leaveDMMutation.isError && (
+                <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+                  {leaveDMMutation.error instanceof Error ? leaveDMMutation.error.message : "Failed to leave conversation"}
+                </p>
+              )}
+              <button
+                data-testid="dm-settings-leave-button"
+                onClick={async () => {
+                  try {
+                    await leaveDMMutation.mutateAsync(currentView.conversationId);
+                    setSelectedConversationId(null);
+                    setViewStack([{ type: "root" }]);
+                  } catch {
+                    // error shown via isError above
+                  }
+                }}
+                disabled={leaveDMMutation.isPending}
+                className="w-full py-2 px-4 font-mono text-xs"
+                style={{
+                  maxWidth: 280,
+                  background: "transparent",
+                  border: "1px solid hsl(0 70% 50% / 40%)",
+                  borderRadius: "4px",
+                  color: "hsl(0 70% 65%)",
+                  cursor: leaveDMMutation.isPending ? "not-allowed" : "pointer",
+                  opacity: leaveDMMutation.isPending ? 0.5 : 1,
+                }}
+                onMouseEnter={(e) => { if (!leaveDMMutation.isPending) { (e.currentTarget as HTMLElement).style.background = "hsl(0 70% 50% / 10%)"; } }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              >
+                {leaveDMMutation.isPending ? "Leaving…" : "Leave conversation"}
+              </button>
+              <button
+                data-testid="dm-settings-cancel-button"
+                onClick={pop}
+                className="font-mono text-xs"
+                style={{ color: "var(--c-text-muted)", background: "transparent", border: "none", cursor: "pointer" }}
+              >
+                Cancel (Esc)
+              </button>
+            </div>
+          </div>
+        );
       case "search":
         return (
           <div className="flex flex-col h-full">
@@ -740,6 +794,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
                 case "join-requests": return `Join Requests : : ${v.group.name}`;
                 case "invite-member": return `Invite Member : : ${v.group.name}`;
                 case "leave-group": return `Leave Group : : ${v.group.name}`;
+                case "dm-settings": return "Conversation Settings";
                 case "search": return "Search";
                 default: return null;
               }
