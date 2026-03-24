@@ -25,8 +25,8 @@ export default {
         bg: 'var(--c-bg)',
       },
       fontFamily: {
-        mono: ['"Atkinson Hyperlegible"', 'ui-monospace', 'monospace'],
-        sans: ['"Atkinson Hyperlegible"', 'system-ui', 'sans-serif'],
+        mono: ['"Atkinson Hyperlegible Mono"', 'ui-monospace', 'monospace'],
+        sans: ['"Atkinson Hyperlegible Next"', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
         panel: '10px',

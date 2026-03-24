@@ -92,7 +92,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess }) => {
           className="inline-flex items-center gap-1 leading-none text-xs font-mono"
           style={{ color: 'var(--c-text-muted)' }}
         >
-          ← Back
+          🠈 Back
         </button>
       </div>
     );

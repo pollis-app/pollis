@@ -4,7 +4,7 @@ import { ChevronRight, ArrowUp, ArrowDown, MoreVertical } from "lucide-react";
 export interface TerminalMenuItem {
   id: string;
   label: string;
-  description?: string;
+  description?: React.ReactNode;
   action?: () => void;
   disabled?: boolean;
   icon?: React.ReactNode;
@@ -201,7 +201,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
 
               <div className="flex-1 min-w-0">
                 <div
-                  className="font-mono font-medium text-sm flex items-center gap-2"
+                  className="font-sans text-sm flex items-center gap-2"
                   style={{
                     color: isSelected
                       ? "var(--c-accent)"
@@ -213,7 +213,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                   <span>{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
                     <span
-                      className="font-mono text-xs"
+                      className="font-sans text-xs"
                       style={{ color: "var(--c-accent)" }}
                     >
                       [{item.badge}]
@@ -222,7 +222,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                 </div>
                 {item.description && (
                   <div
-                    className="text-xs font-mono mt-0.5"
+                    className="text-xs font-sans mt-0.5"
                     style={{ color: "var(--c-text-muted)" }}
                   >
                     {item.description}

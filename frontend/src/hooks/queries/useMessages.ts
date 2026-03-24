@@ -216,6 +216,42 @@ export function useDMConversations() {
   });
 }
 
+export function useLastMessage(channelId: string | null, conversationId: string | null) {
+  const currentUser = useAppStore((state) => state.currentUser);
+  const isChannel = !!channelId;
+  const queryKey = isChannel
+    ? (["last-message", "channel", channelId] as const)
+    : (["last-message", "conversation", conversationId] as const);
+
+  return useQuery({
+    queryKey,
+    queryFn: async (): Promise<Message | null> => {
+      if (isChannel && channelId && currentUser) {
+        const page = await invoke<MessagePage>('get_channel_messages', {
+          userId: currentUser.id,
+          channelId,
+          limit: 1,
+        });
+        const msgs = (page.messages || []).map(transformChannelMessage);
+        return msgs[msgs.length - 1] ?? null;
+      }
+      if (conversationId && currentUser) {
+        const page = await invoke<MessagePage>('get_dm_messages', {
+          userId: currentUser.id,
+          dmChannelId: conversationId,
+          limit: 1,
+        });
+        const msgs = (page.messages || []).map(transformChannelMessage);
+        return msgs[msgs.length - 1] ?? null;
+      }
+      return null;
+    },
+    enabled: !!(channelId || conversationId) && !!currentUser,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
+  });
+}
+
 export function useLeaveDM() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);

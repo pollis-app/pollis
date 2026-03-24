@@ -16,7 +16,7 @@ import { InviteMember } from "../pages/InviteMember";
 import { SearchView } from "./Search/SearchView";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, usePendingInvites, useLeaveGroup } from "../hooks/queries/useGroups";
-import { useLeaveDM } from "../hooks/queries/useMessages";
+import { useLeaveDM, useLastMessage } from "../hooks/queries/useMessages";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useLiveKitRealtime } from "../hooks/useLiveKitRealtime";
@@ -48,6 +48,28 @@ type View =
   | { type: "dm-settings"; conversationId: string }
   | { type: "search" }
   | { type: "voice-channel"; channelName: string };
+
+// ─── LastMessagePreview ───────────────────────────────────────────────────────
+
+interface LastMessagePreviewProps {
+  channelId?: string;
+  conversationId?: string;
+}
+
+const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelId, conversationId }) => {
+  const { data: message } = useLastMessage(channelId ?? null, conversationId ?? null);
+  if (!message?.content_decrypted) {
+    return null;
+  }
+  const text = message.content_decrypted;
+  const preview = text.length > 60 ? text.slice(0, 60) + "…" : text;
+  const sender = message.sender_username;
+  return (
+    <span>
+      {sender ? `${sender}: ${preview}` : preview}
+    </span>
+  );
+};
 
 // ─── TerminalApp ──────────────────────────────────────────────────────────────
 
@@ -153,10 +175,9 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
   }, []);
 
   // ─── Render helpers ─────────────────────────────────────────────────────────
-
   const goBackItem: TerminalMenuItem = {
     id: "__back__",
-    label: "← Go back",
+    label: "🠈 Go back",
     action: pop,
     type: "system",
   };
@@ -289,7 +310,9 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         id: ch.id,
         // Voice channels get a [v] prefix; text channels get #
         label: ch.channel_type === "voice" ? `[v] ${ch.name}` : `# ${ch.name}`,
-        description: ch.description || undefined,
+        description: ch.channel_type === "voice"
+            ? (ch.description || undefined)
+            : <LastMessagePreview channelId={ch.id} />,
         action: () => {
           if (ch.channel_type === "voice") {
             setActiveVoiceChannelId(ch.id);
@@ -347,6 +370,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
       ...conversations.map((c) => ({
         id: c.id,
         label: c.user2_identifier,
+        description: <LastMessagePreview conversationId={c.id} />,
         action: () => {
           setSelectedConversationId(c.id);
           markRead(c.id);
