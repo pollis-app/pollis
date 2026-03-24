@@ -56,7 +56,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         <button
           data-testid={`reply-preview-${message.reply_to_message_id}`}
           onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-          className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-16 opacity-60 hover:opacity-90 transition-opacity"
+          className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-12 opacity-60 hover:opacity-90 transition-opacity"
           style={{ color: "var(--c-text-muted)" }}
         >
           <Reply size={10} style={{ transform: "scaleX(-1)" }} />

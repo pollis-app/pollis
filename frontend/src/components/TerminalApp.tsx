@@ -17,6 +17,7 @@ import { SearchView } from "./Search/SearchView";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, usePendingInvites, useLeaveGroup } from "../hooks/queries/useGroups";
 import { useLeaveDM } from "../hooks/queries/useMessages";
+import { LastMessagePreview } from "./Message/LastMessagePreview";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useLiveKitRealtime } from "../hooks/useLiveKitRealtime";
@@ -153,10 +154,9 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
   }, []);
 
   // ─── Render helpers ─────────────────────────────────────────────────────────
-
   const goBackItem: TerminalMenuItem = {
     id: "__back__",
-    label: "← Go back",
+    label: "🠈 Go back",
     action: pop,
     type: "system",
   };
@@ -166,11 +166,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
       {
         id: "groups",
         label: "Groups",
-        description: groupsLoading
-          ? "Loading…"
-          : groupsWithChannels
-            ? `${groupsWithChannels.length} group${groupsWithChannels.length !== 1 ? "s" : ""}`
-            : "No groups yet",
+        description: "Communities, Organizations, Teams, and overly-ambitious group chats",
         action: () => push({ type: "groups" }),
         testId: "menu-item-groups",
       },
@@ -206,7 +202,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
       {
         id: "preferences",
         label: "Preferences",
-        description: "Colors, font size",
+        description: "Colors, font size, etc.",
         action: () => push({ type: "preferences" }),
         type: "system",
         testId: "menu-item-preferences",
@@ -237,7 +233,7 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
     ];
 
     return <TerminalMenu items={items} />
-;
+      ;
   };
 
   const renderGroupsMenu = () => {
@@ -248,27 +244,33 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
       : groupsError
         ? [{ id: "__error__", label: `Error: ${groupsError instanceof Error ? groupsError.message : "Failed to load"}`, disabled: true }]
         : groups.map((g) => ({
-            id: g.id,
-            label: g.name,
-            description: g.description || undefined,
-            action: () => {
-              setSelectedGroupId(g.id);
-              push({ type: "group" as const, group: g });
-            },
-            testId: `group-option-${g.id}`,
-          }));
+          id: g.id,
+          label: g.name,
+          description: g.description || undefined,
+          action: () => {
+            setSelectedGroupId(g.id);
+            push({ type: "group" as const, group: g });
+          },
+          testId: `group-option-${g.id}`,
+        }));
 
-    const items: TerminalMenuItem[] = [
-      ...groupItems,
-      { id: "__sep__", label: "", type: "separator" },
+    let items: TerminalMenuItem[] = [];
+
+    if (groupItems.length) {
+      items = items.concat([
+        ...groupItems,
+        { id: "__sep__", label: "", type: "separator" },
+      ])
+    }
+
+    items = items.concat([
       {
         id: "create-group",
         label: "Create Group",
         action: () => push({ type: "create-group" }),
         type: "system",
         testId: "menu-item-create-group",
-      },
-      {
+      }, {
         id: "search-group",
         label: "Find Group",
         action: () => push({ type: "search-group" }),
@@ -276,10 +278,10 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         testId: "menu-item-find-group",
       },
       goBackItem,
-    ];
+    ]);
 
     return <TerminalMenu items={items} onEsc={pop} />
-;
+      ;
   };
 
   const renderGroupMenu = (group: GroupWithChannels) => {
@@ -289,7 +291,9 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         id: ch.id,
         // Voice channels get a [v] prefix; text channels get #
         label: ch.channel_type === "voice" ? `[v] ${ch.name}` : `# ${ch.name}`,
-        description: ch.description || undefined,
+        description: ch.channel_type === "voice"
+          ? (ch.description || undefined)
+          : <LastMessagePreview channelId={ch.id} />,
         action: () => {
           if (ch.channel_type === "voice") {
             setActiveVoiceChannelId(ch.id);
@@ -339,14 +343,17 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
     ];
 
     return <TerminalMenu items={items} onEsc={pop} />
-;
+      ;
   };
 
   const renderDMsMenu = (conversations: DMConversation[]) => {
-    const items: TerminalMenuItem[] = [
-      ...conversations.map((c) => ({
+    let items: TerminalMenuItem[] = []
+
+    if (conversations.length) {
+      items = items.concat([...conversations.map((c) => ({
         id: c.id,
         label: c.user2_identifier,
+        description: <LastMessagePreview conversationId={c.id} />,
         action: () => {
           setSelectedConversationId(c.id);
           markRead(c.id);
@@ -356,20 +363,25 @@ export const TerminalApp: React.FC<TerminalAppProps> = ({ onLogout, onDeleteAcco
         testId: `dm-option-${c.id}`,
         secondaryAction: () => push({ type: "dm-settings" as const, conversationId: c.id }),
         secondaryActionLabel: `Settings for ${c.user2_identifier}`,
-      })),
-      { id: "__sep__", label: "", type: "separator" as const },
-      {
-        id: "new-dm",
-        label: "New Message",
-        action: () => push({ type: "start-dm" }),
-        type: "system" as const,
-        testId: "menu-item-new-dm",
-      },
-      goBackItem,
-    ];
+      }))])
+
+      // add separator
+      items.push({ id: "__sep__", label: "", type: "separator" as const })
+    }
+
+
+    items = items.concat([{
+      id: "new-dm",
+      label: "New Message",
+      action: () => push({ type: "start-dm" }),
+      type: "system" as const,
+      testId: "menu-item-new-dm",
+    },
+      goBackItem
+    ]);
 
     return <TerminalMenu items={items} onEsc={pop} />
-;
+      ;
   };
 
   // ─── View title for TopBar display ──────────────────────────────────────────

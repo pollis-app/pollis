@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { ChevronRight } from "lucide-react";
 
 interface TextAreaProps {
   label: string;
@@ -37,27 +38,37 @@ export const TextArea: React.FC<TextAreaProps> = ({
       >
         {label}
       </label>
-      <textarea
-        id={inputId}
-        value={value}
-        rows={rows}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setIsFocused(true)}
-        onBlur={() => setIsFocused(false)}
-        placeholder={placeholder}
-        disabled={disabled}
-        aria-invalid={!!error}
-        className="w-full px-3 py-2 font-mono text-sm resize-none transition-all"
-        style={{
-          background: "var(--c-surface)",
-          color: "var(--c-text)",
-          border: `1px solid ${error ? "#ff6b6b" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
-          outline: "none",
-          borderRadius: "4px",
-          opacity: disabled ? 0.5 : 1,
-          cursor: disabled ? "not-allowed" : undefined,
-        }}
-      />
+      <div className="relative">
+        {isFocused && !disabled && (
+          <ChevronRight
+            className="absolute left-2 top-3 w-3 h-3 pointer-events-none"
+            style={{ color: "var(--c-accent)" }}
+          />
+        )}
+        <textarea
+          id={inputId}
+          value={value}
+          rows={rows}
+          onChange={(e) => onChange(e.target.value)}
+          onFocus={() => setIsFocused(true)}
+          onBlur={() => setIsFocused(false)}
+          placeholder={placeholder}
+          disabled={disabled}
+          aria-invalid={!!error}
+          className="w-full py-2 font-mono text-sm resize-none focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black transition-all"
+          style={{
+            paddingLeft: isFocused && !disabled ? "1.5rem" : "0.75rem",
+            paddingRight: "0.75rem",
+            background: "var(--c-surface)",
+            color: "var(--c-text)",
+            border: `2px solid ${error ? "#ff6b6b" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
+            outline: "none",
+            borderRadius: "0.5rem",
+            opacity: disabled ? 0.5 : 1,
+            cursor: disabled ? "not-allowed" : undefined,
+          }}
+        />
+      </div>
       {description && !error && (
         <p className="mt-1 text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
           {description}

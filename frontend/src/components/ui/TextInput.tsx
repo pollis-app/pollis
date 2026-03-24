@@ -41,8 +41,8 @@ export const TextInput: React.FC<TextInputProps> = ({
     <div className={`relative w-full ${className}`}>
       <label
         htmlFor={inputId}
-        className="block text-xs font-mono font-medium mb-1.5"
-        style={{ color: "var(--c-text-dim)" }}
+        className="block text-xs font-sans font-medium mb-1.5"
+        style={{ color: "var(--c-text)", letterSpacing: "0.5px" }}
       >
         {label}
         {required && <span className="ml-1" style={{ color: "#ff6b6b" }}>*</span>}
@@ -69,15 +69,15 @@ export const TextInput: React.FC<TextInputProps> = ({
           autoComplete={autoComplete}
           required={required}
           aria-invalid={!!error}
-          className="w-full py-2 font-mono text-sm transition-all"
+          className="w-full py-2 placeholder-leading-1 font-mono text-sm focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black transition-all"
           style={{
             paddingLeft: isFocused && !disabled ? "1.5rem" : "0.75rem",
             paddingRight: "0.75rem",
             background: "var(--c-surface)",
             color: "var(--c-text)",
-            border: `1px solid ${error ? "#ff6b6b" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
+            border: `2px solid ${error ? "#ff6b6b" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
             outline: "none",
-            borderRadius: "4px",
+            borderRadius: "0.5rem",
             opacity: disabled ? 0.5 : 1,
             cursor: disabled ? "not-allowed" : undefined,
           }}
@@ -85,12 +85,12 @@ export const TextInput: React.FC<TextInputProps> = ({
       </div>
 
       {description && !error && (
-        <p className="mt-1 text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+        <p className="mt-1 text-xs font-sans" style={{ color: "var(--c-text-muted)" }}>
           {description}
         </p>
       )}
       {error && (
-        <p className="mt-1 text-xs font-mono" style={{ color: "#ff6b6b" }} role="alert">
+        <p className="mt-1 text-xs font-sans" style={{ color: "#ff6b6b" }} role="alert">
           {error}
         </p>
       )}

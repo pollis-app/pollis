@@ -41,7 +41,7 @@ export const Button: React.FC<ButtonProps> = ({
       disabled={disabled || isLoading}
       aria-label={ariaLabel}
       data-testid={testId}
-      className={`inline-flex items-center justify-center gap-2 px-4 py-2 font-mono text-sm font-medium transition-colors ${className}`}
+      className={`inline-flex items-center justify-center gap-2 px-4 py-2 font-sans text-sm font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${className}`}
       style={{
         border: `1px solid var(--c-border-active)`,
         borderRadius: "4px",
@@ -49,6 +49,7 @@ export const Button: React.FC<ButtonProps> = ({
         color: isPrimary ? "var(--c-bg)" : "var(--c-accent)",
         opacity: disabled || isLoading ? 0.5 : 1,
         cursor: disabled || isLoading ? "not-allowed" : "pointer",
+        letterSpacing: "0.5px"
       }}
       onMouseEnter={(e) => {
         if (disabled || isLoading) { return; }

@@ -37,8 +37,8 @@
     /* ── Focus ring (used by all input components) ──────────────── */
     --c-focus-ring:     hsl(var(--accent-h) var(--accent-s) 62% / 22%);
 
-    --font-mono: 'Atkinson Hyperlegible', ui-monospace, monospace;
-    --font-sans: 'Atkinson Hyperlegible', system-ui, sans-serif;
+    --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
+    --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
   }
 
   html, body {

@@ -57,7 +57,7 @@ export const StartDM: React.FC<StartDMProps> = ({ onSuccess }) => {
             label="Username or Email"
             value={identifier}
             onChange={setIdentifier}
-            placeholder="username, email, or phone"
+            placeholder="friend@pollis.com"
             disabled={createDMMutation.isPending}
             id="dm-identifier"
             required
@@ -76,6 +76,7 @@ export const StartDM: React.FC<StartDMProps> = ({ onSuccess }) => {
           <Button
             data-testid="start-dm-submit-button"
             type="submit"
+            disabled={!identifier.trim()}
             isLoading={createDMMutation.isPending}
             loadingText="Starting…"
           >

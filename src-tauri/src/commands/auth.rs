@@ -236,7 +236,11 @@ pub async fn verify_otp(
         (id, uname)
     } else {
         let user_id = Ulid::new().to_string();
-        let default_username = email.split('@').next().unwrap_or("user").to_string();
+        // Append the last 4 chars of the ULID so the default username is unique
+        // even when multiple users share the same email prefix (e.g. john@foo.com, john@bar.com).
+        let suffix = &user_id[user_id.len().saturating_sub(4)..];
+        let email_prefix = email.split('@').next().unwrap_or("user");
+        let default_username = format!("{}_{}", email_prefix, suffix);
         conn.execute(
             "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
             libsql::params![user_id.clone(), email.clone(), default_username.clone()],

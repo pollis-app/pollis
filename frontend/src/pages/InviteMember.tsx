@@ -42,10 +42,10 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
 
           <div className="flex flex-col gap-3">
             <TextInput
-              label="Username"
+              label="Username or Email"
               value={username}
               onChange={setUsername}
-              placeholder="their-username"
+              placeholder="friend@pollis.com"
               disabled={inviteMutation.isPending}
               id="invite-username"
             />
