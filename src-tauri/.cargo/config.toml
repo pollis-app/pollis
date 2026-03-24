@@ -1,0 +1,6 @@
+[build]
+rustflags = []
+
+[env]
+# Force C++17 to avoid C++20 iterator concepts issues with rust::Slice in webrtc-sys
+CXXFLAGS = "-std=c++17"
