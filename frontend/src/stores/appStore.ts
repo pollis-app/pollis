@@ -39,6 +39,10 @@ interface AppStore extends AppState {
   // Voice channel — null when not in a call
   activeVoiceChannelId: string | null;
   setActiveVoiceChannelId: (id: string | null) => void;
+  // Status bar alert — shown in bottom bar when a message arrives for a
+  // channel/DM the user is not currently viewing. Cleared on navigation.
+  statusBarAlert: { senderUsername: string; roomId: string } | null;
+  setStatusBarAlert: (alert: { senderUsername: string; roomId: string } | null) => void;
   logout: () => void;
 }
 
@@ -62,6 +66,7 @@ export const useAppStore = create<AppStore>((set) => ({
   error: null,
   unreadCounts: {},
   activeVoiceChannelId: null,
+  statusBarAlert: null,
 
   // Actions
   setCurrentUser: (user) => set({ currentUser: user }),
@@ -127,6 +132,8 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setActiveVoiceChannelId: (id) => set({ activeVoiceChannelId: id }),
 
+  setStatusBarAlert: (alert) => set({ statusBarAlert: alert }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -146,6 +153,7 @@ export const useAppStore = create<AppStore>((set) => ({
     error: null,
     unreadCounts: {},
     activeVoiceChannelId: null,
+    statusBarAlert: null,
   }),
 }));
 

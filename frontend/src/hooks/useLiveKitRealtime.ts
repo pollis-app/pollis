@@ -28,6 +28,7 @@ export function useLiveKitRealtime() {
     currentUser,
     networkStatus,
     incrementUnread,
+    setStatusBarAlert,
   } = useAppStore();
 
   const { query: prefsQuery } = usePreferences();
@@ -97,6 +98,8 @@ export function useLiveKitRealtime() {
   useEffect(() => { queryClientRef.current = queryClient; }, [queryClient]);
   const incrementUnreadRef = useRef(incrementUnread);
   useEffect(() => { incrementUnreadRef.current = incrementUnread; }, [incrementUnread]);
+  const setStatusBarAlertRef = useRef(setStatusBarAlert);
+  useEffect(() => { setStatusBarAlertRef.current = setStatusBarAlert; }, [setStatusBarAlert]);
 
   // ── OS-level window focus via Tauri events ────────────────────────────────
   // DOM focus/blur don't fire on minimize in Tauri — use the OS window events.
@@ -168,6 +171,7 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
       } else if (incomingId) {
         incrementUnreadRef.current(incomingId);
+        setStatusBarAlertRef.current({ senderUsername, roomId: incomingId });
       }
 
       if (!isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
