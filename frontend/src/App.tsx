@@ -133,6 +133,14 @@ function MainApp() {
 
   useWindowState();
 
+  // Safety net: if currentUser is cleared (e.g. account deletion) but appState
+  // is still "ready", redirect to auth so the user isn't stuck on a blank screen.
+  useEffect(() => {
+    if (appState === "ready" && !currentUser) {
+      setAppState("email-auth");
+    }
+  }, [appState, currentUser]);
+
   const handleAuthSuccess = useCallback(async (user: User) => {
     // Show the identity setup loading screen while keys are generated/uploaded
     setAppState("identity-setup");
@@ -161,10 +169,10 @@ function MainApp() {
     setAppState("logout-confirm");
   }, []);
 
-  // After delete_account succeeds in Settings, clear local state and go to auth
+  // After delete_account succeeds in Settings, transition to auth screen.
+  // Zustand logout() is called in Settings.tsx before this fires.
   const handleDeleteAccount = useCallback(() => {
     setAppState("email-auth");
-    useAppStore.getState().logout();
   }, []);
 
   const handleLogoutConfirm = useCallback(async (deleteData: boolean) => {
@@ -352,7 +360,7 @@ function MainApp() {
         style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}
       >
         <div style={{ flex: 1, overflow: "hidden" }}>
-          <TerminalApp onLogout={handleLogout} />
+          <TerminalApp onLogout={handleLogout} onDeleteAccount={handleDeleteAccount} />
         </div>
       </div>
     );
