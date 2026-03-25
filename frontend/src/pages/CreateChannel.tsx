@@ -73,7 +73,11 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
       };
       addChannel(channelData);
       setSelectedChannelId(channelData.id);
-      queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id) });
+      // Invalidate both channel queries so the sidebar and group page reflect the new channel
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id) }),
+        queryClient.invalidateQueries({ queryKey: groupQueryKeys.channels(selectedGroupId) }),
+      ]);
       onSuccess?.(channel.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create channel");

@@ -209,6 +209,10 @@ export function useCreateChannel() {
       queryClient.invalidateQueries({
         queryKey: groupQueryKeys.channels(variables.groupId),
       });
+      // Also invalidate the combined groups+channels query used by the sidebar
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
 
       queryClient.setQueryData<Channel[]>(
         groupQueryKeys.channels(variables.groupId),
