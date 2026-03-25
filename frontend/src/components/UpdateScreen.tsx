@@ -1,70 +1,88 @@
 import React, { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { open } from "@tauri-apps/plugin-shell";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { LoadingSpinner } from "./ui/LoaderSpinner";
 
-interface LatestJson {
-  version: string;
-  notes?: string;
-  macos?: string;
-  windows?: string;
-  linux?: string;
-}
+type UpdatePhase = "checking" | "downloading" | "installing" | "relaunching" | "error";
 
-interface Props {
-  currentVersion: string;
-  latest: LatestJson;
-}
+/**
+ * Fully automatic update screen. On mount it checks for an update, downloads
+ * it, installs it, and relaunches — no user interaction required.
+ */
+export const UpdateScreen: React.FC = () => {
+  const [phase, setPhase] = useState<UpdatePhase>("checking");
+  const [progress, setProgress] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-function getPlatformUrl(latest: LatestJson): string | null {
-  const ua = navigator.userAgent.toLowerCase();
-  if (ua.includes("mac")) {
-    return latest.macos ?? null;
-  }
-  if (ua.includes("win")) {
-    return latest.windows ?? null;
-  }
-  return latest.linux ?? null;
-}
-
-function parseNotes(notes: string): string[] {
-  return notes
-    .split("\n")
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-}
-
-export const UpdateScreen: React.FC<Props> = ({ currentVersion, latest }) => {
-  const latestVersion = latest.version.replace(/^v/, "");
-  const notes = latest.notes ? parseNotes(latest.notes) : [];
-  const downloadUrl = getPlatformUrl(latest);
-
-  const [visibleNotes, setVisibleNotes] = useState<string[]>([]);
-  const [showDownload, setShowDownload] = useState(false);
-
-  // Print notes line by line with a short delay
   useEffect(() => {
-    if (notes.length === 0) {
-      setShowDownload(true);
-      return;
-    }
-    let i = 0;
-    const interval = setInterval(() => {
-      setVisibleNotes((prev) => [...prev, notes[i]]);
-      i += 1;
-      if (i >= notes.length) {
-        clearInterval(interval);
-        setTimeout(() => setShowDownload(true), 300);
+    let cancelled = false;
+
+    async function runUpdate() {
+      try {
+        setPhase("checking");
+        const update = await check();
+
+        if (!update || cancelled) {
+          return;
+        }
+
+        setPhase("downloading");
+        let totalBytes = 0;
+        let downloadedBytes = 0;
+
+        await update.downloadAndInstall((event) => {
+          if (cancelled) {
+            return;
+          }
+          switch (event.event) {
+            case "Started":
+              totalBytes = event.data.contentLength ?? 0;
+              break;
+            case "Progress":
+              downloadedBytes += event.data.chunkLength;
+              if (totalBytes > 0) {
+                setProgress(Math.round((downloadedBytes / totalBytes) * 100));
+              }
+              break;
+            case "Finished":
+              setPhase("installing");
+              break;
+          }
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setPhase("relaunching");
+        await relaunch();
+      } catch (err) {
+        if (!cancelled) {
+          console.error("[update] Auto-update failed:", err);
+          setError(err instanceof Error ? err.message : String(err));
+          setPhase("error");
+        }
       }
-    }, 120);
-    return () => clearInterval(interval);
+    }
+
+    runUpdate();
+    return () => { cancelled = true; };
   }, []);
 
-  const handleDownload = async () => {
-    if (!downloadUrl) {
-      return;
+  const label = (() => {
+    switch (phase) {
+      case "checking":
+        return "Checking for updates…";
+      case "downloading":
+        return progress !== null ? `Downloading update… ${progress}%` : "Downloading update…";
+      case "installing":
+        return "Installing update…";
+      case "relaunching":
+        return "Relaunching…";
+      case "error":
+        return `Update failed: ${error}`;
     }
-    await open(downloadUrl);
-  };
+  })();
 
   return (
     <div
@@ -88,70 +106,40 @@ export const UpdateScreen: React.FC<Props> = ({ currentVersion, latest }) => {
           display: "flex",
           flexDirection: "column",
           gap: "1.25rem",
+          alignItems: "center",
         }}
       >
-        <span style={{ color: "var(--c-accent)", fontSize: "0.875rem", fontWeight: 700 }}>
-          Pollis.
-        </span>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <span style={{ color: "var(--c-text-muted)", fontSize: "0.75rem" }}>
-            $ pollis --update
-          </span>
-          <span style={{ color: "var(--c-text)", fontSize: "0.75rem" }}>
-            ==&gt; Updating Pollis {currentVersion} → {latestVersion}
+        <div className="flex items-center gap-2">
+          {phase !== "error" && <LoadingSpinner size="sm" />}
+          <span
+            className="text-xs font-mono"
+            style={{ color: phase === "error" ? "#ff6b6b" : "var(--c-text)" }}
+          >
+            {label}
           </span>
         </div>
 
-        {notes.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "0.125rem" }}>
-            <span style={{ color: "var(--c-text-muted)", fontSize: "0.7rem", marginBottom: "0.25rem" }}>
-              Release notes:
-            </span>
-            {visibleNotes.map((line, i) => (
-              <span key={i} style={{ color: "var(--c-text-dim)", fontSize: "0.7rem" }}>
-                &gt; {line.replace(/^[-*]\s*/, "")}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {showDownload && downloadUrl && (
-          <button
-            data-testid="update-download-button"
-            onClick={handleDownload}
+        {phase === "downloading" && progress !== null && (
+          <div
             style={{
-              background: "transparent",
-              border: "1px solid var(--c-accent)",
-              borderRadius: "4px",
-              color: "var(--c-accent)",
-              fontFamily: "inherit",
-              fontSize: "0.75rem",
-              padding: "0.5rem 1rem",
-              cursor: "pointer",
-              alignSelf: "flex-start",
-              transition: "background 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "color-mix(in srgb, var(--c-accent) 12%, transparent)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "transparent";
+              width: "100%",
+              maxWidth: 280,
+              height: 4,
+              borderRadius: 2,
+              background: "var(--c-border)",
+              overflow: "hidden",
             }}
           >
-            Download Pollis {latestVersion}
-          </button>
+            <div
+              style={{
+                width: `${progress}%`,
+                height: "100%",
+                background: "var(--c-accent)",
+                transition: "width 0.2s ease",
+              }}
+            />
+          </div>
         )}
-
-        <span
-          style={{
-            color: "var(--c-text-muted)",
-            fontSize: "0.65rem",
-            opacity: 0.6,
-          }}
-        >
-          This update is required to continue.
-        </span>
       </div>
     </div>
   );

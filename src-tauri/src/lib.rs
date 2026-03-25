@@ -22,6 +22,7 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Load .env.development in dev builds (no-op if file doesn't exist)
             #[cfg(debug_assertions)]
