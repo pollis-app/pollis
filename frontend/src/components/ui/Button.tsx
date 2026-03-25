@@ -9,13 +9,14 @@ const Spinner = () => (
 
 interface ButtonProps {
   children: React.ReactNode;
-  onClick?: () => void;
+  onClick?: (e: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   isLoading?: boolean;
   loadingText?: string;
   className?: string;
-  variant?: "primary" | "secondary";
+  variant?: "primary" | "secondary" | "danger";
   type?: "button" | "submit" | "reset";
+  onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
   "aria-label"?: string;
   "data-testid"?: string;
 }
@@ -29,24 +30,47 @@ export const Button: React.FC<ButtonProps> = ({
   className = "",
   variant = "primary",
   type = "button",
+  onKeyDown,
   "aria-label": ariaLabel,
   "data-testid": testId,
 }) => {
   const isPrimary = variant === "primary";
+  const isDanger = variant === "danger";
+
+  const variantStyles = (() => {
+    if (isDanger) {
+      return {
+        border: "1px solid hsl(0 70% 50% / 40%)",
+        background: "transparent",
+        color: "hsl(0 70% 55%)",
+      };
+    }
+    if (isPrimary) {
+      return {
+        border: "1px solid var(--c-border-active)",
+        background: "var(--c-accent)",
+        color: "var(--c-bg)",
+      };
+    }
+    return {
+      border: "1px solid var(--c-border-active)",
+      background: "transparent",
+      color: "var(--c-accent)",
+    };
+  })();
 
   return (
     <button
       type={type}
-      onClick={isLoading ? undefined : onClick}
+      onClick={isLoading ? undefined : (e) => { onClick?.(e); }}
       disabled={disabled || isLoading}
+      onKeyDown={onKeyDown}
       aria-label={ariaLabel}
       data-testid={testId}
       className={`inline-flex items-center justify-center gap-2 px-4 py-2 font-sans text-sm font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${className}`}
       style={{
-        border: `1px solid var(--c-border-active)`,
+        ...variantStyles,
         borderRadius: "4px",
-        background: isPrimary ? "var(--c-accent)" : "transparent",
-        color: isPrimary ? "var(--c-bg)" : "var(--c-accent)",
         opacity: disabled || isLoading ? 0.5 : 1,
         cursor: disabled || isLoading ? "not-allowed" : "pointer",
         letterSpacing: "0.5px"
@@ -54,7 +78,9 @@ export const Button: React.FC<ButtonProps> = ({
       onMouseEnter={(e) => {
         if (disabled || isLoading) { return; }
         const el = e.currentTarget as HTMLElement;
-        if (isPrimary) {
+        if (isDanger) {
+          el.style.background = "hsl(0 70% 50% / 10%)";
+        } else if (isPrimary) {
           el.style.opacity = "0.85";
         } else {
           el.style.background = "var(--c-hover)";
@@ -64,7 +90,7 @@ export const Button: React.FC<ButtonProps> = ({
         if (disabled || isLoading) { return; }
         const el = e.currentTarget as HTMLElement;
         el.style.opacity = disabled || isLoading ? "0.5" : "1";
-        el.style.background = isPrimary ? "var(--c-accent)" : "transparent";
+        el.style.background = variantStyles.background;
       }}
     >
       {isLoading && <Spinner />}

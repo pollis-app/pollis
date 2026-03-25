@@ -108,7 +108,14 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
     setDeleteError(null);
     try {
       await api.deleteAccount(currentUser.id);
-      onDeleteAccount?.();
+      // Clear local state immediately so the user is logged out even if the
+      // callback chain from the router context is broken.
+      useAppStore.getState().logout();
+      if (onDeleteAccount) {
+        onDeleteAccount();
+      } else {
+        console.error("[Settings] onDeleteAccount callback is undefined — falling back to logout only");
+      }
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Failed to delete account");
       setIsDeleting(false);
@@ -290,61 +297,28 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
               Permanently delete your account and all associated data. This cannot be undone.
             </p>
 
-            <div className="flex flex-col gap-2">
-              <label
-                htmlFor="settings-delete-confirm"
-                className="text-xs font-mono"
-                style={{ color: 'var(--c-text-muted)' }}
-              >
-                Type <span style={{ color: 'hsl(0 70% 55%)' }}>DELETE</span> to confirm
-              </label>
-              <input
-                id="settings-delete-confirm"
-                data-testid="settings-delete-confirm-input"
-                type="text"
-                value={deleteConfirmText}
-                onChange={(e) => setDeleteConfirmText(e.target.value)}
-                placeholder="DELETE"
-                disabled={isDeleting}
-                className="w-full px-3 py-2 text-xs font-mono bg-transparent border outline-none"
-                style={{
-                  borderColor: 'hsl(0 60% 30% / 40%)',
-                  borderRadius: 4,
-                  color: 'var(--c-text)',
-                }}
-                onFocus={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'hsl(0 60% 45% / 70%)'; }}
-                onBlur={(e) => { (e.currentTarget as HTMLElement).style.borderColor = 'hsl(0 60% 30% / 40%)'; }}
-              />
-            </div>
+            <TextInput
+              label="Type DELETE to confirm"
+              id="settings-delete-confirm"
+              data-testid="settings-delete-confirm-input"
+              value={deleteConfirmText}
+              onChange={setDeleteConfirmText}
+              placeholder="DELETE"
+              disabled={isDeleting}
+              error={deleteError || undefined}
+            />
 
-            {deleteError && (
-              <p data-testid="settings-delete-error" className="text-xs font-mono" style={{ color: 'hsl(0 70% 55%)' }}>
-                {deleteError}
-              </p>
-            )}
-
-            <button
+            <Button
               data-testid="settings-delete-account-button"
               onClick={handleDeleteAccount}
               disabled={deleteConfirmText !== "DELETE" || isDeleting}
-              className="w-full py-2 px-4 font-mono text-xs transition-colors"
-              style={{
-                background: "transparent",
-                border: "1px solid hsl(0 70% 50% / 40%)",
-                borderRadius: "4px",
-                color: deleteConfirmText === "DELETE" && !isDeleting ? "hsl(0 70% 55%)" : "hsl(0 40% 40%)",
-                cursor: deleteConfirmText === "DELETE" && !isDeleting ? "pointer" : "not-allowed",
-                opacity: deleteConfirmText === "DELETE" && !isDeleting ? 1 : 0.5,
-              }}
-              onMouseEnter={(e) => {
-                if (deleteConfirmText === "DELETE" && !isDeleting) {
-                  (e.currentTarget as HTMLElement).style.background = "hsl(0 70% 50% / 10%)";
-                }
-              }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              isLoading={isDeleting}
+              loadingText="Deleting account…"
+              variant="danger"
+              className="w-full"
             >
-              {isDeleting ? "Deleting account…" : "Delete my account"}
-            </button>
+              Delete my account
+            </Button>
           </section>
 
         </div>

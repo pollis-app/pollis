@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { ChevronRight, ArrowUp, ArrowDown, MoreVertical } from "lucide-react";
+import { Button } from "./Button";
 
 export interface TerminalMenuItem {
   id: string;
@@ -231,9 +232,11 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               </div>
 
               {item.secondaryAction && (
-                <button
+                <Button
                   data-testid={item.testId ? `${item.testId}-secondary` : undefined}
                   aria-label={item.secondaryActionLabel ?? "More options"}
+                  variant="secondary"
+                  className="flex-shrink-0 !px-1 !py-0.5"
                   onClick={(e) => {
                     e.stopPropagation();
                     item.secondaryAction!();
@@ -245,22 +248,9 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                       item.secondaryAction!();
                     }
                   }}
-                  style={{
-                    background: "transparent",
-                    border: "1px solid var(--c-border)",
-                    borderRadius: "4px",
-                    cursor: "pointer",
-                    color: "var(--c-text-muted)",
-                    padding: "0.15rem 0.2rem",
-                    display: "flex",
-                    alignItems: "center",
-                    flexShrink: 0,
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-border-active)"; (e.currentTarget as HTMLElement).style.color = "var(--c-text)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-border)"; (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
                 >
                   <MoreVertical size={14} aria-hidden="true" />
-                </button>
+                </Button>
               )}
             </div>
           );
