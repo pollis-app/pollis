@@ -1,12 +1,19 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
+import { useAppStore } from "../stores/appStore";
 
 export const DMPage: React.FC = () => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
+  const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
+
+  useEffect(() => {
+    setSelectedConversationId(conversationId);
+    return () => { setSelectedConversationId(null); };
+  }, [conversationId, setSelectedConversationId]);
 
   const { data: conversations = [] } = useDMConversations();
   const conv = conversations.find((c) => c.id === conversationId);

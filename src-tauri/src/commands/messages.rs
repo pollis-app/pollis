@@ -719,19 +719,21 @@ pub async fn get_channel_messages(
         } else {
             // Peer message: check local cache first so the ratchet doesn't need
             // to replay already-decrypted messages after a refresh.
-            let cached = db.conn().query_row(
+            let cached: Option<String> = db.conn().query_row(
                 "SELECT content FROM message WHERE id = ?1",
                 rusqlite::params![&id],
                 |row| row.get::<_, Option<String>>(0),
             ).ok().flatten();
 
-            if cached.is_some() {
-                cached
+            // Only treat as a cache hit if we actually have decrypted content.
+            // A row with content=NULL means a prior decryption failed — retry.
+            if let Some(text) = cached {
+                Some(text)
             } else {
                 let plaintext = try_decrypt_message(db.conn(), &ciphertext, &conv_id, &sender_id);
                 if let Some(ref text) = plaintext {
                     let _ = db.conn().execute(
-                        "INSERT OR IGNORE INTO message
+                        "INSERT OR REPLACE INTO message
                          (id, conversation_id, sender_id, ciphertext, content, sent_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         rusqlite::params![id, conv_id, sender_id, ciphertext.as_bytes(), text, sent_at],
@@ -884,19 +886,19 @@ pub async fn get_dm_messages(
                 |row| row.get::<_, Option<String>>(0),
             ).ok().flatten()
         } else {
-            let cached = db.conn().query_row(
+            let cached: Option<String> = db.conn().query_row(
                 "SELECT content FROM message WHERE id = ?1",
                 rusqlite::params![&id],
                 |row| row.get::<_, Option<String>>(0),
             ).ok().flatten();
 
-            if cached.is_some() {
-                cached
+            if let Some(text) = cached {
+                Some(text)
             } else {
                 let plaintext = try_decrypt_message(db.conn(), &ciphertext, &conv_id, &sender_id);
                 if let Some(ref text) = plaintext {
                     let _ = db.conn().execute(
-                        "INSERT OR IGNORE INTO message
+                        "INSERT OR REPLACE INTO message
                          (id, conversation_id, sender_id, ciphertext, content, sent_at)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         rusqlite::params![id, conv_id, sender_id, ciphertext.as_bytes(), text, sent_at],

@@ -171,7 +171,10 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
       } else if (incomingId) {
         incrementUnreadRef.current(incomingId);
-        setStatusBarAlertRef.current({ senderUsername, roomId: incomingId });
+        // Only show status bar alert for DMs, not group channels
+        if (conversationId) {
+          setStatusBarAlertRef.current({ senderUsername, roomId: incomingId });
+        }
       }
 
       if (!isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
