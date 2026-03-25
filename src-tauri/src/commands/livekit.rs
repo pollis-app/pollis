@@ -144,6 +144,8 @@ pub async fn connect_rooms(
             }
         };
 
+        eprintln!("[realtime] connecting room {room_id} url={url} api_key={} token={}", &state.config.livekit_api_key, &token);
+
         match Room::connect(&url, &token, RoomOptions::default()).await {
             Ok((room, mut events)) => {
                 let room = Arc::new(room);
