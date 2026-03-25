@@ -57,6 +57,7 @@ export const MainContent: React.FC = () => {
     );
   }
 
+  console.log({currentUser})
   return (
     <div
       data-testid="main-content"

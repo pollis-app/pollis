@@ -1,9 +1,9 @@
 import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { useLeaveGroup, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { Button } from "../components/ui/Button";
+import { PageShell } from "../components/Layout/PageShell";
 
 export const LeaveGroupPage: React.FC = () => {
   const navigate = useNavigate();
@@ -19,26 +19,11 @@ export const LeaveGroupPage: React.FC = () => {
   }
 
   return (
-    <div className="flex flex-col h-full">
-      <div
-        className="flex items-center px-4 py-2 flex-shrink-0 text-xs font-mono"
-        style={{
-          borderBottom: "1px solid var(--c-border)",
-          color: "var(--c-text-muted)",
-        }}
-      >
-        <button
-          onClick={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
-          className="mr-3 inline-flex items-center gap-1 leading-none transition-colors"
-          style={{ color: "var(--c-text-muted)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
-        >
-          <ArrowLeft size={12} />
-        </button>
-        <span style={{ flex: 1, color: "var(--c-text)" }}>Leave Group</span>
-      </div>
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6">
+    <PageShell
+      title="Leave Group"
+      onBack={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
+    >
+      <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         <p className="text-xs font-mono text-center" style={{ color: "var(--c-text-dim)" }}>
           Are you sure you want to leave <strong>{group.name}</strong>?
           <br />
@@ -78,6 +63,6 @@ export const LeaveGroupPage: React.FC = () => {
           </Button>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 };

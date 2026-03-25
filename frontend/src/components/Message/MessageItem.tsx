@@ -75,7 +75,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       <div className="flex items-baseline gap-0 min-w-0">
         <span
           data-testid="message-timestamp"
-          className="flex-shrink-0 text-sm font-mono tabular-nums select-none w-12"
+          className="flex-shrink-0 text-sm font-mono tabular-nums select-none w-12 mr-2"
           style={{ color: "var(--c-text-muted)" }}
         >
           {formatTimestamp(message.created_at)}

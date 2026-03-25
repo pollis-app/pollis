@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../../services/api";
 import { useAppStore } from "../../stores/appStore";
+import { messageQueryKeys } from "./useMessages";
+import { groupQueryKeys } from "./useGroups";
 
 export interface ServiceUserData {
   username: string;
@@ -60,8 +62,19 @@ export function useUpdateProfile() {
     },
     onSuccess: (data) => {
       setUsername(data.username);
+      // Username appears in messages, DM previews, and group membership — invalidate
+      // all of these so the updated name is reflected everywhere.
       queryClient.invalidateQueries({
         queryKey: userQueryKeys.profile(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: messageQueryKeys.all,
+      });
+      queryClient.invalidateQueries({
+        queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
       });
     },
   });
