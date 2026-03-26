@@ -37,13 +37,12 @@ Builds for macOS (Universal), Windows, and Linux are published automatically on 
 - pnpm 10.25+
 - Rust (stable, via rustup)
 - Tauri v2 system dependencies — see [tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/)
-- An age key for decrypting secrets (ask the project owner)
+- Access to Doppler for secrets (ask the project owner)
 
 ### Setup
 
 ```bash
 pnpm install          # Install JS dependencies
-pnpm secrets:decrypt  # Decrypt secrets → .env.development
 ```
 
 ### Running

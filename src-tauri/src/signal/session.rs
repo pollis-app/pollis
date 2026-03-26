@@ -18,7 +18,7 @@ pub fn load_sender_key(
             let chain_id: Vec<u8> = row.get(0)?;
             let iteration: u32 = row.get(1)?;
             let chain_key: Vec<u8> = row.get(2)?;
-            Ok(SenderKeyState { chain_id, iteration, chain_key })
+            Ok(SenderKeyState { chain_id, iteration, chain_key, skipped_keys: Default::default() })
         },
     );
 

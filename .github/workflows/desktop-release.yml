@@ -21,31 +21,37 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
 
-      - name: Install sops
-        run: brew install sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      - name: Stamp version from git tag
         run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Stamping version ${VERSION} into tauri.conf.json"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build and sign macOS (Universal)
+      - name: Build and sign macOS (ARM)
         uses: tauri-apps/tauri-action@v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -54,14 +60,19 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: --target universal-apple-darwin
+          args: --target aarch64-apple-darwin
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: pollis-macos
-          path: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+          path: |
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.sig
 
   build-windows:
     runs-on: windows-latest
@@ -81,21 +92,28 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - name: Install sops
-        run: choco install sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      - name: Stamp version from git tag
         shell: bash
         run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Stamping version ${VERSION} into tauri.conf.json"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+
+      - name: Load production secrets
+        shell: bash
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pnpm install
@@ -109,13 +127,19 @@ jobs:
 
       - name: Build Windows
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm build:windows
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: pollis-windows
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.zip
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.sig
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -135,6 +159,12 @@ jobs:
         with:
           workspaces: src-tauri
 
+      - name: Stamp version from git tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "Stamping version ${VERSION} into tauri.conf.json"
+          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -146,35 +176,38 @@ jobs:
             libxdo-dev \
             libssl-dev
 
-      - name: Install sops
+      - name: Load production secrets
         run: |
-          curl -LO https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
-          chmod +x sops-v3.9.1.linux.amd64
-          sudo mv sops-v3.9.1.linux.amd64 /usr/local/bin/sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pnpm install
 
       - name: Build Linux
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: pnpm build:linux
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: pollis-linux
-          path: src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+          path: |
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.tar.gz
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.sig
 
   release:
     needs: [build-macos, build-windows, build-linux]
@@ -185,30 +218,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install sops
+      - name: Load production secrets
         run: |
-          curl -LO https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
-          chmod +x sops-v3.9.1.linux.amd64
-          sudo mv sops-v3.9.1.linux.amd64 /usr/local/bin/sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Rename artifacts with version
+      - name: Rename installer artifacts with version
         run: |
           VERSION="${GITHUB_REF_NAME}"
           for f in artifacts/pollis-macos/*.dmg; do
@@ -218,16 +239,89 @@ jobs:
             mv "$f" "artifacts/pollis-windows/pollis-${VERSION}-windows.exe"
           done
           for f in artifacts/pollis-linux/*.AppImage; do
-            mv "$f" "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage"
+            [ -f "$f" ] && [[ "$f" != *.tar.gz ]] && mv "$f" "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage"
           done
 
-      - name: Upload to R2
+      - name: Upload installers to R2
         run: |
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           aws s3 cp "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
           aws s3 cp "artifacts/pollis-windows/pollis-${VERSION}-windows.exe" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
           aws s3 cp "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Upload updater bundles to R2
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # macOS updater bundle (.tar.gz + .sig)
+          for f in artifacts/pollis-macos/*.tar.gz; do
+            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
+          done
+          for f in artifacts/pollis-macos/*.sig; do
+            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
+          done
+          # Windows updater bundle (.nsis.zip + .sig)
+          for f in artifacts/pollis-windows/*.zip; do
+            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
+          done
+          for f in artifacts/pollis-windows/*.sig; do
+            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
+          done
+          # Linux updater bundle (.AppImage.tar.gz + .sig)
+          for f in artifacts/pollis-linux/*.tar.gz; do
+            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
+          done
+          for f in artifacts/pollis-linux/*.sig; do
+            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
+          done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Publish update.json to R2
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          VERSION_NUM="${VERSION#v}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          CDN="https://cdn.pollis.com/releases/${VERSION}"
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          # Read signatures from artifact files
+          MAC_SIG=$(cat artifacts/pollis-macos/*.sig 2>/dev/null || echo "")
+          WIN_SIG=$(cat artifacts/pollis-windows/*.sig 2>/dev/null || echo "")
+          LINUX_SIG=$(cat artifacts/pollis-linux/*.sig 2>/dev/null || echo "")
+
+          # Find the actual filenames for the updater bundles
+          MAC_TAR=$(basename artifacts/pollis-macos/*.tar.gz 2>/dev/null || echo "")
+          WIN_ZIP=$(basename artifacts/pollis-windows/*.zip 2>/dev/null || echo "")
+          LINUX_TAR=$(basename artifacts/pollis-linux/*.tar.gz 2>/dev/null || echo "")
+
+          jq -n \
+            --arg version "$VERSION_NUM" \
+            --arg pub_date "$PUB_DATE" \
+            --arg mac_url "${CDN}/${MAC_TAR}" \
+            --arg mac_sig "$MAC_SIG" \
+            --arg win_url "${CDN}/${WIN_ZIP}" \
+            --arg win_sig "$WIN_SIG" \
+            --arg linux_url "${CDN}/${LINUX_TAR}" \
+            --arg linux_sig "$LINUX_SIG" \
+            '{
+              version: $version,
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { url: $mac_url, signature: $mac_sig },
+                "windows-x86_64": { url: $win_url, signature: $win_sig },
+                "linux-x86_64": { url: $linux_url, signature: $linux_sig }
+              }
+            }' > update.json
+
+          aws s3 cp update.json "s3://pollis/releases/update.json" --endpoint-url "${ENDPOINT}" --content-type "application/json" --cache-control "no-cache"
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}

@@ -5,7 +5,6 @@ import React, {
   useRef,
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { getVersion } from "@tauri-apps/api/app";
 import { useAppStore } from "./stores/appStore";
 import { EmailOTPAuth } from "./components/Auth/EmailOTPAuth";
 import { TerminalApp } from "./components/TerminalApp";
@@ -19,56 +18,23 @@ import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
 import type { User } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
 
-interface LatestJson {
-  version: string;
-  notes?: string;
-  macos?: string;
-  windows?: string;
-  linux?: string;
-}
-
 type AppState = "initializing" | "loading" | "email-auth" | "logout-confirm" | "identity-setup" | "update-required" | "ready";
-
-function semverIsOutdated(current: string, latest: string): boolean {
-  const parse = (v: string) => v.replace(/^v/, "").split(".").map(Number);
-  const [cMaj, cMin, cPatch] = parse(current);
-  const [lMaj, lMin, lPatch] = parse(latest);
-  if (lMaj !== cMaj) {
-    return lMaj > cMaj;
-  }
-  if (lMin !== cMin) {
-    return lMin > cMin;
-  }
-  return lPatch > cPatch;
-}
-
-async function fetchLatest(): Promise<LatestJson | null> {
-  try {
-    const res = await fetch("https://cdn.pollis.com/releases/latest.json");
-    return await res.json() as LatestJson;
-  } catch {
-    return null;
-  }
-}
 
 function MainApp() {
   const {
     currentUser,
     setCurrentUser,
-  } = useAppStore();
+  } = useAppStore();  
 
   const [appState, setAppState] = useState<AppState>("initializing");
-  const [latestJson, setLatestJson] = useState<LatestJson | null>(null);
-  const [currentVersion, setCurrentVersion] = useState<string>("");
 
   const checkStoredSession = useCallback(async () => {
     try {
       // Check for required update before anything else (skip in dev)
       if (!import.meta.env.DEV) {
-        const [latest, version] = await Promise.all([fetchLatest(), getVersion()]);
-        setCurrentVersion(version);
-        if (latest && semverIsOutdated(version, latest.version)) {
-          setLatestJson(latest);
+        const { check: checkUpdate } = await import("@tauri-apps/plugin-updater");
+        const update = await checkUpdate();
+        if (update) {
           await invoke("mark_update_required");
           setAppState("update-required");
           return;
@@ -87,6 +53,7 @@ function MainApp() {
           const json = await invoke<string>("get_preferences", { userId: user.id });
           const prefs = {
             accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
+            background_color: getPreference<string | undefined>(json, "background_color", undefined),
             font_size: getPreference<string | undefined>(json, "font_size", undefined),
           };
           applyPreferences(prefs);
@@ -185,11 +152,11 @@ function MainApp() {
     useAppStore.getState().logout();
   }, []);
 
-  if (appState === "update-required" && latestJson) {
+  if (appState === "update-required") {
     return (
       <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
         <TitleBar />
-        <UpdateScreen currentVersion={currentVersion} latest={latestJson} />
+        <UpdateScreen />
       </div>
     );
   }

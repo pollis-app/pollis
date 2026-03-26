@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,10 @@ pub struct LiveKitState {
     /// Room is wrapped in Arc so it can be cloned out of the MutexGuard for
     /// publish operations without holding the lock across an await point.
     pub rooms: HashMap<String, (Arc<livekit::Room>, JoinHandle<()>)>,
+
+    /// Room IDs currently being connected (between Room::connect call and map insertion).
+    /// Prevents duplicate connections when connect_rooms is called concurrently.
+    pub connecting: HashSet<String>,
 }
 
 impl LiveKitState {
@@ -35,6 +39,7 @@ impl LiveKitState {
         Self {
             channel: None,
             rooms: HashMap::new(),
+            connecting: HashSet::new(),
         }
     }
 }

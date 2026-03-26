@@ -1,9 +1,0 @@
-creation_rules:
-  - path_regex: secrets\.enc\.env$
-    age: age1zxwmcvzj08fj6m4kdhqrlz0hm7vkps90mvh9lxd3ju40nh8m7q4q66gnww
-    
-  - path_regex: (secrets\.prod\.enc\.env|\.env\.production)$
-    age: age1zxwmcvzj08fj6m4kdhqrlz0hm7vkps90mvh9lxd3ju40nh8m7q4q66gnww
-
-  - path_regex: \.env\.development$
-    age: age1zxwmcvzj08fj6m4kdhqrlz0hm7vkps90mvh9lxd3ju40nh8m7q4q66gnww

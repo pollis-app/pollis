@@ -11,9 +11,6 @@
     "build:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'",
     "lint": "pnpm --filter frontend lint",
     "clean": "pnpm --filter frontend clean && cargo clean --manifest-path src-tauri/Cargo.toml",
-    "secrets:decrypt": "sops --decrypt --input-type dotenv --output-type dotenv secrets.enc.env > .env.development",
-    "secrets:encrypt": "sops --encrypt --filename-override secrets.enc.env --input-type dotenv --output-type dotenv .env.development > secrets.enc.env",
-    "secrets:edit": "sops --filename-override secrets.enc.env --input-type dotenv --output-type dotenv secrets.enc.env",
     "db:push": "cargo run --manifest-path src-tauri/Cargo.toml --bin migrate --features pollis/migrate-bin",
     "test:e2e": "playwright test",
     "test:e2e:interactive": "playwright test --ui"

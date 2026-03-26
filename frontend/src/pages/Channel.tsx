@@ -1,12 +1,19 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
+import { useAppStore } from "../stores/appStore";
 
 export const ChannelPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
+  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
+
+  useEffect(() => {
+    setSelectedChannelId(channelId);
+    return () => { setSelectedChannelId(null); };
+  }, [channelId, setSelectedChannelId]);
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);

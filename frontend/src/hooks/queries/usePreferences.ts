@@ -1,10 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
-import { applyAccentColor, applyFontSize } from "../../utils/colorUtils";
+import { applyAccentColor, applyBackgroundColor, applyFontSize } from "../../utils/colorUtils";
 
 export interface PreferencesData {
   accent_color?: string;
+  background_color?: string;
   font_size?: string;
   allow_desktop_notifications?: boolean;
 }
@@ -43,6 +44,7 @@ export function usePreferences() {
       const json = await invoke<string>("get_preferences", { userId: currentUser.id });
       return {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
+        background_color: getPreference<string | undefined>(json, "background_color", undefined),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", true),
       };
@@ -77,6 +79,9 @@ export function usePreferences() {
 export function applyPreferences(prefs: PreferencesData): void {
   if (prefs.accent_color) {
     applyAccentColor(prefs.accent_color);
+  }
+  if (prefs.background_color) {
+    applyBackgroundColor(prefs.background_color);
   }
   if (prefs.font_size) {
     const px = parseInt(prefs.font_size, 10);

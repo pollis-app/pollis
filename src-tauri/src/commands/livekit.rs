@@ -109,12 +109,24 @@ pub async fn connect_rooms(
     let livekit_arc = Arc::clone(&state.livekit);
 
     // Compute the diff while holding the lock briefly, then release.
+    // Include rooms that are mid-connection to prevent duplicate connects.
     let (to_remove, to_connect) = {
-        let lk = livekit_arc.lock().await;
-        let current: HashSet<String> = lk.rooms.keys().cloned().collect();
+        let mut lk = livekit_arc.lock().await;
         let next: HashSet<String> = room_ids.into_iter().collect();
+        let current: HashSet<String> = lk.rooms.keys().cloned().collect();
+
         let remove: Vec<String> = current.difference(&next).cloned().collect();
-        let connect: Vec<String> = next.difference(&current).cloned().collect();
+        let connect: Vec<String> = next.difference(&current)
+            .filter(|id| !lk.connecting.contains(*id))
+            .cloned()
+            .collect();
+
+        // Mark these rooms as connecting before releasing the lock so
+        // concurrent calls won't try to connect the same rooms.
+        for id in &connect {
+            lk.connecting.insert(id.clone());
+        }
+
         (remove, connect)
     };
 
@@ -123,12 +135,11 @@ pub async fn connect_rooms(
     for room_id in &to_remove {
         let removed = {
             let mut lk = livekit_arc.lock().await;
+            lk.connecting.remove(room_id);
             lk.rooms.remove(room_id)
         };
         if let Some((_room, handle)) = removed {
             handle.abort();
-            // _room drops here — Room is Arc-backed so dropping the last
-            // reference closes the underlying WebRTC connection.
             eprintln!("[realtime] disconnected room {room_id}");
         }
     }
@@ -140,11 +151,13 @@ pub async fn connect_rooms(
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[realtime] token error for room {room_id}: {e}");
+                let mut lk = livekit_arc.lock().await;
+                lk.connecting.remove(room_id);
                 continue;
             }
         };
 
-        eprintln!("[realtime] connecting room {room_id} url={url} api_key={} token={}", &state.config.livekit_api_key, &token);
+        eprintln!("[realtime] connecting room {room_id}");
 
         match Room::connect(&url, &token, RoomOptions::default()).await {
             Ok((room, mut events)) => {
@@ -154,29 +167,101 @@ pub async fn connect_rooms(
                 // each time it fires — this handles the case where subscribe_realtime
                 // is called after connect_rooms (no race condition).
                 let lk_arc_task = Arc::clone(&livekit_arc);
-                let room_id_log = room_id.clone();
+                let room_id_owned = room_id.clone();
+                let config = state.config.clone();
+                let user_id_owned = user_id.clone();
+                let username_owned = username.clone();
+                let url_owned = url.clone();
 
                 let handle = tokio::spawn(async move {
-                    while let Some(event) = events.recv().await {
-                        if let RoomEvent::DataReceived { payload, .. } = event {
-                            let channel = {
-                                let lk = lk_arc_task.lock().await;
-                                lk.channel.clone()
-                            };
-                            if let Some(ch) = channel {
-                                // payload is Arc<Vec<u8>> in livekit v0.7
-                                dispatch_data(payload.as_slice(), &ch);
+                    /// Process events until the stream closes. Returns how long
+                    /// the connection stayed alive (used to calibrate backoff).
+                    async fn run_event_loop(
+                        events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
+                        lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+                    ) -> std::time::Duration {
+                        let started = std::time::Instant::now();
+                        while let Some(event) = events.recv().await {
+                            if let RoomEvent::DataReceived { payload, .. } = event {
+                                let channel = {
+                                    let lk = lk_arc.lock().await;
+                                    lk.channel.clone()
+                                };
+                                if let Some(ch) = channel {
+                                    dispatch_data(payload.as_slice(), &ch);
+                                }
+                            }
+                        }
+                        started.elapsed()
+                    }
+
+                    let alive_dur = run_event_loop(&mut events, &lk_arc_task).await;
+                    eprintln!(
+                        "[realtime] event stream closed for room {room_id_owned} (was alive {:.0}s), reconnecting…",
+                        alive_dur.as_secs_f64()
+                    );
+
+                    let mut backoff = if alive_dur.as_secs() < 10 { 30u64 } else { 5 };
+                    loop {
+                        tokio::time::sleep(std::time::Duration::from_secs(backoff)).await;
+
+                        // Check if we've been removed from the room map (e.g. user
+                        // left the channel or logged out). If so, stop reconnecting.
+                        {
+                            let lk = lk_arc_task.lock().await;
+                            if !lk.rooms.contains_key(&room_id_owned) {
+                                eprintln!("[realtime] room {room_id_owned} removed, stopping reconnect");
+                                return;
+                            }
+                        }
+
+                        let token = match make_token(&config, &room_id_owned, &user_id_owned, &username_owned) {
+                            Ok(t) => t,
+                            Err(e) => {
+                                eprintln!("[realtime] reconnect token error for room {room_id_owned}: {e}");
+                                backoff = (backoff * 2).min(300);
+                                continue;
+                            }
+                        };
+
+                        match Room::connect(&url_owned, &token, RoomOptions::default()).await {
+                            Ok((new_room, mut new_events)) => {
+                                let new_room = Arc::new(new_room);
+                                eprintln!("[realtime] reconnected room {room_id_owned}");
+
+                                // Update the room reference in the map
+                                {
+                                    let mut lk = lk_arc_task.lock().await;
+                                    if let Some(entry) = lk.rooms.get_mut(&room_id_owned) {
+                                        entry.0 = Arc::clone(&new_room);
+                                    }
+                                }
+
+                                let alive_dur = run_event_loop(&mut new_events, &lk_arc_task).await;
+                                eprintln!(
+                                    "[realtime] event stream closed again for room {room_id_owned} (was alive {:.0}s), reconnecting…",
+                                    alive_dur.as_secs_f64()
+                                );
+                                // If the connection was very short-lived, back off more
+                                // aggressively to avoid hammering the server.
+                                backoff = if alive_dur.as_secs() < 10 { (backoff * 2).min(300) } else { 5 };
+                            }
+                            Err(e) => {
+                                eprintln!("[realtime] reconnect failed for room {room_id_owned}: {e}");
+                                backoff = (backoff * 2).min(300);
                             }
                         }
                     }
-                    eprintln!("[realtime] event stream closed for room {room_id_log}");
                 });
 
                 let mut lk = livekit_arc.lock().await;
+                lk.connecting.remove(room_id);
                 lk.rooms.insert(room_id.clone(), (room, handle));
                 eprintln!("[realtime] connected room {room_id}");
             }
             Err(e) => {
+                let mut lk = livekit_arc.lock().await;
+                lk.connecting.remove(room_id);
                 eprintln!("[realtime] failed to connect room {room_id}: {e}");
             }
         }

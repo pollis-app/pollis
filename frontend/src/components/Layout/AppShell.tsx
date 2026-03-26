@@ -247,7 +247,7 @@ export const AppShell: React.FC = () => {
           height: 28,
           flexShrink: 0,
           borderTop: "1px solid var(--c-border)",
-          background: "var(--c-surface)",
+          background: "var(--c-accent)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -255,13 +255,13 @@ export const AppShell: React.FC = () => {
           paddingRight: 12,
         }}
       >
-        <span className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
+        <span className="text-xs font-mono text-black" >
           {breadcrumb}
         </span>
         {statusBarAlert && (
           <span
             className="text-xs font-mono status-bar-blink flex items-center gap-1"
-            style={{ color: "var(--c-accent)" }}
+            style={{ color: "var(--c-surface)" }}
           >
             <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
           </span>

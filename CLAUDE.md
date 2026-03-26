@@ -15,7 +15,6 @@ Pollis is a privacy-first desktop messaging app with end-to-end encryption using
 ### Setup
 ```bash
 pnpm install              # Install JS dependencies
-pnpm secrets:decrypt      # Decrypt secrets.enc.env → .env.development (requires age key)
 ```
 
 `.env.development` is loaded automatically in dev builds via `dotenvy::from_filename(".env.development")` in `src-tauri/src/lib.rs`. No manual sourcing needed.
@@ -35,11 +34,8 @@ pnpm build:windows        # Windows amd64
 ```
 
 ### Secrets Management
-```bash
-pnpm secrets:decrypt      # Decrypt secrets.enc.env → .env.development
-pnpm secrets:encrypt      # Encrypt .env.development → secrets.enc.env
-pnpm secrets:edit         # Edit secrets in-place with SOPS
-```
+
+Secrets are managed via **Doppler**, which syncs to GitHub Actions secrets automatically. For local development, create a `.env.development` file manually or use Doppler CLI (`doppler run -- pnpm dev`).
 
 ## Architecture
 
