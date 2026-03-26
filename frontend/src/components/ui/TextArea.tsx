@@ -54,6 +54,10 @@ export const TextArea: React.FC<TextAreaProps> = ({
           onBlur={() => setIsFocused(false)}
           placeholder={placeholder}
           disabled={disabled}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
           aria-invalid={!!error}
           className="w-full py-2 font-mono text-sm resize-none focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black transition-all"
           style={{
