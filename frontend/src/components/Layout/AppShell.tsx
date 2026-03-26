@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { TitleBar } from "./TitleBar";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
+import { SearchPanel } from "../SearchPanel";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -17,6 +18,7 @@ import { Mail } from "lucide-react";
  */
 export const AppShell: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -46,16 +48,30 @@ export const AppShell: React.FC = () => {
     }
   }, [groupsWithChannels, setGroups, setChannels]);
 
-  // Global Esc handler — navigate back in history
+  const closeSearch = useCallback(() => setIsSearchOpen(false), []);
+
+  // Cmd/Ctrl+K — open search panel
   useEffect(() => {
     const handle = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, []);
+
+  // Global Esc handler — navigate back in history (skip when search panel is open)
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isSearchOpen) {
         router.history.back();
       }
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [router]);
+  }, [router, isSearchOpen]);
 
   // Cmd/Ctrl+R — refetch all queries without a page reload
   useEffect(() => {
@@ -208,6 +224,9 @@ export const AppShell: React.FC = () => {
         position: "relative",
       }}
     >
+      {/* Cmd/Ctrl+K search panel */}
+      <SearchPanel isOpen={isSearchOpen} onClose={closeSearch} />
+
       {/* Title bar */}
       <TitleBar />
 
