@@ -70,7 +70,14 @@ export const useAppStore = create<AppStore>((set) => ({
 
   // Actions
   setCurrentUser: (user) => set({ currentUser: user }),
-  setUsername: (username) => set({ username }),
+  setUsername: (username) => set((state) => ({
+    username,
+    // Keep currentUser in sync so components reading currentUser.username
+    // see the updated value without a page reload.
+    currentUser: state.currentUser
+      ? { ...state.currentUser, username: username ?? state.currentUser.username }
+      : null,
+  })),
   setUserAvatarUrl: (url) => set({ userAvatarUrl: url }),
   
   setSelectedGroupId: (groupId) => set({ selectedGroupId: groupId, selectedChannelId: null }),

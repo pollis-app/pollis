@@ -57,7 +57,6 @@ export const MainContent: React.FC = () => {
     );
   }
 
-  console.log({currentUser})
   return (
     <div
       data-testid="main-content"
@@ -75,9 +74,7 @@ export const MainContent: React.FC = () => {
             onReply={(id) => setReplyToMessageId(id)}
             onScrollToMessage={(id) => console.log("Scroll to:", id)}
             getAuthorUsername={(authorId, message) =>
-              authorId === currentUser?.id
-                ? (currentUser as any).username || "you"
-                : message?.sender_username || authorId
+              message?.sender_username || (authorId === currentUser?.id ? "you" : authorId)
             }
           />
         )}
