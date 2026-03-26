@@ -270,15 +270,15 @@ jobs:
           for f in artifacts/pollis-macos/*.sig; do
             aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
           done
-          # Windows updater bundle (.nsis.zip + .sig)
-          for f in artifacts/pollis-windows/*.zip; do
+          # Windows updater bundle (.exe + .sig) — Tauri v2 uses the exe directly
+          for f in artifacts/pollis-windows/*.exe; do
             aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
           done
           for f in artifacts/pollis-windows/*.sig; do
             aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
           done
-          # Linux updater bundle (.AppImage.tar.gz + .sig)
-          for f in artifacts/pollis-linux/*.tar.gz; do
+          # Linux updater bundle (.AppImage + .sig) — Tauri v2 uses the AppImage directly
+          for f in artifacts/pollis-linux/*.AppImage; do
             aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
           done
           for f in artifacts/pollis-linux/*.sig; do
@@ -304,17 +304,17 @@ jobs:
 
           # Find the actual filenames for the updater bundles
           MAC_TAR=$(basename artifacts/pollis-macos/*.tar.gz 2>/dev/null || echo "")
-          WIN_ZIP=$(basename artifacts/pollis-windows/*.zip 2>/dev/null || echo "")
-          LINUX_TAR=$(basename artifacts/pollis-linux/*.tar.gz 2>/dev/null || echo "")
+          WIN_EXE=$(basename artifacts/pollis-windows/*.exe 2>/dev/null || echo "")
+          LINUX_APPIMAGE=$(basename artifacts/pollis-linux/*.AppImage 2>/dev/null || echo "")
 
           jq -n \
             --arg version "$VERSION_NUM" \
             --arg pub_date "$PUB_DATE" \
             --arg mac_url "${CDN}/${MAC_TAR}" \
             --arg mac_sig "$MAC_SIG" \
-            --arg win_url "${CDN}/${WIN_ZIP}" \
+            --arg win_url "${CDN}/${WIN_EXE}" \
             --arg win_sig "$WIN_SIG" \
-            --arg linux_url "${CDN}/${LINUX_TAR}" \
+            --arg linux_url "${CDN}/${LINUX_APPIMAGE}" \
             --arg linux_sig "$LINUX_SIG" \
             '{
               version: $version,
