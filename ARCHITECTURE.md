@@ -10,7 +10,7 @@
 - **Local DB**: SQLite via `rusqlite` — encrypted messages and crypto state
 - **Encryption**: Signal Protocol (Ed25519 identity keys, X3DH, Double Ratchet)
 - **File storage**: Cloudflare R2 via `reqwest`
-- **Config**: `dotenvy` loads `.env.development` in dev; secrets encrypted with SOPS+age in `secrets.enc.env`
+- **Config**: `dotenvy` loads `.env.development` in dev; production secrets managed via Doppler (synced to GH Actions secrets)
 
 ---
 
