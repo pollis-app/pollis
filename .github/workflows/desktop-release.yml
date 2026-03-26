@@ -21,7 +21,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
+          targets: aarch64-apple-darwin
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -51,7 +51,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Build and sign macOS (Universal)
+      - name: Build and sign macOS (ARM)
         uses: tauri-apps/tauri-action@v0
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -63,16 +63,16 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          args: --target universal-apple-darwin
+          args: --target aarch64-apple-darwin
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: pollis-macos
           path: |
-            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.tar.gz
-            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.sig
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.tar.gz
+            src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.sig
 
   build-windows:
     runs-on: windows-latest
@@ -315,9 +315,7 @@ jobs:
               version: $version,
               pub_date: $pub_date,
               platforms: {
-                "darwin-universal": { url: $mac_url, signature: $mac_sig },
                 "darwin-aarch64": { url: $mac_url, signature: $mac_sig },
-                "darwin-x86_64": { url: $mac_url, signature: $mac_sig },
                 "windows-x86_64": { url: $win_url, signature: $win_sig },
                 "linux-x86_64": { url: $linux_url, signature: $linux_sig }
               }
