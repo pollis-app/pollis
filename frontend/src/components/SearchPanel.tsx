@@ -224,6 +224,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
         flexDirection: "column",
         alignItems: "center",
         paddingTop: "10vh",
+        borderRadius: "10px",
+        overflow: "hidden",
       }}
       onClick={(e) => {
         // Close when clicking the backdrop
