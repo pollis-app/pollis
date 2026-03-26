@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "@fontsource/atkinson-hyperlegible";
 import "./index.css";
 import App from "./App";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { useAppStore } from "./stores/appStore";
 
 // Expose Zustand store for Playwright tests so page.evaluate() can set state
@@ -30,8 +31,10 @@ const root = createRoot(container!);
 
 root.render(
   <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <App />
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 );

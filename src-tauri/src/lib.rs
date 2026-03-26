@@ -15,6 +15,12 @@ use state::AppState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK 2.42+ attempts DMA-BUF rendering and aborts if GBM/EGL is
+    // unavailable (e.g. certain GPU drivers, VMs, Wayland compositors without
+    // DRM). Disable it unconditionally so the app doesn't crash on launch.
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
