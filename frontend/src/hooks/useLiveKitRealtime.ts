@@ -130,12 +130,17 @@ export function useLiveKitRealtime() {
       return;
     }
     const setup = async () => {
+      console.log('[realtime] Checking notification permission...');
       let granted = await isPermissionGranted();
+      console.log('[realtime] Initial permission status:', granted);
       if (!granted) {
+        console.log('[realtime] Requesting notification permission...');
         const result = await requestPermission();
+        console.log('[realtime] Permission request result:', result);
         granted = result === 'granted';
       }
       notificationPermissionRef.current = granted;
+      console.log('[realtime] Final notification permission:', granted);
     };
     setup().catch((err) => { console.error('[realtime] notification permission setup failed:', err); });
   }, [isTauriReady]);

@@ -6,6 +6,9 @@ import { resizeImage } from "../utils/imageProcessing";
 import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
+import { getVersion } from "@tauri-apps/api/app";
+import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import * as api from "../services/api";
 
 interface SettingsProps {
@@ -32,6 +35,11 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   const [phone, setPhone] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
+  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "none" | "error">("idle");
+  const [updateVersion, setUpdateVersion] = useState<string>("");
+  const [updateError, setUpdateError] = useState<string>("");
+  const [isInstalling, setIsInstalling] = useState(false);
 
   useEffect(() => {
     return () => { if (preview) { URL.revokeObjectURL(preview); } };
@@ -44,6 +52,10 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
       setPhone(userData.phone || "");
     }
   }, [userData]);
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
+  }, []);
 
   useEffect(() => { setCurrentAvatarUrl(avatarDownloadUrl || null); }, [avatarDownloadUrl]);
 
@@ -121,6 +133,42 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
       setIsDeleting(false);
     }
   }, [currentUser, deleteConfirmText, onDeleteAccount]);
+
+  const handleCheckForUpdates = useCallback(async () => {
+    setUpdateStatus("checking");
+    setUpdateError("");
+    setUpdateVersion("");
+    try {
+      const update = await checkForUpdate();
+      if (update) {
+        setUpdateStatus("available");
+        setUpdateVersion(update.version);
+      } else {
+        setUpdateStatus("none");
+      }
+    } catch (error) {
+      setUpdateStatus("error");
+      setUpdateError(error instanceof Error ? error.message : "Failed to check for updates");
+    }
+  }, []);
+
+  const handleInstallUpdate = useCallback(async () => {
+    if (updateStatus !== "available") {
+      return;
+    }
+    setIsInstalling(true);
+    try {
+      const update = await checkForUpdate();
+      if (!update) {
+        return;
+      }
+      await update.downloadAndInstall();
+      await relaunch();
+    } catch (error) {
+      setUpdateError(error instanceof Error ? error.message : "Failed to install update");
+      setIsInstalling(false);
+    }
+  }, [updateStatus]);
 
   if (!currentUser) {
     return (
@@ -282,6 +330,60 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
                 Upload Avatar
               </Button>
             )}
+          </section>
+
+          {/* Software Updates */}
+          <section className="flex flex-col gap-4">
+            <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
+              Software Updates
+            </h2>
+
+            <div className="flex flex-col gap-2">
+              <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
+                Current version: <span style={{ color: 'var(--c-text)' }}>{appVersion || "Loading..."}</span>
+              </p>
+
+              {updateStatus === "available" && (
+                <p className="text-xs font-mono" style={{ color: 'var(--c-accent)' }}>
+                  Update available: {updateVersion}
+                </p>
+              )}
+
+              {updateStatus === "none" && (
+                <p className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
+                  You're up to date!
+                </p>
+              )}
+
+              {updateStatus === "error" && (
+                <p className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+                  {updateError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleCheckForUpdates}
+                disabled={updateStatus === "checking"}
+                isLoading={updateStatus === "checking"}
+                loadingText="Checking…"
+              >
+                Check for updates
+              </Button>
+
+              {updateStatus === "available" && (
+                <Button
+                  onClick={handleInstallUpdate}
+                  disabled={isInstalling}
+                  isLoading={isInstalling}
+                  loadingText="Installing…"
+                  variant="primary"
+                >
+                  Install update
+                </Button>
+              )}
+            </div>
           </section>
 
           {/* Danger zone */}
