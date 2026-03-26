@@ -21,7 +21,13 @@ export const MessageList: React.FC<MessageListProps> = ({
   const prevLengthRef = useRef(0);
 
   const sortedMessages = useMemo(
-    () => [...messages].sort((a, b) => a.created_at - b.created_at),
+    () =>
+      [...messages]
+        // Filter out blank messages (null, undefined, or empty content)
+        .filter((m) => {
+          return m.content_decrypted != null && m.content_decrypted !== "";
+        })
+        .sort((a, b) => a.created_at - b.created_at),
     [messages]
   );
 

@@ -24,7 +24,7 @@ function MainApp() {
   const {
     currentUser,
     setCurrentUser,
-  } = useAppStore();
+  } = useAppStore();  
 
   const [appState, setAppState] = useState<AppState>("initializing");
 

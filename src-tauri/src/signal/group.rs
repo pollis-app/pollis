@@ -1,6 +1,7 @@
 /// Sender Key Distribution for group messaging
 /// Each sender maintains a chain key; distributes to group members via X3DH sessions.
 
+use std::collections::HashMap;
 use hmac::Hmac;
 use hmac::Mac as HmacMac;
 use sha2::Sha256;
@@ -11,12 +12,17 @@ use crate::error::{Error, Result};
 
 const SENDER_CHAIN_SEED: &[u8] = b"Pollis SenderChain v1";
 const SENDER_MSG_SEED: &[u8] = b"Pollis SenderMsg v1";
+const MAX_SKIP: u32 = 2000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SenderKeyState {
     pub chain_id: Vec<u8>,
     pub iteration: u32,
     pub chain_key: Vec<u8>,
+    /// Message keys for iterations that were skipped during out-of-order
+    /// decryption. Keyed by iteration number.
+    #[serde(default)]
+    pub skipped_keys: HashMap<u32, Vec<u8>>,
 }
 
 impl SenderKeyState {
@@ -27,6 +33,7 @@ impl SenderKeyState {
             chain_id,
             iteration: 0,
             chain_key,
+            skipped_keys: HashMap::new(),
         }
     }
 
@@ -51,18 +58,25 @@ impl SenderKeyState {
             return Err(Error::Signal("sender key chain_id mismatch".into()));
         }
 
-        // Advance chain to the correct iteration (handle out-of-order up to a limit)
+        // Check if we already have a stored key for this iteration
+        // (it was skipped during a previous out-of-order decryption).
+        if let Some(mk) = self.skipped_keys.remove(&msg.iteration) {
+            return aes_gcm_decrypt(&mk, &msg.ciphertext);
+        }
+
         let current = self.iteration;
         if msg.iteration < current {
             return Err(Error::Signal("message iteration already passed".into()));
         }
-        if msg.iteration - current > 2000 {
+        if msg.iteration - current > MAX_SKIP {
             return Err(Error::Signal("too many skipped sender key messages".into()));
         }
 
+        // Advance chain, storing message keys for skipped iterations
         let mut ck = self.chain_key.clone();
-        for _ in 0..(msg.iteration - current) {
-            let (new_ck, _mk) = advance_chain(&ck)?;
+        for i in current..msg.iteration {
+            let (new_ck, mk) = advance_chain(&ck)?;
+            self.skipped_keys.insert(i, mk);
             ck = new_ck;
         }
 
