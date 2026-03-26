@@ -22,7 +22,6 @@
     "os:default",
     "process:allow-exit",
     "process:allow-restart",
-    "process:allow-relaunch",
     "updater:default"
   ]
 }

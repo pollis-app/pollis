@@ -58,9 +58,6 @@
         "https://cdn.pollis.com/releases/update.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUzREVFMzNCOEVFRjIxOEQKUldTTkllK09PK1BlVXhES1FDa0luZTZONkpxZ3ZsaVJreDFzQThSUnFZVWJORGFxZU9PNHZsbkEK"
-    },
-    "notification": {
-      "identifier": "com.pollis.app"
     }
   }
 }
