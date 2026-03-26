@@ -3,7 +3,7 @@ name: Desktop Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_dispatch:
 
 jobs:
@@ -16,8 +16,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          node-version: "20"
+          cache: "pnpm"
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -83,8 +83,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          node-version: "20"
+          cache: "pnpm"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -150,8 +150,8 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'pnpm'
+          node-version: "20"
+          cache: "pnpm"
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -251,9 +251,9 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
-          aws s3 cp "artifacts/pollis-windows/pollis-${VERSION}-windows.exe" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
-          aws s3 cp "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "artifacts/pollis-macos/dmg/Pollis_${VERSION}_aarch64.dmg" "s3://pollis/releases/${VERSION}/pollis_${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "artifacts/pollis-windows/Pollis_${VERSION}-setup.exe" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "artifacts/pollis-linux/Pollis_${VERSION}_amd64.AppImage" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
@@ -264,10 +264,10 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           # macOS updater bundle (.tar.gz + .sig)
-          for f in artifacts/pollis-macos/*.tar.gz; do
+          for f in artifacts/pollis-macos/macos/*.tar.gz; do
             aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
           done
-          for f in artifacts/pollis-macos/*.sig; do
+          for f in artifacts/pollis-macos/macos/*.sig; do
             aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
           done
           # Windows updater bundle (.exe + .sig) — Tauri v2 uses the exe directly
