@@ -229,31 +229,19 @@ jobs:
         with:
           path: artifacts
 
-      - name: Flatten and rename artifacts
+      - name: Debug artifact structure
         run: |
-          VERSION="${GITHUB_REF_NAME}"
-          # Flatten nested directory structures from upload-artifact
-          for dir in artifacts/pollis-macos artifacts/pollis-windows artifacts/pollis-linux; do
-            find "$dir" -type f -mindepth 2 -exec mv {} "$dir/" \;
-          done
-          # Rename installers with version
-          for f in artifacts/pollis-macos/*.dmg; do
-            [ -f "$f" ] && mv "$f" "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg"
-          done
-          for f in artifacts/pollis-windows/*.exe; do
-            [ -f "$f" ] && mv "$f" "artifacts/pollis-windows/pollis-${VERSION}-windows.exe"
-          done
-          for f in artifacts/pollis-linux/*.AppImage; do
-            [ -f "$f" ] && [[ "$f" != *.tar.gz ]] && mv "$f" "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage"
-          done
+          echo "Listing artifact structure:"
+          find artifacts -type f
 
       - name: Upload installers to R2
         run: |
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp "artifacts/pollis-macos/dmg/Pollis_${VERSION}_aarch64.dmg" "s3://pollis/releases/${VERSION}/pollis_${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
-          aws s3 cp "artifacts/pollis-windows/Pollis_${VERSION}-setup.exe" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
-          aws s3 cp "artifacts/pollis-linux/Pollis_${VERSION}_amd64.AppImage" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
+          # Use the actual artifact paths with wildcards
+          aws s3 cp $(find artifacts/pollis-macos -name "*.dmg" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
+          aws s3 cp $(find artifacts/pollis-windows -name "*.exe" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
+          aws s3 cp $(find artifacts/pollis-linux -name "*.AppImage" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
@@ -264,26 +252,14 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           # macOS updater bundle (.tar.gz + .sig)
-          for f in artifacts/pollis-macos/macos/*.tar.gz; do
-            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
-          done
-          for f in artifacts/pollis-macos/macos/*.sig; do
-            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
-          done
+          find artifacts/pollis-macos -name "*.tar.gz" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
+          find artifacts/pollis-macos -name "*.sig" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
           # Windows updater bundle (.exe + .sig) — Tauri v2 uses the exe directly
-          for f in artifacts/pollis-windows/*.exe; do
-            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
-          done
-          for f in artifacts/pollis-windows/*.sig; do
-            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
-          done
+          find artifacts/pollis-windows -name "*.exe" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
+          find artifacts/pollis-windows -name "*.sig" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
           # Linux updater bundle (.AppImage + .sig) — Tauri v2 uses the AppImage directly
-          for f in artifacts/pollis-linux/*.AppImage; do
-            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
-          done
-          for f in artifacts/pollis-linux/*.sig; do
-            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" --endpoint-url "${ENDPOINT}"
-          done
+          find artifacts/pollis-linux -name "*.AppImage" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
+          find artifacts/pollis-linux -name "*.sig" -exec bash -c 'aws s3 cp "$0" "s3://pollis/releases/'"${VERSION}"'/$(basename "$0")" --endpoint-url "'"${ENDPOINT}"'"' {} \;
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
@@ -298,14 +274,14 @@ jobs:
           PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           # Read signatures from artifact files
-          MAC_SIG=$(cat artifacts/pollis-macos/*.sig 2>/dev/null || echo "")
-          WIN_SIG=$(cat artifacts/pollis-windows/*.sig 2>/dev/null || echo "")
-          LINUX_SIG=$(cat artifacts/pollis-linux/*.sig 2>/dev/null || echo "")
+          MAC_SIG=$(find artifacts/pollis-macos -name "*.tar.gz.sig" -exec cat {} \; | head -1)
+          WIN_SIG=$(find artifacts/pollis-windows -name "*.exe.sig" -exec cat {} \; | head -1)
+          LINUX_SIG=$(find artifacts/pollis-linux -name "*.AppImage.sig" -exec cat {} \; | head -1)
 
           # Find the actual filenames for the updater bundles
-          MAC_TAR=$(basename artifacts/pollis-macos/*.tar.gz 2>/dev/null || echo "")
-          WIN_EXE=$(basename artifacts/pollis-windows/*.exe 2>/dev/null || echo "")
-          LINUX_APPIMAGE=$(basename artifacts/pollis-linux/*.AppImage 2>/dev/null || echo "")
+          MAC_TAR=$(find artifacts/pollis-macos -name "*.tar.gz" -exec basename {} \; | head -1)
+          WIN_EXE=$(find artifacts/pollis-windows -name "*.exe" -exec basename {} \; | head -1)
+          LINUX_APPIMAGE=$(find artifacts/pollis-linux -name "*.AppImage" -exec basename {} \; | head -1)
 
           jq -n \
             --arg version "$VERSION_NUM" \
