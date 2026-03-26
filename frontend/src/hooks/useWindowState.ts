@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, availableMonitors } from "@tauri-apps/api/window";
 import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
 
 const STORAGE_KEY = "pollis-window-state";
@@ -33,6 +33,35 @@ function isValidWindowState(s: unknown): s is WindowState {
   );
 }
 
+// Check whether a logical position falls within any connected monitor.
+// Each monitor reports physical pixels, so we divide by its scale factor
+// to get logical coordinates before comparing.
+async function isPositionOnScreen(x: number, y: number): Promise<boolean> {
+  const monitors = await availableMonitors();
+  if (monitors.length === 0) {
+    return false;
+  }
+
+  for (const monitor of monitors) {
+    const scale = monitor.scaleFactor;
+    const logicalX = monitor.position.x / scale;
+    const logicalY = monitor.position.y / scale;
+    const logicalW = monitor.size.width / scale;
+    const logicalH = monitor.size.height / scale;
+
+    if (
+      x >= logicalX &&
+      x < logicalX + logicalW &&
+      y >= logicalY &&
+      y < logicalY + logicalH
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function restoreWindowState(): Promise<void> {
   try {
     const appWindow = getCurrentWindow();
@@ -46,8 +75,16 @@ export async function restoreWindowState(): Promise<void> {
       await appWindow.center();
       return;
     }
+
+    const onScreen = await isPositionOnScreen(parsed.x, parsed.y);
     await appWindow.setSize(new LogicalSize(parsed.width, parsed.height));
-    await appWindow.setPosition(new LogicalPosition(parsed.x, parsed.y));
+
+    if (onScreen) {
+      await appWindow.setPosition(new LogicalPosition(parsed.x, parsed.y));
+    } else {
+      // Saved position is off-screen (e.g. disconnected monitor), center instead
+      await appWindow.center();
+    }
   } catch {
     // Best-effort — ignore failures
   }
