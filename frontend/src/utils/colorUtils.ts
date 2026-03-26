@@ -38,6 +38,13 @@ export function applyAccentColor(hex: string): void {
   document.documentElement.style.setProperty("--accent-s", `${s}%`);
 }
 
+/** Apply a hex background color to the document CSS variables */
+export function applyBackgroundColor(hex: string): void {
+  const [h, s] = hexToHsl(hex);
+  document.documentElement.style.setProperty("--bg-h", String(h));
+  document.documentElement.style.setProperty("--bg-s", `${s}%`);
+}
+
 /** Apply a font size (in px) to the document CSS variable */
 export function applyFontSize(px: number): void {
   document.documentElement.style.setProperty("--font-size-base", `${px}px`);
@@ -48,6 +55,13 @@ export function readAccentHex(): string {
   const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--accent-h").trim() || "150", 10);
   const s = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--accent-s").trim() || "62");
   return hslToHex(h, s, 62);
+}
+
+/** Read the current background color CSS vars as a hex string */
+export function readBackgroundHex(): string {
+  const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--bg-h").trim() || "38", 10);
+  const s = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--bg-s").trim() || "20");
+  return hslToHex(h, s, 20);
 }
 
 /** Read the current --font-size-base as a number (px) */

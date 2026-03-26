@@ -7,13 +7,15 @@
     /* ── Theme knobs — change these at runtime to retheme the app ── */
     --accent-h:      38;     /* hue 0–360  */
     --accent-s:      90%;    /* saturation */
+    --bg-h:          38;     /* background hue — defaults to match accent */
+    --bg-s:          20%;   /* background saturation */
     --font-size-base: 15px;  /* base font size — scales all rem units */
 
     /* ── Surfaces (dark, hue-tinted) ──────────────────────────────── */
-    --c-bg:             hsl(var(--accent-h) 20% 4%);
-    --c-surface:        hsl(var(--accent-h) 18% 7%);
-    --c-surface-raised: hsl(var(--accent-h) 16% 10%);
-    --c-surface-high:   hsl(var(--accent-h) 14% 13%);
+    --c-bg:             hsl(var(--bg-h) var(--bg-s) 4%);
+    --c-surface:        hsl(var(--bg-h) var(--bg-s) 7%);
+    --c-surface-raised: hsl(var(--bg-h) var(--bg-s) 10%);
+    --c-surface-high:   hsl(var(--bg-h) var(--bg-s) 13%);
 
     /* ── Accent scale ──────────────────────────────────────────────── */
     --c-accent:         hsl(var(--accent-h) var(--accent-s) 62%);

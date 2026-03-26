@@ -53,6 +53,7 @@ function MainApp() {
           const json = await invoke<string>("get_preferences", { userId: user.id });
           const prefs = {
             accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
+            background_color: getPreference<string | undefined>(json, "background_color", undefined),
             font_size: getPreference<string | undefined>(json, "font_size", undefined),
           };
           applyPreferences(prefs);
