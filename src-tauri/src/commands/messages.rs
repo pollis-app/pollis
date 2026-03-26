@@ -122,13 +122,13 @@ pub async fn list_messages(
 /// Fetches member identity keys and SPKs from remote DB, encrypts the state
 /// for each recipient, and stores in sender_key_dist.
 async fn distribute_sender_key_to_group_members(
-    conn: &libsql::Connection,
+    tx: &libsql::Transaction,
     channel_id: &str,
     sender_id: &str,
     state_to_distribute: &SenderKeyState,
 ) -> Result<()> {
     // Get group_id for this channel
-    let mut rows = conn.query(
+    let mut rows = tx.query(
         "SELECT group_id FROM channels WHERE id = ?1",
         libsql::params![channel_id],
     ).await?;
@@ -140,7 +140,7 @@ async fn distribute_sender_key_to_group_members(
     };
 
     // Get all members of the group with their keys
-    let mut member_rows = conn.query(
+    let mut member_rows = tx.query(
         "SELECT u.id, u.identity_key,
                 (SELECT spk.public_key FROM signed_prekey spk WHERE spk.user_id = u.id ORDER BY spk.key_id DESC LIMIT 1) AS spk_pub,
                 (SELECT spk.key_id FROM signed_prekey spk WHERE spk.user_id = u.id ORDER BY spk.key_id DESC LIMIT 1) AS spk_id
@@ -210,7 +210,7 @@ async fn distribute_sender_key_to_group_members(
         };
 
         let dist_id = Ulid::new().to_string();
-        match conn.execute(
+        match tx.execute(
             "INSERT OR REPLACE INTO sender_key_dist
              (id, channel_id, sender_id, recipient_id, encrypted_state, ephemeral_key, spk_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -238,12 +238,12 @@ async fn distribute_sender_key_to_group_members(
 
 /// Distribute the sender's SenderKeyState to all members of a DM channel.
 async fn distribute_sender_key_to_dm_members(
-    conn: &libsql::Connection,
+    tx: &libsql::Transaction,
     dm_channel_id: &str,
     sender_id: &str,
     state_to_distribute: &SenderKeyState,
 ) -> Result<()> {
-    let mut member_rows = conn.query(
+    let mut member_rows = tx.query(
         "SELECT u.id, u.identity_key,
                 (SELECT spk.public_key FROM signed_prekey spk WHERE spk.user_id = u.id ORDER BY spk.key_id DESC LIMIT 1) AS spk_pub,
                 (SELECT spk.key_id FROM signed_prekey spk WHERE spk.user_id = u.id ORDER BY spk.key_id DESC LIMIT 1) AS spk_id
@@ -313,7 +313,7 @@ async fn distribute_sender_key_to_dm_members(
         };
 
         let dist_id = Ulid::new().to_string();
-        match conn.execute(
+        match tx.execute(
             "INSERT OR REPLACE INTO sender_key_dist
              (id, channel_id, sender_id, recipient_id, encrypted_state, ephemeral_key, spk_id)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -390,9 +390,23 @@ pub async fn send_message(
         (msg, ciphertext_json, pre_state)
     };
 
-    // Write envelope to Turso for offline delivery (use same id as local message)
+    // Classify the channel before opening the write transaction (read-only query)
     let conn = state.remote_db.conn().await?;
-    conn.execute(
+    let is_dm = match conn.query(
+        "SELECT 1 FROM dm_channel WHERE id = ?1",
+        libsql::params![conversation_id.clone()],
+    ).await {
+        Ok(mut rows) => rows.next().await.ok().flatten().is_some(),
+        Err(_) => false,
+    };
+
+    // Batch all remote writes into a single transaction:
+    // - message_envelope INSERT
+    // - sender_key_dist INSERTs for each group/DM member
+    let tx = conn.transaction().await?;
+
+    // Write envelope to Turso for offline delivery (use same id as local message)
+    tx.execute(
         "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         libsql::params![id.clone(), conversation_id.clone(), sender_id.clone(), ciphertext_json.clone(), reply_to_id.clone(), now.clone()],
@@ -402,29 +416,23 @@ pub async fn send_message(
     // Using the pre-encrypt state ensures recipients can decrypt the message just sent
     // and all future messages. The NOT EXISTS filter in each distribute function means
     // this is a no-op when all members already have our key.
-    let is_dm = match conn.query(
-        "SELECT 1 FROM dm_channel WHERE id = ?1",
-        libsql::params![conversation_id.clone()],
-    ).await {
-        Ok(mut rows) => rows.next().await.ok().flatten().is_some(),
-        Err(_) => false,
-    };
-
     if is_dm {
         let _ = distribute_sender_key_to_dm_members(
-            &conn,
+            &tx,
             &conversation_id,
             &sender_id,
             &pre_encrypt_state,
         ).await;
     } else {
         let _ = distribute_sender_key_to_group_members(
-            &conn,
+            &tx,
             &conversation_id,
             &sender_id,
             &pre_encrypt_state,
         ).await;
     }
+
+    tx.commit().await?;
 
     Ok(Message {
         id,
