@@ -33,20 +33,20 @@ jobs:
           echo "Stamping version ${VERSION} into tauri.conf.json"
           jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
 
-      - name: Install sops
-        run: brew install sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      - name: Load production secrets
         run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pnpm install
@@ -99,21 +99,21 @@ jobs:
           echo "Stamping version ${VERSION} into tauri.conf.json"
           jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
 
-      - name: Install sops
-        run: choco install sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+      - name: Load production secrets
         shell: bash
         run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pnpm install
@@ -176,23 +176,20 @@ jobs:
             libxdo-dev \
             libssl-dev
 
-      - name: Install sops
+      - name: Load production secrets
         run: |
-          curl -LO https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
-          chmod +x sops-v3.9.1.linux.amd64
-          sudo mv sops-v3.9.1.linux.amd64 /usr/local/bin/sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pnpm install
@@ -221,23 +218,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install sops
+      - name: Load production secrets
         run: |
-          curl -LO https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
-          chmod +x sops-v3.9.1.linux.amd64
-          sudo mv sops-v3.9.1.linux.amd64 /usr/local/bin/sops
-
-      - name: Decrypt production secrets
-        env:
-          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-        run: |
-          echo "$SOPS_AGE_KEY" > /tmp/sops-age-key.txt
-          unset SOPS_AGE_KEY
-          SOPS_AGE_KEY_FILE=/tmp/sops-age-key.txt sops --decrypt --input-type dotenv --output-type dotenv secrets.prod.enc.env \
-            | grep -v '^#' | grep -v '^[[:space:]]*$' | while IFS='=' read -r key value; do
-              echo "::add-mask::${value}"
-              echo "${key}=${value}" >> $GITHUB_ENV
-            done
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
