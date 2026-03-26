@@ -229,14 +229,19 @@ jobs:
         with:
           path: artifacts
 
-      - name: Rename installer artifacts with version
+      - name: Flatten and rename artifacts
         run: |
           VERSION="${GITHUB_REF_NAME}"
+          # Flatten nested directory structures from upload-artifact
+          for dir in artifacts/pollis-macos artifacts/pollis-windows artifacts/pollis-linux; do
+            find "$dir" -type f -mindepth 2 -exec mv {} "$dir/" \;
+          done
+          # Rename installers with version
           for f in artifacts/pollis-macos/*.dmg; do
-            mv "$f" "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg"
+            [ -f "$f" ] && mv "$f" "artifacts/pollis-macos/pollis-${VERSION}-macos.dmg"
           done
           for f in artifacts/pollis-windows/*.exe; do
-            mv "$f" "artifacts/pollis-windows/pollis-${VERSION}-windows.exe"
+            [ -f "$f" ] && mv "$f" "artifacts/pollis-windows/pollis-${VERSION}-windows.exe"
           done
           for f in artifacts/pollis-linux/*.AppImage; do
             [ -f "$f" ] && [[ "$f" != *.tar.gz ]] && mv "$f" "artifacts/pollis-linux/pollis-${VERSION}-linux.AppImage"
