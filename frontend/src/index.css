@@ -7,37 +7,39 @@
     /* ── Theme knobs — change these at runtime to retheme the app ── */
     --accent-h:      38;     /* hue 0–360  */
     --accent-s:      90%;    /* saturation */
-    --bg-h:          38;     /* background hue — defaults to match accent */
-    --bg-s:          20%;   /* background saturation */
+    --accent-l:      62%;    /* lightness  */
+    --bg-h:          38;     /* background hue */
+    --bg-s:          20%;    /* background saturation */
+    --bg-l:          4%;     /* background lightness */
     --font-size-base: 15px;  /* base font size — scales all rem units */
 
     /* ── Surfaces (dark, hue-tinted) ──────────────────────────────── */
-    --c-bg:             hsl(var(--bg-h) var(--bg-s) 4%);
-    --c-surface:        hsl(var(--bg-h) var(--bg-s) 7%);
-    --c-surface-raised: hsl(var(--bg-h) var(--bg-s) 10%);
-    --c-surface-high:   hsl(var(--bg-h) var(--bg-s) 13%);
+    --c-bg:             hsl(var(--bg-h) var(--bg-s) var(--bg-l));
+    --c-surface:        hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 3%));
+    --c-surface-raised: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 6%));
+    --c-surface-high:   hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 9%));
 
     /* ── Accent scale ──────────────────────────────────────────────── */
-    --c-accent:         hsl(var(--accent-h) var(--accent-s) 62%);
-    --c-accent-bright:  hsl(var(--accent-h) var(--accent-s) 75%);
+    --c-accent:         hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+    --c-accent-bright:  hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 13%));
     --c-accent-dim:     hsl(var(--accent-h) 45% 45%);
     --c-accent-muted:   hsl(var(--accent-h) 35% 25%);
 
     /* ── Borders ───────────────────────────────────────────────────── */
-    --c-border:         hsl(var(--accent-h) var(--accent-s) 62% / 22%);
-    --c-border-active:  hsl(var(--accent-h) var(--accent-s) 62% / 50%);
+    --c-border:         hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
+    --c-border-active:  hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 50%);
 
     /* ── Text — explicit lightness (not opacity) for readable contrast */
-    --c-text:           hsl(var(--accent-h) var(--accent-s) 62%);
+    --c-text:           hsl(var(--accent-h) var(--accent-s) var(--accent-l));
     --c-text-dim:       hsl(var(--accent-h) 28% 70%);  /* secondary text */
     --c-text-muted:     hsl(var(--accent-h) 18% 55%);  /* tertiary text  */
 
     /* ── Hover overlays ────────────────────────────────────────────── */
-    --c-hover:          hsl(var(--accent-h) var(--accent-s) 62% / 8%);
-    --c-active:         hsl(var(--accent-h) var(--accent-s) 62% / 14%);
+    --c-hover:          hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 8%);
+    --c-active:         hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 14%);
 
     /* ── Focus ring (used by all input components) ──────────────── */
-    --c-focus-ring:     hsl(var(--accent-h) var(--accent-s) 62% / 22%);
+    --c-focus-ring:     hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
 
     --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
     --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
@@ -173,6 +175,20 @@ input[type="range"]::-moz-range-thumb {
   }
   .btn-ghost:hover { color: var(--c-accent); border-color: var(--c-border-active); }
   .btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* Message link ──────────────────────────────────────────────── */
+  .message-link {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    color: var(--c-accent-dim);
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background 100ms, color 100ms;
+  }
+  .message-link:hover {
+    color: var(--c-accent-bright);
+    background: var(--c-hover);
+  }
 
   /* Divider ────────────────────────────────────────────────────── */
   .divider { border-top: 1px solid var(--c-border); }
