@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
 
@@ -8,7 +8,14 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const { participants, isMuted, toggleMute, leave } = useVoiceChannel(channelId);
+  const { setIsLocalSpeaking } = useAppStore();
+  const { participants, activeSpeakerIds, isMuted, toggleMute, leave } = useVoiceChannel(channelId);
+
+  useEffect(() => {
+    const local = participants.find((p) => p.isLocal);
+    setIsLocalSpeaking(!!local && activeSpeakerIds.includes(local.identity) && !local.isMuted);
+    return () => { setIsLocalSpeaking(false); };
+  }, [activeSpeakerIds, participants, setIsLocalSpeaking]);
 
   return (
     <div

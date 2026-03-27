@@ -31,6 +31,7 @@ export const AppShell: React.FC = () => {
     activeVoiceChannelId,
     statusBarAlert,
     setStatusBarAlert,
+    isLocalSpeaking,
   } = useAppStore();
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -354,14 +355,24 @@ export const AppShell: React.FC = () => {
         >
           {breadcrumb}
         </span>
-        {statusBarAlert && (
+        {activeVoiceChannelId ? (
+          <span
+            className="text-xs font-mono flex items-center gap-1"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "black" }}
+          >
+            [v] {voiceChannelName}
+            {isLocalSpeaking && (
+              <span style={{ color: "var(--c-accent)" }} title="Mic active">●</span>
+            )}
+          </span>
+        ) : statusBarAlert ? (
           <span
             className="text-xs font-mono status-bar-blink flex items-center gap-1"
             style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
           >
             <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
           </span>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -63,6 +63,16 @@ export const GroupPage: React.FC = () => {
       badge: ch.channel_type === "voice" ? 0 : (unreadCounts[ch.id] ?? 0),
       testId: `channel-option-${ch.id}`,
     })),
+    // Stub voice channel — shown below text channels until real voice channels exist in DB
+    {
+      id: "stub-voice-general",
+      label: "[v] general",
+      action: () => {
+        navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: "stub-voice-general" } });
+      },
+      badge: 0,
+      testId: "channel-option-stub-voice-general",
+    },
     { id: "__sep__", label: "", type: "separator" as const },
     {
       id: "create-channel",

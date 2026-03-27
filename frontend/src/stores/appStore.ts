@@ -43,6 +43,9 @@ interface AppStore extends AppState {
   // channel/DM the user is not currently viewing. Cleared on navigation.
   statusBarAlert: { senderUsername: string; roomId: string } | null;
   setStatusBarAlert: (alert: { senderUsername: string; roomId: string } | null) => void;
+  // True when local participant's mic is actively picking up audio
+  isLocalSpeaking: boolean;
+  setIsLocalSpeaking: (speaking: boolean) => void;
   logout: () => void;
 }
 
@@ -67,6 +70,7 @@ export const useAppStore = create<AppStore>((set) => ({
   unreadCounts: {},
   activeVoiceChannelId: null,
   statusBarAlert: null,
+  isLocalSpeaking: false,
 
   // Actions
   setCurrentUser: (user) => set({ currentUser: user }),
@@ -141,6 +145,8 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setStatusBarAlert: (alert) => set({ statusBarAlert: alert }),
 
+  setIsLocalSpeaking: (speaking) => set({ isLocalSpeaking: speaking }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -161,6 +167,7 @@ export const useAppStore = create<AppStore>((set) => ({
     unreadCounts: {},
     activeVoiceChannelId: null,
     statusBarAlert: null,
+    isLocalSpeaking: false,
   }),
 }));
 
