@@ -18,7 +18,7 @@ export const DMPage: React.FC = () => {
   const { data: conversations = [] } = useDMConversations();
   const conv = conversations.find((c) => c.id === conversationId);
 
-  const title = conv ? `Direct Message :: @${conv.user2_identifier}` : "Direct Message";
+  const title = conv ? `@${conv.user2_identifier}` : "Direct Message";
 
   return (
     <div className="flex flex-col h-full">
