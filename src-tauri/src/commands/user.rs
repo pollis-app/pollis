@@ -60,28 +60,36 @@ pub async fn get_preferences(
     user_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<String> {
-    // Try remote first
+    // Try local first (local-first: DB is open while user is signed in)
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            let prefs: Option<String> = db
+                .conn()
+                .query_row(
+                    "SELECT preferences FROM preferences LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(p) = prefs {
+                return Ok(p);
+            }
+        }
+    }
+
+    // Fall back to remote
     let conn = state.remote_db.conn().await?;
     let mut rows = conn.query(
         "SELECT preferences FROM user_preferences WHERE user_id = ?1",
-        libsql::params![user_id.clone()],
+        libsql::params![user_id],
     ).await?;
     if let Some(row) = rows.next().await? {
         let prefs: String = row.get(0)?;
         return Ok(prefs);
     }
 
-    // Fall back to local
-    let local_db = state.local_db.lock().await;
-    let conn = local_db.conn();
-    let prefs: Option<String> = conn
-        .query_row(
-            "SELECT preferences FROM user_preferences WHERE user_id = ?1",
-            rusqlite::params![user_id],
-            |row| row.get(0),
-        )
-        .ok();
-    Ok(prefs.unwrap_or_else(|| "{}".to_string()))
+    Ok("{}".to_string())
 }
 
 #[tauri::command]
@@ -90,6 +98,17 @@ pub async fn save_preferences(
     preferences_json: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
+    // Write to local first (best-effort, fast)
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            let _ = db.conn().execute(
+                "UPDATE preferences SET preferences = ?1, updated_at = datetime('now')",
+                rusqlite::params![preferences_json.clone()],
+            );
+        }
+    }
+
     // Write to remote
     let conn = state.remote_db.conn().await?;
     conn.execute(
@@ -97,15 +116,6 @@ pub async fn save_preferences(
          ON CONFLICT(user_id) DO UPDATE SET preferences = ?2, updated_at = datetime('now')",
         libsql::params![user_id.clone(), preferences_json.clone()],
     ).await?;
-
-    // Write to local (best-effort)
-    let local_db = state.local_db.lock().await;
-    let conn = local_db.conn();
-    let _ = conn.execute(
-        "INSERT INTO user_preferences (user_id, preferences, updated_at) VALUES (?1, ?2, datetime('now'))
-         ON CONFLICT(user_id) DO UPDATE SET preferences = ?2, updated_at = datetime('now')",
-        rusqlite::params![user_id, preferences_json],
-    );
 
     Ok(())
 }

@@ -3,7 +3,7 @@ pub mod user;
 pub mod groups;
 pub mod messages;
 pub mod dm;
-pub mod signal;
 pub mod livekit;
+pub mod mls;
 pub mod r2;
 pub mod update;

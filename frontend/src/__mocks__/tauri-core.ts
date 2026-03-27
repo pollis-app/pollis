@@ -151,6 +151,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
         groupId: string;
         name: string;
         description?: string | null;
+        creatorId?: string;
       };
       const channel: MockChannel = {
         id: generateId(),

@@ -91,8 +91,10 @@ export function useMessages(channelId: string | null, conversationId: string | n
     queryKey,
     queryFn: async (): Promise<Message[]> => {
       if (isChannel && channelId && currentUser) {
-        // get_channel_messages fetches from Turso, ingests sender key distributions,
-        // and decrypts — the only way for recipients to see messages from others.
+        // Advance the local MLS epoch before decrypting so any pending
+        // member-add or member-remove commits are applied first.
+        await invoke('process_pending_commits', { conversationId: channelId }).catch(() => {});
+
         const page = await invoke<MessagePage>('get_channel_messages', {
           userId: currentUser.id,
           channelId,
@@ -102,6 +104,8 @@ export function useMessages(channelId: string | null, conversationId: string | n
       }
 
       if (conversationId && currentUser) {
+        await invoke('process_pending_commits', { conversationId }).catch(() => {});
+
         const page = await invoke<MessagePage>('get_dm_messages', {
           userId: currentUser.id,
           dmChannelId: conversationId,

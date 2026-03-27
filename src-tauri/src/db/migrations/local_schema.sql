@@ -72,10 +72,31 @@ CREATE TABLE IF NOT EXISTS dm_conversation (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- User preferences (offline mirror of remote user_preferences)
-CREATE TABLE IF NOT EXISTS user_preferences (
-    user_id     TEXT PRIMARY KEY,
+-- User preferences (local-first mirror of remote user_preferences).
+-- Single-row table — the DB file is already scoped to one user.
+CREATE TABLE IF NOT EXISTS preferences (
     preferences TEXT NOT NULL DEFAULT '{}',
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO preferences (preferences) VALUES ('{}');
+
+-- UI state (window geometry, etc.)
+CREATE TABLE IF NOT EXISTS ui_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+INSERT OR IGNORE INTO ui_state (key, value) VALUES ('window_state', '{"width":1024,"height":768,"x":0,"y":0}');
+
+-- MLS StorageProvider backend.
+-- All openmls state is stored here via MlsStore (src/signal/mls_storage.rs).
+-- scope = entity-type discriminator string (see MLSProgress.md for convention).
+-- key   = serde_json-serialised lookup key (hash_ref, group_id, public_key, …).
+-- value = serde_json-serialised entity value.
+CREATE TABLE IF NOT EXISTS mls_kv (
+    scope TEXT    NOT NULL,
+    key   BLOB    NOT NULL,
+    value BLOB    NOT NULL,
+    PRIMARY KEY (scope, key)
 );
 

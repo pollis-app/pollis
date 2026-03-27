@@ -195,6 +195,7 @@ pub async fn create_channel(
     // 'text' (default) or 'voice' — stored in the channel_type column.
     // Requires Turso migration: ALTER TABLE channels ADD COLUMN channel_type TEXT NOT NULL DEFAULT 'text';
     channel_type: Option<String>,
+    creator_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Channel> {
     let conn = state.remote_db.conn().await?;
@@ -205,6 +206,13 @@ pub async fn create_channel(
         "INSERT INTO channels (id, group_id, name, description, channel_type) VALUES (?1, ?2, ?3, ?4, ?5)",
         libsql::params![id.clone(), group_id.clone(), name.clone(), description.clone(), channel_type.clone()],
     ).await.map_err(|e| db_err(e.into(), "Channel"))?;
+
+    // Initialise the MLS group for this channel (non-fatal — messaging still
+    // works via the legacy Signal path until Phase 5 cutover).
+    match crate::commands::mls::init_mls_group(state.inner(), &id, &creator_id).await {
+        Ok(()) => {}
+        Err(e) => eprintln!("[mls] create_channel: mls group init failed (non-fatal): {e}"),
+    }
 
     Ok(Channel { id, group_id, name, description, channel_type })
 }
@@ -220,6 +228,18 @@ async fn add_member_to_group(
         "INSERT OR IGNORE INTO group_member (group_id, user_id, role) VALUES (?1, ?2, 'member')",
         libsql::params![group_id, user_id],
     ).await?;
+
+    // Initialize watermark rows for all channels in the group so pre-join
+    // messages don't block envelope cleanup indefinitely.
+    if let Err(e) = conn.execute(
+        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
+         SELECT c.id, ?1, datetime('now')
+         FROM channels c WHERE c.group_id = ?2",
+        libsql::params![user_id, group_id],
+    ).await {
+        eprintln!("[watermark] add_member_to_group: watermark init failed: {e}");
+    }
+
     Ok(())
 }
 
@@ -406,8 +426,26 @@ pub async fn remove_member_from_group(
 
     conn.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id, user_id],
+        libsql::params![group_id.clone(), user_id.clone()],
     ).await?;
+
+    // Remove member from MLS group for all channels.
+    let mut ch_rows = conn.query(
+        "SELECT id FROM channels WHERE group_id = ?1",
+        libsql::params![group_id],
+    ).await?;
+    let mut channel_ids = Vec::new();
+    while let Some(row) = ch_rows.next().await? {
+        channel_ids.push(row.get::<String>(0)?);
+    }
+    for channel_id in channel_ids {
+        match crate::commands::mls::remove_member_mls_inner(
+            state.inner(), &channel_id, &user_id, &requester_id,
+        ).await {
+            Ok(()) => {}
+            Err(e) => eprintln!("[mls] remove_member_from_group: remove_member for channel {channel_id}: {e}"),
+        }
+    }
 
     Ok(())
 }
@@ -451,8 +489,26 @@ pub async fn leave_group(
 
     conn.execute(
         "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), user_id],
+        libsql::params![group_id.clone(), user_id.clone()],
     ).await?;
+
+    // Remove the leaver from the MLS group for every channel in the group.
+    let mut ch_rows = conn.query(
+        "SELECT id FROM channels WHERE group_id = ?1",
+        libsql::params![group_id.clone()],
+    ).await?;
+    let mut channel_ids: Vec<String> = Vec::new();
+    while let Some(row) = ch_rows.next().await? {
+        channel_ids.push(row.get::<String>(0)?);
+    }
+    for channel_id in channel_ids {
+        match crate::commands::mls::remove_member_mls_inner(
+            state.inner(), &channel_id, &user_id, &user_id,
+        ).await {
+            Ok(()) => {}
+            Err(e) => eprintln!("[mls] leave_group: remove_member for channel {channel_id}: {e}"),
+        }
+    }
 
     // If no members remain, delete the group (cascades to channels, invites, etc.)
     if member_count <= 1 {
@@ -755,8 +811,27 @@ pub async fn send_group_invite(
     let id = Ulid::new().to_string();
     conn.execute(
         "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES (?1, ?2, ?3, ?4)",
-        libsql::params![id, group_id, inviter_id, invitee_id],
+        libsql::params![id, group_id.clone(), inviter_id.clone(), invitee_id.clone()],
     ).await.map_err(|e| db_err(e.into(), "Invite"))?;
+
+    // Pre-generate MLS Welcome for invitee for all channels in the group.
+    // Stored in mls_welcome; invitee picks it up via poll_mls_welcomes after accepting.
+    let mut ch_rows = conn.query(
+        "SELECT id FROM channels WHERE group_id = ?1",
+        libsql::params![group_id],
+    ).await?;
+    let mut channel_ids = Vec::new();
+    while let Some(row) = ch_rows.next().await? {
+        channel_ids.push(row.get::<String>(0)?);
+    }
+    for channel_id in channel_ids {
+        match crate::commands::mls::add_member_mls_inner(
+            state.inner(), &channel_id, &invitee_id, &inviter_id,
+        ).await {
+            Ok(()) => {}
+            Err(e) => eprintln!("[mls] send_group_invite: add_member for channel {channel_id}: {e}"),
+        }
+    }
 
     Ok(())
 }
@@ -971,8 +1046,26 @@ pub async fn approve_join_request(
 
     conn.execute(
         "UPDATE group_join_request SET status = 'approved', reviewed_by = ?1, reviewed_at = ?2 WHERE id = ?3",
-        libsql::params![approver_id, now, request_id],
+        libsql::params![approver_id.clone(), now, request_id],
     ).await?;
+
+    // Generate MLS Welcome for requester for all channels in the group.
+    let mut ch_rows = conn.query(
+        "SELECT id FROM channels WHERE group_id = ?1",
+        libsql::params![group_id],
+    ).await?;
+    let mut channel_ids = Vec::new();
+    while let Some(row) = ch_rows.next().await? {
+        channel_ids.push(row.get::<String>(0)?);
+    }
+    for channel_id in channel_ids {
+        match crate::commands::mls::add_member_mls_inner(
+            state.inner(), &channel_id, &requester_id, &approver_id,
+        ).await {
+            Ok(()) => {}
+            Err(e) => eprintln!("[mls] approve_join_request: add_member for channel {channel_id}: {e}"),
+        }
+    }
 
     Ok(())
 }

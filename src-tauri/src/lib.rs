@@ -1,3 +1,4 @@
+mod accounts;
 mod config;
 pub mod db;
 mod error;
@@ -92,6 +93,7 @@ pub fn run() {
             commands::auth::get_session,
             commands::auth::logout,
             commands::auth::delete_account,
+            commands::auth::list_known_accounts,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,
@@ -127,7 +129,6 @@ pub fn run() {
             commands::dm::leave_dm_channel,
             commands::messages::list_messages,
             commands::messages::send_message,
-            commands::messages::poll_pending_messages,
             commands::messages::get_channel_messages,
             commands::messages::get_dm_messages,
             commands::messages::list_messages_by_sender,
@@ -136,10 +137,16 @@ pub fn run() {
             commands::messages::add_reaction,
             commands::messages::remove_reaction,
             commands::messages::get_reactions,
-            commands::signal::get_prekey_bundle,
-            commands::signal::rotate_signed_prekey,
-            commands::signal::replenish_one_time_prekeys,
-            commands::livekit::get_livekit_token,
+            commands::mls::generate_mls_key_package,
+            commands::mls::publish_mls_key_package,
+            commands::mls::fetch_mls_key_package,
+            commands::mls::create_mls_group,
+            commands::mls::process_welcome,
+            commands::mls::poll_mls_welcomes,
+            commands::mls::add_member_mls,
+            commands::mls::remove_member_mls,
+            commands::mls::process_pending_commits,
+commands::livekit::get_livekit_token,
             commands::livekit::get_livekit_url,
             commands::livekit::subscribe_realtime,
             commands::livekit::connect_rooms,

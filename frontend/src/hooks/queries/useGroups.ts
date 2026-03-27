@@ -190,7 +190,7 @@ export function useCreateChannel() {
 
       return await invoke<{ id: string; group_id: string; name: string; description?: string }>(
         'create_channel',
-        { groupId, name, description: description || null },
+        { groupId, name, description: description || null, creatorId: currentUser.id },
       );
     },
     onSuccess: (rawChannel, variables) => {
@@ -292,6 +292,11 @@ export function useAcceptInvite() {
         throw new Error('No current user');
       }
       await invoke('accept_group_invite', { inviteId, userId: currentUser.id });
+      // Drain MLS Welcome messages the inviter pre-generated so we can decrypt
+      // channel messages immediately after navigating into the group.
+      await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+        console.warn('[mls] poll_mls_welcomes after accept:', err);
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.pendingInvites(currentUser?.id ?? null) });

@@ -58,7 +58,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
     try {
       const channel = await invoke<{ id: string; group_id: string; name: string; description?: string }>(
         'create_channel',
-        { groupId: selectedGroupId, name: name.trim(), description: description.trim() || null },
+        { groupId: selectedGroupId, name: name.trim(), description: description.trim() || null, creatorId: currentUser.id },
       );
       const channelData: any = {
         id: channel.id,

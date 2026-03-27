@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import { TitleBar } from "./TitleBar";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -34,6 +35,18 @@ export const AppShell: React.FC = () => {
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
+
+  const currentUser = useAppStore((s) => s.currentUser);
+
+  // On startup, apply any MLS Welcome messages that arrived while offline.
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+      console.warn('[mls] poll_mls_welcomes failed:', err);
+    });
+  }, [currentUser?.id]);
 
   // Maintain a LiveKit room connection for the active channel/conversation
   useLiveKitRealtime();
