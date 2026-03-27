@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Reply, Download, Image as ImageIcon, File as FileIcon } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { getFileDownloadUrl } from "../../services/r2-upload";
+import { LinkifiedText } from "../ui/LinkifiedText";
 // import { MessageReactions } from "./MessageReactions";
 import type { Message, MessageAttachment } from "../../types";
 
@@ -104,7 +105,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           className="font-mono text-sm break-words flex-1 min-w-0"
           style={{ color: "var(--c-text)", whiteSpace: "pre-wrap" }}
         >
-          {content}
+          <LinkifiedText text={content} />
           {message.status && message.status !== "sent" && (
             <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
               [{message.status}]
