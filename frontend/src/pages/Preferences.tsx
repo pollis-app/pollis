@@ -15,8 +15,10 @@ function setRootVar(name: string, value: string) {
 export const Preferences: React.FC = () => {
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
+  const [lightness, setLightness] = useState<number>(62);
   const [bgHue, setBgHue] = useState<number>(38);
   const [bgSaturation, setBgSaturation] = useState<number>(20);
+  const [bgLightness, setBgLightness] = useState<number>(4);
   const [fontSize, setFontSize] = useState<number>(15);
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
 
@@ -248,22 +250,6 @@ export const Preferences: React.FC = () => {
             </div>
           </section>
 
-          {/* Notifications */}
-          {/* <section className="flex flex-col gap-4 mb-12">
-            <h2
-              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
-            >
-              Notifications
-            </h2>
-            <Switch
-              id="pref-desktop-notifications"
-              label="Desktop notifications"
-              checked={allowDesktopNotifications}
-              onChange={handleAllowDesktopNotifications}
-              description="Show a system notification when a message arrives in an unfocused window"
-            />
-          </section> */}
 
           {/* Font size */}
           <section className="flex flex-col gap-4 mb-12">
