@@ -9,6 +9,7 @@ import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
+import { useBadge } from "../../hooks/useBadge";
 import { Mail } from "lucide-react";
 
 /**
@@ -36,6 +37,9 @@ export const AppShell: React.FC = () => {
 
   // Maintain a LiveKit room connection for the active channel/conversation
   useLiveKitRealtime();
+
+  // Sync unread count to OS dock/taskbar badge
+  useBadge();
 
   // Sync groups+channels into the store once loaded
   useEffect(() => {
@@ -117,6 +121,19 @@ export const AppShell: React.FC = () => {
     }
   }, [pathname, statusBarAlert, setStatusBarAlert]);
 
+  // Chat screens: channel view or DM conversation (not /new)
+  const isChatScreen = useMemo(() => {
+    const channelMatch = pathname.match(/^\/groups\/[^/]+\/channels\/([^/]+)/);
+    if (channelMatch && channelMatch[1] !== "new") {
+      return true;
+    }
+    const dmMatch = pathname.match(/^\/dms\/([^/]+)/);
+    if (dmMatch && dmMatch[1] !== "new") {
+      return true;
+    }
+    return false;
+  }, [pathname]);
+
   const breadcrumb = useMemo(() => {
     if (pathname === "/") {
       return "";
@@ -144,7 +161,7 @@ export const AppShell: React.FC = () => {
             const groupChannels = channels[groupId] ?? [];
             const ch = groupChannels.find((c) => c.id === channelId);
             if (ch) {
-              segments.push(`Channel :: ${ch.name}`);
+              segments.push(ch.name);
             }
           } else if (pathname.endsWith("/channels/new")) {
             segments.push("New Channel");
@@ -176,7 +193,7 @@ export const AppShell: React.FC = () => {
       if (conversationId && conversationId !== "new") {
         const conv = dmConversations.find((c) => c.id === conversationId);
         if (conv) {
-          segments.push(`dm :: @${conv.user2_identifier}`);
+          segments.push(`@${conv.user2_identifier}`);
         }
         if (pathname.endsWith("/settings")) {
           segments.push("Conversation Settings");
@@ -194,7 +211,7 @@ export const AppShell: React.FC = () => {
       segments.push("Search");
     }
 
-    return segments.join(" › ");
+    return segments.join(" / ");
   }, [pathname, groupsWithChannels, dmConversations, channels]);
 
   // Find the voice channel name for the VoiceBar
@@ -261,12 +278,13 @@ export const AppShell: React.FC = () => {
       )}
 
       {/* Bottom bar — breadcrumb left, unread alert right */}
+      {/* On chat screens, invert: dark bg with accent text. Otherwise: accent bg with dark text. */}
       <div
         style={{
           height: 28,
           flexShrink: 0,
           borderTop: "1px solid var(--c-border)",
-          background: "var(--c-accent)",
+          background: isChatScreen ? "var(--c-bg)" : "var(--c-accent)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -274,13 +292,16 @@ export const AppShell: React.FC = () => {
           paddingRight: 12,
         }}
       >
-        <span className="text-xs font-mono text-black" >
+        <span
+          className="text-xs font-mono"
+          style={{ color: isChatScreen ? "var(--c-accent)" : "black" }}
+        >
           {breadcrumb}
         </span>
         {statusBarAlert && (
           <span
             className="text-xs font-mono status-bar-blink flex items-center gap-1"
-            style={{ color: "var(--c-surface)" }}
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
           >
             <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
           </span>
