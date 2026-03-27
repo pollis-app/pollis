@@ -50,7 +50,7 @@ function buildChannelResults(
       results.push({
         type: "channel",
         id: `channel-${channel.id}`,
-        name: `# ${channel.name}`,
+        name: channel.name,
         breadcrumb: `/g/${groupSlug}/${channelSlug}`,
         groupId: group.id,
         channelId: channel.id,
@@ -69,7 +69,7 @@ function buildDMResults(
   return conversations.map((conv) => ({
     type: "dm" as const,
     id: `dm-${conv.id}`,
-    name: `@ ${conv.user2_identifier}`,
+    name: conv.user2_identifier,
     breadcrumb: `/dm/${conv.user2_identifier}`,
     conversationId: conv.id,
   }));

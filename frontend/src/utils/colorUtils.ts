@@ -33,16 +33,18 @@ export function hslToHex(h: number, s: number, l: number): string {
 
 /** Apply a hex accent color to the document CSS variables */
 export function applyAccentColor(hex: string): void {
-  const [h, s] = hexToHsl(hex);
+  const [h, s, l] = hexToHsl(hex);
   document.documentElement.style.setProperty("--accent-h", String(h));
   document.documentElement.style.setProperty("--accent-s", `${s}%`);
+  document.documentElement.style.setProperty("--accent-l", `${l}%`);
 }
 
 /** Apply a hex background color to the document CSS variables */
 export function applyBackgroundColor(hex: string): void {
-  const [h, s] = hexToHsl(hex);
+  const [h, s, l] = hexToHsl(hex);
   document.documentElement.style.setProperty("--bg-h", String(h));
   document.documentElement.style.setProperty("--bg-s", `${s}%`);
+  document.documentElement.style.setProperty("--bg-l", `${l}%`);
 }
 
 /** Apply a font size (in px) to the document CSS variable */

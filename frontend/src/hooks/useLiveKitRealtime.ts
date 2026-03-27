@@ -108,17 +108,16 @@ export function useLiveKitRealtime() {
     if (!isTauriReady) {
       return;
     }
-    let unlistenFocus: (() => void) | undefined;
-    let unlistenBlur: (() => void) | undefined;
+    let unlisten: (() => void) | undefined;
     const setup = async () => {
       const win = getCurrentWindow();
-      unlistenFocus = await win.listen('focus', () => { isWindowFocusedRef.current = true; });
-      unlistenBlur = await win.listen('blur', () => { isWindowFocusedRef.current = false; });
+      unlisten = await win.onFocusChanged(({ payload: focused }) => {
+        isWindowFocusedRef.current = focused;
+      });
     };
     setup().catch((err) => { console.error('[realtime] window listener setup failed:', err); });
     return () => {
-      unlistenFocus?.();
-      unlistenBlur?.();
+      unlisten?.();
     };
   }, [isTauriReady]);
 
@@ -186,7 +185,22 @@ export function useLiveKitRealtime() {
         const title = incomingId
           ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
           : 'New message';
-        sendNotification({ title, body: `${senderUsername}: New message` });
+        const body = `${senderUsername}: New message`;
+        // Try Tauri native notification first, fall back to Web Notification API
+        try {
+          sendNotification({ title, body });
+        } catch {
+          // ignore
+        }
+        // Web Notification as fallback (works in WebKit/Tauri on macOS)
+        try {
+          new Notification(title, { body });
+        } catch {
+          // ignore
+        }
+
+        // TODO: play a notification sound here when we have one
+        // e.g. new Audio('/sounds/notify.mp3').play().catch(() => {});
       }
     };
 

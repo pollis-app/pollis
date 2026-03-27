@@ -19,7 +19,7 @@ export const ChannelPage: React.FC = () => {
   const group = groupsWithChannels?.find((g) => g.id === groupId);
   const channel = group?.channels.find((c) => c.id === channelId);
 
-  const title = channel ? `Channel :: ${channel.name}` : "Channel";
+  const title = channel ? channel.name : "Channel";
 
   return (
     <div className="flex flex-col h-full">

@@ -13,6 +13,29 @@ use tauri::Manager;
 use config::Config;
 use state::AppState;
 
+/// On macOS, intercept the window close request (Cmd+W / red traffic light)
+/// and hide the window instead of destroying it. The app keeps running in
+/// the dock and can be re-opened without a cold start.
+#[cfg(target_os = "macos")]
+fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
+    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        // Prevent the window from actually being destroyed.
+        api.prevent_close();
+        // Hide the window — it can be shown again from the dock.
+        let _ = window.hide();
+    }
+}
+
+/// On macOS, re-show the main window when the user clicks the dock icon
+/// (RunEvent::Reopen).
+#[cfg(target_os = "macos")]
+fn show_on_reopen(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK 2.42+ attempts DMA-BUF rendering and aborts if GBM/EGL is
@@ -126,6 +149,18 @@ pub fn run() {
             commands::update::mark_update_required,
             commands::update::is_update_required,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Pollis");
+        // On macOS, hide the window on close instead of quitting.
+        .on_window_event(|_window, _event| {
+            #[cfg(target_os = "macos")]
+            hide_on_close(_window, _event);
+        })
+        .build(tauri::generate_context!())
+        .expect("error while building Pollis")
+        .run(|app, event| {
+            // On macOS, re-show the window when the dock icon is clicked.
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                show_on_reopen(app);
+            }
+        });
 }
