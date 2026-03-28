@@ -11,13 +11,21 @@ import { useUserGroupsWithChannels } from './queries/useGroups';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
-type RealtimeEvent = {
-  type: 'new_message';
-  channel_id: string | null;
-  conversation_id: string | null;
-  sender_id: string;
-  sender_username: string | null;
-};
+type RealtimeEvent =
+  | {
+      type: 'new_message';
+      channel_id: string | null;
+      conversation_id: string | null;
+      sender_id: string;
+      sender_username: string | null;
+    }
+  | {
+      type: 'dm_created';
+      conversation_id: string;
+    }
+  | {
+      type: 'membership_changed';
+    };
 
 export function useLiveKitRealtime() {
   const { isReady: isTauriReady } = useTauriReady();
@@ -40,20 +48,25 @@ export function useLiveKitRealtime() {
 
   const allRoomIds = useMemo<string[]>(() => {
     const ids: string[] = [];
+    // One room per GROUP covers all channels in that group.
     if (groupsWithChannels) {
       for (const group of groupsWithChannels) {
-        for (const channel of group.channels) {
-          ids.push(channel.id);
-        }
+        ids.push(group.id);
       }
     }
+    // DM conversations keep their own rooms — the LiveKit admin REST API
+    // needed to deliver DM messages via inbox is currently unreliable.
     if (dmConversations) {
       for (const conv of dmConversations) {
         ids.push(conv.id);
       }
     }
+    // Personal inbox receives DM creation and membership change events.
+    if (currentUser) {
+      ids.push(`inbox-${currentUser.id}`);
+    }
     return ids;
-  }, [groupsWithChannels, dmConversations]);
+  }, [groupsWithChannels, dmConversations, currentUser?.id]);
 
   // ── Room name lookup (for notification titles) ────────────────────────────
 
@@ -153,6 +166,21 @@ export function useLiveKitRealtime() {
     const channel = new Channel<RealtimeEvent>();
 
     channel.onmessage = (event) => {
+      if (event.type === 'dm_created') {
+        queryClientRef.current.invalidateQueries({
+          queryKey: messageQueryKeys.dmConversations(currentUser.id),
+        });
+        return;
+      }
+
+      if (event.type === 'membership_changed') {
+        // Invalidate all group and invite queries — covers both invite received
+        // and join-request approved scenarios.
+        queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
+        queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
+        return;
+      }
+
       if (event.type !== 'new_message') {
         return;
       }

@@ -121,6 +121,7 @@ pub async fn send_message(
     sender_id: String,
     content: String,
     reply_to_id: Option<String>,
+    sender_username: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Message> {
     state.check_not_outdated()?;
@@ -129,15 +130,16 @@ pub async fn send_message(
 
     // For group channels, all channels share the group's MLS group (keyed by group_id).
     // For DM conversations, the MLS group is keyed by conversation_id directly.
-    let mls_group_id = {
+    // is_channel = true means conversation_id is a channel ID; group_id is the LiveKit room name.
+    let (mls_group_id, is_channel) = {
         let conn = state.remote_db.conn().await?;
         let mut rows = conn.query(
             "SELECT group_id FROM channels WHERE id = ?1",
             libsql::params![conversation_id.clone()],
         ).await?;
         match rows.next().await? {
-            Some(row) => row.get::<String>(0)?,
-            None => conversation_id.clone(),
+            Some(row) => (row.get::<String>(0)?, true),
+            None => (conversation_id.clone(), false),
         }
     };
 
@@ -169,6 +171,36 @@ pub async fn send_message(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         libsql::params![id.clone(), conversation_id.clone(), sender_id.clone(), ciphertext_remote, reply_to_id.clone(), now.clone()],
     ).await?;
+
+    // Notify recipients via LiveKit. Non-fatal — errors are logged, not returned.
+    let uname = sender_username.as_deref();
+    if is_channel {
+        // One LiveKit room per group covers all its channels.
+        // Receivers filter by channel_id in the event payload.
+        if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
+            &state.livekit,
+            &mls_group_id,
+            Some(&conversation_id),
+            None,
+            &sender_id,
+            uname,
+        ).await {
+            eprintln!("[realtime] send_message: publish to group {mls_group_id}: {e}");
+        }
+    } else {
+        // DM: publish directly to the shared DM room (conversation_id is the room name).
+        // Both participants are connected to this room via connect_rooms.
+        if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
+            &state.livekit,
+            &conversation_id,
+            None,
+            Some(&conversation_id),
+            &sender_id,
+            uname,
+        ).await {
+            eprintln!("[realtime] send_message: publish to DM room {conversation_id}: {e}");
+        }
+    }
 
     Ok(Message {
         id,

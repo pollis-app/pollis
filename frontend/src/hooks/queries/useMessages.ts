@@ -165,6 +165,7 @@ export function useSendMessage() {
         senderId: currentUser.id,
         content,
         replyToId: replyToMessageId ?? null,
+        senderUsername: currentUser.username ?? null,
       });
     },
     onSuccess: (newMessage, variables) => {
@@ -191,17 +192,6 @@ export function useSendMessage() {
 
       // Then invalidate in the background so we stay in sync with the server.
       queryClient.invalidateQueries({ queryKey });
-
-      // Notify other participants via the Rust LiveKit connection.
-      invoke('publish_ping', {
-        roomId: variables.channelId || variables.conversationId,
-        channelId: variables.channelId || null,
-        conversationId: variables.conversationId || null,
-        senderId: currentUser?.id,
-        senderUsername: currentUser?.username ?? null,
-      }).catch((err) => {
-        console.error('[realtime] publish_ping failed:', err);
-      });
     },
   });
 }

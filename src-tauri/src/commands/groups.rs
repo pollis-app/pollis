@@ -808,6 +808,15 @@ pub async fn send_group_invite(
         Err(e) => eprintln!("[mls] send_group_invite: add_member for group {group_id}: {e}"),
     }
 
+    // Notify invitee via their inbox so the pending invite appears immediately.
+    if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
+        &state.config,
+        &invitee_id,
+        serde_json::json!({"type": "membership_changed"}),
+    ).await {
+        eprintln!("[inbox] send_group_invite: notify {invitee_id} failed: {e}");
+    }
+
     Ok(())
 }
 
@@ -1030,6 +1039,15 @@ pub async fn approve_join_request(
     ).await {
         Ok(()) => {}
         Err(e) => eprintln!("[mls] approve_join_request: add_member for group {group_id}: {e}"),
+    }
+
+    // Notify requester their join request was approved so they see the group immediately.
+    if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
+        &state.config,
+        &requester_id,
+        serde_json::json!({"type": "membership_changed"}),
+    ).await {
+        eprintln!("[inbox] approve_join_request: notify {requester_id} failed: {e}");
     }
 
     Ok(())

@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine as _;
+
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use livekit::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -62,6 +64,82 @@ fn make_token(config: &Config, room_name: &str, identity: &str, display_name: &s
     let key = EncodingKey::from_secret(config.livekit_api_secret.as_bytes());
     encode(&header, &claims, &key)
         .map_err(|e| Error::Other(anyhow::anyhow!("JWT sign: {e}")))
+}
+
+// ── Server-side JWT (for REST API calls) ───────────────────────────────────
+
+/// Generates an admin JWT for use with the LiveKit Server REST API.
+/// Claims are built as raw JSON to exactly match what the LiveKit Go SDK produces,
+/// avoiding any risk of serde struct/rename translation issues.
+fn make_admin_token(config: &Config) -> Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?
+        .as_secs();
+
+    let claims = serde_json::json!({
+        "iss": config.livekit_api_key,
+        "sub": config.livekit_api_key,
+        "iat": now,
+        "exp": now + 60,
+        "nbf": now,
+        "video": {
+            "roomAdmin": true,
+            "roomCreate": true,
+        }
+    });
+
+    let mut header = Header::new(Algorithm::HS256);
+    header.typ = Some("JWT".to_string());
+    let key = EncodingKey::from_secret(config.livekit_api_secret.as_bytes());
+    encode(&header, &claims, &key)
+        .map_err(|e| Error::Other(anyhow::anyhow!("admin JWT sign: {e}")))
+}
+
+/// Sends a JSON event to a user's personal inbox LiveKit room via the
+/// LiveKit Server REST API (`/twirp/livekit.RoomService/SendData`).
+/// Non-fatal — if the user is offline the room may not exist; errors are logged.
+pub async fn publish_to_user_inbox(
+    config: &Config,
+    user_id: &str,
+    payload: serde_json::Value,
+) -> Result<()> {
+    if config.livekit_url.is_empty() || config.livekit_api_key.is_empty() {
+        return Ok(());
+    }
+
+    // Convert the WebSocket URL to HTTP for the REST API
+    let http_url = config.livekit_url
+        .replace("wss://", "https://")
+        .replace("ws://", "http://");
+
+    let token = make_admin_token(config)?;
+    let room_name = format!("inbox-{}", user_id);
+
+    let raw = serde_json::to_vec(&payload).map_err(Error::Serde)?;
+    let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{}/twirp/livekit.RoomService/SendData", http_url))
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "room": room_name,
+            "data": data_b64,
+        }))
+        .send()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("publish_to_user_inbox http: {e}")))?;
+
+    if !resp.status().is_success() {
+        // Non-fatal: room may not exist if the user is offline.
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        eprintln!("[inbox] SendData to {room_name} returned {status}: {body}");
+    }
+
+    Ok(())
 }
 
 // ── Legacy commands (kept for potential future use) ────────────────────────
@@ -270,6 +348,48 @@ pub async fn connect_rooms(
     Ok(())
 }
 
+/// Publishes a new_message event to a LiveKit room that the current process
+/// is already connected to. Used by `send_message` to notify group channel members.
+/// Returns silently (non-fatal) if the room is not connected.
+pub async fn publish_new_message_to_room(
+    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    room_id: &str,
+    channel_id: Option<&str>,
+    conversation_id: Option<&str>,
+    sender_id: &str,
+    sender_username: Option<&str>,
+) -> Result<()> {
+    let room = {
+        let lk = livekit.lock().await;
+        lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    let room = match room {
+        None => return Ok(()),
+        Some(r) => r,
+    };
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "type": "new_message",
+        "channel_id": channel_id,
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "sender_username": sender_username,
+    }))
+    .map_err(Error::Serde)?;
+
+    room.local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: true,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("publish_new_message: {e}")))?;
+
+    Ok(())
+}
+
 /// Publishes a data ping to a LiveKit room.
 /// Called by the frontend after a message is successfully sent.
 #[tauri::command]
@@ -336,30 +456,43 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
         Err(_) => return,
     };
 
-    if data.get("type").and_then(|v| v.as_str()) != Some("new_message") {
-        return;
+    match data.get("type").and_then(|v| v.as_str()) {
+        Some("new_message") => {
+            let event = RealtimeEvent::NewMessage {
+                channel_id: data
+                    .get("channel_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
+                conversation_id: data
+                    .get("conversation_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
+                sender_id: data
+                    .get("sender_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                sender_username: data
+                    .get("sender_username")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
+            };
+            // Errors here mean the frontend channel was dropped (e.g. logout). Ignore.
+            let _ = channel.send(event);
+        }
+        Some("dm_created") => {
+            if let Some(conversation_id) = data
+                .get("conversation_id")
+                .and_then(|v| v.as_str())
+            {
+                let _ = channel.send(RealtimeEvent::DmCreated {
+                    conversation_id: conversation_id.to_owned(),
+                });
+            }
+        }
+        Some("membership_changed") => {
+            let _ = channel.send(RealtimeEvent::MembershipChanged {});
+        }
+        _ => {}
     }
-
-    let event = RealtimeEvent::NewMessage {
-        channel_id: data
-            .get("channel_id")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned),
-        conversation_id: data
-            .get("conversation_id")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned),
-        sender_id: data
-            .get("sender_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_owned(),
-        sender_username: data
-            .get("sender_username")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned),
-    };
-
-    // Errors here mean the frontend channel was dropped (e.g. logout). Ignore.
-    let _ = channel.send(event);
 }
