@@ -193,3 +193,17 @@ pub async fn load(key: &str) -> Result<Option<Vec<u8>>> {
 pub async fn delete(key: &str) -> Result<()> {
     backend::delete(key).await
 }
+
+// ── Per-user helpers — namespace as "{key}_{user_id}" ────────────────────────
+
+pub async fn store_for_user(key: &str, user_id: &str, value: &[u8]) -> Result<()> {
+    backend::store(&format!("{key}_{user_id}"), value).await
+}
+
+pub async fn load_for_user(key: &str, user_id: &str) -> Result<Option<Vec<u8>>> {
+    backend::load(&format!("{key}_{user_id}")).await
+}
+
+pub async fn delete_for_user(key: &str, user_id: &str) -> Result<()> {
+    backend::delete(&format!("{key}_{user_id}")).await
+}

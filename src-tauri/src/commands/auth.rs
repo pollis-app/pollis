@@ -7,9 +7,6 @@ use crate::error::Result;
 use crate::keystore;
 use crate::state::AppState;
 use ulid::Ulid;
-use crate::signal::identity::{IdentityKey, generate_signed_prekey, generate_one_time_prekeys, load_x25519_secret};
-use x25519_dalek::{StaticSecret, PublicKey as X25519PublicKey};
-use rand::rngs::OsRng;
 
 const SESSION_KEY: &str = "session";
 
@@ -27,103 +24,25 @@ pub struct IdentityInfo {
     pub is_new: bool,
 }
 
-/// Initialize Signal identity for the given user_id.
-/// On first call: generates Ed25519 IK + X25519 IK, SPK, 100 OPKs and uploads to Turso.
-/// On subsequent calls: ensures X25519 identity key exists (migration) and returns info.
-///
-/// NOTE: users.identity_key stores the X25519 public key (not Ed25519).
-/// Ed25519 is used only for signing; X25519 is used for Diffie-Hellman key exchange.
+/// Ensure this user has MLS credentials set up and a KeyPackage published.
+/// Called after login to make the user invitable to MLS groups/DMs.
 #[tauri::command]
 pub async fn initialize_identity(
     state: State<'_, Arc<AppState>>,
     user_id: String,
 ) -> Result<IdentityInfo> {
-    let (identity, is_new_ed25519) = match IdentityKey::load().await? {
-        Some(ik) => (ik, false),
-        None => (IdentityKey::generate_and_store().await?, true),
-    };
-
-    // Ensure a dedicated X25519 identity key exists. This is separate from the
-    // Ed25519 signing key — it is used exclusively for DH-based key distribution.
-    let (x25519_pub, x25519_key_is_new) = match load_x25519_secret("x25519_ik_private").await {
-        Ok(secret) => (X25519PublicKey::from(&secret), false),
-        Err(_) => {
-            let secret = StaticSecret::random_from_rng(OsRng);
-            let pub_key = X25519PublicKey::from(&secret);
-            keystore::store("x25519_ik_private", secret.as_bytes()).await?;
-            eprintln!("[identity] generated new X25519 identity key for user {user_id}");
-            (pub_key, true)
-        }
-    };
-
-    let x25519_pub_bytes: [u8; 32] = *x25519_pub.as_bytes();
-    let public_key = hex::encode(x25519_pub_bytes);
-
-    if is_new_ed25519 {
-        let (spk_pub, spk_sig) = generate_signed_prekey(1, &identity).await?;
-        let opks = generate_one_time_prekeys(1, 100).await?;
-        upload_initial_keys(&state, &user_id, &x25519_pub_bytes, 1, &spk_pub, &spk_sig, &opks).await?;
-        eprintln!("[identity] uploaded initial keys for new user {user_id}");
-        // Stale distribution rows (encrypted with old keys) are now invalid — delete them
-        // so senders will redistribute with the new identity key on their next message.
-        let conn = state.remote_db.conn().await?;
-        let _ = conn.execute(
-            "DELETE FROM sender_key_dist WHERE recipient_id = ?1",
-            libsql::params![user_id.clone()],
-        ).await;
-        eprintln!("[identity] cleared stale sender_key_dist rows for {user_id}");
-    } else {
-        // Existing user: update identity_key to the X25519 public key in case it was
-        // previously set to an Ed25519 key (the old broken behaviour).
-        let conn = state.remote_db.conn().await?;
-        conn.execute(
-            "UPDATE users SET identity_key = ?1 WHERE id = ?2",
-            libsql::params![public_key.clone(), user_id.clone()],
-        ).await?;
-        eprintln!("[identity] ensured X25519 identity_key is uploaded for existing user {user_id}");
-
-        // If X25519 key is new (fresh keystore), old distribution rows are stale.
-        if x25519_key_is_new {
-            let _ = conn.execute(
-                "DELETE FROM sender_key_dist WHERE recipient_id = ?1",
-                libsql::params![user_id.clone()],
-            ).await;
-            eprintln!("[identity] cleared stale sender_key_dist rows for {user_id} (new X25519 key)");
-        }
-
-        // Ensure an SPK exists in the remote DB. Existing users may have none if they
-        // went through the Ed25519→X25519 migration without an SPK upload.
-        let mut spk_rows = conn.query(
-            "SELECT key_id FROM signed_prekey WHERE user_id = ?1 ORDER BY key_id DESC LIMIT 1",
-            libsql::params![user_id.clone()],
-        ).await?;
-        if spk_rows.next().await?.is_none() {
-            let (spk_pub, spk_sig) = generate_signed_prekey(1, &identity).await?;
-            conn.execute(
-                "INSERT OR REPLACE INTO signed_prekey (user_id, key_id, public_key, signature) VALUES (?1, ?2, ?3, ?4)",
-                libsql::params![user_id.clone(), 1i64, hex::encode(&spk_pub), hex::encode(&spk_sig)],
-            ).await?;
-            eprintln!("[identity] uploaded missing SPK for existing user {user_id}");
-        }
+    match crate::commands::mls::ensure_mls_key_package(&state, &user_id).await {
+        Ok(()) => eprintln!("[identity] MLS key package ensured for {user_id}"),
+        Err(e) => eprintln!("[identity] MLS key package error (non-fatal): {e}"),
     }
 
-    Ok(IdentityInfo { user_id, public_key, is_new: is_new_ed25519 })
+    Ok(IdentityInfo { user_id, public_key: String::new(), is_new: false })
 }
 
-/// Check whether a Signal identity key exists locally.
+/// Check whether an MLS identity exists locally.
 #[tauri::command]
 pub async fn get_identity() -> Result<Option<IdentityInfo>> {
-    match IdentityKey::load().await? {
-        Some(identity) => {
-            let public_key = hex::encode(identity.public_key_bytes());
-            Ok(Some(IdentityInfo {
-                user_id: String::new(),
-                public_key,
-                is_new: false,
-            }))
-        }
-        None => Ok(None),
-    }
+    Ok(None)
 }
 
 /// Request an OTP to be sent to the given email address.
@@ -253,7 +172,9 @@ pub async fn verify_otp(
     // Persist session to OS keystore so it survives app restarts
     let session_bytes = serde_json::to_vec(&profile)
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
-    keystore::store(SESSION_KEY, &session_bytes).await?;
+    keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
+    state.load_user_db(&profile.id).await?;
+    crate::accounts::upsert_account(&profile.id, &profile.username, None)?;
 
     Ok(profile)
 }
@@ -263,7 +184,14 @@ pub async fn verify_otp(
 /// Returns None if the user has never signed in or has logged out.
 #[tauri::command]
 pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserProfile>> {
-    let bytes = match keystore::load(SESSION_KEY).await? {
+    // Identify the last active user from the local accounts index.
+    let index = crate::accounts::read_accounts_index();
+    let user_id = match index.last_active_user {
+        Some(uid) => uid,
+        None => return Ok(None),
+    };
+
+    let bytes = match keystore::load_for_user(SESSION_KEY, &user_id).await? {
         Some(b) => b,
         None => return Ok(None),
     };
@@ -286,7 +214,8 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
                     match rows.next().await {
                         Ok(None) => {
                             // Turso confirmed the user doesn't exist — stale session
-                            let _ = keystore::delete(SESSION_KEY).await;
+                            let _ = keystore::delete_for_user(SESSION_KEY, &user_id).await;
+                            let _ = crate::accounts::clear_last_active_user();
                             return Ok(None);
                         }
                         Ok(Some(_)) => {
@@ -307,21 +236,40 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
         }
     }
 
+    // Open the per-user local database.
+    state.load_user_db(&profile.id).await?;
+
     Ok(Some(profile))
 }
 
-/// Clear the persisted session (logout). Optionally delete identity keys too.
+/// Clear the persisted session (logout). Optionally wipe the per-user DB and identity keys.
 #[tauri::command]
-pub async fn logout(delete_data: bool) -> Result<()> {
-    // Always clear the session
-    if keystore::load(SESSION_KEY).await?.is_some() {
-        keystore::delete(SESSION_KEY).await?;
+pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Result<()> {
+    let index = crate::accounts::read_accounts_index();
+    let user_id = index.last_active_user;
+
+    if let Some(ref uid) = user_id {
+        let _ = keystore::delete_for_user(SESSION_KEY, uid).await;
     }
 
+    state.unload_user_db().await;
+
     if delete_data {
-        // Remove identity keys from keystore
-        let _ = keystore::delete("identity_key_private").await;
-        let _ = keystore::delete("identity_key_public").await;
+        if let Some(ref uid) = user_id {
+            let _ = keystore::delete("identity_key_private").await;
+            let _ = keystore::delete("identity_key_public").await;
+            let _ = keystore::delete_for_user("db_key", uid).await;
+            let data_dir = crate::db::local::dirs_path();
+            let db_path = data_dir.join(format!("pollis_{uid}.db"));
+            if db_path.exists() {
+                let _ = std::fs::remove_file(&db_path);
+            }
+            let _ = std::fs::remove_file(data_dir.join(format!("pollis_{uid}.db-wal")));
+            let _ = std::fs::remove_file(data_dir.join(format!("pollis_{uid}.db-shm")));
+            let _ = crate::accounts::remove_account(uid);
+        }
+    } else {
+        let _ = crate::accounts::clear_last_active_user();
     }
 
     Ok(())
@@ -335,27 +283,15 @@ pub async fn delete_account(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Remove sender key distribution rows for this user
-    let _ = conn.execute(
-        "DELETE FROM sender_key_dist WHERE sender_id = ?1 OR recipient_id = ?1",
-        libsql::params![user_id.clone()],
-    ).await;
-
     // Remove encrypted message envelopes sent by this user
     let _ = conn.execute(
         "DELETE FROM message_envelope WHERE sender_id = ?1",
         libsql::params![user_id.clone()],
     ).await;
 
-    // Remove one-time prekeys
+    // Remove MLS key packages
     let _ = conn.execute(
-        "DELETE FROM one_time_prekey WHERE user_id = ?1",
-        libsql::params![user_id.clone()],
-    ).await;
-
-    // Remove signed prekeys
-    let _ = conn.execute(
-        "DELETE FROM signed_prekey WHERE user_id = ?1",
+        "DELETE FROM mls_key_package WHERE user_id = ?1",
         libsql::params![user_id.clone()],
     ).await;
 
@@ -371,86 +307,33 @@ pub async fn delete_account(
         libsql::params![user_id.clone()],
     ).await?;
 
-    // Clear all keystore entries
-    let _ = keystore::delete(SESSION_KEY).await;
-    let _ = keystore::delete("identity_key_private").await;
-    let _ = keystore::delete("identity_key_public").await;
-    let _ = keystore::delete("x25519_ik_private").await;
-    let _ = keystore::delete("local_db_key").await;
-
-    // Clear stored signed prekey and one-time prekey entries from keystore
-    for i in 1u32..=10 {
-        let _ = keystore::delete(&format!("spk_private_{i}")).await;
-    }
-    for i in 1u32..=110 {
-        let _ = keystore::delete(&format!("opk_private_{i}")).await;
-    }
-
-    // Delete the local SQLite database file
+    // Close and delete the per-user local database
+    state.unload_user_db().await;
     {
-        let data_dir = {
-            if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
-                std::path::PathBuf::from(dir)
-            } else {
-                #[cfg(target_os = "macos")]
-                {
-                    let home = std::env::var("HOME").unwrap_or_default();
-                    std::path::PathBuf::from(home)
-                        .join("Library/Application Support/com.pollis.app")
-                }
-                #[cfg(target_os = "linux")]
-                {
-                    let home = std::env::var("HOME").unwrap_or_default();
-                    std::path::PathBuf::from(home).join(".local/share/pollis")
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    let appdata = std::env::var("APPDATA").unwrap_or_default();
-                    std::path::PathBuf::from(appdata).join("pollis")
-                }
-            }
-        };
-        let db_path = data_dir.join("pollis.db");
+        let data_dir = crate::db::local::dirs_path();
+        let db_path = data_dir.join(format!("pollis_{user_id}.db"));
         if db_path.exists() {
             let _ = std::fs::remove_file(&db_path);
         }
-        // Also remove WAL and SHM companion files if present
-        let _ = std::fs::remove_file(data_dir.join("pollis.db-wal"));
-        let _ = std::fs::remove_file(data_dir.join("pollis.db-shm"));
+        let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-wal")));
+        let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-shm")));
     }
+
+    // Clear all keystore entries
+    let _ = keystore::delete_for_user(SESSION_KEY, &user_id).await;
+    let _ = keystore::delete_for_user("db_key", &user_id).await;
+
+    // Remove from local accounts index
+    let _ = crate::accounts::remove_account(&user_id);
 
     eprintln!("[account] deleted account for user {user_id}");
     Ok(())
 }
 
-async fn upload_initial_keys(
-    state: &AppState,
-    user_id: &str,
-    identity_key: &[u8; 32],
-    spk_id: u32,
-    spk_pub: &[u8],
-    spk_sig: &[u8],
-    opks: &[(u32, Vec<u8>)],
-) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    // Update the existing user row with the identity key (user created by verify_otp)
-    conn.execute(
-        "UPDATE users SET identity_key = ?1 WHERE id = ?2",
-        libsql::params![hex::encode(identity_key), user_id],
-    ).await?;
-
-    conn.execute(
-        "INSERT OR REPLACE INTO signed_prekey (user_id, key_id, public_key, signature) VALUES (?1, ?2, ?3, ?4)",
-        libsql::params![user_id, spk_id as i64, hex::encode(spk_pub), hex::encode(spk_sig)],
-    ).await?;
-
-    for (id, pub_key) in opks {
-        conn.execute(
-            "INSERT OR IGNORE INTO one_time_prekey (user_id, key_id, public_key) VALUES (?1, ?2, ?3)",
-            libsql::params![user_id, *id as i64, hex::encode(pub_key)],
-        ).await?;
-    }
-
-    Ok(())
+/// Return the list of accounts that have previously signed in on this device.
+/// Used by the login screen to show a "continue as" picker.
+#[tauri::command]
+pub fn list_known_accounts() -> crate::accounts::AccountsIndex {
+    crate::accounts::read_accounts_index()
 }
+

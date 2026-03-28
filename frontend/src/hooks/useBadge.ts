@@ -20,7 +20,7 @@ export function useBadge() {
     }
 
     const win = getCurrentWindow();
-    // null clears the badge; a number sets it
+    // undefined clears the badge; a number sets it
     win.setBadgeCount(total > 0 ? total : undefined).catch((err) => {
       console.warn('[badge] setBadgeCount failed:', err);
     });

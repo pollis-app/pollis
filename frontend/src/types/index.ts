@@ -135,6 +135,18 @@ export interface SearchResult {
   snippet: string;
 }
 
+export interface AccountInfo {
+  user_id: string;
+  username: string;
+  avatar_url?: string;
+  last_seen: string;
+}
+
+export interface AccountsIndex {
+  accounts: AccountInfo[];
+  last_active_user?: string;
+}
+
 export interface UserAlias {
   id: string;
   user_id: string; // User who owns this alias

@@ -3,8 +3,9 @@ use crate::error::Result;
 
 // Bump this string whenever local_schema.sql changes OR encryption is added.
 // On mismatch the old DB file is deleted and recreated from scratch.
-// Version 3: SQLCipher encryption enabled.
-const LOCAL_SCHEMA_VERSION: &str = "3";
+// Version 4: per-user DB files (pollis_{user_id}.db), preferences + ui_state tables.
+// Version 5: mls_kv table for openmls StorageProvider.
+const LOCAL_SCHEMA_VERSION: &str = "5";
 const SCHEMA: &str = include_str!("migrations/local_schema.sql");
 
 pub struct LocalDb {
@@ -12,17 +13,22 @@ pub struct LocalDb {
 }
 
 impl LocalDb {
-    pub fn open(key: &[u8]) -> Result<Self> {
+    /// Open the per-user database at `pollis_{user_id}.db`.
+    pub fn open_for_user(user_id: &str, key: &[u8]) -> Result<Self> {
         let data_dir = dirs_path();
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create data dir: {e}")))?;
 
-        let db_path = data_dir.join("pollis.db");
+        let db_path = data_dir.join(format!("pollis_{user_id}.db"));
+        Self::open_at(&db_path, key)
+    }
+
+    fn open_at(db_path: &std::path::Path, key: &[u8]) -> Result<Self> {
         let key_pragma = format!("PRAGMA key = \"x'{}'\"", hex::encode(key));
 
         // Check if the stored schema version matches. If not, wipe and recreate.
         if db_path.exists() {
-            match Connection::open(&db_path) {
+            match Connection::open(db_path) {
                 Ok(conn) => {
                     // Apply key before any SQL — required for SQLCipher.
                     let _ = conn.execute_batch(&key_pragma);
@@ -35,19 +41,19 @@ impl LocalDb {
                         .ok();
                     if version.as_deref() != Some(LOCAL_SCHEMA_VERSION) {
                         drop(conn);
-                        std::fs::remove_file(&db_path).map_err(|e| {
+                        std::fs::remove_file(db_path).map_err(|e| {
                             crate::error::Error::Other(anyhow::anyhow!("remove stale db: {e}"))
                         })?;
                     }
                 }
                 Err(_) => {
                     // Unreadable (wrong key or corrupt) — delete and start fresh.
-                    std::fs::remove_file(&db_path).ok();
+                    std::fs::remove_file(db_path).ok();
                 }
             }
         }
 
-        let conn = Connection::open(&db_path)?;
+        let conn = Connection::open(db_path)?;
         // Key must be applied before any other SQL on an encrypted database.
         conn.execute_batch(&key_pragma)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
@@ -247,7 +253,7 @@ mod tests {
     }
 }
 
-fn dirs_path() -> std::path::PathBuf {
+pub fn dirs_path() -> std::path::PathBuf {
     // POLLIS_DATA_DIR lets a second dev instance use a separate local DB
     // without having to override $HOME (which breaks rustup/cargo).
     if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {

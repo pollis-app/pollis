@@ -157,7 +157,13 @@ export const Preferences: React.FC = () => {
                   ].map((preset) => (
                     <button
                       key={preset.label}
-                      onClick={() => { handleHue(preset.h); handleSaturation(preset.s); }}
+                      onClick={() => {
+                        setHue(preset.h);
+                        setRootVar("--accent-h", String(preset.h));
+                        setSaturation(preset.s);
+                        setRootVar("--accent-s", `${preset.s}%`);
+                        save({ accentH: preset.h, accentS: preset.s });
+                      }}
                       className="px-2 py-0.5 text-xs font-mono transition-colors"
                       style={{
                         background: `hsl(${preset.h} ${preset.s}% 62% / 15%)`,
@@ -224,7 +230,13 @@ export const Preferences: React.FC = () => {
                   ].map((preset) => (
                     <button
                       key={preset.label}
-                      onClick={() => { handleBgHue(preset.h); handleBgSaturation(preset.s); }}
+                      onClick={() => {
+                        setBgHue(preset.h);
+                        setRootVar("--bg-h", String(preset.h));
+                        setBgSaturation(preset.s);
+                        setRootVar("--bg-s", `${preset.s}%`);
+                        save({ bgH: preset.h, bgS: preset.s });
+                      }}
                       className="px-2 py-0.5 text-xs font-mono transition-colors"
                       style={{
                         background: `hsl(${preset.h} ${preset.s}% 20% / 40%)`,

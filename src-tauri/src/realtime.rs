@@ -15,6 +15,14 @@ pub enum RealtimeEvent {
         sender_id: String,
         sender_username: Option<String>,
     },
+    /// Sent to a user's personal inbox room when a DM channel is created
+    /// and they are a member, so they can fetch it without refreshing.
+    DmCreated {
+        conversation_id: String,
+    },
+    /// Sent to a user's personal inbox room when they are added to a group
+    /// (via invite acceptance or join-request approval).
+    MembershipChanged {},
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

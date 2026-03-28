@@ -223,7 +223,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                 </div>
                 {item.description && (
                   <div
-                    className="text-xs font-sans mt-0.5"
+                    className="text-xs font-sans mt-0.5 truncate"
                     style={{ color: "var(--c-text-muted)" }}
                   >
                     {item.description}

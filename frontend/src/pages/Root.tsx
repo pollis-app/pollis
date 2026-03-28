@@ -3,7 +3,7 @@ import { useNavigate, useRouter } from "@tanstack/react-router";
 import { exit } from "@tauri-apps/plugin-process";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
-import { usePendingInvites } from "../hooks/queries/useGroups";
+import { usePendingInvites, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import type { RouterContext } from "../types/router";
 
@@ -15,6 +15,7 @@ export const RootPage: React.FC = () => {
 
   const { data: dmConversations = [] } = useDMConversations();
   const { data: pendingInvites = [] } = usePendingInvites();
+  const { data: pendingJoinRequests = [] } = useAllPendingJoinRequests();
 
   const items: TerminalMenuItem[] = [
     {
@@ -37,12 +38,20 @@ export const RootPage: React.FC = () => {
       id: "invites",
       label: "Invites",
       description: pendingInvites.length > 0
-        ? `${pendingInvites.length} pending`
+        ? <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{pendingInvites.length} pending</span>
         : "No pending invites",
       action: () => navigate({ to: "/invites" }),
       type: "system" as const,
       testId: "menu-item-invites",
     },
+    ...(pendingJoinRequests.length > 0 ? [{
+      id: "join-requests",
+      label: "Join Requests",
+      description: <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{pendingJoinRequests.length} pending</span>,
+      action: () => navigate({ to: "/groups" }),
+      type: "system" as const,
+      testId: "menu-item-join-requests",
+    }] : []),
     { id: "__sep1__", label: "", type: "separator" },
     {
       id: "preferences",

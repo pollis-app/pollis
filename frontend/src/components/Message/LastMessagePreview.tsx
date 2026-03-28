@@ -8,7 +8,7 @@ interface LastMessagePreviewProps {
 }
 
 export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelId, conversationId }) => {
-  const { data: message, isLoading } = useLastMessage(channelId ?? null, conversationId ?? null);
+  const { data: message, isLoading, isFetching } = useLastMessage(channelId ?? null, conversationId ?? null);
 
   const text = message?.content_decrypted
     ? (message.sender_username
@@ -16,13 +16,15 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelI
         : message.content_decrypted)
     : null;
 
-  if (!isLoading && !text) {
-    return null;
+  // While initial load or refetch with no prior data, show a scrambling placeholder
+  // so the row height never collapses.
+  if (isLoading || (isFetching && !text)) {
+    return <ScrambleText text={null} placeholderLength={24} typeSpeed={25} />;
   }
 
   return (
     <ScrambleText
-      text={text}
+      text={text ?? "No messages"}
       placeholderLength={24}
       typeSpeed={25}
     />

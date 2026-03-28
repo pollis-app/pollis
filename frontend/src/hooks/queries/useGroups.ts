@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../../services/api";
 import type { GroupWithChannels } from "../../services/api";
@@ -190,7 +191,7 @@ export function useCreateChannel() {
 
       return await invoke<{ id: string; group_id: string; name: string; description?: string }>(
         'create_channel',
-        { groupId, name, description: description || null },
+        { groupId, name, description: description || null, creatorId: currentUser.id },
       );
     },
     onSuccess: (rawChannel, variables) => {
@@ -292,6 +293,11 @@ export function useAcceptInvite() {
         throw new Error('No current user');
       }
       await invoke('accept_group_invite', { inviteId, userId: currentUser.id });
+      // Drain MLS Welcome messages the inviter pre-generated so we can decrypt
+      // channel messages immediately after navigating into the group.
+      await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+        console.warn('[mls] poll_mls_welcomes after accept:', err);
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.pendingInvites(currentUser?.id ?? null) });
@@ -393,5 +399,37 @@ export function useRejectJoinRequest() {
     onSuccess: (groupId) => {
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
     },
+  });
+}
+
+export function useAllPendingJoinRequests() {
+  const currentUser = useAppStore((state) => state.currentUser);
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+
+  const ownedGroupIds = useMemo(() => {
+    if (!currentUser || !groupsWithChannels) {
+      return [];
+    }
+    return groupsWithChannels
+      .filter((g) => g.created_by === currentUser.id)
+      .map((g) => g.id);
+  }, [currentUser?.id, groupsWithChannels]);
+
+  return useQuery({
+    queryKey: ["join-requests", "all-owned", currentUser?.id ?? null, ownedGroupIds.length],
+    queryFn: async (): Promise<JoinRequest[]> => {
+      if (!currentUser || ownedGroupIds.length === 0) {
+        return [];
+      }
+      const results = await Promise.all(
+        ownedGroupIds.map((groupId) =>
+          invoke<JoinRequest[]>('get_group_join_requests', { groupId, requesterId: currentUser.id }),
+        ),
+      );
+      return results.flat();
+    },
+    enabled: !!currentUser && ownedGroupIds.length > 0,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
   });
 }
