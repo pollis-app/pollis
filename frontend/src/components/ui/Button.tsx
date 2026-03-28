@@ -14,7 +14,7 @@ interface ButtonProps {
   isLoading?: boolean;
   loadingText?: string;
   className?: string;
-  variant?: "primary" | "secondary" | "danger";
+  variant?: "primary" | "secondary" | "danger" | "ghost";
   type?: "button" | "submit" | "reset";
   onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
   "aria-label"?: string;
@@ -36,6 +36,7 @@ export const Button: React.FC<ButtonProps> = ({
 }) => {
   const isPrimary = variant === "primary";
   const isDanger = variant === "danger";
+  const isGhost = variant === "ghost";
 
   const variantStyles = (() => {
     if (isDanger) {
@@ -50,6 +51,13 @@ export const Button: React.FC<ButtonProps> = ({
         border: "1px solid var(--c-border-active)",
         background: "var(--c-accent)",
         color: "var(--c-bg)",
+      };
+    }
+    if (isGhost) {
+      return {
+        border: "none",
+        background: "transparent",
+        color: "var(--c-text-muted)",
       };
     }
     return {
@@ -82,6 +90,8 @@ export const Button: React.FC<ButtonProps> = ({
           el.style.background = "hsl(0 70% 50% / 10%)";
         } else if (isPrimary) {
           el.style.opacity = "0.85";
+        } else if (isGhost) {
+          el.style.color = "var(--c-text)";
         } else {
           el.style.background = "var(--c-hover)";
         }
@@ -91,6 +101,7 @@ export const Button: React.FC<ButtonProps> = ({
         const el = e.currentTarget as HTMLElement;
         el.style.opacity = disabled || isLoading ? "0.5" : "1";
         el.style.background = variantStyles.background;
+        if (isGhost) { el.style.color = "var(--c-text-muted)"; }
       }}
     >
       {isLoading && <Spinner />}

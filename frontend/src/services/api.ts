@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { User, Group, Channel, Message } from '../types';
+import type { User, Group, Channel, Message, AccountsIndex } from '../types';
 
 // ── Auth ───────────────────────────────────────────────────────────────────
 
@@ -44,6 +44,10 @@ export async function logout(deleteData = false): Promise<void> {
 
 export async function deleteAccount(userId: string): Promise<void> {
   await invoke('delete_account', { userId });
+}
+
+export async function listKnownAccounts(): Promise<AccountsIndex> {
+  return invoke('list_known_accounts');
 }
 
 // ── User ───────────────────────────────────────────────────────────────────
@@ -140,8 +144,8 @@ export async function createGroup(name: string, description: string, ownerId: st
   return toGroup(g);
 }
 
-export async function createChannel(groupId: string, name: string, description: string, channelType: 'text' | 'voice' = 'text'): Promise<Channel> {
-  const c = await invoke<RawChannel>('create_channel', { groupId, name, description: description || null, channelType });
+export async function createChannel(groupId: string, name: string, description: string, creatorId: string, channelType: 'text' | 'voice' = 'text'): Promise<Channel> {
+  const c = await invoke<RawChannel>('create_channel', { groupId, name, description: description || null, channelType, creatorId });
   return toChannel(c);
 }
 

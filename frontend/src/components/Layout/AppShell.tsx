@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { invoke } from "@tauri-apps/api/core";
 import { TitleBar } from "./TitleBar";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -35,6 +36,38 @@ export const AppShell: React.FC = () => {
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
 
+  const currentUser = useAppStore((s) => s.currentUser);
+
+  // ─── Current route pathname — needed by keyboard handlers below ─────────────
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // On startup, apply any MLS Welcome messages that arrived while offline.
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+      console.warn('[mls] poll_mls_welcomes failed:', err);
+    });
+  }, [currentUser?.id]);
+
+  // When group membership changes (someone joins/leaves while we're online),
+  // process any pending MLS commits so our epoch stays current.
+  useEffect(() => {
+    if (!currentUser || !groupsWithChannels) {
+      return;
+    }
+    for (const group of groupsWithChannels) {
+      const firstChannel = group.channels[0];
+      if (!firstChannel) {
+        continue;
+      }
+      invoke('process_pending_commits', { conversationId: firstChannel.id }).catch((err) => {
+        console.warn(`[mls] process_pending_commits for group ${group.id}:`, err);
+      });
+    }
+  }, [groupsWithChannels]);
+
   // Maintain a LiveKit room connection for the active channel/conversation
   useLiveKitRealtime();
 
@@ -66,29 +99,54 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
-  // Global Esc handler — navigate back in history (skip when search panel is open)
+  // Global Esc handler — navigate back in history (skip when search panel is open).
+  // If currently viewing a channel, go directly to the group page to avoid
+  // landing on "create channel" if that was in history.
   useEffect(() => {
     const handle = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !isSearchOpen) {
-        router.history.back();
+        const channelMatch = pathname.match(/^\/groups\/([^/]+)\/channels\/([^/]+)/);
+        if (channelMatch && channelMatch[2] !== "new") {
+          router.navigate({ to: "/groups/$groupId", params: { groupId: channelMatch[1] } });
+        } else {
+          router.history.back();
+        }
       }
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [router, isSearchOpen]);
+  }, [router, isSearchOpen, pathname]);
 
-  // Cmd/Ctrl+R — refetch all queries without a page reload
+  // Cmd/Ctrl+R — refetch all queries without a page reload, also sync MLS state
   useEffect(() => {
     const handle = (e: KeyboardEvent) => {
       if (e.key === "r" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setIsSyncing(true);
-        queryClient.invalidateQueries().finally(() => setIsSyncing(false));
+        const mlsPromises: Promise<unknown>[] = [];
+        if (currentUser) {
+          mlsPromises.push(
+            invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+              console.warn('[mls] poll_mls_welcomes on sync:', err);
+            }),
+          );
+          for (const group of groupsWithChannels ?? []) {
+            const firstChannel = group.channels[0];
+            if (firstChannel) {
+              mlsPromises.push(
+                invoke('process_pending_commits', { conversationId: firstChannel.id }).catch((err) => {
+                  console.warn(`[mls] process_pending_commits on sync for ${group.id}:`, err);
+                }),
+              );
+            }
+          }
+        }
+        Promise.all([queryClient.invalidateQueries(), ...mlsPromises]).finally(() => setIsSyncing(false));
       }
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [queryClient]);
+  }, [queryClient, currentUser, groupsWithChannels]);
 
   // Auto-focus when the window gains focus (e.g. switching back from another app)
   useEffect(() => {
@@ -110,8 +168,6 @@ export const AppShell: React.FC = () => {
   }, []);
 
   // ─── Breadcrumb derived from current route location ──────────────────────────
-
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
 
   // Clear the status bar alert when the user navigates to the room that
   // triggered it.

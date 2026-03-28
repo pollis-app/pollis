@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
+// import { sendNotification } from '@tauri-apps/plugin-notification';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
@@ -11,13 +11,21 @@ import { useUserGroupsWithChannels } from './queries/useGroups';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
-type RealtimeEvent = {
-  type: 'new_message';
-  channel_id: string | null;
-  conversation_id: string | null;
-  sender_id: string;
-  sender_username: string | null;
-};
+type RealtimeEvent =
+  | {
+      type: 'new_message';
+      channel_id: string | null;
+      conversation_id: string | null;
+      sender_id: string;
+      sender_username: string | null;
+    }
+  | {
+      type: 'dm_created';
+      conversation_id: string;
+    }
+  | {
+      type: 'membership_changed';
+    };
 
 export function useLiveKitRealtime() {
   const { isReady: isTauriReady } = useTauriReady();
@@ -40,20 +48,25 @@ export function useLiveKitRealtime() {
 
   const allRoomIds = useMemo<string[]>(() => {
     const ids: string[] = [];
+    // One room per GROUP covers all channels in that group.
     if (groupsWithChannels) {
       for (const group of groupsWithChannels) {
-        for (const channel of group.channels) {
-          ids.push(channel.id);
-        }
+        ids.push(group.id);
       }
     }
+    // DM conversations keep their own rooms — the LiveKit admin REST API
+    // needed to deliver DM messages via inbox is currently unreliable.
     if (dmConversations) {
       for (const conv of dmConversations) {
         ids.push(conv.id);
       }
     }
+    // Personal inbox receives DM creation and membership change events.
+    if (currentUser) {
+      ids.push(`inbox-${currentUser.id}`);
+    }
     return ids;
-  }, [groupsWithChannels, dmConversations]);
+  }, [groupsWithChannels, dmConversations, currentUser?.id]);
 
   // ── Room name lookup (for notification titles) ────────────────────────────
 
@@ -85,10 +98,8 @@ export function useLiveKitRealtime() {
 
   const isWindowFocusedRef = useRef<boolean>(true);
 
-  const allowNotificationsRef = useRef<boolean>(true);
-  useEffect(() => {
-    allowNotificationsRef.current = prefsQuery.data?.allow_desktop_notifications ?? true;
-  }, [prefsQuery.data?.allow_desktop_notifications]);
+  // Notifications are disabled until we have a reliable cross-platform implementation.
+  const allowNotificationsRef = useRef<boolean>(false);
 
   const notificationPermissionRef = useRef<boolean>(false);
 
@@ -124,25 +135,25 @@ export function useLiveKitRealtime() {
   // ── Notification permission cached on startup ─────────────────────────────
   // Checked once so the channel handler stays synchronous.
 
-  useEffect(() => {
-    if (!isTauriReady) {
-      return;
-    }
-    const setup = async () => {
-      console.log('[realtime] Checking notification permission...');
-      let granted = await isPermissionGranted();
-      console.log('[realtime] Initial permission status:', granted);
-      if (!granted) {
-        console.log('[realtime] Requesting notification permission...');
-        const result = await requestPermission();
-        console.log('[realtime] Permission request result:', result);
-        granted = result === 'granted';
-      }
-      notificationPermissionRef.current = granted;
-      console.log('[realtime] Final notification permission:', granted);
-    };
-    setup().catch((err) => { console.error('[realtime] notification permission setup failed:', err); });
-  }, [isTauriReady]);
+  // useEffect(() => {
+  //   if (!isTauriReady) {
+  //     return;
+  //   }
+  //   const setup = async () => {
+  //     console.log('[realtime] Checking notification permission...');
+  //     let granted = await isPermissionGranted();
+  //     console.log('[realtime] Initial permission status:', granted);
+  //     if (!granted) {
+  //       console.log('[realtime] Requesting notification permission...');
+  //       const result = await requestPermission();
+  //       console.log('[realtime] Permission request result:', result);
+  //       granted = result === 'granted';
+  //     }
+  //     notificationPermissionRef.current = granted;
+  //     console.log('[realtime] Final notification permission:', granted);
+  //   };
+  //   setup().catch((err) => { console.error('[realtime] notification permission setup failed:', err); });
+  // }, [isTauriReady]);
 
   // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
   // Recreated if the user identity changes (e.g. logout → login as someone else).
@@ -155,6 +166,21 @@ export function useLiveKitRealtime() {
     const channel = new Channel<RealtimeEvent>();
 
     channel.onmessage = (event) => {
+      if (event.type === 'dm_created') {
+        queryClientRef.current.invalidateQueries({
+          queryKey: messageQueryKeys.dmConversations(currentUser.id),
+        });
+        return;
+      }
+
+      if (event.type === 'membership_changed') {
+        // Invalidate all group and invite queries — covers both invite received
+        // and join-request approved scenarios.
+        queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
+        queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
+        return;
+      }
+
       if (event.type !== 'new_message') {
         return;
       }
@@ -181,23 +207,30 @@ export function useLiveKitRealtime() {
         }
       }
 
+      // Always update the last-message preview regardless of which channel is selected
+      if (channelId) {
+        queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "channel", channelId] });
+      } else if (conversationId) {
+        queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "conversation", conversationId] });
+      }
+
       if (!isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
         const title = incomingId
           ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
           : 'New message';
         const body = `${senderUsername}: New message`;
         // Try Tauri native notification first, fall back to Web Notification API
-        try {
-          sendNotification({ title, body });
-        } catch {
-          // ignore
-        }
-        // Web Notification as fallback (works in WebKit/Tauri on macOS)
-        try {
-          new Notification(title, { body });
-        } catch {
-          // ignore
-        }
+        // try {
+        //   sendNotification({ title, body });
+        // } catch {
+        //   // ignore
+        // }
+        // // Web Notification as fallback (works in WebKit/Tauri on macOS)
+        // try {
+        //   new Notification(title, { body });
+        // } catch {
+        //   // ignore
+        // }
 
         // TODO: play a notification sound here when we have one
         // e.g. new Audio('/sounds/notify.mp3').play().catch(() => {});
@@ -214,7 +247,7 @@ export function useLiveKitRealtime() {
         roomIds: [],
         userId: currentUser.id,
         username: currentUser.username ?? currentUser.id,
-      }).catch(() => {});
+      }).catch(() => { });
     };
   }, [isTauriReady, currentUser?.id, networkStatus]);
 

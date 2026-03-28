@@ -91,8 +91,10 @@ export function useMessages(channelId: string | null, conversationId: string | n
     queryKey,
     queryFn: async (): Promise<Message[]> => {
       if (isChannel && channelId && currentUser) {
-        // get_channel_messages fetches from Turso, ingests sender key distributions,
-        // and decrypts — the only way for recipients to see messages from others.
+        // Advance the local MLS epoch before decrypting so any pending
+        // member-add or member-remove commits are applied first.
+        await invoke('process_pending_commits', { conversationId: channelId }).catch(() => {});
+
         const page = await invoke<MessagePage>('get_channel_messages', {
           userId: currentUser.id,
           channelId,
@@ -102,6 +104,11 @@ export function useMessages(channelId: string | null, conversationId: string | n
       }
 
       if (conversationId && currentUser) {
+        // Drain any pending MLS Welcome messages first — the DM creator may have
+        // added us to the MLS group while we were already online.
+        await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch(() => {});
+        await invoke('process_pending_commits', { conversationId }).catch(() => {});
+
         const page = await invoke<MessagePage>('get_dm_messages', {
           userId: currentUser.id,
           dmChannelId: conversationId,
@@ -158,6 +165,7 @@ export function useSendMessage() {
         senderId: currentUser.id,
         content,
         replyToId: replyToMessageId ?? null,
+        senderUsername: currentUser.username ?? null,
       });
     },
     onSuccess: (newMessage, variables) => {
@@ -166,25 +174,24 @@ export function useSendMessage() {
         : messageQueryKeys.conversation(variables.conversationId);
 
       // Write the new message into the cache immediately so it appears without
-      // waiting for the full refetch round-trip.
+      // waiting for the full refetch round-trip. Include sender_username so the
+      // last-message preview and message list both show the real name immediately.
+      const optimisticMessage: Message = {
+        ...transformMessage(newMessage),
+        sender_username: currentUser?.username ?? undefined,
+      };
       queryClient.setQueryData<Message[]>(queryKey, (old) => {
-        const transformed = transformMessage(newMessage);
-        return old ? [...old, transformed] : [transformed];
+        return old ? [...old, optimisticMessage] : [optimisticMessage];
       });
+
+      // Update the last-message preview immediately.
+      const lastMsgKey = variables.channelId
+        ? ["last-message", "channel", variables.channelId]
+        : ["last-message", "conversation", variables.conversationId];
+      queryClient.setQueryData(lastMsgKey, optimisticMessage);
 
       // Then invalidate in the background so we stay in sync with the server.
       queryClient.invalidateQueries({ queryKey });
-
-      // Notify other participants via the Rust LiveKit connection.
-      invoke('publish_ping', {
-        roomId: variables.channelId || variables.conversationId,
-        channelId: variables.channelId || null,
-        conversationId: variables.conversationId || null,
-        senderId: currentUser?.id,
-        senderUsername: currentUser?.username ?? null,
-      }).catch((err) => {
-        console.error('[realtime] publish_ping failed:', err);
-      });
     },
   });
 }

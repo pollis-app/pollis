@@ -15,8 +15,9 @@ import { UpdateScreen } from "./components/UpdateScreen";
 import * as api from "./services/api";
 import { getPreference, applyPreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
-import type { User } from "./types";
+import type { User, AccountInfo } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
+import { Button } from "./components/ui/Button";
 
 type AppState = "initializing" | "loading" | "email-auth" | "logout-confirm" | "identity-setup" | "update-required" | "ready";
 
@@ -24,9 +25,10 @@ function MainApp() {
   const {
     currentUser,
     setCurrentUser,
-  } = useAppStore();  
+  } = useAppStore();
 
   const [appState, setAppState] = useState<AppState>("initializing");
+  const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
 
   const checkStoredSession = useCallback(async () => {
     try {
@@ -63,6 +65,13 @@ function MainApp() {
         setCurrentUser(user);
         setAppState("ready");
       } else {
+        // No active session — load known accounts for the login screen
+        try {
+          const index = await api.listKnownAccounts();
+          setKnownAccounts(index.accounts);
+        } catch {
+          // Non-critical — fall through to email auth without the list
+        }
         setAppState("email-auth");
       }
     } catch (error) {
@@ -206,6 +215,32 @@ function MainApp() {
                   Enter your email to continue
                 </p>
               </div>
+
+              {/* Known accounts row — shown when user has signed in before */}
+              {knownAccounts.length > 0 && (
+                <div className="flex flex-col gap-1">
+                  <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                    Previously signed in:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {knownAccounts.map((account) => (
+                      <div
+                        key={account.user_id}
+                        className="flex items-center gap-1 px-2 py-1 font-mono text-xs"
+                        style={{
+                          background: "var(--c-surface)",
+                          border: "2px solid var(--c-border)",
+                          borderRadius: "0.5rem",
+                          color: "var(--c-text-dim)",
+                        }}
+                      >
+                        <span>{account.username}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <EmailOTPAuth onSuccess={handleAuthSuccess} />
             </div>
           </Card>
@@ -239,45 +274,30 @@ function MainApp() {
                 </p>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <button
+              <div className="flex flex-col gap-3">
+                <Button
                   data-testid="logout-delete-data-button"
                   onClick={() => handleLogoutConfirm(true)}
-                  className="w-full py-2 px-4 font-mono text-xs transition-colors"
-                  style={{
-                    background: "transparent",
-                    border: "1px solid hsl(0 70% 50% / 40%)",
-                    borderRadius: "4px",
-                    color: "hsl(0 70% 65%)",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "hsl(0 70% 50% / 10%)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                  variant="danger"
+                  className="w-full"
                 >
                   Delete data and sign out
-                </button>
-                <button
+                </Button>
+                <Button
                   data-testid="logout-keep-data-button"
                   onClick={() => handleLogoutConfirm(false)}
-                  className="w-full py-2 px-4 font-mono text-xs transition-colors"
-                  style={{
-                    background: "transparent",
-                    border: "1px solid var(--c-border)",
-                    borderRadius: "4px",
-                    color: "var(--c-text-dim)",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--c-hover)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                  className="w-full"
                 >
                   Keep data and sign out
-                </button>
-                <button
+                </Button>
+                <Button
                   data-testid="logout-cancel-button"
                   onClick={() => setAppState("ready")}
-                  className="w-full py-1 font-mono text-xs"
-                  style={{ color: "var(--c-text-muted)" }}
+                  variant="ghost"
+                  className="w-full"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           </Card>
