@@ -1,7 +1,7 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { isPermissionGranted, requestPermission, sendNotification } from '@tauri-apps/plugin-notification';
+// import { sendNotification } from '@tauri-apps/plugin-notification';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
@@ -85,10 +85,8 @@ export function useLiveKitRealtime() {
 
   const isWindowFocusedRef = useRef<boolean>(true);
 
-  const allowNotificationsRef = useRef<boolean>(true);
-  useEffect(() => {
-    allowNotificationsRef.current = prefsQuery.data?.allow_desktop_notifications ?? true;
-  }, [prefsQuery.data?.allow_desktop_notifications]);
+  // Notifications are disabled until we have a reliable cross-platform implementation.
+  const allowNotificationsRef = useRef<boolean>(false);
 
   const notificationPermissionRef = useRef<boolean>(false);
 
@@ -124,25 +122,25 @@ export function useLiveKitRealtime() {
   // ── Notification permission cached on startup ─────────────────────────────
   // Checked once so the channel handler stays synchronous.
 
-  useEffect(() => {
-    if (!isTauriReady) {
-      return;
-    }
-    const setup = async () => {
-      console.log('[realtime] Checking notification permission...');
-      let granted = await isPermissionGranted();
-      console.log('[realtime] Initial permission status:', granted);
-      if (!granted) {
-        console.log('[realtime] Requesting notification permission...');
-        const result = await requestPermission();
-        console.log('[realtime] Permission request result:', result);
-        granted = result === 'granted';
-      }
-      notificationPermissionRef.current = granted;
-      console.log('[realtime] Final notification permission:', granted);
-    };
-    setup().catch((err) => { console.error('[realtime] notification permission setup failed:', err); });
-  }, [isTauriReady]);
+  // useEffect(() => {
+  //   if (!isTauriReady) {
+  //     return;
+  //   }
+  //   const setup = async () => {
+  //     console.log('[realtime] Checking notification permission...');
+  //     let granted = await isPermissionGranted();
+  //     console.log('[realtime] Initial permission status:', granted);
+  //     if (!granted) {
+  //       console.log('[realtime] Requesting notification permission...');
+  //       const result = await requestPermission();
+  //       console.log('[realtime] Permission request result:', result);
+  //       granted = result === 'granted';
+  //     }
+  //     notificationPermissionRef.current = granted;
+  //     console.log('[realtime] Final notification permission:', granted);
+  //   };
+  //   setup().catch((err) => { console.error('[realtime] notification permission setup failed:', err); });
+  // }, [isTauriReady]);
 
   // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
   // Recreated if the user identity changes (e.g. logout → login as someone else).
@@ -181,23 +179,30 @@ export function useLiveKitRealtime() {
         }
       }
 
+      // Always update the last-message preview regardless of which channel is selected
+      if (channelId) {
+        queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "channel", channelId] });
+      } else if (conversationId) {
+        queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "conversation", conversationId] });
+      }
+
       if (!isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
         const title = incomingId
           ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
           : 'New message';
         const body = `${senderUsername}: New message`;
         // Try Tauri native notification first, fall back to Web Notification API
-        try {
-          sendNotification({ title, body });
-        } catch {
-          // ignore
-        }
-        // Web Notification as fallback (works in WebKit/Tauri on macOS)
-        try {
-          new Notification(title, { body });
-        } catch {
-          // ignore
-        }
+        // try {
+        //   sendNotification({ title, body });
+        // } catch {
+        //   // ignore
+        // }
+        // // Web Notification as fallback (works in WebKit/Tauri on macOS)
+        // try {
+        //   new Notification(title, { body });
+        // } catch {
+        //   // ignore
+        // }
 
         // TODO: play a notification sound here when we have one
         // e.g. new Audio('/sounds/notify.mp3').play().catch(() => {});
@@ -214,7 +219,7 @@ export function useLiveKitRealtime() {
         roomIds: [],
         userId: currentUser.id,
         username: currentUser.username ?? currentUser.id,
-      }).catch(() => {});
+      }).catch(() => { });
     };
   }, [isTauriReady, currentUser?.id, networkStatus]);
 

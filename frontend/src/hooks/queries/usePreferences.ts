@@ -46,7 +46,7 @@ export function usePreferences() {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
         background_color: getPreference<string | undefined>(json, "background_color", undefined),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
-        allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", true),
+        allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
       };
     },
     enabled: !!currentUser,
