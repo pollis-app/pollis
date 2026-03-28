@@ -104,6 +104,9 @@ export function useMessages(channelId: string | null, conversationId: string | n
       }
 
       if (conversationId && currentUser) {
+        // Drain any pending MLS Welcome messages first — the DM creator may have
+        // added us to the MLS group while we were already online.
+        await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch(() => {});
         await invoke('process_pending_commits', { conversationId }).catch(() => {});
 
         const page = await invoke<MessagePage>('get_dm_messages', {

@@ -94,10 +94,21 @@ pub async fn create_dm_channel(
         }
     }
 
-    // Initialise the MLS group for this DM.
+    // Initialise the MLS group for this DM (creator becomes the sole member).
     match crate::commands::mls::init_mls_group(state.inner(), &id, &creator_id).await {
         Ok(()) => {}
         Err(e) => eprintln!("[mls] create_dm_channel: mls group init failed (non-fatal): {e}"),
+    }
+
+    // Add every non-creator member to the MLS group so they receive a Welcome
+    // and can send/decrypt immediately once they call poll_mls_welcomes.
+    for member in members.iter().filter(|m| m.user_id != creator_id) {
+        match crate::commands::mls::add_member_mls_inner(
+            state.inner(), &id, &member.user_id, &creator_id,
+        ).await {
+            Ok(()) => {}
+            Err(e) => eprintln!("[mls] create_dm_channel: add_member for {}: {e}", member.user_id),
+        }
     }
 
     Ok(DmChannel {
