@@ -127,12 +127,26 @@ pub async fn send_message(
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
+    // For group channels, all channels share the group's MLS group (keyed by group_id).
+    // For DM conversations, the MLS group is keyed by conversation_id directly.
+    let mls_group_id = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn.query(
+            "SELECT group_id FROM channels WHERE id = ?1",
+            libsql::params![conversation_id.clone()],
+        ).await?;
+        match rows.next().await? {
+            Some(row) => row.get::<String>(0)?,
+            None => conversation_id.clone(),
+        }
+    };
+
     // Encrypt with MLS and store locally.
     let ciphertext_remote = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &conversation_id, content.as_bytes())
+        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, content.as_bytes())
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
                 "MLS group not initialized for conversation {conversation_id}"
             )))?;
@@ -213,6 +227,18 @@ pub async fn get_channel_messages(
     let limit = limit.unwrap_or(50);
     let conn = state.remote_db.conn().await?;
 
+    // All channels in a group share one MLS group (keyed by group_id).
+    let mls_group_id = {
+        let mut gid_rows = conn.query(
+            "SELECT group_id FROM channels WHERE id = ?1",
+            libsql::params![channel_id.clone()],
+        ).await?;
+        match gid_rows.next().await? {
+            Some(row) => row.get::<String>(0)?,
+            None => channel_id.clone(),
+        }
+    };
+
     let mut rows = match cursor {
         None => {
             conn.query(
@@ -268,7 +294,7 @@ pub async fn get_channel_messages(
             } else {
                 let plaintext = ciphertext.strip_prefix("mls:")
                     .and_then(|hex_str| hex::decode(hex_str).ok())
-                    .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &conv_id, &bytes))
+                    .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &mls_group_id, &bytes))
                     .and_then(|b| String::from_utf8(b).ok());
                 if let Some(ref text) = plaintext {
                     let _ = db.conn().execute(

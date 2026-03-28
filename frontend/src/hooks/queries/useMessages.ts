@@ -170,11 +170,21 @@ export function useSendMessage() {
         : messageQueryKeys.conversation(variables.conversationId);
 
       // Write the new message into the cache immediately so it appears without
-      // waiting for the full refetch round-trip.
+      // waiting for the full refetch round-trip. Include sender_username so the
+      // last-message preview and message list both show the real name immediately.
+      const optimisticMessage: Message = {
+        ...transformMessage(newMessage),
+        sender_username: currentUser?.username ?? undefined,
+      };
       queryClient.setQueryData<Message[]>(queryKey, (old) => {
-        const transformed = transformMessage(newMessage);
-        return old ? [...old, transformed] : [transformed];
+        return old ? [...old, optimisticMessage] : [optimisticMessage];
       });
+
+      // Update the last-message preview immediately.
+      const lastMsgKey = variables.channelId
+        ? ["last-message", "channel", variables.channelId]
+        : ["last-message", "conversation", variables.conversationId];
+      queryClient.setQueryData(lastMsgKey, optimisticMessage);
 
       // Then invalidate in the background so we stay in sync with the server.
       queryClient.invalidateQueries({ queryKey });

@@ -180,32 +180,31 @@ pub async fn fetch_mls_key_package(
     }
 }
 
-/// Generate KeyPackages and publish them so the user always has 5 unclaimed
-/// packages in the remote table.  Called from `initialize_identity` on every
-/// login.  If ≥ 5 unclaimed packages already exist, nothing is done.
+/// Rotate key packages: delete all unclaimed packages for this user from the
+/// remote table and publish TARGET fresh ones backed by the current local DB.
+///
+/// Called from `initialize_identity` on every login.  Deleting stale unclaimed
+/// packages first is critical — if the local DB was wiped (or the user logs in
+/// on a new device), any previously published packages would have orphaned
+/// private keys and cause "No matching key package" errors when peers try to
+/// add this user to an MLS group.
 pub async fn ensure_mls_key_package(
     state: &Arc<AppState>,
     user_id: &str,
 ) -> Result<()> {
     const TARGET: i64 = 5;
 
-    // Count existing unclaimed packages for this user.
     let conn = state.remote_db.conn().await?;
-    let mut rows = conn.query(
-        "SELECT COUNT(*) FROM mls_key_package WHERE user_id = ?1 AND claimed = 0",
+
+    // Remove any unclaimed packages — their private keys may no longer exist
+    // in the current local DB (e.g. after a wipe or fresh install).
+    conn.execute(
+        "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0",
         libsql::params![user_id],
     ).await?;
-    let existing: i64 = rows.next().await?
-        .map(|r| r.get::<i64>(0).unwrap_or(0))
-        .unwrap_or(0);
 
-    let to_generate = TARGET - existing;
-    if to_generate <= 0 {
-        return Ok(());
-    }
-
-    // Generate and publish (TARGET - existing) new packages.
-    for _ in 0..to_generate {
+    // Generate and publish TARGET fresh packages.
+    for _ in 0..TARGET {
         // Generate one package locally; each iteration creates a distinct key.
         let (ref_hex, kp_bytes) = {
             let guard = state.local_db.lock().await;
@@ -601,6 +600,33 @@ pub async fn remove_member_mls_inner(
     remove_member_mls_impl(state, conversation_id, target_user_id, actor_user_id).await
 }
 
+/// Wipe all local MLS state for a group without publishing a commit.
+///
+/// Used when the local user leaves a group.  MLS does not allow a member to
+/// commit their own removal (`remove_members` with self as target errors), so
+/// instead we just delete the local group epoch.  The remaining members still
+/// have this user in their group state until the next admin-issued commit, but
+/// forward secrecy ensures the leaver cannot decrypt messages after the next
+/// epoch advance.
+pub async fn forget_local_mls_group(
+    state: &Arc<AppState>,
+    group_id: &str,
+) -> crate::error::Result<()> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| {
+        crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+    })?;
+    let provider = PollisProvider::new(db.conn());
+    let mls_group_id = GroupId::from_slice(group_id.as_bytes());
+
+    if let Ok(Some(mut group)) = MlsGroup::load(provider.storage(), &mls_group_id) {
+        group.delete(provider.storage())
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls delete group: {e}")))?;
+    }
+    // If the group wasn't found locally, nothing to clean up.
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn remove_member_mls(
     state: State<'_, Arc<AppState>>,
@@ -681,6 +707,21 @@ pub async fn process_pending_commits(
     state: State<'_, Arc<AppState>>,
     conversation_id: String,
 ) -> crate::error::Result<()> {
+    // Resolve the MLS group ID: for group channels, all channels share the
+    // group's MLS group (keyed by group_id). For DM conversations, use
+    // conversation_id directly.
+    let mls_group_id = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn.query(
+            "SELECT group_id FROM channels WHERE id = ?1",
+            libsql::params![conversation_id.clone()],
+        ).await?;
+        match rows.next().await? {
+            Some(row) => row.get::<String>(0)?,
+            None => conversation_id.clone(),
+        }
+    };
+
     // 1. Get the current epoch from the local group.
     let initial_epoch = {
         let guard = state.local_db.lock().await;
@@ -688,11 +729,11 @@ pub async fn process_pending_commits(
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
         let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
+        let group_id = GroupId::from_slice(mls_group_id.as_bytes());
         let group = MlsGroup::load(provider.storage(), &group_id)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not found for {conversation_id}"
+                "MLS group not found for {mls_group_id}"
             )))?;
         group.epoch().as_u64()
     };
@@ -705,7 +746,7 @@ pub async fn process_pending_commits(
          FROM mls_commit_log \
          WHERE conversation_id = ?1 AND epoch >= ?2 \
          ORDER BY epoch ASC, seq ASC",
-        libsql::params![conversation_id.clone(), initial_epoch as i64],
+        libsql::params![mls_group_id.clone(), initial_epoch as i64],
     ).await?;
 
     let mut pending: Vec<(i64, Vec<u8>)> = Vec::new();
@@ -721,7 +762,7 @@ pub async fn process_pending_commits(
     for (row_epoch, commit_data) in pending {
         if row_epoch as u64 != current_epoch {
             eprintln!(
-                "[mls] process_pending_commits: epoch gap for {conversation_id}: \
+                "[mls] process_pending_commits: epoch gap for {mls_group_id}: \
                  expected {current_epoch}, got {row_epoch} — stopping"
             );
             break;
@@ -736,7 +777,7 @@ pub async fn process_pending_commits(
                 None => break,
             };
             let provider = PollisProvider::new(db.conn());
-            let group_id = GroupId::from_slice(conversation_id.as_bytes());
+            let group_id = GroupId::from_slice(mls_group_id.as_bytes());
             let mut group = match MlsGroup::load(provider.storage(), &group_id)
                 .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?
             {
