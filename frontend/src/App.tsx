@@ -17,6 +17,7 @@ import { getPreference, applyPreferences } from "./hooks/queries/usePreferences"
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
 import type { User, AccountInfo } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
+import { Button } from "./components/ui/Button";
 
 type AppState = "initializing" | "loading" | "email-auth" | "logout-confirm" | "identity-setup" | "update-required" | "ready";
 
@@ -273,45 +274,30 @@ function MainApp() {
                 </p>
               </div>
 
-              <div className="flex flex-col gap-2">
-                <button
+              <div className="flex flex-col gap-3">
+                <Button
                   data-testid="logout-delete-data-button"
                   onClick={() => handleLogoutConfirm(true)}
-                  className="w-full py-2 px-4 font-mono text-xs transition-colors"
-                  style={{
-                    background: "transparent",
-                    border: "1px solid hsl(0 70% 50% / 40%)",
-                    borderRadius: "4px",
-                    color: "hsl(0 70% 65%)",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "hsl(0 70% 50% / 10%)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                  variant="danger"
+                  className="w-full"
                 >
                   Delete data and sign out
-                </button>
-                <button
+                </Button>
+                <Button
                   data-testid="logout-keep-data-button"
                   onClick={() => handleLogoutConfirm(false)}
-                  className="w-full py-2 px-4 font-mono text-xs transition-colors"
-                  style={{
-                    background: "transparent",
-                    border: "1px solid var(--c-border)",
-                    borderRadius: "4px",
-                    color: "var(--c-text-dim)",
-                  }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--c-hover)"; }}
-                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+                  className="w-full"
                 >
                   Keep data and sign out
-                </button>
-                <button
+                </Button>
+                <Button
                   data-testid="logout-cancel-button"
                   onClick={() => setAppState("ready")}
-                  className="w-full py-1 font-mono text-xs"
-                  style={{ color: "var(--c-text-muted)" }}
+                  variant="ghost"
+                  className="w-full"
                 >
                   Cancel
-                </button>
+                </Button>
               </div>
             </div>
           </Card>
