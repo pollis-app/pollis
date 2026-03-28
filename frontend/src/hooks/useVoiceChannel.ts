@@ -1,63 +1,62 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Room, RoomEvent, Participant, LocalParticipant, RemoteParticipant } from 'livekit-client';
-import { invoke } from '@tauri-apps/api/core';
+import { useEffect, useRef, useCallback } from 'react';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 
-export interface VoiceParticipant {
-  identity: string;
-  name: string;
-  isMuted: boolean;
-  isLocal: boolean;
+const VOICE_DEVICES_KEY = 'pollis:voice-devices';
+
+// Mirrors VoiceEvent enum in src-tauri/src/commands/voice.rs
+type VoiceEvent =
+  | { type: 'participant_joined'; identity: string; name: string; is_muted: boolean }
+  | { type: 'participant_left'; identity: string }
+  | { type: 'muted'; identity: string }
+  | { type: 'unmuted'; identity: string }
+  | { type: 'active_speakers'; identities: string[] }
+  | { type: 'disconnected' };
+
+/**
+ * Save device preference and switch mid-call via Tauri command.
+ */
+export function switchVoiceDevice(kind: 'audioinput' | 'audiooutput', deviceName: string): void {
+  const prefs: Record<string, string> = JSON.parse(localStorage.getItem(VOICE_DEVICES_KEY) || '{}');
+  prefs[kind === 'audioinput' ? 'input' : 'output'] = deviceName;
+  localStorage.setItem(VOICE_DEVICES_KEY, JSON.stringify(prefs));
+
+  if (kind === 'audioinput') {
+    invoke('set_voice_input_device', { deviceName }).catch((e) => {
+      console.warn('[VoiceChannel] set_voice_input_device failed:', e);
+    });
+  } else {
+    invoke('set_voice_output_device', { deviceName }).catch((e) => {
+      console.warn('[VoiceChannel] set_voice_output_device failed:', e);
+    });
+  }
 }
 
 interface UseVoiceChannelResult {
-  participants: VoiceParticipant[];
-  activeSpeakerIds: string[];
-  isMuted: boolean;
   toggleMute: () => Promise<void>;
   leave: () => void;
 }
 
-// Separate Room instance solely for audio — never used for data pings.
-// See spec section 5: two Room instances are intentional.
 export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult {
   const { isReady: isTauriReady } = useTauriReady();
-  const { currentUser, networkStatus, setActiveVoiceChannelId } = useAppStore();
+  const {
+    currentUser,
+    networkStatus,
+    setActiveVoiceChannelId,
+    setIsLocalSpeaking,
+    setVoiceParticipants,
+    setVoiceActiveSpeakerIds,
+    setVoiceIsMuted,
+  } = useAppStore();
 
-  const roomRef = useRef<Room | null>(null);
-  const [participants, setParticipants] = useState<VoiceParticipant[]>([]);
-  const [activeSpeakerIds, setActiveSpeakerIds] = useState<string[]>([]);
-  const [isMuted, setIsMuted] = useState(false);
+  // Track participants as a map so we can update mute state in-place
+  const participantsRef = useRef<Map<string, { identity: string; name: string; isMuted: boolean; isLocal: boolean }>>(new Map());
+  const localIdentityRef = useRef<string>('');
 
-  // Build the participant list from current room state
-  const syncParticipants = useCallback((room: Room) => {
-    const local = room.localParticipant;
-    const locals: VoiceParticipant[] = [
-      {
-        identity: local.identity,
-        name: local.name || local.identity,
-        isMuted: !local.isMicrophoneEnabled,
-        isLocal: true,
-      },
-    ];
-
-    const remotes: VoiceParticipant[] = Array.from(room.remoteParticipants.values()).map(
-      (p: RemoteParticipant) => {
-        const micPub = p.getTrackPublication('microphone' as any);
-        return {
-          identity: p.identity,
-          name: p.name || p.identity,
-          isMuted: micPub ? micPub.isMuted : true,
-          isLocal: false,
-        };
-      }
-    );
-
-    setParticipants([...locals, ...remotes]);
-    // Keep local mute indicator in sync
-    setIsMuted(!local.isMicrophoneEnabled);
-  }, []);
+  const flushParticipants = useCallback(() => {
+    setVoiceParticipants(Array.from(participantsRef.current.values()));
+  }, [setVoiceParticipants]);
 
   useEffect(() => {
     if (!channelId || !isTauriReady || !currentUser || networkStatus === 'kill-switch') {
@@ -67,72 +66,86 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
     let cancelled = false;
 
     const connect = async () => {
-      const url = await invoke<string>('get_livekit_url');
+      const prefs: Record<string, string> = JSON.parse(localStorage.getItem(VOICE_DEVICES_KEY) || '{}');
+      const inputDevice: string | null = prefs.input && prefs.input !== 'default' ? prefs.input : null;
+      const outputDevice: string | null = prefs.output && prefs.output !== 'default' ? prefs.output : null;
+
+      const localIdentity = `voice-${currentUser.id}`;
+      localIdentityRef.current = localIdentity;
+
+      // Register the event channel before joining so no events are missed
+      const voiceChannel = new Channel<VoiceEvent>();
+
+      voiceChannel.onmessage = (event) => {
+        if (event.type === 'participant_joined') {
+          participantsRef.current.set(event.identity, {
+            identity: event.identity,
+            name: event.name,
+            isMuted: event.is_muted,
+            isLocal: event.identity === localIdentityRef.current,
+          });
+          flushParticipants();
+        } else if (event.type === 'participant_left') {
+          participantsRef.current.delete(event.identity);
+          flushParticipants();
+        } else if (event.type === 'muted') {
+          const p = participantsRef.current.get(event.identity);
+          if (p) {
+            participantsRef.current.set(event.identity, { ...p, isMuted: true });
+          }
+          if (event.identity === localIdentityRef.current) {
+            setVoiceIsMuted(true);
+          }
+          flushParticipants();
+        } else if (event.type === 'unmuted') {
+          const p = participantsRef.current.get(event.identity);
+          if (p) {
+            participantsRef.current.set(event.identity, { ...p, isMuted: false });
+          }
+          if (event.identity === localIdentityRef.current) {
+            setVoiceIsMuted(false);
+          }
+          flushParticipants();
+        } else if (event.type === 'active_speakers') {
+          setVoiceActiveSpeakerIds(event.identities);
+          const isLocalSpeaking = event.identities.includes(localIdentityRef.current);
+          setIsLocalSpeaking(isLocalSpeaking);
+        } else if (event.type === 'disconnected') {
+          participantsRef.current.clear();
+          setVoiceParticipants([]);
+          setVoiceActiveSpeakerIds([]);
+          setVoiceIsMuted(false);
+          setIsLocalSpeaking(false);
+          setActiveVoiceChannelId(null);
+        }
+      };
+
+      await invoke('subscribe_voice_events', { onEvent: voiceChannel });
 
       if (cancelled) {
         return;
       }
 
-      if (!url || !url.trim()) {
-        // LiveKit not configured — skip silently
-        return;
-      }
+      // Add ourselves as the local participant immediately
+      participantsRef.current.set(localIdentity, {
+        identity: localIdentity,
+        name: currentUser.username ?? currentUser.id,
+        isMuted: false,
+        isLocal: true,
+      });
+      flushParticipants();
 
-      const token = await invoke<string>('get_livekit_token', {
-        roomName: channelId,
-        identity: `voice-${currentUser.id}`,
+      await invoke('join_voice_channel', {
+        channelId,
+        userId: currentUser.id,
         displayName: currentUser.username ?? currentUser.id,
+        inputDevice,
+        outputDevice,
       });
 
       if (cancelled) {
-        return;
+        await invoke('leave_voice_channel');
       }
-
-      const room = new Room();
-
-      room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-        setActiveSpeakerIds(speakers.map((s) => s.identity));
-      });
-
-      room.on(RoomEvent.ParticipantConnected, () => {
-        syncParticipants(room);
-      });
-
-      room.on(RoomEvent.ParticipantDisconnected, () => {
-        syncParticipants(room);
-      });
-
-      room.on(RoomEvent.TrackMuted, () => {
-        syncParticipants(room);
-      });
-
-      room.on(RoomEvent.TrackUnmuted, () => {
-        syncParticipants(room);
-      });
-
-      room.on(RoomEvent.LocalTrackPublished, () => {
-        syncParticipants(room);
-      });
-
-      room.on(RoomEvent.Disconnected, () => {
-        setParticipants([]);
-        setActiveSpeakerIds([]);
-      });
-
-      console.log('[VoiceChannel] connecting to room', channelId);
-      await room.connect(url, token);
-
-      if (cancelled) {
-        room.disconnect();
-        return;
-      }
-
-      // Publish local microphone on join
-      await room.localParticipant.setMicrophoneEnabled(true);
-
-      console.log('[VoiceChannel] connected and mic enabled for room', channelId);
-      roomRef.current = room;
-      syncParticipants(room);
     };
 
     connect().catch((err) => {
@@ -141,12 +154,13 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
 
     return () => {
       cancelled = true;
-      if (roomRef.current) {
-        roomRef.current.disconnect();
-        roomRef.current = null;
-      }
-      setParticipants([]);
-      setActiveSpeakerIds([]);
+      participantsRef.current.clear();
+      localIdentityRef.current = '';
+      setVoiceParticipants([]);
+      setVoiceActiveSpeakerIds([]);
+      setVoiceIsMuted(false);
+      setIsLocalSpeaking(false);
+      invoke('leave_voice_channel').catch(() => {});
     };
   }, [
     channelId,
@@ -154,29 +168,34 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
     currentUser?.id,
     currentUser?.username,
     networkStatus,
-    syncParticipants,
+    flushParticipants,
+    setVoiceParticipants,
+    setVoiceActiveSpeakerIds,
+    setVoiceIsMuted,
+    setIsLocalSpeaking,
+    setActiveVoiceChannelId,
   ]);
 
   const toggleMute = useCallback(async () => {
-    const room = roomRef.current;
-    if (!room) {
-      return;
+    const newMuted = await invoke<boolean>('toggle_voice_mute');
+    setVoiceIsMuted(newMuted);
+    const local = participantsRef.current.get(localIdentityRef.current);
+    if (local) {
+      participantsRef.current.set(localIdentityRef.current, { ...local, isMuted: newMuted });
+      setVoiceParticipants(Array.from(participantsRef.current.values()));
     }
-    const newEnabled = !room.localParticipant.isMicrophoneEnabled;
-    await room.localParticipant.setMicrophoneEnabled(newEnabled);
-    setIsMuted(!newEnabled);
-    syncParticipants(room);
-  }, [syncParticipants]);
+  }, [setVoiceIsMuted, setVoiceParticipants]);
 
   const leave = useCallback(() => {
-    if (roomRef.current) {
-      roomRef.current.disconnect();
-      roomRef.current = null;
-    }
-    setParticipants([]);
-    setActiveSpeakerIds([]);
+    participantsRef.current.clear();
+    localIdentityRef.current = '';
+    setVoiceParticipants([]);
+    setVoiceActiveSpeakerIds([]);
+    setVoiceIsMuted(false);
+    setIsLocalSpeaking(false);
     setActiveVoiceChannelId(null);
-  }, [setActiveVoiceChannelId]);
+    invoke('leave_voice_channel').catch(() => {});
+  }, [setActiveVoiceChannelId, setVoiceParticipants, setVoiceActiveSpeakerIds, setVoiceIsMuted, setIsLocalSpeaking]);
 
-  return { participants, activeSpeakerIds, isMuted, toggleMute, leave };
+  return { toggleMute, leave };
 }

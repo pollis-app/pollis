@@ -37,7 +37,7 @@ struct VideoGrants {
     can_publish_data: bool,
 }
 
-fn make_token(config: &Config, room_name: &str, identity: &str, display_name: &str) -> Result<String> {
+pub(crate) fn make_token(config: &Config, room_name: &str, identity: &str, display_name: &str) -> Result<String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?

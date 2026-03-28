@@ -41,38 +41,44 @@ export const GroupPage: React.FC = () => {
   }
 
   const channels = group.channels ?? [];
+  const textChannels = channels.filter((ch) => ch.channel_type !== "voice");
+  const voiceChannels = channels.filter((ch) => ch.channel_type === "voice");
+
+  const textChannelItems: TerminalMenuItem[] = textChannels.map((ch) => ({
+    id: ch.id,
+    label: `# ${ch.name}`,
+    description: <LastMessagePreview channelId={ch.id} />,
+    action: () => {
+      setSelectedChannelId(ch.id);
+      markRead(ch.id);
+      navigate({ to: "/groups/$groupId/channels/$channelId", params: { groupId, channelId: ch.id } });
+    },
+    badge: unreadCounts[ch.id] ?? 0,
+    testId: `channel-option-${ch.id}`,
+  }));
+
+  const voiceChannelItems: TerminalMenuItem[] = voiceChannels.map((ch) => ({
+    id: ch.id,
+    label: `[v] ${ch.name}`,
+    description: ch.description || undefined,
+    action: () => {
+      setActiveVoiceChannelId(ch.id);
+      navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
+    },
+    badge: 0,
+    testId: `channel-option-${ch.id}`,
+  }));
+
+  // Insert a separator before voice channels only when both sections are non-empty
+  const voiceSeparator: TerminalMenuItem[] =
+    textChannels.length > 0 && voiceChannels.length > 0
+      ? [{ id: "__voice-sep__", label: "", type: "separator" as const }]
+      : [];
 
   const items: TerminalMenuItem[] = [
-    ...channels.map((ch) => ({
-      id: ch.id,
-      // Voice channels get a [v] prefix; text channels get #
-      label: ch.channel_type === "voice" ? `[v] ${ch.name}` : `# ${ch.name}`,
-      description: ch.channel_type === "voice"
-        ? (ch.description || undefined)
-        : <LastMessagePreview channelId={ch.id} />,
-      action: () => {
-        if (ch.channel_type === "voice") {
-          setActiveVoiceChannelId(ch.id);
-          navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
-        } else {
-          setSelectedChannelId(ch.id);
-          markRead(ch.id);
-          navigate({ to: "/groups/$groupId/channels/$channelId", params: { groupId, channelId: ch.id } });
-        }
-      },
-      badge: ch.channel_type === "voice" ? 0 : (unreadCounts[ch.id] ?? 0),
-      testId: `channel-option-${ch.id}`,
-    })),
-    // Stub voice channel — shown below text channels until real voice channels exist in DB
-    {
-      id: "stub-voice-general",
-      label: "[v] general",
-      action: () => {
-        navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: "stub-voice-general" } });
-      },
-      badge: 0,
-      testId: "channel-option-stub-voice-general",
-    },
+    ...textChannelItems,
+    ...voiceSeparator,
+    ...voiceChannelItems,
     { id: "__sep__", label: "", type: "separator" as const },
     {
       id: "create-channel",

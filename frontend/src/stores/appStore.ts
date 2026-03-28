@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, NetworkStatus } from '../types';
+import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, NetworkStatus, VoiceParticipant } from '../types';
 
 interface AppStore extends AppState {
   // User profile data from Turso
@@ -46,6 +46,13 @@ interface AppStore extends AppState {
   // True when local participant's mic is actively picking up audio
   isLocalSpeaking: boolean;
   setIsLocalSpeaking: (speaking: boolean) => void;
+  // Live voice channel state — written by useVoiceChannel, read by VoiceBar/VoiceChannelView/VoiceChannelPage
+  voiceParticipants: VoiceParticipant[];
+  voiceActiveSpeakerIds: string[];
+  voiceIsMuted: boolean;
+  setVoiceParticipants: (participants: VoiceParticipant[]) => void;
+  setVoiceActiveSpeakerIds: (ids: string[]) => void;
+  setVoiceIsMuted: (muted: boolean) => void;
   logout: () => void;
 }
 
@@ -71,6 +78,9 @@ export const useAppStore = create<AppStore>((set) => ({
   activeVoiceChannelId: null,
   statusBarAlert: null,
   isLocalSpeaking: false,
+  voiceParticipants: [],
+  voiceActiveSpeakerIds: [],
+  voiceIsMuted: false,
 
   // Actions
   setCurrentUser: (user) => set({ currentUser: user }),
@@ -147,6 +157,10 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setIsLocalSpeaking: (speaking) => set({ isLocalSpeaking: speaking }),
 
+  setVoiceParticipants: (participants) => set({ voiceParticipants: participants }),
+  setVoiceActiveSpeakerIds: (ids) => set({ voiceActiveSpeakerIds: ids }),
+  setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -168,6 +182,9 @@ export const useAppStore = create<AppStore>((set) => ({
     activeVoiceChannelId: null,
     statusBarAlert: null,
     isLocalSpeaking: false,
+    voiceParticipants: [],
+    voiceActiveSpeakerIds: [],
+    voiceIsMuted: false,
   }),
 }));
 

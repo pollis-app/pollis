@@ -52,6 +52,10 @@ pnpm dev              # Full desktop app (Rust + React)
 pnpm dev:frontend     # Frontend only in browser (no Tauri commands)
 ```
 
+### Skipping email OTP in development
+
+Add `DEV_OTP=000000` to `.env.development`. With this set, hitting "Continue" on the login screen skips the Resend email call and stores a hash of `000000` as the valid code — type it in the OTP field to sign in. The session persists to the OS keystore so you only need to do this once per fresh install.
+
 ### Testing with two users
 
 ```bash

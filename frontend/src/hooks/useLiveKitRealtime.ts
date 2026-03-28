@@ -13,19 +13,19 @@ import { useUserGroupsWithChannels } from './queries/useGroups';
 // Add new variants here as new event types are added on the Rust side.
 type RealtimeEvent =
   | {
-      type: 'new_message';
-      channel_id: string | null;
-      conversation_id: string | null;
-      sender_id: string;
-      sender_username: string | null;
-    }
+    type: 'new_message';
+    channel_id: string | null;
+    conversation_id: string | null;
+    sender_id: string;
+    sender_username: string | null;
+  }
   | {
-      type: 'dm_created';
-      conversation_id: string;
-    }
+    type: 'dm_created';
+    conversation_id: string;
+  }
   | {
-      type: 'membership_changed';
-    };
+    type: 'membership_changed';
+  };
 
 export function useLiveKitRealtime() {
   const { isReady: isTauriReady } = useTauriReady();
@@ -52,6 +52,14 @@ export function useLiveKitRealtime() {
     if (groupsWithChannels) {
       for (const group of groupsWithChannels) {
         ids.push(group.id);
+        for (const channel of group.channels) {
+          // Voice channels use a separate LiveKit connection for audio.
+          // Connecting the data-ping room to them would create a duplicate
+          // participant and corrupt the voice participant list.
+          if (channel.channel_type !== 'voice') {
+            ids.push(channel.id);
+          }
+        }
       }
     }
     // DM conversations keep their own rooms — the LiveKit admin REST API

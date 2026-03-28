@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React from "react";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
 
@@ -8,14 +8,8 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const { setIsLocalSpeaking } = useAppStore();
-  const { participants, activeSpeakerIds, isMuted, toggleMute, leave } = useVoiceChannel(channelId);
-
-  useEffect(() => {
-    const local = participants.find((p) => p.isLocal);
-    setIsLocalSpeaking(!!local && activeSpeakerIds.includes(local.identity) && !local.isMuted);
-    return () => { setIsLocalSpeaking(false); };
-  }, [activeSpeakerIds, participants, setIsLocalSpeaking]);
+  const { toggleMute, leave } = useVoiceChannel(channelId);
+  const { voiceParticipants, voiceIsMuted } = useAppStore();
 
   return (
     <div
@@ -40,16 +34,16 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         data-testid="voice-bar-mute-button"
         onClick={toggleMute}
         className="transition-colors"
-        style={{ color: isMuted ? "#ff6b6b" : "var(--c-accent)" }}
+        style={{ color: voiceIsMuted ? "#ff6b6b" : "var(--c-accent)" }}
         onMouseEnter={(e) => {
           (e.currentTarget as HTMLElement).style.opacity = "0.7";
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLElement).style.opacity = "1";
         }}
-        title={isMuted ? "Unmute microphone" : "Mute microphone"}
+        title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
       >
-        {isMuted ? "[mic off]" : "[mic on]"}
+        {voiceIsMuted ? "[mic off]" : "[mic on]"}
       </button>
 
       {/* Leave button */}
@@ -73,7 +67,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
 
       {/* Participant count */}
       <span data-testid="voice-bar-participant-count" style={{ color: "var(--c-text-dim)" }}>
-        {participants.length} participant{participants.length !== 1 ? "s" : ""}
+        {voiceParticipants.length} participant{voiceParticipants.length !== 1 ? "s" : ""}
       </span>
 
       {/* Security indicator — audio is transport-encrypted (TLS) but not E2EE for v1 */}
