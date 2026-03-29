@@ -122,13 +122,66 @@ impl VoiceState {
 fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<cpal::Device> {
     let device = match name {
         None => {
-            if is_input {
-                host.default_input_device()
-            } else {
-                host.default_output_device()
+            // On Linux, ALSA's system default may be a virtual device like
+            // "vdownmix" (surround downmix) that crashes when opened for capture.
+            // Strategy:
+            //   1. Try well-known audio-server PCMs: pipewire, pulse, default.
+            //   2. Fall back to first device that passes is_useful_device.
+            //   3. Return error rather than opening a blocked device.
+            #[cfg(target_os = "linux")]
+            {
+                // Virtual ALSA devices known to crash or produce no audio.
+                let blocked: &[&str] = &["vdownmix", "upmix", "speex", "speexrate"];
+                let preferred: &[&str] = &["pipewire", "pulse", "default"];
+
+                let iter = if is_input {
+                    host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
+                } else {
+                    host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
+                };
+                // Collect, filter blocked names, log what we see.
+                let devices: Vec<cpal::Device> = iter
+                    .filter(|d| {
+                        d.name()
+                            .ok()
+                            .map(|n| !blocked.contains(&n.as_str()))
+                            .unwrap_or(true)
+                    })
+                    .collect();
+
+                let names: Vec<String> = devices.iter().filter_map(|d| d.name().ok()).collect();
+                eprintln!("[voice] available {} devices (blocked filtered): {:?}",
+                    if is_input { "input" } else { "output" }, names);
+
+                // 1. Preferred by name
+                let found = preferred.iter().find_map(|&pref| {
+                    devices.iter().position(|d| d.name().ok().as_deref() == Some(pref))
+                });
+                if let Some(idx) = found {
+                    devices.into_iter().nth(idx)
+                } else {
+                    // 2. First device that passes the useful filter (e.g. hw:CARD=...,DEV=0)
+                    devices
+                        .into_iter()
+                        .find(|d| d.name().ok().map(|n| is_useful_device(&n)).unwrap_or(false))
+                }
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                if is_input { host.default_input_device() } else { host.default_output_device() }
             }
         }
         Some(n) => {
+            // On Linux, reject blocked devices even when explicitly named.
+            // Fall back to auto-detect so a stale preference doesn't crash the app.
+            #[cfg(target_os = "linux")]
+            {
+                let blocked: &[&str] = &["vdownmix", "upmix", "speex", "speexrate"];
+                if blocked.contains(&n) {
+                    eprintln!("[voice] device '{n}' is blocked on Linux — auto-selecting");
+                    return get_device(host, None, is_input);
+                }
+            }
             let iter = if is_input {
                 host.input_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             } else {
@@ -258,27 +311,31 @@ fn start_speaker_stream(
     Ok((SendableStream(stream), sample_rate, channels, buf))
 }
 
-/// Attach a NativeAudioStream to a speaker output device. Spawns a task that
-/// drains audio frames from LiveKit and writes them into the ring buffer.
-fn attach_remote_track(
-    host: &cpal::Host,
-    output_device_name: Option<&str>,
+/// Attach a NativeAudioStream to a speaker output device. Async: blocking ALSA
+/// device setup runs in spawn_blocking, then a tokio task drains frames into
+/// the ring buffer. Call via tokio::spawn so the room event loop isn't blocked.
+async fn attach_remote_track(
+    output_device_name: Option<String>,
     rtc_track: libwebrtc::audio_track::RtcAudioTrack,
-    playback: &Arc<Mutex<PlaybackState>>,
-    track_key: &str,
+    playback: Arc<Mutex<PlaybackState>>,
+    track_key: String,
 ) {
-    let output_dev = match get_device(host, output_device_name, false) {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("[voice] output device error for {track_key}: {e}");
+    // Build the cpal output stream on a blocking thread (ALSA syscalls).
+    let result = tokio::task::spawn_blocking(move || {
+        let host = cpal::default_host();
+        let output_dev = get_device(&host, output_device_name.as_deref(), false)?;
+        start_speaker_stream(&output_dev)
+    })
+    .await;
+
+    let (stream, sample_rate, channels, buf) = match result {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            eprintln!("[voice] speaker stream error for {track_key}: {e}");
             return;
         }
-    };
-
-    let (stream, sample_rate, channels, buf) = match start_speaker_stream(&output_dev) {
-        Ok(v) => v,
         Err(e) => {
-            eprintln!("[voice] speaker stream error for {track_key}: {e}");
+            eprintln!("[voice] speaker stream panicked for {track_key}: {e}");
             return;
         }
     };
@@ -293,7 +350,7 @@ fn attach_remote_track(
                 frame.data.iter().map(|&s| s as f32 / 32768.0).collect();
             let mut b = buf.lock().unwrap();
             b.extend(samples);
-            // Cap at 2 seconds to prevent unbounded growth on a stalled output
+            // Cap at 2 seconds to prevent unbounded growth on a stalled output.
             while b.len() > max_buf {
                 b.pop_front();
             }
@@ -301,9 +358,9 @@ fn attach_remote_track(
     });
 
     let mut pb = playback.lock().unwrap();
-    pb.streams.insert(track_key.to_string(), stream);
-    pb.tasks.insert(track_key.to_string(), task);
-    pb.rtc_tracks.insert(track_key.to_string(), rtc_track);
+    pb.streams.insert(track_key.clone(), stream);
+    pb.tasks.insert(track_key.clone(), task);
+    pb.rtc_tracks.insert(track_key, rtc_track);
 }
 
 // ── Device name helpers ───────────────────────────────────────────────────
@@ -359,42 +416,47 @@ pub async fn subscribe_voice_events(
 }
 
 /// Return all available audio input and output devices.
+/// Device enumeration makes blocking ALSA syscalls (and produces ALSA warning
+/// spam); run it on a blocking thread to avoid stalling the tokio runtime.
 #[tauri::command]
 pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
-    let host = cpal::default_host();
-    let mut devices = Vec::new();
+    tokio::task::spawn_blocking(|| {
+        let host = cpal::default_host();
+        let mut devices = Vec::new();
 
-    if let Ok(inputs) = host.input_devices() {
-        for d in inputs {
-            if let Ok(name) = d.name() {
-                if is_useful_device(&name) {
-                    devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "input".into() });
+        if let Ok(inputs) = host.input_devices() {
+            for d in inputs {
+                if let Ok(name) = d.name() {
+                    if is_useful_device(&name) {
+                        devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "input".into() });
+                    }
                 }
             }
         }
-    }
-    if let Ok(outputs) = host.output_devices() {
-        for d in outputs {
-            if let Ok(name) = d.name() {
-                if is_useful_device(&name) {
-                    devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "output".into() });
+        if let Ok(outputs) = host.output_devices() {
+            for d in outputs {
+                if let Ok(name) = d.name() {
+                    if is_useful_device(&name) {
+                        devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "output".into() });
+                    }
                 }
             }
         }
-    }
-    Ok(devices)
+        devices
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("device enumeration panicked: {e}").into())
 }
 
-/// Connect to a LiveKit voice room and start publishing the local microphone.
-/// `input_device` and `output_device` are device names from `list_audio_devices`
-/// (or null/undefined to use the system default).
+/// Connect to a LiveKit voice room and publish the local microphone.
+/// Step 2: mic input added. Playback of remote tracks comes next.
 #[tauri::command]
 pub async fn join_voice_channel(
     channel_id: String,
     user_id: String,
     display_name: String,
     input_device: Option<String>,
-    output_device: Option<String>,
+    _output_device: Option<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     let url = state.config.livekit_url.clone();
@@ -409,36 +471,57 @@ pub async fn join_voice_channel(
         &display_name,
     )?;
 
-    // Extract the shared atomics from voice state so toggle_voice_mute and
-    // set_noise_floor affect the live mic callback. Reset mute on every join.
-    let (is_muted, noise_floor) = {
-        let voice = state.voice.lock().await;
-        voice.is_muted.store(false, Ordering::Relaxed);
-        (Arc::clone(&voice.is_muted), Arc::clone(&voice.noise_floor))
-    };
-
-    // Connect to the LiveKit room
+    eprintln!("[voice] connecting to room {channel_id}…");
     let (room, mut events) = Room::connect(&url, &token, RoomOptions::default())
         .await
         .map_err(|e| anyhow::anyhow!("LiveKit connect: {e}"))?;
+    eprintln!("[voice] connected to room {channel_id}");
+
     let room = Arc::new(room);
 
-    // Create audio source (LiveKit encodes and transmits this as an audio track)
-    let host = cpal::default_host();
-    let input_dev = get_device(&host, input_device.as_deref(), true)?;
+    // ── Mic open, frames dropped (diagnostic step) ───────────────────────────
+    // Open the mic and receive frames but don't call capture_frame yet.
+    // If this crashes, the bug is in cpal. If stable, it's in capture_frame.
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
+    let is_muted = {
+        let voice = state.voice.lock().await;
+        voice.is_muted.store(false, Ordering::Relaxed);
+        Arc::clone(&voice.is_muted)
+    };
+    let noise_floor = {
+        let voice = state.voice.lock().await;
+        Arc::clone(&voice.noise_floor)
+    };
 
-    let (mic_stream, mic_rate) =
-        start_mic_stream(&input_dev, frame_tx, Arc::clone(&is_muted), Arc::clone(&noise_floor))?;
+    let input_device_clone = input_device.clone();
+    eprintln!("[voice] opening mic…");
+    let (mic_stream, mic_rate) = tokio::task::spawn_blocking(move || {
+        let host = cpal::default_host();
+        let dev = get_device(&host, input_device_clone.as_deref(), true)?;
+        eprintln!("[voice] mic device: {:?}", dev.name());
+        start_mic_stream(&dev, frame_tx, is_muted, noise_floor)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
+    eprintln!("[voice] mic opened at {mic_rate} Hz");
 
-    let audio_source =
-        NativeAudioSource::new(AudioSourceOptions::default(), mic_rate, 1, 100);
+    let audio_source = NativeAudioSource::new(
+        AudioSourceOptions {
+            echo_cancellation: false,
+            noise_suppression: false,
+            auto_gain_control: false,
+        },
+        mic_rate,
+        1,
+        1000,
+    );
 
     let local_track = LocalAudioTrack::create_audio_track(
         "microphone",
         RtcAudioSource::Native(audio_source.clone()),
     );
 
+    eprintln!("[voice] publishing track…");
     room.local_participant()
         .publish_track(
             LocalTrack::Audio(local_track.clone()),
@@ -446,34 +529,79 @@ pub async fn join_voice_channel(
         )
         .await
         .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
+    eprintln!("[voice] track published");
 
-    // Task: feed i16 frames from cpal callback into the LiveKit audio source
-    let source_clone = audio_source.clone();
+    // Buffer mic frames into exact 10ms chunks and feed to capture_frame.
+    let audio_source_task = audio_source.clone();
     let frame_task = tokio::spawn(async move {
+        let chunk_size = (mic_rate / 100) as usize;
+        let mut buf: Vec<i16> = Vec::new();
         while let Some((samples, rate)) = frame_rx.recv().await {
-            let n = samples.len() as u32;
-            let frame = AudioFrame {
-                data: samples.into(),
-                sample_rate: rate,
-                num_channels: 1,
-                samples_per_channel: n,
-            };
-            let _ = source_clone.capture_frame(&frame).await;
+            buf.extend_from_slice(&samples);
+            while buf.len() >= chunk_size {
+                let chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+                let frame = AudioFrame {
+                    data: chunk.into(),
+                    sample_rate: rate,
+                    num_channels: 1,
+                    samples_per_channel: chunk_size as u32,
+                };
+                let _ = audio_source_task.capture_frame(&frame).await;
+            }
         }
     });
 
-    // Task: handle incoming room events (participants, tracks, speakers)
+    // ── Seed participant list and attach existing remote tracks ───────────────
+    // Participants already in the room when we join never fire ParticipantConnected.
+    // Read them from the room snapshot and attach any tracks they already published.
+    {
+        let voice = state.voice.lock().await;
+        let playback_arc_seed = Arc::clone(&voice.playback);
+        let output_device_name = {
+            let pb = voice.playback.lock().unwrap();
+            pb.output_device_name.clone()
+        };
+        if let Some(ch) = &voice.channel {
+            // Emit self first
+            let _ = ch.send(VoiceEvent::ParticipantJoined {
+                identity: format!("voice-{user_id}"),
+                name: display_name.clone(),
+                is_muted: false,
+            });
+            for (_identity, participant) in room.remote_participants() {
+                eprintln!("[voice] existing participant: {}", participant.identity());
+                let _ = ch.send(VoiceEvent::ParticipantJoined {
+                    identity: participant.identity().to_string(),
+                    name: participant.name(),
+                    is_muted: false,
+                });
+                // Attach any audio tracks the participant has already published.
+                for (_sid, pub_) in participant.track_publications() {
+                    if let Some(RemoteTrack::Audio(audio_track)) = pub_.track() {
+                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                        eprintln!("[voice] attaching existing track {track_key}");
+                        tokio::spawn(attach_remote_track(
+                            output_device_name.clone(),
+                            audio_track.rtc_track(),
+                            Arc::clone(&playback_arc_seed),
+                            track_key,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     let voice_arc = Arc::clone(&state.voice);
     let playback_arc = {
-        let voice = state.voice.lock().await;
-        Arc::clone(&voice.playback)
+        let v = state.voice.lock().await;
+        Arc::clone(&v.playback)
     };
     let room_task = tokio::spawn(async move {
-        let host = cpal::default_host();
-
         while let Some(event) = events.recv().await {
             match event {
                 RoomEvent::ParticipantConnected(p) => {
+                    eprintln!("[voice] participant joined: {}", p.identity());
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::ParticipantJoined {
@@ -483,113 +611,58 @@ pub async fn join_voice_channel(
                         });
                     }
                 }
-
                 RoomEvent::ParticipantDisconnected(p) => {
-                    let identity = p.identity().to_string();
-                    // Clean up all playback streams for this participant
-                    {
-                        let mut pb = playback_arc.lock().unwrap();
-                        let keys: Vec<String> = pb
-                            .streams
-                            .keys()
-                            .filter(|k| k.starts_with(&identity))
-                            .cloned()
-                            .collect();
-                        for k in keys {
-                            if let Some(t) = pb.tasks.remove(&k) { t.abort(); }
-                            pb.streams.remove(&k);
-                            pb.rtc_tracks.remove(&k);
-                        }
-                    }
+                    eprintln!("[voice] participant left: {}", p.identity());
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
+                        let _ = ch.send(VoiceEvent::ParticipantLeft {
+                            identity: p.identity().to_string(),
+                        });
                     }
                 }
-
-                RoomEvent::TrackSubscribed { track, participant, .. } => {
+                RoomEvent::TrackSubscribed { track, publication: _, participant } => {
                     if let RemoteTrack::Audio(audio_track) = track {
-                        let output_dev_name = {
+                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                        eprintln!("[voice] track subscribed: {track_key}");
+                        let output_device_name = {
                             let pb = playback_arc.lock().unwrap();
                             pb.output_device_name.clone()
                         };
-                        let key = format!(
-                            "{}-{}",
-                            participant.identity(),
-                            audio_track.sid()
-                        );
-                        attach_remote_track(
-                            &host,
-                            output_dev_name.as_deref(),
+                        tokio::spawn(attach_remote_track(
+                            output_device_name,
                             audio_track.rtc_track(),
-                            &playback_arc,
-                            &key,
-                        );
+                            Arc::clone(&playback_arc),
+                            track_key,
+                        ));
                     }
                 }
-
-                RoomEvent::TrackUnsubscribed { track, participant, .. } => {
+                RoomEvent::TrackUnsubscribed { track, publication: _, participant } => {
                     if let RemoteTrack::Audio(audio_track) = track {
-                        let key =
-                            format!("{}-{}", participant.identity(), audio_track.sid());
+                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                        eprintln!("[voice] track unsubscribed: {track_key}");
                         let mut pb = playback_arc.lock().unwrap();
-                        if let Some(t) = pb.tasks.remove(&key) { t.abort(); }
-                        pb.streams.remove(&key);
-                        pb.rtc_tracks.remove(&key);
+                        if let Some(t) = pb.tasks.remove(&track_key) { t.abort(); }
+                        pb.streams.remove(&track_key);
+                        pb.rtc_tracks.remove(&track_key);
                     }
                 }
-
-                RoomEvent::TrackMuted { participant, .. } => {
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::Muted {
-                            identity: participant.identity().to_string(),
-                        });
-                    }
-                }
-
-                RoomEvent::TrackUnmuted { participant, .. } => {
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::Unmuted {
-                            identity: participant.identity().to_string(),
-                        });
-                    }
-                }
-
-                RoomEvent::ActiveSpeakersChanged { speakers } => {
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let identities =
-                            speakers.iter().map(|s| s.identity().to_string()).collect();
-                        let _ = ch.send(VoiceEvent::ActiveSpeakers { identities });
-                    }
-                }
-
-                RoomEvent::Disconnected { .. } => {
+                RoomEvent::Disconnected { reason } => {
+                    eprintln!("[voice] disconnected: {reason:?}");
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::Disconnected);
                     }
                     break;
                 }
-
                 _ => {}
             }
         }
     });
 
-    // Store everything
+    // ── Store state ───────────────────────────────────────────────────────────
     let mut voice = state.voice.lock().await;
-    // Abort any previous call that wasn't cleanly left
     if let Some(t) = voice.room_task.take() { t.abort(); }
     if let Some(t) = voice.frame_task.take() { t.abort(); }
-    {
-        let mut pb = voice.playback.lock().unwrap();
-        pb.stop_all();
-        pb.output_device_name = output_device;
-    }
-
     voice.room = Some(room);
     voice.local_track = Some(local_track);
     voice.audio_source = Some(audio_source);
@@ -668,29 +741,46 @@ pub async fn set_voice_input_device(
         return Ok(());
     }
 
-    let host = cpal::default_host();
-    let device = get_device(&host, Some(&device_name), true)?;
+    // Extract shared atomics then drop the lock — cpal init makes blocking ALSA
+    // syscalls and must not hold the async mutex.
+    let is_muted_clone = Arc::clone(&voice.is_muted);
+    let noise_floor_clone = Arc::clone(&voice.noise_floor);
+    drop(voice);
 
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
-    let (new_mic, _) = start_mic_stream(&device, frame_tx, Arc::clone(&voice.is_muted), Arc::clone(&voice.noise_floor))?;
+    let device_name_clone = device_name.clone();
+    let (new_mic, _) = tokio::task::spawn_blocking(move || {
+        let host = cpal::default_host();
+        let device = get_device(&host, Some(&device_name_clone), true)?;
+        start_mic_stream(&device, frame_tx, is_muted_clone, noise_floor_clone)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("audio init panicked: {e}"))??;
+
+    let mut voice = state.voice.lock().await;
 
     // Swap the input stream — dropping the old one stops it
     voice.input_stream = Some(new_mic);
     voice.current_input_device = Some(device_name);
 
-    // Abort the old frame-feed task and start a new one on the new channel
+    // Abort the old frame-feed task and start a new one on the new channel.
     if let Some(t) = voice.frame_task.take() { t.abort(); }
     let source = voice.audio_source.clone().unwrap();
     let task = tokio::spawn(async move {
+        let mut buf: Vec<i16> = Vec::new();
         while let Some((samples, rate)) = frame_rx.recv().await {
-            let n = samples.len() as u32;
-            let frame = AudioFrame {
-                data: samples.into(),
-                sample_rate: rate,
-                num_channels: 1,
-                samples_per_channel: n,
-            };
-            let _ = source.capture_frame(&frame).await;
+            buf.extend_from_slice(&samples);
+            let chunk_size = (rate / 100) as usize;
+            while buf.len() >= chunk_size {
+                let chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+                let frame = AudioFrame {
+                    data: chunk.into(),
+                    sample_rate: rate,
+                    num_channels: 1,
+                    samples_per_channel: chunk_size as u32,
+                };
+                let _ = source.capture_frame(&frame).await;
+            }
         }
     });
     voice.frame_task = Some(task);
@@ -709,7 +799,6 @@ pub async fn set_voice_output_device(
     let playback_arc = Arc::clone(&voice.playback);
     drop(voice);
 
-    let host = cpal::default_host();
     let rtc_tracks: Vec<(String, libwebrtc::audio_track::RtcAudioTrack)> = {
         let mut pb = playback_arc.lock().unwrap();
         pb.stop_all();
@@ -717,9 +806,14 @@ pub async fn set_voice_output_device(
         pb.rtc_tracks.iter().map(|(k, t)| (k.clone(), t.clone())).collect()
     };
 
-    // Re-attach each remote track to the new device
+    // Re-attach each remote track to the new output device.
     for (key, rtc_track) in rtc_tracks {
-        attach_remote_track(&host, Some(&device_name), rtc_track, &playback_arc, &key);
+        tokio::spawn(attach_remote_track(
+            Some(device_name.clone()),
+            rtc_track,
+            Arc::clone(&playback_arc),
+            key,
+        ));
     }
 
     Ok(())

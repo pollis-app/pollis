@@ -49,17 +49,11 @@ export function useLiveKitRealtime() {
   const allRoomIds = useMemo<string[]>(() => {
     const ids: string[] = [];
     // One room per GROUP covers all channels in that group.
+    // The Rust send_message command publishes to the group room (mls_group_id),
+    // not to individual channel rooms — do not add channel IDs here.
     if (groupsWithChannels) {
       for (const group of groupsWithChannels) {
         ids.push(group.id);
-        for (const channel of group.channels) {
-          // Voice channels use a separate LiveKit connection for audio.
-          // Connecting the data-ping room to them would create a duplicate
-          // participant and corrupt the voice participant list.
-          if (channel.channel_type !== 'voice') {
-            ids.push(channel.id);
-          }
-        }
       }
     }
     // DM conversations keep their own rooms — the LiveKit admin REST API
