@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
@@ -107,9 +108,12 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
           }
           flushParticipants();
         } else if (event.type === 'active_speakers') {
-          setVoiceActiveSpeakerIds(event.identities);
-          const isLocalSpeaking = event.identities.includes(localIdentityRef.current);
-          setIsLocalSpeaking(isLocalSpeaking);
+          console.log('[voice] active_speakers received:', event.identities);
+          flushSync(() => {
+            setVoiceActiveSpeakerIds(event.identities);
+            const isLocalSpeaking = event.identities.includes(localIdentityRef.current);
+            setIsLocalSpeaking(isLocalSpeaking);
+          });
         } else if (event.type === 'disconnected') {
           participantsRef.current.clear();
           setVoiceParticipants([]);

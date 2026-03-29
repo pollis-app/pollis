@@ -204,10 +204,16 @@ fn start_mic_stream(
     let config = device
         .default_input_config()
         .map_err(|e| anyhow::anyhow!("input config: {e}"))?;
-    let sample_rate = config.sample_rate().0;
     let channels = config.channels() as usize;
     let sample_format = config.sample_format();
-    let stream_config: cpal::StreamConfig = config.into();
+    // Force 48000 Hz: WebRTC APM only supports 8/16/32/48 kHz.
+    // PipeWire (and most modern audio servers) resample transparently.
+    let sample_rate: u32 = 48000;
+    let stream_config = cpal::StreamConfig {
+        channels: config.channels(),
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
 
     // Build the stream for whatever native format the device reports.
     // Each arm clones the shared state so it can move into the closure.
@@ -272,10 +278,15 @@ fn start_speaker_stream(
     let config = device
         .default_output_config()
         .map_err(|e| anyhow::anyhow!("output config: {e}"))?;
-    let sample_rate = config.sample_rate().0;
     let channels = config.channels() as u32;
     let sample_format = config.sample_format();
-    let stream_config: cpal::StreamConfig = config.into();
+    // Force 48000 Hz to match the NativeAudioSource encoding rate.
+    let sample_rate: u32 = 48000;
+    let stream_config = cpal::StreamConfig {
+        channels: config.channels(),
+        sample_rate: cpal::SampleRate(sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
 
     // 2-second ring buffer (always f32 internally; converted on output)
     let buf: Arc<Mutex<VecDeque<f32>>> =
@@ -343,18 +354,27 @@ async fn attach_remote_track(
     let mut audio_stream =
         NativeAudioStream::new(rtc_track.clone(), sample_rate as i32, channels as i32);
 
-    let max_buf = (sample_rate * channels * 2) as usize;
+    // Cap the ring buffer at 200ms to keep audio fresh and latency low.
+    let max_buf = (sample_rate * channels / 5) as usize;
+    let task_key = track_key.clone();
     let task = tokio::spawn(async move {
+        eprintln!("[voice] remote drain task started for {task_key}");
+        let mut remote_frame_count = 0u64;
         while let Some(frame) = audio_stream.next().await {
+            remote_frame_count += 1;
+            if remote_frame_count % 50 == 0 {
+                let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
+                eprintln!("[voice] remote frame {remote_frame_count}: peak={peak}");
+            }
             let samples: Vec<f32> =
                 frame.data.iter().map(|&s| s as f32 / 32768.0).collect();
             let mut b = buf.lock().unwrap();
             b.extend(samples);
-            // Cap at 2 seconds to prevent unbounded growth on a stalled output.
             while b.len() > max_buf {
                 b.pop_front();
             }
         }
+        eprintln!("[voice] remote drain task ended for {task_key}");
     });
 
     let mut pb = playback.lock().unwrap();
@@ -513,7 +533,7 @@ pub async fn join_voice_channel(
         },
         mic_rate,
         1,
-        1000,
+        100,
     );
 
     let local_track = LocalAudioTrack::create_audio_track(
@@ -531,38 +551,69 @@ pub async fn join_voice_channel(
         .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
     eprintln!("[voice] track published");
 
-    // Buffer mic frames into exact 10ms chunks and feed to capture_frame.
+    // Buffer mic frames into exact 10ms chunks, detect local speaking, and
+    // feed to capture_frame. Speaking is detected client-side from audio peaks
+    // so the indicator works without waiting for the LiveKit server.
     let audio_source_task = audio_source.clone();
+    let voice_arc_frame = Arc::clone(&state.voice);
+    let local_identity = format!("voice-{user_id}");
     let frame_task = tokio::spawn(async move {
         let chunk_size = (mic_rate / 100) as usize;
         let mut buf: Vec<i16> = Vec::new();
+        let mut speak_hold: u32 = 0; // counts down after speech stops (12 × 10ms = 120ms hold)
+        let mut onset_frames: u32 = 0; // consecutive above-threshold frames; 2 required to (re)trigger
+        let mut is_speaking = false;
+
         while let Some((samples, rate)) = frame_rx.recv().await {
             buf.extend_from_slice(&samples);
             while buf.len() >= chunk_size {
                 let chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+                let peak = chunk.iter().map(|&s| s.abs()).max().unwrap_or(0);
+
+                // Speaking detection: require 2 consecutive above-threshold frames to trigger,
+                // preventing single trailing spikes from resetting the hold counter.
+                if peak > 1000 {
+                    onset_frames += 1;
+                    if onset_frames >= 2 {
+                        speak_hold = 12;
+                    }
+                } else {
+                    onset_frames = 0;
+                    if speak_hold > 0 {
+                        speak_hold -= 1;
+                    }
+                }
+                let now_speaking = speak_hold > 0;
+                if now_speaking != is_speaking {
+                    is_speaking = now_speaking;
+                    let identities = if is_speaking { vec![local_identity.clone()] } else { vec![] };
+                    let voice = voice_arc_frame.lock().await;
+                    if let Some(ch) = &voice.channel {
+                        let _ = ch.send(VoiceEvent::ActiveSpeakers { identities });
+                    }
+                }
+
                 let frame = AudioFrame {
                     data: chunk.into(),
                     sample_rate: rate,
                     num_channels: 1,
                     samples_per_channel: chunk_size as u32,
                 };
-                let _ = audio_source_task.capture_frame(&frame).await;
+                if let Err(e) = audio_source_task.capture_frame(&frame).await {
+                    eprintln!("[voice] capture_frame error: {e:?}");
+                }
             }
         }
     });
 
-    // ── Seed participant list and attach existing remote tracks ───────────────
-    // Participants already in the room when we join never fire ParticipantConnected.
-    // Read them from the room snapshot and attach any tracks they already published.
+    // ── Seed participant list ─────────────────────────────────────────────────
+    // Emit ParticipantJoined for participants already in the room.
+    // Do NOT attach tracks here — TrackSubscribed fires for pre-existing
+    // subscribed tracks once the event loop drains buffered events, and
+    // attaching twice creates competing NativeAudioStream sinks.
     {
         let voice = state.voice.lock().await;
-        let playback_arc_seed = Arc::clone(&voice.playback);
-        let output_device_name = {
-            let pb = voice.playback.lock().unwrap();
-            pb.output_device_name.clone()
-        };
         if let Some(ch) = &voice.channel {
-            // Emit self first
             let _ = ch.send(VoiceEvent::ParticipantJoined {
                 identity: format!("voice-{user_id}"),
                 name: display_name.clone(),
@@ -575,19 +626,6 @@ pub async fn join_voice_channel(
                     name: participant.name(),
                     is_muted: false,
                 });
-                // Attach any audio tracks the participant has already published.
-                for (_sid, pub_) in participant.track_publications() {
-                    if let Some(RemoteTrack::Audio(audio_track)) = pub_.track() {
-                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
-                        eprintln!("[voice] attaching existing track {track_key}");
-                        tokio::spawn(attach_remote_track(
-                            output_device_name.clone(),
-                            audio_track.rtc_track(),
-                            Arc::clone(&playback_arc_seed),
-                            track_key,
-                        ));
-                    }
-                }
             }
         }
     }
@@ -646,6 +684,15 @@ pub async fn join_voice_channel(
                         pb.rtc_tracks.remove(&track_key);
                     }
                 }
+                RoomEvent::ActiveSpeakersChanged { speakers } => {
+                    let identities: Vec<String> =
+                        speakers.iter().map(|p| p.identity().to_string()).collect();
+                    eprintln!("[voice] active speakers: {:?}", identities);
+                    let voice = voice_arc.lock().await;
+                    if let Some(ch) = &voice.channel {
+                        let _ = ch.send(VoiceEvent::ActiveSpeakers { identities });
+                    }
+                }
                 RoomEvent::Disconnected { reason } => {
                     eprintln!("[voice] disconnected: {reason:?}");
                     let voice = voice_arc.lock().await;
@@ -653,6 +700,9 @@ pub async fn join_voice_channel(
                         let _ = ch.send(VoiceEvent::Disconnected);
                     }
                     break;
+                }
+                RoomEvent::ConnectionStateChanged(state) => {
+                    eprintln!("[voice] connection state: {state:?}");
                 }
                 _ => {}
             }
