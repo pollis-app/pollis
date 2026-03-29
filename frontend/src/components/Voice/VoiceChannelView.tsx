@@ -1,4 +1,5 @@
 import React from "react";
+import { VolumeX } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 
 export const VoiceChannelView: React.FC = () => {
@@ -56,9 +57,6 @@ export const VoiceChannelView: React.FC = () => {
               {/* Username */}
               <span className="flex-1 truncate">
                 {p.name}
-                {p.isLocal && (
-                  <span style={{ color: "var(--c-text-dim)" }}> (you)</span>
-                )}
               </span>
 
               {/* Muted indicator */}
@@ -68,7 +66,7 @@ export const VoiceChannelView: React.FC = () => {
                   style={{ color: "var(--c-text-dim)" }}
                   title="Muted"
                 >
-                  [m]
+                  <VolumeX size={10} />
                 </span>
               )}
             </div>

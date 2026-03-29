@@ -47,11 +47,14 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     }
   }, [autoFocus]);
 
-  // Reset selection to first navigable item when items change
+  // Reset selection to first navigable item only when the actual item IDs change,
+  // not on every parent re-render that produces a new array reference.
+  const itemIds = items.map((i) => i.id).join(",");
   useEffect(() => {
     const first = items.findIndex((item) => item.type !== "separator");
     setSelectedIndex(first >= 0 ? first : 0);
-  }, [items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemIds]);
 
   // Skip separators when navigating
   const navigableIndices = items

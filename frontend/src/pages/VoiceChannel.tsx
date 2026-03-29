@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Volume2 } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { switchVoiceDevice } from "../hooks/useVoiceChannel";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
+import { RangeSlider } from "../components/ui/RangeSlider";
 import type { AudioDevice } from "../types";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
@@ -125,7 +126,10 @@ export const VoiceChannelPage: React.FC = () => {
         >
           <ArrowLeft size={12} />
         </button>
-        <span style={{ flex: 1, color: "var(--c-text)" }}>[v] {channelName}</span>
+        <span style={{ flex: 1, color: "var(--c-text)" }} className="flex items-center gap-1.5">
+          <Volume2 size={12} />
+          {channelName}
+        </span>
       </div>
 
       {/* Device selectors and noise gate — always visible */}
@@ -146,21 +150,16 @@ export const VoiceChannelPage: React.FC = () => {
         />
 
         {/* Noise gate slider */}
-        <div className="flex flex-col gap-1">
-          <span style={{ color: "var(--c-text-muted)" }}>
-            Noise Gate:{" "}
-            <span style={{ color: noiseFloor === 0 ? "var(--c-text-dim)" : "var(--c-text)" }}>
-              {noiseFloor === 0 ? "off" : noiseFloor}
-            </span>
-          </span>
-          <input
-            type="range"
+        <div style={{ maxWidth: 320 }}>
+          <RangeSlider
+            label="Noise Gate (level)"
+            value={noiseFloor}
+            onChange={handleNoiseFloor}
             min={0}
             max={100}
             step={1}
-            value={noiseFloor}
-            onChange={(e) => handleNoiseFloor(parseInt(e.target.value, 10))}
-            style={{ maxWidth: 320, accentColor: "var(--c-accent)", cursor: "pointer" }}
+            sublabel="Filters ambient noise before it's transmitted. Raise if background sounds are triggering your speaking indicator."
+            description="0 = off"
           />
         </div>
       </div>

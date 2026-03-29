@@ -228,7 +228,7 @@ export const AppShell: React.FC = () => {
           const channelId = channelIdMatch?.[1];
           const group = groupsWithChannels?.find((g) => g.id === groupId);
           const ch = group?.channels.find((c) => c.id === channelId);
-          segments.push(`[v] ${ch?.name ?? "voice"}`);
+          segments.push(ch?.name ?? "voice");
         } else if (pathname.endsWith("/join-requests")) {
           segments.push("Join Requests");
         } else if (pathname.endsWith("/invite")) {
@@ -355,17 +355,7 @@ export const AppShell: React.FC = () => {
         >
           {breadcrumb}
         </span>
-        {activeVoiceChannelId ? (
-          <span
-            className="text-xs font-mono flex items-center gap-1"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "black" }}
-          >
-            [v] {voiceChannelName}
-            {isLocalSpeaking && (
-              <span style={{ color: "var(--c-accent)" }} title="Mic active">●</span>
-            )}
-          </span>
-        ) : statusBarAlert ? (
+        {statusBarAlert ? (
           <span
             className="text-xs font-mono status-bar-blink flex items-center gap-1"
             style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}

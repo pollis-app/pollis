@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Volume2 } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
@@ -59,7 +59,8 @@ export const GroupPage: React.FC = () => {
 
   const voiceChannelItems: TerminalMenuItem[] = voiceChannels.map((ch) => ({
     id: ch.id,
-    label: `[v] ${ch.name}`,
+    label: ch.name,
+    icon: <Volume2 size={14} />,
     description: ch.description || undefined,
     action: () => {
       setActiveVoiceChannelId(ch.id);
