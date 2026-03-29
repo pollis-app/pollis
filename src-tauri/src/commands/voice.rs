@@ -38,7 +38,8 @@ pub enum VoiceEvent {
     ParticipantLeft { identity: String },
     Muted { identity: String },
     Unmuted { identity: String },
-    ActiveSpeakers { identities: Vec<String> },
+    SpeakingStarted { identity: String },
+    SpeakingStopped { identity: String },
     Disconnected,
 }
 
@@ -60,6 +61,8 @@ pub struct PlaybackState {
     pub tasks: HashMap<String, tokio::task::JoinHandle<()>>,
     // raw RtcAudioTrack refs kept so output device switching can rebuild streams
     pub rtc_tracks: HashMap<String, libwebrtc::audio_track::RtcAudioTrack>,
+    // participant identity keyed by track key — needed to re-attach on device switch
+    pub identities: HashMap<String, String>,
     pub output_device_name: Option<String>,
 }
 
@@ -69,6 +72,7 @@ impl PlaybackState {
             streams: HashMap::new(),
             tasks: HashMap::new(),
             rtc_tracks: HashMap::new(),
+            identities: HashMap::new(),
             output_device_name: None,
         }
     }
@@ -330,6 +334,8 @@ async fn attach_remote_track(
     rtc_track: libwebrtc::audio_track::RtcAudioTrack,
     playback: Arc<Mutex<PlaybackState>>,
     track_key: String,
+    voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
+    participant_identity: String,
 ) {
     // Build the cpal output stream on a blocking thread (ALSA syscalls).
     let result = tokio::task::spawn_blocking(move || {
@@ -357,15 +363,40 @@ async fn attach_remote_track(
     // Cap the ring buffer at 200ms to keep audio fresh and latency low.
     let max_buf = (sample_rate * channels / 5) as usize;
     let task_key = track_key.clone();
+    let voice_arc_task = voice_arc.clone();
+    let identity_task = participant_identity.clone();
     let task = tokio::spawn(async move {
         eprintln!("[voice] remote drain task started for {task_key}");
-        let mut remote_frame_count = 0u64;
+        let mut onset_frames: u32 = 0;
+        let mut speak_hold: u32 = 0;
+        let mut is_speaking = false;
         while let Some(frame) = audio_stream.next().await {
-            remote_frame_count += 1;
-            if remote_frame_count % 50 == 0 {
-                let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
-                eprintln!("[voice] remote frame {remote_frame_count}: peak={peak}");
+            let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
+
+            if peak > 1000 {
+                onset_frames += 1;
+                if onset_frames >= 2 {
+                    speak_hold = 12;
+                }
+            } else {
+                onset_frames = 0;
+                if speak_hold > 0 {
+                    speak_hold -= 1;
+                }
             }
+            let now_speaking = speak_hold > 0;
+            if now_speaking != is_speaking {
+                is_speaking = now_speaking;
+                let voice = voice_arc_task.lock().await;
+                if let Some(ch) = &voice.channel {
+                    if is_speaking {
+                        let _ = ch.send(VoiceEvent::SpeakingStarted { identity: identity_task.clone() });
+                    } else {
+                        let _ = ch.send(VoiceEvent::SpeakingStopped { identity: identity_task.clone() });
+                    }
+                }
+            }
+
             let samples: Vec<f32> =
                 frame.data.iter().map(|&s| s as f32 / 32768.0).collect();
             let mut b = buf.lock().unwrap();
@@ -380,7 +411,8 @@ async fn attach_remote_track(
     let mut pb = playback.lock().unwrap();
     pb.streams.insert(track_key.clone(), stream);
     pb.tasks.insert(track_key.clone(), task);
-    pb.rtc_tracks.insert(track_key, rtc_track);
+    pb.rtc_tracks.insert(track_key.clone(), rtc_track);
+    pb.identities.insert(track_key, participant_identity);
 }
 
 // ── Device name helpers ───────────────────────────────────────────────────
@@ -586,10 +618,13 @@ pub async fn join_voice_channel(
                 let now_speaking = speak_hold > 0;
                 if now_speaking != is_speaking {
                     is_speaking = now_speaking;
-                    let identities = if is_speaking { vec![local_identity.clone()] } else { vec![] };
                     let voice = voice_arc_frame.lock().await;
                     if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::ActiveSpeakers { identities });
+                        if is_speaking {
+                            let _ = ch.send(VoiceEvent::SpeakingStarted { identity: local_identity.clone() });
+                        } else {
+                            let _ = ch.send(VoiceEvent::SpeakingStopped { identity: local_identity.clone() });
+                        }
                     }
                 }
 
@@ -671,6 +706,8 @@ pub async fn join_voice_channel(
                             audio_track.rtc_track(),
                             Arc::clone(&playback_arc),
                             track_key,
+                            Arc::clone(&voice_arc),
+                            participant.identity().to_string(),
                         ));
                     }
                 }
@@ -682,17 +719,10 @@ pub async fn join_voice_channel(
                         if let Some(t) = pb.tasks.remove(&track_key) { t.abort(); }
                         pb.streams.remove(&track_key);
                         pb.rtc_tracks.remove(&track_key);
+                        pb.identities.remove(&track_key);
                     }
                 }
-                RoomEvent::ActiveSpeakersChanged { speakers } => {
-                    let identities: Vec<String> =
-                        speakers.iter().map(|p| p.identity().to_string()).collect();
-                    eprintln!("[voice] active speakers: {:?}", identities);
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::ActiveSpeakers { identities });
-                    }
-                }
+
                 RoomEvent::Disconnected { reason } => {
                     eprintln!("[voice] disconnected: {reason:?}");
                     let voice = voice_arc.lock().await;
@@ -845,24 +875,30 @@ pub async fn set_voice_output_device(
     device_name: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
-    let voice = state.voice.lock().await;
+    let voice_arc = Arc::clone(&state.voice);
+    let voice = voice_arc.lock().await;
     let playback_arc = Arc::clone(&voice.playback);
     drop(voice);
 
-    let rtc_tracks: Vec<(String, libwebrtc::audio_track::RtcAudioTrack)> = {
+    let rtc_tracks: Vec<(String, libwebrtc::audio_track::RtcAudioTrack, String)> = {
         let mut pb = playback_arc.lock().unwrap();
         pb.stop_all();
         pb.output_device_name = Some(device_name.clone());
-        pb.rtc_tracks.iter().map(|(k, t)| (k.clone(), t.clone())).collect()
+        pb.rtc_tracks.iter().map(|(k, t)| {
+            let identity = pb.identities.get(k).cloned().unwrap_or_default();
+            (k.clone(), t.clone(), identity)
+        }).collect()
     };
 
     // Re-attach each remote track to the new output device.
-    for (key, rtc_track) in rtc_tracks {
+    for (key, rtc_track, identity) in rtc_tracks {
         tokio::spawn(attach_remote_track(
             Some(device_name.clone()),
             rtc_track,
             Arc::clone(&playback_arc),
             key,
+            Arc::clone(&voice_arc),
+            identity,
         ));
     }
 

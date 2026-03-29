@@ -12,7 +12,8 @@ type VoiceEvent =
   | { type: 'participant_left'; identity: string }
   | { type: 'muted'; identity: string }
   | { type: 'unmuted'; identity: string }
-  | { type: 'active_speakers'; identities: string[] }
+  | { type: 'speaking_started'; identity: string }
+  | { type: 'speaking_stopped'; identity: string }
   | { type: 'disconnected' };
 
 /**
@@ -89,6 +90,7 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
         } else if (event.type === 'participant_left') {
           participantsRef.current.delete(event.identity);
           flushParticipants();
+          setVoiceActiveSpeakerIds(useAppStore.getState().voiceActiveSpeakerIds.filter((id) => id !== event.identity));
         } else if (event.type === 'muted') {
           const p = participantsRef.current.get(event.identity);
           if (p) {
@@ -107,12 +109,23 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
             setVoiceIsMuted(false);
           }
           flushParticipants();
-        } else if (event.type === 'active_speakers') {
-          console.log('[voice] active_speakers received:', event.identities);
+        } else if (event.type === 'speaking_started') {
           flushSync(() => {
-            setVoiceActiveSpeakerIds(event.identities);
-            const isLocalSpeaking = event.identities.includes(localIdentityRef.current);
-            setIsLocalSpeaking(isLocalSpeaking);
+            const prev = useAppStore.getState().voiceActiveSpeakerIds;
+            if (!prev.includes(event.identity)) {
+              setVoiceActiveSpeakerIds([...prev, event.identity]);
+            }
+            if (event.identity === localIdentityRef.current) {
+              setIsLocalSpeaking(true);
+            }
+          });
+        } else if (event.type === 'speaking_stopped') {
+          flushSync(() => {
+            const prev = useAppStore.getState().voiceActiveSpeakerIds;
+            setVoiceActiveSpeakerIds(prev.filter((id) => id !== event.identity));
+            if (event.identity === localIdentityRef.current) {
+              setIsLocalSpeaking(false);
+            }
           });
         } else if (event.type === 'disconnected') {
           participantsRef.current.clear();

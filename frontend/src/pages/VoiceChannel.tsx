@@ -83,12 +83,12 @@ export const VoiceChannelPage: React.FC = () => {
     invoke<AudioDevice[]>('list_audio_devices').then((devices) => {
       setInputs(devices.filter((d) => d.kind === "input"));
       setOutputs(devices.filter((d) => d.kind === "output"));
-    }).catch(() => {});
+    }).catch(() => { });
   }, []);
 
   // Sync saved noise floor to Rust on mount so it's applied from the start.
   useEffect(() => {
-    invoke('set_noise_floor', { threshold: noiseFloor / 1000 }).catch(() => {});
+    invoke('set_noise_floor', { threshold: noiseFloor / 1000 }).catch(() => { });
   }, []);
 
   const setInput = (id: string) => {
@@ -104,7 +104,7 @@ export const VoiceChannelPage: React.FC = () => {
   const handleNoiseFloor = (val: number) => {
     setNoiseFloorState(val);
     localStorage.setItem(NOISE_FLOOR_KEY, val.toString());
-    invoke('set_noise_floor', { threshold: val / 1000 }).catch(() => {});
+    invoke('set_noise_floor', { threshold: val / 1000 }).catch(() => { });
   };
 
   const isInCall = activeVoiceChannelId === channelId;
@@ -186,7 +186,7 @@ export const VoiceChannelPage: React.FC = () => {
             borderRadius: "0.25rem",
           }}
         >
-          {isInCall ? "[leave voice]" : "[join voice]"}
+          {isInCall ? "Leave" : "Join"}
         </button>
       </div>
     </div>
