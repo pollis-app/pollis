@@ -14,3 +14,6 @@ CREATE TABLE IF NOT EXISTS voice_presence (
 
 CREATE INDEX IF NOT EXISTS idx_voice_presence_channel ON voice_presence(channel_id);
 CREATE INDEX IF NOT EXISTS idx_voice_presence_group   ON voice_presence(group_id);
+
+INSERT INTO schema_migrations (version, description) VALUES
+    (6, 'voice channel presence tracking');
