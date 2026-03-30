@@ -4,8 +4,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::db::remote::RemoteDb;
 
-use base64::Engine as _;
-
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use livekit::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -68,39 +66,11 @@ pub(crate) fn make_token(config: &Config, room_name: &str, identity: &str, displ
         .map_err(|e| Error::Other(anyhow::anyhow!("JWT sign: {e}")))
 }
 
-// ── Server-side JWT (for REST API calls) ───────────────────────────────────
-
-/// Generates an admin JWT for use with the LiveKit Server REST API.
-/// Claims are built as raw JSON to exactly match what the LiveKit Go SDK produces,
-/// avoiding any risk of serde struct/rename translation issues.
-fn make_admin_token(config: &Config) -> Result<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?
-        .as_secs();
-
-    let claims = serde_json::json!({
-        "iss": config.livekit_api_key,
-        "sub": config.livekit_api_key,
-        "iat": now,
-        "exp": now + 60,
-        "nbf": now,
-        "video": {
-            "roomAdmin": true,
-            "roomCreate": true,
-        }
-    });
-
-    let mut header = Header::new(Algorithm::HS256);
-    header.typ = Some("JWT".to_string());
-    let key = EncodingKey::from_secret(config.livekit_api_secret.as_bytes());
-    encode(&header, &claims, &key)
-        .map_err(|e| Error::Other(anyhow::anyhow!("admin JWT sign: {e}")))
-}
-
-/// Sends a JSON event to a user's personal inbox LiveKit room via the
-/// LiveKit Server REST API (`/twirp/livekit.RoomService/SendData`).
-/// Non-fatal — if the user is offline the room may not exist; errors are logged.
+/// Sends a JSON event to a user's personal inbox LiveKit room by making a
+/// one-shot room connection. Joins `inbox-{user_id}` as identity "server",
+/// publishes the data packet, then drops the room (auto-disconnects).
+/// Spawned in a background task so callers are never blocked.
+/// Non-fatal — errors are only logged.
 pub async fn publish_to_user_inbox(
     config: &Config,
     user_id: &str,
@@ -110,36 +80,39 @@ pub async fn publish_to_user_inbox(
         return Ok(());
     }
 
-    // Convert the WebSocket URL to HTTP for the REST API
-    let http_url = config.livekit_url
-        .replace("wss://", "https://")
-        .replace("ws://", "http://");
-
-    let token = make_admin_token(config)?;
     let room_name = format!("inbox-{}", user_id);
+    let token = make_token(config, &room_name, "server", "server")?;
+    let url = config.livekit_url.clone();
 
-    let raw = serde_json::to_vec(&payload).map_err(Error::Serde)?;
-    let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw);
-
-    let client = reqwest::Client::new();
-    let resp = client
-        .post(format!("{}/twirp/livekit.RoomService/SendData", http_url))
-        .header("Authorization", format!("Bearer {}", token))
-        .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "room": room_name,
-            "data": data_b64,
-        }))
-        .send()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("publish_to_user_inbox http: {e}")))?;
-
-    if !resp.status().is_success() {
-        // Non-fatal: room may not exist if the user is offline.
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        eprintln!("[inbox] SendData to {room_name} returned {status}: {body}");
-    }
+    tauri::async_runtime::spawn(async move {
+        match Room::connect(&url, &token, RoomOptions::default()).await {
+            Ok((room, _events)) => {
+                let raw = match serde_json::to_vec(&payload) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("[inbox] serialize error for {room_name}: {e}");
+                        return;
+                    }
+                };
+                let result = room
+                    .local_participant()
+                    .publish_data(DataPacket {
+                        payload: raw,
+                        reliable: true,
+                        ..Default::default()
+                    })
+                    .await;
+                if let Err(e) = result {
+                    eprintln!("[inbox] publish_data to {room_name} failed: {e}");
+                }
+                // Dropping `room` here causes the SDK to disconnect automatically.
+            }
+            Err(e) => {
+                // Non-fatal: room may not exist if the user is offline.
+                eprintln!("[inbox] connect to {room_name} failed (user may be offline): {e}");
+            }
+        }
+    });
 
     Ok(())
 }
