@@ -73,7 +73,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
         aria-describedby={descriptionId}
         className="
           w-full h-2 rounded-md appearance-none cursor-pointer
-          focus:outline-none
+          focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black
           disabled:opacity-50 disabled:cursor-not-allowed
           [&::-webkit-slider-thumb]:appearance-none
           [&::-webkit-slider-thumb]:w-3.5

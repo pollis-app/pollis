@@ -170,7 +170,7 @@ export const VoiceChannelPage: React.FC = () => {
       {isInCall ? (
         <VoiceChannelView />
       ) : (
-        <div className="flex-1 overflow-auto px-4 py-2 flex flex-col gap-1 font-mono text-xs">
+        <div className="flex-1 overflow-auto px-4 py-2 flex flex-col gap-1 font-mono text-xs" style={{ borderTop: "1px solid var(--c-border)", borderBottom: "1px solid var(--c-border)" }}>
           {observerParticipants.length === 0 ? (
             <span style={{ color: "var(--c-text-dim)" }}>No one in this channel</span>
           ) : (
