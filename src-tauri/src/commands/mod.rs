@@ -6,5 +6,6 @@ pub mod dm;
 pub mod livekit;
 pub mod mls;
 pub mod r2;
+pub mod sfx;
 pub mod update;
 pub mod voice;

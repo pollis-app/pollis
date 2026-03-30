@@ -356,12 +356,16 @@ export const AppShell: React.FC = () => {
           {breadcrumb}
         </span>
         {statusBarAlert ? (
-          <span
-            className="text-xs font-mono status-bar-blink flex items-center gap-1"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          <button
+            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)", background: "none", border: "none", padding: 0 }}
+            onClick={() => {
+              router.navigate({ to: "/dms/$conversationId", params: { conversationId: statusBarAlert.roomId } });
+              setStatusBarAlert(null);
+            }}
           >
             <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
-          </span>
+          </button>
         ) : null}
       </div>
     </div>

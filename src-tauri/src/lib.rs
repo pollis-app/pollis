@@ -166,6 +166,7 @@ commands::livekit::get_livekit_token,
             commands::voice::set_voice_input_device,
             commands::voice::set_voice_output_device,
             commands::voice::set_noise_floor,
+            commands::sfx::play_sfx,
         ])
         // On macOS, hide the window on close instead of quitting.
         .on_window_event(|_window, _event| {

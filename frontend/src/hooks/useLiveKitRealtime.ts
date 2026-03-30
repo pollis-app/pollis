@@ -8,6 +8,7 @@ import { useTauriReady } from './useTauriReady';
 import { messageQueryKeys, useDMConversations } from './queries/useMessages';
 import { usePreferences } from './queries/usePreferences';
 import { useUserGroupsWithChannels } from './queries/useGroups';
+import { playSfx, SFX } from '../utils/sfx';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -125,6 +126,16 @@ export function useLiveKitRealtime() {
   const setStatusBarAlertRef = useRef(setStatusBarAlert);
   useEffect(() => { setStatusBarAlertRef.current = setStatusBarAlert; }, [setStatusBarAlert]);
 
+  const currentUserIdRef = useRef<string | null>(currentUser?.id ?? null);
+  useEffect(() => { currentUserIdRef.current = currentUser?.id ?? null; }, [currentUser?.id]);
+
+  // Sound is independent of OS notification permission — tied only to the user's
+  // allow_desktop_notifications preference.
+  const allowSoundRef = useRef<boolean>(prefsQuery.data?.allow_desktop_notifications ?? false);
+  useEffect(() => {
+    allowSoundRef.current = prefsQuery.data?.allow_desktop_notifications ?? false;
+  }, [prefsQuery.data?.allow_desktop_notifications]);
+
   // ── OS-level window focus via Tauri events ────────────────────────────────
   // DOM focus/blur don't fire on minimize in Tauri — use the OS window events.
 
@@ -197,6 +208,10 @@ export function useLiveKitRealtime() {
       if (event.type === 'voice_joined' || event.type === 'voice_left') {
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants', event.channel_id] });
+        // TODO: play join/leave sound for other users' voice activity (not the local user's own actions).
+        // if (event.user_id !== currentUserIdRef.current) {
+        //   playSfx(event.type === 'voice_joined' ? SFX.join : SFX.leave);
+        // }
         return;
       }
 
@@ -233,6 +248,11 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "conversation", conversationId] });
       }
 
+      // TODO: play ping sound on incoming message when window is unfocused.
+      // if (!isWindowFocusedRef.current && allowSoundRef.current) {
+      //   playSfx(SFX.ping);
+      // }
+
       if (!isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
         const title = incomingId
           ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
@@ -250,9 +270,6 @@ export function useLiveKitRealtime() {
         // } catch {
         //   // ignore
         // }
-
-        // TODO: play a notification sound here when we have one
-        // e.g. new Audio('/sounds/notify.mp3').play().catch(() => {});
       }
     };
 
