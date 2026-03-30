@@ -174,7 +174,10 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libxdo-dev \
-            libssl-dev
+            libssl-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libdbus-1-dev
 
       - name: Load production secrets
         run: |
