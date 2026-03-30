@@ -25,6 +25,17 @@ type RealtimeEvent =
   }
   | {
     type: 'membership_changed';
+  }
+  | {
+    type: 'voice_joined';
+    channel_id: string;
+    user_id: string;
+    display_name: string;
+  }
+  | {
+    type: 'voice_left';
+    channel_id: string;
+    user_id: string;
   };
 
 export function useLiveKitRealtime() {
@@ -180,6 +191,12 @@ export function useLiveKitRealtime() {
         // and join-request approved scenarios.
         queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
+        return;
+      }
+
+      if (event.type === 'voice_joined' || event.type === 'voice_left') {
+        queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
+        queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants', event.channel_id] });
         return;
       }
 

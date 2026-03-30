@@ -40,7 +40,7 @@ interface UseVoiceChannelResult {
   leave: () => void;
 }
 
-export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult {
+export function useVoiceChannel(channelId: string | null, groupId: string | null = null): UseVoiceChannelResult {
   const { isReady: isTauriReady } = useTauriReady();
   const {
     currentUser,
@@ -162,6 +162,23 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
 
       if (cancelled) {
         await invoke('leave_voice_channel');
+        if (groupId) {
+          invoke('publish_voice_presence', {
+            groupId,
+            channelId,
+            userId: currentUser.id,
+            displayName: currentUser.username ?? currentUser.id,
+            joined: false,
+          }).catch(() => {});
+        }
+      } else if (groupId) {
+        invoke('publish_voice_presence', {
+          groupId,
+          channelId,
+          userId: currentUser.id,
+          displayName: currentUser.username ?? currentUser.id,
+          joined: true,
+        }).catch(() => {});
       }
     };
 
@@ -178,9 +195,19 @@ export function useVoiceChannel(channelId: string | null): UseVoiceChannelResult
       setVoiceIsMuted(false);
       setIsLocalSpeaking(false);
       invoke('leave_voice_channel').catch(() => {});
+      if (groupId && currentUser) {
+        invoke('publish_voice_presence', {
+          groupId,
+          channelId,
+          userId: currentUser.id,
+          displayName: currentUser.username ?? currentUser.id,
+          joined: false,
+        }).catch(() => {});
+      }
     };
   }, [
     channelId,
+    groupId,
     isTauriReady,
     currentUser?.id,
     currentUser?.username,

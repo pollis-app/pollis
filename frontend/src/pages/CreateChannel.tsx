@@ -102,7 +102,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
         <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Select a group first</p>
         <button
           data-testid="create-channel-go-home-button"
-          onClick={() => onSuccess?.("")}
+          onClick={() => onSuccess?.("", "text")}
           className="text-xs font-mono transition-colors"
           style={{ color: "var(--c-text-muted)" }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}

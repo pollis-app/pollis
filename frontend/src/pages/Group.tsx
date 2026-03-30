@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Volume2 } from "lucide-react";
+import { ArrowLeft, Hash, Volume2 } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
+import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
 
 export const GroupPage: React.FC = () => {
   const navigate = useNavigate();
@@ -13,6 +14,12 @@ export const GroupPage: React.FC = () => {
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);
+
+  const voiceChannelIds = useMemo(
+    () => (group?.channels ?? []).filter((ch) => ch.channel_type === "voice").map((ch) => ch.id),
+    [group]
+  );
+  const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
 
   if (isLoading) {
     return (
@@ -46,7 +53,8 @@ export const GroupPage: React.FC = () => {
 
   const textChannelItems: TerminalMenuItem[] = textChannels.map((ch) => ({
     id: ch.id,
-    label: `# ${ch.name}`,
+    label: ch.name,
+    icon: <Hash size={14} />,
     description: <LastMessagePreview channelId={ch.id} />,
     action: () => {
       setSelectedChannelId(ch.id);
@@ -57,18 +65,21 @@ export const GroupPage: React.FC = () => {
     testId: `channel-option-${ch.id}`,
   }));
 
-  const voiceChannelItems: TerminalMenuItem[] = voiceChannels.map((ch) => ({
-    id: ch.id,
-    label: ch.name,
-    icon: <Volume2 size={14} />,
-    description: ch.description || undefined,
-    action: () => {
-      setActiveVoiceChannelId(ch.id);
-      navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
-    },
-    badge: 0,
-    testId: `channel-option-${ch.id}`,
-  }));
+  const voiceChannelItems: TerminalMenuItem[] = voiceChannels.map((ch) => {
+    const count = voiceCounts[ch.id] ?? 0;
+    return {
+      id: ch.id,
+      label: ch.name,
+      icon: <Volume2 size={14} />,
+      description: count > 0 ? `${count} in call` : (ch.description || "Join voice chat"),
+      action: () => {
+        setActiveVoiceChannelId(ch.id);
+        navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
+      },
+      badge: count > 0 ? count : 0,
+      testId: `channel-option-${ch.id}`,
+    };
+  });
 
   // Insert a separator before voice channels only when both sections are non-empty
   const voiceSeparator: TerminalMenuItem[] =

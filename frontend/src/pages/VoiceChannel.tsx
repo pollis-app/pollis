@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowLeft, Volume2 } from "lucide-react";
+import { ArrowLeft, Circle, Volume2 } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { switchVoiceDevice } from "../hooks/useVoiceChannel";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { RangeSlider } from "../components/ui/RangeSlider";
+import { useVoiceParticipants } from "../hooks/queries/useVoiceParticipants";
 import type { AudioDevice } from "../types";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
@@ -109,6 +110,7 @@ export const VoiceChannelPage: React.FC = () => {
   };
 
   const isInCall = activeVoiceChannelId === channelId;
+  const { data: observerParticipants = [] } = useVoiceParticipants(isInCall ? null : channelId);
 
   return (
     <div className="flex flex-col h-full font-mono text-xs">
@@ -164,8 +166,36 @@ export const VoiceChannelPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Participant list — only when in a call */}
-      {isInCall && <VoiceChannelView />}
+      {/* Participant list */}
+      {isInCall ? (
+        <VoiceChannelView />
+      ) : (
+        <div className="flex-1 overflow-auto px-4 py-2 flex flex-col gap-1 font-mono text-xs">
+          {observerParticipants.length === 0 ? (
+            <span style={{ color: "var(--c-text-dim)" }}>No one in this channel</span>
+          ) : (
+            observerParticipants.map((p) => (
+              <div
+                key={p.identity}
+                className="flex items-center gap-2"
+                style={{
+                  color: "var(--c-text)",
+                  borderLeft: "2px solid transparent",
+                  paddingLeft: "6px",
+                }}
+              >
+                <span
+                  className="text-lg"
+                  style={{ color: "var(--c-border)", lineHeight: 1.25, flexShrink: 0, display: "flex", alignItems: "center" }}
+                >
+                  <Circle size={12} fill="var(--c-border)" />
+                </span>
+                <span className="flex-1 truncate">{p.name}</span>
+              </div>
+            ))
+          )}
+        </div>
+      )}
 
       {/* Join / Leave button — always visible */}
       <div className="px-4 pb-6 flex-shrink-0">

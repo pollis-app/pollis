@@ -1,5 +1,5 @@
 import React from "react";
-import { VolumeX } from "lucide-react";
+import { Circle, Dot, VolumeX } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 
 export const VoiceChannelView: React.FC = () => {
@@ -40,35 +40,28 @@ export const VoiceChannelView: React.FC = () => {
                 opacity: p.isMuted ? 0.6 : 1,
               }}
             >
-              {/* Speaking pulse dot */}
+              {/* Activity indicator: mute icon when muted, speaking dot otherwise */}
               <span
                 data-testid={`voice-speaking-${p.identity}`}
-                className={isSpeaking ? "animate-pulse" : ""}
+                className={`text-lg ${isSpeaking ? "animate-pulse" : ""}`}
                 style={{
-                  color: isSpeaking ? "var(--c-accent)" : "var(--c-border)",
-                  fontSize: "0.6rem",
-                  lineHeight: 1,
+                  color: p.isMuted ? "var(--c-text-dim)" : isSpeaking ? "var(--c-accent)" : "var(--c-border)",
+                  lineHeight: 1.25,
                   flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
                 }}
               >
-                ●
+                {p.isMuted
+                  ? <VolumeX size={16} data-testid={`voice-muted-${p.identity}`} />
+                  : <Circle size={12} fill={isSpeaking ? "var(--c-accent)" : "var(--c-border)"} />
+                }
               </span>
 
               {/* Username */}
               <span className="flex-1 truncate">
                 {p.name}
               </span>
-
-              {/* Muted indicator */}
-              {p.isMuted && (
-                <span
-                  data-testid={`voice-muted-${p.identity}`}
-                  style={{ color: "var(--c-text-dim)" }}
-                  title="Muted"
-                >
-                  <VolumeX size={10} />
-                </span>
-              )}
             </div>
           );
         })}

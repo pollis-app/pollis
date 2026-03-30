@@ -11,16 +11,16 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const { toggleMute, leave } = useVoiceChannel(channelId);
   const { voiceParticipants, voiceIsMuted, voiceActiveSpeakerIds } = useAppStore();
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
   const groupId = groupsWithChannels?.find((g) =>
     g.channels.some((c) => c.id === channelId)
-  )?.id;
+  )?.id ?? null;
 
-  console.log(voiceActiveSpeakerIds, voiceParticipants);
+  const { toggleMute, leave } = useVoiceChannel(channelId, groupId);
+
   return (
     <div
       data-testid="voice-bar"
