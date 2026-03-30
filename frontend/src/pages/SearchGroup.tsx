@@ -1,14 +1,17 @@
 import React, { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../stores/appStore";
-import { useRequestGroupAccess } from "../hooks/queries";
+import { useRequestGroupAccess, useUserGroupsWithChannels } from "../hooks/queries";
 import { deriveSlug } from "../utils/urlRouting";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 
 export const SearchGroup: React.FC = () => {
+  const navigate = useNavigate();
   const currentUser = useAppStore((state) => state.currentUser);
+  const { data: userGroups } = useUserGroupsWithChannels();
   const [slug, setSlug] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -16,6 +19,8 @@ export const SearchGroup: React.FC = () => {
   const [requestSent, setRequestSent] = useState(false);
 
   const requestAccessMutation = useRequestGroupAccess();
+
+  const isMember = foundGroup != null && (userGroups ?? []).some((g) => g.id === foundGroup.id);
 
   const handleSearch = async () => {
     if (!slug.trim()) {
@@ -44,7 +49,10 @@ export const SearchGroup: React.FC = () => {
       await requestAccessMutation.mutateAsync(foundGroup.id);
       setRequestSent(true);
     } catch (err) {
-      console.error("Failed to request access:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.toLowerCase().includes("pending request already exists")) {
+        setRequestSent(true);
+      }
     }
   };
 
@@ -98,15 +106,24 @@ export const SearchGroup: React.FC = () => {
                   </p>
                 )}
               </div>
-              <Button
-                data-testid="request-access-button"
-                onClick={handleRequestAccess}
-                disabled={requestAccessMutation.isPending}
-                isLoading={requestAccessMutation.isPending}
-                loadingText="Sending request…"
-              >
-                Request Access
-              </Button>
+              {isMember ? (
+                <Button
+                  data-testid="go-to-group-button"
+                  onClick={() => navigate({ to: "/groups/$groupId", params: { groupId: foundGroup.id } })}
+                >
+                  Go to Group
+                </Button>
+              ) : (
+                <Button
+                  data-testid="request-access-button"
+                  onClick={handleRequestAccess}
+                  disabled={requestAccessMutation.isPending}
+                  isLoading={requestAccessMutation.isPending}
+                  loadingText="Sending request…"
+                >
+                  Request Access
+                </Button>
+              )}
             </Card>
           )}
 
@@ -116,12 +133,9 @@ export const SearchGroup: React.FC = () => {
             </p>
           )}
 
-          {(searchError || requestAccessMutation.error) && (
+          {searchError && (
             <p data-testid="search-group-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
-              {searchError ||
-                (requestAccessMutation.error instanceof Error
-                  ? requestAccessMutation.error.message
-                  : "Failed to send request")}
+              {searchError}
             </p>
           )}
         </div>

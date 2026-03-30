@@ -31,6 +31,7 @@ export const AppShell: React.FC = () => {
     activeVoiceChannelId,
     statusBarAlert,
     setStatusBarAlert,
+    isLocalSpeaking,
   } = useAppStore();
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -227,7 +228,7 @@ export const AppShell: React.FC = () => {
           const channelId = channelIdMatch?.[1];
           const group = groupsWithChannels?.find((g) => g.id === groupId);
           const ch = group?.channels.find((c) => c.id === channelId);
-          segments.push(`[v] ${ch?.name ?? "voice"}`);
+          segments.push(ch?.name ?? "voice");
         } else if (pathname.endsWith("/join-requests")) {
           segments.push("Join Requests");
         } else if (pathname.endsWith("/invite")) {
@@ -354,14 +355,18 @@ export const AppShell: React.FC = () => {
         >
           {breadcrumb}
         </span>
-        {statusBarAlert && (
-          <span
-            className="text-xs font-mono status-bar-blink flex items-center gap-1"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+        {statusBarAlert ? (
+          <button
+            className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)", background: "none", border: "none", padding: 0 }}
+            onClick={() => {
+              router.navigate({ to: "/dms/$conversationId", params: { conversationId: statusBarAlert.roomId } });
+              setStatusBarAlert(null);
+            }}
           >
             <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
-          </span>
-        )}
+          </button>
+        ) : null}
       </div>
     </div>
   );

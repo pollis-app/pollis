@@ -33,13 +33,9 @@ export const Switch: React.FC<SwitchProps> = ({
           aria-describedby={descriptionId}
           onClick={() => { if (!disabled) { onChange(!checked); } }}
           disabled={disabled}
-          className="relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black disabled:opacity-50 disabled:cursor-not-allowed"
           style={{
             background: checked ? "var(--c-accent)" : "var(--c-border-active)",
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ["--tw-ring-color" as any]: "var(--c-accent)",
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ["--tw-ring-offset-color" as any]: "var(--c-bg)",
             cursor: disabled ? "not-allowed" : "pointer",
           }}
         >

@@ -47,11 +47,14 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     }
   }, [autoFocus]);
 
-  // Reset selection to first navigable item when items change
+  // Reset selection to first navigable item only when the actual item IDs change,
+  // not on every parent re-render that produces a new array reference.
+  const itemIds = items.map((i) => i.id).join(",");
   useEffect(() => {
     const first = items.findIndex((item) => item.type !== "separator");
     setSelectedIndex(first >= 0 ? first : 0);
-  }, [items]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemIds]);
 
   // Skip separators when navigating
   const navigableIndices = items
@@ -186,19 +189,13 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
               role="menuitem"
               aria-disabled={item.disabled}
             >
-              {/* Chevron indicator */}
+              {/* Chevron indicator — stays centered in the full row height */}
               <div className="w-4 h-4 flex-shrink-0 flex items-center justify-center">
                 {isSelected
                   ? <ChevronRight className="w-4 h-4" style={{ color: "var(--c-accent)" }} />
                   : <div className="w-4 h-4" />
                 }
               </div>
-
-              {item.icon && (
-                <div className="flex-shrink-0" style={{ color: "var(--c-text-dim)" }}>
-                  {item.icon}
-                </div>
-              )}
 
               <div className="flex-1 min-w-0">
                 <div
@@ -211,6 +208,11 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                         : "var(--c-text)",
                   }}
                 >
+                  {item.icon && (
+                    <span className="flex-shrink-0" style={{ color: isSelected ? "var(--c-accent)" : "var(--c-text-dim)" }}>
+                      {item.icon}
+                    </span>
+                  )}
                   <span>{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
                     <span

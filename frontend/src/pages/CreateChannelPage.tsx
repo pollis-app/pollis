@@ -15,12 +15,12 @@ export const CreateChannelPage: React.FC = () => {
       onBack={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
     >
       <CreateChannel
-        onSuccess={(channelId) => {
-          if (channelId) {
+        onSuccess={(channelId, channelType) => {
+          if (!channelId || channelType === "voice") {
+            navigate({ to: "/groups/$groupId", params: { groupId } });
+          } else {
             setSelectedChannelId(channelId);
             navigate({ to: "/groups/$groupId/channels/$channelId", params: { groupId, channelId } });
-          } else {
-            navigate({ to: "/groups/$groupId", params: { groupId } });
           }
         }}
       />

@@ -23,6 +23,17 @@ pub enum RealtimeEvent {
     /// Sent to a user's personal inbox room when they are added to a group
     /// (via invite acceptance or join-request approval).
     MembershipChanged {},
+    /// Sent to a group room when a user joins a voice channel in that group.
+    VoiceJoined {
+        channel_id: String,
+        user_id: String,
+        display_name: String,
+    },
+    /// Sent to a group room when a user leaves a voice channel in that group.
+    VoiceLeft {
+        channel_id: String,
+        user_id: String,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

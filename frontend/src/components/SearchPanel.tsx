@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Hash, AtSign, Search, ArrowUp, ArrowDown } from "lucide-react";
+import { Hash, AtSign, Search, ArrowUp, ArrowDown, Volume2 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
+import { useAppStore } from "../stores/appStore";
 import type { GroupWithChannels } from "../services/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -10,6 +11,14 @@ import type { GroupWithChannels } from "../services/api";
 type SearchResultItem =
   | {
       type: "channel";
+      id: string;
+      name: string;
+      breadcrumb: string;
+      groupId: string;
+      channelId: string;
+    }
+  | {
+      type: "voice";
       id: string;
       name: string;
       breadcrumb: string;
@@ -60,6 +69,33 @@ function buildChannelResults(
   return results;
 }
 
+function buildVoiceResults(
+  groups: GroupWithChannels[] | undefined
+): SearchResultItem[] {
+  if (!groups) {
+    return [];
+  }
+  const results: SearchResultItem[] = [];
+  for (const group of groups) {
+    const groupSlug = group.slug || group.name.toLowerCase().replace(/\s+/g, "-");
+    for (const channel of group.channels) {
+      if (channel.channel_type !== "voice") {
+        continue;
+      }
+      const channelSlug = channel.slug || channel.name.toLowerCase().replace(/\s+/g, "-");
+      results.push({
+        type: "voice",
+        id: `voice-${channel.id}`,
+        name: channel.name,
+        breadcrumb: `/g/${groupSlug}/voice/${channelSlug}`,
+        groupId: group.id,
+        channelId: channel.id,
+      });
+    }
+  }
+  return results;
+}
+
 function buildDMResults(
   conversations: Array<{ id: string; user2_identifier: string }> | undefined
 ): SearchResultItem[] {
@@ -102,13 +138,25 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations } = useDMConversations();
+  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
 
-  // Build the full list of searchable items
+  // Build the full list of searchable items, active voice channel sorted to top
   const allItems = useMemo(() => {
     const channels = buildChannelResults(groupsWithChannels);
+    const voiceChannels = buildVoiceResults(groupsWithChannels);
     const dms = buildDMResults(dmConversations);
-    return [...channels, ...dms];
-  }, [groupsWithChannels, dmConversations]);
+    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...dms];
+    if (activeVoiceChannelId) {
+      const activeIdx = combined.findIndex(
+        (i) => i.type === "voice" && i.channelId === activeVoiceChannelId
+      );
+      if (activeIdx > 0) {
+        const [active] = combined.splice(activeIdx, 1);
+        combined.unshift(active);
+      }
+    }
+    return combined;
+  }, [groupsWithChannels, dmConversations, activeVoiceChannelId]);
 
   // Filter based on query
   const filteredItems = useMemo(
@@ -147,6 +195,11 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
       if (item.type === "channel") {
         navigate({
           to: "/groups/$groupId/channels/$channelId",
+          params: { groupId: item.groupId, channelId: item.channelId },
+        });
+      } else if (item.type === "voice") {
+        navigate({
+          to: "/groups/$groupId/voice/$channelId",
           params: { groupId: item.groupId, channelId: item.channelId },
         });
       } else {
@@ -271,7 +324,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Jump to channel or DM..."
+            placeholder="Jump to channel, voice, or DM..."
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -333,8 +386,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
               style={{ color: "var(--c-text-muted)" }}
             >
               {query.trim()
-                ? "No channels or conversations found"
-                : "Type to search channels and DMs"}
+                ? "No channels, voice channels, or DMs found"
+                : "Jump to a channel, voice channel, or DM"}
             </div>
           ) : (
             filteredItems.map((item, index) => {
@@ -363,6 +416,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
                   >
                     {item.type === "channel" ? (
                       <Hash size={14} />
+                    ) : item.type === "voice" ? (
+                      <Volume2 size={14} />
                     ) : (
                       <AtSign size={14} />
                     )}
@@ -371,12 +426,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
                   {/* Name and breadcrumb */}
                   <div className="flex-1 min-w-0">
                     <div
-                      className="font-sans text-sm truncate"
+                      className="font-sans text-sm truncate flex items-center gap-2"
                       style={{
                         color: isSelected ? "var(--c-accent)" : "var(--c-text)",
                       }}
                     >
-                      {item.name}
+                      <span>{item.name}</span>
+                      {item.type === "voice" && item.channelId === activeVoiceChannelId && (
+                        <span className="font-mono text-xs" style={{ color: "var(--c-accent)" }}>[live]</span>
+                      )}
                     </div>
                     <div
                       className="font-mono text-xs truncate"

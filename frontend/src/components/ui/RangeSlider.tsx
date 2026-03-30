@@ -10,6 +10,7 @@ interface RangeSliderProps {
   disabled?: boolean;
   className?: string;
   id?: string;
+  sublabel?: string;
   description?: string;
 }
 
@@ -23,6 +24,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
   disabled = false,
   className = "",
   id,
+  sublabel,
   description,
 }) => {
   const inputId = id || `slider-${label.toLowerCase().replace(/\s+/g, "-")}`;
@@ -50,6 +52,15 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
         </span>
       </label>
 
+      {sublabel && (
+        <p
+          className="mb-2 text-xs font-mono"
+          style={{ color: "var(--c-text-muted)" }}
+        >
+          {sublabel}
+        </p>
+      )}
+
       <input
         id={inputId}
         type="range"
@@ -62,7 +73,7 @@ export const RangeSlider: React.FC<RangeSliderProps> = ({
         aria-describedby={descriptionId}
         className="
           w-full h-2 rounded-md appearance-none cursor-pointer
-          focus:outline-none
+          focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black
           disabled:opacity-50 disabled:cursor-not-allowed
           [&::-webkit-slider-thumb]:appearance-none
           [&::-webkit-slider-thumb]:w-3.5

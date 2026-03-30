@@ -1,5 +1,7 @@
 /* ── Reset & base ─────────────────────────────────────────────── */
-*, *::before, *::after {
+*,
+*::before,
+*::after {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
@@ -13,7 +15,8 @@
   --c-border: #27272a;
 }
 
-html, body {
+html,
+body {
   height: 100%;
   background: var(--c-bg);
   color: var(--c-text);
@@ -77,6 +80,13 @@ main {
   opacity: 1;
 }
 
+.small-print {
+  font-size: 0.75rem;
+  color: var(--c-text-muted);
+  opacity: 1;
+  margin-top: 0.5rem;
+}
+
 /* ── CTA ──────────────────────────────────────────────────────── */
 .cta-group {
   display: flex;
@@ -118,7 +128,7 @@ main {
   font-weight: bold;
   border: 2px solid var(--c-accent);
   padding: 0.25rem 0.5rem;
-  border-radius: 1rem; 
+  border-radius: 1rem;
   background-color: var(--c-accent);
   margin-top: 1rem;
 }

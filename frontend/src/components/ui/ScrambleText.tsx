@@ -104,7 +104,8 @@ export const ScrambleText: React.FC<ScrambleTextProps> = ({
         setPhase("done");
         return;
       }
-      setDisplayed(text.slice(0, i));
+      // Ensure at least 1 character is always shown to prevent height jitter
+      setDisplayed(text.slice(0, Math.max(1, i)));
       typeIndex.current = i + 1;
       frameRef.current = setTimeout(tick, typeSpeed);
     };

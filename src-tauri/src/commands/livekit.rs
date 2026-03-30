@@ -2,6 +2,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::db::remote::RemoteDb;
+
 use base64::Engine as _;
 
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
@@ -37,7 +39,7 @@ struct VideoGrants {
     can_publish_data: bool,
 }
 
-fn make_token(config: &Config, room_name: &str, identity: &str, display_name: &str) -> Result<String> {
+pub(crate) fn make_token(config: &Config, room_name: &str, identity: &str, display_name: &str) -> Result<String> {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?
@@ -142,6 +144,51 @@ pub async fn publish_to_user_inbox(
     Ok(())
 }
 
+// ── Voice participant listing ──────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct VoiceParticipantInfo {
+    pub identity: String,
+    pub name: String,
+}
+
+#[derive(Serialize)]
+pub struct VoiceRoomCount {
+    pub channel_id: String,
+    pub count: usize,
+}
+
+/// Returns the participant count for each of the given voice channels by
+/// querying voice_presence in Turso. No LiveKit REST calls.
+#[tauri::command]
+pub async fn list_voice_room_counts(
+    channel_ids: Vec<String>,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<VoiceRoomCount>> {
+    if channel_ids.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let counts = query_voice_counts(&state.remote_db, &channel_ids).await?;
+    Ok(channel_ids
+        .into_iter()
+        .map(|id| {
+            let count = counts.get(&id).copied().unwrap_or(0);
+            VoiceRoomCount { channel_id: id, count }
+        })
+        .collect())
+}
+
+/// Returns the participants in a voice channel by querying voice_presence.
+/// No LiveKit REST calls.
+#[tauri::command]
+pub async fn list_voice_participants(
+    channel_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<VoiceParticipantInfo>> {
+    query_voice_participants(&state.remote_db, &channel_id).await
+}
+
 // ── Legacy commands (kept for potential future use) ────────────────────────
 
 #[tauri::command]
@@ -241,6 +288,17 @@ pub async fn connect_rooms(
             Ok((room, mut events)) => {
                 let room = Arc::new(room);
 
+                // On connect, reconcile voice_presence: delete rows for any user who
+                // has a presence record for this group but is not currently in the room.
+                // This cleans up orphaned rows from previous crash disconnects.
+                let online_ids: HashSet<String> = room
+                    .remote_participants()
+                    .keys()
+                    .map(|id| id.to_string())
+                    .chain(std::iter::once(user_id.clone()))
+                    .collect();
+                reconcile_voice_presence(&state.remote_db, room_id, &online_ids).await;
+
                 // Clone the Arc so the event task can look up the channel
                 // each time it fires — this handles the case where subscribe_realtime
                 // is called after connect_rooms (no race condition).
@@ -250,6 +308,7 @@ pub async fn connect_rooms(
                 let user_id_owned = user_id.clone();
                 let username_owned = username.clone();
                 let url_owned = url.clone();
+                let remote_db_task = Arc::clone(&state.remote_db);
 
                 let handle = tokio::spawn(async move {
                     /// Process events until the stream closes. Returns how long
@@ -257,23 +316,40 @@ pub async fn connect_rooms(
                     async fn run_event_loop(
                         events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
                         lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+                        remote_db: &Arc<RemoteDb>,
+                        room_id: &str,
                     ) -> std::time::Duration {
                         let started = std::time::Instant::now();
                         while let Some(event) = events.recv().await {
-                            if let RoomEvent::DataReceived { payload, .. } = event {
-                                let channel = {
-                                    let lk = lk_arc.lock().await;
-                                    lk.channel.clone()
-                                };
-                                if let Some(ch) = channel {
-                                    dispatch_data(payload.as_slice(), &ch);
+                            match event {
+                                RoomEvent::DataReceived { payload, .. } => {
+                                    let channel = {
+                                        let lk = lk_arc.lock().await;
+                                        lk.channel.clone()
+                                    };
+                                    if let Some(ch) = channel {
+                                        dispatch_data(payload.as_slice(), &ch);
+                                    }
                                 }
+                                RoomEvent::ParticipantDisconnected(participant) => {
+                                    let identity = participant.identity().to_string();
+                                    // Clean up any voice presence rows for this user in
+                                    // this group and notify the frontend for each.
+                                    handle_participant_disconnect(
+                                        remote_db,
+                                        lk_arc,
+                                        room_id,
+                                        &identity,
+                                    )
+                                    .await;
+                                }
+                                _ => {}
                             }
                         }
                         started.elapsed()
                     }
 
-                    let alive_dur = run_event_loop(&mut events, &lk_arc_task).await;
+                    let alive_dur = run_event_loop(&mut events, &lk_arc_task, &remote_db_task, &room_id_owned).await;
                     eprintln!(
                         "[realtime] event stream closed for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                         alive_dur.as_secs_f64()
@@ -307,6 +383,15 @@ pub async fn connect_rooms(
                                 let new_room = Arc::new(new_room);
                                 eprintln!("[realtime] reconnected room {room_id_owned}");
 
+                                // Reconcile again on reconnect.
+                                let online_ids: HashSet<String> = new_room
+                                    .remote_participants()
+                                    .keys()
+                                    .map(|id| id.to_string())
+                                    .chain(std::iter::once(user_id_owned.clone()))
+                                    .collect();
+                                reconcile_voice_presence(&remote_db_task, &room_id_owned, &online_ids).await;
+
                                 // Update the room reference in the map
                                 {
                                     let mut lk = lk_arc_task.lock().await;
@@ -315,13 +400,11 @@ pub async fn connect_rooms(
                                     }
                                 }
 
-                                let alive_dur = run_event_loop(&mut new_events, &lk_arc_task).await;
+                                let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &remote_db_task, &room_id_owned).await;
                                 eprintln!(
                                     "[realtime] event stream closed again for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                                     alive_dur.as_secs_f64()
                                 );
-                                // If the connection was very short-lived, back off more
-                                // aggressively to avoid hammering the server.
                                 backoff = if alive_dur.as_secs() < 10 { (backoff * 2).min(300) } else { 5 };
                             }
                             Err(e) => {
@@ -390,6 +473,72 @@ pub async fn publish_new_message_to_room(
     Ok(())
 }
 
+/// Records a voice join or leave in the DB and notifies group members via the
+/// LiveKit data channel so their participant counts update in real time.
+#[tauri::command]
+pub async fn publish_voice_presence(
+    group_id: String,
+    channel_id: String,
+    user_id: String,
+    display_name: String,
+    joined: bool,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    // Write to DB first — this is the source of truth.
+    let conn = state.remote_db.conn().await?;
+    if joined {
+        conn.execute(
+            "INSERT OR REPLACE INTO voice_presence (user_id, group_id, channel_id, display_name, joined_at) \
+             VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            libsql::params![user_id.clone(), group_id.clone(), channel_id.clone(), display_name.clone()],
+        )
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("voice_presence insert: {e}")))?;
+    } else {
+        conn.execute(
+            "DELETE FROM voice_presence WHERE user_id = ?1 AND channel_id = ?2",
+            libsql::params![user_id.clone(), channel_id.clone()],
+        )
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("voice_presence delete: {e}")))?;
+    }
+
+    // Notify other online group members to refetch via the data channel.
+    let room = {
+        let lk = state.livekit.lock().await;
+        lk.rooms.get(&group_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    if let Some(room) = room {
+        let payload = if joined {
+            serde_json::to_vec(&serde_json::json!({
+                "type": "voice_joined",
+                "channel_id": channel_id,
+                "user_id": user_id,
+                "display_name": display_name,
+            }))
+        } else {
+            serde_json::to_vec(&serde_json::json!({
+                "type": "voice_left",
+                "channel_id": channel_id,
+                "user_id": user_id,
+            }))
+        }
+        .map_err(Error::Serde)?;
+
+        let _ = room
+            .local_participant()
+            .publish_data(DataPacket {
+                payload,
+                reliable: true,
+                ..Default::default()
+            })
+            .await;
+    }
+
+    Ok(())
+}
+
 /// Publishes a data ping to a LiveKit room.
 /// Called by the frontend after a message is successfully sent.
 #[tauri::command]
@@ -445,6 +594,172 @@ pub async fn publish_ping(
 
 // ── Internal helpers ───────────────────────────────────────────────────────
 
+/// Query voice_presence counts for multiple channel IDs in one SQL statement.
+async fn query_voice_counts(
+    remote_db: &RemoteDb,
+    channel_ids: &[String],
+) -> Result<std::collections::HashMap<String, usize>> {
+    let conn = remote_db.conn().await?;
+    let placeholders = channel_ids
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let sql = format!(
+        "SELECT channel_id, COUNT(*) FROM voice_presence WHERE channel_id IN ({}) GROUP BY channel_id",
+        placeholders
+    );
+    let params: Vec<libsql::Value> = channel_ids
+        .iter()
+        .map(|id| libsql::Value::Text(id.clone()))
+        .collect();
+    let mut rows = conn
+        .query(&sql, libsql::params_from_iter(params))
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("query_voice_counts: {e}")))?;
+    let mut map = std::collections::HashMap::new();
+    while let Some(row) = rows.next().await.map_err(|e| Error::Other(anyhow::anyhow!("{e}")))? {
+        let ch_id: String = row.get(0).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
+        let cnt: i64 = row.get(1).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
+        map.insert(ch_id, cnt as usize);
+    }
+    Ok(map)
+}
+
+/// Query voice_presence participant list for a single channel.
+async fn query_voice_participants(
+    remote_db: &RemoteDb,
+    channel_id: &str,
+) -> Result<Vec<VoiceParticipantInfo>> {
+    let conn = remote_db.conn().await?;
+    let mut rows = conn
+        .query(
+            "SELECT user_id, display_name FROM voice_presence WHERE channel_id = ?1",
+            libsql::params![channel_id.to_owned()],
+        )
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("query_voice_participants: {e}")))?;
+    let mut list = Vec::new();
+    while let Some(row) = rows.next().await.map_err(|e| Error::Other(anyhow::anyhow!("{e}")))? {
+        let identity: String = row.get(0).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
+        let name: String = row.get(1).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
+        list.push(VoiceParticipantInfo { identity, name });
+    }
+    Ok(list)
+}
+
+/// On group room connect/reconnect: delete voice_presence rows for any user in
+/// this group who is NOT currently in the group room (i.e. crashed previously).
+async fn reconcile_voice_presence(
+    remote_db: &RemoteDb,
+    group_id: &str,
+    online_ids: &HashSet<String>,
+) {
+    let conn = match remote_db.conn().await {
+        Ok(c) => c,
+        Err(e) => { eprintln!("[presence] reconcile conn error: {e}"); return; }
+    };
+
+    // Fetch all user_ids with presence rows for this group.
+    let mut rows = match conn
+        .query(
+            "SELECT DISTINCT user_id FROM voice_presence WHERE group_id = ?1",
+            libsql::params![group_id.to_owned()],
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => { eprintln!("[presence] reconcile query error: {e}"); return; }
+    };
+
+    let mut stale: Vec<String> = Vec::new();
+    while let Ok(Some(row)) = rows.next().await {
+        if let Ok(uid) = row.get::<String>(0) {
+            if !online_ids.contains(&uid) {
+                stale.push(uid);
+            }
+        }
+    }
+
+    for uid in stale {
+        if let Err(e) = conn
+            .execute(
+                "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
+                libsql::params![uid.clone(), group_id.to_owned()],
+            )
+            .await
+        {
+            eprintln!("[presence] reconcile delete error for {uid}: {e}");
+        } else {
+            eprintln!("[presence] reconciled stale presence for {uid} in group {group_id}");
+        }
+    }
+}
+
+/// Called when a participant disconnects from a group room (graceful or crash).
+/// Deletes their voice_presence rows and pushes VoiceLeft events to the frontend.
+async fn handle_participant_disconnect(
+    remote_db: &RemoteDb,
+    lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    group_id: &str,
+    user_id: &str,
+) {
+    let conn = match remote_db.conn().await {
+        Ok(c) => c,
+        Err(e) => { eprintln!("[presence] disconnect conn error: {e}"); return; }
+    };
+
+    // Find which channels this user was in before deleting.
+    let mut rows = match conn
+        .query(
+            "SELECT channel_id FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
+            libsql::params![user_id.to_owned(), group_id.to_owned()],
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => { eprintln!("[presence] disconnect query error: {e}"); return; }
+    };
+
+    let mut affected_channels: Vec<String> = Vec::new();
+    while let Ok(Some(row)) = rows.next().await {
+        if let Ok(ch_id) = row.get::<String>(0) {
+            affected_channels.push(ch_id);
+        }
+    }
+
+    if affected_channels.is_empty() {
+        return;
+    }
+
+    // Delete the rows.
+    if let Err(e) = conn
+        .execute(
+            "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
+            libsql::params![user_id.to_owned(), group_id.to_owned()],
+        )
+        .await
+    {
+        eprintln!("[presence] disconnect delete error: {e}");
+        return;
+    }
+
+    // Notify the frontend for each affected channel.
+    let channel = {
+        let lk = lk_arc.lock().await;
+        lk.channel.clone()
+    };
+    if let Some(ch) = channel {
+        for channel_id in affected_channels {
+            let _ = ch.send(RealtimeEvent::VoiceLeft {
+                channel_id,
+                user_id: user_id.to_owned(),
+            });
+        }
+    }
+}
+
 /// Parses a raw DataReceived payload and forwards it to the frontend channel.
 fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
     let text = match std::str::from_utf8(payload) {
@@ -492,6 +807,34 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
         }
         Some("membership_changed") => {
             let _ = channel.send(RealtimeEvent::MembershipChanged {});
+        }
+        Some("voice_joined") => {
+            if let (Some(channel_id), Some(user_id)) = (
+                data.get("channel_id").and_then(|v| v.as_str()),
+                data.get("user_id").and_then(|v| v.as_str()),
+            ) {
+                let display_name = data
+                    .get("display_name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(user_id)
+                    .to_owned();
+                let _ = channel.send(RealtimeEvent::VoiceJoined {
+                    channel_id: channel_id.to_owned(),
+                    user_id: user_id.to_owned(),
+                    display_name,
+                });
+            }
+        }
+        Some("voice_left") => {
+            if let (Some(channel_id), Some(user_id)) = (
+                data.get("channel_id").and_then(|v| v.as_str()),
+                data.get("user_id").and_then(|v| v.as_str()),
+            ) {
+                let _ = channel.send(RealtimeEvent::VoiceLeft {
+                    channel_id: channel_id.to_owned(),
+                    user_id: user_id.to_owned(),
+                });
+            }
         }
         _ => {}
     }

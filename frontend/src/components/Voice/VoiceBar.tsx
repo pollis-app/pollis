@@ -1,6 +1,9 @@
 import React from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
+import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
+import { Volume2 } from "lucide-react";
 
 interface VoiceBarProps {
   channelId: string;
@@ -8,7 +11,15 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const { participants, isMuted, toggleMute, leave } = useVoiceChannel(channelId);
+  const { voiceParticipants, voiceIsMuted, voiceActiveSpeakerIds } = useAppStore();
+  const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const navigate = useNavigate();
+
+  const groupId = groupsWithChannels?.find((g) =>
+    g.channels.some((c) => c.id === channelId)
+  )?.id ?? null;
+
+  const { toggleMute, leave } = useVoiceChannel(channelId, groupId);
 
   return (
     <div
@@ -22,9 +33,22 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
       }}
     >
       {/* Channel name */}
-      <span data-testid="voice-bar-channel-name" style={{ color: "var(--c-text)" }}>
-        [v] {channelName}
-      </span>
+      <button
+        data-testid="voice-bar-channel-name"
+        onClick={() => {
+          if (groupId) {
+            navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId } });
+          }
+        }}
+        // style={{ color: "var(--c-text)" }}
+        // onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
+        // onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text)"; }}
+        className="flex items-center gap-1.5 text-[var(--c-accent)] hover:text-[var(--c-text)] transition-colors"
+        title={`Go to ${channelName} voice channel`}
+      >
+        <Volume2 size={12} />
+        {channelName}
+      </button>
 
       <span style={{ color: "var(--c-border)" }}>|</span>
 
@@ -33,16 +57,16 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         data-testid="voice-bar-mute-button"
         onClick={toggleMute}
         className="transition-colors"
-        style={{ color: isMuted ? "#ff6b6b" : "var(--c-accent)" }}
+        style={{ color: voiceIsMuted ? "#ff6b6b" : "var(--c-accent)" }}
         onMouseEnter={(e) => {
           (e.currentTarget as HTMLElement).style.opacity = "0.7";
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLElement).style.opacity = "1";
         }}
-        title={isMuted ? "Unmute microphone" : "Mute microphone"}
+        title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
       >
-        {isMuted ? "[mic off]" : "[mic on]"}
+        {voiceIsMuted ? "[mic off]" : "[mic on]"}
       </button>
 
       {/* Leave button */}
@@ -66,16 +90,21 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
 
       {/* Participant count */}
       <span data-testid="voice-bar-participant-count" style={{ color: "var(--c-text-dim)" }}>
-        {participants.length} participant{participants.length !== 1 ? "s" : ""}
+        {voiceParticipants.length} participant{voiceParticipants.length !== 1 ? "s" : ""}
       </span>
 
       {/* Security indicator — audio is transport-encrypted (TLS) but not E2EE for v1 */}
       <span
         data-testid="voice-bar-security-indicator"
         style={{ marginLeft: "auto", color: "var(--c-text-dim)" }}
-        title="Voice is encrypted in transit (TLS) but not end-to-end encrypted in v1"
+        className="flex items-center gap-1"
       >
-        [voice: server-encrypted]
+        {voiceActiveSpeakerIds.length > 0
+          ? <>
+            <Volume2 size={12} style={{ verticalAlign: "middle" }} />
+            {voiceParticipants.find(p => voiceActiveSpeakerIds.at(-1) === p.identity)?.name}
+          </>
+          : null}
       </span>
     </div>
   );

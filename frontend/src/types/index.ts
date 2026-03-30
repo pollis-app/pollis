@@ -147,6 +147,19 @@ export interface AccountsIndex {
   last_active_user?: string;
 }
 
+export interface VoiceParticipant {
+  identity: string;
+  name: string;
+  isMuted: boolean;
+  isLocal: boolean;
+}
+
+export interface AudioDevice {
+  id: string;
+  name: string;
+  kind: 'input' | 'output';
+}
+
 export interface UserAlias {
   id: string;
   user_id: string; // User who owns this alias

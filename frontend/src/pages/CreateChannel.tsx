@@ -7,9 +7,10 @@ import { groupQueryKeys } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
+import { Switch } from "../components/ui/Switch";
 
 interface CreateChannelProps {
-  onSuccess?: (channelId: string) => void;
+  onSuccess?: (channelId: string, channelType: "text" | "voice") => void;
 }
 
 export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
@@ -19,6 +20,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
+  const [channelType, setChannelType] = useState<"text" | "voice">("text");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,9 +58,9 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
     setIsLoading(true);
     setError(null);
     try {
-      const channel = await invoke<{ id: string; group_id: string; name: string; description?: string }>(
+      const channel = await invoke<{ id: string; group_id: string; name: string; description?: string; channel_type: string }>(
         'create_channel',
-        { groupId: selectedGroupId, name: name.trim(), description: description.trim() || null, creatorId: currentUser.id },
+        { groupId: selectedGroupId, name: name.trim(), description: description.trim() || null, creatorId: currentUser.id, channelType },
       );
       const channelData: any = {
         id: channel.id,
@@ -66,7 +68,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
         slug: finalSlug,
         name: channel.name,
         description: channel.description || '',
-        channel_type: 'text',
+        channel_type: channel.channel_type,
         created_by: currentUser.id,
         created_at: Date.now(),
         updated_at: Date.now(),
@@ -78,7 +80,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
         queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id) }),
         queryClient.invalidateQueries({ queryKey: groupQueryKeys.channels(selectedGroupId) }),
       ]);
-      onSuccess?.(channel.id);
+      onSuccess?.(channel.id, channel.channel_type as "text" | "voice");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create channel");
     } finally {
@@ -100,7 +102,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
         <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Select a group first</p>
         <button
           data-testid="create-channel-go-home-button"
-          onClick={() => onSuccess?.("")}
+          onClick={() => onSuccess?.("", "text")}
           className="text-xs font-mono transition-colors"
           style={{ color: "var(--c-text-muted)" }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
@@ -159,6 +161,16 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
             id="create-channel-description"
           />
           <input data-testid="create-channel-description-input" type="hidden" value={description} readOnly />
+
+          <Switch
+            label="Voice channel"
+            checked={channelType === "voice"}
+            onChange={(checked) => setChannelType(checked ? "voice" : "text")}
+            disabled={isLoading}
+            id="create-channel-type"
+            description="Voice channels support audio/video calls instead of text messages."
+          />
+          <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
 
           {error && (
             <p data-testid="create-channel-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
