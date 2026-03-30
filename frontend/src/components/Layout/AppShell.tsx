@@ -100,6 +100,18 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
+  // Cmd+W / Ctrl+W — hide the window on macOS, close it on Windows/Linux.
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === "w" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        invoke("hide_window").catch(console.error);
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, []);
+
   // Global Esc handler — navigate back in history (skip when search panel is open).
   // If currently viewing a channel, go directly to the group page to avoid
   // landing on "create channel" if that was in history.

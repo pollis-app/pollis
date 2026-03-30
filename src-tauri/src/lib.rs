@@ -37,6 +37,17 @@ fn show_on_reopen(app: &tauri::AppHandle) {
     }
 }
 
+/// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)
+/// or close it on Windows/Linux.
+#[tauri::command]
+fn hide_window(window: tauri::Window) {
+    #[cfg(target_os = "macos")]
+    let _ = window.hide();
+
+    #[cfg(not(target_os = "macos"))]
+    let _ = window.close();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // WebKitGTK 2.42+ attempts DMA-BUF rendering and aborts if GBM/EGL is
@@ -86,6 +97,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            hide_window,
             commands::auth::initialize_identity,
             commands::auth::get_identity,
             commands::auth::request_otp,
@@ -155,6 +167,7 @@ commands::livekit::get_livekit_token,
             commands::livekit::list_voice_participants,
             commands::livekit::list_voice_room_counts,
             commands::r2::upload_file,
+            commands::r2::upload_media,
             commands::r2::download_file,
             commands::update::mark_update_required,
             commands::update::is_update_required,
