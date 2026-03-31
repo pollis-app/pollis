@@ -7,7 +7,7 @@ import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 
 export const GroupsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setSelectedGroupId } = useAppStore();
+  const { setSelectedGroupId, unreadCounts } = useAppStore();
 
   const { data: groupsWithChannels, isLoading: groupsLoading, error: groupsError } = useUserGroupsWithChannels();
 
@@ -17,16 +17,21 @@ export const GroupsPage: React.FC = () => {
     ? [{ id: "__loading__", label: "Loading…", disabled: true }]
     : groupsError
       ? [{ id: "__error__", label: `Error: ${groupsError instanceof Error ? groupsError.message : "Failed to load"}`, disabled: true }]
-      : groups.map((g) => ({
-        id: g.id,
-        label: g.name,
-        description: g.description || undefined,
-        action: () => {
-          setSelectedGroupId(g.id);
-          navigate({ to: "/groups/$groupId", params: { groupId: g.id } });
-        },
-        testId: `group-option-${g.id}`,
-      }));
+      : groups.map((g) => {
+        const textChannels = g.channels.filter((ch) => ch.channel_type === "text");
+        const totalUnread = textChannels.reduce((sum, ch) => sum + (unreadCounts[ch.id] ?? 0), 0);
+        return {
+          id: g.id,
+          label: g.name,
+          description: g.description || undefined,
+          action: () => {
+            setSelectedGroupId(g.id);
+            navigate({ to: "/groups/$groupId", params: { groupId: g.id } });
+          },
+          badge: totalUnread > 0 ? totalUnread : undefined,
+          testId: `group-option-${g.id}`,
+        };
+      });
 
   let items: TerminalMenuItem[] = [];
 

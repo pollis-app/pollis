@@ -8,7 +8,7 @@ import { useDMConversations } from "../hooks/queries/useMessages";
 import type { RouterContext } from "../types/router";
 
 export const RootPage: React.FC = () => {
-  const { currentUser } = useAppStore();
+  const { currentUser, unreadCounts } = useAppStore();
   const navigate = useNavigate();
   const router = useRouter();
   const { onLogout } = router.options.context as RouterContext;
@@ -16,6 +16,8 @@ export const RootPage: React.FC = () => {
   const { data: dmConversations = [] } = useDMConversations();
   const { data: pendingInvites = [] } = usePendingInvites();
   const { data: pendingJoinRequests = [] } = useAllPendingJoinRequests();
+
+  const totalDMUnread = dmConversations.reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
 
   const items: TerminalMenuItem[] = [
     {
@@ -32,6 +34,7 @@ export const RootPage: React.FC = () => {
         ? `${dmConversations.length} conversation${dmConversations.length !== 1 ? "s" : ""}`
         : "Start a new conversation",
       action: () => navigate({ to: "/dms" }),
+      badge: totalDMUnread > 0 ? totalDMUnread : undefined,
       testId: "menu-item-dms",
     },
     {

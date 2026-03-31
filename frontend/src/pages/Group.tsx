@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Hash, Volume2 } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
-import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
+import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
 
@@ -20,6 +20,7 @@ export const GroupPage: React.FC = () => {
     [group]
   );
   const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
+  const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
 
   if (isLoading) {
     return (
@@ -113,6 +114,7 @@ export const GroupPage: React.FC = () => {
       id: "join-requests",
       label: "Join Requests",
       action: () => navigate({ to: "/groups/$groupId/join-requests", params: { groupId } }),
+      badge: joinRequests.length > 0 ? joinRequests.length : undefined,
       type: "system" as const,
       testId: "menu-item-join-requests",
     },
