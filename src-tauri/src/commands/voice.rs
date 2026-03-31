@@ -509,6 +509,7 @@ pub async fn join_voice_channel(
     display_name: String,
     input_device: Option<String>,
     _output_device: Option<String>,
+    auto_gain_control: bool,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     let url = state.config.livekit_url.clone();
@@ -559,9 +560,9 @@ pub async fn join_voice_channel(
 
     let audio_source = NativeAudioSource::new(
         AudioSourceOptions {
-            echo_cancellation: false,
-            noise_suppression: false,
-            auto_gain_control: false,
+            echo_cancellation: true,
+            noise_suppression: true,
+            auto_gain_control,
         },
         mic_rate,
         1,

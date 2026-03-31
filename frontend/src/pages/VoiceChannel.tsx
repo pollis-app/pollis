@@ -8,6 +8,7 @@ import { switchVoiceDevice } from "../hooks/useVoiceChannel";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { useVoiceParticipants } from "../hooks/queries/useVoiceParticipants";
+import { usePreferences } from "../hooks/queries/usePreferences";
 import type { AudioDevice } from "../types";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
@@ -66,6 +67,8 @@ export const VoiceChannelPage: React.FC = () => {
   const channel = group?.channels.find((c) => c.id === channelId);
   const channelName = channel?.name ?? "general";
 
+  const preferences = usePreferences();
+
   const [inputs, setInputs] = useState<AudioDevice[]>([]);
   const [outputs, setOutputs] = useState<AudioDevice[]>([]);
   const [selectedInput, setSelectedInputState] = useState<string>(() => {
@@ -80,6 +83,8 @@ export const VoiceChannelPage: React.FC = () => {
     const saved = localStorage.getItem(NOISE_FLOOR_KEY);
     return saved ? parseInt(saved, 10) : 0;
   });
+
+  const autoGain = preferences.query.data?.auto_gain_control ?? true;
 
   useEffect(() => {
     invoke<AudioDevice[]>('list_audio_devices').then((devices) => {
@@ -107,6 +112,13 @@ export const VoiceChannelPage: React.FC = () => {
     setNoiseFloorState(val);
     localStorage.setItem(NOISE_FLOOR_KEY, val.toString());
     invoke('set_noise_floor', { threshold: val / 1000 }).catch(() => { });
+  };
+
+  const handleAutoGain = (enabled: boolean) => {
+    preferences.mutation.mutate({
+      ...preferences.query.data,
+      auto_gain_control: enabled,
+    });
   };
 
   const isInCall = activeVoiceChannelId === channelId;
@@ -163,6 +175,27 @@ export const VoiceChannelPage: React.FC = () => {
             sublabel="Filters ambient noise before it's transmitted. Raise if background sounds are triggering your speaking indicator."
             description="0 = off"
           />
+        </div>
+
+        {/* Auto gain control toggle */}
+        <div style={{ maxWidth: 320 }} className="flex flex-col gap-1">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={autoGain}
+              onChange={(e) => handleAutoGain(e.target.checked)}
+              style={{
+                width: 14,
+                height: 14,
+                cursor: "pointer",
+                accentColor: "var(--c-accent)",
+              }}
+            />
+            <span style={{ color: "var(--c-text)" }}>Auto Gain Control</span>
+          </label>
+          <span style={{ color: "var(--c-text-muted)", fontSize: "0.85em" }}>
+            Automatically adjusts microphone volume for consistent output levels. Disable if you experience "pumping" effects or prefer manual gain control.
+          </span>
         </div>
       </div>
 
