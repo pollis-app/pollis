@@ -719,6 +719,37 @@ pub async fn get_reactions(
     Ok(reactions)
 }
 
+/// Delete a message from both local and remote storage.
+/// This deletes the message for the current user and from remote message_envelopes
+/// (preventing delivery to users who haven't received it yet).
+/// Messages already delivered to other users' local storage cannot be deleted.
+#[tauri::command]
+pub async fn delete_message(
+    message_id: String,
+    user_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    // Delete from local SQLite DB
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            db.conn().execute(
+                "DELETE FROM message WHERE id = ?1 AND sender_id = ?2",
+                rusqlite::params![message_id, user_id],
+            )?;
+        }
+    }
+
+    // Delete from remote message_envelopes table
+    let conn = state.remote_db.conn().await?;
+    conn.execute(
+        "DELETE FROM message_envelopes WHERE id = ?1 AND sender_id = ?2",
+        libsql::params![message_id, user_id],
+    ).await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;

@@ -129,6 +129,7 @@ pub fn run() {
             commands::dm::leave_dm_channel,
             commands::messages::list_messages,
             commands::messages::send_message,
+            commands::messages::delete_message,
             commands::messages::get_channel_messages,
             commands::messages::get_dm_messages,
             commands::messages::list_messages_by_sender,
