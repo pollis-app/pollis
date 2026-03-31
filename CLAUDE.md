@@ -148,7 +148,7 @@ website/                # Next.js marketing site (Vercel)
 - **React Query is the source of truth** for remote data — don't duplicate in Zustand
 - **Local DB should NOT have users/groups/channels tables** — those come from remote Turso
 - **TypeScript types should match Rust structs** — keep them synchronized
-- **`remote_schema.sql` is frozen** — do not modify it. All schema changes go in numbered migration files in `src-tauri/src/db/migrations/` (e.g. `000002_my_change.sql`) and are run by hand against Turso
+- **`remote_schema.sql` is frozen** — do not modify it. All schema changes go in numbered migration files in `src-tauri/src/db/migrations/` (e.g. `000002_my_change.sql`) and are run by hand against Turso. Every migration file must end with an `INSERT INTO schema_migrations (version, description) VALUES (N, '...');` row matching its number
 - **Prefer editing existing files** over creating new ones
 - **Always use `pnpm`** not `npm`
 - **Never remove `data-testid` attributes** from JSX/HTML — they are used by Playwright E2E tests (`pnpm test:e2e`)
