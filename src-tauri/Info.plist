@@ -4,5 +4,7 @@
 <dict>
 	<key>NSUserNotificationAlertStyle</key>
 	<string>alert</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Pollis needs microphone access for voice channels</string>
 </dict>
 </plist>

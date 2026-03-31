@@ -317,6 +317,22 @@ export const Preferences: React.FC = () => {
             </p>
           </section>
 
+          {/* Notifications */}
+          <section className="flex flex-col gap-4 mb-12">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            >
+              Notifications
+            </h2>
+            <Switch
+              id="pref-notifications"
+              label="Desktop notifications & sounds"
+              checked={allowDesktopNotifications}
+              onChange={handleAllowDesktopNotifications}
+            />
+          </section>
+
         </div>
       </div>
     </div>
