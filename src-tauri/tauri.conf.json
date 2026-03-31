@@ -43,7 +43,8 @@
     "macOS": {
       "signingIdentity": "Developer ID Application: Daniel Kral (9JF7WWYMU2)",
       "minimumSystemVersion": "10.13",
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "entitlements": "Entitlements.plist"
     },
     "linux": {
       "deb": {
