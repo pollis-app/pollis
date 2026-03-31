@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
+import { usePreferences } from './queries/usePreferences';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -52,6 +53,8 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
     setVoiceIsMuted,
   } = useAppStore();
 
+  const preferences = usePreferences();
+
   // Track participants as a map so we can update mute state in-place
   const participantsRef = useRef<Map<string, { identity: string; name: string; isMuted: boolean; isLocal: boolean }>>(new Map());
   const localIdentityRef = useRef<string>('');
@@ -71,6 +74,8 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       const prefs: Record<string, string> = JSON.parse(localStorage.getItem(VOICE_DEVICES_KEY) || '{}');
       const inputDevice: string | null = prefs.input && prefs.input !== 'default' ? prefs.input : null;
       const outputDevice: string | null = prefs.output && prefs.output !== 'default' ? prefs.output : null;
+
+      const autoGainControl = preferences.query.data?.auto_gain_control ?? true;
 
       const localIdentity = `voice-${currentUser.id}`;
       localIdentityRef.current = localIdentity;
@@ -158,6 +163,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         displayName: currentUser.username ?? currentUser.id,
         inputDevice,
         outputDevice,
+        autoGainControl,
       });
 
       if (cancelled) {
