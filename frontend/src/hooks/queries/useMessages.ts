@@ -43,7 +43,43 @@ type RawDmChannel = {
   members: Array<{ user_id: string; username?: string; added_by: string; added_at: string }>;
 };
 
+// Parses structured attachment JSON embedded in message content.
+// Plain-text messages are returned as-is. Content with attachments looks like:
+//   {"_att":[{"key":"media/…","url":"…","name":"…","ct":"…","size":N,"bh":"…","w":N,"h":N}],"_txt":"caption"}
+function parseContent(raw: string | undefined): { text: string; attachments: Message['attachments'] } {
+  if (!raw?.startsWith('{')) {
+    return { text: raw ?? '', attachments: [] };
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed._att)) {
+      return { text: raw, attachments: [] };
+    }
+    return {
+      text: parsed._txt ?? '',
+      attachments: (parsed._att as any[]).map((a) => ({
+        id: a.key as string,
+        object_key: a.key as string,
+        content_hash: a.hash as string,
+        filename: a.name as string,
+        content_type: a.ct as string,
+        file_size: a.size as number,
+        uploaded_at: Date.now(),
+        blurhash: a.bh as string | undefined,
+        width: a.w as number | undefined,
+        height: a.h as number | undefined,
+      })),
+    };
+  } catch {
+    return { text: raw, attachments: [] };
+  }
+}
+
 function transformMessage(m: RawMessage): Message {
+  // m.content is undefined when the server returned null (e.g. decryption failure).
+  // Keep content_decrypted as undefined in that case so MessageList can show
+  // [encrypted] instead of silently filtering the message out.
+  const parsed = m.content !== undefined ? parseContent(m.content) : null;
   return {
     id: m.id,
     channel_id: undefined,
@@ -51,17 +87,21 @@ function transformMessage(m: RawMessage): Message {
     sender_id: m.sender_id,
     ciphertext: new Uint8Array(),
     nonce: new Uint8Array(),
-    content_decrypted: m.content || '',
+    content_decrypted: parsed?.text,
     reply_to_message_id: m.reply_to_id,
     is_pinned: false,
     created_at: new Date(m.sent_at).getTime(),
     delivered: true,
     status: 'sent' as const,
-    attachments: [],
+    attachments: parsed?.attachments ?? [],
   };
 }
 
 function transformChannelMessage(m: RawChannelMessage): Message {
+  // m.content is undefined when the server returned null (e.g. decryption failure).
+  // Keep content_decrypted as undefined in that case so MessageList can show
+  // [encrypted] instead of silently filtering the message out.
+  const parsed = m.content !== undefined ? parseContent(m.content) : null;
   return {
     id: m.id,
     channel_id: undefined,
@@ -70,13 +110,13 @@ function transformChannelMessage(m: RawChannelMessage): Message {
     sender_username: m.sender_username,
     ciphertext: new Uint8Array(),
     nonce: new Uint8Array(),
-    content_decrypted: m.content || '',
+    content_decrypted: parsed?.text,
     reply_to_message_id: m.reply_to_id,
     is_pinned: false,
     created_at: new Date(m.sent_at).getTime(),
     delivered: true,
     status: 'sent' as const,
-    attachments: [],
+    attachments: parsed?.attachments ?? [],
   };
 }
 
@@ -154,6 +194,7 @@ export function useSendMessage() {
       conversationId: string;
       content: string;
       replyToMessageId?: string;
+      optimisticId?: string; // used by onSuccess to replace the optimistic stub
     }) => {
       if (!currentUser) {
         throw new Error("No current user");
@@ -173,22 +214,25 @@ export function useSendMessage() {
         ? messageQueryKeys.channel(variables.channelId)
         : messageQueryKeys.conversation(variables.conversationId);
 
-      // Write the new message into the cache immediately so it appears without
-      // waiting for the full refetch round-trip. Include sender_username so the
-      // last-message preview and message list both show the real name immediately.
-      const optimisticMessage: Message = {
+      // Replace the optimistic stub (if any) with the confirmed server message,
+      // or append it if there was no stub.
+      const confirmedMessage: Message = {
         ...transformMessage(newMessage),
         sender_username: currentUser?.username ?? undefined,
       };
       queryClient.setQueryData<Message[]>(queryKey, (old) => {
-        return old ? [...old, optimisticMessage] : [optimisticMessage];
+        if (!old) { return [confirmedMessage]; }
+        const filtered = variables.optimisticId
+          ? old.filter((m) => m.id !== variables.optimisticId)
+          : old;
+        return [...filtered, confirmedMessage];
       });
 
       // Update the last-message preview immediately.
       const lastMsgKey = variables.channelId
         ? ["last-message", "channel", variables.channelId]
         : ["last-message", "conversation", variables.conversationId];
-      queryClient.setQueryData(lastMsgKey, optimisticMessage);
+      queryClient.setQueryData(lastMsgKey, confirmedMessage);
 
       // Then invalidate in the background so we stay in sync with the server.
       queryClient.invalidateQueries({ queryKey });

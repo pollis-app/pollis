@@ -85,6 +85,45 @@ export async function resizeImage(
 }
 
 /**
+ * Generate a blurhash string and original dimensions from any image URL (including
+ * video poster blob URLs). Scales down to a tiny canvas before encoding so it's fast
+ * regardless of the source image size.
+ *
+ * Returns null on any failure (missing canvas support, load error, encode error).
+ */
+export async function blurhashFromUrl(
+  url: string,
+): Promise<{ hash: string; width: number; height: number } | null> {
+  const { encode } = await import('blurhash');
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const W = img.naturalWidth;
+      const H = img.naturalHeight;
+      if (!W || !H) { resolve(null); return; }
+      // 32-pixel wide canvas is enough resolution for blurhash.
+      const bw = 32;
+      const bh = Math.max(1, Math.round(32 * (H / W)));
+      const canvas = document.createElement('canvas');
+      canvas.width = bw;
+      canvas.height = bh;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { resolve(null); return; }
+      ctx.drawImage(img, 0, 0, bw, bh);
+      const { data } = ctx.getImageData(0, 0, bw, bh);
+      try {
+        const hash = encode(data, bw, bh, 4, 3);
+        resolve({ hash, width: W, height: H });
+      } catch {
+        resolve(null);
+      }
+    };
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
+/**
  * Validate if a file is an image and within size limits
  *
  * @param file - File to validate

@@ -55,17 +55,6 @@ CREATE TABLE IF NOT EXISTS message (
 
 CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);
 
-CREATE TABLE IF NOT EXISTS attachment (
-    id TEXT PRIMARY KEY,
-    message_id TEXT NOT NULL REFERENCES message(id),
-    filename TEXT NOT NULL,
-    mime_type TEXT NOT NULL,
-    size_bytes INTEGER NOT NULL,
-    r2_key TEXT NOT NULL,
-    encryption_key BLOB NOT NULL,
-    downloaded INTEGER NOT NULL DEFAULT 0
-);
-
 CREATE TABLE IF NOT EXISTS dm_conversation (
     id TEXT PRIMARY KEY,
     peer_user_id TEXT NOT NULL UNIQUE,

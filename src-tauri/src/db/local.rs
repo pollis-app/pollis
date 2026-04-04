@@ -5,7 +5,9 @@ use crate::error::Result;
 // On mismatch the old DB file is deleted and recreated from scratch.
 // Version 4: per-user DB files (pollis_{user_id}.db), preferences + ui_state tables.
 // Version 5: mls_kv table for openmls StorageProvider.
-const LOCAL_SCHEMA_VERSION: &str = "5";
+// Version 6: attachment table rewritten with convergent-encryption schema.
+// Version 7: attachment table removed — dedup lives on Turso, metadata in message payload.
+const LOCAL_SCHEMA_VERSION: &str = "7";
 const SCHEMA: &str = include_str!("migrations/local_schema.sql");
 
 pub struct LocalDb {
@@ -226,31 +228,6 @@ mod tests {
         assert!(result.is_err(), "duplicate peer_user_id should violate UNIQUE constraint");
     }
 
-    #[test]
-    fn message_attachment_references_message() {
-        let db = db();
-        let conn = db.conn();
-
-        conn.execute(
-            "INSERT INTO message (id, conversation_id, sender_id, ciphertext, sent_at)
-             VALUES ('m1', 'conv1', 'u1', X'00', '2024-01-01T00:00:00Z')",
-            [],
-        ).unwrap();
-
-        conn.execute(
-            "INSERT INTO attachment (id, message_id, filename, mime_type, size_bytes, r2_key, encryption_key)
-             VALUES ('a1', 'm1', 'photo.jpg', 'image/jpeg', 12345, 'r2/key/photo.jpg', X'aabbcc')",
-            [],
-        ).unwrap();
-
-        let msg_id: String = conn.query_row(
-            "SELECT message_id FROM attachment WHERE id = 'a1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-
-        assert_eq!(msg_id, "m1");
-    }
 }
 
 pub fn dirs_path() -> std::path::PathBuf {

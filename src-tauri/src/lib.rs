@@ -56,6 +56,18 @@ pub fn run() {
     #[cfg(target_os = "linux")]
     std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
 
+    // WebKit uses GStreamer for media playback. The `autoaudiosink` element
+    // (gst-plugins-good) is not always installed. When it is missing, GStreamer
+    // returns NULL and WebKitWebProcess crashes with a GLib NULL-pointer assertion
+    // instead of degrading gracefully. Setting GST_AUDIO_SINK to `pulsesink`
+    // (provided by gst-plugins-good on PulseAudio/PipeWire systems) is safer;
+    // on PipeWire the PulseAudio compatibility layer handles it transparently.
+    // We only override if the user hasn't set it themselves.
+    #[cfg(target_os = "linux")]
+    if std::env::var("GST_AUDIO_SINK").is_err() {
+        std::env::set_var("GST_AUDIO_SINK", "pulsesink");
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
@@ -169,6 +181,7 @@ commands::livekit::get_livekit_token,
             commands::r2::upload_file,
             commands::r2::upload_media,
             commands::r2::download_file,
+            commands::r2::download_media,
             commands::update::mark_update_required,
             commands::update::is_update_required,
             commands::voice::subscribe_voice_events,

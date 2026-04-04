@@ -163,3 +163,16 @@ CREATE TABLE message_reaction (
 );
 
 CREATE INDEX idx_reaction_message ON message_reaction(message_id, created_at);
+
+-- Cross-user attachment deduplication registry.
+-- Uses convergent encryption: SHA-256(plaintext) → deterministic key → identical ciphertext.
+-- Same file uploaded by any user maps to the same R2 object; no per-user or per-message rows here.
+-- Access control is enforced by MLS: the content_hash is inside the encrypted message_envelope,
+-- so only members who can decrypt the message can derive the decryption key.
+CREATE TABLE attachment_object (
+    content_hash  TEXT PRIMARY KEY,
+    r2_key        TEXT NOT NULL,
+    mime_type     TEXT NOT NULL,
+    size_bytes    INTEGER NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
