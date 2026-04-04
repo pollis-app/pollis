@@ -10,7 +10,7 @@ import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
 export const GroupPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId" });
-  const { setSelectedGroupId, setSelectedChannelId, setActiveVoiceChannelId, markRead, unreadCounts } = useAppStore();
+  const { setSelectedGroupId, setSelectedChannelId, markRead, unreadCounts } = useAppStore();
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);
@@ -74,7 +74,6 @@ export const GroupPage: React.FC = () => {
       icon: <Volume2 size={14} />,
       description: count > 0 ? `${count} in call` : (ch.description || "Join voice chat"),
       action: () => {
-        setActiveVoiceChannelId(ch.id);
         navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
       },
       badge: count > 0 ? count : 0,

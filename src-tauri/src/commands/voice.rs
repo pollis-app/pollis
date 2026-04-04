@@ -792,23 +792,6 @@ pub async fn leave_voice_channel(state: State<'_, Arc<AppState>>) -> Result<()> 
         ).await;
     }
 
-    // Unpublish the local track before closing the room to release the microphone
-    if let Some(room) = &voice.room {
-        if let Some(track) = &voice.local_track {
-            let _ = room.local_participant().unpublish_track(&track.sid()).await;
-        }
-    }
-
-    if let Some(room) = voice.room.take() {
-        let _ = room.close().await;
-    }
-
-    voice.local_track = None;
-    voice.audio_source = None;
-    voice.input_stream = None;
-    voice.is_muted.store(false, Ordering::Relaxed);
-    voice.current_input_device = None;
-
     Ok(())
 }
 
