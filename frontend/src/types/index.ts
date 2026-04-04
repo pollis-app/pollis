@@ -119,11 +119,16 @@ export interface Reaction {
 
 export interface MessageAttachment {
   id: string;
-  object_key: string; // R2 object key
+  object_key: string;       // R2 object key — empty string while upload is in progress
+  content_hash: string;     // SHA-256(plaintext) hex — used to derive decryption key via HKDF
   filename: string;
   content_type: string;
   file_size: number;
   uploaded_at: number;
+  blurhash?: string;
+  width?: number;
+  height?: number;
+  localPreviewUrl?: string; // Blob URL for optimistic display — never persisted or sent to server
 }
 
 export interface SearchResult {

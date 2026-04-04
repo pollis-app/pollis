@@ -1,0 +1,25 @@
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    ports:
+      - "7881:7881"             # ICE TCP candidates
+      - "7882:7882/udp"         # ICE UDP (single-port mux)
+      - "5349:5349"             # TURNS (TURN over TLS)
+      - "30000-30100:30000-30100/udp"  # TURN relay media ports
+    volumes:
+      - ./livekit.yml:/etc/livekit.yml
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    command: --config /etc/livekit.yml
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - livekit
+    restart: unless-stopped

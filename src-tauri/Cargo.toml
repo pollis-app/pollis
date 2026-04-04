@@ -63,6 +63,8 @@ livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
 libwebrtc = "0.3"
 cpal = "0.15"
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
+blurhash = "0.2"
 futures-util = "0.3"
 bytes = "1"
 openmls = "0.8"

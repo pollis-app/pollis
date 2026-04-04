@@ -758,33 +758,39 @@ pub async fn join_voice_channel(
 /// Disconnect from the current voice room and release all audio resources.
 #[tauri::command]
 pub async fn leave_voice_channel(state: State<'_, Arc<AppState>>) -> Result<()> {
-    let mut voice = state.voice.lock().await;
+    // Extract everything that needs cleanup while holding the lock, then release
+    // the lock before awaiting room.close(). If the network is broken (e.g. VPN
+    // dropped), room.close() hangs sending a disconnect signal — holding the lock
+    // during that await deadlocks every subsequent command that needs voice state.
+    let room = {
+        let mut voice = state.voice.lock().await;
 
-    if let Some(t) = voice.room_task.take() { t.abort(); }
-    if let Some(t) = voice.frame_task.take() { t.abort(); }
+        if let Some(t) = voice.room_task.take() { t.abort(); }
+        if let Some(t) = voice.frame_task.take() { t.abort(); }
 
-    {
-        let mut pb = voice.playback.lock().unwrap();
-        pb.stop_all();
-        pb.rtc_tracks.clear();
-    }
-
-    // Unpublish the local track before closing the room to release the microphone
-    if let Some(room) = &voice.room {
-        if let Some(track) = &voice.local_track {
-            let _ = room.local_participant().unpublish_track(&track.sid()).await;
+        {
+            let mut pb = voice.playback.lock().unwrap();
+            pb.stop_all();
+            pb.rtc_tracks.clear();
         }
-    }
 
-    if let Some(room) = voice.room.take() {
-        let _ = room.close().await;
-    }
+        voice.local_track = None;
+        voice.audio_source = None;
+        voice.input_stream = None;
+        voice.is_muted.store(false, Ordering::Relaxed);
+        voice.current_input_device = None;
 
-    voice.local_track = None;
-    voice.audio_source = None;
-    voice.input_stream = None;
-    voice.is_muted.store(false, Ordering::Relaxed);
-    voice.current_input_device = None;
+        voice.room.take()
+    }; // voice lock released here
+
+    // Close outside the lock with a timeout so a broken connection (dropped VPN,
+    // network change) can't stall a reconnect attempt indefinitely.
+    if let Some(room) = room {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            room.close(),
+        ).await;
+    }
 
     Ok(())
 }

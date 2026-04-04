@@ -23,9 +23,15 @@ export const MessageList: React.FC<MessageListProps> = ({
   const sortedMessages = useMemo(
     () =>
       [...messages]
-        // Filter out blank messages (null, undefined, or empty content)
+        // Filter out blank messages — but keep any message with attachments even
+        // if the text caption is empty.
         .filter((m) => {
-          return m.content_decrypted != null && m.content_decrypted !== "";
+          const hasText = m.content_decrypted != null && m.content_decrypted !== "";
+          const hasAttachments = (m.attachments?.length ?? 0) > 0;
+          // content_decrypted === undefined means decryption failed — keep the
+          // message so it renders as [encrypted] instead of vanishing silently.
+          const decryptionFailed = m.content_decrypted === undefined;
+          return hasText || hasAttachments || decryptionFailed;
         })
         .sort((a, b) => a.created_at - b.created_at),
     [messages]

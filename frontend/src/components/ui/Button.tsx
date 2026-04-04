@@ -41,14 +41,14 @@ export const Button: React.FC<ButtonProps> = ({
   const variantStyles = (() => {
     if (isDanger) {
       return {
-        border: "1px solid hsl(0 70% 50% / 40%)",
+        border: "2px solid hsl(0 70% 50% / 40%)",
         background: "transparent",
         color: "hsl(0 70% 55%)",
       };
     }
     if (isPrimary) {
       return {
-        border: "1px solid var(--c-border-active)",
+        border: "2px solid transparent",
         background: "var(--c-accent)",
         color: "var(--c-bg)",
       };
@@ -61,7 +61,7 @@ export const Button: React.FC<ButtonProps> = ({
       };
     }
     return {
-      border: "1px solid var(--c-border-active)",
+      border: "2px solid var(--c-border-active)",
       background: "transparent",
       color: "var(--c-accent)",
     };
@@ -75,7 +75,7 @@ export const Button: React.FC<ButtonProps> = ({
       onKeyDown={onKeyDown}
       aria-label={ariaLabel}
       data-testid={testId}
-      className={`inline-flex items-center justify-center gap-2 px-4 py-2 font-sans text-sm font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${className}`}
+      className={`inline-flex items-center justify-center gap-2 px-4 py-2 font-mono text-xs font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${className}`}
       style={{
         ...variantStyles,
         borderRadius: "4px",

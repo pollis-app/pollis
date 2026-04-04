@@ -1,0 +1,20 @@
+port: 7880
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  use_external_ip: true
+
+# TURNS (TURN over TLS on port 5349) — handles VPNs that block UDP and
+# non-443 ports. relay_range_* are the UDP ports LiveKit allocates to
+# actually relay media; they must be open in the firewall.
+turn:
+  enabled: true
+  domain: downpage.xyz
+  tls_port: 5349
+  cert_file: /etc/letsencrypt/live/downpage.xyz/fullchain.pem
+  key_file: /etc/letsencrypt/live/downpage.xyz/privkey.pem
+  relay_range_start: 30000
+  relay_range_end: 30100
+
+keys:
+  your_api_key: your_api_secret

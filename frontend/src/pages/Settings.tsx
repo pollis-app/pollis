@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Upload, User } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { uploadAvatar } from "../services/r2-upload";
@@ -34,6 +34,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [fileInputKey, setFileInputKey] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
   const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "none" | "error">("idle");
@@ -58,6 +59,40 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   }, []);
 
   useEffect(() => { setCurrentAvatarUrl(avatarDownloadUrl || null); }, [avatarDownloadUrl]);
+
+  // Accept image files dropped anywhere on the window while on this page.
+  useEffect(() => {
+    const handlePathDrop = (e: Event) => {
+      const paths: string[] = (e as CustomEvent<{ paths: string[] }>).detail?.paths ?? [];
+      const imagePath = paths.find((p) => /\.(png|jpe?g|gif|webp|avif|svg)$/i.test(p));
+      if (!imagePath) {
+        return;
+      }
+      // Convert the native path to a File-like object via fetch(convertFileSrc(path)).
+      // Tauri exposes native paths through the asset protocol.
+      import("@tauri-apps/api/core").then(({ convertFileSrc }) => {
+        const src = convertFileSrc(imagePath);
+        fetch(src)
+          .then((r) => r.blob())
+          .then((blob) => {
+            const name = imagePath.split(/[\\/]/).pop() ?? "image";
+            const file = new File([blob], name, { type: blob.type || "image/png" });
+            setSelectedFile(file);
+            setUploadError(null);
+            if (preview) {
+              URL.revokeObjectURL(preview);
+            }
+            setPreview(URL.createObjectURL(file));
+          })
+          .catch((err) => {
+            console.error("[Settings] pathdrop read failed:", err);
+          });
+      });
+    };
+
+    window.addEventListener("pollis:pathdrop", handlePathDrop);
+    return () => window.removeEventListener("pollis:pathdrop", handlePathDrop);
+  }, [preview]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -263,8 +298,10 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
             <div className="flex items-center gap-4">
               <div
                 data-testid="avatar-preview-container"
-                className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0"
+                className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer"
                 style={{ border: '1px solid var(--c-border)', background: 'var(--c-surface-high)' }}
+                onClick={() => fileInputRef.current?.click()}
+                title="Click to choose image"
               >
                 {preview ? (
                   <img data-testid="avatar-new-preview" src={preview} alt="Preview" className="w-full h-full object-cover" />
@@ -292,6 +329,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
                 </label>
                 <input
                   key={fileInputKey}
+                  ref={fileInputRef}
                   id="settings-avatar-input"
                   data-testid="settings-avatar-input"
                   type="file"

@@ -16,6 +16,16 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelI
         : message.content_decrypted)
     : null;
 
+  const fallbackText = (() => {
+    if (!message) { return "No messages yet"; }
+    const attCount = message.attachments?.length ?? 0;
+    if (attCount > 0) {
+      const who = message.sender_username ? `${message.sender_username}: ` : "";
+      return `${who}[${attCount === 1 ? "attachment" : `${attCount} attachments`}]`;
+    }
+    return "No messages yet";
+  })();
+
   // While initial load or refetch with no prior data, show a scrambling placeholder
   // so the row height never collapses.
   if (isLoading || (isFetching && !text)) {
@@ -24,7 +34,7 @@ export const LastMessagePreview: React.FC<LastMessagePreviewProps> = ({ channelI
 
   return (
     <ScrambleText
-      text={text ?? "No messages"}
+      text={text ?? fallbackText}
       placeholderLength={24}
       typeSpeed={25}
     />

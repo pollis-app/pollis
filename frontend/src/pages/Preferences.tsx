@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { usePreferences, applyPreferences } from "../hooks/queries/usePreferences";
 import { hslToHex, hexToHsl, applyAccentColor, applyBackgroundColor } from "../utils/colorUtils";
 import { RangeSlider } from "../components/ui/RangeSlider";
@@ -13,6 +14,7 @@ function isValidHex(val: string): boolean {
 }
 
 export const Preferences: React.FC = () => {
+  const navigate = useNavigate();
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
   const [bgHue, setBgHue] = useState<number>(38);
@@ -331,6 +333,31 @@ export const Preferences: React.FC = () => {
               checked={allowDesktopNotifications}
               onChange={handleAllowDesktopNotifications}
             />
+          </section>
+
+          {/* Voice */}
+          <section className="flex flex-col gap-4 mb-12">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            >
+              Voice
+            </h2>
+            <button
+              onClick={() => navigate({ to: "/voice-settings" })}
+              className="self-start text-xs font-mono px-3 py-1.5 transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
+              style={{
+                border: "1px solid var(--c-border)",
+                borderRadius: 4,
+                color: "var(--c-text)",
+                background: "transparent",
+                cursor: "pointer",
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-accent)"; (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.borderColor = "var(--c-border)"; (e.currentTarget as HTMLElement).style.color = "var(--c-text)"; }}
+            >
+              Voice Settings →
+            </button>
           </section>
 
         </div>

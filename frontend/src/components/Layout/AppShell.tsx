@@ -2,6 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TitleBar } from "./TitleBar";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -21,6 +22,7 @@ import { Mail } from "lucide-react";
 export const AppShell: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -41,6 +43,34 @@ export const AppShell: React.FC = () => {
 
   // ─── Current route pathname — needed by keyboard handlers below ─────────────
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // Global file drop — Tauri intercepts OS drag-drop before the browser sees it.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+
+    getCurrentWindow().onDragDropEvent((event) => {
+      if (event.payload.type === "enter" || event.payload.type === "over") {
+        setIsDragOver(true);
+      } else if (event.payload.type === "drop") {
+        setIsDragOver(false);
+        const paths = event.payload.paths;
+        if (paths.length > 0) {
+          window.dispatchEvent(new CustomEvent("pollis:pathdrop", { detail: { paths } }));
+        }
+      } else {
+        setIsDragOver(false);
+      }
+    }).then((fn) => {
+      // If cleanup already ran (React StrictMode double-invoke), unlisten immediately.
+      if (cancelled) { fn(); } else { unlisten = fn; }
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
 
   // On startup, apply any MLS Welcome messages that arrived while offline.
   useEffect(() => {
@@ -94,6 +124,18 @@ export const AppShell: React.FC = () => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setIsSearchOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, []);
+
+  // Cmd+W / Ctrl+W — hide the window on macOS, close it on Windows/Linux.
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === "w" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        invoke("hide_window").catch(console.error);
       }
     };
     window.addEventListener("keydown", handle);
@@ -332,6 +374,27 @@ export const AppShell: React.FC = () => {
           channelId={activeVoiceChannelId}
           channelName={voiceChannelName}
         />
+      )}
+
+      {/* Drag-over overlay */}
+      {isDragOver && (
+        <div
+          className="absolute inset-0 flex items-center justify-center pointer-events-none"
+          style={{ zIndex: 9000, background: "rgba(0,0,0,0.7)" }}
+        >
+          <div
+            className="flex flex-col items-center gap-2"
+            style={{
+              border: "2px dashed var(--c-accent)",
+              borderRadius: 8,
+              padding: "28px 56px",
+            }}
+          >
+            <span className="text-sm font-mono" style={{ color: "var(--c-accent)" }}>
+              drop files to send
+            </span>
+          </div>
+        </div>
       )}
 
       {/* Bottom bar — breadcrumb left, unread alert right */}

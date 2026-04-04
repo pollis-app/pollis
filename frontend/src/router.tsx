@@ -20,6 +20,7 @@ import { SearchGroupPage } from "./pages/SearchGroupPage";
 import { CreateChannelPage } from "./pages/CreateChannelPage";
 import { StartDMPage } from "./pages/StartDMPage";
 import { PreferencesPage } from "./pages/PreferencesPage";
+import { VoiceSettingsPage } from "./pages/VoiceSettingsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { InvitesPage } from "./pages/InvitesPage";
 import { JoinRequestsPage } from "./pages/JoinRequestsPage";
@@ -137,6 +138,12 @@ const preferencesRoute = createRoute({
   component: PreferencesPage,
 });
 
+const voiceSettingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/voice-settings",
+  component: VoiceSettingsPage,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -174,6 +181,7 @@ const routeTree = rootRoute.addChildren([
   dmRoute,
   dmSettingsRoute,
   preferencesRoute,
+  voiceSettingsRoute,
   settingsRoute,
   invitesRoute,
   searchRoute,
