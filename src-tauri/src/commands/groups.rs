@@ -702,8 +702,33 @@ pub async fn set_member_role(
 
     conn.execute(
         "UPDATE group_member SET role = ?1 WHERE group_id = ?2 AND user_id = ?3",
-        libsql::params![role, group_id, user_id],
+        libsql::params![role, group_id.clone(), user_id],
     ).await?;
+
+    // Notify other online group members so their members list refreshes.
+    {
+        use livekit::DataPacket;
+        use crate::realtime::RealtimeEvent;
+        let payload = match serde_json::to_vec(&RealtimeEvent::MemberRoleChanged {
+            group_id: group_id.clone(),
+        }) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[role] serialize MemberRoleChanged: {e}");
+                return Ok(());
+            }
+        };
+        let lk = state.livekit.lock().await;
+        if let Some((room, _)) = lk.rooms.get(&group_id) {
+            let room = Arc::clone(room);
+            drop(lk);
+            let _ = room.local_participant().publish_data(DataPacket {
+                payload,
+                reliable: true,
+                ..Default::default()
+            }).await;
+        }
+    }
 
     Ok(())
 }

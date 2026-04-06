@@ -7,7 +7,7 @@ import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { messageQueryKeys, useDMConversations } from './queries/useMessages';
 import { usePreferences } from './queries/usePreferences';
-import { useUserGroupsWithChannels } from './queries/useGroups';
+import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
 import { playSfx, SFX } from '../utils/sfx';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
@@ -37,6 +37,10 @@ type RealtimeEvent =
     type: 'voice_left';
     channel_id: string;
     user_id: string;
+  }
+  | {
+    type: 'member_role_changed';
+    group_id: string;
   };
 
 export function useLiveKitRealtime() {
@@ -194,6 +198,16 @@ export function useLiveKitRealtime() {
         // and join-request approved scenarios.
         queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
+        return;
+      }
+
+      if (event.type === 'member_role_changed') {
+        // Targeted: only the affected group's member list and the current user's
+        // groups-with-channels (which embeds current_user_role).
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.members(event.group_id),
+        });
+        queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
         return;
       }
 
