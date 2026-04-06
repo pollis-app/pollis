@@ -26,7 +26,40 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
 
   const maxCol = isAdmin ? 2 : 0;
 
-  // Focus the container once members are loaded so keyboard nav (including Escape) works.
+  // Move DOM focus to the right element whenever nav changes.
+  // colIndex 0 → container div (shows row highlight).
+  // colIndex 1 → the Switch button in the focused row (native focus ring).
+  // colIndex 2 → the kick Button in the focused row (native focus ring).
+  useEffect(() => {
+    if (members.length === 0) {
+      return;
+    }
+    const member = members[nav.rowIndex];
+    if (!member) {
+      return;
+    }
+    const isSelf = member.user_id === currentUser?.id;
+
+    if (nav.colIndex === 0 || (isSelf && nav.colIndex > 0)) {
+      containerRef.current?.focus();
+      return;
+    }
+
+    const rowEl = containerRef.current?.querySelector<HTMLElement>(
+      `[data-testid="member-row-${member.user_id}"]`,
+    );
+    if (!rowEl) {
+      return;
+    }
+
+    if (nav.colIndex === 1) {
+      rowEl.querySelector<HTMLElement>('[role="switch"]')?.focus();
+    } else if (nav.colIndex === 2) {
+      rowEl.querySelector<HTMLElement>('[data-testid^="member-kick-"]')?.focus();
+    }
+  }, [nav, members, currentUser?.id]);
+
+  // Focus the container once members are loaded so keyboard nav works immediately.
   useEffect(() => {
     if (!isLoading && members.length > 0) {
       containerRef.current?.focus();
@@ -146,7 +179,6 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
       {members.map((member, rowIndex) => {
         const isSelf = member.user_id === currentUser?.id;
         const isRowFocused = nav.rowIndex === rowIndex;
-        const isFocusedCol = (col: number) => isRowFocused && nav.colIndex === col;
         const showControls = isAdmin && !isSelf;
 
         return (
@@ -170,7 +202,10 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
             </span>
 
             {/* Member name */}
-            <span className="flex-1 truncate" style={{ color: "var(--c-text)" }}>
+            <span
+              className="truncate"
+              style={{ color: "var(--c-text)", maxWidth: "12rem" }}
+            >
               {member.username ?? member.user_id}
               {isSelf && (
                 <span className="ml-2" style={{ color: "var(--c-text-muted)" }}>
@@ -189,26 +224,18 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
             {/* Admin toggle + kick — only for other members when current user is admin */}
             {showControls && (
               <div className="flex items-center gap-4">
-                <div
-                  style={{
-                    outline: isFocusedCol(1) ? "2px solid var(--c-accent)" : "2px solid transparent",
-                    borderRadius: "4px",
+                <Switch
+                  id={`member-admin-toggle-${member.user_id}`}
+                  label="admin"
+                  checked={member.role === "admin"}
+                  onChange={() => {
+                    const newRole = member.role === "admin" ? "member" : "admin";
+                    setRoleMutation.mutate({ groupId, userId: member.user_id, role: newRole });
                   }}
-                >
-                  <Switch
-                    id={`member-admin-toggle-${member.user_id}`}
-                    label="admin"
-                    checked={member.role === "admin"}
-                    onChange={() => {
-                      const newRole = member.role === "admin" ? "member" : "admin";
-                      setRoleMutation.mutate({ groupId, userId: member.user_id, role: newRole });
-                    }}
-                  />
-                </div>
+                />
                 <Button
                   data-testid={`member-kick-${member.user_id}`}
                   variant="primary"
-                  className={isFocusedCol(2) ? "ring-2 ring-[var(--c-accent)] ring-offset-2 ring-offset-black" : ""}
                   onClick={() =>
                     navigate({
                       to: "/groups/$groupId/members/$userId/kick",
