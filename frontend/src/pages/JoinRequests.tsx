@@ -62,7 +62,7 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
               <span className="text-xs font-mono" style={{ color: 'var(--c-text)' }}>
                 {req.requester_username ?? req.requester_id}
               </span>
-              <div className="flex gap-2 flex-shrink-0">
+              <div className="flex gap-4 flex-shrink-0">
                 <Button
                   data-testid={`approve-request-${req.id}`}
                   onClick={() => handleApprove(req.id)}

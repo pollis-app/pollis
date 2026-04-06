@@ -26,9 +26,12 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
 
   const maxCol = isAdmin ? 2 : 0;
 
+  // Focus the container once members are loaded so keyboard nav (including Escape) works.
   useEffect(() => {
-    containerRef.current?.focus();
-  }, []);
+    if (!isLoading && members.length > 0) {
+      containerRef.current?.focus();
+    }
+  }, [isLoading, members.length]);
 
   useEffect(() => {
     setNav({ rowIndex: 0, colIndex: 0 });
@@ -176,19 +179,6 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
               )}
             </span>
 
-            {/* Admin toggle — only for other members when current user is admin */}
-            {showControls && (
-              <Switch
-                id={`member-admin-toggle-${member.user_id}`}
-                label="admin"
-                checked={member.role === "admin"}
-                onChange={() => {
-                  const newRole = member.role === "admin" ? "member" : "admin";
-                  setRoleMutation.mutate({ groupId, userId: member.user_id, role: newRole });
-                }}
-              />
-            )}
-
             {/* Role label — shown when current user is not admin, or for own row */}
             {!showControls && (
               <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
@@ -196,20 +186,39 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
               </span>
             )}
 
-            {/* Kick button — only for other members when current user is admin */}
+            {/* Admin toggle + kick — only for other members when current user is admin */}
             {showControls && (
-              <Button
-                data-testid={`member-kick-${member.user_id}`}
-                variant="danger"
-                onClick={() =>
-                  navigate({
-                    to: "/groups/$groupId/members/$userId/kick",
-                    params: { groupId, userId: member.user_id },
-                  })
-                }
-              >
-                kick
-              </Button>
+              <div className="flex items-center gap-4">
+                <div
+                  style={{
+                    outline: isFocusedCol(1) ? "2px solid var(--c-accent)" : "2px solid transparent",
+                    borderRadius: "4px",
+                  }}
+                >
+                  <Switch
+                    id={`member-admin-toggle-${member.user_id}`}
+                    label="admin"
+                    checked={member.role === "admin"}
+                    onChange={() => {
+                      const newRole = member.role === "admin" ? "member" : "admin";
+                      setRoleMutation.mutate({ groupId, userId: member.user_id, role: newRole });
+                    }}
+                  />
+                </div>
+                <Button
+                  data-testid={`member-kick-${member.user_id}`}
+                  variant="primary"
+                  className={isFocusedCol(2) ? "ring-2 ring-[var(--c-accent)] ring-offset-2 ring-offset-black" : ""}
+                  onClick={() =>
+                    navigate({
+                      to: "/groups/$groupId/members/$userId/kick",
+                      params: { groupId, userId: member.user_id },
+                    })
+                  }
+                >
+                  kick
+                </Button>
+              </div>
             )}
           </div>
         );

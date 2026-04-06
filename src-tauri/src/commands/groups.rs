@@ -724,6 +724,7 @@ pub struct JoinRequest {
     pub group_id: String,
     pub requester_id: String,
     pub requester_username: Option<String>,
+    pub status: String,
     pub created_at: String,
 }
 
@@ -761,6 +762,10 @@ pub async fn send_group_invite(
     } else {
         return Err(Error::Other(anyhow::anyhow!("user '{}' not found", invitee_identifier)));
     };
+
+    if invitee_id == inviter_id {
+        return Err(Error::Other(anyhow::anyhow!("cannot invite yourself to a group")));
+    }
 
     // Check if invitee is already a member
     let mut member_rows = conn.query(
@@ -981,7 +986,7 @@ pub async fn get_group_join_requests(
     }
 
     let mut req_rows = conn.query(
-        "SELECT jr.id, jr.group_id, jr.requester_id, u.username, jr.created_at
+        "SELECT jr.id, jr.group_id, jr.requester_id, u.username, jr.status, jr.created_at
          FROM group_join_request jr
          LEFT JOIN users u ON u.id = jr.requester_id
          WHERE jr.group_id = ?1 AND jr.status = 'pending'
@@ -996,11 +1001,43 @@ pub async fn get_group_join_requests(
             group_id: row.get(1)?,
             requester_id: row.get(2)?,
             requester_username: row.get(3)?,
-            created_at: row.get(4)?,
+            status: row.get(4)?,
+            created_at: row.get(5)?,
         });
     }
 
     Ok(requests)
+}
+
+/// Get the current user's own join request for a specific group, if one exists.
+/// Returns None if no request has been made.
+#[tauri::command]
+pub async fn get_my_join_request(
+    group_id: String,
+    requester_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<JoinRequest>> {
+    let conn = state.remote_db.conn().await?;
+
+    let mut rows = conn.query(
+        "SELECT id, group_id, requester_id, status, created_at
+         FROM group_join_request
+         WHERE group_id = ?1 AND requester_id = ?2",
+        libsql::params![group_id, requester_id],
+    ).await?;
+
+    if let Some(row) = rows.next().await? {
+        Ok(Some(JoinRequest {
+            id: row.get(0)?,
+            group_id: row.get(1)?,
+            requester_id: row.get(2)?,
+            requester_username: None,
+            status: row.get(3)?,
+            created_at: row.get(4)?,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Approve a join request. Approver must be a group member. Adds the requester to the group.

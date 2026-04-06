@@ -15,6 +15,8 @@ export const groupQueryKeys = {
   members: (groupId: string) => ["groups", groupId, "members"] as const,
   pendingInvites: (userId: string | null) => ["group-invites", "pending", userId] as const,
   joinRequests: (groupId: string) => ["group-join-requests", groupId] as const,
+  myJoinRequest: (groupId: string | undefined, userId: string | null) =>
+    ["group-join-requests", "my", groupId, userId] as const,
 };
 
 export function useUserGroupsWithChannels() {
@@ -264,6 +266,7 @@ export type JoinRequest = {
   group_id: string;
   requester_id: string;
   requester_username?: string;
+  status: string;
   created_at: string;
 };
 
@@ -386,6 +389,26 @@ export function useRequestGroupAccess() {
       }
       await invoke('request_group_access', { groupId, requesterId: currentUser.id });
     },
+  });
+}
+
+export function useMyJoinRequest(groupId: string | undefined) {
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useQuery({
+    queryKey: groupQueryKeys.myJoinRequest(groupId, currentUser?.id ?? null),
+    queryFn: async (): Promise<JoinRequest | null> => {
+      if (!currentUser || !groupId) {
+        return null;
+      }
+      return await invoke<JoinRequest | null>('get_my_join_request', {
+        groupId,
+        requesterId: currentUser.id,
+      });
+    },
+    enabled: !!currentUser && !!groupId,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
   });
 }
 

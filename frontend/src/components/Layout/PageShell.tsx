@@ -31,8 +31,20 @@ export const PageShell: React.FC<PageShellProps> = ({ title, onBack, children, s
     return () => clearTimeout(timer);
   }, []);
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Escape") {
+      return;
+    }
+    const target = e.target as HTMLElement;
+    if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
+      return;
+    }
+    e.preventDefault();
+    onBack();
+  };
+
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" onKeyDown={handleKeyDown}>
       <div
         className="flex items-center px-4 py-2 flex-shrink-0 text-xs font-mono"
         style={{

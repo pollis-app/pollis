@@ -68,8 +68,6 @@ export function useLiveKitRealtime() {
         ids.push(group.id);
       }
     }
-    // DM conversations keep their own rooms — the LiveKit admin REST API
-    // needed to deliver DM messages via inbox is currently unreliable.
     if (dmConversations) {
       for (const conv of dmConversations) {
         ids.push(conv.id);

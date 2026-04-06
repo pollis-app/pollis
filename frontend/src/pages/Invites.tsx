@@ -58,7 +58,7 @@ export const Invites: React.FC = () => {
                   Invited by {invite.inviter_username ?? invite.inviter_id}
                 </span>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-4">
                 <Button
                   data-testid={`accept-invite-${invite.id}`}
                   onClick={() => handleAccept(invite.id)}

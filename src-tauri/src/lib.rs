@@ -159,6 +159,7 @@ pub fn run() {
             commands::groups::decline_group_invite,
             commands::groups::request_group_access,
             commands::groups::get_group_join_requests,
+            commands::groups::get_my_join_request,
             commands::groups::approve_join_request,
             commands::groups::reject_join_request,
             commands::groups::update_group,
