@@ -237,6 +237,18 @@ jobs:
           echo "Listing artifact structure:"
           find artifacts -type f
 
+      - name: Upload install script to R2
+        run: |
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp website/install.sh "s3://pollis/releases/install.sh" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "text/plain" \
+            --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
       - name: Upload installers to R2
         run: |
           VERSION="${GITHUB_REF_NAME}"
