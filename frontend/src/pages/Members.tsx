@@ -138,11 +138,6 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
           }
           break;
         }
-        case "Escape": {
-          e.preventDefault();
-          navigate({ to: "/groups/$groupId", params: { groupId } });
-          break;
-        }
       }
     },
     [members, nav, isAdmin, groupId, maxCol, navigate, setRoleMutation, currentUser],
