@@ -6,7 +6,6 @@
 // /settings - Settings page
 // /create-group - Create group page
 // /create-channel - Create channel page
-// /g/<group-slug>/settings - Group settings page
 // /search-group - Search group page
 // /start-dm - Start DM page
 
@@ -24,7 +23,7 @@ export const updateURL = (path: string) => {
 };
 
 export const parseURL = (): {
-  type: "group" | "channel" | "dm" | "settings" | "create-group" | "create-channel" | "group-settings" | "search-group" | "start-dm" | null;
+  type: "group" | "channel" | "dm" | "settings" | "create-group" | "create-channel" | "search-group" | "start-dm" | null;
   groupSlug?: string;
   channelSlug?: string;
   conversationId?: string;
@@ -56,12 +55,6 @@ export const parseURL = (): {
     return { type: "start-dm" };
   }
 
-  // /g/<group-slug>/settings
-  const groupSettingsMatch = path.match(/^\/g\/([^/]+)\/settings$/);
-  if (groupSettingsMatch) {
-    return { type: "group-settings", groupSlug: groupSettingsMatch[1] };
-  }
-  
   // /g/<group-slug>/<channel-slug>
   const channelMatch = path.match(/^\/g\/([^/]+)\/([^/]+)$/);
   if (channelMatch) {

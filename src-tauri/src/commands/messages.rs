@@ -365,18 +365,28 @@ pub async fn get_channel_messages(
         None
     };
 
-    // Upsert the caller's watermark for this channel.
-    if let Err(e) = conn.execute(
-        "INSERT OR REPLACE INTO conversation_watermark (conversation_id, user_id, last_fetched_at) VALUES (?1, ?2, datetime('now'))",
-        libsql::params![channel_id.clone(), user_id.clone()],
-    ).await {
-        eprintln!("[watermark] get_channel_messages: upsert failed: {e}");
+    // Upsert the caller's watermark using the latest sent_at from the returned
+    // messages, not wall-clock time. This ensures cleanup only removes envelopes
+    // that every member has actually fetched past. Skip if there are no messages
+    // (nothing new was fetched, so the watermark should not advance).
+    let max_sent_at = messages.iter().map(|m| m.sent_at.as_str()).max().map(str::to_owned);
+    if let Some(watermark_ts) = max_sent_at {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![channel_id.clone(), user_id.clone(), watermark_ts],
+        ).await {
+            eprintln!("[watermark] get_channel_messages: upsert failed: {e}");
+        }
     }
 
     // Delete envelopes that all current group members have fetched past.
     if let Err(e) = conn.execute(
         "DELETE FROM message_envelope
          WHERE conversation_id = ?1
+         AND sent_at < datetime('now', '-30 days')
          AND sent_at < (
              SELECT CASE
                  WHEN COUNT(gm.user_id) = COUNT(cw.last_fetched_at)
@@ -554,18 +564,28 @@ pub async fn get_dm_messages(
         None
     };
 
-    // Upsert the caller's watermark for this DM channel.
-    if let Err(e) = conn.execute(
-        "INSERT OR REPLACE INTO conversation_watermark (conversation_id, user_id, last_fetched_at) VALUES (?1, ?2, datetime('now'))",
-        libsql::params![dm_channel_id.clone(), user_id.clone()],
-    ).await {
-        eprintln!("[watermark] get_dm_messages: upsert failed: {e}");
+    // Upsert the caller's watermark using the latest sent_at from the returned
+    // messages, not wall-clock time. This ensures cleanup only removes envelopes
+    // that every member has actually fetched past. Skip if there are no messages
+    // (nothing new was fetched, so the watermark should not advance).
+    let max_sent_at = messages.iter().map(|m| m.sent_at.as_str()).max().map(str::to_owned);
+    if let Some(watermark_ts) = max_sent_at {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![dm_channel_id.clone(), user_id.clone(), watermark_ts],
+        ).await {
+            eprintln!("[watermark] get_dm_messages: upsert failed: {e}");
+        }
     }
 
     // Delete envelopes that all current DM members have fetched past.
     if let Err(e) = conn.execute(
         "DELETE FROM message_envelope
          WHERE conversation_id = ?1
+         AND sent_at < datetime('now', '-30 days')
          AND sent_at < (
              SELECT CASE
                  WHEN COUNT(dcm.user_id) = COUNT(cw.last_fetched_at)

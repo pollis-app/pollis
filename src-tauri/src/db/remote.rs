@@ -37,13 +37,9 @@ pub async fn push_schema(url: &str, token: &str) -> Result<()> {
         DROP TABLE IF EXISTS group_invite;
         DROP TABLE IF EXISTS group_join_request;
         DROP TABLE IF EXISTS user_preferences;
-        DROP TABLE IF EXISTS x3dh_init;
-        DROP TABLE IF EXISTS sender_key_dist;
         DROP TABLE IF EXISTS dm_channel_member;
         DROP TABLE IF EXISTS dm_channel;
         DROP TABLE IF EXISTS message_envelope;
-        DROP TABLE IF EXISTS one_time_prekey;
-        DROP TABLE IF EXISTS signed_prekey;
         DROP TABLE IF EXISTS channels;
         DROP TABLE IF EXISTS group_member;
         DROP TABLE IF EXISTS groups;
@@ -100,8 +96,6 @@ mod tests {
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Test', 'u1')", []).expect("groups");
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []).expect("group_member");
         conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'general')", []).expect("channels");
-        conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 1, 'pk', 'sig')", []).expect("signed_prekey");
-        conn.execute("INSERT INTO one_time_prekey (user_id, key_id, public_key) VALUES ('u1', 1, 'pk')", []).expect("one_time_prekey");
         conn.execute("INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) VALUES ('e1', 'c1', 'u1', 'enc', '2024-01-01T00:00:00Z')", []).expect("message_envelope");
     }
 
@@ -152,12 +146,12 @@ mod tests {
     }
 
     #[test]
-    fn group_with_owner_and_member() {
+    fn group_with_admin_and_member() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('owner', 'owner@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('admin', 'admin@x.com')", []).unwrap();
         conn.execute("INSERT INTO users (id, email) VALUES ('member', 'member@x.com')", []).unwrap();
-        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Crew', 'owner')", []).unwrap();
-        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'owner', 'owner')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Crew', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'admin', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'member', 'member')", []).unwrap();
 
         let count: i64 = conn.query_row(
@@ -191,39 +185,374 @@ mod tests {
         assert_eq!(count, 3);
     }
 
-    #[test]
-    fn signed_prekey_composite_primary_key() {
-        let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'u@x.com')", []).unwrap();
-        conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 1, 'pk1', 'sig1')", []).unwrap();
-        // Same user, different key_id — must succeed.
-        conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 2, 'pk2', 'sig2')", []).unwrap();
-        // Same (user_id, key_id) — must fail.
-        let result = conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 1, 'pk3', 'sig3')", []);
-        assert!(result.is_err(), "duplicate (user_id, key_id) should fail");
-    }
+    // ── Group roles ──────────────────────────────────────────────────────────
 
     #[test]
-    fn one_time_prekey_used_flag() {
+    fn group_member_defaults_to_member_role() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'u@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        // No role supplied — should default to 'member'
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []).unwrap();
 
-        for id in 1..=5i64 {
-            conn.execute(
-                "INSERT INTO one_time_prekey (user_id, key_id, public_key) VALUES ('u1', ?1, 'pk')",
-                rusqlite::params![id],
-            ).unwrap();
-        }
-
-        conn.execute("UPDATE one_time_prekey SET used = 1 WHERE user_id = 'u1' AND key_id = 3", []).unwrap();
-
-        let unclaimed: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM one_time_prekey WHERE user_id = 'u1' AND used = 0",
+        let role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'u1'",
             [],
             |row| row.get(0),
         ).unwrap();
+        assert_eq!(role, "member");
+    }
 
-        assert_eq!(unclaimed, 4, "4 keys should remain unclaimed");
+    #[test]
+    fn creator_is_inserted_as_admin() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'admin')", []).unwrap();
+
+        let role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'u1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(role, "admin");
+    }
+
+    #[test]
+    fn set_member_role_toggles_between_admin_and_member() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u2', 'member')", []).unwrap();
+
+        // Promote u2 to admin
+        conn.execute(
+            "UPDATE group_member SET role = 'admin' WHERE group_id = 'g1' AND user_id = 'u2'",
+            [],
+        ).unwrap();
+        let role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'u2'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(role, "admin");
+
+        // Demote back to member
+        conn.execute(
+            "UPDATE group_member SET role = 'member' WHERE group_id = 'g1' AND user_id = 'u2'",
+            [],
+        ).unwrap();
+        let role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'u2'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(role, "member");
+    }
+
+    #[test]
+    fn migration_008_owner_role_becomes_admin() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        // Simulate pre-migration data
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'owner')", []).unwrap();
+
+        conn.execute("UPDATE group_member SET role = 'admin' WHERE role = 'owner'", []).unwrap();
+
+        let role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'u1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(role, "admin", "migration should have renamed 'owner' to 'admin'");
+    }
+
+    #[test]
+    fn duplicate_membership_violates_primary_key() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []).unwrap();
+
+        let result = conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []);
+        assert!(result.is_err(), "duplicate (group_id, user_id) should violate PRIMARY KEY");
+    }
+
+    #[test]
+    fn admin_role_check_matches_only_admin() {
+        // Mirrors the SQL pattern used in every admin-gated command
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('a', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('m', 'm@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'a')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'a', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'm', 'member')", []).unwrap();
+
+        let admin_check = |user_id: &str| -> Option<String> {
+            conn.query_row(
+                "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = ?1",
+                rusqlite::params![user_id],
+                |row| row.get(0),
+            ).ok()
+        };
+
+        assert_eq!(admin_check("a").as_deref(), Some("admin"));
+        assert_ne!(admin_check("m").as_deref(), Some("admin"));
+        assert_eq!(admin_check("unknown"), None);
+    }
+
+    #[test]
+    fn remove_member_leaves_admin_intact() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('a', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('m', 'm@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'a')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'a', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'm', 'member')", []).unwrap();
+
+        conn.execute("DELETE FROM group_member WHERE group_id = 'g1' AND user_id = 'm'", []).unwrap();
+
+        let remaining: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_member WHERE group_id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(remaining, 1);
+
+        let role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'a'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(role, "admin");
+    }
+
+    #[test]
+    fn delete_group_cascades_to_members_and_channels() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'general')", []).unwrap();
+
+        conn.execute("DELETE FROM groups WHERE id = 'g1'", []).unwrap();
+
+        let members: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_member WHERE group_id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        let channels: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM channels WHERE group_id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(members, 0, "group_member rows should cascade delete");
+        assert_eq!(channels, 0, "channel rows should cascade delete");
+    }
+
+    // ── Invites ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn invite_can_be_created_and_queried() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES ('inv1', 'g1', 'u1', 'u2')",
+            [],
+        ).unwrap();
+
+        // All rows in group_invite are implicitly pending — accepted/declined rows are deleted.
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_invite WHERE invitee_id = 'u2'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn invite_deleted_on_accept_or_decline() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u3', 'c@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES ('inv1', 'g1', 'u1', 'u2')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES ('inv2', 'g1', 'u1', 'u3')",
+            [],
+        ).unwrap();
+
+        // Accept / decline both delete the row.
+        conn.execute("DELETE FROM group_invite WHERE id = 'inv1'", []).unwrap();
+        conn.execute("DELETE FROM group_invite WHERE id = 'inv2'", []).unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_invite WHERE group_id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 0, "both invite rows should be gone after accept/decline");
+    }
+
+    // ── Join requests ────────────────────────────────────────────────────────
+
+    #[test]
+    fn join_request_defaults_to_pending() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO group_join_request (id, group_id, requester_id) VALUES ('jr1', 'g1', 'u2')",
+            [],
+        ).unwrap();
+
+        let status: String = conn.query_row(
+            "SELECT status FROM group_join_request WHERE id = 'jr1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(status, "pending");
+    }
+
+    #[test]
+    fn join_request_approve_and_reject_flows() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('admin', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u3', 'c@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'admin')", []).unwrap();
+        conn.execute(
+            "INSERT INTO group_join_request (id, group_id, requester_id) VALUES ('jr1', 'g1', 'u2')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO group_join_request (id, group_id, requester_id) VALUES ('jr2', 'g1', 'u3')",
+            [],
+        ).unwrap();
+
+        conn.execute(
+            "UPDATE group_join_request SET status = 'approved', reviewed_by = 'admin' WHERE id = 'jr1'",
+            [],
+        ).unwrap();
+        conn.execute(
+            "UPDATE group_join_request SET status = 'rejected', reviewed_by = 'admin' WHERE id = 'jr2'",
+            [],
+        ).unwrap();
+
+        let s1: String = conn.query_row("SELECT status FROM group_join_request WHERE id = 'jr1'", [], |r| r.get(0)).unwrap();
+        let s2: String = conn.query_row("SELECT status FROM group_join_request WHERE id = 'jr2'", [], |r| r.get(0)).unwrap();
+        assert_eq!(s1, "approved");
+        assert_eq!(s2, "rejected");
+    }
+
+    #[test]
+    fn join_request_rejects_invalid_status() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO group_join_request (id, group_id, requester_id) VALUES ('jr1', 'g1', 'u2')",
+            [],
+        ).unwrap();
+
+        let result = conn.execute("UPDATE group_join_request SET status = 'bogus' WHERE id = 'jr1'", []);
+        assert!(result.is_err(), "CHECK constraint should reject invalid status");
+    }
+
+    // ── DM channels ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn dm_channel_with_two_members() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO dm_channel (id, created_by) VALUES ('dm1', 'u1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'u1', 'u1')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'u2', 'u1')",
+            [],
+        ).unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn dm_channel_delete_cascades_to_members() {
+        let conn = db();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO dm_channel (id, created_by) VALUES ('dm1', 'u1')", []).unwrap();
+        conn.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'u1', 'u1')",
+            [],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'u2', 'u1')",
+            [],
+        ).unwrap();
+
+        conn.execute("DELETE FROM dm_channel WHERE id = 'dm1'", []).unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = 'dm1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 0, "dm_channel_member rows should cascade delete");
+    }
+
+    // ── Attachment dedup ─────────────────────────────────────────────────────
+
+    #[test]
+    fn attachment_object_deduplicates_by_content_hash() {
+        let conn = db();
+        conn.execute(
+            "INSERT INTO attachment_object (content_hash, r2_key, mime_type, size_bytes)
+             VALUES ('abc123', 'r2/abc123', 'image/png', 1024)",
+            [],
+        ).unwrap();
+
+        // Same content_hash from a different upload must fail
+        let result = conn.execute(
+            "INSERT INTO attachment_object (content_hash, r2_key, mime_type, size_bytes)
+             VALUES ('abc123', 'r2/different', 'image/png', 1024)",
+            [],
+        );
+        assert!(result.is_err(), "duplicate content_hash should violate PRIMARY KEY");
+
+        // Different hash must succeed
+        conn.execute(
+            "INSERT INTO attachment_object (content_hash, r2_key, mime_type, size_bytes)
+             VALUES ('def456', 'r2/def456', 'image/jpeg', 2048)",
+            [],
+        ).unwrap();
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM attachment_object",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(count, 2);
     }
 
     #[test]

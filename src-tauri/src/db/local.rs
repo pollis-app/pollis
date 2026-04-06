@@ -105,11 +105,9 @@ mod tests {
             [],
         ).expect("dm_conversation table exists");
 
-        conn.execute(
-            "INSERT INTO signal_session (user_id, device_id, session_data)
-             VALUES ('user1', 1, X'cafebabe')",
-            [],
-        ).expect("signal_session table exists");
+        // signal_session, signed_prekey, one_time_prekey, group_sender_key were
+        // Signal Protocol tables removed in migration 000009 and are no longer
+        // created for new local databases.
     }
 
     #[test]
@@ -163,51 +161,6 @@ mod tests {
         ).unwrap();
 
         assert_eq!(stored, content);
-    }
-
-    #[test]
-    fn signed_prekey_primary_key_is_unique() {
-        let db = db();
-        let conn = db.conn();
-
-        conn.execute(
-            "INSERT INTO signed_prekey (id, public_key, signature) VALUES (1, X'aabb', X'ccdd')",
-            [],
-        ).unwrap();
-
-        let result = conn.execute(
-            "INSERT INTO signed_prekey (id, public_key, signature) VALUES (1, X'eeff', X'1122')",
-            [],
-        );
-
-        assert!(result.is_err(), "duplicate key_id should fail");
-    }
-
-    #[test]
-    fn one_time_prekey_used_flag_update() {
-        let db = db();
-        let conn = db.conn();
-
-        conn.execute(
-            "INSERT INTO one_time_prekey (id, public_key) VALUES (42, X'aabb')",
-            [],
-        ).unwrap();
-
-        let used: i64 = conn.query_row(
-            "SELECT used FROM one_time_prekey WHERE id = 42",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(used, 0);
-
-        conn.execute("UPDATE one_time_prekey SET used = 1 WHERE id = 42", []).unwrap();
-
-        let used: i64 = conn.query_row(
-            "SELECT used FROM one_time_prekey WHERE id = 42",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(used, 1);
     }
 
     #[test]

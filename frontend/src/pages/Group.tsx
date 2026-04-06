@@ -14,13 +14,14 @@ export const GroupPage: React.FC = () => {
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);
+  const isAdmin = group?.current_user_role === 'admin';
 
   const voiceChannelIds = useMemo(
     () => (group?.channels ?? []).filter((ch) => ch.channel_type === "voice").map((ch) => ch.id),
     [group]
   );
   const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
-  const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
+  const { data: joinRequests = [] } = useGroupJoinRequests(isAdmin ? groupId : null);
 
   if (isLoading) {
     return (
@@ -93,30 +94,39 @@ export const GroupPage: React.FC = () => {
     ...voiceChannelItems,
     { id: "__sep__", label: "", type: "separator" as const },
     {
-      id: "create-channel",
-      label: "+ New Channel",
-      action: () => {
-        setSelectedGroupId(group.id);
-        navigate({ to: "/groups/$groupId/channels/new", params: { groupId } });
+      id: "members",
+      label: "Members",
+      action: () => navigate({ to: "/groups/$groupId/members", params: { groupId } }),
+      type: "system" as const,
+      testId: "menu-item-members",
+    },
+    ...(isAdmin ? [
+      {
+        id: "create-channel",
+        label: "+ New Channel",
+        action: () => {
+          setSelectedGroupId(group.id);
+          navigate({ to: "/groups/$groupId/channels/new", params: { groupId } });
+        },
+        type: "system" as const,
+        testId: "menu-item-create-channel",
       },
-      type: "system" as const,
-      testId: "menu-item-create-channel",
-    },
-    {
-      id: "invite-member",
-      label: "Invite Member",
-      action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
-      type: "system" as const,
-      testId: "menu-item-invite-member",
-    },
-    {
-      id: "join-requests",
-      label: "Join Requests",
-      action: () => navigate({ to: "/groups/$groupId/join-requests", params: { groupId } }),
-      badge: joinRequests.length > 0 ? joinRequests.length : undefined,
-      type: "system" as const,
-      testId: "menu-item-join-requests",
-    },
+      {
+        id: "invite-member",
+        label: "Invite Member",
+        action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
+        type: "system" as const,
+        testId: "menu-item-invite-member",
+      },
+      {
+        id: "join-requests",
+        label: "Join Requests",
+        action: () => navigate({ to: "/groups/$groupId/join-requests", params: { groupId } }),
+        badge: joinRequests.length > 0 ? joinRequests.length : undefined,
+        type: "system" as const,
+        testId: "menu-item-join-requests",
+      },
+    ] : []),
     {
       id: "leave-group",
       label: "Leave Group",

@@ -29,6 +29,10 @@ function MainApp() {
 
   const [appState, setAppState] = useState<AppState>("initializing");
   const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
+  // Incremented each time the user clicks a chip so EmailOTPAuth always sees a
+  // new value, even if the same account is clicked again after going back.
+  const [prefillNonce, setPrefillNonce] = useState(0);
+  const [prefillEmail, setPrefillEmail] = useState<string | undefined>(undefined);
 
   const checkStoredSession = useCallback(async () => {
     try {
@@ -157,8 +161,15 @@ function MainApp() {
     } catch (error) {
       console.error("Failed to logout:", error);
     }
-    setAppState("email-auth");
     useAppStore.getState().logout();
+    // Re-fetch known accounts so the login screen shows the switcher
+    try {
+      const index = await api.listKnownAccounts();
+      setKnownAccounts(index.accounts);
+    } catch {
+      // Non-critical
+    }
+    setAppState("email-auth");
   }, []);
 
   if (appState === "update-required") {
@@ -224,24 +235,44 @@ function MainApp() {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {knownAccounts.map((account) => (
-                      <div
+                      <button
                         key={account.user_id}
-                        className="flex items-center gap-1 px-2 py-1 font-mono text-xs"
+                        data-testid={`known-account-chip-${account.user_id}`}
+                        onClick={() => {
+                          if (account.email) {
+                            setPrefillEmail(account.email);
+                            setPrefillNonce((n) => n + 1);
+                          }
+                        }}
+                        disabled={!account.email}
+                        className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors"
                         style={{
                           background: "var(--c-surface)",
                           border: "2px solid var(--c-border)",
                           borderRadius: "0.5rem",
                           color: "var(--c-text-dim)",
+                          cursor: account.email ? "pointer" : "default",
+                        }}
+                        onMouseEnter={(e) => {
+                          if (!account.email) {
+                            return;
+                          }
+                          (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-accent)";
+                          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-border)";
+                          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-dim)";
                         }}
                       >
                         <span>{account.username}</span>
-                      </div>
+                      </button>
                     ))}
                   </div>
                 </div>
               )}
 
-              <EmailOTPAuth onSuccess={handleAuthSuccess} />
+              <EmailOTPAuth onSuccess={handleAuthSuccess} prefillEmail={prefillEmail} prefillNonce={prefillNonce} />
             </div>
           </Card>
         </div>

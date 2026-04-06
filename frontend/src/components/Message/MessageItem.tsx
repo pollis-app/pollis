@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
-import { Reply, Download, Film, File as FileIcon, Music } from "lucide-react";
+import { Reply, Download, Film, Music, Check } from "lucide-react";
+import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
@@ -12,6 +13,7 @@ interface MessageItemProps {
   message: Message;
   allMessages?: Message[];
   authorUsername?: string;
+  isAuthorAdmin?: boolean;
   onReply?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
@@ -29,6 +31,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   message,
   allMessages = [],
   authorUsername = "unknown",
+  isAuthorAdmin = false,
   onReply,
   onScrollToReply,
 }) => {
@@ -62,23 +65,34 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       className="group relative px-3 py-1 mb-0.5 hover:bg-[var(--c-hover)] transition-colors duration-75"
     >
       {/* Reply thread indicator */}
-      {replyTo && (
-        <button
-          data-testid={`reply-preview-${message.reply_to_message_id}`}
-          onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-          className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
-          style={{ color: "var(--c-text-muted)" }}
-        >
-          <Reply size={10} style={{ transform: "scaleX(-1)" }} />
-          {replyToAuthor && (
-            <span className="font-semibold flex-shrink-0" style={{ color: "var(--c-text-dim)" }}>
-              {replyToAuthor}:
+      {message.reply_to_message_id && (
+        replyTo ? (
+          <button
+            data-testid={`reply-preview-${message.reply_to_message_id}`}
+            onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
+            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
+            style={{ color: "var(--c-text-muted)" }}
+          >
+            <Reply size={10} style={{ transform: "scaleX(-1)" }} />
+            {replyToAuthor && (
+              <span className="font-semibold flex-shrink-0" style={{ color: "var(--c-text-dim)" }}>
+                {replyToAuthor}:
+              </span>
+            )}
+            <span className="truncate max-w-xs">
+              {replyTo.content_decrypted?.slice(0, 80) || "[encrypted]"}
             </span>
-          )}
-          <span className="truncate max-w-xs">
-            {replyTo.content_decrypted?.slice(0, 80) || "[encrypted]"}
-          </span>
-        </button>
+          </button>
+        ) : (
+          <div
+            data-testid={`reply-preview-${message.reply_to_message_id}`}
+            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14"
+            style={{ color: "var(--c-text-dim)" }}
+          >
+            <Reply size={10} style={{ transform: "scaleX(-1)" }} />
+            <span>[redacted]</span>
+          </div>
+        )
       )}
 
       {/* IRC-style inline row: HH:MM  username  message */}
@@ -94,7 +108,12 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         <span
           data-testid="message-author"
           className="flex-shrink-0 font-mono text-sm font-semibold mr-1"
-          style={{
+          style={isAuthorAdmin ? {
+            background: "var(--c-accent)",
+            color: "var(--c-bg)",
+            paddingLeft: "3px",
+            paddingRight: "3px",
+          } : {
             color: isOwn ? "var(--c-accent)" : "var(--c-text-dim)",
           }}
         >
@@ -134,9 +153,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         </button>
       </div>
 
-      {/* Attachments — row layout, media sorted first */}
+      {/* Attachments — each on its own row */}
       {sortedAttachments && (
-        <div className="mt-1 flex flex-row flex-wrap gap-2" style={{ alignItems: "flex-start" }}>
+        <div className="mt-1 flex flex-col gap-2">
           {sortedAttachments.map((a) => (
             <AttachmentDisplay key={a.id} attachment={a} />
           ))}
@@ -492,7 +511,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
           {downloadStatus === "downloading" ? (
             <LoadingSpinner size="sm" />
           ) : downloadStatus === "done" ? (
-            <span className="text-xs font-mono">ok</span>
+            <Check size={14} aria-hidden="true" />
           ) : (
             <Download size={14} aria-hidden="true" />
           )}
@@ -770,6 +789,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   }
 
   // ── Generic file card ──────────────────────────────────────────────────────
+  const FileTypeIcon = getFileIcon(attachment.filename);
   return (
     <div
       data-testid={`attachment-${attachment.id}`}
@@ -782,7 +802,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
         borderRadius: 8,
       }}
     >
-      <FileIcon size={16} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
+      <FileTypeIcon size={16} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
       <div className="flex-1 min-w-0">
         <div className="text-xs font-mono truncate" style={{ color: "var(--c-accent-dim)" }}>
           {attachment.filename}
@@ -800,12 +820,22 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       ) : (
         <button
           onClick={handleDownload}
-          disabled={isLoading}
+          disabled={downloadStatus !== "idle"}
           aria-label={`Download ${attachment.filename}`}
           className="p-1"
-          style={{ color: "var(--c-text-dim)", flexShrink: 0, lineHeight: 0 }}
+          style={{
+            color: downloadStatus === "done" ? "var(--c-accent)" : "var(--c-text-dim)",
+            flexShrink: 0,
+            lineHeight: 0,
+          }}
         >
-          {isLoading ? "…" : <Download size={14} aria-hidden="true" />}
+          {downloadStatus === "downloading" ? (
+            <LoadingSpinner size="sm" />
+          ) : downloadStatus === "done" ? (
+            <Check size={14} aria-hidden="true" />
+          ) : (
+            <Download size={14} aria-hidden="true" />
+          )}
         </button>
       )}
     </div>

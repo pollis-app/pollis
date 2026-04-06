@@ -1,13 +1,15 @@
-import React from "react";
+import React, { useRef, useMemo, useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
 import { MessageList } from "../Message/MessageList";
 import { ReplyPreview } from "../Message/ReplyPreview";
 import { MessageQueue } from "../Message/MessageQueue";
-import { ChatInput, type Attachment } from "../ui/ChatInput";
+import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInput";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { useMessages, useSendMessage, messageQueryKeys } from "../../hooks/queries";
+import { transformChannelMessage } from "../../hooks/queries/useMessages";
+import { useGroupMembers } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
 import { blurhashFromUrl } from "../../utils/imageProcessing";
 
@@ -23,21 +25,114 @@ type MediaUploadResult = {
   height?: number;
 };
 
+type PageCursor = { sent_at: string; id: string };
+
+type RawMessagePage = {
+  messages: unknown[];
+  next_cursor: PageCursor | null;
+};
+
+type MessagesQueryData = {
+  messages: Message[];
+  nextCursor: PageCursor | null;
+};
+
 export const MainContent: React.FC = () => {
   const {
     selectedChannelId,
     selectedConversationId,
+    selectedGroupId,
     replyToMessageId,
     setReplyToMessageId,
     currentUser,
   } = useAppStore();
 
+  const { data: groupMembers = [] } = useGroupMembers(selectedGroupId ?? null);
+  const adminUserIds = useMemo(
+    () => new Set(groupMembers.filter((m) => m.role === "admin").map((m) => m.user_id)),
+    [groupMembers],
+  );
+
+  const chatInputRef = useRef<ChatInputHandle>(null);
+
   const queryClient = useQueryClient();
-  const { data: messages = [], isLoading: messagesLoading } = useMessages(
+  const { messages, nextCursor, isLoading: messagesLoading } = useMessages(
     selectedChannelId,
     selectedConversationId
   );
   const sendMessageMutation = useSendMessage();
+
+  const [olderMessages, setOlderMessages] = useState<Message[]>([]);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageCursor, setPageCursor] = useState<PageCursor | null>(null);
+
+  // Reset pagination state when the selected channel/conversation changes.
+  useEffect(() => {
+    setOlderMessages([]);
+    setPageCursor(null);
+  }, [selectedChannelId, selectedConversationId]);
+
+  // Initialise the cursor from the initial page load (only if no older pages
+  // have been fetched yet — don't overwrite cursor mid-pagination).
+  useEffect(() => {
+    if (nextCursor && olderMessages.length === 0) {
+      setPageCursor(nextCursor);
+    }
+  }, [nextCursor]);
+
+  // Merge older fetched pages with the live initial page, deduplicated and
+  // sorted oldest-first. Dedup keeps the first occurrence by message ID.
+  const allMessages = useMemo(() => {
+    const combined = [...olderMessages, ...messages];
+    const seen = new Set<string>();
+    const deduped: Message[] = [];
+    for (const m of combined) {
+      if (!seen.has(m.id)) {
+        seen.add(m.id);
+        deduped.push(m);
+      }
+    }
+    return deduped.sort((a, b) => a.created_at - b.created_at);
+  }, [olderMessages, messages]);
+
+  const loadMore = async () => {
+    if (!pageCursor || loadingMore || !currentUser) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      let page: RawMessagePage;
+      if (selectedChannelId) {
+        page = await invoke<RawMessagePage>('get_channel_messages', {
+          userId: currentUser.id,
+          channelId: selectedChannelId,
+          limit: 50,
+          cursor: pageCursor,
+        });
+      } else if (selectedConversationId) {
+        page = await invoke<RawMessagePage>('get_dm_messages', {
+          userId: currentUser.id,
+          dmChannelId: selectedConversationId,
+          limit: 50,
+          cursor: pageCursor,
+        });
+      } else {
+        return;
+      }
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const fetched = (page.messages as any[]).map(transformChannelMessage);
+
+      setOlderMessages((prev) => {
+        const existingIds = new Set(prev.map((m) => m.id));
+        const newOnes = fetched.filter((m) => !existingIds.has(m.id));
+        return [...newOnes, ...prev];
+      });
+      setPageCursor(page.next_cursor ?? null);
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const handleSend = async (text: string, attachments: Attachment[]) => {
     if (!text.trim() && attachments.length === 0) {
@@ -87,9 +182,10 @@ export const MainContent: React.FC = () => {
     };
 
     // Render immediately — upload + encrypt happens in the background.
-    queryClient.setQueryData<Message[]>(queryKey, (old) =>
-      old ? [...old, optimisticMessage] : [optimisticMessage]
-    );
+    queryClient.setQueryData<MessagesQueryData>(queryKey, (old) => {
+      const prev = old ?? { messages: [], nextCursor: null };
+      return { ...prev, messages: [...prev.messages, optimisticMessage] };
+    });
     setReplyToMessageId(null);
 
     try {
@@ -146,16 +242,22 @@ export const MainContent: React.FC = () => {
         channelId: selectedChannelId || "",
         conversationId: selectedConversationId || "",
         content,
-        replyToMessageId: undefined,
+        replyToMessageId: replyToMessageId ?? undefined,
         optimisticId,
       });
     } catch (error) {
       // Mark the optimistic stub as failed so the user can see it.
-      queryClient.setQueryData<Message[]>(queryKey, (old) =>
-        old
-          ? old.map((m) => (m.id === optimisticId ? { ...m, status: 'failed' as const } : m))
-          : []
-      );
+      queryClient.setQueryData<MessagesQueryData>(queryKey, (old) => {
+        if (!old) {
+          return { messages: [], nextCursor: null };
+        }
+        return {
+          ...old,
+          messages: old.messages.map((m) =>
+            m.id === optimisticId ? { ...m, status: 'failed' as const } : m
+          ),
+        };
+      });
       console.error("Failed to send message:", error);
     }
   };
@@ -191,12 +293,19 @@ export const MainContent: React.FC = () => {
           </div>
         ) : (
           <MessageList
-            messages={messages}
-            onReply={(id) => setReplyToMessageId(id)}
+            messages={allMessages}
+            adminUserIds={selectedGroupId ? adminUserIds : undefined}
+            onReply={(id) => {
+              setReplyToMessageId(id);
+              chatInputRef.current?.focus();
+            }}
             onScrollToMessage={(id) => console.log("Scroll to:", id)}
             getAuthorUsername={(authorId, message) =>
               message?.sender_username || (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId)
             }
+            hasMore={!!pageCursor}
+            isFetchingMore={loadingMore}
+            onLoadMore={loadMore}
           />
         )}
       </div>
@@ -204,7 +313,7 @@ export const MainContent: React.FC = () => {
       {replyToMessageId && (
         <ReplyPreview
           messageId={replyToMessageId}
-          allMessages={messages}
+          allMessages={allMessages}
           onDismiss={() => setReplyToMessageId(null)}
           onScrollToMessage={(id) => console.log("Scroll to:", id)}
         />
@@ -213,7 +322,7 @@ export const MainContent: React.FC = () => {
       <MessageQueue />
 
       <div data-testid="message-form">
-        <ChatInput onSend={handleSend} autoFocus />
+        <ChatInput ref={chatInputRef} onSend={handleSend} autoFocus />
       </div>
     </div>
   );

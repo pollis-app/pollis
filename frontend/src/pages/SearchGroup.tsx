@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "../stores/appStore";
-import { useRequestGroupAccess, useUserGroupsWithChannels } from "../hooks/queries";
+import { useRequestGroupAccess, useMyJoinRequest, useUserGroupsWithChannels, groupQueryKeys } from "../hooks/queries";
 import { deriveSlug } from "../utils/urlRouting";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
@@ -11,18 +12,20 @@ import { Card } from "../components/ui/Card";
 export const SearchGroup: React.FC = () => {
   const navigate = useNavigate();
   const currentUser = useAppStore((state) => state.currentUser);
+  const queryClient = useQueryClient();
   const { data: userGroups } = useUserGroupsWithChannels();
   const [slug, setSlug] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [foundGroup, setFoundGroup] = useState<any>(null);
-  const [requestSent, setRequestSent] = useState(false);
+  const [foundGroup, setFoundGroup] = useState<{ id: string; name: string; description?: string } | null>(null);
 
   const requestAccessMutation = useRequestGroupAccess();
+  const { data: myJoinRequest } = useMyJoinRequest(foundGroup?.id);
 
   const isMember = foundGroup != null && (userGroups ?? []).some((g) => g.id === foundGroup.id);
 
-  const handleSearch = async () => {
+  const handleSearch = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!slug.trim()) {
       setSearchError("Please enter a group slug");
       return;
@@ -30,7 +33,6 @@ export const SearchGroup: React.FC = () => {
     setIsSearching(true);
     setSearchError(null);
     setFoundGroup(null);
-    setRequestSent(false);
     try {
       const group = await invoke<{ id: string; name: string; description?: string }>('search_group_by_slug', { slug: slug.trim() });
       setFoundGroup(group);
@@ -45,15 +47,10 @@ export const SearchGroup: React.FC = () => {
     if (!foundGroup || !currentUser) {
       return;
     }
-    try {
-      await requestAccessMutation.mutateAsync(foundGroup.id);
-      setRequestSent(true);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg.toLowerCase().includes("pending request already exists")) {
-        setRequestSent(true);
-      }
-    }
+    await requestAccessMutation.mutateAsync(foundGroup.id);
+    queryClient.invalidateQueries({
+      queryKey: groupQueryKeys.myJoinRequest(foundGroup.id, currentUser.id),
+    });
   };
 
   return (
@@ -65,7 +62,7 @@ export const SearchGroup: React.FC = () => {
       <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
         <div className="w-full max-w-md flex flex-col gap-6">
 
-          <div className="flex flex-col gap-3">
+          <form onSubmit={handleSearch} className="flex flex-col gap-3">
             <TextInput
               label="Group Slug"
               value={slug}
@@ -78,16 +75,16 @@ export const SearchGroup: React.FC = () => {
 
             <Button
               data-testid="search-group-button"
-              onClick={handleSearch}
+              type="submit"
               disabled={!slug.trim() || isSearching}
               isLoading={isSearching}
               loadingText="Searching…"
             >
               Search
             </Button>
-          </div>
+          </form>
 
-          {foundGroup && !requestSent && (
+          {foundGroup && (
             <Card
               data-testid="search-group-result"
               className="flex flex-col gap-3"
@@ -113,6 +110,33 @@ export const SearchGroup: React.FC = () => {
                 >
                   Go to Group
                 </Button>
+              ) : myJoinRequest?.status === "pending" ? (
+                <p
+                  data-testid="request-pending-indicator"
+                  className="text-xs font-mono"
+                  style={{ color: 'var(--c-text-muted)' }}
+                >
+                  Request pending — a group admin will review it shortly.
+                </p>
+              ) : myJoinRequest?.status === "rejected" ? (
+                <div className="flex flex-col gap-2">
+                  <p
+                    data-testid="request-rejected-indicator"
+                    className="text-xs font-mono"
+                    style={{ color: '#ff6b6b' }}
+                  >
+                    Your request was declined.
+                  </p>
+                  <Button
+                    data-testid="try-again-button"
+                    onClick={handleRequestAccess}
+                    disabled={requestAccessMutation.isPending}
+                    isLoading={requestAccessMutation.isPending}
+                    loadingText="Sending request…"
+                  >
+                    Try Again
+                  </Button>
+                </div>
               ) : (
                 <Button
                   data-testid="request-access-button"
@@ -125,12 +149,6 @@ export const SearchGroup: React.FC = () => {
                 </Button>
               )}
             </Card>
-          )}
-
-          {requestSent && (
-            <p data-testid="request-sent-confirmation" className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
-              Request sent. A group member will review it shortly.
-            </p>
           )}
 
           {searchError && (

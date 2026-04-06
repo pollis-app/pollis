@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import * as api from "../../services/api";
 import type { GroupWithChannels } from "../../services/api";
 import { useAppStore } from "../../stores/appStore";
-import type { Group, Channel } from "../../types";
+import type { Group, Channel, GroupMember } from "../../types";
 
 export const groupQueryKeys = {
   all: ["groups"] as const,
@@ -12,8 +12,11 @@ export const groupQueryKeys = {
   userGroupsWithChannels: (userId: string | null) => ["groups", "with-channels", userId] as const,
   group: (groupId: string) => ["groups", groupId] as const,
   channels: (groupId: string) => ["groups", groupId, "channels"] as const,
+  members: (groupId: string) => ["groups", groupId, "members"] as const,
   pendingInvites: (userId: string | null) => ["group-invites", "pending", userId] as const,
   joinRequests: (groupId: string) => ["group-join-requests", groupId] as const,
+  myJoinRequest: (groupId: string | undefined, userId: string | null) =>
+    ["group-join-requests", "my", groupId, userId] as const,
 };
 
 export function useUserGroupsWithChannels() {
@@ -263,6 +266,7 @@ export type JoinRequest = {
   group_id: string;
   requester_id: string;
   requester_username?: string;
+  status: string;
   created_at: string;
 };
 
@@ -323,6 +327,58 @@ export function useDeclineInvite() {
   });
 }
 
+export function useGroupMembers(groupId: string | null) {
+  return useQuery({
+    queryKey: groupQueryKeys.members(groupId ?? ''),
+    queryFn: async (): Promise<GroupMember[]> => {
+      if (!groupId) {
+        return [];
+      }
+      return await invoke<GroupMember[]>('get_group_members', { groupId });
+    },
+    enabled: !!groupId,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useSetMemberRole() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async ({ groupId, userId, role }: { groupId: string; userId: string; role: 'admin' | 'member' }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('set_member_role', { groupId, userId, role, requesterId: currentUser.id });
+      return groupId;
+    },
+    onSuccess: (groupId) => {
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.members(groupId) });
+    },
+  });
+}
+
+export function useKickMember() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async ({ groupId, userId }: { groupId: string; userId: string }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('remove_member_from_group', { groupId, userId, requesterId: currentUser.id });
+      return groupId;
+    },
+    onSuccess: (groupId) => {
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.members(groupId) });
+      queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null) });
+    },
+  });
+}
+
 export function useRequestGroupAccess() {
   const currentUser = useAppStore((state) => state.currentUser);
 
@@ -333,6 +389,26 @@ export function useRequestGroupAccess() {
       }
       await invoke('request_group_access', { groupId, requesterId: currentUser.id });
     },
+  });
+}
+
+export function useMyJoinRequest(groupId: string | undefined) {
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useQuery({
+    queryKey: groupQueryKeys.myJoinRequest(groupId, currentUser?.id ?? null),
+    queryFn: async (): Promise<JoinRequest | null> => {
+      if (!currentUser || !groupId) {
+        return null;
+      }
+      return await invoke<JoinRequest | null>('get_my_join_request', {
+        groupId,
+        requesterId: currentUser.id,
+      });
+    },
+    enabled: !!currentUser && !!groupId,
+    staleTime: 1000 * 30,
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -406,29 +482,29 @@ export function useAllPendingJoinRequests() {
   const currentUser = useAppStore((state) => state.currentUser);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
 
-  const ownedGroupIds = useMemo(() => {
+  const adminGroupIds = useMemo(() => {
     if (!currentUser || !groupsWithChannels) {
       return [];
     }
     return groupsWithChannels
-      .filter((g) => g.created_by === currentUser.id)
+      .filter((g) => g.current_user_role === 'admin')
       .map((g) => g.id);
   }, [currentUser?.id, groupsWithChannels]);
 
   return useQuery({
-    queryKey: ["join-requests", "all-owned", currentUser?.id ?? null, ownedGroupIds.length],
+    queryKey: ["join-requests", "all-admin", currentUser?.id ?? null, adminGroupIds.length],
     queryFn: async (): Promise<JoinRequest[]> => {
-      if (!currentUser || ownedGroupIds.length === 0) {
+      if (!currentUser || adminGroupIds.length === 0) {
         return [];
       }
       const results = await Promise.all(
-        ownedGroupIds.map((groupId) =>
+        adminGroupIds.map((groupId) =>
           invoke<JoinRequest[]>('get_group_join_requests', { groupId, requesterId: currentUser.id }),
         ),
       );
       return results.flat();
     },
-    enabled: !!currentUser && ownedGroupIds.length > 0,
+    enabled: !!currentUser && adminGroupIds.length > 0,
     staleTime: 1000 * 30,
     refetchOnWindowFocus: true,
   });

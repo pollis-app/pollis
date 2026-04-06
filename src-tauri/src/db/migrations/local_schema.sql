@@ -9,37 +9,10 @@ CREATE TABLE IF NOT EXISTS identity_key (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS signed_prekey (
-    id INTEGER PRIMARY KEY,
-    public_key BLOB NOT NULL,
-    signature BLOB NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS one_time_prekey (
-    id INTEGER PRIMARY KEY,
-    public_key BLOB NOT NULL,
-    used INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS signal_session (
-    user_id TEXT NOT NULL,
-    device_id INTEGER NOT NULL DEFAULT 1,
-    session_data BLOB NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, device_id)
-);
-
-CREATE TABLE IF NOT EXISTS group_sender_key (
-    group_id TEXT NOT NULL,
-    sender_id TEXT NOT NULL,
-    chain_id BLOB NOT NULL,
-    iteration INTEGER NOT NULL DEFAULT 0,
-    chain_key BLOB NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (group_id, sender_id)
-);
+-- NOTE: signed_prekey, one_time_prekey, signal_session, group_sender_key were
+-- Signal Protocol tables removed in favour of MLS. They are not created for new
+-- local databases. Existing databases may still have these tables but nothing
+-- reads from or writes to them.
 
 CREATE TABLE IF NOT EXISTS message (
     id TEXT PRIMARY KEY,

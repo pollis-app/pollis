@@ -34,6 +34,10 @@ pub enum RealtimeEvent {
         channel_id: String,
         user_id: String,
     },
+    /// Sent to a group room when a member's role changes (admin ↔ member).
+    MemberRoleChanged {
+        group_id: String,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

@@ -30,10 +30,12 @@ export interface Group {
 }
 
 export interface GroupMember {
-  id: string; // ULID
-  group_id: string;
-  user_identifier: string; // username/email/phone
-  joined_at: number;
+  user_id: string;
+  username?: string;
+  display_name?: string;
+  avatar_url?: string;
+  role: 'admin' | 'member';
+  joined_at: string;
 }
 
 export interface Channel {
@@ -143,6 +145,7 @@ export interface SearchResult {
 export interface AccountInfo {
   user_id: string;
   username: string;
+  email?: string;
   avatar_url?: string;
   last_seen: string;
 }

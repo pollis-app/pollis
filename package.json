@@ -23,5 +23,8 @@
   "packageManager": "pnpm@10.25.0",
   "engines": {
     "node": ">=18"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-clipboard-manager": "^2.3.2"
   }
 }

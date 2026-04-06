@@ -47,6 +47,7 @@ pub struct GroupWithChannels {
     pub description: Option<String>,
     pub owner_id: String,
     pub created_at: String,
+    pub current_user_role: String,
     pub channels: Vec<Channel>,
 }
 
@@ -59,7 +60,8 @@ pub async fn list_user_groups_with_channels(
 
     let mut rows = conn.query(
         "SELECT g.id, g.name, g.description, g.owner_id, g.created_at,
-                c.id, c.group_id, c.name, c.description, c.channel_type
+                c.id, c.group_id, c.name, c.description, c.channel_type,
+                gm.role
          FROM groups g
          JOIN group_member gm ON gm.group_id = g.id
          LEFT JOIN channels c ON c.group_id = g.id
@@ -100,6 +102,7 @@ pub async fn list_user_groups_with_channels(
                 description: row.get(2)?,
                 owner_id: row.get(3)?,
                 created_at: row.get(4)?,
+                current_user_role: row.get::<Option<String>>(10)?.unwrap_or_else(|| "member".to_string()),
                 channels,
             });
         }
@@ -180,7 +183,7 @@ pub async fn create_group(
     ).await.map_err(|e| db_err(e.into(), "Group"))?;
 
     conn.execute(
-        "INSERT INTO group_member (group_id, user_id, role) VALUES (?1, ?2, 'owner')",
+        "INSERT INTO group_member (group_id, user_id, role) VALUES (?1, ?2, 'admin')",
         libsql::params![id.clone(), owner_id.clone()],
     ).await.map_err(|e| db_err(e.into(), "Group member"))?;
 
@@ -263,20 +266,20 @@ pub async fn update_group(
 ) -> Result<Group> {
     let conn = state.remote_db.conn().await?;
 
-    // Only owner can update
+    // Only admins can update group settings
     let mut rows = conn.query(
-        "SELECT owner_id FROM groups WHERE id = ?1",
-        libsql::params![group_id.clone()],
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        libsql::params![group_id.clone(), requester_id.clone()],
     ).await?;
 
-    let owner_id: String = if let Some(row) = rows.next().await? {
+    let role: String = if let Some(row) = rows.next().await? {
         row.get(0)?
     } else {
-        return Err(Error::Other(anyhow::anyhow!("group not found")));
+        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
     };
 
-    if owner_id != requester_id {
-        return Err(Error::Other(anyhow::anyhow!("only the group owner can update group settings")));
+    if role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only group admins can update group settings")));
     }
 
     if let Some(ref n) = name {
@@ -324,19 +327,20 @@ pub async fn delete_group(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
+    // Only admins can delete the group
     let mut rows = conn.query(
-        "SELECT owner_id FROM groups WHERE id = ?1",
-        libsql::params![group_id.clone()],
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        libsql::params![group_id.clone(), requester_id.clone()],
     ).await?;
 
-    let owner_id: String = if let Some(row) = rows.next().await? {
+    let role: String = if let Some(row) = rows.next().await? {
         row.get(0)?
     } else {
-        return Err(Error::Other(anyhow::anyhow!("group not found")));
+        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
     };
 
-    if owner_id != requester_id {
-        return Err(Error::Other(anyhow::anyhow!("only the group owner can delete the group")));
+    if role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only group admins can delete the group")));
     }
 
     // CASCADE deletes group_member and channels entries
@@ -356,7 +360,7 @@ pub async fn get_group_members(
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
-        "SELECT gm.user_id, u.username, u.display_name, u.avatar_url, gm.role, gm.joined_at
+        "SELECT gm.user_id, u.username, u.avatar_url, gm.role, gm.joined_at
          FROM group_member gm
          LEFT JOIN users u ON u.id = gm.user_id
          WHERE gm.group_id = ?1",
@@ -368,10 +372,10 @@ pub async fn get_group_members(
         members.push(GroupMember {
             user_id: row.get(0)?,
             username: row.get(1)?,
-            display_name: row.get(2)?,
-            avatar_url: row.get(3)?,
-            role: row.get(4)?,
-            joined_at: row.get(5)?,
+            display_name: None,
+            avatar_url: row.get(2)?,
+            role: row.get(3)?,
+            joined_at: row.get(4)?,
         });
     }
 
@@ -399,28 +403,11 @@ pub async fn remove_member_from_group(
         return Err(Error::Other(anyhow::anyhow!("requester is not a group member")));
     };
 
-    // Owner or admin can remove others; anyone can remove themselves
-    if requester_id != user_id && requester_role != "owner" && requester_role != "admin" {
+    // Admins can remove others; anyone can remove themselves (leave)
+    if requester_id != user_id && requester_role != "admin" {
         return Err(Error::Other(anyhow::anyhow!(
-            "only an owner or admin can remove other members"
+            "only an admin can remove other members"
         )));
-    }
-
-    // Owner cannot be removed (must transfer first)
-    if requester_id != user_id {
-        let mut target_rows = conn.query(
-            "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-            libsql::params![group_id.clone(), user_id.clone()],
-        ).await?;
-
-        if let Some(row) = target_rows.next().await? {
-            let target_role: String = row.get(0)?;
-            if target_role == "owner" {
-                return Err(Error::Other(anyhow::anyhow!(
-                    "cannot remove the group owner; transfer ownership first"
-                )));
-            }
-        }
     }
 
     conn.execute(
@@ -453,7 +440,7 @@ pub async fn leave_group(
         libsql::params![group_id.clone(), user_id.clone()],
     ).await?;
 
-    let role: String = if let Some(row) = rows.next().await? {
+    let _role: String = if let Some(row) = rows.next().await? {
         row.get(0)?
     } else {
         return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
@@ -539,8 +526,8 @@ pub async fn update_channel(
         return Err(Error::Other(anyhow::anyhow!("requester is not a group member")));
     };
 
-    if role != "owner" && role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only group owner or admin can update channels")));
+    if role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only group admins can update channels")));
     }
 
     if let Some(ref n) = name {
@@ -604,8 +591,8 @@ pub async fn delete_channel(
         return Err(Error::Other(anyhow::anyhow!("requester is not a group member")));
     };
 
-    if role != "owner" && role != "admin" {
-        return Err(Error::Other(anyhow::anyhow!("only group owner or admin can delete channels")));
+    if role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only group admins can delete channels")));
     }
 
     conn.execute(
@@ -671,57 +658,77 @@ pub async fn search_group_by_slug(
     Err(Error::Other(anyhow::anyhow!("No group found with slug '{}'", slug)))
 }
 
+/// Promote or demote a group member. Requester must be an admin.
+/// Valid roles: 'admin', 'member'.
 #[tauri::command]
-pub async fn transfer_ownership(
+pub async fn set_member_role(
     group_id: String,
-    new_owner_id: String,
+    user_id: String,
+    role: String,
     requester_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
+    if role != "admin" && role != "member" {
+        return Err(Error::Other(anyhow::anyhow!("invalid role: must be 'admin' or 'member'")));
+    }
+
     let conn = state.remote_db.conn().await?;
 
-    // Verify requester is current owner
+    // Requester must be admin
     let mut rows = conn.query(
-        "SELECT owner_id FROM groups WHERE id = ?1",
-        libsql::params![group_id.clone()],
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        libsql::params![group_id.clone(), requester_id.clone()],
     ).await?;
 
-    let current_owner: String = if let Some(row) = rows.next().await? {
+    let requester_role: String = if let Some(row) = rows.next().await? {
         row.get(0)?
     } else {
-        return Err(Error::Other(anyhow::anyhow!("group not found")));
+        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
     };
 
-    if current_owner != requester_id {
-        return Err(Error::Other(anyhow::anyhow!("only the current owner can transfer ownership")));
+    if requester_role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only admins can change member roles")));
     }
 
-    // Verify new owner is a member
-    let mut member_rows = conn.query(
+    // Verify target is a member
+    let mut target_rows = conn.query(
         "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), new_owner_id.clone()],
+        libsql::params![group_id.clone(), user_id.clone()],
     ).await?;
 
-    if member_rows.next().await?.is_none() {
-        return Err(Error::Other(anyhow::anyhow!("new owner must be a current member of the group")));
+    if target_rows.next().await?.is_none() {
+        return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
     }
 
-    // Update the owner_id in groups table
     conn.execute(
-        "UPDATE groups SET owner_id = ?1 WHERE id = ?2",
-        libsql::params![new_owner_id.clone(), group_id.clone()],
+        "UPDATE group_member SET role = ?1 WHERE group_id = ?2 AND user_id = ?3",
+        libsql::params![role, group_id.clone(), user_id],
     ).await?;
 
-    // Update roles in group_member
-    conn.execute(
-        "UPDATE group_member SET role = 'member' WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), requester_id],
-    ).await?;
-
-    conn.execute(
-        "UPDATE group_member SET role = 'owner' WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id, new_owner_id],
-    ).await?;
+    // Notify other online group members so their members list refreshes.
+    {
+        use livekit::DataPacket;
+        use crate::realtime::RealtimeEvent;
+        let payload = match serde_json::to_vec(&RealtimeEvent::MemberRoleChanged {
+            group_id: group_id.clone(),
+        }) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[role] serialize MemberRoleChanged: {e}");
+                return Ok(());
+            }
+        };
+        let lk = state.livekit.lock().await;
+        if let Some((room, _)) = lk.rooms.get(&group_id) {
+            let room = Arc::clone(room);
+            drop(lk);
+            let _ = room.local_participant().publish_data(DataPacket {
+                payload,
+                reliable: true,
+                ..Default::default()
+            }).await;
+        }
+    }
 
     Ok(())
 }
@@ -742,6 +749,7 @@ pub struct JoinRequest {
     pub group_id: String,
     pub requester_id: String,
     pub requester_username: Option<String>,
+    pub status: String,
     pub created_at: String,
 }
 
@@ -755,13 +763,18 @@ pub async fn send_group_invite(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Verify inviter is a member
+    // Only admins can send invites
     let mut rows = conn.query(
-        "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![group_id.clone(), inviter_id.clone()],
     ).await?;
-    if rows.next().await?.is_none() {
+    let inviter_role: String = if let Some(row) = rows.next().await? {
+        row.get(0)?
+    } else {
         return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
+    };
+    if inviter_role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only admins can invite members")));
     }
 
     // Look up invitee by username or email
@@ -774,6 +787,10 @@ pub async fn send_group_invite(
     } else {
         return Err(Error::Other(anyhow::anyhow!("user '{}' not found", invitee_identifier)));
     };
+
+    if invitee_id == inviter_id {
+        return Err(Error::Other(anyhow::anyhow!("cannot invite yourself to a group")));
+    }
 
     // Check if invitee is already a member
     let mut member_rows = conn.query(
@@ -875,8 +892,9 @@ pub async fn accept_group_invite(
 
     add_member_to_group(&conn, &group_id, &user_id).await?;
 
+    // Delete the invite row — accepted invites don't need to be retained.
     conn.execute(
-        "UPDATE group_invite SET status = 'accepted' WHERE id = ?1",
+        "DELETE FROM group_invite WHERE id = ?1",
         libsql::params![invite_id],
     ).await?;
 
@@ -901,8 +919,9 @@ pub async fn decline_group_invite(
         return Err(Error::Other(anyhow::anyhow!("invite not found or already processed")));
     }
 
+    // Delete the invite row — declined invites don't need to be retained.
     conn.execute(
-        "UPDATE group_invite SET status = 'declined' WHERE id = ?1",
+        "DELETE FROM group_invite WHERE id = ?1",
         libsql::params![invite_id],
     ).await?;
 
@@ -936,18 +955,32 @@ pub async fn request_group_access(
         return Err(Error::Other(anyhow::anyhow!("you are already a member of this group")));
     }
 
-    // Check not already a pending request
+    // Block duplicate pending requests, but allow re-application after rejection.
+    // If a pending request already exists, error. If a prior rejected/approved row
+    // exists, the upsert below will reset it to pending — giving admins a clean
+    // slate to review while preserving the row-per-pair constraint.
     let mut existing = conn.query(
-        "SELECT 1 FROM group_join_request WHERE group_id = ?1 AND requester_id = ?2 AND status = 'pending'",
+        "SELECT status FROM group_join_request WHERE group_id = ?1 AND requester_id = ?2",
         libsql::params![group_id.clone(), requester_id.clone()],
     ).await?;
-    if existing.next().await?.is_some() {
-        return Err(Error::Other(anyhow::anyhow!("you already have a pending request for this group")));
+    if let Some(row) = existing.next().await? {
+        let status: String = row.get(0)?;
+        if status == "pending" {
+            return Err(Error::Other(anyhow::anyhow!("you already have a pending request for this group")));
+        }
     }
 
     let id = Ulid::new().to_string();
+    // Upsert: new insert, or reset a prior rejected/approved row back to pending.
+    // reviewed_by and reviewed_at are intentionally preserved so the history of
+    // who reviewed the previous request is available for future UI use.
     conn.execute(
-        "INSERT INTO group_join_request (id, group_id, requester_id) VALUES (?1, ?2, ?3)",
+        "INSERT INTO group_join_request (id, group_id, requester_id, status, created_at)
+         VALUES (?1, ?2, ?3, 'pending', datetime('now'))
+         ON CONFLICT(group_id, requester_id) DO UPDATE SET
+             id         = excluded.id,
+             status     = 'pending',
+             created_at = excluded.created_at",
         libsql::params![id, group_id, requester_id],
     ).await.map_err(|e| db_err(e.into(), "Join request"))?;
 
@@ -963,17 +996,22 @@ pub async fn get_group_join_requests(
 ) -> Result<Vec<JoinRequest>> {
     let conn = state.remote_db.conn().await?;
 
-    // Verify caller is a member
+    // Only admins can view join requests; non-admins get an empty list
     let mut rows = conn.query(
-        "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![group_id.clone(), requester_id],
     ).await?;
-    if rows.next().await?.is_none() {
-        return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
+    let role: String = if let Some(row) = rows.next().await? {
+        row.get(0)?
+    } else {
+        return Ok(Vec::new());
+    };
+    if role != "admin" {
+        return Ok(Vec::new());
     }
 
     let mut req_rows = conn.query(
-        "SELECT jr.id, jr.group_id, jr.requester_id, u.username, jr.created_at
+        "SELECT jr.id, jr.group_id, jr.requester_id, u.username, jr.status, jr.created_at
          FROM group_join_request jr
          LEFT JOIN users u ON u.id = jr.requester_id
          WHERE jr.group_id = ?1 AND jr.status = 'pending'
@@ -988,11 +1026,43 @@ pub async fn get_group_join_requests(
             group_id: row.get(1)?,
             requester_id: row.get(2)?,
             requester_username: row.get(3)?,
-            created_at: row.get(4)?,
+            status: row.get(4)?,
+            created_at: row.get(5)?,
         });
     }
 
     Ok(requests)
+}
+
+/// Get the current user's own join request for a specific group, if one exists.
+/// Returns None if no request has been made.
+#[tauri::command]
+pub async fn get_my_join_request(
+    group_id: String,
+    requester_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<JoinRequest>> {
+    let conn = state.remote_db.conn().await?;
+
+    let mut rows = conn.query(
+        "SELECT id, group_id, requester_id, status, created_at
+         FROM group_join_request
+         WHERE group_id = ?1 AND requester_id = ?2",
+        libsql::params![group_id, requester_id],
+    ).await?;
+
+    if let Some(row) = rows.next().await? {
+        Ok(Some(JoinRequest {
+            id: row.get(0)?,
+            group_id: row.get(1)?,
+            requester_id: row.get(2)?,
+            requester_username: None,
+            status: row.get(3)?,
+            created_at: row.get(4)?,
+        }))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Approve a join request. Approver must be a group member. Adds the requester to the group.
@@ -1015,13 +1085,18 @@ pub async fn approve_join_request(
         return Err(Error::Other(anyhow::anyhow!("join request not found or already processed")));
     };
 
-    // Verify approver is a member
+    // Only admins can approve join requests
     let mut member_rows = conn.query(
-        "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
         libsql::params![group_id.clone(), approver_id.clone()],
     ).await?;
-    if member_rows.next().await?.is_none() {
+    let approver_role: String = if let Some(row) = member_rows.next().await? {
+        row.get(0)?
+    } else {
         return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
+    };
+    if approver_role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only admins can approve join requests")));
     }
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -1073,13 +1148,18 @@ pub async fn reject_join_request(
         return Err(Error::Other(anyhow::anyhow!("join request not found or already processed")));
     };
 
-    // Verify approver is a member
+    // Only admins can reject join requests
     let mut member_rows = conn.query(
-        "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id, approver_id.clone()],
+        "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+        libsql::params![group_id.clone(), approver_id.clone()],
     ).await?;
-    if member_rows.next().await?.is_none() {
+    let approver_role: String = if let Some(row) = member_rows.next().await? {
+        row.get(0)?
+    } else {
         return Err(Error::Other(anyhow::anyhow!("you are not a member of this group")));
+    };
+    if approver_role != "admin" {
+        return Err(Error::Other(anyhow::anyhow!("only admins can reject join requests")));
     }
 
     let now = chrono::Utc::now().to_rfc3339();

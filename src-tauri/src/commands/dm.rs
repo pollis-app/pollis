@@ -54,6 +54,12 @@ pub async fn create_dm_channel(
     member_ids: Vec<String>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<DmChannel> {
+    // Require at least one other participant.
+    let has_other = member_ids.iter().any(|id| id != &creator_id);
+    if !has_other {
+        return Err(Error::Other(anyhow::anyhow!("cannot create a DM with only yourself")));
+    }
+
     let conn = state.remote_db.conn().await?;
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();

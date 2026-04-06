@@ -6,22 +6,22 @@ A desktop messaging app with end-to-end encryption. Think Slack, but nobody — 
 
 ## How it works
 
-Messages are encrypted on your device using the Signal protocol before they ever leave your machine. The backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the Tauri app is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
+Messages are encrypted on your device using MLS (Messaging Layer Security) before they ever leave your machine. The backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the Tauri app is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
 
 **Stack**
 - **Desktop**: Tauri 2 (Rust + React/TypeScript)
-- **Encryption**: Signal Protocol — X3DH key exchange, Double Ratchet, AES-256-GCM
+- **Encryption**: MLS (Messaging Layer Security) for group channel encryption, AES-256-GCM
 - **Remote DB**: Turso (libSQL) — direct from the app, no middleman
 - **Local DB**: SQLite via SQLCipher (encrypted at rest)
 - **Auth**: Email OTP, session stored in the OS keystore
-- **Real-time**: LiveKit (WebRTC data channels for message delivery)
+- **Real-time**: LiveKit (WebRTC for voice calls and real-time presence)
 - **File storage**: Cloudflare R2
 
 ## Security model
 
-The server only ever sees encrypted blobs. Turso stores group metadata, public keys, and ciphertext — never message content or private keys. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
+Message content and file attachments are encrypted on your device before they ever leave it. The server stores ciphertext it can never read — your messages and files are inaccessible to anyone operating the infrastructure. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
 
-Forward secrecy is provided by the Double Ratchet: each message uses a unique derived key, so compromising one doesn't expose past messages.
+Forward secrecy is provided by MLS's key schedule: each epoch advance rotates the group key material, and each message uses a unique derived key so compromising one doesn't expose past or future messages.
 
 ## Releases
 
@@ -80,14 +80,11 @@ pnpm build:windows    # amd64 NSIS installer
 ## Project layout
 
 ```
-src-tauri/   # Rust backend — Tauri commands, DB, Signal protocol, auth
+src-tauri/   # Rust backend — Tauri commands, DB, MLS encryption, auth
 frontend/    # React app — Vite, TypeScript, TailwindCSS
 website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
 ```
 
 ## What's coming
 
-- **Auto-update** — in-app update prompts and one-click installs via the Tauri updater plugin, driven by the `latest.json` manifest already published on each release
-- **Voice and video calls** — LiveKit is already integrated for real-time messaging; call support is the natural next step
-- **macOS code signing and notarization** — so Gatekeeper stops complaining
 - **Broader platform availability** — currently open pre-alpha; working toward a stable public release
