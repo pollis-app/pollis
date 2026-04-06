@@ -97,7 +97,7 @@ function transformMessage(m: RawMessage): Message {
   };
 }
 
-function transformChannelMessage(m: RawChannelMessage): Message {
+export function transformChannelMessage(m: RawChannelMessage): Message {
   // m.content is undefined when the server returned null (e.g. decryption failure).
   // Keep content_decrypted as undefined in that case so MessageList can show
   // [encrypted] instead of silently filtering the message out.
@@ -120,6 +120,11 @@ function transformChannelMessage(m: RawChannelMessage): Message {
   };
 }
 
+type MessagesQueryResult = {
+  messages: Message[];
+  nextCursor: { sent_at: string; id: string } | null;
+};
+
 export function useMessages(channelId: string | null, conversationId: string | null) {
   const currentUser = useAppStore((state) => state.currentUser);
   const isChannel = !!channelId;
@@ -127,9 +132,9 @@ export function useMessages(channelId: string | null, conversationId: string | n
     ? messageQueryKeys.channel(channelId)
     : messageQueryKeys.conversation(conversationId);
 
-  return useQuery({
+  const query = useQuery({
     queryKey,
-    queryFn: async (): Promise<Message[]> => {
+    queryFn: async (): Promise<MessagesQueryResult> => {
       if (isChannel && channelId && currentUser) {
         // Advance the local MLS epoch before decrypting so any pending
         // member-add or member-remove commits are applied first.
@@ -140,7 +145,10 @@ export function useMessages(channelId: string | null, conversationId: string | n
           channelId,
           limit: 50,
         });
-        return (page.messages || []).map(transformChannelMessage);
+        return {
+          messages: (page.messages || []).map(transformChannelMessage),
+          nextCursor: page.next_cursor ?? null,
+        };
       }
 
       if (conversationId && currentUser) {
@@ -154,15 +162,24 @@ export function useMessages(channelId: string | null, conversationId: string | n
           dmChannelId: conversationId,
           limit: 50,
         });
-        return (page.messages || []).map(transformChannelMessage);
+        return {
+          messages: (page.messages || []).map(transformChannelMessage),
+          nextCursor: page.next_cursor ?? null,
+        };
       }
 
-      return [];
+      return { messages: [], nextCursor: null };
     },
     enabled: !!(channelId || conversationId) && !!currentUser,
     staleTime: 1000 * 30,
     refetchOnWindowFocus: true,
   });
+
+  return {
+    messages: query.data?.messages ?? [],
+    nextCursor: query.data?.nextCursor ?? null,
+    isLoading: query.isLoading,
+  };
 }
 
 /**
@@ -220,12 +237,12 @@ export function useSendMessage() {
         ...transformMessage(newMessage),
         sender_username: currentUser?.username ?? undefined,
       };
-      queryClient.setQueryData<Message[]>(queryKey, (old) => {
-        if (!old) { return [confirmedMessage]; }
+      queryClient.setQueryData<MessagesQueryResult>(queryKey, (old) => {
+        const prev = old ?? { messages: [], nextCursor: null };
         const filtered = variables.optimisticId
-          ? old.filter((m) => m.id !== variables.optimisticId)
-          : old;
-        return [...filtered, confirmedMessage];
+          ? prev.messages.filter((m) => m.id !== variables.optimisticId)
+          : prev.messages;
+        return { ...prev, messages: [...filtered, confirmedMessage] };
       });
 
       // Update the last-message preview immediately.

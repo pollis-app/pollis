@@ -69,23 +69,34 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       className="group relative px-3 py-1 mb-0.5 hover:bg-[var(--c-hover)] transition-colors duration-75"
     >
       {/* Reply thread indicator */}
-      {replyTo && (
-        <button
-          data-testid={`reply-preview-${message.reply_to_message_id}`}
-          onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-          className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
-          style={{ color: "var(--c-text-muted)" }}
-        >
-          <Reply size={10} style={{ transform: "scaleX(-1)" }} />
-          {replyToAuthor && (
-            <span className="font-semibold flex-shrink-0" style={{ color: "var(--c-text-dim)" }}>
-              {replyToAuthor}:
+      {message.reply_to_message_id && (
+        replyTo ? (
+          <button
+            data-testid={`reply-preview-${message.reply_to_message_id}`}
+            onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
+            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
+            style={{ color: "var(--c-text-muted)" }}
+          >
+            <Reply size={10} style={{ transform: "scaleX(-1)" }} />
+            {replyToAuthor && (
+              <span className="font-semibold flex-shrink-0" style={{ color: "var(--c-text-dim)" }}>
+                {replyToAuthor}:
+              </span>
+            )}
+            <span className="truncate max-w-xs">
+              {replyTo.content_decrypted?.slice(0, 80) || "[encrypted]"}
             </span>
-          )}
-          <span className="truncate max-w-xs">
-            {replyTo.content_decrypted?.slice(0, 80) || "[encrypted]"}
-          </span>
-        </button>
+          </button>
+        ) : (
+          <div
+            data-testid={`reply-preview-${message.reply_to_message_id}`}
+            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14"
+            style={{ color: "var(--c-text-dim)" }}
+          >
+            <Reply size={10} style={{ transform: "scaleX(-1)" }} />
+            <span>[redacted]</span>
+          </div>
+        )
       )}
 
       {/* IRC-style inline row: HH:MM  username  message */}
