@@ -152,6 +152,7 @@ website/                # Next.js marketing site (Vercel)
 - **Prefer editing existing files** over creating new ones
 - **Always use `pnpm`** not `npm`
 - **Never remove `data-testid` attributes** from JSX/HTML — they are used by Playwright E2E tests (`pnpm test:e2e`)
+- **Never reinvent UI components** — always use existing components from `frontend/src/components/ui/`. Toggles/switches use `Switch`, buttons use `Button`, text inputs use `TextInput`, etc. Do not build custom styled `<button>` or `<input>` elements when a ui/ component already exists.
 
 ## Coding Style
 

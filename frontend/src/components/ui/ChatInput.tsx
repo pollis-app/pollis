@@ -19,6 +19,7 @@ export interface Attachment {
 
 export interface ChatInputHandle {
   addFiles: (files: File[]) => void;
+  focus: () => void;
 }
 
 interface ChatInputProps {
@@ -350,6 +351,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
 
   useImperativeHandle(ref, () => ({
     addFiles: (files: File[]) => { files.forEach(handleBrowserFile); },
+    focus: () => { textareaRef.current?.focus(); },
   }), [handleBrowserFile]);
 
   // Global drop zone — AppShell fires this when Tauri intercepts an OS file drop.

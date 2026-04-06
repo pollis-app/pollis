@@ -1,6 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
-import { Reply, Download, Film, File as FileIcon, Music } from "lucide-react";
+import {
+  Reply, Download, Film, File as FileIcon, Music, Check,
+  FileText, FileCode, Archive, Terminal, Database, BookOpen,
+  Package, Table, Cpu,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
@@ -12,6 +17,7 @@ interface MessageItemProps {
   message: Message;
   allMessages?: Message[];
   authorUsername?: string;
+  isAuthorAdmin?: boolean;
   onReply?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
@@ -29,6 +35,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   message,
   allMessages = [],
   authorUsername = "unknown",
+  isAuthorAdmin = false,
   onReply,
   onScrollToReply,
 }) => {
@@ -94,7 +101,12 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         <span
           data-testid="message-author"
           className="flex-shrink-0 font-mono text-sm font-semibold mr-1"
-          style={{
+          style={isAuthorAdmin ? {
+            background: "var(--c-accent)",
+            color: "var(--c-bg)",
+            paddingLeft: "3px",
+            paddingRight: "3px",
+          } : {
             color: isOwn ? "var(--c-accent)" : "var(--c-text-dim)",
           }}
         >
@@ -148,6 +160,95 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     </div>
   );
 };
+
+function getFileIcon(filename: string): LucideIcon {
+  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
+  switch (ext) {
+    case "md":
+    case "mdx":
+      return BookOpen;
+    case "js":
+    case "ts":
+    case "jsx":
+    case "tsx":
+    case "py":
+    case "rs":
+    case "go":
+    case "java":
+    case "cpp":
+    case "c":
+    case "h":
+    case "rb":
+    case "php":
+    case "swift":
+    case "kt":
+    case "css":
+    case "html":
+    case "xml":
+    case "yaml":
+    case "yml":
+    case "toml":
+    case "ini":
+    case "conf":
+    case "json":
+    case "jsonc":
+      return FileCode;
+    case "doc":
+    case "docx":
+    case "txt":
+    case "rtf":
+    case "odt":
+    case "pdf":
+    case "ppt":
+    case "pptx":
+    case "key":
+    case "odp":
+      return FileText;
+    case "zip":
+    case "tar":
+    case "gz":
+    case "rar":
+    case "7z":
+    case "bz2":
+    case "xz":
+      return Archive;
+    case "sh":
+    case "bash":
+    case "zsh":
+    case "fish":
+    case "bat":
+    case "cmd":
+    case "ps1":
+      return Terminal;
+    case "exe":
+    case "dmg":
+    case "pkg":
+    case "deb":
+    case "rpm":
+    case "msi":
+    case "appimage":
+      return Package;
+    case "sql":
+    case "db":
+    case "sqlite":
+    case "sqlite3":
+      return Database;
+    case "csv":
+    case "tsv":
+    case "xls":
+    case "xlsx":
+    case "ods":
+      return Table;
+    case "wasm":
+    case "bin":
+    case "elf":
+    case "so":
+    case "dll":
+      return Cpu;
+    default:
+      return FileIcon;
+  }
+}
 
 // Co-located: only used by AttachmentDisplay.
 const BlurhashCanvas: React.FC<{ hash: string; width: number; height: number }> = ({
@@ -492,7 +593,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
           {downloadStatus === "downloading" ? (
             <LoadingSpinner size="sm" />
           ) : downloadStatus === "done" ? (
-            <span className="text-xs font-mono">ok</span>
+            <Check size={14} aria-hidden="true" />
           ) : (
             <Download size={14} aria-hidden="true" />
           )}
@@ -770,6 +871,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   }
 
   // ── Generic file card ──────────────────────────────────────────────────────
+  const FileTypeIcon = getFileIcon(attachment.filename);
   return (
     <div
       data-testid={`attachment-${attachment.id}`}
@@ -782,7 +884,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
         borderRadius: 8,
       }}
     >
-      <FileIcon size={16} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
+      <FileTypeIcon size={16} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
       <div className="flex-1 min-w-0">
         <div className="text-xs font-mono truncate" style={{ color: "var(--c-accent-dim)" }}>
           {attachment.filename}
@@ -800,12 +902,22 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       ) : (
         <button
           onClick={handleDownload}
-          disabled={isLoading}
+          disabled={downloadStatus !== "idle"}
           aria-label={`Download ${attachment.filename}`}
           className="p-1"
-          style={{ color: "var(--c-text-dim)", flexShrink: 0, lineHeight: 0 }}
+          style={{
+            color: downloadStatus === "done" ? "var(--c-accent)" : "var(--c-text-dim)",
+            flexShrink: 0,
+            lineHeight: 0,
+          }}
         >
-          {isLoading ? "…" : <Download size={14} aria-hidden="true" />}
+          {downloadStatus === "downloading" ? (
+            <LoadingSpinner size="sm" />
+          ) : downloadStatus === "done" ? (
+            <Check size={14} aria-hidden="true" />
+          ) : (
+            <Download size={14} aria-hidden="true" />
+          )}
         </button>
       )}
     </div>

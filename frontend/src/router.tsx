@@ -24,7 +24,10 @@ import { VoiceSettingsPage } from "./pages/VoiceSettingsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { InvitesPage } from "./pages/InvitesPage";
 import { JoinRequestsPage } from "./pages/JoinRequestsPage";
+import { AllJoinRequestsPage } from "./pages/AllJoinRequestsPage";
 import { InviteMemberPage } from "./pages/InviteMemberPage";
+import { MembersPage } from "./pages/MembersPage";
+import { KickMemberPage } from "./pages/KickMemberPage";
 import { SearchPage } from "./pages/Search";
 
 // Re-export RouterContext so callers can import from either location.
@@ -81,6 +84,18 @@ const createChannelRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/channels/new",
   component: CreateChannelPage,
+});
+
+const membersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/members",
+  component: MembersPage,
+});
+
+const kickMemberRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/members/$userId/kick",
+  component: KickMemberPage,
 });
 
 const joinRequestsRoute = createRoute({
@@ -156,6 +171,12 @@ const invitesRoute = createRoute({
   component: InvitesPage,
 });
 
+const allJoinRequestsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/join-requests",
+  component: AllJoinRequestsPage,
+});
+
 const searchRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/search",
@@ -172,6 +193,8 @@ const routeTree = rootRoute.addChildren([
   groupRoute,
   channelRoute,
   createChannelRoute,
+  membersRoute,
+  kickMemberRoute,
   joinRequestsRoute,
   inviteMemberRoute,
   leaveGroupRoute,
@@ -184,6 +207,7 @@ const routeTree = rootRoute.addChildren([
   voiceSettingsRoute,
   settingsRoute,
   invitesRoute,
+  allJoinRequestsRoute,
   searchRoute,
 ]);
 

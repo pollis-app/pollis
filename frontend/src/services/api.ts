@@ -115,10 +115,11 @@ function toChannel(c: RawChannel): Channel {
   };
 }
 
-type RawGroupWithChannels = RawGroup & { channels: RawChannel[] };
+type RawGroupWithChannels = RawGroup & { channels: RawChannel[]; current_user_role: string };
 
 export interface GroupWithChannels extends Group {
   channels: Channel[];
+  current_user_role: 'admin' | 'member';
 }
 
 export async function listUserGroupsWithChannels(userId: string): Promise<GroupWithChannels[]> {
@@ -126,6 +127,7 @@ export async function listUserGroupsWithChannels(userId: string): Promise<GroupW
   return (groups || []).map((g) => ({
     ...toGroup(g),
     channels: (g.channels || []).map(toChannel),
+    current_user_role: (g.current_user_role === 'admin' ? 'admin' : 'member') as 'admin' | 'member',
   }));
 }
 

@@ -13,7 +13,8 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
   const [success, setSuccess] = useState(false);
   const inviteMutation = useSendGroupInvite();
 
-  const handleInvite = async () => {
+  const handleInvite = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!username.trim()) {
       return;
     }
@@ -34,8 +35,10 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
       style={{ background: 'var(--c-bg)' }}
     >
       <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
-        <div className="w-full max-w-md flex flex-col gap-6">
-
+        <form
+          onSubmit={handleInvite}
+          className="w-full max-w-md flex flex-col gap-6"
+        >
           <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
             Invite someone to <span style={{ color: 'var(--c-accent)' }}>{groupName}</span>
           </p>
@@ -52,7 +55,7 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
 
             <Button
               data-testid="send-invite-button"
-              onClick={handleInvite}
+              type="submit"
               disabled={!username.trim() || inviteMutation.isPending}
               isLoading={inviteMutation.isPending}
               loadingText="Sending…"
@@ -72,7 +75,7 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
               {inviteMutation.error instanceof Error ? inviteMutation.error.message : "Failed to send invite"}
             </p>
           )}
-        </div>
+        </form>
       </div>
     </div>
   );

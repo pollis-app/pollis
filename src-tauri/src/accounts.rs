@@ -8,6 +8,7 @@ use crate::error::Result;
 pub struct AccountInfo {
     pub user_id: String,
     pub username: String,
+    pub email: Option<String>,
     pub avatar_url: Option<String>,
     pub last_seen: String,
 }
@@ -44,18 +45,22 @@ fn write_accounts_index(index: &AccountsIndex) -> Result<()> {
 }
 
 /// Insert or update an account entry and set it as the last active user.
-pub fn upsert_account(user_id: &str, username: &str, avatar_url: Option<&str>) -> Result<()> {
+pub fn upsert_account(user_id: &str, username: &str, email: Option<&str>, avatar_url: Option<&str>) -> Result<()> {
     let mut index = read_accounts_index();
 
     let now = chrono::Utc::now().to_rfc3339();
     if let Some(existing) = index.accounts.iter_mut().find(|a| a.user_id == user_id) {
         existing.username = username.to_string();
+        if let Some(e) = email {
+            existing.email = Some(e.to_string());
+        }
         existing.avatar_url = avatar_url.map(|s| s.to_string());
         existing.last_seen = now;
     } else {
         index.accounts.push(AccountInfo {
             user_id: user_id.to_string(),
             username: username.to_string(),
+            email: email.map(|s| s.to_string()),
             avatar_url: avatar_url.map(|s| s.to_string()),
             last_seen: now,
         });

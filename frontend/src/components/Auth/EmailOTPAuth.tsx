@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as api from '../../services/api';
 import type { User } from '../../types';
 import { Button } from '../ui/Button';
@@ -7,14 +7,46 @@ import { TextInput } from '../ui/TextInput';
 
 interface EmailOTPAuthProps {
   onSuccess: (user: User) => void | Promise<void>;
+  // When set, auto-populates the email field and immediately sends the OTP,
+  // advancing straight to the code-entry step.
+  prefillEmail?: string;
+  // Incremented each time the parent wants to trigger a new prefill, even for
+  // the same email address (e.g. clicking the same chip after going back).
+  prefillNonce?: number;
 }
 
-export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess }) => {
+export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEmail, prefillNonce }) => {
   const [step, setStep] = useState<'email' | 'otp'>('email');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fire whenever the parent bumps the nonce (chip click). Skip nonce === 0
+  // (initial mount) so we don't send a spurious request on page load.
+  useEffect(() => {
+    if (!prefillEmail || !prefillNonce) {
+      return;
+    }
+
+    setEmail(prefillEmail);
+    setStep('email');
+    setOtp('');
+    setError(null);
+    setIsLoading(true);
+
+    api.requestOTP(prefillEmail)
+      .then(() => {
+        setStep('otp');
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : 'Failed to send code');
+      })
+      .finally(() => {
+        setIsLoading(false);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillNonce]);
 
   const handleRequestOTP = async (e: React.FormEvent) => {
     e.preventDefault();

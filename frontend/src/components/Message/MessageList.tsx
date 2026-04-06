@@ -4,6 +4,7 @@ import type { Message } from "../../types";
 
 interface MessageListProps {
   messages: Message[];
+  adminUserIds?: Set<string>;
   onReply?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToMessage?: (messageId: string) => void;
@@ -12,6 +13,7 @@ interface MessageListProps {
 
 export const MessageList: React.FC<MessageListProps> = ({
   messages,
+  adminUserIds,
   onReply,
   onScrollToMessage,
   getAuthorUsername,
@@ -84,6 +86,7 @@ export const MessageList: React.FC<MessageListProps> = ({
             message={message}
             allMessages={sortedMessages}
             authorUsername={authorUsername}
+            isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
             onReply={onReply}
             onScrollToReply={scrollToMessage}
           />

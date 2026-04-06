@@ -186,7 +186,7 @@ pub async fn verify_otp(
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
     keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
-    crate::accounts::upsert_account(&profile.id, &profile.username, None)?;
+    crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
 
     Ok(profile)
 }

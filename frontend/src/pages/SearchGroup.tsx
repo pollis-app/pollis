@@ -22,7 +22,8 @@ export const SearchGroup: React.FC = () => {
 
   const isMember = foundGroup != null && (userGroups ?? []).some((g) => g.id === foundGroup.id);
 
-  const handleSearch = async () => {
+  const handleSearch = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!slug.trim()) {
       setSearchError("Please enter a group slug");
       return;
@@ -65,7 +66,7 @@ export const SearchGroup: React.FC = () => {
       <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
         <div className="w-full max-w-md flex flex-col gap-6">
 
-          <div className="flex flex-col gap-3">
+          <form onSubmit={handleSearch} className="flex flex-col gap-3">
             <TextInput
               label="Group Slug"
               value={slug}
@@ -78,14 +79,14 @@ export const SearchGroup: React.FC = () => {
 
             <Button
               data-testid="search-group-button"
-              onClick={handleSearch}
+              type="submit"
               disabled={!slug.trim() || isSearching}
               isLoading={isSearching}
               loadingText="Searching…"
             >
               Search
             </Button>
-          </div>
+          </form>
 
           {foundGroup && !requestSent && (
             <Card

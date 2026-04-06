@@ -10,7 +10,7 @@ Messages are encrypted on your device using the Signal protocol before they ever
 
 **Stack**
 - **Desktop**: Tauri 2 (Rust + React/TypeScript)
-- **Encryption**: Signal Protocol — X3DH key exchange, Double Ratchet, AES-256-GCM
+- **Encryption**: MLS (Messaging Layer Security) for group channel encryption, AES-256-GCM
 - **Remote DB**: Turso (libSQL) — direct from the app, no middleman
 - **Local DB**: SQLite via SQLCipher (encrypted at rest)
 - **Auth**: Email OTP, session stored in the OS keystore
@@ -87,7 +87,5 @@ website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudfla
 
 ## What's coming
 
-- **Auto-update** — in-app update prompts and one-click installs via the Tauri updater plugin, driven by the `latest.json` manifest already published on each release
-- **Voice and video calls** — LiveKit is already integrated for real-time messaging; call support is the natural next step
 - **macOS code signing and notarization** — so Gatekeeper stops complaining
 - **Broader platform availability** — currently open pre-alpha; working toward a stable public release

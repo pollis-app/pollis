@@ -1,13 +1,14 @@
-import React from "react";
+import React, { useRef, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
 import { MessageList } from "../Message/MessageList";
 import { ReplyPreview } from "../Message/ReplyPreview";
 import { MessageQueue } from "../Message/MessageQueue";
-import { ChatInput, type Attachment } from "../ui/ChatInput";
+import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInput";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { useMessages, useSendMessage, messageQueryKeys } from "../../hooks/queries";
+import { useGroupMembers } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
 import { blurhashFromUrl } from "../../utils/imageProcessing";
 
@@ -27,10 +28,19 @@ export const MainContent: React.FC = () => {
   const {
     selectedChannelId,
     selectedConversationId,
+    selectedGroupId,
     replyToMessageId,
     setReplyToMessageId,
     currentUser,
   } = useAppStore();
+
+  const { data: groupMembers = [] } = useGroupMembers(selectedGroupId ?? null);
+  const adminUserIds = useMemo(
+    () => new Set(groupMembers.filter((m) => m.role === "admin").map((m) => m.user_id)),
+    [groupMembers],
+  );
+
+  const chatInputRef = useRef<ChatInputHandle>(null);
 
   const queryClient = useQueryClient();
   const { data: messages = [], isLoading: messagesLoading } = useMessages(
@@ -146,7 +156,7 @@ export const MainContent: React.FC = () => {
         channelId: selectedChannelId || "",
         conversationId: selectedConversationId || "",
         content,
-        replyToMessageId: undefined,
+        replyToMessageId: replyToMessageId ?? undefined,
         optimisticId,
       });
     } catch (error) {
@@ -192,7 +202,11 @@ export const MainContent: React.FC = () => {
         ) : (
           <MessageList
             messages={messages}
-            onReply={(id) => setReplyToMessageId(id)}
+            adminUserIds={selectedGroupId ? adminUserIds : undefined}
+            onReply={(id) => {
+              setReplyToMessageId(id);
+              chatInputRef.current?.focus();
+            }}
             onScrollToMessage={(id) => console.log("Scroll to:", id)}
             getAuthorUsername={(authorId, message) =>
               message?.sender_username || (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId)
@@ -213,7 +227,7 @@ export const MainContent: React.FC = () => {
       <MessageQueue />
 
       <div data-testid="message-form">
-        <ChatInput onSend={handleSend} autoFocus />
+        <ChatInput ref={chatInputRef} onSend={handleSend} autoFocus />
       </div>
     </div>
   );

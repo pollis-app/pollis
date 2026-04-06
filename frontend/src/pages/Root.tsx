@@ -30,9 +30,7 @@ export const RootPage: React.FC = () => {
     {
       id: "dms",
       label: "Direct Messages",
-      description: dmConversations.length > 0
-        ? `${dmConversations.length} conversation${dmConversations.length !== 1 ? "s" : ""}`
-        : "Start a new conversation",
+      description: "Private, end-to-end encrypted conversations with individuals",
       action: () => navigate({ to: "/dms" }),
       badge: totalDMUnread > 0 ? totalDMUnread : undefined,
       testId: "menu-item-dms",
@@ -51,7 +49,7 @@ export const RootPage: React.FC = () => {
       id: "join-requests",
       label: "Join Requests",
       description: <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{pendingJoinRequests.length} pending</span>,
-      action: () => navigate({ to: "/groups" }),
+      action: () => navigate({ to: "/join-requests" }),
       type: "system" as const,
       testId: "menu-item-join-requests",
     }] : []),

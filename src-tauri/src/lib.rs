@@ -143,7 +143,7 @@ pub fn run() {
             commands::groups::leave_group,
             commands::groups::update_channel,
             commands::groups::delete_channel,
-            commands::groups::transfer_ownership,
+            commands::groups::set_member_role,
             commands::groups::search_group_by_slug,
             commands::dm::create_dm_channel,
             commands::dm::list_dm_channels,

@@ -1,17 +1,27 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
-import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
+import { useUserGroupsWithChannels, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
 
 export const GroupsPage: React.FC = () => {
   const navigate = useNavigate();
   const { setSelectedGroupId, unreadCounts } = useAppStore();
 
   const { data: groupsWithChannels, isLoading: groupsLoading, error: groupsError } = useUserGroupsWithChannels();
+  const { data: allJoinRequests = [] } = useAllPendingJoinRequests();
 
   const groups = groupsWithChannels ?? [];
+
+  // Build a map of groupId → pending join request count for badge display
+  const joinRequestCountByGroup = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const req of allJoinRequests) {
+      map[req.group_id] = (map[req.group_id] ?? 0) + 1;
+    }
+    return map;
+  }, [allJoinRequests]);
 
   const groupItems: TerminalMenuItem[] = groupsLoading
     ? [{ id: "__loading__", label: "Loading…", disabled: true }]
@@ -20,10 +30,22 @@ export const GroupsPage: React.FC = () => {
       : groups.map((g) => {
         const textChannels = g.channels.filter((ch) => ch.channel_type === "text");
         const totalUnread = textChannels.reduce((sum, ch) => sum + (unreadCounts[ch.id] ?? 0), 0);
+        const pendingJoinCount = joinRequestCountByGroup[g.id] ?? 0;
+
+        // Build description: prefer join request alert over static description text
+        let description: React.ReactNode = g.description || undefined;
+        if (pendingJoinCount > 0) {
+          description = (
+            <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>
+              {pendingJoinCount} join request{pendingJoinCount !== 1 ? "s" : ""} pending
+            </span>
+          );
+        }
+
         return {
           id: g.id,
           label: g.name,
-          description: g.description || undefined,
+          description,
           action: () => {
             setSelectedGroupId(g.id);
             navigate({ to: "/groups/$groupId", params: { groupId: g.id } });
