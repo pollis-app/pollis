@@ -357,7 +357,7 @@ mod tests {
     // ── Invites ──────────────────────────────────────────────────────────────
 
     #[test]
-    fn invite_defaults_to_pending() {
+    fn invite_can_be_created_and_queried() {
         let conn = db();
         conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
         conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
@@ -367,16 +367,17 @@ mod tests {
             [],
         ).unwrap();
 
-        let status: String = conn.query_row(
-            "SELECT status FROM group_invite WHERE id = 'inv1'",
+        // All rows in group_invite are implicitly pending — accepted/declined rows are deleted.
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_invite WHERE invitee_id = 'u2'",
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(status, "pending");
+        assert_eq!(count, 1);
     }
 
     #[test]
-    fn invite_can_be_accepted_and_declined() {
+    fn invite_deleted_on_accept_or_decline() {
         let conn = db();
         conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
         conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
@@ -391,28 +392,16 @@ mod tests {
             [],
         ).unwrap();
 
-        conn.execute("UPDATE group_invite SET status = 'accepted' WHERE id = 'inv1'", []).unwrap();
-        conn.execute("UPDATE group_invite SET status = 'declined' WHERE id = 'inv2'", []).unwrap();
+        // Accept / decline both delete the row.
+        conn.execute("DELETE FROM group_invite WHERE id = 'inv1'", []).unwrap();
+        conn.execute("DELETE FROM group_invite WHERE id = 'inv2'", []).unwrap();
 
-        let s1: String = conn.query_row("SELECT status FROM group_invite WHERE id = 'inv1'", [], |r| r.get(0)).unwrap();
-        let s2: String = conn.query_row("SELECT status FROM group_invite WHERE id = 'inv2'", [], |r| r.get(0)).unwrap();
-        assert_eq!(s1, "accepted");
-        assert_eq!(s2, "declined");
-    }
-
-    #[test]
-    fn invite_rejects_invalid_status() {
-        let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
-        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
-        conn.execute(
-            "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES ('inv1', 'g1', 'u1', 'u2')",
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_invite WHERE group_id = 'g1'",
             [],
+            |row| row.get(0),
         ).unwrap();
-
-        let result = conn.execute("UPDATE group_invite SET status = 'bogus' WHERE id = 'inv1'", []);
-        assert!(result.is_err(), "CHECK constraint should reject invalid status");
+        assert_eq!(count, 0, "both invite rows should be gone after accept/decline");
     }
 
     // ── Join requests ────────────────────────────────────────────────────────

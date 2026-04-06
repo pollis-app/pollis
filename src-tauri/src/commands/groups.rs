@@ -942,15 +942,15 @@ pub async fn request_group_access(
 
     let id = Ulid::new().to_string();
     // Upsert: new insert, or reset a prior rejected/approved row back to pending.
+    // reviewed_by and reviewed_at are intentionally preserved so the history of
+    // who reviewed the previous request is available for future UI use.
     conn.execute(
         "INSERT INTO group_join_request (id, group_id, requester_id, status, created_at)
          VALUES (?1, ?2, ?3, 'pending', datetime('now'))
          ON CONFLICT(group_id, requester_id) DO UPDATE SET
-             id          = excluded.id,
-             status      = 'pending',
-             reviewed_by = NULL,
-             reviewed_at = NULL,
-             created_at  = excluded.created_at",
+             id         = excluded.id,
+             status     = 'pending',
+             created_at = excluded.created_at",
         libsql::params![id, group_id, requester_id],
     ).await.map_err(|e| db_err(e.into(), "Join request"))?;
 

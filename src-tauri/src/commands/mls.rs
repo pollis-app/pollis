@@ -810,27 +810,6 @@ pub async fn process_pending_commits(
         }
     }
 
-    // Prune old MLS housekeeping rows now that we've applied what we need.
-    // 30-day window for the commit log — members offline longer than that
-    // will need to be re-invited, which is acceptable.
-    // 7-day window for claimed key packages and delivered welcomes — these
-    // are consumed on use and serve no purpose once the handshake is done.
-    let _ = conn.execute(
-        "DELETE FROM mls_commit_log \
-         WHERE conversation_id = ?1 AND created_at < datetime('now', '-30 days')",
-        libsql::params![mls_group_id],
-    ).await;
-    let _ = conn.execute(
-        "DELETE FROM mls_key_package \
-         WHERE claimed = 1 AND created_at < datetime('now', '-7 days')",
-        libsql::params![],
-    ).await;
-    let _ = conn.execute(
-        "DELETE FROM mls_welcome \
-         WHERE delivered = 1 AND created_at < datetime('now', '-7 days')",
-        libsql::params![],
-    ).await;
-
     Ok(())
 }
 
