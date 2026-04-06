@@ -14,12 +14,12 @@ Messages are encrypted on your device using MLS (Messaging Layer Security) befor
 - **Remote DB**: Turso (libSQL) — direct from the app, no middleman
 - **Local DB**: SQLite via SQLCipher (encrypted at rest)
 - **Auth**: Email OTP, session stored in the OS keystore
-- **Real-time**: LiveKit (WebRTC data channels for message delivery)
+- **Real-time**: LiveKit (WebRTC for voice and video calls)
 - **File storage**: Cloudflare R2
 
 ## Security model
 
-The server only ever sees encrypted blobs. Turso stores group metadata, public keys, and ciphertext — never message content or private keys. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
+Message content and file attachments are encrypted on your device before they ever leave it. The server stores ciphertext it can never read — your messages and files are inaccessible to anyone operating the infrastructure. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
 
 Forward secrecy is provided by MLS's key schedule: each epoch advance rotates the group key material, and each message uses a unique derived key so compromising one doesn't expose past or future messages.
 
@@ -87,5 +87,4 @@ website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudfla
 
 ## What's coming
 
-- **macOS code signing and notarization** — so Gatekeeper stops complaining
 - **Broader platform availability** — currently open pre-alpha; working toward a stable public release
