@@ -14,7 +14,7 @@ Messages are encrypted on your device using MLS (Messaging Layer Security) befor
 - **Remote DB**: Turso (libSQL) — direct from the app, no middleman
 - **Local DB**: SQLite via SQLCipher (encrypted at rest)
 - **Auth**: Email OTP, session stored in the OS keystore
-- **Real-time**: LiveKit (WebRTC for voice and video calls)
+- **Real-time**: LiveKit (WebRTC for voice calls and real-time presence)
 - **File storage**: Cloudflare R2
 
 ## Security model
