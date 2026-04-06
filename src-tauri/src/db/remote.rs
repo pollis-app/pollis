@@ -37,13 +37,9 @@ pub async fn push_schema(url: &str, token: &str) -> Result<()> {
         DROP TABLE IF EXISTS group_invite;
         DROP TABLE IF EXISTS group_join_request;
         DROP TABLE IF EXISTS user_preferences;
-        DROP TABLE IF EXISTS x3dh_init;
-        DROP TABLE IF EXISTS sender_key_dist;
         DROP TABLE IF EXISTS dm_channel_member;
         DROP TABLE IF EXISTS dm_channel;
         DROP TABLE IF EXISTS message_envelope;
-        DROP TABLE IF EXISTS one_time_prekey;
-        DROP TABLE IF EXISTS signed_prekey;
         DROP TABLE IF EXISTS channels;
         DROP TABLE IF EXISTS group_member;
         DROP TABLE IF EXISTS groups;
@@ -100,8 +96,6 @@ mod tests {
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Test', 'u1')", []).expect("groups");
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []).expect("group_member");
         conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'general')", []).expect("channels");
-        conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 1, 'pk', 'sig')", []).expect("signed_prekey");
-        conn.execute("INSERT INTO one_time_prekey (user_id, key_id, public_key) VALUES ('u1', 1, 'pk')", []).expect("one_time_prekey");
         conn.execute("INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) VALUES ('e1', 'c1', 'u1', 'enc', '2024-01-01T00:00:00Z')", []).expect("message_envelope");
     }
 
@@ -189,41 +183,6 @@ mod tests {
         ).unwrap();
 
         assert_eq!(count, 3);
-    }
-
-    #[test]
-    fn signed_prekey_composite_primary_key() {
-        let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'u@x.com')", []).unwrap();
-        conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 1, 'pk1', 'sig1')", []).unwrap();
-        // Same user, different key_id — must succeed.
-        conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 2, 'pk2', 'sig2')", []).unwrap();
-        // Same (user_id, key_id) — must fail.
-        let result = conn.execute("INSERT INTO signed_prekey (user_id, key_id, public_key, signature) VALUES ('u1', 1, 'pk3', 'sig3')", []);
-        assert!(result.is_err(), "duplicate (user_id, key_id) should fail");
-    }
-
-    #[test]
-    fn one_time_prekey_used_flag() {
-        let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'u@x.com')", []).unwrap();
-
-        for id in 1..=5i64 {
-            conn.execute(
-                "INSERT INTO one_time_prekey (user_id, key_id, public_key) VALUES ('u1', ?1, 'pk')",
-                rusqlite::params![id],
-            ).unwrap();
-        }
-
-        conn.execute("UPDATE one_time_prekey SET used = 1 WHERE user_id = 'u1' AND key_id = 3", []).unwrap();
-
-        let unclaimed: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM one_time_prekey WHERE user_id = 'u1' AND used = 0",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-
-        assert_eq!(unclaimed, 4, "4 keys should remain unclaimed");
     }
 
     // ── Group roles ──────────────────────────────────────────────────────────

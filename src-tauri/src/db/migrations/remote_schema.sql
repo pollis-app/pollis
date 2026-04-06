@@ -39,23 +39,8 @@ CREATE TABLE channels (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE signed_prekey (
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    key_id INTEGER NOT NULL,
-    public_key TEXT NOT NULL,
-    signature TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, key_id)
-);
-
-CREATE TABLE one_time_prekey (
-    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    key_id INTEGER NOT NULL,
-    public_key TEXT NOT NULL,
-    used INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    PRIMARY KEY (user_id, key_id)
-);
+-- signed_prekey and one_time_prekey were Signal Protocol tables removed in
+-- migration 000009. Not present in live databases.
 
 CREATE TABLE message_envelope (
     id TEXT PRIMARY KEY,
@@ -85,47 +70,23 @@ CREATE TABLE dm_channel_member (
     PRIMARY KEY (dm_channel_id, user_id)
 );
 
--- Sender key distribution (Signal Protocol)
-CREATE TABLE sender_key_dist (
-    id TEXT PRIMARY KEY,
-    channel_id TEXT NOT NULL,
-    sender_id TEXT NOT NULL,
-    recipient_id TEXT NOT NULL,
-    encrypted_state TEXT NOT NULL,
-    ephemeral_key TEXT NOT NULL,
-    spk_id INTEGER NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(channel_id, sender_id, recipient_id)
-);
+-- sender_key_dist and x3dh_init were Signal Protocol tables removed in
+-- migration 000009. Not present in live databases.
 
-CREATE TABLE x3dh_init (
-    id TEXT PRIMARY KEY,
-    sender_id TEXT NOT NULL,
-    recipient_id TEXT NOT NULL,
-    ephemeral_key TEXT NOT NULL,
-    spk_id INTEGER NOT NULL,
-    used_opk_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
+CREATE INDEX idx_dm_member_user ON dm_channel_member(user_id);
 
-CREATE INDEX idx_dm_member_user     ON dm_channel_member(user_id);
-CREATE INDEX idx_sender_key_channel ON sender_key_dist(channel_id, sender_id);
-CREATE INDEX idx_sender_key_recip   ON sender_key_dist(recipient_id, channel_id);
-CREATE INDEX idx_x3dh_init_recip    ON x3dh_init(recipient_id, sender_id);
-
--- Group invites (a member invites an outside user to join)
+-- Group invites (a member invites an outside user to join).
+-- Rows are deleted on accept or decline — all rows in this table are implicitly pending.
 CREATE TABLE group_invite (
     id TEXT PRIMARY KEY,
     group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
     inviter_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     invitee_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'accepted', 'declined'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_invite_invitee ON group_invite(invitee_id, status);
-CREATE INDEX idx_invite_group   ON group_invite(group_id, status);
+CREATE INDEX idx_invite_invitee ON group_invite(invitee_id);
+CREATE INDEX idx_invite_group   ON group_invite(group_id);
 
 -- Join requests (a user requests to join a group)
 CREATE TABLE group_join_request (
@@ -139,8 +100,10 @@ CREATE TABLE group_join_request (
         CHECK (status IN ('pending', 'approved', 'rejected'))
 );
 
-CREATE INDEX idx_join_request_group     ON group_join_request(group_id, status);
-CREATE INDEX idx_join_request_requester ON group_join_request(requester_id, status);
+CREATE INDEX        idx_join_request_group     ON group_join_request(group_id, status);
+CREATE INDEX        idx_join_request_requester ON group_join_request(requester_id, status);
+-- One row per (group, requester) — re-applications upsert rather than insert new rows.
+CREATE UNIQUE INDEX idx_join_request_unique    ON group_join_request(group_id, requester_id);
 
 -- User preferences (stored as JSON: accent_color, font_size, etc.)
 CREATE TABLE user_preferences (

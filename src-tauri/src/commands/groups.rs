@@ -862,8 +862,9 @@ pub async fn accept_group_invite(
 
     add_member_to_group(&conn, &group_id, &user_id).await?;
 
+    // Delete the invite row — accepted invites don't need to be retained.
     conn.execute(
-        "UPDATE group_invite SET status = 'accepted' WHERE id = ?1",
+        "DELETE FROM group_invite WHERE id = ?1",
         libsql::params![invite_id],
     ).await?;
 
@@ -888,8 +889,9 @@ pub async fn decline_group_invite(
         return Err(Error::Other(anyhow::anyhow!("invite not found or already processed")));
     }
 
+    // Delete the invite row — declined invites don't need to be retained.
     conn.execute(
-        "UPDATE group_invite SET status = 'declined' WHERE id = ?1",
+        "DELETE FROM group_invite WHERE id = ?1",
         libsql::params![invite_id],
     ).await?;
 
@@ -923,18 +925,32 @@ pub async fn request_group_access(
         return Err(Error::Other(anyhow::anyhow!("you are already a member of this group")));
     }
 
-    // Check not already a pending request
+    // Block duplicate pending requests, but allow re-application after rejection.
+    // If a pending request already exists, error. If a prior rejected/approved row
+    // exists, the upsert below will reset it to pending — giving admins a clean
+    // slate to review while preserving the row-per-pair constraint.
     let mut existing = conn.query(
-        "SELECT 1 FROM group_join_request WHERE group_id = ?1 AND requester_id = ?2 AND status = 'pending'",
+        "SELECT status FROM group_join_request WHERE group_id = ?1 AND requester_id = ?2",
         libsql::params![group_id.clone(), requester_id.clone()],
     ).await?;
-    if existing.next().await?.is_some() {
-        return Err(Error::Other(anyhow::anyhow!("you already have a pending request for this group")));
+    if let Some(row) = existing.next().await? {
+        let status: String = row.get(0)?;
+        if status == "pending" {
+            return Err(Error::Other(anyhow::anyhow!("you already have a pending request for this group")));
+        }
     }
 
     let id = Ulid::new().to_string();
+    // Upsert: new insert, or reset a prior rejected/approved row back to pending.
     conn.execute(
-        "INSERT INTO group_join_request (id, group_id, requester_id) VALUES (?1, ?2, ?3)",
+        "INSERT INTO group_join_request (id, group_id, requester_id, status, created_at)
+         VALUES (?1, ?2, ?3, 'pending', datetime('now'))
+         ON CONFLICT(group_id, requester_id) DO UPDATE SET
+             id          = excluded.id,
+             status      = 'pending',
+             reviewed_by = NULL,
+             reviewed_at = NULL,
+             created_at  = excluded.created_at",
         libsql::params![id, group_id, requester_id],
     ).await.map_err(|e| db_err(e.into(), "Join request"))?;
 
