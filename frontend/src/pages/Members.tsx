@@ -202,10 +202,7 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
             </span>
 
             {/* Member name */}
-            <span
-              className="truncate"
-              style={{ color: "var(--c-text)", maxWidth: "12rem" }}
-            >
+            <span className="flex-1 truncate" style={{ color: "var(--c-text)" }}>
               {member.username ?? member.user_id}
               {isSelf && (
                 <span className="ml-2" style={{ color: "var(--c-text-muted)" }}>
@@ -223,7 +220,7 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
 
             {/* Admin toggle + kick — only for other members when current user is admin */}
             {showControls && (
-              <div className="flex items-center gap-4">
+              <div className="flex items-center gap-8">
                 <Switch
                   id={`member-admin-toggle-${member.user_id}`}
                   label="admin"
