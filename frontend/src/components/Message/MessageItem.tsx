@@ -1,11 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
-import {
-  Reply, Download, Film, File as FileIcon, Music, Check,
-  FileText, FileCode, Archive, Terminal, Database, BookOpen,
-  Package, Table, Cpu,
-} from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import { Reply, Download, Film, Music, Check } from "lucide-react";
+import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
@@ -157,9 +153,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         </button>
       </div>
 
-      {/* Attachments — row layout, media sorted first */}
+      {/* Attachments — each on its own row */}
       {sortedAttachments && (
-        <div className="mt-1 flex flex-row flex-wrap gap-2" style={{ alignItems: "flex-start" }}>
+        <div className="mt-1 flex flex-col gap-2">
           {sortedAttachments.map((a) => (
             <AttachmentDisplay key={a.id} attachment={a} />
           ))}
@@ -171,95 +167,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     </div>
   );
 };
-
-function getFileIcon(filename: string): LucideIcon {
-  const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-  switch (ext) {
-    case "md":
-    case "mdx":
-      return BookOpen;
-    case "js":
-    case "ts":
-    case "jsx":
-    case "tsx":
-    case "py":
-    case "rs":
-    case "go":
-    case "java":
-    case "cpp":
-    case "c":
-    case "h":
-    case "rb":
-    case "php":
-    case "swift":
-    case "kt":
-    case "css":
-    case "html":
-    case "xml":
-    case "yaml":
-    case "yml":
-    case "toml":
-    case "ini":
-    case "conf":
-    case "json":
-    case "jsonc":
-      return FileCode;
-    case "doc":
-    case "docx":
-    case "txt":
-    case "rtf":
-    case "odt":
-    case "pdf":
-    case "ppt":
-    case "pptx":
-    case "key":
-    case "odp":
-      return FileText;
-    case "zip":
-    case "tar":
-    case "gz":
-    case "rar":
-    case "7z":
-    case "bz2":
-    case "xz":
-      return Archive;
-    case "sh":
-    case "bash":
-    case "zsh":
-    case "fish":
-    case "bat":
-    case "cmd":
-    case "ps1":
-      return Terminal;
-    case "exe":
-    case "dmg":
-    case "pkg":
-    case "deb":
-    case "rpm":
-    case "msi":
-    case "appimage":
-      return Package;
-    case "sql":
-    case "db":
-    case "sqlite":
-    case "sqlite3":
-      return Database;
-    case "csv":
-    case "tsv":
-    case "xls":
-    case "xlsx":
-    case "ods":
-      return Table;
-    case "wasm":
-    case "bin":
-    case "elf":
-    case "so":
-    case "dll":
-      return Cpu;
-    default:
-      return FileIcon;
-  }
-}
 
 // Co-located: only used by AttachmentDisplay.
 const BlurhashCanvas: React.FC<{ hash: string; width: number; height: number }> = ({
