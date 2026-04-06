@@ -6,7 +6,7 @@ A desktop messaging app with end-to-end encryption. Think Slack, but nobody — 
 
 ## How it works
 
-Messages are encrypted on your device using the Signal protocol before they ever leave your machine. The backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the Tauri app is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
+Messages are encrypted on your device using MLS (Messaging Layer Security) before they ever leave your machine. The backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the Tauri app is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
 
 **Stack**
 - **Desktop**: Tauri 2 (Rust + React/TypeScript)
@@ -21,7 +21,7 @@ Messages are encrypted on your device using the Signal protocol before they ever
 
 The server only ever sees encrypted blobs. Turso stores group metadata, public keys, and ciphertext — never message content or private keys. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
 
-Forward secrecy is provided by the Double Ratchet: each message uses a unique derived key, so compromising one doesn't expose past messages.
+Forward secrecy is provided by MLS's key schedule: each epoch advance rotates the group key material, and each message uses a unique derived key so compromising one doesn't expose past or future messages.
 
 ## Releases
 
@@ -80,7 +80,7 @@ pnpm build:windows    # amd64 NSIS installer
 ## Project layout
 
 ```
-src-tauri/   # Rust backend — Tauri commands, DB, Signal protocol, auth
+src-tauri/   # Rust backend — Tauri commands, DB, MLS encryption, auth
 frontend/    # React app — Vite, TypeScript, TailwindCSS
 website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
 ```
