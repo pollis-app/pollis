@@ -77,6 +77,8 @@ pub async fn request_otp(
 
     // In development, DEV_OTP overrides the random code and skips the email send.
     // Set DEV_OTP=000000 in .env.development to use a fixed code during local iteration.
+    // Compiled out entirely in release builds so the env var has no effect in production.
+    #[cfg(debug_assertions)]
     if let Ok(dev_otp) = std::env::var("DEV_OTP") {
         let mut dev_hasher = Sha256::new();
         dev_hasher.update(dev_otp.trim().as_bytes());
