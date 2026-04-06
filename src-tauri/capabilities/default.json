@@ -26,6 +26,7 @@
     "os:default",
     "process:allow-exit",
     "process:allow-restart",
-    "updater:default"
+    "updater:default",
+    "clipboard-manager:allow-read-text"
   ]
 }

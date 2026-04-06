@@ -37,6 +37,29 @@ fn show_on_reopen(app: &tauri::AppHandle) {
     }
 }
 
+/// Read the OS clipboard and return any file:// paths found in it.
+/// Uses the clipboard-manager plugin which bypasses WebKit's clipboard
+/// restrictions, letting us see text/uri-list data that file managers
+/// (Nautilus, Finder, Explorer) put on the clipboard when files are copied.
+#[tauri::command]
+fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    let text = match app.clipboard().read_text() {
+        Ok(t) => t,
+        Err(_) => return vec![],
+    };
+    text.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .filter_map(|line| {
+            let url = url::Url::parse(line).ok()?;
+            if url.scheme() != "file" { return None; }
+            let path = url.to_file_path().ok()?;
+            Some(path.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
 /// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)
 /// or close it on Windows/Linux.
 #[tauri::command]
@@ -76,6 +99,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
             // Load .env.development in dev builds (no-op if file doesn't exist)
             #[cfg(debug_assertions)]
@@ -110,6 +134,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             hide_window,
+            read_clipboard_files,
             commands::auth::initialize_identity,
             commands::auth::get_identity,
             commands::auth::request_otp,

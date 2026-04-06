@@ -1,8 +1,10 @@
 import React, { useState, useRef, useCallback, useEffect, useImperativeHandle } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { writeFile, readFile } from "@tauri-apps/plugin-fs";
+import { writeFile, readFile, stat } from "@tauri-apps/plugin-fs";
 import { tempDir } from "@tauri-apps/api/path";
-import { ChevronRight, Plus, X, File as FileIcon, Film, Music } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
+import { getFileIcon } from "../../utils/fileIcon";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
 // no bytes-over-IPC bottleneck, no size limit.
@@ -158,9 +160,10 @@ const AttachmentPreview: React.FC<{
           <Film size={28} style={{ color: "var(--c-text-dim)" }} />
         ) : attachment.type === "audio" ? (
           <Music size={28} style={{ color: "var(--c-text-dim)" }} />
-        ) : (
-          <FileIcon size={28} style={{ color: "var(--c-text-dim)" }} />
-        )}
+        ) : (() => {
+          const Icon = getFileIcon(attachment.name);
+          return <Icon size={28} style={{ color: "var(--c-text-dim)" }} />;
+        })()}
       </div>
       <div
         className="mt-0.5 text-xs font-mono truncate"
@@ -220,8 +223,26 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
 
   // ── Shared path-based attachment builder (picker + OS drag-drop) ─────────
   const handlePaths = useCallback(async (paths: string[]) => {
+    // De-dupe against already-queued paths.
+    const existingPaths = new Set(attachments.map((a) => a.path).filter(Boolean));
+    const newPaths = paths.filter((p) => !existingPaths.has(p));
     const remaining = maxAttachments - attachments.length;
-    const toProcess = paths.slice(0, remaining);
+    const candidates = newPaths.slice(0, remaining);
+    if (candidates.length === 0) { return; }
+
+    // Filter out directories before adding stubs.
+    const checks = await Promise.all(
+      candidates.map(async (p) => {
+        try {
+          const info = await stat(p);
+          return info.isDirectory ? null : p;
+        } catch {
+          // stat failed — let it through and fail gracefully later
+          return p;
+        }
+      })
+    );
+    const toProcess = checks.filter((p): p is string => p !== null);
     if (toProcess.length === 0) { return; }
 
     // Add stubs immediately so the user sees cards right away.
@@ -281,7 +302,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           );
         }),
     ]);
-  }, [attachments.length, maxAttachments]);
+  }, [attachments, maxAttachments]);
 
   // ── File picker via Tauri dialog ──────────────────────────────────────────
   const handlePickFiles = useCallback(async () => {
@@ -298,6 +319,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   // ── Paste (File objects, written to temp first) ───────────────────────────
   const handleBrowserFile = useCallback(async (file: File) => {
     if (attachments.length >= maxAttachments) { return; }
+    // De-dupe by name+size — pasted files have no stable path.
+    if (attachments.some((a) => a.name === file.name && a.size === file.size)) { return; }
 
     const id = `${Date.now()}-${Math.random()}`;
     const mime = file.type || mimeFromName(file.name);
@@ -347,7 +370,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
         ? { ...a, path, preview: preview ?? videoPoster, loading: false }
         : a)
     );
-  }, [attachments.length, maxAttachments]);
+  }, [attachments, maxAttachments]);
 
   useImperativeHandle(ref, () => ({
     addFiles: (files: File[]) => { files.forEach(handleBrowserFile); },
@@ -393,16 +416,30 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   };
 
   const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    // Screenshots and images copied from web content come through as
+    // DataTransferItem files — handle these synchronously.
     const items = e.clipboardData.items;
     let hasFiles = false;
     for (let i = 0; i < items.length; i++) {
-      if (items[i].type.startsWith("image/")) {
+      if (items[i].kind === "file") {
         const file = items[i].getAsFile();
         if (file) { handleBrowserFile(file); hasFiles = true; }
       }
     }
-    if (hasFiles) { e.preventDefault(); }
-  }, [handleBrowserFile]);
+    if (hasFiles) {
+      e.preventDefault();
+      return;
+    }
+
+    // For files copied from the OS file manager, WebKit doesn't expose the
+    // clipboard data — invoke Rust to read it directly via the OS clipboard API.
+    // We don't prevent default here so normal text paste still works alongside.
+    invoke<string[]>("read_clipboard_files").then((paths) => {
+      if (paths.length > 0) {
+        handlePaths(paths);
+      }
+    }).catch(() => { /* clipboard unreadable */ });
+  }, [handleBrowserFile, handlePaths]);
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((prev) => {
