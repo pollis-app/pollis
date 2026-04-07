@@ -64,9 +64,52 @@ install_macos() {
     success "$APP_NAME installed to /Applications/$APP_NAME.app"
 }
 
-install_linux() {
-    local appimage_url appimage_dir appimage_path launcher_path desktop_dir desktop_file
-    appimage_url=$(json_field "$LATEST" "linux")
+# ── Linux: prefer .deb / .rpm, fall back to AppImage ────────────────────────
+
+install_linux_deb() {
+    local deb_url="$1"
+    local tmpdir deb_path
+    tmpdir=$(mktemp -d)
+    deb_path="$tmpdir/pollis.deb"
+
+    info "Downloading $APP_NAME $VERSION (.deb)..."
+    curl -fsSL --progress-bar "$deb_url" -o "$deb_path"
+
+    info "Installing .deb package..."
+    if sudo dpkg -i "$deb_path"; then
+        true
+    else
+        info "Resolving dependencies..."
+        sudo apt-get install -f -y
+    fi
+
+    rm -rf "$tmpdir"
+    success "$APP_NAME installed via .deb — run 'pollis' to launch."
+}
+
+install_linux_rpm() {
+    local rpm_url="$1"
+    local tmpdir rpm_path
+    tmpdir=$(mktemp -d)
+    rpm_path="$tmpdir/pollis.rpm"
+
+    info "Downloading $APP_NAME $VERSION (.rpm)..."
+    curl -fsSL --progress-bar "$rpm_url" -o "$rpm_path"
+
+    info "Installing .rpm package..."
+    if command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y "$rpm_path"
+    else
+        sudo yum install -y "$rpm_path"
+    fi
+
+    rm -rf "$tmpdir"
+    success "$APP_NAME installed via .rpm — run 'pollis' to launch."
+}
+
+install_linux_appimage() {
+    local appimage_url="$1"
+    local appimage_dir appimage_path launcher_path desktop_dir desktop_file
     appimage_dir="$HOME/.local/share/pollis"
     appimage_path="$appimage_dir/pollis.AppImage"
     launcher_path="$HOME/.local/bin/pollis"
@@ -75,16 +118,15 @@ install_linux() {
 
     mkdir -p "$appimage_dir" "$HOME/.local/bin" "$desktop_dir"
 
-    info "Downloading $APP_NAME $VERSION..."
+    info "Downloading $APP_NAME $VERSION (AppImage)..."
     curl -fsSL --progress-bar "$appimage_url" -o "$appimage_path"
     chmod +x "$appimage_path"
 
-    # Create a launcher wrapper that sets WEBKIT_DISABLE_DMABUF_RENDERER=1.
-    # This prevents WebKitGTK from trying to create an EGL context for the
-    # transparent window, which aborts on systems without full EGL support.
+    # Create a launcher wrapper that sets WebKit env vars to prevent
+    # EGL/compositing crashes on systems without full GPU support.
     cat > "$launcher_path" <<LAUNCHER
 #!/usr/bin/env bash
-exec env WEBKIT_DISABLE_DMABUF_RENDERER=1 "$appimage_path" "\$@"
+exec env WEBKIT_DISABLE_DMABUF_RENDERER=1 WEBKIT_DISABLE_COMPOSITING_MODE=1 "$appimage_path" "\$@"
 LAUNCHER
     chmod +x "$launcher_path"
 
@@ -109,6 +151,25 @@ EOF
         echo "  Then run: pollis"
     else
         success "Run 'pollis' to launch."
+    fi
+}
+
+install_linux() {
+    local deb_url rpm_url appimage_url
+    deb_url=$(json_field "$LATEST" "linux_deb")
+    rpm_url=$(json_field "$LATEST" "linux_rpm")
+    appimage_url=$(json_field "$LATEST" "linux")
+
+    # Prefer native packages: .deb for Debian/Ubuntu, .rpm for Fedora/RHEL
+    if [[ -n "$deb_url" ]] && command -v dpkg >/dev/null 2>&1; then
+        install_linux_deb "$deb_url"
+    elif [[ -n "$rpm_url" ]] && (command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1); then
+        install_linux_rpm "$rpm_url"
+    elif [[ -n "$appimage_url" ]]; then
+        info "No supported package manager detected — falling back to AppImage."
+        install_linux_appimage "$appimage_url"
+    else
+        error "No Linux download URL found in latest.json."
     fi
 }
 

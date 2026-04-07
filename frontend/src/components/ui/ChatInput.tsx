@@ -47,7 +47,7 @@ function mimeFromName(name: string): string {
     jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
     gif: "image/gif", webp: "image/webp", svg: "image/svg+xml",
     mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
-    mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg",
+    mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4",
     pdf: "application/pdf", zip: "application/zip",
   };
   return map[ext] ?? "application/octet-stream";

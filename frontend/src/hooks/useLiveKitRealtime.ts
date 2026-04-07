@@ -1,7 +1,9 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { sendNotification, isPermissionGranted, requestPermission } from '@tauri-apps/plugin-notification';
+// Note: we invoke the Rust-side notification plugin directly instead of using
+// the JS wrapper, because the wrapper's sendNotification/requestPermission use
+// `window.Notification` which WKWebView on macOS doesn't properly support.
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
@@ -114,9 +116,14 @@ export function useLiveKitRealtime() {
 
   const isWindowFocusedRef = useRef<boolean>(true);
 
-  const allowNotificationsRef = useRef<boolean>(true);
+  const allowNotificationsRef = useRef<boolean>(prefsQuery.data?.allow_desktop_notifications ?? false);
 
   const notificationPermissionRef = useRef<boolean>(false);
+
+  // Keep the notification preference ref in sync with the saved preference.
+  useEffect(() => {
+    allowNotificationsRef.current = prefsQuery.data?.allow_desktop_notifications ?? false;
+  }, [prefsQuery.data?.allow_desktop_notifications]);
 
   // queryClient and incrementUnread change reference on every render but are
   // stable in practice; keep refs so the handler doesn't need to be recreated.
@@ -157,23 +164,31 @@ export function useLiveKitRealtime() {
     };
   }, [isTauriReady]);
 
-  // ── Notification permission cached on startup ─────────────────────────────
-  // Checked once so the channel handler stays synchronous.
+  // ── Notification permission ────────────────────────────────────────────────
+  // Re-checks whenever the user's notification preference changes so that
+  // toggling "on" in Preferences → granting the OS prompt → immediately
+  // updates the ref used by the channel handler.
 
   useEffect(() => {
     if (!isTauriReady) {
       return;
     }
-    const setup = async () => {
-      let granted = await isPermissionGranted();
-      if (!granted) {
-        const result = await requestPermission();
-        granted = result === 'granted';
+    const check = async () => {
+      // Returns true/false/null (null = prompt needed)
+      const result: boolean | null = await invoke('plugin:notification|is_permission_granted');
+      if (result === true) {
+        notificationPermissionRef.current = true;
+        return;
       }
-      notificationPermissionRef.current = granted;
+      if (allowNotificationsRef.current) {
+        const state: string = await invoke('plugin:notification|request_permission');
+        notificationPermissionRef.current = state === 'granted';
+      } else {
+        notificationPermissionRef.current = false;
+      }
     };
-    setup().catch((err) => { console.error('[realtime] notification permission setup failed:', err); });
-  }, [isTauriReady]);
+    check().catch((err) => { console.error('[realtime] notification permission check failed:', err); });
+  }, [isTauriReady, prefsQuery.data?.allow_desktop_notifications]);
 
   // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
   // Recreated if the user identity changes (e.g. logout → login as someone else).
@@ -264,15 +279,13 @@ export function useLiveKitRealtime() {
           ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
           : 'New message';
         const body = `${senderUsername}: New message`;
+        // Use the Rust-side notification plugin directly via invoke.
+        // The JS wrapper's sendNotification() uses `new window.Notification()`
+        // which WKWebView on macOS doesn't support.
         try {
-          sendNotification({ title, body });
+          invoke('plugin:notification|notify', { options: { title, body } }).catch(() => {});
         } catch {
-          // Tauri notification failed — try Web Notification as fallback
-          try {
-            new Notification(title, { body });
-          } catch {
-            // ignore
-          }
+          // ignore
         }
       }
     };

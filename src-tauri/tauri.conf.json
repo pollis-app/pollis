@@ -52,7 +52,18 @@
     },
     "linux": {
       "deb": {
-        "depends": []
+        "depends": [
+          "libasound2",
+          "libpulse0",
+          "libdbus-1-3"
+        ]
+      },
+      "rpm": {
+        "depends": [
+          "libasound.so.2()(64bit)",
+          "libpulse.so.0()(64bit)",
+          "libdbus-1.so.3()(64bit)"
+        ]
       }
     },
     "createUpdaterArtifacts": true

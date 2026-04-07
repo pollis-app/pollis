@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
-import { Reply, Download, Film, Music, Check } from "lucide-react";
+import { Reply, Download, Film, Check } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
+import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
+import { AudioPlayer } from "../ui/AudioPlayer";
 // import { MessageReactions } from "./MessageReactions";
 import type { Message, MessageAttachment } from "../../types";
 
@@ -637,35 +639,71 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   // ── Audio card ─────────────────────────────────────────────────────────────
   if (isAudio) {
     return (
-      <div
-        data-testid={`attachment-${attachment.id}`}
-        style={{
-          border: "2px solid var(--c-border)",
-          background: "var(--c-surface-high)",
-          borderRadius: 8,
-          overflow: "hidden",
-          width: "100%",
-          maxWidth: 600,
-        }}
-      >
-        <div className="flex items-center gap-2 px-3 py-2">
-          <Music size={16} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
+      <>
+        <div
+          data-testid={`attachment-${attachment.id}`}
+          style={{
+            borderRadius: 8,
+            overflow: "hidden",
+            width: "100%",
+            maxWidth: 600,
+          }}
+        >
           {downloadUrl ? (
-            <audio
-              controls
+            <InlineAudioPlayer
               src={downloadUrl}
-              style={{ flex: 1, minWidth: 0, height: 32 }}
+              title={attachment.filename}
+              onClick={() => setViewerOpen(true)}
             />
           ) : (
-            <div className="flex-1 flex items-center">
+            <div
+              className="flex items-center gap-2 px-3 py-2"
+              style={{
+                border: "1px solid var(--c-border)",
+                background: "var(--c-surface-high)",
+                borderRadius: 8,
+              }}
+            >
               <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
                 {isLoading ? "loading…" : error ? error : "…"}
               </span>
             </div>
           )}
+          {renderCaptionBar()}
         </div>
-        {renderCaptionBar()}
-      </div>
+
+        {/* Audio lightbox — full player */}
+        {viewerOpen && downloadUrl && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "column",
+              background: "rgba(0,0,0,0.85)",
+              cursor: "pointer",
+            }}
+            onClick={() => setViewerOpen(false)}
+          >
+            <div
+              style={{ width: "90vw", maxWidth: 500 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <AudioPlayer
+                src={downloadUrl}
+                title={attachment.filename}
+                autoPlay
+              />
+            </div>
+            <div onClick={(e) => e.stopPropagation()}>
+              {renderLightboxBar()}
+            </div>
+          </div>
+        )}
+      </>
     );
   }
 
