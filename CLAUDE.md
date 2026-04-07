@@ -151,6 +151,7 @@ website/                # Next.js marketing site (Vercel)
 - **`remote_schema.sql` is frozen** — do not modify it. All schema changes go in numbered migration files in `src-tauri/src/db/migrations/` (e.g. `000002_my_change.sql`) and are run by hand against Turso. Every migration file must end with an `INSERT INTO schema_migrations (version, description) VALUES (N, '...');` row matching its number
 - **Prefer editing existing files** over creating new ones
 - **Always use `pnpm`** not `npm`
+- **Never add Claude as a co-author on commits** — do not include `Co-Authored-By:` trailers or any Claude attribution in commit messages
 - **Never remove `data-testid` attributes** from JSX/HTML — they are used by Playwright E2E tests (`pnpm test:e2e`)
 - **Never reinvent UI components** — always use existing components from `frontend/src/components/ui/`. Toggles/switches use `Switch`, buttons use `Button`, text inputs use `TextInput`, etc. Do not build custom styled `<button>` or `<input>` elements when a ui/ component already exists.
 
