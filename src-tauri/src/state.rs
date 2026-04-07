@@ -52,6 +52,30 @@ impl AppState {
             }
         };
         let db = LocalDb::open_for_user(user_id, &db_key)?;
+
+        // If mls_kv is empty the local DB was freshly created or wiped (e.g. a
+        // schema-version bump deleted and recreated the file).  Reset welcome
+        // delivery markers so poll_mls_welcomes (called from initialize_identity)
+        // will re-process them and restore all MLS group memberships.
+        let mls_empty: bool = db.conn()
+            .query_row("SELECT COUNT(*) FROM mls_kv", [], |r| r.get::<_, i64>(0))
+            .map(|c| c == 0)
+            .unwrap_or(true);
+
+        if mls_empty {
+            match self.remote_db.conn().await {
+                Ok(conn) => {
+                    let _ = conn.execute(
+                        "UPDATE mls_welcome SET delivered = 0 WHERE recipient_id = ?1",
+                        libsql::params![user_id],
+                    ).await;
+                }
+                Err(e) => {
+                    eprintln!("[state] load_user_db: failed to reset mls_welcome (non-fatal): {e}");
+                }
+            }
+        }
+
         *self.local_db.lock().await = Some(db);
         Ok(())
     }

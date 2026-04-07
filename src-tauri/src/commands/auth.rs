@@ -36,6 +36,15 @@ pub async fn initialize_identity(
         Err(e) => eprintln!("[identity] MLS key package error (non-fatal): {e}"),
     }
 
+    // Re-process any pending MLS Welcome messages. This is a no-op when the
+    // local MLS state is intact, but recovers group membership after the local
+    // DB is wiped (e.g. schema version bump) because load_user_db resets
+    // delivered = 0 for this user's welcomes in that case.
+    match crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &user_id).await {
+        Ok(()) => {}
+        Err(e) => eprintln!("[identity] poll_mls_welcomes (non-fatal): {e}"),
+    }
+
     Ok(IdentityInfo { user_id, public_key: String::new(), is_new: false })
 }
 
