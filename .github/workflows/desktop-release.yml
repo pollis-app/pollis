@@ -387,9 +387,9 @@ jobs:
           sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" PKGBUILD
 
           # Regenerate .SRCINFO from the updated PKGBUILD
-          # Only chown PKGBUILD (not .git/) so git operations still work after docker
+          # chown everything except .git/ so makepkg can write but git still works after
           docker run --rm -v "$PWD:/pkg" archlinux:base-devel bash -c \
-            "chown nobody:nobody /pkg/PKGBUILD && cd /pkg && sudo -u nobody makepkg --printsrcinfo > .SRCINFO"
+            "find /pkg -maxdepth 1 -not -name .git -not -path /pkg -exec chown nobody:nobody {} + && cd /pkg && sudo -u nobody makepkg --printsrcinfo > .SRCINFO"
 
           # Commit and push if there are changes
           git config user.name "Pollis Bot"
