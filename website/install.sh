@@ -65,31 +65,41 @@ install_macos() {
 }
 
 install_linux() {
-    local appimage_url install_dir install_path desktop_dir desktop_file
+    local appimage_url appimage_dir appimage_path launcher_path desktop_dir desktop_file
     appimage_url=$(json_field "$LATEST" "linux")
-    install_dir="$HOME/.local/bin"
-    install_path="$install_dir/pollis"
+    appimage_dir="$HOME/.local/share/pollis"
+    appimage_path="$appimage_dir/pollis.AppImage"
+    launcher_path="$HOME/.local/bin/pollis"
     desktop_dir="$HOME/.local/share/applications"
     desktop_file="$desktop_dir/pollis.desktop"
 
-    mkdir -p "$install_dir" "$desktop_dir"
+    mkdir -p "$appimage_dir" "$HOME/.local/bin" "$desktop_dir"
 
     info "Downloading $APP_NAME $VERSION..."
-    curl -fsSL --progress-bar "$appimage_url" -o "$install_path"
-    chmod +x "$install_path"
+    curl -fsSL --progress-bar "$appimage_url" -o "$appimage_path"
+    chmod +x "$appimage_path"
+
+    # Create a launcher wrapper that sets WEBKIT_DISABLE_DMABUF_RENDERER=1.
+    # This prevents WebKitGTK from trying to create an EGL context for the
+    # transparent window, which aborts on systems without full EGL support.
+    cat > "$launcher_path" <<LAUNCHER
+#!/usr/bin/env bash
+exec env WEBKIT_DISABLE_DMABUF_RENDERER=1 "$appimage_path" "\$@"
+LAUNCHER
+    chmod +x "$launcher_path"
 
     # Write a .desktop entry so the app appears in application launchers
     cat > "$desktop_file" <<EOF
 [Desktop Entry]
 Name=Pollis
-Exec=$install_path
+Exec=$launcher_path
 Icon=pollis
 Type=Application
 Categories=Network;InstantMessaging;Chat;
 StartupNotify=true
 EOF
 
-    success "$APP_NAME installed to $install_path"
+    success "$APP_NAME installed to $launcher_path"
 
     if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
         echo ""
