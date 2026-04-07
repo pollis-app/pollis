@@ -343,11 +343,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/pollis-macos/*.dmg
-            artifacts/pollis-windows/*.exe
-            artifacts/pollis-linux/*.AppImage
-            artifacts/pollis-linux/*.deb
-            artifacts/pollis-linux/*.rpm
+            artifacts/pollis-macos/**/*.dmg
+            artifacts/pollis-windows/**/*.exe
+            artifacts/pollis-linux/**/*.AppImage
+            artifacts/pollis-linux/**/*.deb
+            artifacts/pollis-linux/**/*.rpm
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -387,8 +387,9 @@ jobs:
           sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" PKGBUILD
 
           # Regenerate .SRCINFO from the updated PKGBUILD
+          # Only chown PKGBUILD (not .git/) so git operations still work after docker
           docker run --rm -v "$PWD:/pkg" archlinux:base-devel bash -c \
-            "chown -R nobody:nobody /pkg && cd /pkg && sudo -u nobody makepkg --printsrcinfo > .SRCINFO"
+            "chown nobody:nobody /pkg/PKGBUILD && cd /pkg && sudo -u nobody makepkg --printsrcinfo > .SRCINFO"
 
           # Commit and push if there are changes
           git config user.name "Pollis Bot"
