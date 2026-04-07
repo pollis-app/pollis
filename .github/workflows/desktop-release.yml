@@ -177,7 +177,8 @@ jobs:
             libssl-dev \
             libasound2-dev \
             libpulse-dev \
-            libdbus-1-dev
+            libdbus-1-dev \
+            rpm
 
       - name: Load production secrets
         run: |
@@ -211,6 +212,8 @@ jobs:
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.tar.gz
             src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.sig
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+            src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/rpm/*.rpm
 
   release:
     needs: [build-macos, build-windows, build-linux]
@@ -257,6 +260,8 @@ jobs:
           aws s3 cp $(find artifacts/pollis-macos -name "*.dmg" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
           aws s3 cp $(find artifacts/pollis-windows -name "*.exe" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
           aws s3 cp $(find artifacts/pollis-linux -name "*.AppImage" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
+          aws s3 cp $(find artifacts/pollis-linux -name "*.deb" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.deb" --endpoint-url "${ENDPOINT}"
+          aws s3 cp $(find artifacts/pollis-linux -name "*.rpm" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.rpm" --endpoint-url "${ENDPOINT}"
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
@@ -327,7 +332,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          echo "{\"version\":\"${VERSION}\",\"macos\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-macos.dmg\",\"windows\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-windows.exe\",\"linux\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.AppImage\"}" > latest.json
+          echo "{\"version\":\"${VERSION}\",\"macos\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-macos.dmg\",\"windows\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-windows.exe\",\"linux\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.AppImage\",\"linux_deb\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.deb\",\"linux_rpm\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.rpm\"}" > latest.json
           aws s3 cp latest.json "s3://pollis/releases/latest.json" --endpoint-url "${ENDPOINT}" --content-type "application/json" --cache-control "no-cache"
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
@@ -341,6 +346,57 @@ jobs:
             artifacts/pollis-macos/*.dmg
             artifacts/pollis-windows/*.exe
             artifacts/pollis-linux/*.AppImage
+            artifacts/pollis-linux/*.deb
+            artifacts/pollis-linux/*.rpm
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      # Publish stable releases to the AUR (skip prereleases like v1.0.43-beta.1)
+      - name: Publish to AUR
+        if: "!contains(github.ref_name, '-')"
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITHUB_REF_NAME#v}"
+
+          # Compute sha256 of the .deb artifact built earlier
+          DEB_PATH=$(find artifacts/pollis-linux -name "*.deb" | head -1)
+          SHA256=$(sha256sum "$DEB_PATH" | awk '{print $1}')
+
+          # Configure SSH for AUR access
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<'SSHEOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          SSHEOF
+
+          # Clone the AUR repo
+          git clone ssh://aur@aur.archlinux.org/pollis.git aur-pollis
+          cd aur-pollis
+
+          # Update PKGBUILD with new version and checksum
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" PKGBUILD
+
+          # Regenerate .SRCINFO from the updated PKGBUILD
+          docker run --rm -v "$PWD:/pkg" archlinux:base-devel bash -c \
+            "chown -R nobody:nobody /pkg && cd /pkg && sudo -u nobody makepkg --printsrcinfo > .SRCINFO"
+
+          # Commit and push if there are changes
+          git config user.name "Pollis Bot"
+          git config user.email "hello@pollis.com"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "No AUR changes to commit"
+          else
+            git commit -m "Update to v${VERSION}"
+            git push
+          fi

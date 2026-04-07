@@ -37,27 +37,72 @@ fn show_on_reopen(app: &tauri::AppHandle) {
     }
 }
 
-/// Read the OS clipboard and return any file:// paths found in it.
-/// Uses the clipboard-manager plugin which bypasses WebKit's clipboard
-/// restrictions, letting us see text/uri-list data that file managers
-/// (Nautilus, Finder, Explorer) put on the clipboard when files are copied.
+/// Read the OS clipboard and return any file paths found in it.
+///
+/// On macOS, Finder puts file references on the clipboard using
+/// `public.file-url` (NSPasteboard), not as plain text with file:// URIs.
+/// The clipboard-manager plugin's `read_text()` can't see those, so we
+/// shell out to `osascript` to read NSPasteboard file URLs directly.
+///
+/// On Linux, file managers use the text/uri-list MIME type with file:// URIs,
+/// which `read_text()` picks up fine.
 #[tauri::command]
 fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
-    use tauri_plugin_clipboard_manager::ClipboardExt;
-    let text = match app.clipboard().read_text() {
-        Ok(t) => t,
-        Err(_) => return vec![],
-    };
-    text.lines()
-        .map(|l| l.trim())
-        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-        .filter_map(|line| {
-            let url = url::Url::parse(line).ok()?;
-            if url.scheme() != "file" { return None; }
-            let path = url.to_file_path().ok()?;
-            Some(path.to_string_lossy().into_owned())
-        })
-        .collect()
+    // macOS: read file URLs from NSPasteboard via AppleScript-ObjC bridge
+    #[cfg(target_os = "macos")]
+    {
+        let _ = &app; // suppress unused warning
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(concat!(
+                "use framework \"AppKit\"\n",
+                "set pb to current application's NSPasteboard's generalPasteboard()\n",
+                "set urls to pb's readObjectsForClasses:{current application's NSURL} options:(missing value)\n",
+                "if urls is missing value then return \"\"\n",
+                "set paths to {}\n",
+                "repeat with u in urls\n",
+                "if (u's isFileURL()) as boolean then\n",
+                "set end of paths to (u's |path|()) as text\n",
+                "end if\n",
+                "end repeat\n",
+                "set AppleScript's text item delimiters to linefeed\n",
+                "return paths as text",
+            ))
+            .output();
+
+        return match output {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                stdout
+                    .lines()
+                    .map(|l| l.trim())
+                    .filter(|l| !l.is_empty())
+                    .map(|l| l.to_string())
+                    .collect()
+            }
+            Err(_) => vec![],
+        };
+    }
+
+    // Linux/Windows: read text clipboard for file:// URIs (text/uri-list)
+    #[cfg(not(target_os = "macos"))]
+    {
+        use tauri_plugin_clipboard_manager::ClipboardExt;
+        let text = match app.clipboard().read_text() {
+            Ok(t) => t,
+            Err(_) => return vec![],
+        };
+        text.lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .filter_map(|line| {
+                let url = url::Url::parse(line).ok()?;
+                if url.scheme() != "file" { return None; }
+                let path = url.to_file_path().ok()?;
+                Some(path.to_string_lossy().into_owned())
+            })
+            .collect()
+    }
 }
 
 /// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)

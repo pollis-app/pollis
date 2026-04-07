@@ -80,6 +80,24 @@ input[type="range"]::-moz-range-thumb {
   border: none !important;
 }
 
+/* Audio player slider — accent-colored track */
+.accent-slider {
+  background: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 20%);
+}
+.accent-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+.accent-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
 @layer components {
   /* Panel ─────────────────────────────────────────────────────── */
   .panel {

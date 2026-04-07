@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { invoke } from "@tauri-apps/api/core";
 import { usePreferences, applyPreferences } from "../hooks/queries/usePreferences";
 import { hslToHex, hexToHsl, applyAccentColor, applyBackgroundColor } from "../utils/colorUtils";
 import { RangeSlider } from "../components/ui/RangeSlider";
@@ -103,9 +104,20 @@ export const Preferences: React.FC = () => {
     save({ fs: val });
   };
 
-  const handleAllowDesktopNotifications = (val: boolean) => {
+  const handleAllowDesktopNotifications = async (val: boolean) => {
     setAllowDesktopNotifications(val);
     save({ notifications: val });
+    // When enabling, ensure we have OS-level permission (prompts on macOS)
+    if (val) {
+      try {
+        const granted: boolean | null = await invoke('plugin:notification|is_permission_granted');
+        if (granted !== true) {
+          await invoke('plugin:notification|request_permission');
+        }
+      } catch {
+        // Notification plugin unavailable — ignore
+      }
+    }
   };
 
   return (

@@ -276,6 +276,42 @@ main {
   color: var(--c-text-muted);
 }
 
+.download-card--linux {
+  cursor: default;
+}
+
+.linux-formats {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.linux-format-link {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--c-border);
+  border-radius: 4px;
+  text-decoration: none;
+  color: var(--c-text-muted);
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.linux-format-link:hover {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+}
+
+.aur-link {
+  color: var(--c-accent);
+  text-decoration: none;
+}
+
+.aur-link:hover {
+  text-decoration: underline;
+}
+
 /* ── Footer ──────────────────────────────────────────────────── */
 footer {
   position: relative;

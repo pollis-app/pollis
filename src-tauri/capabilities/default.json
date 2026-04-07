@@ -22,6 +22,7 @@
     "shell:allow-open",
     "dialog:default",
     "fs:default",
+    "fs:allow-temp-write",
     "notification:default",
     "os:default",
     "process:allow-exit",

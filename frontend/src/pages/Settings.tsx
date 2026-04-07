@@ -223,7 +223,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
         <div className="w-full max-w-md flex flex-col gap-8">
 
           {/* Account */}
-          <section className="flex flex-col gap-4">
+          <section className="flex flex-col gap-4 mb-12">
             <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
               Account
             </h2>
@@ -290,7 +290,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
           </section>
 
           {/* Avatar */}
-          <section className="flex flex-col gap-4">
+          <section className="flex flex-col gap-4 mb-12">
             <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
               Avatar
             </h2>
@@ -371,7 +371,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
           </section>
 
           {/* Software Updates */}
-          <section className="flex flex-col gap-4">
+          <section className="flex flex-col gap-4 mb-12">
             <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
               Software Updates
             </h2>
@@ -425,7 +425,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
           </section>
 
           {/* Danger zone */}
-          <section className="flex flex-col gap-4" data-testid="settings-danger-zone">
+          <section className="flex flex-col gap-4 mb-12" data-testid="settings-danger-zone">
             <h2
               className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
               style={{ color: 'hsl(0 60% 55%)', borderColor: 'hsl(0 60% 30% / 40%)' }}
