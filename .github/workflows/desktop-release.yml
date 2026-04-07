@@ -343,11 +343,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/pollis-macos/*.dmg
-            artifacts/pollis-windows/*.exe
-            artifacts/pollis-linux/*.AppImage
-            artifacts/pollis-linux/*.deb
-            artifacts/pollis-linux/*.rpm
+            artifacts/pollis-macos/**/*.dmg
+            artifacts/pollis-windows/**/*.exe
+            artifacts/pollis-linux/**/*.AppImage
+            artifacts/pollis-linux/**/*.deb
+            artifacts/pollis-linux/**/*.rpm
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
