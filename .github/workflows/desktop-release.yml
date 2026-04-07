@@ -387,9 +387,9 @@ jobs:
           sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" PKGBUILD
 
           # Regenerate .SRCINFO from the updated PKGBUILD
-          # chown everything except .git/ so makepkg can write but git still works after
+          # Copy PKGBUILD to a nobody-owned temp dir to avoid permission issues with makepkg and .git
           docker run --rm -v "$PWD:/pkg" archlinux:base-devel bash -c \
-            "find /pkg -maxdepth 1 -not -name .git -not -path /pkg -exec chown nobody:nobody {} + && cd /pkg && sudo -u nobody makepkg --printsrcinfo > .SRCINFO"
+            "cp /pkg/PKGBUILD /tmp/ && chown -R nobody:nobody /tmp/PKGBUILD && cd /tmp && sudo -u nobody makepkg --printsrcinfo > /pkg/.SRCINFO"
 
           # Commit and push if there are changes
           git config user.name "Pollis Bot"
