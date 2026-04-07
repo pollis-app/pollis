@@ -366,11 +366,7 @@ pub async fn process_welcome(
 /// `delivered = 1` so it is not processed again.
 ///
 /// Called on startup and from `poll_pending_messages`.
-#[tauri::command]
-pub async fn poll_mls_welcomes(
-    state: State<'_, Arc<AppState>>,
-    user_id: String,
-) -> Result<()> {
+pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
@@ -390,7 +386,7 @@ pub async fn poll_mls_welcomes(
     drop(rows);
 
     for (id, bytes) in items {
-        match apply_welcome(state.inner(), &bytes).await {
+        match apply_welcome(state, &bytes).await {
             Ok(()) => {}
             Err(e) => {
                 eprintln!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
@@ -405,6 +401,14 @@ pub async fn poll_mls_welcomes(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn poll_mls_welcomes(
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+) -> Result<()> {
+    poll_mls_welcomes_inner(state.inner(), &user_id).await
 }
 
 // ── Phase 4: Member changes ───────────────────────────────────────────────────
