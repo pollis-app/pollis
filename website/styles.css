@@ -303,6 +303,15 @@ main {
   color: var(--c-accent);
 }
 
+.aur-link {
+  color: var(--c-accent);
+  text-decoration: none;
+}
+
+.aur-link:hover {
+  text-decoration: underline;
+}
+
 /* ── Footer ──────────────────────────────────────────────────── */
 footer {
   position: relative;
