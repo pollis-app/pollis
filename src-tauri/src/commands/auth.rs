@@ -298,13 +298,138 @@ pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Resul
     Ok(())
 }
 
-/// Permanently delete the account: wipe all remote data, clear keystore, delete local DB.
+/// Permanently delete the account: rotate MLS keys for all groups/DMs the user
+/// belongs to, then wipe all remote data, clear keystore, and delete local DB.
+///
+/// MLS key rotation is done first (while the local DB is still open) so that
+/// remaining group members receive a remove commit and advance their epoch.
+/// This ensures forward secrecy: the deleted user's key material cannot decrypt
+/// any messages sent after the rotation.
+///
+/// See: https://github.com/actuallydan/pollis/issues/103
 #[tauri::command]
 pub async fn delete_account(
     state: State<'_, Arc<AppState>>,
     user_id: String,
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
+
+    // ── Phase 1: MLS key rotation ──────────────────────────────────────
+    // Issue remove commits for every group and DM channel the user belongs
+    // to. This must happen while the local DB is open because
+    // remove_member_mls_inner reads the MLS group state from local SQLite.
+    // Failures are non-fatal — we still proceed with account deletion so
+    // the user isn't stuck, but log each error for debugging.
+
+    // Enumerate all groups the user belongs to.
+    {
+        let mut group_rows = conn.query(
+            "SELECT group_id FROM group_member WHERE user_id = ?1",
+            libsql::params![user_id.clone()],
+        ).await?;
+
+        let mut group_ids: Vec<String> = Vec::new();
+        while let Some(row) = group_rows.next().await? {
+            group_ids.push(row.get(0)?);
+        }
+
+        for gid in &group_ids {
+            match crate::commands::mls::remove_member_mls_inner(
+                state.inner(), gid, &user_id, &user_id,
+            ).await {
+                Ok(()) => eprintln!("[account] rotated MLS keys for group {gid}"),
+                Err(e) => eprintln!("[account] MLS remove from group {gid} failed (non-fatal): {e}"),
+            }
+        }
+    }
+
+    // Enumerate all DM channels the user belongs to.
+    {
+        let mut dm_rows = conn.query(
+            "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+            libsql::params![user_id.clone()],
+        ).await?;
+
+        let mut dm_ids: Vec<String> = Vec::new();
+        while let Some(row) = dm_rows.next().await? {
+            dm_ids.push(row.get(0)?);
+        }
+
+        for dm_id in &dm_ids {
+            match crate::commands::mls::remove_member_mls_inner(
+                state.inner(), dm_id, &user_id, &user_id,
+            ).await {
+                Ok(()) => eprintln!("[account] rotated MLS keys for DM {dm_id}"),
+                Err(e) => eprintln!("[account] MLS remove from DM {dm_id} failed (non-fatal): {e}"),
+            }
+        }
+    }
+
+    // ── Phase 2: remote data cleanup ───────────────────────────────────
+
+    // Handle group ownership before removing memberships. For each group
+    // the user belongs to, check whether they're the sole member (delete
+    // the group) or the sole admin (promote another member first).
+    {
+        let mut group_rows = conn.query(
+            "SELECT group_id, role FROM group_member WHERE user_id = ?1",
+            libsql::params![user_id.clone()],
+        ).await?;
+
+        let mut memberships: Vec<(String, String)> = Vec::new();
+        while let Some(row) = group_rows.next().await? {
+            memberships.push((row.get(0)?, row.get(1)?));
+        }
+
+        for (gid, role) in &memberships {
+            // How many members does this group have?
+            let mut count_rows = conn.query(
+                "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+                libsql::params![gid.clone()],
+            ).await?;
+            let member_count: i64 = if let Some(row) = count_rows.next().await? {
+                row.get(0)?
+            } else {
+                0
+            };
+
+            if member_count <= 1 {
+                // Sole member — delete the entire group (cascades channels, invites, etc.)
+                let _ = conn.execute(
+                    "DELETE FROM groups WHERE id = ?1",
+                    libsql::params![gid.clone()],
+                ).await;
+                eprintln!("[account] deleted empty group {gid}");
+            } else if role == "admin" {
+                // Check if there are other admins.
+                let mut admin_rows = conn.query(
+                    "SELECT COUNT(*) FROM group_member WHERE group_id = ?1 AND role = 'admin' AND user_id != ?2",
+                    libsql::params![gid.clone(), user_id.clone()],
+                ).await?;
+                let other_admins: i64 = if let Some(row) = admin_rows.next().await? {
+                    row.get(0)?
+                } else {
+                    0
+                };
+
+                if other_admins == 0 {
+                    // Sole admin — promote the first non-admin member.
+                    let mut candidate_rows = conn.query(
+                        "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
+                        libsql::params![gid.clone(), user_id.clone()],
+                    ).await?;
+                    if let Some(row) = candidate_rows.next().await? {
+                        let new_admin: String = row.get(0)?;
+                        let _ = conn.execute(
+                            "UPDATE group_member SET role = 'admin' WHERE group_id = ?1 AND user_id = ?2",
+                            libsql::params![gid.clone(), new_admin.clone()],
+                        ).await;
+                        eprintln!("[account] promoted {new_admin} to admin in group {gid}");
+                    }
+                }
+            }
+        }
+    }
 
     // Remove encrypted message envelopes sent by this user
     let _ = conn.execute(
@@ -318,17 +443,19 @@ pub async fn delete_account(
         libsql::params![user_id.clone()],
     ).await;
 
-    // Remove group memberships
+    // Remove group memberships (for groups that weren't deleted above)
     let _ = conn.execute(
         "DELETE FROM group_member WHERE user_id = ?1",
         libsql::params![user_id.clone()],
     ).await;
 
-    // Remove the user row itself
+    // Remove the user row itself (cascades to dm_channel_member, group_invite, etc.)
     conn.execute(
         "DELETE FROM users WHERE id = ?1",
         libsql::params![user_id.clone()],
     ).await?;
+
+    // ── Phase 3: local cleanup ─────────────────────────────────────────
 
     // Close and delete the per-user local database
     state.unload_user_db().await;
@@ -358,5 +485,288 @@ pub async fn delete_account(
 #[tauri::command]
 pub fn list_known_accounts() -> crate::accounts::AccountsIndex {
     crate::accounts::read_accounts_index()
+}
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    const REMOTE_V001: &str = include_str!("../db/migrations/remote_schema.sql");
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(REMOTE_V001).unwrap();
+        conn
+    }
+
+    fn setup_users(conn: &Connection) {
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('alice', 'alice@x.com', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('bob',   'bob@x.com',   'bob')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('carol', 'carol@x.com', 'carol')", []).unwrap();
+    }
+
+    // ── sole member: group should be deleted ───────────────────────────
+
+    #[test]
+    fn sole_member_deletion_removes_group() {
+        let conn = db();
+        setup_users(&conn);
+
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Solo Group', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('ch1', 'g1', 'general')", []).unwrap();
+
+        // Simulate Phase 2 logic: check member count
+        let member_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_member WHERE group_id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(member_count, 1);
+
+        // Sole member — delete the group
+        conn.execute("DELETE FROM groups WHERE id = 'g1'", []).unwrap();
+
+        let group_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM groups WHERE id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(group_exists, 0);
+
+        // Channels cascade-deleted too
+        let ch_count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM channels WHERE group_id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(ch_count, 0);
+    }
+
+    // ── sole admin with other members: promote then leave ──────────────
+
+    #[test]
+    fn sole_admin_promotes_first_member_before_leaving() {
+        let conn = db();
+        setup_users(&conn);
+
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Team', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'member')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'carol', 'member')", []).unwrap();
+
+        let deleting_user = "alice";
+
+        // Simulate Phase 2: check other admins
+        let other_admins: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_member WHERE group_id = 'g1' AND role = 'admin' AND user_id != ?1",
+            rusqlite::params![deleting_user],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(other_admins, 0, "alice is the sole admin");
+
+        // Promote first non-admin member
+        let new_admin: String = conn.query_row(
+            "SELECT user_id FROM group_member WHERE group_id = 'g1' AND user_id != ?1 LIMIT 1",
+            rusqlite::params![deleting_user],
+            |row| row.get(0),
+        ).unwrap();
+
+        conn.execute(
+            "UPDATE group_member SET role = 'admin' WHERE group_id = 'g1' AND user_id = ?1",
+            rusqlite::params![new_admin.clone()],
+        ).unwrap();
+
+        // Remove the deleting user
+        conn.execute(
+            "DELETE FROM group_member WHERE group_id = 'g1' AND user_id = ?1",
+            rusqlite::params![deleting_user],
+        ).unwrap();
+
+        // Verify: promoted member is admin, group still exists with 2 members
+        let role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = ?1",
+            rusqlite::params![new_admin],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(role, "admin");
+
+        let remaining: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_member WHERE group_id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(remaining, 2);
+
+        let group_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM groups WHERE id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(group_exists, 1, "group should still exist");
+    }
+
+    // ── admin with other admins: no promotion needed ───────────────────
+
+    #[test]
+    fn admin_with_other_admins_no_promotion() {
+        let conn = db();
+        setup_users(&conn);
+
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Team', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'carol', 'member')", []).unwrap();
+
+        let deleting_user = "alice";
+
+        let other_admins: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM group_member WHERE group_id = 'g1' AND role = 'admin' AND user_id != ?1",
+            rusqlite::params![deleting_user],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(other_admins > 0, "bob is also an admin — no promotion needed");
+
+        // Just remove alice
+        conn.execute(
+            "DELETE FROM group_member WHERE group_id = 'g1' AND user_id = ?1",
+            rusqlite::params![deleting_user],
+        ).unwrap();
+
+        // bob is still admin
+        let bob_role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'bob'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(bob_role, "admin");
+
+        // carol unchanged
+        let carol_role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'carol'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(carol_role, "member");
+    }
+
+    // ── regular member deletion: no promotion needed ───────────────────
+
+    #[test]
+    fn regular_member_deletion_no_promotion() {
+        let conn = db();
+        setup_users(&conn);
+
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Team', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'bob', 'member')", []).unwrap();
+
+        // bob (member) deletes account — no admin promotion needed
+        conn.execute("DELETE FROM group_member WHERE group_id = 'g1' AND user_id = 'bob'", []).unwrap();
+
+        let alice_role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g1' AND user_id = 'alice'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(alice_role, "admin", "alice should remain admin");
+
+        let group_exists: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM groups WHERE id = 'g1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(group_exists, 1);
+    }
+
+    // ── multiple groups: each handled correctly ────────────────────────
+
+    #[test]
+    fn deletion_handles_multiple_groups_independently() {
+        let conn = db();
+        setup_users(&conn);
+
+        // Group 1: alice is sole member → should be deleted
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Solo', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'alice', 'admin')", []).unwrap();
+
+        // Group 2: alice is sole admin with bob → bob should be promoted
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g2', 'Shared', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g2', 'alice', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g2', 'bob', 'member')", []).unwrap();
+
+        // Group 3: alice is member, carol is admin → just leave
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g3', 'Other', 'carol')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g3', 'carol', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g3', 'alice', 'member')", []).unwrap();
+
+        let deleting_user = "alice";
+
+        // Simulate Phase 2 for each group
+        let memberships: Vec<(String, String)> = conn
+            .prepare("SELECT group_id, role FROM group_member WHERE user_id = ?1")
+            .unwrap()
+            .query_map(rusqlite::params![deleting_user], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        for (gid, role) in &memberships {
+            let member_count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+                rusqlite::params![gid.as_str()],
+                |row| row.get(0),
+            ).unwrap();
+
+            if member_count <= 1 {
+                conn.execute("DELETE FROM groups WHERE id = ?1", rusqlite::params![gid.as_str()]).unwrap();
+            } else if role == "admin" {
+                let other_admins: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM group_member WHERE group_id = ?1 AND role = 'admin' AND user_id != ?2",
+                    rusqlite::params![gid.as_str(), deleting_user],
+                    |row| row.get(0),
+                ).unwrap();
+                if other_admins == 0 {
+                    let new_admin: String = conn.query_row(
+                        "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
+                        rusqlite::params![gid.as_str(), deleting_user],
+                        |row| row.get(0),
+                    ).unwrap();
+                    conn.execute(
+                        "UPDATE group_member SET role = 'admin' WHERE group_id = ?1 AND user_id = ?2",
+                        rusqlite::params![gid.as_str(), new_admin],
+                    ).unwrap();
+                }
+            }
+        }
+
+        // Remove alice from all remaining groups
+        conn.execute("DELETE FROM group_member WHERE user_id = ?1", rusqlite::params![deleting_user]).unwrap();
+
+        // g1 should be deleted
+        let g1: i64 = conn.query_row("SELECT COUNT(*) FROM groups WHERE id = 'g1'", [], |row| row.get(0)).unwrap();
+        assert_eq!(g1, 0, "sole-member group should be deleted");
+
+        // g2 should exist, bob is now admin
+        let g2: i64 = conn.query_row("SELECT COUNT(*) FROM groups WHERE id = 'g2'", [], |row| row.get(0)).unwrap();
+        assert_eq!(g2, 1, "shared group should still exist");
+        let bob_role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g2' AND user_id = 'bob'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(bob_role, "admin", "bob should have been promoted");
+
+        // g3 should exist, carol still admin
+        let g3: i64 = conn.query_row("SELECT COUNT(*) FROM groups WHERE id = 'g3'", [], |row| row.get(0)).unwrap();
+        assert_eq!(g3, 1);
+        let carol_role: String = conn.query_row(
+            "SELECT role FROM group_member WHERE group_id = 'g3' AND user_id = 'carol'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(carol_role, "admin");
+    }
 }
 

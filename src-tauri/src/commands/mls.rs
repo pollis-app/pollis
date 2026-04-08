@@ -1403,16 +1403,12 @@ mod tests {
     /// part of account deletion), the remaining members' keys should rotate
     /// so the deleted user cannot decrypt future messages.
     ///
-    /// This test currently only covers the MLS remove + epoch advance path.
-    /// In production, account deletion also needs to:
-    ///   1. Enumerate all groups the user belongs to
-    ///   2. Issue a remove commit for each group
-    ///   3. Broadcast the commit so remaining members apply it
+    /// The `delete_account` command (auth.rs) enumerates all groups and DM
+    /// channels the user belongs to and calls `remove_member_mls_inner` for
+    /// each before deleting DB rows.  This test verifies the underlying MLS
+    /// removal + epoch advance works across multiple groups.
     ///
-    /// TODO: The full account-deletion flow should trigger automatic key
-    /// rotation for every group the deleted user was in. This test documents
-    /// the expected behavior — see the related issue for the end-to-end
-    /// implementation.
+    /// See: https://github.com/actuallydan/pollis/issues/103
     #[test]
     fn account_deletion_rotates_keys_for_remaining_members() {
         let group1 = "01JTEST000000000000ACCTDEL1";
