@@ -14,4 +14,5 @@ FROM message_envelope me
 JOIN channels c ON c.id = me.conversation_id
 JOIN groups g ON g.id = c.group_id
 WHERE me.sender_id = ?1
+  AND me.type = 'message'
 ORDER BY g.name, c.name, me.sent_at

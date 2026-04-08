@@ -404,9 +404,11 @@ export function useEditMessage() {
 
   return useMutation({
     mutationFn: async ({
+      conversationId,
       messageId,
       newContent,
     }: {
+      conversationId: string;
       messageId: string;
       newContent: string;
     }) => {
@@ -414,6 +416,7 @@ export function useEditMessage() {
         throw new Error('No current user');
       }
       await invoke('edit_message', {
+        conversationId,
         messageId,
         userId: currentUser.id,
         newContent,

@@ -154,7 +154,11 @@ export const MainContent: React.FC = () => {
   };
 
   const handleEdit = async (messageId: string, newContent: string) => {
-    await editMessageMutation.mutateAsync({ messageId, newContent });
+    const conversationId = selectedChannelId ?? selectedConversationId;
+    if (!conversationId) {
+      return;
+    }
+    await editMessageMutation.mutateAsync({ conversationId, messageId, newContent });
   };
 
   const handleSend = async (text: string, attachments: Attachment[]) => {

@@ -301,8 +301,48 @@ pub async fn get_channel_messages(
         ));
     }
 
+    // Fetch any pending edit envelopes for this conversation and apply them to
+    // local DB before processing message envelopes. This ensures the message
+    // processing loop below reads up-to-date plaintext from the local cache.
+    let edit_envelopes: Vec<(String, String, String)> = {
+        let mut edits = Vec::new();
+        if let Ok(mut edit_rows) = conn.query(
+            "SELECT id, target_message_id, ciphertext FROM message_envelope
+             WHERE conversation_id = ?1 AND type = 'edit'
+             ORDER BY sent_at ASC",
+            libsql::params![channel_id.clone()],
+        ).await {
+            while let Ok(Some(row)) = edit_rows.next().await {
+                if let (Ok(id), Ok(target), Ok(ct)) = (
+                    row.get::<String>(0),
+                    row.get::<String>(1),
+                    row.get::<String>(2),
+                ) {
+                    edits.push((id, target, ct));
+                }
+            }
+        }
+        edits
+    };
+
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+    // Apply edit envelopes: decrypt and patch the local message cache.
+    for (_edit_id, target_id, ciphertext) in &edit_envelopes {
+        let plaintext = ciphertext.strip_prefix("mls:")
+            .and_then(|hex_str| hex::decode(hex_str).ok())
+            .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &mls_group_id, &bytes))
+            .and_then(|b| String::from_utf8(b).ok());
+        if let Some(text) = plaintext {
+            let now = chrono::Utc::now().to_rfc3339();
+            let _ = db.conn().execute(
+                "UPDATE message SET content = ?1, edited_at = ?2
+                 WHERE id = ?3 AND deleted_at IS NULL",
+                rusqlite::params![text, now, target_id],
+            );
+        }
+    }
 
     // Sort oldest-first so MLS epoch ordering is preserved during decryption.
     raw_messages.sort_by(|a, b| a.0.cmp(&b.0));
@@ -513,8 +553,47 @@ pub async fn get_dm_messages(
         ));
     }
 
+    // Fetch pending edit envelopes and apply them before reading message cache.
+    let edit_envelopes: Vec<(String, String, String)> = {
+        let mut edits = Vec::new();
+        if let Ok(mut edit_rows) = conn.query(
+            "SELECT id, target_message_id, ciphertext FROM message_envelope
+             WHERE conversation_id = ?1 AND type = 'edit'
+             ORDER BY sent_at ASC",
+            libsql::params![dm_channel_id.clone()],
+        ).await {
+            while let Ok(Some(row)) = edit_rows.next().await {
+                if let (Ok(id), Ok(target), Ok(ct)) = (
+                    row.get::<String>(0),
+                    row.get::<String>(1),
+                    row.get::<String>(2),
+                ) {
+                    edits.push((id, target, ct));
+                }
+            }
+        }
+        edits
+    };
+
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+    // Apply edit envelopes: decrypt and patch the local message cache.
+    // DM MLS group is keyed by conversation_id directly.
+    for (_edit_id, target_id, ciphertext) in &edit_envelopes {
+        let plaintext = ciphertext.strip_prefix("mls:")
+            .and_then(|hex_str| hex::decode(hex_str).ok())
+            .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &dm_channel_id, &bytes))
+            .and_then(|b| String::from_utf8(b).ok());
+        if let Some(text) = plaintext {
+            let now = chrono::Utc::now().to_rfc3339();
+            let _ = db.conn().execute(
+                "UPDATE message SET content = ?1, edited_at = ?2
+                 WHERE id = ?3 AND deleted_at IS NULL",
+                rusqlite::params![text, now, target_id],
+            );
+        }
+    }
 
     // Sort oldest-first so MLS epoch ordering is preserved during decryption.
     raw_messages.sort_by(|a, b| a.0.cmp(&b.0));
@@ -674,22 +753,40 @@ pub async fn search_messages(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Soft-delete a message by clearing its content and marking deleted_at.
-/// Only the message author may delete. Returns an error if the message is
-/// not found or the caller is not the sender.
+/// Delete a message: removes the envelope from Turso (preventing future delivery)
+/// and removes it from the sender's local message cache. Recipients who already
+/// have the message keep it — there is intentionally no retroactive deletion from
+/// other devices. Any pending edit envelope for this message is also removed.
+///
+/// Best-effort on Turso: if the envelope was already cleaned up by the watermark
+/// mechanism the remote delete is a no-op, but the local delete still proceeds.
 #[tauri::command]
 pub async fn delete_message(
     message_id: String,
     user_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
+    let conn = state.remote_db.conn().await?;
+
+    // Remove the message envelope. Best-effort — may already be gone.
+    conn.execute(
+        "DELETE FROM message_envelope WHERE id = ?1 AND sender_id = ?2",
+        libsql::params![message_id.clone(), user_id.clone()],
+    ).await?;
+
+    // Remove any pending edit envelope for this message.
+    conn.execute(
+        "DELETE FROM message_envelope WHERE target_message_id = ?1 AND type = 'edit'",
+        libsql::params![message_id.clone()],
+    ).await?;
+
+    // Remove from the sender's local plaintext cache.
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-    let now = chrono::Utc::now().to_rfc3339();
 
     let rows_affected = db.conn().execute(
-        "UPDATE message SET content = NULL, deleted_at = ?1 WHERE id = ?2 AND sender_id = ?3",
-        rusqlite::params![now, message_id, user_id],
+        "DELETE FROM message WHERE id = ?1 AND sender_id = ?2",
+        rusqlite::params![message_id, user_id],
     )?;
 
     if rows_affected == 0 {
@@ -701,30 +798,77 @@ pub async fn delete_message(
     Ok(())
 }
 
-/// Edit a message's content in the local store and mark edited_at.
-/// Only the message author may edit. Returns an error if the message is
-/// not found or the caller is not the sender.
+/// Edit a message: updates the sender's local plaintext cache immediately and
+/// publishes an encrypted edit envelope to Turso so all other group members
+/// receive the updated content on their next fetch.
+///
+/// The edit envelope uses type='edit' with target_message_id pointing at the
+/// original message. A DELETE+INSERT replaces any prior pending edit, so Turso
+/// never holds more than one edit per message per conversation.
 #[tauri::command]
 pub async fn edit_message(
+    conversation_id: String,
     message_id: String,
     user_id: String,
     new_content: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+    let envelope_id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
-    let rows_affected = db.conn().execute(
-        "UPDATE message SET content = ?1, edited_at = ?2 WHERE id = ?3 AND sender_id = ?4 AND deleted_at IS NULL",
-        rusqlite::params![new_content, now, message_id, user_id],
-    )?;
+    // Resolve the MLS group for this conversation (channel → group_id, DM → conversation_id).
+    let mls_group_id = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn.query(
+            "SELECT group_id FROM channels WHERE id = ?1",
+            libsql::params![conversation_id.clone()],
+        ).await?;
+        match rows.next().await? {
+            Some(row) => row.get::<String>(0)?,
+            None => conversation_id.clone(),
+        }
+    };
 
-    if rows_affected == 0 {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "Message not found, already deleted, or you are not the sender"
-        )));
-    }
+    // Encrypt the new content with MLS and update local cache atomically.
+    let ciphertext_remote = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, new_content.as_bytes())
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
+                "MLS group not initialized for conversation {conversation_id}"
+            )))?;
+
+        let rows_affected = db.conn().execute(
+            "UPDATE message SET content = ?1, edited_at = ?2
+             WHERE id = ?3 AND sender_id = ?4 AND deleted_at IS NULL",
+            rusqlite::params![new_content, now, message_id, user_id],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "Message not found, already deleted, or you are not the sender"
+            )));
+        }
+
+        format!("mls:{}", hex::encode(&mls_bytes))
+    };
+
+    // Replace any existing edit envelope for this message with the new one.
+    // DELETE + INSERT rather than ON CONFLICT to stay compatible with older libsql.
+    let conn = state.remote_db.conn().await?;
+    conn.execute(
+        "DELETE FROM message_envelope
+         WHERE conversation_id = ?1 AND target_message_id = ?2 AND type = 'edit'",
+        libsql::params![conversation_id.clone(), message_id.clone()],
+    ).await?;
+
+    conn.execute(
+        "INSERT INTO message_envelope
+             (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, 'edit', ?6)",
+        libsql::params![envelope_id, conversation_id, user_id, ciphertext_remote, now, message_id],
+    ).await?;
 
     Ok(())
 }
@@ -823,6 +967,11 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         conn.execute_batch(REMOTE_V001).unwrap();
+        // Apply migration 000010 columns (can't modify remote_schema.sql).
+        conn.execute_batch(
+            "ALTER TABLE message_envelope ADD COLUMN type TEXT NOT NULL DEFAULT 'message';
+             ALTER TABLE message_envelope ADD COLUMN target_message_id TEXT;"
+        ).unwrap();
         conn
     }
 
