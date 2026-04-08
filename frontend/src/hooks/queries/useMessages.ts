@@ -29,6 +29,8 @@ type RawChannelMessage = {
   content?: string;
   reply_to_id?: string;
   sent_at: string;
+  edited_at?: string;
+  deleted_at?: string;
 };
 
 type MessagePage = {
@@ -117,6 +119,8 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
     delivered: true,
     status: 'sent' as const,
     attachments: parsed?.attachments ?? [],
+    edited_at: m.edited_at,
+    deleted_at: m.deleted_at,
   };
 }
 
@@ -368,6 +372,55 @@ export function useCreateOrGetDMConversation() {
       queryClient.invalidateQueries({
         queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
       });
+    },
+  });
+}
+
+export function useDeleteMessage() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async ({ messageId }: { messageId: string }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('delete_message', {
+        messageId,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      // Invalidate all message caches so the deleted message disappears.
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['last-message'] });
+    },
+  });
+}
+
+export function useEditMessage() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async ({
+      messageId,
+      newContent,
+    }: {
+      messageId: string;
+      newContent: string;
+    }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('edit_message', {
+        messageId,
+        userId: currentUser.id,
+        newContent,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
     },
   });
 }

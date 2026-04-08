@@ -7,7 +7,8 @@ use crate::error::Result;
 // Version 5: mls_kv table for openmls StorageProvider.
 // Version 6: attachment table rewritten with convergent-encryption schema.
 // Version 7: attachment table removed — dedup lives on Turso, metadata in message payload.
-const LOCAL_SCHEMA_VERSION: &str = "7";
+// Version 8: message table gains edited_at and deleted_at columns.
+const LOCAL_SCHEMA_VERSION: &str = "8";
 const SCHEMA: &str = include_str!("migrations/local_schema.sql");
 
 pub struct LocalDb {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
-import { Reply, Download, Film, Check } from "lucide-react";
+import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia } from "../../services/r2-upload";
@@ -17,6 +17,8 @@ interface MessageItemProps {
   authorUsername?: string;
   isAuthorAdmin?: boolean;
   onReply?: (messageId: string) => void;
+  onEdit?: (messageId: string, newContent: string) => Promise<void>;
+  onDelete?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
 }
@@ -35,10 +37,18 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   authorUsername = "unknown",
   isAuthorAdmin = false,
   onReply,
+  onEdit,
+  onDelete,
   onScrollToReply,
 }) => {
   const { currentUser } = useAppStore();
   const isOwn = message.sender_id === currentUser?.id;
+
+  // Inline edit state.
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const editInputRef = useRef<HTMLTextAreaElement>(null);
 
   const replyTo = message.reply_to_message_id
     ? allMessages.find((m) => m.id === message.reply_to_message_id)
@@ -48,9 +58,50 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     ? (replyTo.sender_username ?? replyTo.sender_id)
     : null;
 
+  const isDeleted = !!message.deleted_at;
+
   // content_decrypted is undefined when decryption failed (the server returned
   // null). Show [encrypted] in that case rather than an empty row.
-  const content = message.content_decrypted ?? "[encrypted]";
+  const content = isDeleted ? "[deleted]" : (message.content_decrypted ?? "[encrypted]");
+
+  const handleStartEdit = () => {
+    setEditValue(message.content_decrypted ?? '');
+    setIsEditing(true);
+  };
+
+  // Focus the textarea when entering edit mode.
+  useEffect(() => {
+    if (isEditing) {
+      editInputRef.current?.focus();
+      // Place cursor at the end.
+      const len = editInputRef.current?.value.length ?? 0;
+      editInputRef.current?.setSelectionRange(len, len);
+    }
+  }, [isEditing]);
+
+  const handleSaveEdit = async () => {
+    const trimmed = editValue.trim();
+    if (!trimmed || !onEdit) {
+      return;
+    }
+    setIsSavingEdit(true);
+    try {
+      await onEdit(message.id, trimmed);
+      setIsEditing(false);
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSaveEdit();
+    }
+    if (e.key === 'Escape') {
+      setIsEditing(false);
+    }
+  };
 
   // Sort attachments: images and videos first, then everything else.
   const sortedAttachments = message.attachments && message.attachments.length > 0
@@ -130,29 +181,89 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           {":"}
         </span>
 
-        <span
-          data-testid="message-content"
-          className="font-mono text-sm break-words flex-1 min-w-0"
-          style={{ color: "var(--c-text)", whiteSpace: "pre-wrap" }}
-        >
-          <LinkifiedText text={content} />
-          {message.status && message.status !== "sent" && (
-            <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
-              [{message.status}]
+        {isEditing ? (
+          <span className="flex-1 min-w-0 flex flex-col gap-1">
+            <textarea
+              ref={editInputRef}
+              data-testid="edit-message-input"
+              value={editValue}
+              onChange={(e) => setEditValue(e.target.value)}
+              onKeyDown={handleEditKeyDown}
+              disabled={isSavingEdit}
+              rows={2}
+              className="w-full font-mono text-sm resize-none focus:outline-none"
+              style={{
+                background: "var(--c-surface)",
+                color: "var(--c-text)",
+                border: "1px solid var(--c-border-active)",
+                borderRadius: "4px",
+                padding: "2px 6px",
+              }}
+            />
+            <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+              Enter to save · Esc to cancel
             </span>
-          )}
-        </span>
+          </span>
+        ) : (
+          <span
+            data-testid="message-content"
+            className="font-mono text-sm break-words flex-1 min-w-0"
+            style={{
+              color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
+              whiteSpace: "pre-wrap",
+              fontStyle: isDeleted ? "italic" : undefined,
+            }}
+          >
+            <LinkifiedText text={content} />
+            {message.edited_at && !isDeleted && (
+              <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+                (edited)
+              </span>
+            )}
+            {message.status && message.status !== "sent" && (
+              <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+                [{message.status}]
+              </span>
+            )}
+          </span>
+        )}
 
-        {/* Reply button — only visible on hover */}
-        <button
-          data-testid="reply-button"
-          onClick={() => onReply?.(message.id)}
-          aria-label="Reply"
-          className="flex-shrink-0 ml-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-          style={{ color: "var(--c-text-muted)" }}
-        >
-          <Reply size={12} />
-        </button>
+        {/* Action buttons — only visible on hover, only for own non-deleted messages */}
+        {!isDeleted && !isEditing && (
+          <div className="flex-shrink-0 ml-1 flex items-center gap-1">
+            <button
+              data-testid="reply-button"
+              onClick={() => onReply?.(message.id)}
+              aria-label="Reply"
+              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+              style={{ color: "var(--c-text-muted)" }}
+            >
+              <Reply size={12} />
+            </button>
+            {isOwn && onEdit && (
+              <button
+                data-testid="edit-button"
+                onClick={handleStartEdit}
+                aria-label="Edit message"
+                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                style={{ color: "var(--c-text-muted)" }}
+              >
+                <Edit2 size={12} />
+              </button>
+            )}
+            {isOwn && onDelete && (
+              <button
+                data-testid="delete-button"
+                onClick={() => onDelete(message.id)}
+                aria-label="Delete message"
+                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
+                style={{ color: "var(--c-text-muted)" }}
+              >
+                <Trash2 size={12} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Attachments — each on its own row */}

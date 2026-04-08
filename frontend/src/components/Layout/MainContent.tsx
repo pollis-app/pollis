@@ -7,7 +7,8 @@ import { ReplyPreview } from "../Message/ReplyPreview";
 import { MessageQueue } from "../Message/MessageQueue";
 import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInput";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
-import { useMessages, useSendMessage, messageQueryKeys } from "../../hooks/queries";
+import { Button } from "../ui/Button";
+import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage } from "../../hooks/queries";
 import { transformChannelMessage } from "../../hooks/queries/useMessages";
 import { useGroupMembers } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
@@ -61,6 +62,11 @@ export const MainContent: React.FC = () => {
     selectedConversationId
   );
   const sendMessageMutation = useSendMessage();
+  const deleteMessageMutation = useDeleteMessage();
+  const editMessageMutation = useEditMessage();
+
+  // ID of message pending delete confirmation (null = no dialog).
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const [olderMessages, setOlderMessages] = useState<Message[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -132,6 +138,23 @@ export const MainContent: React.FC = () => {
     } finally {
       setLoadingMore(false);
     }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDeleteId) {
+      return;
+    }
+    try {
+      await deleteMessageMutation.mutateAsync({ messageId: pendingDeleteId });
+    } catch (error) {
+      console.error("Failed to delete message:", error);
+    } finally {
+      setPendingDeleteId(null);
+    }
+  };
+
+  const handleEdit = async (messageId: string, newContent: string) => {
+    await editMessageMutation.mutateAsync({ messageId, newContent });
   };
 
   const handleSend = async (text: string, attachments: Attachment[]) => {
@@ -299,6 +322,8 @@ export const MainContent: React.FC = () => {
               setReplyToMessageId(id);
               chatInputRef.current?.focus();
             }}
+            onEdit={handleEdit}
+            onDelete={(id) => setPendingDeleteId(id)}
             onScrollToMessage={(id) => console.log("Scroll to:", id)}
             getAuthorUsername={(authorId, message) =>
               message?.sender_username || (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId)
@@ -324,6 +349,64 @@ export const MainContent: React.FC = () => {
       <div data-testid="message-form">
         <ChatInput ref={chatInputRef} onSend={handleSend} autoFocus />
       </div>
+
+      {/* Delete confirmation overlay */}
+      {pendingDeleteId && (
+        <div
+          data-testid="delete-message-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.7)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          onClick={() => setPendingDeleteId(null)}
+        >
+          <div
+            className="flex flex-col gap-4 p-6"
+            style={{
+              background: "var(--c-surface)",
+              border: "1px solid var(--c-border)",
+              borderRadius: "8px",
+              minWidth: 280,
+              maxWidth: 380,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
+              Delete this message? It will be removed from your view.
+              Others who already received it may still see it.
+            </p>
+            {deleteMessageMutation.isError && (
+              <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+                Failed to delete. Please try again.
+              </p>
+            )}
+            <div className="flex gap-3 justify-end">
+              <Button
+                data-testid="delete-message-cancel"
+                variant="secondary"
+                onClick={() => setPendingDeleteId(null)}
+                disabled={deleteMessageMutation.isPending}
+              >
+                Cancel
+              </Button>
+              <Button
+                data-testid="delete-message-confirm"
+                variant="danger"
+                onClick={handleConfirmDelete}
+                isLoading={deleteMessageMutation.isPending}
+                loadingText="Deleting…"
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

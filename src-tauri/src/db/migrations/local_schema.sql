@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS message (
     reply_to_id TEXT,
     sent_at TEXT NOT NULL,
     received_at TEXT NOT NULL DEFAULT (datetime('now')),
-    delivered INTEGER NOT NULL DEFAULT 0
+    delivered INTEGER NOT NULL DEFAULT 0,
+    edited_at TEXT,
+    deleted_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);

@@ -223,6 +223,8 @@ pub struct ChannelMessage {
     pub content: Option<String>,
     pub reply_to_id: Option<String>,
     pub sent_at: String,
+    pub edited_at: Option<String>,
+    pub deleted_at: Option<String>,
 }
 
 /// Opaque pagination cursor — the (sent_at, id) of the oldest row on the
@@ -306,23 +308,29 @@ pub async fn get_channel_messages(
     raw_messages.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut messages: Vec<ChannelMessage> = raw_messages.into_iter().map(|(id, conv_id, sender_id, sender_username, ciphertext, reply_to_id, sent_at)| {
-        let content = if sender_id == user_id {
+        // Read local state: content (plaintext cache), edited_at, deleted_at.
+        let local_row: Option<(Option<String>, Option<String>, Option<String>)> = db.conn().query_row(
+            "SELECT content, edited_at, deleted_at FROM message WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).ok();
+
+        let (edited_at, deleted_at) = local_row
+            .as_ref()
+            .map(|(_, e, d)| (e.clone(), d.clone()))
+            .unwrap_or((None, None));
+
+        let content = if deleted_at.is_some() {
+            // Soft-deleted messages show no content.
+            None
+        } else if sender_id == user_id {
             // Own message: read plaintext stored locally at send time.
-            db.conn().query_row(
-                "SELECT content FROM message WHERE id = ?1",
-                rusqlite::params![&id],
-                |row| row.get::<_, Option<String>>(0),
-            ).ok().flatten()
+            local_row.and_then(|(c, _, _)| c)
         } else {
             // Peer message: check local cache first.
-            let cached: Option<String> = db.conn().query_row(
-                "SELECT content FROM message WHERE id = ?1",
-                rusqlite::params![&id],
-                |row| row.get::<_, Option<String>>(0),
-            ).ok().flatten();
-
-            if let Some(text) = cached {
-                Some(text)
+            let cached = local_row.and_then(|(c, _, _)| c);
+            if cached.is_some() {
+                cached
             } else {
                 let plaintext = ciphertext.strip_prefix("mls:")
                     .and_then(|hex_str| hex::decode(hex_str).ok())
@@ -348,6 +356,8 @@ pub async fn get_channel_messages(
             content,
             reply_to_id,
             sent_at,
+            edited_at,
+            deleted_at,
         }
     }).collect();
 
@@ -510,21 +520,26 @@ pub async fn get_dm_messages(
     raw_messages.sort_by(|a, b| a.0.cmp(&b.0));
 
     let mut messages: Vec<ChannelMessage> = raw_messages.into_iter().map(|(id, conv_id, sender_id, sender_username, ciphertext, reply_to_id, sent_at)| {
-        let content = if sender_id == user_id {
-            db.conn().query_row(
-                "SELECT content FROM message WHERE id = ?1",
-                rusqlite::params![&id],
-                |row| row.get::<_, Option<String>>(0),
-            ).ok().flatten()
-        } else {
-            let cached: Option<String> = db.conn().query_row(
-                "SELECT content FROM message WHERE id = ?1",
-                rusqlite::params![&id],
-                |row| row.get::<_, Option<String>>(0),
-            ).ok().flatten();
+        // Read local state: content (plaintext cache), edited_at, deleted_at.
+        let local_row: Option<(Option<String>, Option<String>, Option<String>)> = db.conn().query_row(
+            "SELECT content, edited_at, deleted_at FROM message WHERE id = ?1",
+            rusqlite::params![&id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).ok();
 
-            if let Some(text) = cached {
-                Some(text)
+        let (edited_at, deleted_at) = local_row
+            .as_ref()
+            .map(|(_, e, d)| (e.clone(), d.clone()))
+            .unwrap_or((None, None));
+
+        let content = if deleted_at.is_some() {
+            None
+        } else if sender_id == user_id {
+            local_row.and_then(|(c, _, _)| c)
+        } else {
+            let cached = local_row.and_then(|(c, _, _)| c);
+            if cached.is_some() {
+                cached
             } else {
                 let plaintext = ciphertext.strip_prefix("mls:")
                     .and_then(|hex_str| hex::decode(hex_str).ok())
@@ -550,6 +565,8 @@ pub async fn get_dm_messages(
             content,
             reply_to_id,
             sent_at,
+            edited_at,
+            deleted_at,
         }
     }).collect();
 
@@ -655,6 +672,61 @@ pub async fn search_messages(
     )?;
 
     Ok(rows.filter_map(|r| r.ok()).collect())
+}
+
+/// Soft-delete a message by clearing its content and marking deleted_at.
+/// Only the message author may delete. Returns an error if the message is
+/// not found or the caller is not the sender.
+#[tauri::command]
+pub async fn delete_message(
+    message_id: String,
+    user_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let rows_affected = db.conn().execute(
+        "UPDATE message SET content = NULL, deleted_at = ?1 WHERE id = ?2 AND sender_id = ?3",
+        rusqlite::params![now, message_id, user_id],
+    )?;
+
+    if rows_affected == 0 {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "Message not found or you are not the sender"
+        )));
+    }
+
+    Ok(())
+}
+
+/// Edit a message's content in the local store and mark edited_at.
+/// Only the message author may edit. Returns an error if the message is
+/// not found or the caller is not the sender.
+#[tauri::command]
+pub async fn edit_message(
+    message_id: String,
+    user_id: String,
+    new_content: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let rows_affected = db.conn().execute(
+        "UPDATE message SET content = ?1, edited_at = ?2 WHERE id = ?3 AND sender_id = ?4 AND deleted_at IS NULL",
+        rusqlite::params![new_content, now, message_id, user_id],
+    )?;
+
+    if rows_affected == 0 {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "Message not found, already deleted, or you are not the sender"
+        )));
+    }
+
+    Ok(())
 }
 
 /// Aggregated emoji reaction for a message.

@@ -68,6 +68,9 @@ export interface Message {
   created_at: number; // primary timestamp
   delivered: boolean; // delivery status
   attachments?: MessageAttachment[];
+  // Edit/delete metadata
+  edited_at?: string; // ISO timestamp if message was edited
+  deleted_at?: string; // ISO timestamp if message was soft-deleted
   // UI state
   status?: 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled';
 }

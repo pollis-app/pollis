@@ -232,6 +232,8 @@ pub fn run() {
             commands::messages::add_reaction,
             commands::messages::remove_reaction,
             commands::messages::get_reactions,
+            commands::messages::delete_message,
+            commands::messages::edit_message,
             commands::mls::generate_mls_key_package,
             commands::mls::publish_mls_key_package,
             commands::mls::fetch_mls_key_package,
