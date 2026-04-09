@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@fontsource/atkinson-hyperlegible": "^5.2.8",
+    "@fontsource/atkinson-hyperlegible-mono": "^5.2.10",
+    "@fontsource/atkinson-hyperlegible-next": "^5.2.7",
     "@internationalized/date": "^3.10.0",
     "@react-aria/button": "^3.14.2",
     "@react-aria/overlays": "^3.30.0",
