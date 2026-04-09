@@ -1414,6 +1414,71 @@ mod tests {
         );
     }
 
+    /// When a member leaves (is removed), the remaining members can still
+    /// communicate, the removed member cannot decrypt, and a newly added
+    /// member can participate in the group.
+    #[test]
+    fn leave_group_remaining_members_communicate_then_new_member_joins() {
+        let conv_id = "01JTEST0000000000000LEAVE1";
+
+        let alice_db = make_db();
+        let bob_db = make_db();
+        let carol_db = make_db();
+        let dave_db = make_db();
+
+        // Alice creates group, adds Bob and Carol.
+        create_group(&alice_db, conv_id, "alice");
+
+        let bob_kp = gen_key_package(&bob_db, "bob");
+        let (add_bob_commit, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+        let _ = add_bob_commit;
+
+        let carol_kp = gen_key_package(&carol_db, "carol");
+        let (add_carol_commit, carol_welcome) = add_member_to_group(&alice_db, conv_id, &carol_kp);
+        join_via_welcome(&carol_db, &carol_welcome);
+        apply_commit(&bob_db, conv_id, &add_carol_commit);
+
+        // Verify all three can communicate before removal.
+        let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"all three here").unwrap();
+        assert_eq!(try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap(), b"all three here");
+        assert_eq!(try_mls_decrypt(&carol_db, conv_id, &pre_ct).unwrap(), b"all three here");
+
+        // Alice removes Bob. Carol applies the commit.
+        let remove_bob_commit = remove_member(&alice_db, conv_id, "bob");
+        apply_commit(&carol_db, conv_id, &remove_bob_commit);
+
+        // Alice and Carol can still communicate.
+        let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
+        assert_eq!(try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap(), b"bob is gone");
+
+        let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"confirmed").unwrap();
+        assert_eq!(try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap(), b"confirmed");
+
+        // Bob cannot decrypt post-removal messages.
+        assert!(
+            try_mls_decrypt(&bob_db, conv_id, &alice_ct).is_none(),
+            "removed bob must not decrypt"
+        );
+
+        // Alice adds Dave. Carol applies the commit.
+        let dave_kp = gen_key_package(&dave_db, "dave");
+        let (add_dave_commit, dave_welcome) = add_member_to_group(&alice_db, conv_id, &dave_kp);
+        join_via_welcome(&dave_db, &dave_welcome);
+        apply_commit(&carol_db, conv_id, &add_dave_commit);
+
+        // All three current members (Alice, Carol, Dave) can communicate.
+        let dave_ct = try_mls_encrypt(&dave_db, conv_id, b"dave here").unwrap();
+        assert_eq!(try_mls_decrypt(&alice_db, conv_id, &dave_ct).unwrap(), b"dave here");
+        assert_eq!(try_mls_decrypt(&carol_db, conv_id, &dave_ct).unwrap(), b"dave here");
+
+        // Bob still cannot decrypt.
+        assert!(
+            try_mls_decrypt(&bob_db, conv_id, &dave_ct).is_none(),
+            "bob must still be locked out after new member joins"
+        );
+    }
+
     /// After multiple add/remove cycles the group epoch is consistent and
     /// only current members can decrypt.
     #[test]
@@ -1452,6 +1517,89 @@ mod tests {
         assert!(
             try_mls_decrypt(&bob_db, conv_id, &ct).is_none(),
             "removed Bob must not decrypt after key rotation"
+        );
+    }
+
+    /// Simulates account deletion: when a user is removed from a group (as
+    /// part of account deletion), the remaining members' keys should rotate
+    /// so the deleted user cannot decrypt future messages.
+    ///
+    /// The `delete_account` command (auth.rs) enumerates all groups and DM
+    /// channels the user belongs to and calls `remove_member_mls_inner` for
+    /// each before deleting DB rows.  This test verifies the underlying MLS
+    /// removal + epoch advance works across multiple groups.
+    ///
+    /// See: https://github.com/actuallydan/pollis/issues/103
+    #[test]
+    fn account_deletion_rotates_keys_for_remaining_members() {
+        let group1 = "01JTEST000000000000ACCTDEL1";
+        let group2 = "01JTEST000000000000ACCTDEL2";
+
+        let alice_db = make_db();
+        let bob_db = make_db();
+        let carol_db = make_db();
+
+        // --- Group 1: Alice + Bob + Carol ---
+        create_group(&alice_db, group1, "alice");
+
+        let bob_kp1 = gen_key_package(&bob_db, "bob");
+        let (_, bob_welcome1) = add_member_to_group(&alice_db, group1, &bob_kp1);
+        join_via_welcome(&bob_db, &bob_welcome1);
+
+        let carol_kp1 = gen_key_package(&carol_db, "carol");
+        let (add_carol_commit1, carol_welcome1) = add_member_to_group(&alice_db, group1, &carol_kp1);
+        join_via_welcome(&carol_db, &carol_welcome1);
+        apply_commit(&bob_db, group1, &add_carol_commit1);
+
+        // --- Group 2: Alice + Bob (Carol not in this one) ---
+        create_group(&alice_db, group2, "alice");
+
+        let bob_kp2 = gen_key_package(&bob_db, "bob");
+        let (_, bob_welcome2) = add_member_to_group(&alice_db, group2, &bob_kp2);
+        join_via_welcome(&bob_db, &bob_welcome2);
+
+        // Verify Bob can read in both groups before deletion.
+        let pre_g1 = try_mls_encrypt(&alice_db, group1, b"pre-delete g1").unwrap();
+        assert_eq!(try_mls_decrypt(&bob_db, group1, &pre_g1).unwrap(), b"pre-delete g1");
+
+        let pre_g2 = try_mls_encrypt(&alice_db, group2, b"pre-delete g2").unwrap();
+        assert_eq!(try_mls_decrypt(&bob_db, group2, &pre_g2).unwrap(), b"pre-delete g2");
+
+        // --- Simulate account deletion for Bob ---
+        // In production this would be done by delete_account iterating all
+        // groups and calling remove_member_mls_inner for each. Here we do
+        // the MLS removal manually per group.
+
+        // Remove Bob from group 1 — Carol applies commit.
+        let remove_g1 = remove_member(&alice_db, group1, "bob");
+        apply_commit(&carol_db, group1, &remove_g1);
+
+        // Remove Bob from group 2 — no other non-alice members to notify.
+        let _remove_g2 = remove_member(&alice_db, group2, "bob");
+
+        // --- Verify key rotation: Bob locked out of both groups ---
+        let post_g1 = try_mls_encrypt(&alice_db, group1, b"post-delete g1").unwrap();
+        assert!(
+            try_mls_decrypt(&bob_db, group1, &post_g1).is_none(),
+            "deleted Bob must not decrypt group1 messages after account deletion"
+        );
+
+        let post_g2 = try_mls_encrypt(&alice_db, group2, b"post-delete g2").unwrap();
+        assert!(
+            try_mls_decrypt(&bob_db, group2, &post_g2).is_none(),
+            "deleted Bob must not decrypt group2 messages after account deletion"
+        );
+
+        // --- Verify remaining members still work ---
+        // Group 1: Alice and Carol can still communicate.
+        assert_eq!(
+            try_mls_decrypt(&carol_db, group1, &post_g1).unwrap(),
+            b"post-delete g1"
+        );
+        let carol_msg = try_mls_encrypt(&carol_db, group1, b"carol still here").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&alice_db, group1, &carol_msg).unwrap(),
+            b"carol still here"
         );
     }
 }

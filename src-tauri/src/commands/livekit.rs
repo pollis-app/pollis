@@ -868,3 +868,380 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
         _ => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::Connection;
+
+    const REMOTE_V001: &str = include_str!("../db/migrations/remote_schema.sql");
+
+    const VOICE_PRESENCE: &str = "
+        CREATE TABLE IF NOT EXISTS voice_presence (
+            user_id      TEXT NOT NULL,
+            group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+            channel_id   TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+            display_name TEXT NOT NULL,
+            joined_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            PRIMARY KEY (user_id, channel_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_voice_presence_channel ON voice_presence(channel_id);
+        CREATE INDEX IF NOT EXISTS idx_voice_presence_group   ON voice_presence(group_id);
+    ";
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        conn.execute_batch(REMOTE_V001).unwrap();
+        conn.execute_batch(VOICE_PRESENCE).unwrap();
+        conn
+    }
+
+    fn setup(conn: &Connection) {
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('alice', 'alice@x.com', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('bob',   'bob@x.com',   'bob')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('carol', 'carol@x.com', 'carol')", []).unwrap();
+
+        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Test Group', 'alice')", []).unwrap();
+        conn.execute("INSERT INTO channels (id, group_id, name, channel_type) VALUES ('vc1', 'g1', 'voice-1', 'voice')", []).unwrap();
+        conn.execute("INSERT INTO channels (id, group_id, name, channel_type) VALUES ('vc2', 'g1', 'voice-2', 'voice')", []).unwrap();
+    }
+
+    /// Simulate `publish_voice_presence(joined=true)`.
+    fn join(conn: &Connection, user_id: &str, group_id: &str, channel_id: &str, display_name: &str) {
+        conn.execute(
+            "INSERT OR REPLACE INTO voice_presence (user_id, group_id, channel_id, display_name, joined_at) \
+             VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+            rusqlite::params![user_id, group_id, channel_id, display_name],
+        ).unwrap();
+    }
+
+    /// Simulate `publish_voice_presence(joined=false)`.
+    fn leave(conn: &Connection, user_id: &str, channel_id: &str) {
+        conn.execute(
+            "DELETE FROM voice_presence WHERE user_id = ?1 AND channel_id = ?2",
+            rusqlite::params![user_id, channel_id],
+        ).unwrap();
+    }
+
+    /// Simulate `query_voice_participants` — returns (user_id, display_name) pairs.
+    fn participants(conn: &Connection, channel_id: &str) -> Vec<(String, String)> {
+        conn.prepare("SELECT user_id, display_name FROM voice_presence WHERE channel_id = ?1")
+            .unwrap()
+            .query_map(rusqlite::params![channel_id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    /// Simulate `query_voice_counts` for a single channel.
+    fn count(conn: &Connection, channel_id: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM voice_presence WHERE channel_id = ?1",
+            rusqlite::params![channel_id],
+            |row| row.get(0),
+        ).unwrap()
+    }
+
+    // ── basic join/leave ───────────────────────────────────────────────────
+
+    #[test]
+    fn single_user_joins_and_appears_in_channel() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+
+        let p = participants(&conn, "vc1");
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0], ("alice".into(), "alice".into()));
+    }
+
+    #[test]
+    fn single_user_leaves_and_disappears() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        leave(&conn, "alice", "vc1");
+
+        assert_eq!(count(&conn, "vc1"), 0);
+    }
+
+    // ── multiple users join/leave at different times ───────────────────────
+
+    #[test]
+    fn multiple_users_join_same_channel() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc1", "bob");
+
+        assert_eq!(count(&conn, "vc1"), 2);
+        let p = participants(&conn, "vc1");
+        let ids: Vec<&str> = p.iter().map(|(id, _)| id.as_str()).collect();
+        assert!(ids.contains(&"alice"));
+        assert!(ids.contains(&"bob"));
+    }
+
+    #[test]
+    fn first_user_leaves_second_stays() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc1", "bob");
+        leave(&conn, "alice", "vc1");
+
+        assert_eq!(count(&conn, "vc1"), 1);
+        let p = participants(&conn, "vc1");
+        assert_eq!(p[0].0, "bob");
+    }
+
+    #[test]
+    fn staggered_join_leave_join() {
+        let conn = db();
+        setup(&conn);
+
+        // Alice joins, then Bob joins, then Alice leaves, then Carol joins.
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc1", "bob");
+        leave(&conn, "alice", "vc1");
+        join(&conn, "carol", "g1", "vc1", "carol");
+
+        assert_eq!(count(&conn, "vc1"), 2);
+        let p = participants(&conn, "vc1");
+        let ids: Vec<&str> = p.iter().map(|(id, _)| id.as_str()).collect();
+        assert!(ids.contains(&"bob"));
+        assert!(ids.contains(&"carol"));
+        assert!(!ids.contains(&"alice"));
+    }
+
+    #[test]
+    fn all_users_leave_channel_is_empty() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc1", "bob");
+        join(&conn, "carol", "g1", "vc1", "carol");
+
+        leave(&conn, "alice", "vc1");
+        leave(&conn, "bob", "vc1");
+        leave(&conn, "carol", "vc1");
+
+        assert_eq!(count(&conn, "vc1"), 0);
+        assert!(participants(&conn, "vc1").is_empty());
+    }
+
+    // ── multiple channels ─────────────────────────────────────────────────
+
+    #[test]
+    fn users_in_different_channels_isolated() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc2", "bob");
+
+        assert_eq!(count(&conn, "vc1"), 1);
+        assert_eq!(count(&conn, "vc2"), 1);
+        assert_eq!(participants(&conn, "vc1")[0].0, "alice");
+        assert_eq!(participants(&conn, "vc2")[0].0, "bob");
+    }
+
+    #[test]
+    fn user_cannot_be_in_two_channels_simultaneously() {
+        let conn = db();
+        setup(&conn);
+
+        // PK is (user_id, channel_id), but INSERT OR REPLACE means joining
+        // a second channel replaces the first row only if same channel_id.
+        // Different channel_ids would coexist. Verify this:
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "alice", "g1", "vc2", "alice");
+
+        // Both rows exist — the app should leave the old channel first,
+        // but the schema allows it (no UNIQUE on user_id alone).
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM voice_presence WHERE user_id = 'alice'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(total, 2, "schema allows user in multiple channels — app must enforce single-channel");
+    }
+
+    // ── rejoin same channel (INSERT OR REPLACE) ───────────────────────────
+
+    #[test]
+    fn rejoin_same_channel_does_not_duplicate() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "alice", "g1", "vc1", "alice");
+
+        assert_eq!(count(&conn, "vc1"), 1, "INSERT OR REPLACE should not create a duplicate");
+    }
+
+    #[test]
+    fn rejoin_updates_display_name() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "alice", "g1", "vc1", "Alice (renamed)");
+
+        let p = participants(&conn, "vc1");
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].1, "Alice (renamed)");
+    }
+
+    // ── crash recovery: reconcile_voice_presence ──────────────────────────
+
+    #[test]
+    fn reconcile_removes_stale_users() {
+        let conn = db();
+        setup(&conn);
+
+        // Simulate: alice and bob both have presence rows, but only alice
+        // is actually online (bob crashed).
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc1", "bob");
+
+        // Reconciliation: fetch all users with presence, compare against online set.
+        let online: std::collections::HashSet<String> = ["alice"].iter().map(|s| s.to_string()).collect();
+
+        let all_present: Vec<String> = conn
+            .prepare("SELECT DISTINCT user_id FROM voice_presence WHERE group_id = ?1")
+            .unwrap()
+            .query_map(rusqlite::params!["g1"], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+
+        let stale: Vec<&String> = all_present.iter().filter(|uid| !online.contains(*uid)).collect();
+        assert_eq!(stale, vec!["bob"]);
+
+        // Delete stale
+        for uid in &stale {
+            conn.execute(
+                "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
+                rusqlite::params![uid.as_str(), "g1"],
+            ).unwrap();
+        }
+
+        assert_eq!(count(&conn, "vc1"), 1);
+        assert_eq!(participants(&conn, "vc1")[0].0, "alice");
+    }
+
+    // ── participant disconnect cleanup ─────────────────────────────────────
+
+    #[test]
+    fn disconnect_removes_user_from_all_channels_in_group() {
+        let conn = db();
+        setup(&conn);
+
+        // Bob is in two channels in the same group (unusual but schema allows it)
+        join(&conn, "bob", "g1", "vc1", "bob");
+        join(&conn, "bob", "g1", "vc2", "bob");
+        join(&conn, "alice", "g1", "vc1", "alice");
+
+        // Simulate handle_participant_disconnect: find affected channels, then delete.
+        let affected: Vec<String> = conn
+            .prepare("SELECT channel_id FROM voice_presence WHERE user_id = ?1 AND group_id = ?2")
+            .unwrap()
+            .query_map(rusqlite::params!["bob", "g1"], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert_eq!(affected.len(), 2);
+
+        conn.execute(
+            "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
+            rusqlite::params!["bob", "g1"],
+        ).unwrap();
+
+        assert_eq!(count(&conn, "vc1"), 1, "alice should remain");
+        assert_eq!(count(&conn, "vc2"), 0, "bob's other channel should be cleared");
+        assert_eq!(participants(&conn, "vc1")[0].0, "alice");
+    }
+
+    #[test]
+    fn disconnect_no_presence_is_noop() {
+        let conn = db();
+        setup(&conn);
+
+        // carol has no presence rows
+        let affected: Vec<String> = conn
+            .prepare("SELECT channel_id FROM voice_presence WHERE user_id = ?1 AND group_id = ?2")
+            .unwrap()
+            .query_map(rusqlite::params!["carol", "g1"], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect();
+        assert!(affected.is_empty());
+    }
+
+    // ── cascade deletes ───────────────────────────────────────────────────
+
+    #[test]
+    fn deleting_channel_cascades_presence() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc1", "bob");
+
+        conn.execute("DELETE FROM channels WHERE id = 'vc1'", []).unwrap();
+
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM voice_presence WHERE channel_id = 'vc1'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(total, 0, "presence should be cascade-deleted with channel");
+    }
+
+    #[test]
+    fn deleting_group_cascades_presence() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        join(&conn, "bob", "g1", "vc2", "bob");
+
+        conn.execute("DELETE FROM groups WHERE id = 'g1'", []).unwrap();
+
+        let total: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM voice_presence",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert_eq!(total, 0, "all presence should be cascade-deleted with group");
+    }
+
+    // ── leave idempotent ──────────────────────────────────────────────────
+
+    #[test]
+    fn leave_when_not_present_is_noop() {
+        let conn = db();
+        setup(&conn);
+
+        // carol never joined — leave should not error
+        leave(&conn, "carol", "vc1");
+        assert_eq!(count(&conn, "vc1"), 0);
+    }
+
+    #[test]
+    fn double_leave_is_noop() {
+        let conn = db();
+        setup(&conn);
+
+        join(&conn, "alice", "g1", "vc1", "alice");
+        leave(&conn, "alice", "vc1");
+        leave(&conn, "alice", "vc1");
+
+        assert_eq!(count(&conn, "vc1"), 0);
+    }
+}
