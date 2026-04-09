@@ -17,7 +17,7 @@ interface MessageItemProps {
   authorUsername?: string;
   isAuthorAdmin?: boolean;
   onReply?: (messageId: string) => void;
-  onEdit?: (messageId: string, newContent: string) => Promise<void>;
+  onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
@@ -44,12 +44,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   const { currentUser } = useAppStore();
   const isOwn = message.sender_id === currentUser?.id;
 
-  // Inline edit state.
-  const [isEditing, setIsEditing] = useState(false);
-  const [editValue, setEditValue] = useState('');
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const editInputRef = useRef<HTMLTextAreaElement>(null);
-
   const replyTo = message.reply_to_message_id
     ? allMessages.find((m) => m.id === message.reply_to_message_id)
     : null;
@@ -64,58 +58,19 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   // null). Show [encrypted] in that case rather than an empty row.
   const content = isDeleted ? "[deleted]" : (message.content_decrypted ?? "[encrypted]");
 
-  const handleStartEdit = () => {
-    setEditValue(message.content_decrypted ?? '');
-    setIsEditing(true);
-  };
-
-  // Focus the textarea when entering edit mode.
-  useEffect(() => {
-    if (isEditing) {
-      editInputRef.current?.focus();
-      // Place cursor at the end.
-      const len = editInputRef.current?.value.length ?? 0;
-      editInputRef.current?.setSelectionRange(len, len);
-    }
-  }, [isEditing]);
-
-  const handleSaveEdit = async () => {
-    const trimmed = editValue.trim();
-    if (!trimmed || !onEdit) {
-      return;
-    }
-    setIsSavingEdit(true);
-    try {
-      await onEdit(message.id, trimmed);
-      setIsEditing(false);
-    } finally {
-      setIsSavingEdit(false);
-    }
-  };
-
-  const handleEditKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSaveEdit();
-    }
-    if (e.key === 'Escape') {
-      setIsEditing(false);
-    }
-  };
-
   // Sort attachments: images and videos first, then everything else.
   const sortedAttachments = message.attachments && message.attachments.length > 0
     ? [...message.attachments].sort((a, b) => {
-        const rank = (ct: string) => ct.startsWith("image/") || ct.startsWith("video/") ? 0 : 1;
-        return rank(a.content_type) - rank(b.content_type);
-      })
+      const rank = (ct: string) => ct.startsWith("image/") || ct.startsWith("video/") ? 0 : 1;
+      return rank(a.content_type) - rank(b.content_type);
+    })
     : null;
 
   return (
     <div
       data-testid={`message-${message.id}`}
       aria-label={`Message from ${authorUsername}`}
-      className="group relative px-3 py-1 mb-0.5 hover:bg-[var(--c-hover)] transition-colors duration-75"
+      className="group relative px-4 py-1 hover:bg-[var(--c-hover)] transition-colors duration-75"
     >
       {/* Reply thread indicator */}
       {message.reply_to_message_id && (
@@ -123,7 +78,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           <button
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
             style={{ color: "var(--c-text-muted)" }}
           >
             <Reply size={10} style={{ transform: "scaleX(-1)" }} />
@@ -139,7 +94,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14"
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 pl-14"
             style={{ color: "var(--c-text-dim)" }}
           >
             <Reply size={10} style={{ transform: "scaleX(-1)" }} />
@@ -149,7 +104,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       )}
 
       {/* IRC-style inline row: HH:MM  username  message */}
-      <div className="flex items-baseline gap-0 min-w-0">
+      <div className="flex items-start gap-0 min-w-0">
         <span
           data-testid="message-timestamp"
           className="flex-shrink-0 text-sm font-mono tabular-nums select-none w-12 mr-2"
@@ -164,8 +119,8 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={isAuthorAdmin ? {
             background: "var(--c-accent)",
             color: "var(--c-bg)",
-            paddingLeft: "3px",
-            paddingRight: "3px",
+            paddingLeft: "0.5rem",
+            paddingRight: "0.5rem",
           } : {
             color: isOwn ? "var(--c-accent)" : "var(--c-text-dim)",
           }}
@@ -181,74 +136,47 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           {":"}
         </span>
 
-        {isEditing ? (
-          <span className="flex-1 min-w-0 flex flex-col gap-1">
-            <textarea
-              ref={editInputRef}
-              data-testid="edit-message-input"
-              value={editValue}
-              onChange={(e) => setEditValue(e.target.value)}
-              onKeyDown={handleEditKeyDown}
-              disabled={isSavingEdit}
-              rows={2}
-              className="w-full font-mono text-sm resize-none focus:outline-none"
-              style={{
-                background: "var(--c-surface)",
-                color: "var(--c-text)",
-                border: "1px solid var(--c-border-active)",
-                borderRadius: "4px",
-                padding: "2px 6px",
-              }}
-            />
-            <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-              Enter to save · Esc to cancel
+        <span
+          data-testid="message-content"
+          className="font-mono text-sm break-words flex-1 min-w-0"
+          style={{
+            color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
+            whiteSpace: "pre-wrap",
+            fontStyle: isDeleted ? "italic" : undefined,
+          }}
+        >
+          <LinkifiedText text={content} />
+          {message.edited_at && !isDeleted && (
+            <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+              (edited)
             </span>
-          </span>
-        ) : (
-          <span
-            data-testid="message-content"
-            className="font-mono text-sm break-words flex-1 min-w-0"
-            style={{
-              color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
-              whiteSpace: "pre-wrap",
-              fontStyle: isDeleted ? "italic" : undefined,
-            }}
-          >
-            <LinkifiedText text={content} />
-            {message.edited_at && !isDeleted && (
-              <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
-                (edited)
-              </span>
-            )}
-            {message.status && message.status !== "sent" && (
-              <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
-                [{message.status}]
-              </span>
-            )}
-          </span>
-        )}
+          )}
+          {message.status && message.status !== "sent" && (
+            <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+              [{message.status}]
+            </span>
+          )}
+        </span>
 
-        {/* Action buttons — only visible on hover, only for own non-deleted messages */}
-        {!isDeleted && !isEditing && (
-          <div className="flex-shrink-0 ml-1 flex items-center gap-1">
+        {/* Action buttons — only visible on hover */}
+        {!isDeleted && (
+          <div className="flex-shrink-0 ml-2 flex items-center gap-4 h-6">
             <button
               data-testid="reply-button"
               onClick={() => onReply?.(message.id)}
               aria-label="Reply"
-              className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-              style={{ color: "var(--c-text-muted)" }}
+              className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
             >
-              <Reply size={12} />
+              <Reply size={18} />
             </button>
             {isOwn && onEdit && (
               <button
                 data-testid="edit-button"
-                onClick={handleStartEdit}
+                onClick={() => onEdit(message.id)}
                 aria-label="Edit message"
-                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-                style={{ color: "var(--c-text-muted)" }}
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
               >
-                <Edit2 size={12} />
+                <Edit2 size={18} />
               </button>
             )}
             {isOwn && onDelete && (
@@ -256,10 +184,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                 data-testid="delete-button"
                 onClick={() => onDelete(message.id)}
                 aria-label="Delete message"
-                className="opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-                style={{ color: "var(--c-text-muted)" }}
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
               >
-                <Trash2 size={12} />
+                <Trash2 size={18} />
               </button>
             )}
           </div>

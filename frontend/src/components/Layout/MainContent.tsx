@@ -1,4 +1,5 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
+import { X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
@@ -68,15 +69,56 @@ export const MainContent: React.FC = () => {
   // ID of message pending delete confirmation (null = no dialog).
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
+  // Message currently being edited (null = not editing).
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null);
+  const [editDraftValue, setEditDraftValue] = useState('');
+  const [editBarFocused, setEditBarFocused] = useState(false);
+  const editTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   const [olderMessages, setOlderMessages] = useState<Message[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pageCursor, setPageCursor] = useState<PageCursor | null>(null);
 
-  // Reset pagination state when the selected channel/conversation changes.
+  // Reset pagination and edit state when the selected channel/conversation changes.
   useEffect(() => {
     setOlderMessages([]);
     setPageCursor(null);
+    setEditingMessage(null);
   }, [selectedChannelId, selectedConversationId]);
+
+  // Focus the edit textarea and place cursor at end when entering edit mode.
+  useEffect(() => {
+    if (!editingMessage) {
+      return;
+    }
+    const el = editTextareaRef.current;
+    if (!el) {
+      return;
+    }
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [editingMessage]);
+
+  // Escape cancels edit/delete/reply bar — capture phase so AppShell's navigation handler doesn't fire first.
+  useEffect(() => {
+    if (!editingMessage && !pendingDeleteId && !replyToMessageId) {
+      return;
+    }
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopImmediatePropagation();
+        if (editingMessage) {
+          handleCancelEdit();
+        } else if (pendingDeleteId) {
+          setPendingDeleteId(null);
+        } else {
+          setReplyToMessageId(null);
+        }
+      }
+    };
+    window.addEventListener('keydown', handler, { capture: true });
+    return () => window.removeEventListener('keydown', handler, { capture: true });
+  }, [editingMessage, pendingDeleteId, replyToMessageId]);
 
   // Initialise the cursor from the initial page load (only if no older pages
   // have been fetched yet — don't overwrite cursor mid-pagination).
@@ -153,12 +195,47 @@ export const MainContent: React.FC = () => {
     }
   };
 
-  const handleEdit = async (messageId: string, newContent: string) => {
+  const handleEdit = (messageId: string) => {
+    const message = allMessages.find((m) => m.id === messageId);
+    if (!message) {
+      return;
+    }
+    setPendingDeleteId(null);
+    setReplyToMessageId(null);
+    setEditDraftValue(message.content_decrypted ?? '');
+    setEditingMessage(message);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingMessage(null);
+  };
+
+  const handleDelete = (messageId: string) => {
+    setEditingMessage(null);
+    setReplyToMessageId(null);
+    setPendingDeleteId(messageId);
+  };
+
+  const handleSaveEdit = async () => {
+    const trimmed = editDraftValue.trim();
+    if (!trimmed || !editingMessage) {
+      return;
+    }
     const conversationId = selectedChannelId ?? selectedConversationId;
     if (!conversationId) {
       return;
     }
-    await editMessageMutation.mutateAsync({ conversationId, messageId, newContent });
+    try {
+      await editMessageMutation.mutateAsync({
+        conversationId,
+        channelId: selectedChannelId ?? undefined,
+        messageId: editingMessage.id,
+        newContent: trimmed,
+      });
+      setEditingMessage(null);
+    } catch (error) {
+      console.error("Failed to edit message:", error);
+    }
   };
 
   const handleSend = async (text: string, attachments: Attachment[]) => {
@@ -323,11 +400,13 @@ export const MainContent: React.FC = () => {
             messages={allMessages}
             adminUserIds={selectedGroupId ? adminUserIds : undefined}
             onReply={(id) => {
+              setEditingMessage(null);
+              setPendingDeleteId(null);
               setReplyToMessageId(id);
               chatInputRef.current?.focus();
             }}
             onEdit={handleEdit}
-            onDelete={(id) => setPendingDeleteId(id)}
+            onDelete={handleDelete}
             onScrollToMessage={(id) => console.log("Scroll to:", id)}
             getAuthorUsername={(authorId, message) =>
               message?.sender_username || (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId)
@@ -350,65 +429,95 @@ export const MainContent: React.FC = () => {
 
       <MessageQueue />
 
-      <div data-testid="message-form">
-        <ChatInput ref={chatInputRef} onSend={handleSend} autoFocus />
-      </div>
-
-      {/* Delete confirmation overlay */}
-      {pendingDeleteId && (
-        <div
-          data-testid="delete-message-overlay"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 9999,
-            background: "rgba(0,0,0,0.7)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-          onClick={() => setPendingDeleteId(null)}
-        >
+      {editingMessage ? (
+        <div data-testid="edit-message-bar">
           <div
-            className="flex flex-col gap-4 p-6"
-            style={{
-              background: "var(--c-surface)",
-              border: "1px solid var(--c-border)",
-              borderRadius: "8px",
-              minWidth: 280,
-              maxWidth: 380,
-            }}
-            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
+            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
           >
-            <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
-              Delete this message? It will be removed from your view.
-              Others who already received it may still see it.
-            </p>
-            {deleteMessageMutation.isError && (
-              <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
-                Failed to delete. Please try again.
-              </p>
-            )}
-            <div className="flex gap-3 justify-end">
-              <Button
-                data-testid="delete-message-cancel"
-                variant="secondary"
-                onClick={() => setPendingDeleteId(null)}
-                disabled={deleteMessageMutation.isPending}
-              >
-                Cancel
-              </Button>
-              <Button
-                data-testid="delete-message-confirm"
-                variant="danger"
-                onClick={handleConfirmDelete}
-                isLoading={deleteMessageMutation.isPending}
-                loadingText="Deleting…"
-              >
-                Delete
-              </Button>
-            </div>
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+              editing message
+            </span>
+            <button
+              data-testid="cancel-edit-button"
+              onClick={handleCancelEdit}
+              aria-label="Cancel editing"
+              className="icon-btn-sm flex-shrink-0"
+            >
+              <X size={20} aria-hidden="true" />
+            </button>
           </div>
+          <div className="px-4 pb-3 pt-1" style={{ background: 'var(--c-surface)' }}>
+            <textarea
+              ref={editTextareaRef}
+              data-testid="edit-message-bar-input"
+              value={editDraftValue}
+              onChange={(e) => setEditDraftValue(e.target.value)}
+              onFocus={() => setEditBarFocused(true)}
+              onBlur={() => setEditBarFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSaveEdit();
+                }
+              }}
+              disabled={editMessageMutation.isPending}
+              rows={2}
+              className="chat-input-textarea w-full font-mono text-sm resize-none transition-colors"
+              style={{
+                borderRadius: '4px',
+                border: 'none',
+                outline: 'none',
+                padding: '4px 8px',
+                background: editBarFocused ? 'var(--c-accent)' : 'var(--c-hover)',
+                color: editBarFocused ? 'var(--c-bg)' : 'var(--c-text)',
+                opacity: editMessageMutation.isPending ? 0.5 : 1,
+              }}
+            />
+            <p className="text-2xs font-mono mt-1" style={{ color: 'var(--c-text-muted)' }}>
+              Enter to save · Shift+Enter for newline · Esc to cancel
+            </p>
+          </div>
+        </div>
+      ) : pendingDeleteId ? (
+        <div data-testid="delete-message-bar">
+          <div
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
+            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+          >
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+              delete message
+            </span>
+            <button
+              data-testid="delete-message-cancel"
+              onClick={() => setPendingDeleteId(null)}
+              aria-label="Cancel delete"
+              className="icon-btn-sm flex-shrink-0"
+            >
+              <X size={20} aria-hidden="true" />
+            </button>
+          </div>
+          <div
+            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
+            style={{ background: 'var(--c-surface)' }}
+          >
+            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+              This message will be deleted from the channel. Others who already received it may still see it.
+            </p>
+            <Button
+              data-testid="delete-message-confirm"
+              variant="danger"
+              onClick={handleConfirmDelete}
+              isLoading={deleteMessageMutation.isPending}
+              loadingText="Deleting…"
+            >
+              Delete
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div data-testid="message-form">
+          <ChatInput ref={chatInputRef} onSend={handleSend} autoFocus />
         </div>
       )}
     </div>

@@ -6,7 +6,7 @@ interface MessageListProps {
   messages: Message[];
   adminUserIds?: Set<string>;
   onReply?: (messageId: string) => void;
-  onEdit?: (messageId: string, newContent: string) => Promise<void>;
+  onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToMessage?: (messageId: string) => void;

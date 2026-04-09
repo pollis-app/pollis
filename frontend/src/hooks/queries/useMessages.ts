@@ -398,20 +398,24 @@ export function useDeleteMessage() {
   });
 }
 
+type EditMessageVars = {
+  conversationId: string;
+  channelId?: string;
+  messageId: string;
+  newContent: string;
+};
+
+type EditMessageContext = {
+  queryKey: readonly unknown[];
+  previousData: MessagesQueryResult | undefined;
+};
+
 export function useEditMessage() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);
 
-  return useMutation({
-    mutationFn: async ({
-      conversationId,
-      messageId,
-      newContent,
-    }: {
-      conversationId: string;
-      messageId: string;
-      newContent: string;
-    }) => {
+  return useMutation<void, Error, EditMessageVars, EditMessageContext>({
+    mutationFn: async ({ conversationId, messageId, newContent }) => {
       if (!currentUser) {
         throw new Error('No current user');
       }
@@ -422,8 +426,39 @@ export function useEditMessage() {
         newContent,
       });
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+    onMutate: async ({ channelId, conversationId, messageId, newContent }) => {
+      const queryKey = channelId
+        ? messageQueryKeys.channel(channelId)
+        : messageQueryKeys.conversation(conversationId);
+
+      await queryClient.cancelQueries({ queryKey });
+      const previousData = queryClient.getQueryData<MessagesQueryResult>(queryKey);
+
+      queryClient.setQueryData<MessagesQueryResult>(queryKey, (old) => {
+        if (!old) {
+          return old;
+        }
+        return {
+          ...old,
+          messages: old.messages.map((m) =>
+            m.id === messageId
+              ? { ...m, content_decrypted: newContent, edited_at: new Date().toISOString() }
+              : m
+          ),
+        };
+      });
+
+      return { queryKey, previousData };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previousData !== undefined) {
+        queryClient.setQueryData(context.queryKey, context.previousData);
+      }
+    },
+    onSettled: (_data, _err, _vars, context) => {
+      if (context) {
+        queryClient.invalidateQueries({ queryKey: context.queryKey });
+      }
     },
   });
 }
