@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Pollis is a privacy-first desktop messaging app with end-to-end encryption using Signal Protocol. Built with Tauri 2 (Rust + React), it combines Signal's security with Slack's group messaging features. The server never sees message plaintext.
+Pollis is a privacy-first desktop messaging app with end-to-end encryption using MLS (Message Layer Security). Built with Tauri 2 (Rust + React), it combines strong group encryption with Slack's group messaging features. The server never sees message plaintext.
 
-**Stack**: Tauri 2, React/TypeScript, Rust, Turso (libSQL), Signal Protocol
+**Stack**: Tauri 2, React/TypeScript, Rust, Turso (libSQL), MLS
 
 **Key Architecture**: Tauri Rust backend connects **directly** to Turso (1 hop) for all CRUD. No separate backend server. All operations go through Tauri commands invoked from the React frontend.
 
@@ -52,20 +52,20 @@ Secrets are managed via **Doppler**, which syncs to GitHub Actions secrets autom
 - Groups and channels CRUD
 - Reading/writing to Turso
 - R2 uploads/downloads
-- Signal protocol operations
+- MLS group encryption operations
 - Auth (email OTP + session in OS keystore)
 
 ### Data Storage Model
 
 **Remote Database (Turso)** — public metadata:
 - Users, groups, channels, membership
-- Public keys for Signal Protocol key exchange
+- Public keys for MLS key exchange
 - Encrypted message envelopes (for offline delivery)
 - **Never stores**: message plaintext, private keys
 
 **Local Database (SQLite via rusqlite)** — secrets:
 - Encrypted messages (ciphertext, nonce)
-- Signal protocol session state
+- MLS group state
 - **Never stores**: user profiles, groups, channels (fetched from remote)
 
 **OS Keystore (keyring crate)**:
@@ -97,7 +97,7 @@ Implemented in `src-tauri/src/commands/`, registered in `src-tauri/src/lib.rs`:
 - **user**: `get_user_profile`, `update_user_profile`, `search_user_by_username`
 - **groups**: `list_user_groups`, `list_group_channels`, `create_group`, `create_channel`, `invite_to_group`
 - **messages**: `list_messages`, `send_message`, `poll_pending_messages`
-- **signal**: `get_prekey_bundle`, `rotate_signed_prekey`, `replenish_one_time_prekeys`
+- **mls**: MLS group key operations (legacy `signal/` directory is being removed)
 - **livekit**: `get_livekit_token`
 - **r2**: `upload_file`, `download_file`
 
@@ -110,7 +110,7 @@ src-tauri/              # Rust backend (Tauri)
     config.rs           # Config from env vars
     db.rs               # Turso + local SQLite
     keystore.rs         # OS keystore (keyring)
-    signal/             # Signal protocol
+    signal/             # Legacy Signal protocol (being replaced by MLS)
     state.rs            # AppState
     lib.rs              # App setup, command registration
 frontend/               # React app (Vite, TypeScript, TailwindCSS)
@@ -154,6 +154,8 @@ website/                # Next.js marketing site (Vercel)
 - **Never add Claude as a co-author on commits** — do not include `Co-Authored-By:` trailers or any Claude attribution in commit messages
 - **Never remove `data-testid` attributes** from JSX/HTML — they are used by Playwright E2E tests (`pnpm test:e2e`)
 - **Never reinvent UI components** — always use existing components from `frontend/src/components/ui/`. Toggles/switches use `Switch`, buttons use `Button`, text inputs use `TextInput`, etc. Do not build custom styled `<button>` or `<input>` elements when a ui/ component already exists.
+- **NO MODALS** — this is absolute. No fixed-position overlays, no backdrops, no dialog elements, no modal patterns of any kind. The only exception is the Cmd+K search menu. If a flow needs confirmation or input, replace the chat input bar (edit/delete bar pattern in `MainContent`) or navigate to a new page/view. A full page with two buttons is preferable to a modal.
+- **Confirmation and editing flows replace the chat input bar** — render a bar in place of the chat input at the bottom of `MainContent`, following the edit/delete bar pattern already established there.
 
 ## Coding Style
 
