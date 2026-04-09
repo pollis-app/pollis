@@ -24,6 +24,9 @@ pub struct AppState {
     pub livekit: Arc<Mutex<LiveKitState>>,
     pub voice: Arc<Mutex<VoiceState>>,
     pub update_required: Arc<AtomicBool>,
+    /// Per-device ULID, set during login. Each physical device gets a stable ID
+    /// stored in the OS keystore so it survives local DB wipes.
+    pub device_id: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -38,6 +41,7 @@ impl AppState {
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
             voice: Arc::new(Mutex::new(VoiceState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
+            device_id: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -63,12 +67,31 @@ impl AppState {
             .unwrap_or(true);
 
         if mls_empty {
+            // Load the device_id from keystore (if it exists yet) to scope the
+            // reset to THIS device only.  Without scoping, resetting all of a
+            // user's welcomes would cause other devices to re-process welcomes
+            // and destroy their working MLS group state.
+            let maybe_device_id = keystore::load_for_user("device_id", user_id).await
+                .ok()
+                .flatten()
+                .and_then(|b| String::from_utf8(b).ok());
+
             match self.remote_db.conn().await {
                 Ok(conn) => {
-                    let _ = conn.execute(
-                        "UPDATE mls_welcome SET delivered = 0 WHERE recipient_id = ?1",
-                        libsql::params![user_id],
-                    ).await;
+                    if let Some(ref did) = maybe_device_id {
+                        let _ = conn.execute(
+                            "UPDATE mls_welcome SET delivered = 0 \
+                             WHERE recipient_id = ?1 AND (recipient_device_id = ?2 OR recipient_device_id IS NULL)",
+                            libsql::params![user_id, did.clone()],
+                        ).await;
+                    } else {
+                        // First login ever (no device_id yet) — safe to reset all
+                        // since no other device can exist for this user yet.
+                        let _ = conn.execute(
+                            "UPDATE mls_welcome SET delivered = 0 WHERE recipient_id = ?1",
+                            libsql::params![user_id],
+                        ).await;
+                    }
                 }
                 Err(e) => {
                     eprintln!("[state] load_user_db: failed to reset mls_welcome (non-fatal): {e}");

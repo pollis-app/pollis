@@ -75,9 +75,26 @@ impl From<MlsStorageError> for crate::error::Error {
     }
 }
 
+// ── Credential helpers ───────────────────────────────────────────────────────
+
+/// Build an MLS `Credential` encoding both user and device identity.
+///
+/// Format: `"user_id:device_id"` as UTF-8 bytes inside a `BasicCredential`.
+fn make_credential(user_id: &str, device_id: &str) -> Credential {
+    BasicCredential::new(format!("{user_id}:{device_id}").into_bytes()).into()
+}
+
+/// Extract the `user_id` from a credential produced by `make_credential`.
+///
+/// Handles legacy credentials that contain only `user_id` (no colon).
+fn parse_credential_user_id(cred: &Credential) -> String {
+    let s = String::from_utf8_lossy(cred.serialized_content());
+    s.split_once(':').map(|(u, _)| u).unwrap_or(&s).to_string()
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-/// Generate a fresh MLS `KeyPackage` + `SignatureKeyPair` for `user_id` and
+/// Generate a fresh MLS `KeyPackage` + `SignatureKeyPair` for this device and
 /// persist both in the local `mls_kv` table.
 ///
 /// Returns the TLS-serialised `KeyPackage` bytes and its hex-encoded hash ref.
@@ -87,6 +104,9 @@ pub async fn generate_mls_key_package(
     state: State<'_, Arc<AppState>>,
     user_id: String,
 ) -> Result<serde_json::Value> {
+    let device_id = state.device_id.lock().await.clone()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
+
     // All local DB work is sync — collect results in a block before any await.
     let (ref_hex, kp_bytes) = {
         let guard = state.local_db.lock().await;
@@ -102,13 +122,13 @@ pub async fn generate_mls_key_package(
         sig_keys.store(provider.storage())
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
 
-        let credential = BasicCredential::new(user_id.as_bytes().to_vec());
+        let credential = make_credential(&user_id, &device_id);
         let sig_pub = OpenMlsSignaturePublicKey::new(
             sig_keys.to_public_vec().into(),
             CS.signature_algorithm(),
         ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
         let cred_with_key = CredentialWithKey {
-            credential: credential.into(),
+            credential,
             signature_key: sig_pub.into(),
         };
 
@@ -140,10 +160,13 @@ pub async fn publish_mls_key_package(
     ref_hex: String,
     key_package_bytes: Vec<u8>,
 ) -> Result<()> {
+    let device_id = state.device_id.lock().await.clone()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
     let conn = state.remote_db.conn().await?;
     conn.execute(
-        "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package) VALUES (?1, ?2, ?3)",
-        libsql::params![ref_hex, user_id, key_package_bytes],
+        "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
+         VALUES (?1, ?2, ?3, ?4)",
+        libsql::params![ref_hex, user_id, key_package_bytes, device_id],
     ).await?;
     Ok(())
 }
@@ -180,32 +203,31 @@ pub async fn fetch_mls_key_package(
     }
 }
 
-/// Rotate key packages: delete all unclaimed packages for this user from the
+/// Rotate key packages: delete unclaimed packages for this device from the
 /// remote table and publish TARGET fresh ones backed by the current local DB.
 ///
-/// Called from `initialize_identity` on every login.  Deleting stale unclaimed
-/// packages first is critical — if the local DB was wiped (or the user logs in
-/// on a new device), any previously published packages would have orphaned
-/// private keys and cause "No matching key package" errors when peers try to
-/// add this user to an MLS group.
+/// Called from `initialize_identity` on every login.  Only deletes packages
+/// for the current `device_id` — other devices' packages are left intact.
 pub async fn ensure_mls_key_package(
     state: &Arc<AppState>,
     user_id: &str,
+    device_id: &str,
 ) -> Result<()> {
     const TARGET: i64 = 5;
 
     let conn = state.remote_db.conn().await?;
 
-    // Remove any unclaimed packages — their private keys may no longer exist
-    // in the current local DB (e.g. after a wipe or fresh install).
+    // Remove unclaimed packages for THIS device only — their private keys may
+    // no longer exist in the current local DB (e.g. after a wipe).
+    // Also clean up legacy packages with NULL device_id for this user.
     conn.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0",
-        libsql::params![user_id],
+        "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
+         AND (device_id = ?2 OR device_id IS NULL)",
+        libsql::params![user_id, device_id],
     ).await?;
 
     // Generate and publish TARGET fresh packages.
     for _ in 0..TARGET {
-        // Generate one package locally; each iteration creates a distinct key.
         let (ref_hex, kp_bytes) = {
             let guard = state.local_db.lock().await;
             let db = guard.as_ref().ok_or_else(|| {
@@ -218,13 +240,13 @@ pub async fn ensure_mls_key_package(
             sig_keys.store(provider.storage())
                 .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
 
-            let credential = BasicCredential::new(user_id.as_bytes().to_vec());
+            let credential = make_credential(user_id, device_id);
             let sig_pub = OpenMlsSignaturePublicKey::new(
                 sig_keys.to_public_vec().into(),
                 CS.signature_algorithm(),
             ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
             let cred_with_key = CredentialWithKey {
-                credential: credential.into(),
+                credential,
                 signature_key: sig_pub.into(),
             };
 
@@ -244,10 +266,88 @@ pub async fn ensure_mls_key_package(
             (ref_hex, kp_bytes)
         };
 
-        // Upload to remote.
         conn.execute(
-            "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package) VALUES (?1, ?2, ?3)",
-            libsql::params![ref_hex, user_id, kp_bytes],
+            "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![ref_hex, user_id, kp_bytes, device_id],
+        ).await?;
+    }
+
+    Ok(())
+}
+
+/// Top-up key packages for this device to TARGET without deleting existing ones.
+/// Called after processing welcomes (which consume KPs) so the device stays
+/// reachable for future group invites.
+async fn replenish_key_packages(
+    state: &Arc<AppState>,
+    user_id: &str,
+    device_id: &str,
+) -> Result<()> {
+    const TARGET: i64 = 5;
+
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn.query(
+        "SELECT COUNT(*) FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0",
+        libsql::params![user_id, device_id],
+    ).await?;
+    let remaining: i64 = if let Some(row) = rows.next().await? {
+        row.get(0)?
+    } else {
+        0
+    };
+    drop(rows);
+
+    let needed = TARGET - remaining;
+    if needed <= 0 {
+        return Ok(());
+    }
+
+    eprintln!("[mls] replenish: {remaining} unclaimed KPs, publishing {needed} more");
+
+    for _ in 0..needed {
+        let (ref_hex, kp_bytes) = {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(|| {
+                crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+            })?;
+            let provider = PollisProvider::new(db.conn());
+
+            let sig_keys = SignatureKeyPair::new(CS.signature_algorithm())
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
+            sig_keys.store(provider.storage())
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
+
+            let credential = make_credential(user_id, device_id);
+            let sig_pub = OpenMlsSignaturePublicKey::new(
+                sig_keys.to_public_vec().into(),
+                CS.signature_algorithm(),
+            ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+            let cred_with_key = CredentialWithKey {
+                credential,
+                signature_key: sig_pub.into(),
+            };
+
+            let bundle = KeyPackage::builder()
+                .build(CS, &provider, &sig_keys, cred_with_key)
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp build: {e}")))?;
+
+            let kp = bundle.key_package();
+            let hash_ref = kp
+                .hash_ref(provider.crypto())
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp hash_ref: {e}")))?;
+            let ref_hex = hex::encode(hash_ref.as_slice());
+            let kp_bytes = kp
+                .tls_serialize_detached()
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp serialize: {e}")))?;
+
+            (ref_hex, kp_bytes)
+        };
+
+        conn.execute(
+            "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
+             VALUES (?1, ?2, ?3, ?4)",
+            libsql::params![ref_hex, user_id, kp_bytes, device_id],
         ).await?;
     }
 
@@ -268,6 +368,9 @@ pub async fn init_mls_group(
     conversation_id: &str,
     creator_user_id: &str,
 ) -> Result<()> {
+    let device_id = state.device_id.lock().await.clone()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
+
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
@@ -279,13 +382,13 @@ pub async fn init_mls_group(
     sig_keys.store(provider.storage())
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
 
-    let credential = BasicCredential::new(creator_user_id.as_bytes().to_vec());
+    let credential = make_credential(creator_user_id, &device_id);
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
         CS.signature_algorithm(),
     ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
     let cred_with_key = CredentialWithKey {
-        credential: credential.into(),
+        credential,
         signature_key: sig_pub.into(),
     };
 
@@ -387,14 +490,17 @@ pub async fn process_welcome(
 /// `delivered = 1` so it is not processed again.
 ///
 /// Called on startup and from `poll_pending_messages`.
-pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str) -> Result<()> {
+pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, device_id: &str) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
+    // Fetch welcomes targeted at this specific device, plus legacy rows
+    // (recipient_device_id IS NULL) from before multi-device was deployed.
     let mut rows = conn.query(
         "SELECT id, welcome_data FROM mls_welcome \
          WHERE recipient_id = ?1 AND delivered = 0 \
+         AND (recipient_device_id = ?2 OR recipient_device_id IS NULL) \
          ORDER BY created_at ASC",
-        libsql::params![user_id],
+        libsql::params![user_id, device_id],
     ).await?;
 
     // Drain into owned Vec so `rows` is dropped before local-DB awaits below.
@@ -406,6 +512,7 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str) -> Re
     }
     drop(rows);
 
+    let had_welcomes = !items.is_empty();
     for (id, bytes) in items {
         match apply_welcome(state, &bytes).await {
             Ok(()) => {}
@@ -423,6 +530,13 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str) -> Re
         ).await;
     }
 
+    // Each processed welcome consumed a KP — top back up to TARGET.
+    if had_welcomes {
+        if let Err(e) = replenish_key_packages(state, user_id, device_id).await {
+            eprintln!("[mls] KP replenishment failed (non-fatal): {e}");
+        }
+    }
+
     Ok(())
 }
 
@@ -431,7 +545,9 @@ pub async fn poll_mls_welcomes(
     state: State<'_, Arc<AppState>>,
     user_id: String,
 ) -> Result<()> {
-    poll_mls_welcomes_inner(state.inner(), &user_id).await
+    let device_id = state.device_id.lock().await.clone()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
+    poll_mls_welcomes_inner(state.inner(), &user_id, &device_id).await
 }
 
 // ── Phase 4: Member changes ───────────────────────────────────────────────────
@@ -494,7 +610,7 @@ pub async fn add_member_mls_inner(
     target_user_id: &str,
     actor_user_id: &str,
 ) -> crate::error::Result<()> {
-    add_member_mls_impl(state, conversation_id, target_user_id, actor_user_id).await
+    add_member_mls_impl(state, conversation_id, target_user_id, actor_user_id, None).await
 }
 
 #[tauri::command]
@@ -504,7 +620,7 @@ pub async fn add_member_mls(
     target_user_id: String,
     actor_user_id: String,
 ) -> crate::error::Result<()> {
-    add_member_mls_impl(state.inner(), &conversation_id, &target_user_id, &actor_user_id).await
+    add_member_mls_impl(state.inner(), &conversation_id, &target_user_id, &actor_user_id, None).await
 }
 
 async fn add_member_mls_impl(
@@ -512,54 +628,106 @@ async fn add_member_mls_impl(
     conversation_id: &str,
     target_user_id: &str,
     actor_user_id: &str,
+    exclude_device_id: Option<&str>,
 ) -> crate::error::Result<()> {
     let conversation_id = conversation_id.to_owned();
     let target_user_id = target_user_id.to_owned();
     let actor_user_id = actor_user_id.to_owned();
-    // 1. Claim the target's KeyPackage atomically.
-    let kp_bytes = {
+
+    // 1. Look up all registered devices for the target user.
+    let device_ids: Vec<String> = {
         let conn = state.remote_db.conn().await?;
         let mut rows = conn.query(
-            "UPDATE mls_key_package \
-             SET claimed = 1 \
-             WHERE ref_hash = ( \
-                 SELECT ref_hash FROM mls_key_package \
-                 WHERE user_id = ?1 AND claimed = 0 \
-                 ORDER BY created_at ASC LIMIT 1 \
-             ) \
-             RETURNING key_package",
+            "SELECT device_id FROM user_device WHERE user_id = ?1",
             libsql::params![target_user_id.clone()],
         ).await?;
-        match rows.next().await? {
-            Some(row) => row.get::<Vec<u8>>(0)?,
-            None => return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "No available key package for {target_user_id}"
-            ))),
+        let mut ids = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let did: String = row.get(0)?;
+            // Skip the excluded device (e.g. the group creator during repair).
+            if exclude_device_id.map_or(false, |ex| ex == did) {
+                continue;
+            }
+            ids.push(did);
         }
+        ids
     };
 
-    // 2–4. Validate KP, load group, create commit, merge locally.
-    let (commit_bytes, welcome_bytes, epoch): (Vec<u8>, Vec<u8>, u64) = {
+    if device_ids.is_empty() {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "No registered devices for {target_user_id}"
+        )));
+    }
+
+    // 2. Claim one KeyPackage per device.
+    let mut kp_bytes_list: Vec<(String, Vec<u8>)> = Vec::new();
+    {
+        let conn = state.remote_db.conn().await?;
+        for did in &device_ids {
+            let mut rows = conn.query(
+                "UPDATE mls_key_package \
+                 SET claimed = 1 \
+                 WHERE ref_hash = ( \
+                     SELECT ref_hash FROM mls_key_package \
+                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
+                     ORDER BY created_at ASC LIMIT 1 \
+                 ) \
+                 RETURNING key_package",
+                libsql::params![target_user_id.clone(), did.clone()],
+            ).await?;
+            if let Some(row) = rows.next().await? {
+                kp_bytes_list.push((did.clone(), row.get::<Vec<u8>>(0)?));
+            } else {
+                eprintln!("[mls] add_member: no key package for {target_user_id} device {did} — skipping");
+            }
+        }
+    }
+
+    if kp_bytes_list.is_empty() {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "No available key packages for any device of {target_user_id}"
+        )));
+    }
+
+    // 3. Validate all KPs, load group, create single commit with all devices.
+    let (commit_bytes, welcome_bytes, epoch, added_device_ids): (Vec<u8>, Vec<u8>, u64, Vec<String>) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
         let provider = PollisProvider::new(db.conn());
 
-        // Validate the key package and check identity.
-        let mut kp_reader: &[u8] = &kp_bytes;
-        let kp_in = KeyPackageIn::tls_deserialize(&mut kp_reader)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp deserialize: {e}")))?;
-        let kp = kp_in
-            .validate(provider.crypto(), ProtocolVersion::Mls10)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp validate: {e}")))?;
-        let identity = String::from_utf8_lossy(
-            kp.leaf_node().credential().serialized_content(),
-        )
-        .into_owned();
-        if identity != target_user_id {
+        let mut validated_kps: Vec<KeyPackage> = Vec::new();
+        let mut added_devs: Vec<String> = Vec::new();
+        for (did, kp_raw) in &kp_bytes_list {
+            let mut kp_reader: &[u8] = kp_raw;
+            let kp_in = match KeyPackageIn::tls_deserialize(&mut kp_reader) {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("[mls] add_member: kp deserialize failed for device {did}: {e}");
+                    continue;
+                }
+            };
+            let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("[mls] add_member: kp validate failed for device {did}: {e}");
+                    continue;
+                }
+            };
+            // Verify the credential belongs to the target user.
+            let cred_user = parse_credential_user_id(kp.leaf_node().credential());
+            if cred_user != target_user_id {
+                eprintln!("[mls] add_member: credential user '{cred_user}' != '{target_user_id}' for device {did}");
+                continue;
+            }
+            validated_kps.push(kp);
+            added_devs.push(did.clone());
+        }
+
+        if validated_kps.is_empty() {
             return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "KeyPackage identity '{identity}' does not match '{target_user_id}'"
+                "No valid key packages for {target_user_id}"
             )));
         }
 
@@ -567,18 +735,13 @@ async fn add_member_mls_impl(
         let epoch = group.epoch().as_u64();
 
         let (commit_msg, welcome_msg, _group_info) = group
-            .add_members(&provider, &signer, &[kp])
+            .add_members(&provider, &signer, &validated_kps)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("add_members: {e}")))?;
 
-        // Serialize the commit as MlsMessageOut bytes — recipients deserialize
-        // as MlsMessageIn and call process_message / merge_staged_commit.
         let commit_bytes: Vec<u8> = commit_msg
             .tls_serialize_detached()
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
 
-        // Serialize the welcome message the same way — apply_welcome
-        // deserialises as MlsMessageIn, extracts the Welcome via extract(), and
-        // passes it to StagedWelcome::new_from_welcome.
         let welcome_bytes: Vec<u8> = welcome_msg
             .tls_serialize_detached()
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("welcome serialize: {e}")))?;
@@ -587,10 +750,10 @@ async fn add_member_mls_impl(
             .merge_pending_commit(&provider)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge commit: {e}")))?;
 
-        (commit_bytes, welcome_bytes, epoch)
+        (commit_bytes, welcome_bytes, epoch, added_devs)
     };
 
-    // 5–6. Post commit + welcome to remote.
+    // 4. Post commit to remote.
     let conn = state.remote_db.conn().await?;
     conn.execute(
         "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
@@ -603,12 +766,16 @@ async fn add_member_mls_impl(
         ],
     ).await?;
 
-    let welcome_id = Ulid::new().to_string();
-    conn.execute(
-        "INSERT INTO mls_welcome (id, conversation_id, recipient_id, welcome_data) \
-         VALUES (?1, ?2, ?3, ?4)",
-        libsql::params![welcome_id, conversation_id, target_user_id, welcome_bytes],
-    ).await?;
+    // 5. Post one welcome row per device — same Welcome blob, each device
+    //    processes it independently with its own KeyPackage private key.
+    for did in &added_device_ids {
+        let welcome_id = Ulid::new().to_string();
+        conn.execute(
+            "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            libsql::params![welcome_id, conversation_id.clone(), target_user_id.clone(), did.clone(), welcome_bytes.clone()],
+        ).await?;
+    }
 
     Ok(())
 }
@@ -682,17 +849,27 @@ async fn remove_member_mls_impl(
         let (mut group, signer) = load_group_with_signer(&provider, &conversation_id)?;
         let epoch = group.epoch().as_u64();
 
-        // Find the target's leaf index by matching the BasicCredential identity.
-        let target_cred: Credential =
-            BasicCredential::new(target_user_id.as_bytes().to_vec()).into();
-        let leaf_index = group
-            .member_leaf_index(&target_cred)
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
+        // Find ALL leaf indices belonging to the target user (may have
+        // multiple devices, each with its own leaf node).
+        let leaf_indices: Vec<LeafNodeIndex> = group.members()
+            .filter_map(|m| {
+                let cred_user = parse_credential_user_id(&m.credential);
+                if cred_user == target_user_id {
+                    Some(m.index)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if leaf_indices.is_empty() {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
                 "'{target_user_id}' is not a member of group {conversation_id}"
-            )))?;
+            )));
+        }
 
         let (commit_msg, _welcome, _group_info) = group
-            .remove_members(&provider, &signer, &[leaf_index])
+            .remove_members(&provider, &signer, &leaf_indices)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("remove_members: {e}")))?;
 
         let commit_bytes = commit_msg
@@ -897,20 +1074,23 @@ pub async fn repair_mls_group(
         "DELETE FROM mls_commit_log WHERE conversation_id = ?1",
         libsql::params![mls_group_id],
     ).await;
+    // Only delete welcomes for THIS conversation — not other conversations
+    // the sender may have pending welcomes for.
     let _ = conn.execute(
-        "DELETE FROM mls_welcome WHERE recipient_id = ?1 AND delivered = 0",
-        libsql::params![sender_id],
+        "DELETE FROM mls_welcome WHERE conversation_id = ?1 AND delivered = 0",
+        libsql::params![mls_group_id],
     ).await;
     drop(conn);
 
-    // 2. Look up all other members. Group channels use `group_member`; DM
-    //    conversations use `dm_channel_member`. Try groups first, fall back to DMs.
+    // 2. Look up all members (including sender — their other devices need
+    //    to be added too). Group channels use `group_member`; DM conversations
+    //    use `dm_channel_member`. Try groups first, fall back to DMs.
     let conn = state.remote_db.conn().await?;
     let mut member_ids: Vec<String> = Vec::new();
     {
         let mut rows = conn.query(
-            "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2",
-            libsql::params![mls_group_id, sender_id],
+            "SELECT user_id FROM group_member WHERE group_id = ?1",
+            libsql::params![mls_group_id],
         ).await?;
         while let Some(row) = rows.next().await? {
             member_ids.push(row.get::<String>(0)?);
@@ -918,27 +1098,157 @@ pub async fn repair_mls_group(
     }
     if member_ids.is_empty() {
         let mut rows = conn.query(
-            "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id != ?2",
-            libsql::params![mls_group_id, sender_id],
+            "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
+            libsql::params![mls_group_id],
         ).await?;
         while let Some(row) = rows.next().await? {
             member_ids.push(row.get::<String>(0)?);
         }
     }
 
-    // 3. Add each member — this claims their fresh key package and posts a Welcome.
+    // 3. Collect ALL key packages for ALL members' devices in one pass,
+    //    then add them in a single `add_members` call — one commit, one epoch
+    //    advance, instead of M separate commits.
+    let current_device_id = state.device_id.lock().await.clone();
+
+    // (user_id, device_id, kp_bytes) for each device we successfully claim a KP for.
+    let mut claimed_kps: Vec<(String, String, Vec<u8>)> = Vec::new();
+
     for member_id in &member_ids {
-        match add_member_mls_inner(state, mls_group_id, member_id, sender_id).await {
-            Ok(()) => eprintln!("[mls] repair: added {member_id}"),
-            Err(e) => eprintln!("[mls] repair: skipping {member_id} (no key package?): {e}"),
+        // Look up all devices for this member.
+        let mut device_ids: Vec<String> = Vec::new();
+        {
+            let mut rows = conn.query(
+                "SELECT device_id FROM user_device WHERE user_id = ?1",
+                libsql::params![member_id.clone()],
+            ).await?;
+            while let Some(row) = rows.next().await? {
+                let did: String = row.get(0)?;
+                // Exclude the sender's current device (already the group creator).
+                if member_id == sender_id && current_device_id.as_deref() == Some(did.as_str()) {
+                    continue;
+                }
+                device_ids.push(did);
+            }
+        }
+
+        // Claim one KP per device.
+        for did in &device_ids {
+            let mut rows = conn.query(
+                "UPDATE mls_key_package \
+                 SET claimed = 1 \
+                 WHERE ref_hash = ( \
+                     SELECT ref_hash FROM mls_key_package \
+                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
+                     ORDER BY created_at ASC LIMIT 1 \
+                 ) \
+                 RETURNING key_package",
+                libsql::params![member_id.clone(), did.clone()],
+            ).await?;
+            if let Some(row) = rows.next().await? {
+                claimed_kps.push((member_id.clone(), did.clone(), row.get::<Vec<u8>>(0)?));
+            } else {
+                eprintln!("[mls] repair: no key package for {member_id} device {did} — skipping");
+            }
         }
     }
+    drop(conn);
 
-    eprintln!("[mls] repair: done — {} members processed", member_ids.len());
+    if claimed_kps.is_empty() {
+        eprintln!("[mls] repair: done — no other devices to add");
+        return Ok(());
+    }
+
+    // 4. Validate all KPs and do a single add_members call.
+    let (commit_bytes, welcome_bytes, epoch, welcome_targets): (Vec<u8>, Vec<u8>, u64, Vec<(String, String)>) = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+        })?;
+        let provider = PollisProvider::new(db.conn());
+
+        let mut validated_kps: Vec<KeyPackage> = Vec::new();
+        let mut targets: Vec<(String, String)> = Vec::new();
+        for (uid, did, kp_raw) in &claimed_kps {
+            let mut kp_reader: &[u8] = kp_raw;
+            let kp_in = match KeyPackageIn::tls_deserialize(&mut kp_reader) {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("[mls] repair: kp deserialize failed for {uid} device {did}: {e}");
+                    continue;
+                }
+            };
+            let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
+                Ok(k) => k,
+                Err(e) => {
+                    eprintln!("[mls] repair: kp validate failed for {uid} device {did}: {e}");
+                    continue;
+                }
+            };
+            let cred_user = parse_credential_user_id(kp.leaf_node().credential());
+            if cred_user != *uid {
+                eprintln!("[mls] repair: credential user '{cred_user}' != '{uid}' for device {did}");
+                continue;
+            }
+            validated_kps.push(kp);
+            targets.push((uid.clone(), did.clone()));
+        }
+
+        if validated_kps.is_empty() {
+            eprintln!("[mls] repair: done — no valid key packages");
+            return Ok(());
+        }
+
+        let (mut group, signer) = load_group_with_signer(&provider, mls_group_id)?;
+        let epoch = group.epoch().as_u64();
+
+        let (commit_msg, welcome_msg, _group_info) = group
+            .add_members(&provider, &signer, &validated_kps)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("repair add_members: {e}")))?;
+
+        let commit_bytes = commit_msg
+            .tls_serialize_detached()
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
+        let welcome_bytes = welcome_msg
+            .tls_serialize_detached()
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("welcome serialize: {e}")))?;
+
+        group
+            .merge_pending_commit(&provider)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge commit: {e}")))?;
+
+        (commit_bytes, welcome_bytes, epoch, targets)
+    };
+
+    // 5. Post single commit + per-device welcome rows.
+    let conn = state.remote_db.conn().await?;
+    conn.execute(
+        "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
+         VALUES (?1, ?2, ?3, ?4)",
+        libsql::params![mls_group_id, epoch as i64, sender_id, commit_bytes],
+    ).await?;
+
+    for (uid, did) in &welcome_targets {
+        let welcome_id = Ulid::new().to_string();
+        conn.execute(
+            "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            libsql::params![welcome_id, mls_group_id, uid.clone(), did.clone(), welcome_bytes.clone()],
+        ).await?;
+    }
+
+    eprintln!("[mls] repair: done — {} devices added in 1 commit", welcome_targets.len());
     Ok(())
 }
 
 // ── Phase 5 helpers: encrypt / decrypt ───────────────────────────────────────
+
+/// Check whether an MLS group exists in the local database.
+pub fn has_local_group(conn: &rusqlite::Connection, conversation_id: &str) -> bool {
+    let provider = PollisProvider::new(conn);
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    matches!(MlsGroup::load(provider.storage(), &group_id), Ok(Some(_)))
+}
 
 /// Try to encrypt `plaintext` with the MLS group for `conversation_id`.
 ///
@@ -1001,13 +1311,11 @@ pub fn validate_key_package(
         .validate(crypto, ProtocolVersion::Mls10)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp validate: {e}")))?;
 
-    // Verify the credential identity matches the expected user
-    let identity = match kp.leaf_node().credential().serialized_content() {
-        cred_bytes => String::from_utf8_lossy(cred_bytes).into_owned(),
-    };
-    if identity != expected_user_id {
+    // Verify the credential user_id matches the expected user.
+    let cred_user = parse_credential_user_id(kp.leaf_node().credential());
+    if cred_user != expected_user_id {
         return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "KeyPackage identity '{identity}' does not match expected '{expected_user_id}'"
+            "KeyPackage credential user '{cred_user}' does not match expected '{expected_user_id}'"
         )));
     }
 
@@ -1039,6 +1347,12 @@ mod tests {
         conn
     }
 
+    /// Synthetic device ID for test users. In tests each "user" maps to a
+    /// single device so we derive a deterministic device_id from the user_id.
+    fn test_device_id(user_id: &str) -> String {
+        format!("{user_id}_dev")
+    }
+
     /// Create an MLS group with `user_id` as sole member and return the
     /// `SignatureKeyPair` so the caller can later call `create_message`.
     fn create_group(
@@ -1050,13 +1364,13 @@ mod tests {
         let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
         sig_keys.store(provider.storage()).unwrap();
 
-        let credential = BasicCredential::new(user_id.as_bytes().to_vec());
+        let credential = make_credential(user_id, &test_device_id(user_id));
         let sig_pub = OpenMlsSignaturePublicKey::new(
             sig_keys.to_public_vec().into(),
             CS.signature_algorithm(),
         ).unwrap();
         let cred_with_key = CredentialWithKey {
-            credential: credential.into(),
+            credential,
             signature_key: sig_pub.into(),
         };
 
@@ -1078,13 +1392,13 @@ mod tests {
         let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
         sig_keys.store(provider.storage()).unwrap();
 
-        let credential = BasicCredential::new(user_id.as_bytes().to_vec());
+        let credential = make_credential(user_id, &test_device_id(user_id));
         let sig_pub = OpenMlsSignaturePublicKey::new(
             sig_keys.to_public_vec().into(),
             CS.signature_algorithm(),
         ).unwrap();
         let cred_with_key = CredentialWithKey {
-            credential: credential.into(),
+            credential,
             signature_key: sig_pub.into(),
         };
 
@@ -1251,13 +1565,21 @@ mod tests {
         let provider = PollisProvider::new(remover_db);
         let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
 
-        let target_cred: Credential =
-            BasicCredential::new(target_user_id.as_bytes().to_vec()).into();
-        let leaf = group.member_leaf_index(&target_cred)
-            .expect("target must be in group");
+        // Find all leaves for the target user (may have multiple devices).
+        let leaf_indices: Vec<LeafNodeIndex> = group.members()
+            .filter_map(|m| {
+                let cred_user = parse_credential_user_id(&m.credential);
+                if cred_user == target_user_id {
+                    Some(m.index)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(!leaf_indices.is_empty(), "target must be in group");
 
         let (commit_msg, _, _) =
-            group.remove_members(&provider, &signer, &[leaf]).unwrap();
+            group.remove_members(&provider, &signer, &leaf_indices).unwrap();
         group.merge_pending_commit(&provider).unwrap();
 
         commit_msg.tls_serialize_detached().unwrap()

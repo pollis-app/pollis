@@ -291,6 +291,23 @@ pub async fn get_channel_messages(
         eprintln!("[messages] process_pending_commits for {mls_group_id}: {e}");
     }
 
+    // If the MLS group doesn't exist locally (new device, DB wipe), trigger
+    // repair so this device can decrypt messages going forward.
+    {
+        let has_group = {
+            let guard = state.local_db.lock().await;
+            guard.as_ref().map_or(false, |db| {
+                crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
+            })
+        };
+        if !has_group {
+            eprintln!("[messages] MLS group {mls_group_id} missing locally — triggering repair");
+            if let Err(e) = crate::commands::mls::repair_mls_group(state.inner(), &mls_group_id, &user_id).await {
+                eprintln!("[messages] repair failed for {mls_group_id}: {e}");
+            }
+        }
+    }
+
     let mut rows = match cursor {
         None => {
             conn.query(
@@ -545,6 +562,22 @@ pub async fn get_dm_messages(
     // Process any pending MLS commits before decrypting.
     if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &dm_channel_id).await {
         eprintln!("[messages] process_pending_commits for DM {dm_channel_id}: {e}");
+    }
+
+    // If the MLS group doesn't exist locally (new device), trigger repair.
+    {
+        let has_group = {
+            let guard = state.local_db.lock().await;
+            guard.as_ref().map_or(false, |db| {
+                crate::commands::mls::has_local_group(db.conn(), &dm_channel_id)
+            })
+        };
+        if !has_group {
+            eprintln!("[messages] MLS group for DM {dm_channel_id} missing locally — triggering repair");
+            if let Err(e) = crate::commands::mls::repair_mls_group(state.inner(), &dm_channel_id, &user_id).await {
+                eprintln!("[messages] repair failed for DM {dm_channel_id}: {e}");
+            }
+        }
     }
 
     let conn = state.remote_db.conn().await?;
