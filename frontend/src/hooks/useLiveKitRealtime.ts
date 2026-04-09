@@ -43,6 +43,13 @@ type RealtimeEvent =
   | {
     type: 'member_role_changed';
     group_id: string;
+  }
+  | {
+    type: 'edited_message';
+    channel_id: string | null;
+    conversation_id: string | null;
+    message_id: string;
+    sender_id: string;
   };
 
 export function useLiveKitRealtime() {
@@ -233,6 +240,21 @@ export function useLiveKitRealtime() {
         // if (event.user_id !== currentUserIdRef.current) {
         //   playSfx(event.type === 'voice_joined' ? SFX.join : SFX.leave);
         // }
+        return;
+      }
+
+      if (event.type === 'edited_message') {
+        // Skip own edits — optimistic update already applied by useEditMessage.
+        if (event.sender_id === currentUser.id) {
+          return;
+        }
+        const channelId = event.channel_id;
+        const conversationId = event.conversation_id;
+        if (channelId && channelId === selectedChannelIdRef.current) {
+          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
+        } else if (conversationId && conversationId === selectedConversationIdRef.current) {
+          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
+        }
         return;
       }
 

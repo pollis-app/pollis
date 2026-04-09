@@ -451,6 +451,47 @@ pub async fn publish_new_message_to_room(
     Ok(())
 }
 
+/// Broadcasts an `edited_message` event to a LiveKit room so other clients
+/// invalidate their message cache. Non-fatal — callers should log errors.
+pub async fn publish_edited_message_to_room(
+    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    room_id: &str,
+    channel_id: Option<&str>,
+    conversation_id: Option<&str>,
+    sender_id: &str,
+    message_id: &str,
+) -> Result<()> {
+    let room = {
+        let lk = livekit.lock().await;
+        lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    let room = match room {
+        None => return Ok(()),
+        Some(r) => r,
+    };
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "type": "edited_message",
+        "channel_id": channel_id,
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "message_id": message_id,
+    }))
+    .map_err(Error::Serde)?;
+
+    room.local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: true,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("publish_edited_message: {e}")))?;
+
+    Ok(())
+}
+
 /// Records a voice join or leave in the DB and notifies group members via the
 /// LiveKit data channel so their participant counts update in real time.
 #[tauri::command]
@@ -811,6 +852,16 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
                 let _ = channel.send(RealtimeEvent::VoiceLeft {
                     channel_id: channel_id.to_owned(),
                     user_id: user_id.to_owned(),
+                });
+            }
+        }
+        Some("edited_message") => {
+            if let Some(message_id) = data.get("message_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::EditedMessage {
+                    channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    conversation_id: data.get("conversation_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    message_id: message_id.to_owned(),
+                    sender_id: data.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default().to_owned(),
                 });
             }
         }

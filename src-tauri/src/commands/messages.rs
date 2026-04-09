@@ -144,6 +144,18 @@ pub async fn send_message(
     };
 
     // Encrypt with MLS and store locally.
+    // First attempt — if the group is missing (e.g. local DB was wiped),
+    // transparently repair and retry.
+    let needs_repair = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, content.as_bytes()).is_none()
+    };
+
+    if needs_repair {
+        crate::commands::mls::repair_mls_group(state.inner(), &mls_group_id, &sender_id).await?;
+    }
+
     let ciphertext_remote = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -272,6 +284,12 @@ pub async fn get_channel_messages(
             None => channel_id.clone(),
         }
     };
+
+    // Process any pending MLS commits (membership changes) before decrypting
+    // so the local epoch is current and messages from the new epoch are readable.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id).await {
+        eprintln!("[messages] process_pending_commits for {mls_group_id}: {e}");
+    }
 
     let mut rows = match cursor {
         None => {
@@ -523,6 +541,12 @@ pub async fn get_dm_messages(
     state: State<'_, Arc<AppState>>,
 ) -> Result<MessagePage> {
     let limit = limit.unwrap_or(50);
+
+    // Process any pending MLS commits before decrypting.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &dm_channel_id).await {
+        eprintln!("[messages] process_pending_commits for DM {dm_channel_id}: {e}");
+    }
+
     let conn = state.remote_db.conn().await?;
 
     let mut rows = match cursor {
@@ -830,6 +854,18 @@ pub async fn edit_message(
     };
 
     // Encrypt the new content with MLS and update local cache atomically.
+    // First attempt — if the group is missing (e.g. local DB was wiped),
+    // transparently repair and retry.
+    let needs_repair = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, new_content.as_bytes()).is_none()
+    };
+
+    if needs_repair {
+        crate::commands::mls::repair_mls_group(state.inner(), &mls_group_id, &user_id).await?;
+    }
+
     let ciphertext_remote = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -867,8 +903,36 @@ pub async fn edit_message(
         "INSERT INTO message_envelope
              (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id)
          VALUES (?1, ?2, ?3, ?4, ?5, 'edit', ?6)",
-        libsql::params![envelope_id, conversation_id, user_id, ciphertext_remote, now, message_id],
+        libsql::params![envelope_id, conversation_id.clone(), user_id.clone(), ciphertext_remote, now, message_id.clone()],
     ).await?;
+
+    // Notify recipients via LiveKit so they invalidate their cache immediately.
+    // Non-fatal — errors are logged, not returned.
+    let is_channel = mls_group_id != conversation_id;
+    let room_id = mls_group_id;
+    if is_channel {
+        if let Err(e) = crate::commands::livekit::publish_edited_message_to_room(
+            &state.livekit,
+            &room_id,
+            Some(&conversation_id),
+            None,
+            &user_id,
+            &message_id,
+        ).await {
+            eprintln!("[realtime] edit_message: publish to group {room_id}: {e}");
+        }
+    } else {
+        if let Err(e) = crate::commands::livekit::publish_edited_message_to_room(
+            &state.livekit,
+            &room_id,
+            None,
+            Some(&conversation_id),
+            &user_id,
+            &message_id,
+        ).await {
+            eprintln!("[realtime] edit_message: publish to DM room {room_id}: {e}");
+        }
+    }
 
     Ok(())
 }
