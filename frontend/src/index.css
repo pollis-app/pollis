@@ -1,3 +1,5 @@
+@import "@fontsource/atkinson-hyperlegible-next";
+@import "@fontsource/atkinson-hyperlegible-mono/500.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -167,8 +169,8 @@ input[type="range"]::-moz-range-thumb {
   input::placeholder, textarea::placeholder { color: var(--c-text-muted); }
   .pollis-input:focus { border-color: var(--c-border-active); }
 
-  /* Chat input placeholder: bright when unfocused, dark when focused */
-  .chat-input-textarea::placeholder { color: var(--c-text-dim); }
+  /* Chat input placeholder: muted when unfocused, dark when focused (on accent bg) */
+  .chat-input-textarea::placeholder { color: var(--c-text-muted); }
   .chat-input-textarea:focus::placeholder { color: color-mix(in srgb, var(--c-bg) 65%, transparent); }
 
   .pollis-textarea {
@@ -210,6 +212,12 @@ input[type="range"]::-moz-range-thumb {
 
   /* Divider ────────────────────────────────────────────────────── */
   .divider { border-top: 1px solid var(--c-border); }
+}
+
+/* ── Mono font weight default ────────────────────────────────────── */
+/* Only the 500-weight face is loaded; set it explicitly so the intent is clear */
+.font-mono {
+  font-weight: 500;
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────── */

@@ -6,6 +6,8 @@ interface MessageListProps {
   messages: Message[];
   adminUserIds?: Set<string>;
   onReply?: (messageId: string) => void;
+  onEdit?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   getAuthorUsername?: (authorId: string, message?: Message) => string;
@@ -18,6 +20,8 @@ export const MessageList: React.FC<MessageListProps> = ({
   messages,
   adminUserIds,
   onReply,
+  onEdit,
+  onDelete,
   onScrollToMessage,
   getAuthorUsername,
   hasMore,
@@ -42,7 +46,9 @@ export const MessageList: React.FC<MessageListProps> = ({
           // content_decrypted === undefined means decryption failed — keep the
           // message so it renders as [encrypted] instead of vanishing silently.
           const decryptionFailed = m.content_decrypted === undefined;
-          return hasText || hasAttachments || decryptionFailed;
+          // Soft-deleted messages have no content but should remain visible as "[deleted]".
+          const isSoftDeleted = !!m.deleted_at;
+          return hasText || hasAttachments || decryptionFailed || isSoftDeleted;
         })
         .sort((a, b) => a.created_at - b.created_at),
     [messages]
@@ -150,6 +156,8 @@ export const MessageList: React.FC<MessageListProps> = ({
             authorUsername={authorUsername}
             isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
             onReply={onReply}
+            onEdit={onEdit}
+            onDelete={onDelete}
             onScrollToReply={scrollToMessage}
           />
         );

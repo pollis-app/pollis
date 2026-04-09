@@ -10,5 +10,6 @@ FROM message_envelope me
 JOIN dm_channel_member dcm ON dcm.dm_channel_id = me.conversation_id AND dcm.user_id = ?1
 LEFT JOIN users u ON u.id = me.sender_id
 WHERE me.conversation_id = ?2
+  AND me.type = 'message'
 ORDER BY me.sent_at DESC, me.id DESC
 LIMIT ?3

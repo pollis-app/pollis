@@ -23,6 +23,7 @@ JOIN groups        g   ON g.id  = c.group_id
 JOIN group_member  gm  ON gm.group_id = g.id AND gm.user_id = ?1
 LEFT JOIN users    u   ON u.id  = me.sender_id
 WHERE me.conversation_id = ?2
+  AND me.type = 'message'
   AND (me.sent_at < ?3 OR (me.sent_at = ?3 AND me.id < ?4))
 ORDER BY me.sent_at DESC, me.id DESC
 LIMIT ?5

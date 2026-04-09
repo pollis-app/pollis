@@ -38,6 +38,14 @@ pub enum RealtimeEvent {
     MemberRoleChanged {
         group_id: String,
     },
+    /// Sent to a group room (or DM room) when a message is edited, so recipients
+    /// can invalidate their message cache without polling.
+    EditedMessage {
+        channel_id: Option<String>,
+        conversation_id: Option<String>,
+        message_id: String,
+        sender_id: String,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

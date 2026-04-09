@@ -202,11 +202,44 @@ pub async fn verify_otp(
     Ok(profile)
 }
 
+/// Dev-only: bypass OTP and log in directly with an email address.
+/// Returns an error in release builds so this can never be used in production.
+#[tauri::command]
+pub async fn dev_login(
+    _state: State<'_, Arc<AppState>>,
+    _email: String,
+) -> Result<UserProfile> {
+    #[cfg(not(debug_assertions))]
+    {
+        let _ = (_state, _email);
+        return Err(crate::error::Error::Other(anyhow::anyhow!("dev_login is not available in release builds")));
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let profile = dev_login_inner(&_state, _email).await?;
+        eprintln!("[auth] dev_login: logged in as {}", profile.username);
+        Ok(profile)
+    }
+}
+
 /// Load the persisted session from the OS keystore.
 /// Verifies the user still exists in Turso — if not, clears the stale session and returns None.
 /// Returns None if the user has never signed in or has logged out.
 #[tauri::command]
 pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserProfile>> {
+    // In development, DEV_EMAIL bypasses the normal session check and logs in directly.
+    // Set DEV_EMAIL=user@example.com in .env.development to auto-login on every startup.
+    #[cfg(debug_assertions)]
+    if let Ok(dev_email) = std::env::var("DEV_EMAIL") {
+        let dev_email = dev_email.trim().to_string();
+        if !dev_email.is_empty() {
+            eprintln!("[auth] DEV_EMAIL active — auto-logging in as {dev_email}");
+            let profile = dev_login_inner(&state, dev_email).await?;
+            return Ok(Some(profile));
+        }
+    }
+
     // Identify the last active user from the local accounts index.
     let index = crate::accounts::read_accounts_index();
     let user_id = match index.last_active_user {
@@ -263,6 +296,43 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     state.load_user_db(&profile.id).await?;
 
     Ok(Some(profile))
+}
+
+// Helper shared by get_session (DEV_EMAIL) and dev_login.
+#[cfg(debug_assertions)]
+async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
+    let conn = state.remote_db.conn().await?;
+
+    let mut rows = conn.query(
+        "SELECT id, username FROM users WHERE email = ?1",
+        libsql::params![email.clone()],
+    ).await?;
+
+    let (user_id, username) = if let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        let uname: String = row.get(1).unwrap_or_else(|_| {
+            email.split('@').next().unwrap_or("user").to_string()
+        });
+        (id, uname)
+    } else {
+        let user_id = Ulid::new().to_string();
+        let suffix = &user_id[user_id.len().saturating_sub(4)..];
+        let email_prefix = email.split('@').next().unwrap_or("user");
+        let default_username = format!("{}_{}", email_prefix, suffix);
+        conn.execute(
+            "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
+            libsql::params![user_id.clone(), email.clone(), default_username.clone()],
+        ).await?;
+        (user_id, default_username)
+    };
+
+    let profile = UserProfile { id: user_id, email, username };
+    let session_bytes = serde_json::to_vec(&profile)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
+    keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
+    state.load_user_db(&profile.id).await?;
+    crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
+    Ok(profile)
 }
 
 /// Clear the persisted session (logout). Optionally wipe the per-user DB and identity keys.

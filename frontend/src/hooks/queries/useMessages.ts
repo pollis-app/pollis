@@ -29,6 +29,8 @@ type RawChannelMessage = {
   content?: string;
   reply_to_id?: string;
   sent_at: string;
+  edited_at?: string;
+  deleted_at?: string;
 };
 
 type MessagePage = {
@@ -117,6 +119,8 @@ export function transformChannelMessage(m: RawChannelMessage): Message {
     delivered: true,
     status: 'sent' as const,
     attachments: parsed?.attachments ?? [],
+    edited_at: m.edited_at,
+    deleted_at: m.deleted_at,
   };
 }
 
@@ -368,6 +372,93 @@ export function useCreateOrGetDMConversation() {
       queryClient.invalidateQueries({
         queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
       });
+    },
+  });
+}
+
+export function useDeleteMessage() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async ({ messageId }: { messageId: string }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('delete_message', {
+        messageId,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      // Invalidate all message caches so the deleted message disappears.
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.all });
+      queryClient.invalidateQueries({ queryKey: ['last-message'] });
+    },
+  });
+}
+
+type EditMessageVars = {
+  conversationId: string;
+  channelId?: string;
+  messageId: string;
+  newContent: string;
+};
+
+type EditMessageContext = {
+  queryKey: readonly unknown[];
+  previousData: MessagesQueryResult | undefined;
+};
+
+export function useEditMessage() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation<void, Error, EditMessageVars, EditMessageContext>({
+    mutationFn: async ({ conversationId, messageId, newContent }) => {
+      if (!currentUser) {
+        throw new Error('No current user');
+      }
+      await invoke('edit_message', {
+        conversationId,
+        messageId,
+        userId: currentUser.id,
+        newContent,
+      });
+    },
+    onMutate: async ({ channelId, conversationId, messageId, newContent }) => {
+      const queryKey = channelId
+        ? messageQueryKeys.channel(channelId)
+        : messageQueryKeys.conversation(conversationId);
+
+      await queryClient.cancelQueries({ queryKey });
+      const previousData = queryClient.getQueryData<MessagesQueryResult>(queryKey);
+
+      queryClient.setQueryData<MessagesQueryResult>(queryKey, (old) => {
+        if (!old) {
+          return old;
+        }
+        return {
+          ...old,
+          messages: old.messages.map((m) =>
+            m.id === messageId
+              ? { ...m, content_decrypted: newContent, edited_at: new Date().toISOString() }
+              : m
+          ),
+        };
+      });
+
+      return { queryKey, previousData };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previousData !== undefined) {
+        queryClient.setQueryData(context.queryKey, context.previousData);
+      }
+    },
+    onSettled: (_data, _err, _vars, context) => {
+      if (context) {
+        queryClient.invalidateQueries({ queryKey: context.queryKey });
+      }
     },
   });
 }

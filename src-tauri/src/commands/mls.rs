@@ -290,6 +290,14 @@ pub async fn init_mls_group(
     };
 
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
+
+    // Delete any stale group with the same ID so the create below never
+    // collides.  This is a no-op on first creation and essential during
+    // repair (where the old group still exists but is broken/outdated).
+    if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
+        let _ = old.delete(provider.storage());
+    }
+
     let config = MlsGroupCreateConfig::builder()
         .ciphersuite(CS)
         .use_ratchet_tree_extension(true)
@@ -341,7 +349,20 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
     let join_config = MlsGroupJoinConfig::builder()
         .use_ratchet_tree_extension(true)
         .build();
-    let staged = StagedWelcome::new_from_welcome(&provider, &join_config, welcome, None)
+
+    // Split into ProcessedWelcome → delete stale group → stage → into_group.
+    // openmls checks for duplicate GroupIds inside `into_staged_welcome`, so we
+    // must delete any existing group *before* that call.
+    let processed = ProcessedWelcome::new_from_welcome(&provider, &join_config, welcome)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("process welcome: {e}")))?;
+
+    let new_group_id = processed.unverified_group_info().group_id().clone();
+    if let Ok(Some(mut old_group)) = MlsGroup::load(provider.storage(), &new_group_id) {
+        eprintln!("[mls] apply_welcome: deleting stale group {:?} before re-joining", new_group_id);
+        let _ = old_group.delete(provider.storage());
+    }
+
+    let staged = processed.into_staged_welcome(&provider, None)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("stage welcome: {e}")))?;
 
     staged.into_group(&provider)
@@ -389,8 +410,10 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str) -> Re
         match apply_welcome(state, &bytes).await {
             Ok(()) => {}
             Err(e) => {
+                // Mark as delivered even on failure — the private key for this
+                // Welcome was likely orphaned by a DB wipe and will never
+                // succeed. The repair mechanism will generate a new Welcome.
                 eprintln!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
-                continue;
             }
         }
 
@@ -705,27 +728,12 @@ async fn remove_member_mls_impl(
 /// stops processing and logs an error — this indicates a missed or reordered
 /// commit that would require manual intervention in a production system.
 ///
-/// Call this on startup and from `poll_pending_messages`.
-#[tauri::command]
-pub async fn process_pending_commits(
-    state: State<'_, Arc<AppState>>,
-    conversation_id: String,
+/// `mls_group_id` must already be resolved (group_id for channels,
+/// conversation_id for DMs).
+pub async fn process_pending_commits_inner(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
 ) -> crate::error::Result<()> {
-    // Resolve the MLS group ID: for group channels, all channels share the
-    // group's MLS group (keyed by group_id). For DM conversations, use
-    // conversation_id directly.
-    let mls_group_id = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![conversation_id.clone()],
-        ).await?;
-        match rows.next().await? {
-            Some(row) => row.get::<String>(0)?,
-            None => conversation_id.clone(),
-        }
-    };
-
     // 1. Get the current epoch from the local group.
     let initial_epoch = {
         let guard = state.local_db.lock().await;
@@ -734,11 +742,14 @@ pub async fn process_pending_commits(
         })?;
         let provider = PollisProvider::new(db.conn());
         let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-        let group = MlsGroup::load(provider.storage(), &group_id)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not found for {mls_group_id}"
-            )))?;
+        let group = match MlsGroup::load(provider.storage(), &group_id) {
+            Ok(Some(g)) => g,
+            _ => {
+                // Group doesn't exist locally (e.g. DB was wiped). Nothing to
+                // process — repair will happen on first send.
+                return Ok(());
+            }
+        };
         group.epoch().as_u64()
     };
 
@@ -750,7 +761,7 @@ pub async fn process_pending_commits(
          FROM mls_commit_log \
          WHERE conversation_id = ?1 AND epoch >= ?2 \
          ORDER BY epoch ASC, seq ASC",
-        libsql::params![mls_group_id.clone(), initial_epoch as i64],
+        libsql::params![mls_group_id, initial_epoch as i64],
     ).await?;
 
     let mut pending: Vec<(i64, Vec<u8>)> = Vec::new();
@@ -790,20 +801,40 @@ pub async fn process_pending_commits(
             };
 
             let mut reader: &[u8] = &commit_data;
-            let msg_in = MlsMessageIn::tls_deserialize(&mut reader)
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit deserialize: {e}")))?;
-            let protocol_msg = msg_in
-                .try_into_protocol_message()
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into protocol msg: {e}")))?;
+            let msg_in = match MlsMessageIn::tls_deserialize(&mut reader) {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id}: {e} — deleting stale group");
+                    let _ = group.delete(provider.storage());
+                    return Ok(());
+                }
+            };
+            let protocol_msg = match msg_in.try_into_protocol_message() {
+                Ok(m) => m,
+                Err(e) => {
+                    eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id}: {e} — deleting stale group");
+                    let _ = group.delete(provider.storage());
+                    return Ok(());
+                }
+            };
 
-            let processed = group
-                .process_message(&provider, protocol_msg)
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("process_message: {e}")))?;
-
-            if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
-                group
-                    .merge_staged_commit(&provider, *staged)
-                    .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge commit: {e}")))?;
+            match group.process_message(&provider, protocol_msg) {
+                Ok(processed) => {
+                    if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
+                        if let Err(e) = group.merge_staged_commit(&provider, *staged) {
+                            eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id}: {e} — deleting stale group");
+                            let _ = group.delete(provider.storage());
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(e) => {
+                    // AEAD or epoch mismatch — local state is unrecoverable.
+                    // Delete the group so repair recreates it on next send.
+                    eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} — deleting stale group");
+                    let _ = group.delete(provider.storage());
+                    return Ok(());
+                }
             }
 
             true
@@ -814,6 +845,96 @@ pub async fn process_pending_commits(
         }
     }
 
+    Ok(())
+}
+
+/// Tauri command wrapper — resolves conversation_id to MLS group ID, then
+/// delegates to `process_pending_commits_inner`.
+#[tauri::command]
+pub async fn process_pending_commits(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: String,
+) -> crate::error::Result<()> {
+    let mls_group_id = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn.query(
+            "SELECT group_id FROM channels WHERE id = ?1",
+            libsql::params![conversation_id.clone()],
+        ).await?;
+        match rows.next().await? {
+            Some(row) => row.get::<String>(0)?,
+            None => conversation_id,
+        }
+    };
+    process_pending_commits_inner(state.inner(), &mls_group_id).await
+}
+
+// ── Phase 4.5: MLS group self-repair ─────────────────────────────────────────
+
+/// Re-create the MLS group for a channel and re-add all current members.
+///
+/// Called transparently when `try_mls_encrypt` returns `None` (i.e. the local
+/// MLS state was lost — typically after a local DB schema bump wiped the file).
+/// The sender becomes the new group "creator"; fresh Welcome messages are
+/// generated for every other member using their latest key packages.
+///
+/// Members who haven't logged in since the wipe won't have key packages yet —
+/// they're silently skipped and will be repaired the next time *they* send.
+pub async fn repair_mls_group(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    sender_id: &str,
+) -> crate::error::Result<()> {
+    eprintln!("[mls] repair: re-creating MLS group {mls_group_id}");
+
+    // 1. Create a fresh MLS group with the sender as sole member.
+    init_mls_group(state, mls_group_id, sender_id).await?;
+
+    // 1b. Purge stale commit log and welcome entries so process_pending_commits
+    //     doesn't try to apply old-generation commits against the new group.
+    let conn = state.remote_db.conn().await?;
+    let _ = conn.execute(
+        "DELETE FROM mls_commit_log WHERE conversation_id = ?1",
+        libsql::params![mls_group_id],
+    ).await;
+    let _ = conn.execute(
+        "DELETE FROM mls_welcome WHERE recipient_id = ?1 AND delivered = 0",
+        libsql::params![sender_id],
+    ).await;
+    drop(conn);
+
+    // 2. Look up all other members. Group channels use `group_member`; DM
+    //    conversations use `dm_channel_member`. Try groups first, fall back to DMs.
+    let conn = state.remote_db.conn().await?;
+    let mut member_ids: Vec<String> = Vec::new();
+    {
+        let mut rows = conn.query(
+            "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2",
+            libsql::params![mls_group_id, sender_id],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            member_ids.push(row.get::<String>(0)?);
+        }
+    }
+    if member_ids.is_empty() {
+        let mut rows = conn.query(
+            "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id != ?2",
+            libsql::params![mls_group_id, sender_id],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            member_ids.push(row.get::<String>(0)?);
+        }
+    }
+
+    // 3. Add each member — this claims their fresh key package and posts a Welcome.
+    for member_id in &member_ids {
+        match add_member_mls_inner(state, mls_group_id, member_id, sender_id).await {
+            Ok(()) => eprintln!("[mls] repair: added {member_id}"),
+            Err(e) => eprintln!("[mls] repair: skipping {member_id} (no key package?): {e}"),
+        }
+    }
+
+    eprintln!("[mls] repair: done — {} members processed", member_ids.len());
     Ok(())
 }
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
-import { Reply, Download, Film, Check } from "lucide-react";
+import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia } from "../../services/r2-upload";
@@ -17,6 +17,8 @@ interface MessageItemProps {
   authorUsername?: string;
   isAuthorAdmin?: boolean;
   onReply?: (messageId: string) => void;
+  onEdit?: (messageId: string) => void;
+  onDelete?: (messageId: string) => void;
   onPin?: (messageId: string) => void;
   onScrollToReply?: (messageId: string) => void;
 }
@@ -35,6 +37,8 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   authorUsername = "unknown",
   isAuthorAdmin = false,
   onReply,
+  onEdit,
+  onDelete,
   onScrollToReply,
 }) => {
   const { currentUser } = useAppStore();
@@ -48,23 +52,25 @@ export const MessageItem: React.FC<MessageItemProps> = ({
     ? (replyTo.sender_username ?? replyTo.sender_id)
     : null;
 
+  const isDeleted = !!message.deleted_at;
+
   // content_decrypted is undefined when decryption failed (the server returned
   // null). Show [encrypted] in that case rather than an empty row.
-  const content = message.content_decrypted ?? "[encrypted]";
+  const content = isDeleted ? "[deleted]" : (message.content_decrypted ?? "[encrypted]");
 
   // Sort attachments: images and videos first, then everything else.
   const sortedAttachments = message.attachments && message.attachments.length > 0
     ? [...message.attachments].sort((a, b) => {
-        const rank = (ct: string) => ct.startsWith("image/") || ct.startsWith("video/") ? 0 : 1;
-        return rank(a.content_type) - rank(b.content_type);
-      })
+      const rank = (ct: string) => ct.startsWith("image/") || ct.startsWith("video/") ? 0 : 1;
+      return rank(a.content_type) - rank(b.content_type);
+    })
     : null;
 
   return (
     <div
       data-testid={`message-${message.id}`}
       aria-label={`Message from ${authorUsername}`}
-      className="group relative px-3 py-1 mb-0.5 hover:bg-[var(--c-hover)] transition-colors duration-75"
+      className="group relative px-4 py-1 hover:bg-[var(--c-hover)] transition-colors duration-75"
     >
       {/* Reply thread indicator */}
       {message.reply_to_message_id && (
@@ -72,7 +78,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           <button
             data-testid={`reply-preview-${message.reply_to_message_id}`}
             onClick={() => onScrollToReply?.(message.reply_to_message_id!)}
-            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 pl-14 opacity-60 hover:opacity-90 transition-opacity"
             style={{ color: "var(--c-text-muted)" }}
           >
             <Reply size={10} style={{ transform: "scaleX(-1)" }} />
@@ -88,7 +94,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         ) : (
           <div
             data-testid={`reply-preview-${message.reply_to_message_id}`}
-            className="flex items-center gap-1 text-xs font-mono mb-0.5 pl-14"
+            className="flex items-center gap-1 text-xs font-mono mb-1.5 pl-14"
             style={{ color: "var(--c-text-dim)" }}
           >
             <Reply size={10} style={{ transform: "scaleX(-1)" }} />
@@ -98,7 +104,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       )}
 
       {/* IRC-style inline row: HH:MM  username  message */}
-      <div className="flex items-baseline gap-0 min-w-0">
+      <div className="flex items-start gap-0 min-w-0">
         <span
           data-testid="message-timestamp"
           className="flex-shrink-0 text-sm font-mono tabular-nums select-none w-12 mr-2"
@@ -113,8 +119,8 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={isAuthorAdmin ? {
             background: "var(--c-accent)",
             color: "var(--c-bg)",
-            paddingLeft: "3px",
-            paddingRight: "3px",
+            paddingLeft: "0.5rem",
+            paddingRight: "0.5rem",
           } : {
             color: isOwn ? "var(--c-accent)" : "var(--c-text-dim)",
           }}
@@ -133,9 +139,18 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         <span
           data-testid="message-content"
           className="font-mono text-sm break-words flex-1 min-w-0"
-          style={{ color: "var(--c-text)", whiteSpace: "pre-wrap" }}
+          style={{
+            color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
+            whiteSpace: "pre-wrap",
+            fontStyle: isDeleted ? "italic" : undefined,
+          }}
         >
           <LinkifiedText text={content} />
+          {message.edited_at && !isDeleted && (
+            <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
+              (edited)
+            </span>
+          )}
           {message.status && message.status !== "sent" && (
             <span className="ml-1 text-xs" style={{ color: "var(--c-text-muted)" }}>
               [{message.status}]
@@ -143,16 +158,39 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           )}
         </span>
 
-        {/* Reply button — only visible on hover */}
-        <button
-          data-testid="reply-button"
-          onClick={() => onReply?.(message.id)}
-          aria-label="Reply"
-          className="flex-shrink-0 ml-1 opacity-0 group-hover:opacity-60 hover:!opacity-100 transition-opacity"
-          style={{ color: "var(--c-text-muted)" }}
-        >
-          <Reply size={12} />
-        </button>
+        {/* Action buttons — only visible on hover */}
+        {!isDeleted && (
+          <div className="flex-shrink-0 ml-2 flex items-center gap-4 h-6">
+            <button
+              data-testid="reply-button"
+              onClick={() => onReply?.(message.id)}
+              aria-label="Reply"
+              className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+            >
+              <Reply size={18} />
+            </button>
+            {isOwn && onEdit && (
+              <button
+                data-testid="edit-button"
+                onClick={() => onEdit(message.id)}
+                aria-label="Edit message"
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <Edit2 size={18} />
+              </button>
+            )}
+            {isOwn && onDelete && (
+              <button
+                data-testid="delete-button"
+                onClick={() => onDelete(message.id)}
+                aria-label="Delete message"
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Attachments — each on its own row */}

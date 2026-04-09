@@ -16,10 +16,12 @@ JOIN group_member gm ON gm.group_id = g.id AND gm.user_id = ?1
 LEFT JOIN (
     SELECT me.conversation_id, me.ciphertext, me.sender_id, me.sent_at
     FROM message_envelope me
-    WHERE me.sent_at = (
+    WHERE me.type = 'message'
+      AND me.sent_at = (
         SELECT MAX(sent_at)
         FROM message_envelope
         WHERE conversation_id = me.conversation_id
+          AND type = 'message'
     )
 ) last_msg ON last_msg.conversation_id = c.id
 LEFT JOIN users u ON u.id = last_msg.sender_id
