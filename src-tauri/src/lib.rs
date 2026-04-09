@@ -184,6 +184,7 @@ pub fn run() {
             commands::auth::get_identity,
             commands::auth::request_otp,
             commands::auth::verify_otp,
+            commands::auth::dev_login,
             commands::auth::get_session,
             commands::auth::logout,
             commands::auth::delete_account,
