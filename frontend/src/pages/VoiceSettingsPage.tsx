@@ -121,9 +121,9 @@ export const VoiceSettingsPage: React.FC = () => {
 
   return (
     <PageShell title="Voice Settings" onBack={() => router.history.back()} scrollable>
-      <div className="flex flex-col px-6 py-6 gap-6" style={{ maxWidth: 400 }}>
+      <div className="flex flex-col px-6 py-8 gap-8" style={{ maxWidth: 400 }}>
 
-        <section className="flex flex-col gap-4">
+        <section className="flex flex-col gap-4 mb-12">
           <h2
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
@@ -146,7 +146,7 @@ export const VoiceSettingsPage: React.FC = () => {
           />
         </section>
 
-        <section className="flex flex-col gap-4">
+        <section className="flex flex-col gap-4 mb-12">
           <h2
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
@@ -171,7 +171,7 @@ export const VoiceSettingsPage: React.FC = () => {
           />
         </section>
 
-        <section className="flex flex-col gap-4">
+        <section className="flex flex-col gap-4 mb-12">
           <h2
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
