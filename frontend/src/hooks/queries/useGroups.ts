@@ -437,7 +437,7 @@ export function useGroupJoinRequests(groupId: string | null) {
       return await invoke<JoinRequest[]>('get_group_join_requests', { groupId, requesterId: currentUser.id });
     },
     enabled: !!currentUser && !!groupId,
-    staleTime: 1000 * 30,
+    staleTime: 0,
     refetchOnWindowFocus: true,
   });
 }
@@ -456,6 +456,7 @@ export function useApproveJoinRequest() {
     },
     onSuccess: (groupId) => {
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
+      queryClient.invalidateQueries({ queryKey: ["join-requests", "all-admin"] });
     },
   });
 }
@@ -474,6 +475,7 @@ export function useRejectJoinRequest() {
     },
     onSuccess: (groupId) => {
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.joinRequests(groupId) });
+      queryClient.invalidateQueries({ queryKey: ["join-requests", "all-admin"] });
     },
   });
 }

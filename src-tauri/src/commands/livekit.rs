@@ -117,6 +117,53 @@ pub async fn publish_to_user_inbox(
     Ok(())
 }
 
+/// Connects to a LiveKit room as a temporary "server" participant and publishes
+/// a data packet. Used when the caller is not already in the room (e.g. a user
+/// accepting an invite needs to notify existing group members).
+pub async fn publish_to_room_server(
+    config: &Config,
+    room_name: &str,
+    payload: serde_json::Value,
+) -> Result<()> {
+    if config.livekit_url.is_empty() || config.livekit_api_key.is_empty() {
+        return Ok(());
+    }
+
+    let token = make_token(config, room_name, "server", "server")?;
+    let url = config.livekit_url.clone();
+    let room_owned = room_name.to_owned();
+
+    tauri::async_runtime::spawn(async move {
+        match Room::connect(&url, &token, RoomOptions::default()).await {
+            Ok((room, _events)) => {
+                let raw = match serde_json::to_vec(&payload) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("[room-server] serialize error for {room_owned}: {e}");
+                        return;
+                    }
+                };
+                let result = room
+                    .local_participant()
+                    .publish_data(DataPacket {
+                        payload: raw,
+                        reliable: true,
+                        ..Default::default()
+                    })
+                    .await;
+                if let Err(e) = result {
+                    eprintln!("[room-server] publish_data to {room_owned} failed: {e}");
+                }
+            }
+            Err(e) => {
+                eprintln!("[room-server] connect to {room_owned} failed: {e}");
+            }
+        }
+    });
+
+    Ok(())
+}
+
 // ── Voice participant listing ──────────────────────────────────────────────
 
 #[derive(Serialize)]
@@ -206,6 +253,13 @@ pub async fn connect_rooms(
     let url = state.config.livekit_url.clone();
     let livekit_arc = Arc::clone(&state.livekit);
 
+    // Build a per-device identity so multiple devices for the same user can
+    // coexist in the same LiveKit room without kicking each other.
+    let identity = match state.device_id.lock().await.clone() {
+        Some(did) => format!("{user_id}:{did}"),
+        None => user_id.clone(),
+    };
+
     // Compute the diff while holding the lock briefly, then release.
     // Include rooms that are mid-connection to prevent duplicate connects.
     let (to_remove, to_connect) = {
@@ -245,7 +299,7 @@ pub async fn connect_rooms(
     // Connect new rooms in parallel — each room gets its own task so a timeout
     // or failure on one room does not delay or block the others.
     for room_id in to_connect {
-        let token = match make_token(&state.config, &room_id, &user_id, &username) {
+        let token = match make_token(&state.config, &room_id, &identity, &username) {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("[realtime] token error for room {room_id}: {e}");
@@ -258,6 +312,7 @@ pub async fn connect_rooms(
         let url_owned = url.clone();
         let lk_arc_connect = Arc::clone(&livekit_arc);
         let config = state.config.clone();
+        let identity_owned = identity.clone();
         let user_id_owned = user_id.clone();
         let username_owned = username.clone();
         let remote_db_connect = Arc::clone(&state.remote_db);
@@ -272,10 +327,11 @@ pub async fn connect_rooms(
                     // On connect, reconcile voice_presence: delete rows for any user who
                     // has a presence record for this group but is not currently in the room.
                     // This cleans up orphaned rows from previous crash disconnects.
+                    // Extract user_id from participant identities (may be "user_id:device_id").
                     let online_ids: HashSet<String> = room
                         .remote_participants()
                         .keys()
-                        .map(|id| id.to_string())
+                        .map(|id| id.to_string().split(':').next().unwrap_or_default().to_string())
                         .chain(std::iter::once(user_id_owned.clone()))
                         .collect();
                     reconcile_voice_presence(&remote_db_connect, &room_id, &online_ids).await;
@@ -310,13 +366,15 @@ pub async fn connect_rooms(
                                     }
                                     RoomEvent::ParticipantDisconnected(participant) => {
                                         let identity = participant.identity().to_string();
+                                        // Extract user_id from identity (may be "user_id:device_id").
+                                        let uid = identity.split(':').next().unwrap_or(&identity);
                                         // Clean up any voice presence rows for this user in
                                         // this group and notify the frontend for each.
                                         handle_participant_disconnect(
                                             remote_db,
                                             lk_arc,
                                             room_id,
-                                            &identity,
+                                            uid,
                                         )
                                         .await;
                                     }
@@ -346,7 +404,7 @@ pub async fn connect_rooms(
                                 }
                             }
 
-                            let token = match make_token(&config, &room_id_owned, &user_id_owned, &username_owned) {
+                            let token = match make_token(&config, &room_id_owned, &identity_owned, &username_owned) {
                                 Ok(t) => t,
                                 Err(e) => {
                                     eprintln!("[realtime] reconnect token error for room {room_id_owned}: {e}");
@@ -364,7 +422,7 @@ pub async fn connect_rooms(
                                     let online_ids: HashSet<String> = new_room
                                         .remote_participants()
                                         .keys()
-                                        .map(|id| id.to_string())
+                                        .map(|id| id.to_string().split(':').next().unwrap_or_default().to_string())
                                         .chain(std::iter::once(user_id_owned.clone()))
                                         .collect();
                                     reconcile_voice_presence(&remote_db_task, &room_id_owned, &online_ids).await;
@@ -488,6 +546,40 @@ pub async fn publish_edited_message_to_room(
         })
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("publish_edited_message: {e}")))?;
+
+    Ok(())
+}
+
+/// Broadcasts a `membership_changed` event to a group's LiveKit room so
+/// existing members refetch the member list (e.g. after a join-request approval).
+pub async fn publish_membership_changed_to_room(
+    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    group_id: &str,
+) -> Result<()> {
+    let room = {
+        let lk = livekit.lock().await;
+        lk.rooms.get(group_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    let room = match room {
+        None => return Ok(()),
+        Some(r) => r,
+    };
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "type": "membership_changed",
+        "group_id": group_id,
+    }))
+    .map_err(Error::Serde)?;
+
+    room.local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: true,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("publish_membership_changed: {e}")))?;
 
     Ok(())
 }

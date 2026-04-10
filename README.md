@@ -56,6 +56,8 @@ pnpm dev:frontend     # Frontend only in browser (no Tauri commands)
 
 Add `DEV_OTP=000000` to `.env.development`. With this set, hitting "Continue" on the login screen skips the Resend email call and stores a hash of `000000` as the valid code — type it in the OTP field to sign in. The session persists to the OS keystore so you only need to do this once per fresh install.
 
+For fully hands-free startup, set `DEV_EMAIL=you@example.com` instead. This bypasses OTP entirely and auto-logs in as that email on every launch (creating the user in Turso if needed).
+
 ### Testing with two users
 
 ```bash
@@ -63,17 +65,39 @@ Add `DEV_OTP=000000` to `.env.development`. With this set, hitting "Continue" on
 pnpm dev
 
 # Terminal 2 — user B
-POLLIS_DATA_DIR=/tmp/pollis2 pnpm dev
+POLLIS_DATA_DIR=/tmp/pollis-dev2 pnpm dev
 ```
 
-Both instances hit the same Turso database, so messages appear in real time across windows via LiveKit.
+`POLLIS_DATA_DIR` gives the second instance its own local SQLite database and keystore, so the two instances don't interfere. Both hit the same Turso database, so messages appear in real time across windows via LiveKit.
+
+### Testing multi-device (same user, two devices)
+
+```bash
+# Terminal 1 — device 1
+DEV_EMAIL=you@example.com pnpm dev
+
+# Terminal 2 — device 2
+DEV_EMAIL=you@example.com POLLIS_DATA_DIR=/tmp/pollis-dev2 pnpm dev
+```
+
+Both instances log in as the same user, but `POLLIS_DATA_DIR` isolates the keystore and local DB so each gets its own `device_id` and MLS state — they register as separate devices in the `user_device` table. Messages sent from a third user (or from either device) should appear on both.
+
+### Development environment variables
+
+All dev-only env vars. Set them in `.env.development` or pass inline.
+
+| Variable | Purpose |
+|----------|---------|
+| `DEV_OTP` | Fixed OTP code (e.g. `000000`) — skips Resend email, accepts this code on the OTP screen |
+| `DEV_EMAIL` | Auto-login as this email on startup — bypasses OTP entirely |
+| `POLLIS_DATA_DIR` | Override the local data directory — isolates local DB and keystore for running multiple instances |
 
 ### Building
 
 ```bash
 pnpm build            # Current platform
-pnpm build:macos      # Universal binary (Intel + Apple Silicon)
-pnpm build:linux      # amd64 AppImage
+pnpm build:macos      # Universal binary (Apple Silicon)
+pnpm build:linux      # amd64 AppImage, deb, rpm
 pnpm build:windows    # amd64 NSIS installer
 ```
 

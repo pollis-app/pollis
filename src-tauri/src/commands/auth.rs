@@ -605,6 +605,39 @@ pub fn list_known_accounts() -> crate::accounts::AccountsIndex {
     crate::accounts::read_accounts_index()
 }
 
+/// List all registered devices for a user. Returns each device's ID,
+/// name, timestamps, and whether it is the current device.
+#[tauri::command]
+pub async fn list_user_devices(
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+) -> Result<Vec<serde_json::Value>> {
+    let current_device_id = state.device_id.lock().await.clone();
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn.query(
+        "SELECT device_id, device_name, created_at, last_seen FROM user_device WHERE user_id = ?1 ORDER BY created_at ASC",
+        libsql::params![user_id],
+    ).await?;
+
+    let mut devices = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let did: String = row.get(0)?;
+        let name: Option<String> = row.get(1).ok();
+        let created: String = row.get(2)?;
+        let seen: String = row.get(3)?;
+        let is_current = current_device_id.as_deref() == Some(did.as_str());
+        devices.push(serde_json::json!({
+            "device_id": did,
+            "device_name": name,
+            "created_at": created,
+            "last_seen": seen,
+            "is_current": is_current,
+        }));
+    }
+
+    Ok(devices)
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;

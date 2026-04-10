@@ -80,14 +80,14 @@ impl From<MlsStorageError> for crate::error::Error {
 /// Build an MLS `Credential` encoding both user and device identity.
 ///
 /// Format: `"user_id:device_id"` as UTF-8 bytes inside a `BasicCredential`.
-fn make_credential(user_id: &str, device_id: &str) -> Credential {
+pub fn make_credential(user_id: &str, device_id: &str) -> Credential {
     BasicCredential::new(format!("{user_id}:{device_id}").into_bytes()).into()
 }
 
 /// Extract the `user_id` from a credential produced by `make_credential`.
 ///
 /// Handles legacy credentials that contain only `user_id` (no colon).
-fn parse_credential_user_id(cred: &Credential) -> String {
+pub fn parse_credential_user_id(cred: &Credential) -> String {
     let s = String::from_utf8_lossy(cred.serialized_content());
     s.split_once(':').map(|(u, _)| u).unwrap_or(&s).to_string()
 }
@@ -613,6 +613,29 @@ pub async fn add_member_mls_inner(
     add_member_mls_impl(state, conversation_id, target_user_id, actor_user_id, None).await
 }
 
+/// Add the user's OTHER devices to an MLS group they just created.
+/// No-op if the user only has one device. Non-fatal errors are logged.
+pub async fn add_member_mls_for_own_devices(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    exclude_device_id: Option<&str>,
+) -> crate::error::Result<()> {
+    match add_member_mls_impl(state, conversation_id, user_id, user_id, exclude_device_id).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let msg = format!("{e}");
+            // "No registered devices" or "No available key packages" means the
+            // user only has one device — that's fine, not an error.
+            if msg.contains("No registered devices") || msg.contains("No available key packages") || msg.contains("No valid key packages") {
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn add_member_mls(
     state: State<'_, Arc<AppState>>,
@@ -634,17 +657,24 @@ async fn add_member_mls_impl(
     let target_user_id = target_user_id.to_owned();
     let actor_user_id = actor_user_id.to_owned();
 
-    // 1. Look up all registered devices for the target user.
+    // 1. Look up devices for the target user that have at least one unclaimed
+    //    key package.  Stale devices (e.g. from earlier testing) with no KPs
+    //    are skipped — they can't be added to MLS groups.
     let device_ids: Vec<String> = {
         let conn = state.remote_db.conn().await?;
         let mut rows = conn.query(
-            "SELECT device_id FROM user_device WHERE user_id = ?1",
+            "SELECT d.device_id FROM user_device d \
+             WHERE d.user_id = ?1 \
+             AND EXISTS ( \
+                 SELECT 1 FROM mls_key_package kp \
+                 WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
+             )",
             libsql::params![target_user_id.clone()],
         ).await?;
         let mut ids = Vec::new();
         while let Some(row) = rows.next().await? {
             let did: String = row.get(0)?;
-            // Skip the excluded device (e.g. the group creator during repair).
+            // Skip the excluded device (e.g. the group creator's current device).
             if exclude_device_id.map_or(false, |ex| ex == did) {
                 continue;
             }
@@ -1922,6 +1952,295 @@ mod tests {
         assert_eq!(
             try_mls_decrypt(&alice_db, group1, &carol_msg).unwrap(),
             b"carol still here"
+        );
+    }
+
+    // ── multi-device helpers ────────────────────────────────────────────────
+
+    /// Create an MLS group with an explicit device_id in the credential.
+    fn create_group_with_device(
+        conn: &rusqlite::Connection,
+        conversation_id: &str,
+        user_id: &str,
+        device_id: &str,
+    ) -> SignatureKeyPair {
+        let provider = PollisProvider::new(conn);
+        let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+        sig_keys.store(provider.storage()).unwrap();
+
+        let credential = make_credential(user_id, device_id);
+        let sig_pub = OpenMlsSignaturePublicKey::new(
+            sig_keys.to_public_vec().into(),
+            CS.signature_algorithm(),
+        ).unwrap();
+        let cred_with_key = CredentialWithKey {
+            credential,
+            signature_key: sig_pub.into(),
+        };
+
+        let group_id = GroupId::from_slice(conversation_id.as_bytes());
+        let config = MlsGroupCreateConfig::builder()
+            .ciphersuite(CS)
+            .use_ratchet_tree_extension(true)
+            .build();
+
+        MlsGroup::new_with_group_id(&provider, &sig_keys, &config, group_id, cred_with_key)
+            .unwrap();
+
+        sig_keys
+    }
+
+    /// Generate a key package with an explicit device_id in the credential.
+    fn gen_key_package_with_device(
+        conn: &rusqlite::Connection,
+        user_id: &str,
+        device_id: &str,
+    ) -> Vec<u8> {
+        let provider = PollisProvider::new(conn);
+        let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+        sig_keys.store(provider.storage()).unwrap();
+
+        let credential = make_credential(user_id, device_id);
+        let sig_pub = OpenMlsSignaturePublicKey::new(
+            sig_keys.to_public_vec().into(),
+            CS.signature_algorithm(),
+        ).unwrap();
+        let cred_with_key = CredentialWithKey {
+            credential,
+            signature_key: sig_pub.into(),
+        };
+
+        let bundle = KeyPackage::builder()
+            .build(CS, &provider, &sig_keys, cred_with_key)
+            .unwrap();
+
+        bundle.key_package().tls_serialize_detached().unwrap()
+    }
+
+    /// Add multiple key packages to a group in a single `add_members` call.
+    /// Mirrors production `add_member_mls_impl` which batches all devices.
+    fn add_members_batch(
+        adder_db: &rusqlite::Connection,
+        conv_id: &str,
+        kp_bytes_list: &[Vec<u8>],
+    ) -> (Vec<u8>, Vec<u8>) {
+        let provider = PollisProvider::new(adder_db);
+        let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+
+        let validated_kps: Vec<KeyPackage> = kp_bytes_list.iter().map(|kp_raw| {
+            let mut reader: &[u8] = kp_raw;
+            let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
+            kp_in.validate(provider.crypto(), ProtocolVersion::Mls10).unwrap()
+        }).collect();
+
+        let (commit_msg, welcome_msg, _) =
+            group.add_members(&provider, &signer, &validated_kps).unwrap();
+        group.merge_pending_commit(&provider).unwrap();
+
+        (
+            commit_msg.tls_serialize_detached().unwrap(),
+            welcome_msg.tls_serialize_detached().unwrap(),
+        )
+    }
+
+    // ── multi-device credential tests ───────────────────────────────────────
+
+    /// Credential encodes user_id:device_id; parsing extracts user_id.
+    #[test]
+    fn credential_roundtrip_with_device() {
+        let cred = make_credential("alice", "dev_01ABCDEF");
+        assert_eq!(parse_credential_user_id(&cred), "alice");
+        assert_eq!(
+            String::from_utf8_lossy(cred.serialized_content()),
+            "alice:dev_01ABCDEF"
+        );
+    }
+
+    /// Legacy credentials (no colon) still parse correctly.
+    #[test]
+    fn credential_legacy_no_device_id() {
+        let cred: Credential = BasicCredential::new("alice".as_bytes().to_vec()).into();
+        assert_eq!(parse_credential_user_id(&cred), "alice");
+    }
+
+    // ── multi-device scenario tests ─────────────────────────────────────────
+
+    /// Alice has two devices in the group. Bob sends a message. Both Alice
+    /// devices decrypt it.
+    #[test]
+    fn multi_device_both_devices_decrypt() {
+        let conv_id = "01JTEST00000000000MULTIDEV1";
+
+        let alice_d1_db = make_db();
+        let alice_d2_db = make_db();
+        let bob_db = make_db();
+
+        // Alice device 1 creates the group.
+        create_group_with_device(&alice_d1_db, conv_id, "alice", "alice_d1");
+
+        // Add Bob.
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (add_bob_commit, bob_welcome) =
+            add_member_to_group(&alice_d1_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+        let _ = add_bob_commit;
+
+        // Add Alice's second device.
+        let alice_d2_kp = gen_key_package_with_device(&alice_d2_db, "alice", "alice_d2");
+        let (add_d2_commit, alice_d2_welcome) =
+            add_member_to_group(&alice_d1_db, conv_id, &alice_d2_kp);
+        join_via_welcome(&alice_d2_db, &alice_d2_welcome);
+        apply_commit(&bob_db, conv_id, &add_d2_commit);
+
+        // Bob sends.
+        let bob_ct = try_mls_encrypt(&bob_db, conv_id, b"hello both alices").unwrap();
+
+        // Both Alice devices decrypt.
+        assert_eq!(
+            try_mls_decrypt(&alice_d1_db, conv_id, &bob_ct).unwrap(),
+            b"hello both alices"
+        );
+        assert_eq!(
+            try_mls_decrypt(&alice_d2_db, conv_id, &bob_ct).unwrap(),
+            b"hello both alices"
+        );
+    }
+
+    /// Two devices for the same user are added in a single add_members commit
+    /// (matching production add_member_mls_impl). Both join via the same
+    /// Welcome and can decrypt.
+    #[test]
+    fn multi_device_batch_add_single_commit() {
+        let conv_id = "01JTEST00000000000MULTIDEV2";
+
+        let alice_db = make_db();
+        let bob_d1_db = make_db();
+        let bob_d2_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        // Generate KPs for both Bob devices.
+        let bob_d1_kp = gen_key_package_with_device(&bob_d1_db, "bob", "bob_d1");
+        let bob_d2_kp = gen_key_package_with_device(&bob_d2_db, "bob", "bob_d2");
+
+        // Add both in a single commit.
+        let (_commit, welcome) =
+            add_members_batch(&alice_db, conv_id, &[bob_d1_kp, bob_d2_kp]);
+
+        // Both Bob devices process the same Welcome.
+        join_via_welcome(&bob_d1_db, &welcome);
+        join_via_welcome(&bob_d2_db, &welcome);
+
+        // Alice sends — both Bob devices decrypt.
+        let ct = try_mls_encrypt(&alice_db, conv_id, b"hello bob devices").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&bob_d1_db, conv_id, &ct).unwrap(),
+            b"hello bob devices"
+        );
+        assert_eq!(
+            try_mls_decrypt(&bob_d2_db, conv_id, &ct).unwrap(),
+            b"hello bob devices"
+        );
+
+        // Bob device 1 sends — Alice and Bob device 2 both decrypt.
+        let bob_ct = try_mls_encrypt(&bob_d1_db, conv_id, b"from bob d1").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&alice_db, conv_id, &bob_ct).unwrap(),
+            b"from bob d1"
+        );
+        assert_eq!(
+            try_mls_decrypt(&bob_d2_db, conv_id, &bob_ct).unwrap(),
+            b"from bob d1"
+        );
+    }
+
+    /// Removing a user removes ALL their device leaf nodes. Neither device
+    /// can decrypt messages from the new epoch.
+    #[test]
+    fn remove_multi_device_user_removes_all_leaves() {
+        let conv_id = "01JTEST00000000000MULTIDEV3";
+
+        let alice_db = make_db();
+        let bob_d1_db = make_db();
+        let bob_d2_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        // Add both Bob devices in one commit.
+        let bob_d1_kp = gen_key_package_with_device(&bob_d1_db, "bob", "bob_d1");
+        let bob_d2_kp = gen_key_package_with_device(&bob_d2_db, "bob", "bob_d2");
+        let (_commit, welcome) =
+            add_members_batch(&alice_db, conv_id, &[bob_d1_kp, bob_d2_kp]);
+        join_via_welcome(&bob_d1_db, &welcome);
+        join_via_welcome(&bob_d2_db, &welcome);
+
+        // Both can decrypt before removal.
+        let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"before removal").unwrap();
+        assert!(try_mls_decrypt(&bob_d1_db, conv_id, &pre_ct).is_some());
+        assert!(try_mls_decrypt(&bob_d2_db, conv_id, &pre_ct).is_some());
+
+        // Alice removes "bob" — removes both leaf nodes.
+        let _remove_commit = remove_member(&alice_db, conv_id, "bob");
+
+        // Alice sends at new epoch.
+        let post_ct = try_mls_encrypt(&alice_db, conv_id, b"after removal").unwrap();
+
+        // Neither Bob device can decrypt.
+        assert!(
+            try_mls_decrypt(&bob_d1_db, conv_id, &post_ct).is_none(),
+            "bob device 1 must not decrypt after removal"
+        );
+        assert!(
+            try_mls_decrypt(&bob_d2_db, conv_id, &post_ct).is_none(),
+            "bob device 2 must not decrypt after removal"
+        );
+    }
+
+    /// A second device joins later. It cannot read pre-join history but can
+    /// decrypt new messages.
+    #[test]
+    fn second_device_joins_later_cannot_read_history() {
+        let conv_id = "01JTEST00000000000MULTIDEV4";
+
+        let alice_d1_db = make_db();
+        let alice_d2_db = make_db();
+        let bob_db = make_db();
+
+        // Alice device 1 creates group and adds Bob.
+        create_group_with_device(&alice_d1_db, conv_id, "alice", "alice_d1");
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (_, bob_welcome) = add_member_to_group(&alice_d1_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+
+        // Messages sent before alice_d2 joins.
+        let history_ct = try_mls_encrypt(&bob_db, conv_id, b"history msg").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&alice_d1_db, conv_id, &history_ct).unwrap(),
+            b"history msg"
+        );
+
+        // Alice device 2 joins.
+        let alice_d2_kp = gen_key_package_with_device(&alice_d2_db, "alice", "alice_d2");
+        let (add_d2_commit, alice_d2_welcome) =
+            add_member_to_group(&alice_d1_db, conv_id, &alice_d2_kp);
+        join_via_welcome(&alice_d2_db, &alice_d2_welcome);
+        apply_commit(&bob_db, conv_id, &add_d2_commit);
+
+        // Device 2 cannot read pre-join history.
+        assert!(
+            try_mls_decrypt(&alice_d2_db, conv_id, &history_ct).is_none(),
+            "second device must not decrypt messages from before it joined"
+        );
+
+        // Both devices decrypt new messages.
+        let new_ct = try_mls_encrypt(&bob_db, conv_id, b"new msg").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&alice_d1_db, conv_id, &new_ct).unwrap(),
+            b"new msg"
+        );
+        assert_eq!(
+            try_mls_decrypt(&alice_d2_db, conv_id, &new_ct).unwrap(),
+            b"new msg"
         );
     }
 }

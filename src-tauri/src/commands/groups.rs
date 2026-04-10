@@ -189,7 +189,16 @@ pub async fn create_group(
 
     // Create the per-group MLS group — all channels in this group share it.
     match crate::commands::mls::init_mls_group(state.inner(), &id, &owner_id).await {
-        Ok(()) => {}
+        Ok(()) => {
+            // Add the creator's OTHER devices so they receive a Welcome and can
+            // decrypt messages without triggering an independent repair.
+            let current_did = state.device_id.lock().await.clone();
+            if let Err(e) = crate::commands::mls::add_member_mls_for_own_devices(
+                state.inner(), &id, &owner_id, current_did.as_deref(),
+            ).await {
+                eprintln!("[mls] create_group: add owner's other devices: {e}");
+            }
+        }
         Err(e) => eprintln!("[mls] create_group: mls group init failed (non-fatal): {e}"),
     }
 
@@ -829,7 +838,7 @@ pub async fn send_group_invite(
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
         &state.config,
         &invitee_id,
-        serde_json::json!({"type": "membership_changed"}),
+        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
     ).await {
         eprintln!("[inbox] send_group_invite: notify {invitee_id} failed: {e}");
     }
@@ -897,6 +906,17 @@ pub async fn accept_group_invite(
         "DELETE FROM group_invite WHERE id = ?1",
         libsql::params![invite_id],
     ).await?;
+
+    // Notify existing group members so they see the new member.
+    // The accepting user isn't connected to the group room yet, so use
+    // the server-side publish to reach existing members.
+    if let Err(e) = crate::commands::livekit::publish_to_room_server(
+        &state.config,
+        &group_id,
+        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
+    ).await {
+        eprintln!("[realtime] accept_group_invite: notify group {group_id}: {e}");
+    }
 
     Ok(())
 }
@@ -1120,9 +1140,17 @@ pub async fn approve_join_request(
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
         &state.config,
         &requester_id,
-        serde_json::json!({"type": "membership_changed"}),
+        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
     ).await {
         eprintln!("[inbox] approve_join_request: notify {requester_id} failed: {e}");
+    }
+
+    // Notify existing group members so they refetch the member list.
+    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
+        &state.livekit,
+        &group_id,
+    ).await {
+        eprintln!("[realtime] approve_join_request: notify group {group_id}: {e}");
     }
 
     Ok(())
