@@ -27,6 +27,13 @@ export async function resizeImage(
     outputFormat = 'image/jpeg',
   } = options;
 
+  // GIFs must pass through untouched — canvas.toBlob() flattens them to a
+  // single frame, killing animation. Only the first frame would survive a
+  // resize, and we'd rather upload the original so avatars can animate.
+  if (file.type === 'image/gif') {
+    return file;
+  }
+
   return new Promise((resolve, reject) => {
     const img = new Image();
     const canvas = document.createElement('canvas');
