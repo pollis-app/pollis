@@ -187,6 +187,14 @@ pub async fn create_group(
         libsql::params![id.clone(), owner_id.clone()],
     ).await.map_err(|e| db_err(e.into(), "Group member"))?;
 
+    // Create default channels: a #General text channel and a Voice Chat.
+    conn.execute(
+        "INSERT INTO channels (id, group_id, name, description, channel_type) VALUES \
+            (?1, ?2, 'General', NULL, 'text'), \
+            (?3, ?2, 'Voice Chat', NULL, 'voice')",
+        libsql::params![Ulid::new().to_string(), id.clone(), Ulid::new().to_string()],
+    ).await.map_err(|e| db_err(e.into(), "Channel"))?;
+
     // Create the per-group MLS group — all channels in this group share it.
     match crate::commands::mls::init_mls_group(state.inner(), &id, &owner_id).await {
         Ok(()) => {
