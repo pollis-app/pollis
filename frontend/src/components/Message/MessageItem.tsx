@@ -195,7 +195,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
 
       {/* Attachments — each on its own row */}
       {sortedAttachments && (
-        <div className="mt-1 flex flex-col gap-2">
+        <div className="mt-2 flex flex-col gap-2">
           {sortedAttachments.map((a) => (
             <AttachmentDisplay key={a.id} attachment={a} />
           ))}
@@ -271,7 +271,7 @@ const formatDuration = (seconds: number): string => {
 const lightboxBtnStyle: React.CSSProperties = {
   color: "var(--c-accent)",
   background: "none",
-  border: "1px solid transparent",
+  border: "2px solid transparent",
   borderRadius: 4,
   cursor: "pointer",
   padding: "2px 8px",
@@ -394,7 +394,10 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
 
   // Auto-load images and audio from R2 once confirmed (object_key populated, no local URL).
   useEffect(() => {
-    if ((!isImage && !isAudio) || isPending || downloadUrl) { return; }
+    if ((!isImage && !isAudio) || isPending || downloadUrl) {
+      return;
+    }
+
     let mounted = true;
     setIsLoading(true);
     downloadAndDecryptMedia(
@@ -526,7 +529,6 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   const renderCaptionBar = (extra?: React.ReactNode) => (
     <div
       className="flex items-center gap-2 px-2 py-1"
-      style={{ borderTop: "1px solid var(--c-border)" }}
     >
       <span
         className="flex-1 min-w-0 text-xs font-mono truncate"
@@ -697,7 +699,6 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             <div
               className="flex items-center gap-2 px-3 py-2"
               style={{
-                border: "1px solid var(--c-border)",
                 background: "var(--c-surface-high)",
                 borderRadius: 8,
               }}

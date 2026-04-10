@@ -298,8 +298,8 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
             <div className="flex items-center gap-4">
               <div
                 data-testid="avatar-preview-container"
-                className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer"
-                style={{ border: '1px solid var(--c-border)', background: 'var(--c-surface-high)' }}
+                className="w-14 h-14 overflow-hidden flex items-center justify-center flex-shrink-0 cursor-pointer rounded-panel"
+                style={{ border: '2px solid var(--c-border)', background: 'var(--c-surface-high)' }}
                 onClick={() => fileInputRef.current?.click()}
                 title="Click to choose image"
               >
