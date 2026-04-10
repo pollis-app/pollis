@@ -356,11 +356,18 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
         }
     };
 
+    let hostname = gethostname::gethostname().to_string_lossy().to_string();
+    let device_name = format!("{hostname} ({})", std::env::consts::OS);
+
+    // COALESCE preserves any existing device_name — fills it in only if NULL,
+    // so a user-set rename (future feature) is never overwritten on reconnect.
     let conn = state.remote_db.conn().await?;
     conn.execute(
-        "INSERT INTO user_device (device_id, user_id) VALUES (?1, ?2) \
-         ON CONFLICT(device_id) DO UPDATE SET last_seen = datetime('now')",
-        libsql::params![device_id.clone(), user_id],
+        "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(device_id) DO UPDATE SET \
+            last_seen = datetime('now'), \
+            device_name = COALESCE(user_device.device_name, excluded.device_name)",
+        libsql::params![device_id.clone(), user_id, device_name],
     ).await?;
 
     *state.device_id.lock().await = Some(device_id.clone());

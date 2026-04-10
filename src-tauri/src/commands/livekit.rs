@@ -974,7 +974,8 @@ mod tests {
             channel_id   TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
             display_name TEXT NOT NULL,
             joined_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            PRIMARY KEY (user_id, channel_id)
+            PRIMARY KEY (user_id, channel_id),
+            UNIQUE (user_id, group_id)
         );
         CREATE INDEX IF NOT EXISTS idx_voice_presence_channel ON voice_presence(channel_id);
         CREATE INDEX IF NOT EXISTS idx_voice_presence_group   ON voice_presence(group_id);
@@ -1143,24 +1144,29 @@ mod tests {
     }
 
     #[test]
-    fn user_cannot_be_in_two_channels_simultaneously() {
+    fn user_in_one_channel_only_via_unique_constraint() {
         let conn = db();
         setup(&conn);
 
-        // PK is (user_id, channel_id), but INSERT OR REPLACE means joining
-        // a second channel replaces the first row only if same channel_id.
-        // Different channel_ids would coexist. Verify this:
+        // UNIQUE (user_id, group_id) means joining a second channel in the
+        // same group atomically evicts the row for the first channel via
+        // INSERT OR REPLACE. The schema enforces single-channel-per-group
+        // even if the app's leave step crashed or raced.
         join(&conn, "alice", "g1", "vc1", "alice");
         join(&conn, "alice", "g1", "vc2", "alice");
 
-        // Both rows exist — the app should leave the old channel first,
-        // but the schema allows it (no UNIQUE on user_id alone).
         let total: i64 = conn.query_row(
             "SELECT COUNT(*) FROM voice_presence WHERE user_id = 'alice'",
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(total, 2, "schema allows user in multiple channels — app must enforce single-channel");
+        assert_eq!(total, 1, "UNIQUE(user_id, group_id) must collapse to a single row");
+
+        // The surviving row is the most recent channel.
+        assert_eq!(count(&conn, "vc1"), 0, "old channel row should be evicted");
+        assert_eq!(count(&conn, "vc2"), 1, "new channel row should be present");
+        let p = participants(&conn, "vc2");
+        assert_eq!(p[0].0, "alice");
     }
 
     // ── rejoin same channel (INSERT OR REPLACE) ───────────────────────────
@@ -1234,8 +1240,8 @@ mod tests {
         let conn = db();
         setup(&conn);
 
-        // Bob is in two channels in the same group (unusual but schema allows it)
-        join(&conn, "bob", "g1", "vc1", "bob");
+        // Bob is in vc2; alice is in vc1. UNIQUE(user_id, group_id) means
+        // bob can only ever be in one channel per group at a time.
         join(&conn, "bob", "g1", "vc2", "bob");
         join(&conn, "alice", "g1", "vc1", "alice");
 
@@ -1247,7 +1253,8 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        assert_eq!(affected.len(), 2);
+        assert_eq!(affected.len(), 1);
+        assert_eq!(affected[0], "vc2");
 
         conn.execute(
             "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
@@ -1255,7 +1262,7 @@ mod tests {
         ).unwrap();
 
         assert_eq!(count(&conn, "vc1"), 1, "alice should remain");
-        assert_eq!(count(&conn, "vc2"), 0, "bob's other channel should be cleared");
+        assert_eq!(count(&conn, "vc2"), 0, "bob's channel should be cleared");
         assert_eq!(participants(&conn, "vc1")[0].0, "alice");
     }
 

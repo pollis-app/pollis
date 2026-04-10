@@ -82,9 +82,9 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
 
   return (
     <div
-      className={`flex items-center gap-3 p-2 rounded-md ${className}`}
+      className={`flex items-center gap-3 p-2 rounded-lg ${className}`}
       style={{
-        border: "1px solid var(--c-border)",
+        border: "2px solid var(--c-border)",
         background: "var(--c-surface-high)",
         cursor: onClick ? "pointer" : "default",
       }}

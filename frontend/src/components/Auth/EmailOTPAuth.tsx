@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as api from '../../services/api';
 import type { User } from '../../types';
 import { Button } from '../ui/Button';
@@ -21,6 +21,20 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasAutoSubmittedRef = useRef(false);
+
+  useEffect(() => {
+    if (otp.length < 6) {
+      hasAutoSubmittedRef.current = false;
+      return;
+    }
+    if (hasAutoSubmittedRef.current || isLoading || error) {
+      return;
+    }
+    hasAutoSubmittedRef.current = true;
+    handleVerifyOTP();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otp]);
 
   // Fire whenever the parent bumps the nonce (chip click). Skip nonce === 0
   // (initial mount) so we don't send a spurious request on page load.

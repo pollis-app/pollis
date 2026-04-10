@@ -119,8 +119,16 @@ frontend/               # React app (Vite, TypeScript, TailwindCSS)
     types/              # TypeScript types
     components/         # React components
     pages/              # Route pages
-website/                # Next.js marketing site (Vercel)
+website/                # Static HTML marketing site (Cloudflare Pages)
 ```
+
+## Media (voice / video)
+
+**All real-time media is handled in Rust, end to end.** Voice is implemented in `src-tauri/src/commands/voice.rs` using the `livekit` + `libwebrtc` crates (capture via `cpal`, publish via `NativeAudioSource` / `LocalAudioTrack`, playback via `NativeAudioStream` → cpal output).
+
+**Why Rust and not the webview**: Tauri's webview on Linux (WebKitGTK) does not support WebRTC. `getUserMedia`, `RTCPeerConnection`, etc. are unavailable. This means the "use livekit-client JS SDK in the webview" approach is NOT an option on our target platforms — do not suggest it. Any media feature (voice, video, screen share) must be implemented in Rust using the `livekit` crate directly and wired to Tauri commands. Frames are pushed to the frontend via `tauri::ipc::Channel` for UI purposes only (speaking indicators, participant events), never for rendering media itself.
+
+**Implication for future video**: video capture, publish, subscribe, and render must all run in Rust. Remote video frames cannot be handed to a `<video>` element via `srcObject` because there is no `MediaStream` in the webview. Rendering requires either a native OS surface layered behind the webview or pushing decoded frames to the frontend via IPC (latter is fine for small previews, not for real video).
 
 ## Security Model
 

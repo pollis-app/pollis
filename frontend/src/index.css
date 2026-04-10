@@ -7,47 +7,57 @@
 @layer base {
   :root {
     /* ── Theme knobs — change these at runtime to retheme the app ── */
-    --accent-h:      38;     /* hue 0–360  */
-    --accent-s:      90%;    /* saturation */
-    --accent-l:      62%;    /* lightness  */
-    --bg-h:          38;     /* background hue */
-    --bg-s:          20%;    /* background saturation */
-    --bg-l:          4%;     /* background lightness */
-    --font-size-base: 15px;  /* base font size — scales all rem units */
+    --accent-h: 38;
+    /* hue 0–360  */
+    --accent-s: 90%;
+    /* saturation */
+    --accent-l: 62%;
+    /* lightness  */
+    --bg-h: 38;
+    /* background hue */
+    --bg-s: 20%;
+    /* background saturation */
+    --bg-l: 4%;
+    /* background lightness */
+    --font-size-base: 15px;
+    /* base font size — scales all rem units */
 
     /* ── Surfaces (dark, hue-tinted) ──────────────────────────────── */
-    --c-bg:             hsl(var(--bg-h) var(--bg-s) var(--bg-l));
-    --c-surface:        hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 3%));
+    --c-bg: hsl(var(--bg-h) var(--bg-s) var(--bg-l));
+    --c-surface: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 3%));
     --c-surface-raised: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 6%));
-    --c-surface-high:   hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 9%));
+    --c-surface-high: hsl(var(--bg-h) var(--bg-s) calc(var(--bg-l) + 9%));
 
     /* ── Accent scale ──────────────────────────────────────────────── */
-    --c-accent:         hsl(var(--accent-h) var(--accent-s) var(--accent-l));
-    --c-accent-bright:  hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 13%));
-    --c-accent-dim:     hsl(var(--accent-h) 45% 45%);
-    --c-accent-muted:   hsl(var(--accent-h) 35% 25%);
+    --c-accent: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+    --c-accent-bright: hsl(var(--accent-h) var(--accent-s) calc(var(--accent-l) + 13%));
+    --c-accent-dim: hsl(var(--accent-h) 45% 45%);
+    --c-accent-muted: hsl(var(--accent-h) 35% 25%);
 
     /* ── Borders ───────────────────────────────────────────────────── */
-    --c-border:         hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
-    --c-border-active:  hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 50%);
+    --c-border: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
+    --c-border-active: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 50%);
 
     /* ── Text — explicit lightness (not opacity) for readable contrast */
-    --c-text:           hsl(var(--accent-h) var(--accent-s) var(--accent-l));
-    --c-text-dim:       hsl(var(--accent-h) 28% 70%);  /* secondary text */
-    --c-text-muted:     hsl(var(--accent-h) 18% 55%);  /* tertiary text  */
+    --c-text: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
+    --c-text-dim: hsl(var(--accent-h) 28% 70%);
+    /* secondary text */
+    --c-text-muted: hsl(var(--accent-h) 18% 55%);
+    /* tertiary text  */
 
     /* ── Hover overlays ────────────────────────────────────────────── */
-    --c-hover:          hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 8%);
-    --c-active:         hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 14%);
+    --c-hover: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 8%);
+    --c-active: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 14%);
 
     /* ── Focus ring (used by all input components) ──────────────── */
-    --c-focus-ring:     hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
+    --c-focus-ring: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
 
     --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
     --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
   }
 
-  html, body {
+  html,
+  body {
     height: 100%;
     width: 100%;
     margin: 0;
@@ -86,6 +96,7 @@ input[type="range"]::-moz-range-thumb {
 .accent-slider {
   background: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 20%);
 }
+
 .accent-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 12px;
@@ -93,6 +104,7 @@ input[type="range"]::-moz-range-thumb {
   border-radius: 50%;
   cursor: pointer;
 }
+
 .accent-slider::-moz-range-thumb {
   width: 12px;
   height: 12px;
@@ -101,15 +113,17 @@ input[type="range"]::-moz-range-thumb {
 }
 
 @layer components {
+
   /* Panel ─────────────────────────────────────────────────────── */
   .panel {
     background: var(--c-surface);
-    border: 1px solid var(--c-border);
+    border: 2px solid var(--c-border);
     @apply rounded-panel;
   }
+
   .panel-raised {
     background: var(--c-surface-raised);
-    border: 1px solid var(--c-border);
+    border: 2px solid var(--c-border);
     @apply rounded-panel;
   }
 
@@ -121,14 +135,15 @@ input[type="range"]::-moz-range-thumb {
 
   /* Sidebar nav item ───────────────────────────────────────────── */
   .sidebar-item {
-    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-left text-xs
-           transition-colors duration-100 cursor-pointer select-none rounded-sm;
+    @apply flex items-center gap-2.5 w-full px-3 py-1.5 text-left text-xs transition-colors duration-100 cursor-pointer select-none rounded-sm;
     color: var(--c-text-dim);
   }
+
   .sidebar-item:hover {
     color: var(--c-text);
     background: var(--c-hover);
   }
+
   .sidebar-item-active {
     color: var(--c-accent);
     background: var(--c-active);
@@ -138,20 +153,20 @@ input[type="range"]::-moz-range-thumb {
 
   /* Icon buttons ───────────────────────────────────────────────── */
   .icon-btn {
-    @apply flex items-center justify-center w-8 h-8 rounded cursor-pointer
-           transition-colors duration-100;
+    @apply flex items-center justify-center w-8 h-8 rounded cursor-pointer transition-colors duration-100;
     color: var(--c-text-muted);
   }
+
   .icon-btn:hover {
     color: var(--c-accent);
     background: var(--c-hover);
   }
 
   .icon-btn-sm {
-    @apply flex items-center justify-center w-6 h-6 rounded cursor-pointer
-           transition-colors duration-100;
+    @apply flex items-center justify-center w-6 h-6 rounded cursor-pointer transition-colors duration-100;
     color: var(--c-text-muted);
   }
+
   .icon-btn-sm:hover {
     color: var(--c-accent);
     background: var(--c-hover);
@@ -159,19 +174,33 @@ input[type="range"]::-moz-range-thumb {
 
   /* Input / textarea ───────────────────────────────────────────── */
   .pollis-input {
-    @apply w-full rounded-panel px-3 py-2 text-sm outline-none
-           transition-colors duration-150;
+    @apply w-full rounded-panel px-3 py-2 text-sm outline-none transition-colors duration-150;
     background: var(--c-surface-high);
-    border: 1px solid var(--c-border);
+    border: 2px solid var(--c-border);
     color: var(--c-text);
   }
-  .pollis-input::placeholder { color: var(--c-text-muted); }
-  input::placeholder, textarea::placeholder { color: var(--c-text-muted); }
-  .pollis-input:focus { border-color: var(--c-border-active); }
+
+  .pollis-input::placeholder {
+    color: var(--c-text-muted);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--c-text-muted);
+  }
+
+  .pollis-input:focus {
+    border-color: var(--c-border-active);
+  }
 
   /* Chat input placeholder: muted when unfocused, dark when focused (on accent bg) */
-  .chat-input-textarea::placeholder { color: var(--c-text-muted); }
-  .chat-input-textarea:focus::placeholder { color: color-mix(in srgb, var(--c-bg) 65%, transparent); }
+  .chat-input-textarea::placeholder {
+    color: var(--c-text-muted);
+  }
+
+  .chat-input-textarea:focus::placeholder {
+    color: color-mix(in srgb, var(--c-bg) 65%, transparent);
+  }
 
   .pollis-textarea {
     @apply pollis-input resize-none;
@@ -179,22 +208,35 @@ input[type="range"]::-moz-range-thumb {
 
   /* Buttons ────────────────────────────────────────────────────── */
   .btn-primary {
-    @apply px-4 py-2 text-sm font-mono rounded-panel cursor-pointer
-           transition-colors duration-100 font-medium;
+    @apply px-4 py-2 text-sm font-mono rounded-panel cursor-pointer transition-colors duration-100 font-medium;
     background: var(--c-accent);
     color: var(--c-bg);
   }
-  .btn-primary:hover { background: var(--c-accent-bright); }
-  .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-primary:hover {
+    background: var(--c-accent-bright);
+  }
+
+  .btn-primary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
 
   .btn-ghost {
-    @apply px-3 py-2 text-sm rounded-panel cursor-pointer
-           transition-colors duration-100;
+    @apply px-3 py-2 text-sm rounded-panel cursor-pointer transition-colors duration-100;
     color: var(--c-text-dim);
-    border: 1px solid var(--c-border);
+    border: 2px solid var(--c-border);
   }
-  .btn-ghost:hover { color: var(--c-accent); border-color: var(--c-border-active); }
-  .btn-ghost:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .btn-ghost:hover {
+    color: var(--c-accent);
+    border-color: var(--c-border-active);
+  }
+
+  .btn-ghost:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
 
   /* Message link ──────────────────────────────────────────────── */
   .message-link {
@@ -205,13 +247,16 @@ input[type="range"]::-moz-range-thumb {
     border-radius: 2px;
     transition: background 100ms, color 100ms;
   }
+
   .message-link:hover {
     color: var(--c-accent-bright);
     background: var(--c-hover);
   }
 
   /* Divider ────────────────────────────────────────────────────── */
-  .divider { border-top: 1px solid var(--c-border); }
+  .divider {
+    border-top: 1px solid var(--c-border);
+  }
 }
 
 /* ── Mono font weight default ────────────────────────────────────── */
@@ -225,20 +270,48 @@ input[type="range"]::-moz-range-thumb {
   scrollbar-width: thin;
   scrollbar-color: var(--c-accent-muted) transparent;
 }
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--c-accent-muted); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--c-accent-dim); }
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--c-accent-muted);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--c-accent-dim);
+}
 
 /* ── Status bar unread blink ─────────────────────────────────────── */
 @keyframes status-blink {
-  0%, 49% { opacity: 1; }
-  50%, 100%      { opacity: 0.5; }
+
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0.5;
+  }
 }
+
 .status-bar-blink {
   animation: status-blink 2s ease-in-out infinite;
 }
 
 /* ── Titlebar drag ───────────────────────────────────────────────── */
-.titlebar-drag    { --wails-draggable: drag; }
-.titlebar-no-drag { --wails-draggable: no-drag; }
+.titlebar-drag {
+  --wails-draggable: drag;
+}
+
+.titlebar-no-drag {
+  --wails-draggable: no-drag;
+}
