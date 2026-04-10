@@ -5312,6 +5312,7 @@ dependencies = [
  "dotenvy",
  "ed25519-dalek",
  "futures-util",
+ "gethostname",
  "hex",
  "hkdf",
  "hmac",
