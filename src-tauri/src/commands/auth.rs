@@ -9,6 +9,7 @@ use crate::state::AppState;
 use ulid::Ulid;
 
 const SESSION_KEY: &str = "session";
+const DEVICE_ID_KEY: &str = "device_id";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserProfile {
@@ -31,8 +32,11 @@ pub async fn initialize_identity(
     state: State<'_, Arc<AppState>>,
     user_id: String,
 ) -> Result<IdentityInfo> {
-    match crate::commands::mls::ensure_mls_key_package(&state, &user_id).await {
-        Ok(()) => eprintln!("[identity] MLS key package ensured for {user_id}"),
+    let device_id = state.device_id.lock().await.clone()
+        .ok_or_else(|| anyhow::anyhow!("device_id not set — login incomplete"))?;
+
+    match crate::commands::mls::ensure_mls_key_package(&state, &user_id, &device_id).await {
+        Ok(()) => eprintln!("[identity] MLS key package ensured for {user_id} device {device_id}"),
         Err(e) => eprintln!("[identity] MLS key package error (non-fatal): {e}"),
     }
 
@@ -40,7 +44,7 @@ pub async fn initialize_identity(
     // local MLS state is intact, but recovers group membership after the local
     // DB is wiped (e.g. schema version bump) because load_user_db resets
     // delivered = 0 for this user's welcomes in that case.
-    match crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &user_id).await {
+    match crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &user_id, &device_id).await {
         Ok(()) => {}
         Err(e) => eprintln!("[identity] poll_mls_welcomes (non-fatal): {e}"),
     }
@@ -197,6 +201,7 @@ pub async fn verify_otp(
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
     keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
+    register_device(state.inner(), &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
 
     Ok(profile)
@@ -294,6 +299,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
 
     // Open the per-user local database.
     state.load_user_db(&profile.id).await?;
+    register_device(state.inner(), &profile.id).await?;
 
     Ok(Some(profile))
 }
@@ -331,8 +337,35 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
     keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
+    register_device(state, &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
     Ok(profile)
+}
+
+/// Register this device for the given user. Generates a stable device_id on first
+/// call (persisted in the OS keystore), inserts/updates the remote `user_device`
+/// table, and stores the id in `AppState.device_id`.
+async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String> {
+    let device_id = match keystore::load_for_user(DEVICE_ID_KEY, user_id).await? {
+        Some(bytes) => String::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("corrupt device_id in keystore: {e}"))?,
+        None => {
+            let id = Ulid::new().to_string();
+            keystore::store_for_user(DEVICE_ID_KEY, user_id, id.as_bytes()).await?;
+            id
+        }
+    };
+
+    let conn = state.remote_db.conn().await?;
+    conn.execute(
+        "INSERT INTO user_device (device_id, user_id) VALUES (?1, ?2) \
+         ON CONFLICT(device_id) DO UPDATE SET last_seen = datetime('now')",
+        libsql::params![device_id.clone(), user_id],
+    ).await?;
+
+    *state.device_id.lock().await = Some(device_id.clone());
+    eprintln!("[auth] device registered: {device_id}");
+    Ok(device_id)
 }
 
 /// Clear the persisted session (logout). Optionally wipe the per-user DB and identity keys.
@@ -340,6 +373,9 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
 pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Result<()> {
     let index = crate::accounts::read_accounts_index();
     let user_id = index.last_active_user;
+
+    // Grab the device_id before clearing it.
+    let device_id = state.device_id.lock().await.take();
 
     if let Some(ref uid) = user_id {
         let _ = keystore::delete_for_user(SESSION_KEY, uid).await;
@@ -349,9 +385,19 @@ pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Resul
 
     if delete_data {
         if let Some(ref uid) = user_id {
+            // Remove this device from the remote registry.
+            if let Some(ref did) = device_id {
+                if let Ok(conn) = state.remote_db.conn().await {
+                    let _ = conn.execute(
+                        "DELETE FROM user_device WHERE device_id = ?1",
+                        libsql::params![did.clone()],
+                    ).await;
+                }
+            }
             let _ = keystore::delete("identity_key_private").await;
             let _ = keystore::delete("identity_key_public").await;
             let _ = keystore::delete_for_user("db_key", uid).await;
+            let _ = keystore::delete_for_user(DEVICE_ID_KEY, uid).await;
             let data_dir = crate::db::local::dirs_path();
             let db_path = data_dir.join(format!("pollis_{uid}.db"));
             if db_path.exists() {
@@ -542,6 +588,8 @@ pub async fn delete_account(
     // Clear all keystore entries
     let _ = keystore::delete_for_user(SESSION_KEY, &user_id).await;
     let _ = keystore::delete_for_user("db_key", &user_id).await;
+    let _ = keystore::delete_for_user(DEVICE_ID_KEY, &user_id).await;
+    *state.device_id.lock().await = None;
 
     // Remove from local accounts index
     let _ = crate::accounts::remove_account(&user_id);
@@ -555,6 +603,39 @@ pub async fn delete_account(
 #[tauri::command]
 pub fn list_known_accounts() -> crate::accounts::AccountsIndex {
     crate::accounts::read_accounts_index()
+}
+
+/// List all registered devices for a user. Returns each device's ID,
+/// name, timestamps, and whether it is the current device.
+#[tauri::command]
+pub async fn list_user_devices(
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+) -> Result<Vec<serde_json::Value>> {
+    let current_device_id = state.device_id.lock().await.clone();
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn.query(
+        "SELECT device_id, device_name, created_at, last_seen FROM user_device WHERE user_id = ?1 ORDER BY created_at ASC",
+        libsql::params![user_id],
+    ).await?;
+
+    let mut devices = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let did: String = row.get(0)?;
+        let name: Option<String> = row.get(1).ok();
+        let created: String = row.get(2)?;
+        let seen: String = row.get(3)?;
+        let is_current = current_device_id.as_deref() == Some(did.as_str());
+        devices.push(serde_json::json!({
+            "device_id": did,
+            "device_name": name,
+            "created_at": created,
+            "last_seen": seen,
+            "is_current": is_current,
+        }));
+    }
+
+    Ok(devices)
 }
 
 #[cfg(test)]

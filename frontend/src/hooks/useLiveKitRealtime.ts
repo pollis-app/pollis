@@ -28,6 +28,7 @@ type RealtimeEvent =
   }
   | {
     type: 'membership_changed';
+    group_id?: string;
   }
   | {
     type: 'voice_joined';
@@ -217,7 +218,8 @@ export function useLiveKitRealtime() {
 
       if (event.type === 'membership_changed') {
         // Invalidate all group and invite queries — covers both invite received
-        // and join-request approved scenarios.
+        // and join-request approved scenarios. The ['groups'] prefix also covers
+        // member queries (["groups", groupId, "members"]).
         queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
         return;
@@ -244,10 +246,6 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'edited_message') {
-        // Skip own edits — optimistic update already applied by useEditMessage.
-        if (event.sender_id === currentUser.id) {
-          return;
-        }
         const channelId = event.channel_id;
         const conversationId = event.conversation_id;
         if (channelId && channelId === selectedChannelIdRef.current) {
@@ -262,23 +260,21 @@ export function useLiveKitRealtime() {
         return;
       }
 
-      // Skip own messages — optimistic update already applied by useSendMessage.
-      if (event.sender_id === currentUser.id) {
-        return;
-      }
-
       const channelId = event.channel_id;
       const conversationId = event.conversation_id;
       const senderUsername = event.sender_username ?? 'Someone';
       const incomingId = channelId ?? conversationId;
 
+      // Messages from the same user on another device should update the
+      // conversation data but never trigger notifications or unread badges.
+      const isOwnMessage = event.sender_id === currentUserIdRef.current;
+
       if (channelId && channelId === selectedChannelIdRef.current) {
         queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
       } else if (conversationId && conversationId === selectedConversationIdRef.current) {
         queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
-      } else if (incomingId) {
+      } else if (incomingId && !isOwnMessage) {
         incrementUnreadRef.current(incomingId);
-        // Only show status bar alert for DMs, not group channels
         if (conversationId) {
           setStatusBarAlertRef.current({ senderUsername, roomId: incomingId });
         }
@@ -291,19 +287,11 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "conversation", conversationId] });
       }
 
-      // TODO: play ping sound on incoming message when window is unfocused.
-      // if (!isWindowFocusedRef.current && allowSoundRef.current) {
-      //   playSfx(SFX.ping);
-      // }
-
-      if (!isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
+      if (!isOwnMessage && !isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
         const title = incomingId
           ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
           : 'New message';
         const body = `${senderUsername}: New message`;
-        // Use the Rust-side notification plugin directly via invoke.
-        // The JS wrapper's sendNotification() uses `new window.Notification()`
-        // which WKWebView on macOS doesn't support.
         try {
           invoke('plugin:notification|notify', { options: { title, body } }).catch(() => {});
         } catch {

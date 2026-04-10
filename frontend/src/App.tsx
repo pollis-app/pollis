@@ -21,6 +21,20 @@ import { Button } from "./components/ui/Button";
 
 type AppState = "initializing" | "loading" | "email-auth" | "logout-confirm" | "identity-setup" | "update-required" | "ready";
 
+// Dev-only: expose device list on window.__POLLIS_DEBUG__ for console inspection.
+function setupDebugDevices(userId: string) {
+  api.listUserDevices(userId).then((devices) => {
+    (window as unknown as Record<string, unknown>).__POLLIS_DEBUG__ = { userId, devices };
+    console.table(devices.map((d) => ({
+      device_id: d.device_id,
+      is_current: d.is_current ? "<<< THIS" : "",
+      last_seen: d.last_seen,
+    })));
+  }).catch((err) => {
+    console.warn("[debug] failed to fetch devices:", err);
+  });
+}
+
 function MainApp() {
   const {
     currentUser,
@@ -53,6 +67,9 @@ function MainApp() {
           await api.initializeIdentity(user.id);
         } catch (err) {
           console.error("[App] Failed to initialize identity:", err);
+        }
+        if (import.meta.env.DEV) {
+          setupDebugDevices(user.id);
         }
         // Load and apply saved preferences before showing the UI
         try {
@@ -128,6 +145,9 @@ function MainApp() {
       await api.initializeIdentity(user.id);
     } catch (err) {
       console.error("[App] Failed to initialize identity:", err);
+    }
+    if (import.meta.env.DEV) {
+      setupDebugDevices(user.id);
     }
     // Apply saved preferences for newly logged-in user
     try {

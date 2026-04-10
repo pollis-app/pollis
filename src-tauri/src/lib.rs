@@ -189,6 +189,7 @@ pub fn run() {
             commands::auth::logout,
             commands::auth::delete_account,
             commands::auth::list_known_accounts,
+            commands::auth::list_user_devices,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,

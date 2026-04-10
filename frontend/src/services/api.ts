@@ -50,6 +50,18 @@ export async function listKnownAccounts(): Promise<AccountsIndex> {
   return invoke('list_known_accounts');
 }
 
+export interface DeviceInfo {
+  device_id: string;
+  device_name: string | null;
+  created_at: string;
+  last_seen: string;
+  is_current: boolean;
+}
+
+export async function listUserDevices(userId: string): Promise<DeviceInfo[]> {
+  return invoke('list_user_devices', { userId });
+}
+
 // ── User ───────────────────────────────────────────────────────────────────
 
 export interface UserProfileData {

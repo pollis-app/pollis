@@ -102,7 +102,15 @@ pub async fn create_dm_channel(
 
     // Initialise the MLS group for this DM (creator becomes the sole member).
     match crate::commands::mls::init_mls_group(state.inner(), &id, &creator_id).await {
-        Ok(()) => {}
+        Ok(()) => {
+            // Add the creator's OTHER devices so they receive a Welcome.
+            let current_did = state.device_id.lock().await.clone();
+            if let Err(e) = crate::commands::mls::add_member_mls_for_own_devices(
+                state.inner(), &id, &creator_id, current_did.as_deref(),
+            ).await {
+                eprintln!("[mls] create_dm_channel: add creator's other devices: {e}");
+            }
+        }
         Err(e) => eprintln!("[mls] create_dm_channel: mls group init failed (non-fatal): {e}"),
     }
 
