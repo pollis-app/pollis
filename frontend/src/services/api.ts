@@ -7,31 +7,129 @@ export async function requestOTP(email: string): Promise<void> {
   await invoke('request_otp', { email });
 }
 
-export async function verifyOTP(email: string, code: string): Promise<User> {
-  const profile = await invoke<{ id: string; email: string; username: string }>('verify_otp', { email, code });
+/// Backend `UserProfile` shape, including the optional fields the
+/// enrollment system layers in.
+interface RawUserProfile {
+  id: string;
+  email: string;
+  username: string;
+  /// First-device signup only — the freshly-generated Secret Key the
+  /// user must save once. Always undefined on subsequent logins.
+  new_secret_key?: string;
+  /// True when this device must complete enrollment before accessing
+  /// the main app. Set when the user has an `account_id_pub` on the
+  /// server but no local `account_id_key`.
+  enrollment_required?: boolean;
+}
+
+/// Result of a successful authentication. The `user` is the normalized
+/// shape the rest of the app uses; `newSecretKey` and `enrollmentRequired`
+/// drive the post-auth routing decision.
+export interface AuthResult {
+  user: User;
+  newSecretKey: string | null;
+  enrollmentRequired: boolean;
+}
+
+function rawProfileToAuthResult(profile: RawUserProfile, isResume: boolean): AuthResult {
   return {
-    id: profile.id,
-    clerk_id: '',
-    email: profile.email,
-    username: profile.username,
-    created_at: Date.now(),
-    updated_at: Date.now(),
+    user: {
+      id: profile.id,
+      clerk_id: '',
+      email: profile.email,
+      username: profile.username,
+      created_at: isResume ? 0 : Date.now(),
+      updated_at: isResume ? 0 : Date.now(),
+    },
+    newSecretKey: profile.new_secret_key ?? null,
+    enrollmentRequired: profile.enrollment_required ?? false,
   };
 }
 
-export async function getSession(): Promise<User | null> {
-  const profile = await invoke<{ id: string; email: string; username: string } | null>('get_session');
+export async function verifyOTP(email: string, code: string): Promise<AuthResult> {
+  const profile = await invoke<RawUserProfile>('verify_otp', { email, code });
+  return rawProfileToAuthResult(profile, false);
+}
+
+export async function getSession(): Promise<AuthResult | null> {
+  const profile = await invoke<RawUserProfile | null>('get_session');
   if (!profile) {
     return null;
   }
-  return {
-    id: profile.id,
-    clerk_id: '',
-    email: profile.email,
-    username: profile.username,
-    created_at: 0,
-    updated_at: 0,
-  };
+  return rawProfileToAuthResult(profile, true);
+}
+
+// ── Device enrollment ───────────────────────────────────────────────────────
+
+export interface EnrollmentHandle {
+  request_id: string;
+  verification_code: string;
+  expires_at: string;
+}
+
+export type EnrollmentStatus =
+  | { status: 'pending' }
+  | { status: 'approved' }
+  | { status: 'rejected' }
+  | { status: 'expired' };
+
+export interface PendingEnrollmentRequest {
+  request_id: string;
+  new_device_id: string;
+  verification_code: string;
+  created_at: string;
+  expires_at: string;
+}
+
+export async function startDeviceEnrollment(userId: string): Promise<EnrollmentHandle> {
+  return invoke('start_device_enrollment', { userId });
+}
+
+export async function pollEnrollmentStatus(requestId: string): Promise<EnrollmentStatus> {
+  return invoke('poll_enrollment_status', { requestId });
+}
+
+export async function listPendingEnrollmentRequests(userId: string): Promise<PendingEnrollmentRequest[]> {
+  return invoke('list_pending_enrollment_requests', { userId });
+}
+
+export async function approveDeviceEnrollment(requestId: string, verificationCode: string): Promise<void> {
+  await invoke('approve_device_enrollment', { requestId, verificationCode });
+}
+
+export async function rejectDeviceEnrollment(requestId: string): Promise<void> {
+  await invoke('reject_device_enrollment', { requestId });
+}
+
+export async function recoverWithSecretKey(userId: string, secretKey: string): Promise<void> {
+  await invoke('recover_with_secret_key', { userId, secretKey });
+}
+
+/// Soft recovery. Destructive — orphans every existing device, removes
+/// the user from every group, and returns a brand-new Secret Key the
+/// frontend MUST display once and gate navigation on.
+export async function resetIdentityAndRecover(
+  userId: string,
+  confirmEmail: string,
+): Promise<string> {
+  return invoke<string>('reset_identity_and_recover', { userId, confirmEmail });
+}
+
+// ── Security events ────────────────────────────────────────────────────────
+
+export interface SecurityEvent {
+  id: string;
+  kind: string;
+  device_id: string | null;
+  created_at: string;
+  metadata: string | null;
+}
+
+export async function listSecurityEvents(
+  userId: string,
+  limit?: number,
+): Promise<SecurityEvent[]> {
+  return invoke<SecurityEvent[]>('list_security_events', { userId, limit: limit ?? null });
 }
 
 export async function initializeIdentity(userId: string): Promise<void> {
@@ -174,7 +272,7 @@ export async function updateGroupIcon(groupId: string, iconUrl: string): Promise
   }
   await invoke('update_group', {
     groupId,
-    requesterId: session.id,
+    requesterId: session.user.id,
     name: null,
     description: null,
     iconUrl,
@@ -188,7 +286,7 @@ export async function updateGroup(groupId: string, name: string, description: st
   }
   await invoke('update_group', {
     groupId,
-    requesterId: session.id,
+    requesterId: session.user.id,
     name: name || null,
     description: description || null,
     iconUrl: null,
@@ -292,7 +390,7 @@ export async function updateServiceUserData(username: string, _email: string | n
   if (!session) {
     throw new Error('No session');
   }
-  await updateUserProfile(session.id, username);
+  await updateUserProfile(session.user.id, username);
 }
 
 /**
@@ -303,5 +401,5 @@ export async function updateServiceUserAvatar(avatarUrl: string): Promise<void> 
   if (!session) {
     throw new Error('No session');
   }
-  await updateUserProfile(session.id, undefined, undefined, avatarUrl);
+  await updateUserProfile(session.user.id, undefined, undefined, avatarUrl);
 }

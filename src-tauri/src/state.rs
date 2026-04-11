@@ -27,6 +27,14 @@ pub struct AppState {
     /// Per-device ULID, set during login. Each physical device gets a stable ID
     /// stored in the OS keystore so it survives local DB wipes.
     pub device_id: Arc<Mutex<Option<String>>>,
+    /// In-memory ephemeral X25519 private keys for pending device-enrollment
+    /// requests. Keyed by enrollment request id. Populated by
+    /// `start_device_enrollment` and consumed by `poll_enrollment_status`
+    /// when the approver has written back the wrapped account key.
+    ///
+    /// Stored in memory only — if the app restarts mid-enrollment the user
+    /// starts over. The 10-minute request TTL bounds the exposure.
+    pub enrollment_ephemeral_keys: Arc<Mutex<HashMap<String, Vec<u8>>>>,
 }
 
 impl AppState {
@@ -42,6 +50,7 @@ impl AppState {
             voice: Arc::new(Mutex::new(VoiceState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
+            enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 

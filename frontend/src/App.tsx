@@ -7,6 +7,9 @@ import React, {
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "./stores/appStore";
 import { EmailOTPAuth } from "./components/Auth/EmailOTPAuth";
+import { SaveSecretKeyScreen } from "./components/Auth/SaveSecretKeyScreen";
+import { EnrollmentGateScreen } from "./components/Auth/EnrollmentGateScreen";
+import { EnrollmentApprovalPrompt } from "./components/Auth/EnrollmentApprovalPrompt";
 import { TerminalApp } from "./components/TerminalApp";
 import { TitleBar } from "./components/Layout/TitleBar";
 import { DotMatrix } from "./components/ui/DotMatrix";
@@ -19,7 +22,16 @@ import type { User, AccountInfo } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
 import { Button } from "./components/ui/Button";
 
-type AppState = "initializing" | "loading" | "email-auth" | "logout-confirm" | "identity-setup" | "update-required" | "ready";
+type AppState =
+  | "initializing"
+  | "loading"
+  | "email-auth"
+  | "save-secret-key"
+  | "enrollment-required"
+  | "logout-confirm"
+  | "identity-setup"
+  | "update-required"
+  | "ready";
 
 // Dev-only: expose device list on window.__POLLIS_DEBUG__ for console inspection.
 function setupDebugDevices(userId: string) {
@@ -39,6 +51,8 @@ function MainApp() {
   const {
     currentUser,
     setCurrentUser,
+    pendingEnrollmentApproval,
+    setPendingEnrollmentApproval,
   } = useAppStore();
 
   const [appState, setAppState] = useState<AppState>("initializing");
@@ -47,6 +61,40 @@ function MainApp() {
   // new value, even if the same account is clicked again after going back.
   const [prefillNonce, setPrefillNonce] = useState(0);
   const [prefillEmail, setPrefillEmail] = useState<string | undefined>(undefined);
+  // Pending Secret Key (first-device signup) — held in component state ONLY
+  // for the duration of the SaveSecretKeyScreen, never persisted.
+  const [pendingSecretKey, setPendingSecretKey] = useState<string | null>(null);
+  // The user we're enrolling. Set when an enrollment-required login happens
+  // so the EnrollmentGateScreen knows whose account it's joining.
+  const [pendingEnrollmentUser, setPendingEnrollmentUser] = useState<User | null>(null);
+
+  /// Final phase of any successful sign-in (resume or fresh OTP). Loads
+  /// preferences, debug data, and transitions to "ready". Assumes the
+  /// user has account_id_key locally — call only AFTER first-device
+  /// signup or device enrollment has completed.
+  const completeSignIn = useCallback(async (user: User) => {
+    try {
+      await api.initializeIdentity(user.id);
+    } catch (err) {
+      console.error("[App] Failed to initialize identity:", err);
+    }
+    if (import.meta.env.DEV) {
+      setupDebugDevices(user.id);
+    }
+    try {
+      const json = await invoke<string>("get_preferences", { userId: user.id });
+      const prefs = {
+        accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
+        background_color: getPreference<string | undefined>(json, "background_color", undefined),
+        font_size: getPreference<string | undefined>(json, "font_size", undefined),
+      };
+      applyPreferences(prefs);
+    } catch {
+      // Preferences are optional
+    }
+    setCurrentUser(user);
+    setAppState("ready");
+  }, [setCurrentUser]);
 
   const checkStoredSession = useCallback(async () => {
     try {
@@ -61,30 +109,18 @@ function MainApp() {
         }
       }
 
-      const user = await api.getSession();
-      if (user) {
-        try {
-          await api.initializeIdentity(user.id);
-        } catch (err) {
-          console.error("[App] Failed to initialize identity:", err);
+      const session = await api.getSession();
+      if (session) {
+        if (session.enrollmentRequired) {
+          // Returning device that has never been enrolled (e.g. user
+          // signed in once before the enrollment system shipped, or the
+          // OS keystore got wiped). Route to the gate before any other
+          // UI renders.
+          setPendingEnrollmentUser(session.user);
+          setAppState("enrollment-required");
+          return;
         }
-        if (import.meta.env.DEV) {
-          setupDebugDevices(user.id);
-        }
-        // Load and apply saved preferences before showing the UI
-        try {
-          const json = await invoke<string>("get_preferences", { userId: user.id });
-          const prefs = {
-            accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
-            background_color: getPreference<string | undefined>(json, "background_color", undefined),
-            font_size: getPreference<string | undefined>(json, "font_size", undefined),
-          };
-          applyPreferences(prefs);
-        } catch {
-          // Preferences are optional — ignore failures
-        }
-        setCurrentUser(user);
-        setAppState("ready");
+        await completeSignIn(session.user);
       } else {
         // No active session — load known accounts for the login screen
         try {
@@ -99,7 +135,7 @@ function MainApp() {
       console.error("[App] Error checking session:", error);
       setAppState("email-auth");
     }
-  }, [setCurrentUser]);
+  }, [completeSignIn]);
 
   const hasInitializedRef = useRef(false);
 
@@ -138,32 +174,69 @@ function MainApp() {
     }
   }, [appState, currentUser]);
 
-  const handleAuthSuccess = useCallback(async (user: User) => {
-    // Show the identity setup loading screen while keys are generated/uploaded
+  const handleAuthSuccess = useCallback(async (result: api.AuthResult) => {
+    // Branch 1: first-device signup. Show the Secret Key screen and gate
+    // navigation until the user types it back to confirm they saved it.
+    if (result.newSecretKey) {
+      setPendingSecretKey(result.newSecretKey);
+      setPendingEnrollmentUser(result.user);
+      setAppState("save-secret-key");
+      return;
+    }
+
+    // Branch 2: returning device that has no local account_id_key.
+    // Must run the enrollment gate before the main app.
+    if (result.enrollmentRequired) {
+      setPendingEnrollmentUser(result.user);
+      setAppState("enrollment-required");
+      return;
+    }
+
+    // Branch 3: normal returning user. Boot straight to identity setup.
     setAppState("identity-setup");
+    await completeSignIn(result.user);
+  }, [completeSignIn]);
+
+  const handleSecretKeySaved = useCallback(async () => {
+    setPendingSecretKey(null);
+    if (pendingEnrollmentUser) {
+      const user = pendingEnrollmentUser;
+      setPendingEnrollmentUser(null);
+      setAppState("identity-setup");
+      await completeSignIn(user);
+    } else {
+      setAppState("email-auth");
+    }
+  }, [pendingEnrollmentUser, completeSignIn]);
+
+  const handleEnrolled = useCallback(async () => {
+    if (pendingEnrollmentUser) {
+      const user = pendingEnrollmentUser;
+      setPendingEnrollmentUser(null);
+      setAppState("identity-setup");
+      await completeSignIn(user);
+    } else {
+      setAppState("email-auth");
+    }
+  }, [pendingEnrollmentUser, completeSignIn]);
+
+  const handleEnrollmentCancelled = useCallback(async () => {
+    setPendingEnrollmentUser(null);
+    setPendingSecretKey(null);
     try {
-      await api.initializeIdentity(user.id);
+      await api.logout(false);
     } catch (err) {
-      console.error("[App] Failed to initialize identity:", err);
+      console.error("[App] logout during enrollment cancel failed:", err);
     }
-    if (import.meta.env.DEV) {
-      setupDebugDevices(user.id);
-    }
-    // Apply saved preferences for newly logged-in user
+    useAppStore.getState().logout();
     try {
-      const json = await invoke<string>("get_preferences", { userId: user.id });
-      const prefs = {
-        accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
-        background_color: getPreference<string | undefined>(json, "background_color", undefined),
-        font_size: getPreference<string | undefined>(json, "font_size", undefined),
-      };
-      applyPreferences(prefs);
+      const index = await api.listKnownAccounts();
+      setKnownAccounts(index.accounts);
     } catch {
-      // Preferences are optional
+      // Non-critical
     }
-    setCurrentUser(user);
-    setAppState("ready");
-  }, [setCurrentUser]);
+    setAppState("email-auth");
+  }, []);
 
   // Navigate to the confirmation view instead of using window.confirm
   const handleLogout = useCallback(() => {
@@ -392,6 +465,33 @@ function MainApp() {
     );
   }
 
+  if (appState === "save-secret-key" && pendingSecretKey) {
+    return (
+      <SaveSecretKeyScreen
+        secretKey={pendingSecretKey}
+        onConfirmed={handleSecretKeySaved}
+      />
+    );
+  }
+
+  if (appState === "enrollment-required" && pendingEnrollmentUser) {
+    return (
+      <EnrollmentGateScreen
+        userId={pendingEnrollmentUser.id}
+        userEmail={pendingEnrollmentUser.email ?? ""}
+        onEnrolled={handleEnrolled}
+        onCancel={handleEnrollmentCancelled}
+        onResetComplete={(newKey) => {
+          // Soft recovery succeeded. The new Secret Key must be shown
+          // once before the user reaches the main app — reuse the
+          // first-device SaveSecretKeyScreen.
+          setPendingSecretKey(newKey);
+          setAppState("save-secret-key");
+        }}
+      />
+    );
+  }
+
   if (appState === "ready" && currentUser) {
     return (
       <div
@@ -401,6 +501,17 @@ function MainApp() {
         <div style={{ flex: 1, overflow: "hidden" }}>
           <TerminalApp onLogout={handleLogout} onDeleteAccount={handleDeleteAccount} />
         </div>
+        {/* Global enrollment-approval takeover. Layered above the main app
+            UI so the user MUST act on it before continuing. The overlay
+            element itself is fixed-position. */}
+        {pendingEnrollmentApproval && (
+          <EnrollmentApprovalPrompt
+            requestId={pendingEnrollmentApproval.requestId}
+            newDeviceId={pendingEnrollmentApproval.newDeviceId}
+            verificationCode={pendingEnrollmentApproval.verificationCode}
+            onResolved={() => setPendingEnrollmentApproval(null)}
+          />
+        )}
       </div>
     );
   }

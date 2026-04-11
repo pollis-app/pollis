@@ -14,6 +14,7 @@
 //! from `initialize_identity` so every user has a published package available
 //! for use in Phase 3 group/DM creation.
 
+use openmls::prelude::group_info::VerifiableGroupInfo;
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_rust_crypto::RustCrypto;
@@ -42,6 +43,13 @@ impl<'a> PollisProvider<'a> {
             crypto: RustCrypto::default(),
             store: MlsStore::new(conn),
         }
+    }
+
+    /// Borrow the raw sqlite connection backing `mls_kv`. Used for custom
+    /// rows Pollis writes alongside openmls state (e.g. the stable per-
+    /// device signing key reference).
+    pub fn raw_conn(&self) -> &rusqlite::Connection {
+        self.store.raw_conn()
     }
 }
 
@@ -92,6 +100,577 @@ pub fn parse_credential_user_id(cred: &Credential) -> String {
     s.split_once(':').map(|(u, _)| u).unwrap_or(&s).to_string()
 }
 
+/// Extract the `device_id` from a credential produced by `make_credential`.
+///
+/// Returns `None` for legacy credentials that contain only `user_id`.
+pub fn parse_credential_device_id(cred: &Credential) -> Option<String> {
+    let s = String::from_utf8_lossy(cred.serialized_content()).into_owned();
+    s.split_once(':').map(|(_, d)| d.to_string())
+}
+
+// ── Per-device stable MLS signing key ────────────────────────────────────────
+
+/// Custom scope in `mls_kv` that stores the stable per-device MLS
+/// signature public-key bytes. The private side is held by openmls under
+/// its own `SignatureKeyPair` scope, looked up by these same bytes.
+const DEVICE_SIG_PUB_SCOPE: &str = "PollisDeviceSigPub";
+
+fn load_stable_device_sig_pub_bytes(
+    conn: &rusqlite::Connection,
+    user_id: &str,
+    device_id: &str,
+) -> crate::error::Result<Option<Vec<u8>>> {
+    let key = format!("{user_id}:{device_id}").into_bytes();
+    let mut stmt = conn.prepare(
+        "SELECT value FROM mls_kv WHERE scope = ?1 AND key = ?2",
+    )?;
+    use rusqlite::OptionalExtension;
+    let row: Option<Vec<u8>> = stmt
+        .query_row(rusqlite::params![DEVICE_SIG_PUB_SCOPE, key], |r| {
+            r.get::<_, Vec<u8>>(0)
+        })
+        .optional()?;
+    Ok(row)
+}
+
+fn store_stable_device_sig_pub_bytes(
+    conn: &rusqlite::Connection,
+    user_id: &str,
+    device_id: &str,
+    pub_bytes: &[u8],
+) -> crate::error::Result<()> {
+    let key = format!("{user_id}:{device_id}").into_bytes();
+    conn.execute(
+        "INSERT OR REPLACE INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+        rusqlite::params![DEVICE_SIG_PUB_SCOPE, key, pub_bytes],
+    )?;
+    Ok(())
+}
+
+/// Return the stable MLS signing keypair for this device, creating it if
+/// missing. All key packages and group creation on this device MUST use
+/// this keypair so the device-level cross-signing cert in `user_device`
+/// covers every leaf node this device produces.
+///
+/// Returns `(SignatureKeyPair, pub_bytes)`. The pub_bytes are also what
+/// gets signed into the `device_cert` in `user_device`.
+pub fn load_or_create_device_signer(
+    provider: &PollisProvider<'_>,
+    user_id: &str,
+    device_id: &str,
+) -> crate::error::Result<(SignatureKeyPair, Vec<u8>)> {
+    // Fast path: pub bytes are stashed → recover the private side from
+    // openmls storage and return.
+    if let Some(pub_bytes) = load_stable_device_sig_pub_bytes(
+        provider.raw_conn(),
+        user_id,
+        device_id,
+    )? {
+        if let Some(kp) = SignatureKeyPair::read(
+            provider.storage(),
+            &pub_bytes,
+            CS.signature_algorithm(),
+        ) {
+            return Ok((kp, pub_bytes));
+        }
+        // Pub bytes stashed but the private side is gone (e.g. mls_kv
+        // got partially wiped). Fall through to regenerate.
+        eprintln!(
+            "[mls] stable device signer pub present but private missing for {user_id}:{device_id} — regenerating"
+        );
+    }
+
+    // Slow path: create, store, stash.
+    let sig_keys = SignatureKeyPair::new(CS.signature_algorithm())
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
+    sig_keys
+        .store(provider.storage())
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
+    let pub_bytes = sig_keys.to_public_vec();
+    store_stable_device_sig_pub_bytes(provider.raw_conn(), user_id, device_id, &pub_bytes)?;
+    Ok((sig_keys, pub_bytes))
+}
+
+// ── Device cross-signing ─────────────────────────────────────────────────────
+
+/// Ensure this device has a stable MLS signing keypair AND a `device_cert`
+/// published in `user_device` binding the pub bytes to the user's
+/// `account_id_key`. Idempotent — safe to call on every login.
+///
+/// Skipped if `account_id_key` is not in the local OS keystore (i.e. this
+/// is a returning user on a device that has never been enrolled yet).
+/// Returns `true` if a cert was written, `false` if skipped.
+pub async fn ensure_device_cert(
+    state: &Arc<AppState>,
+    user_id: &str,
+    device_id: &str,
+) -> crate::error::Result<bool> {
+    // 0. Bail early if we don't have the account identity locally. This
+    //    happens on a new device before step-5 enrollment has run.
+    if !crate::commands::account_identity::has_local_account_identity(user_id).await? {
+        return Ok(false);
+    }
+
+    // 1. Load or create the stable per-device MLS signing keypair and
+    //    capture its public bytes. Sync openmls work inside a scope.
+    let sig_pub_bytes = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+        })?;
+        let provider = PollisProvider::new(db.conn());
+        let (_sig_keys, sig_pub_bytes) =
+            load_or_create_device_signer(&provider, user_id, device_id)?;
+        sig_pub_bytes
+    };
+
+    // 2. Read the current identity_version for this user from the remote
+    //    `users` table. Defaults to 1 if the column is NULL (shouldn't
+    //    happen post-migration-13 but is defensive).
+    let conn = state.remote_db.conn().await?;
+    let identity_version: u32 = {
+        let mut rows = conn
+            .query(
+                "SELECT identity_version FROM users WHERE id = ?1",
+                libsql::params![user_id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => row.get::<i64>(0).unwrap_or(1) as u32,
+            None => {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "user {user_id} not found while signing device cert"
+                )))
+            }
+        }
+    };
+
+    // 3. Sign the cert with the account identity key loaded from the OS
+    //    keystore, using the current unix time as `issued_at`.
+    let issued_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let cert = crate::commands::account_identity::sign_device_cert(
+        user_id,
+        device_id,
+        &sig_pub_bytes,
+        identity_version,
+        issued_at,
+    )
+    .await?;
+
+    // 4. Write cert + signing pub + issued_at + identity_version into
+    //    the remote `user_device` row. Other clients read these columns
+    //    before accepting this device into any MLS group.
+    //
+    // `cert_issued_at` is stored as a decimal string of unix seconds —
+    // the migration created the column as TEXT, and we need lossless
+    // round-trip to u64 for signature verification later.
+    let issued_at_str = issued_at.to_string();
+
+    conn.execute(
+        "UPDATE user_device \
+         SET device_cert = ?1, \
+             cert_issued_at = ?2, \
+             cert_identity_version = ?3, \
+             mls_signature_pub = ?4 \
+         WHERE device_id = ?5",
+        libsql::params![
+            cert,
+            issued_at_str,
+            identity_version as i64,
+            sig_pub_bytes,
+            device_id
+        ],
+    )
+    .await?;
+
+    eprintln!(
+        "[mls] device cert published for {user_id}:{device_id} (identity_version={identity_version})"
+    );
+
+    Ok(true)
+}
+
+// ── GroupInfo publishing ─────────────────────────────────────────────────────
+
+/// Export a fresh `GroupInfo` for the given conversation and upsert it
+/// into the remote `mls_group_info` table. Called by every device that
+/// merges a commit (the originator right after `merge_pending_commit`,
+/// receivers right after `merge_staged_commit`).
+///
+/// The row is conversation-scoped and only overwritten with a STRICTLY
+/// greater epoch, so concurrent writers at the same epoch are idempotent
+/// and receivers don't waste work once the committer has already
+/// published.
+///
+/// No-op if:
+///   - the device has no local MLS group for this conversation
+///   - the device has no `account_id_key` (pre-enrollment)
+///
+/// This function is the prerequisite for the Secret Key recovery path:
+/// a brand-new device uses the stored `GroupInfo` to construct an MLS
+/// external commit joining the group, without needing a Welcome.
+pub async fn publish_group_info(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+) -> crate::error::Result<()> {
+    // Sync scope: load the local group, recover the signer, export a
+    // GroupInfo, and TLS-serialize it. Nothing !Send crosses await.
+    let device_id_opt = state.device_id.lock().await.clone();
+    let Some(device_id) = device_id_opt else {
+        return Ok(());
+    };
+
+    let exported: Option<(u64, Vec<u8>)> = {
+        let guard = state.local_db.lock().await;
+        let Some(db) = guard.as_ref() else {
+            return Ok(());
+        };
+        let provider = PollisProvider::new(db.conn());
+        let (group, signer) = match load_group_with_signer(&provider, conversation_id) {
+            Ok(pair) => pair,
+            Err(_) => return Ok(()),
+        };
+        let epoch = group.epoch().as_u64();
+        let msg = match group.export_group_info(provider.crypto(), &signer, true) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("[mls] publish_group_info: export failed for {conversation_id}: {e}");
+                return Ok(());
+            }
+        };
+        let bytes = msg
+            .tls_serialize_detached()
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("group_info serialize: {e}")))?;
+        Some((epoch, bytes))
+    };
+
+    let Some((epoch, bytes)) = exported else {
+        return Ok(());
+    };
+
+    let conn = state.remote_db.conn().await?;
+    conn.execute(
+        "INSERT INTO mls_group_info \
+         (conversation_id, epoch, group_info, updated_at, updated_by_device_id) \
+         VALUES (?1, ?2, ?3, datetime('now'), ?4) \
+         ON CONFLICT(conversation_id) DO UPDATE SET \
+             epoch = excluded.epoch, \
+             group_info = excluded.group_info, \
+             updated_at = datetime('now'), \
+             updated_by_device_id = excluded.updated_by_device_id \
+         WHERE excluded.epoch > mls_group_info.epoch",
+        libsql::params![conversation_id, epoch as i64, bytes, device_id],
+    )
+    .await?;
+
+    Ok(())
+}
+
+// ── Inbound cert verification helper ────────────────────────────────────────
+
+/// Verify that every `device_id` in `device_ids` has a valid
+/// cross-signing cert that chains to the `account_id_pub` of
+/// `target_user_id`. Returns `Ok(true)` if all devices check out,
+/// `Ok(false)` if any single device fails, `Err` on a database
+/// lookup error.
+///
+/// Called from `process_pending_commits_inner` against the metadata
+/// columns on `mls_commit_log` BEFORE handing the commit to
+/// `process_message`. This is the inbound complement to the outbound
+/// check in `add_member_mls_impl`.
+async fn verify_added_devices(
+    conn: &libsql::Connection,
+    target_user_id: &str,
+    device_ids: &[String],
+) -> crate::error::Result<bool> {
+    if device_ids.is_empty() {
+        return Ok(true);
+    }
+
+    // Fetch account_id_pub once.
+    let account_id_pub: Vec<u8> = {
+        let mut rows = conn
+            .query(
+                "SELECT account_id_pub FROM users WHERE id = ?1",
+                libsql::params![target_user_id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => match row.get::<Option<Vec<u8>>>(0).ok().flatten() {
+                Some(b) => b,
+                None => {
+                    eprintln!(
+                        "[mls] verify_added_devices: {target_user_id} has no account_id_pub"
+                    );
+                    return Ok(false);
+                }
+            },
+            None => {
+                eprintln!(
+                    "[mls] verify_added_devices: user {target_user_id} not found"
+                );
+                return Ok(false);
+            }
+        }
+    };
+
+    for did in device_ids {
+        let mut rows = conn
+            .query(
+                "SELECT device_cert, cert_issued_at, cert_identity_version, mls_signature_pub \
+                 FROM user_device WHERE device_id = ?1 AND user_id = ?2",
+                libsql::params![did.as_str(), target_user_id],
+            )
+            .await?;
+
+        let row = match rows.next().await? {
+            Some(r) => r,
+            None => {
+                eprintln!(
+                    "[mls] verify_added_devices: device {did} not registered for {target_user_id}"
+                );
+                return Ok(false);
+            }
+        };
+
+        let cert: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(0).ok().flatten();
+        let issued_at_str: Option<String> = row.get::<Option<String>>(1).ok().flatten();
+        let cert_identity_version: Option<i64> = row.get::<Option<i64>>(2).ok().flatten();
+        let mls_sig_pub: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(3).ok().flatten();
+        drop(rows);
+
+        let (cert, issued_at_str, cert_identity_version, mls_sig_pub) =
+            match (cert, issued_at_str, cert_identity_version, mls_sig_pub) {
+                (Some(c), Some(t), Some(v), Some(p)) => (c, t, v, p),
+                _ => {
+                    eprintln!(
+                        "[mls] verify_added_devices: device {did} has no cert columns populated"
+                    );
+                    return Ok(false);
+                }
+            };
+
+        let issued_at: u64 = match issued_at_str.parse() {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!(
+                    "[mls] verify_added_devices: device {did} cert_issued_at unparseable '{issued_at_str}': {e}"
+                );
+                return Ok(false);
+            }
+        };
+
+        if let Err(e) = crate::commands::account_identity::verify_device_cert(
+            &account_id_pub,
+            did,
+            &mls_sig_pub,
+            cert_identity_version as u32,
+            issued_at,
+            &cert,
+        ) {
+            eprintln!(
+                "[mls] verify_added_devices: device {did} cert verification failed: {e}"
+            );
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+// ── External-commit joining ──────────────────────────────────────────────────
+
+/// Join an existing MLS group via external commit, using the latest
+/// `GroupInfo` blob stored server-side in `mls_group_info`. The new
+/// device becomes a full member of the group at the epoch *after* the
+/// one carried in the GroupInfo.
+///
+/// Used by the Secret Key recovery path: when a new device recovers
+/// `account_id_key` without any sibling device online to issue a
+/// Welcome, it fetches each of the user's groups' GroupInfo and
+/// externally commits into them. The commit is posted to
+/// `mls_commit_log` so existing members will merge it on their next
+/// `process_pending_commits` pass.
+///
+/// Safety note: this path does NOT currently pass through the outbound
+/// cross-signing cert check in `add_member_mls_impl`. Existing members
+/// that implement the step-3b inbound cert verification will reject
+/// external-join commits from devices whose cert doesn't chain to the
+/// user's `account_id_pub` — which is exactly the desired behavior.
+/// Until step 3b lands, an attacker who compromised the server could
+/// theoretically forge a GroupInfo + external commit to smuggle a
+/// device in, so the honest path below is trust-on-first-use against
+/// the server for the duration of the step-3b gap.
+pub async fn external_join_group(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+) -> crate::error::Result<()> {
+    let device_id = state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
+
+    // 1. Fetch the stored GroupInfo for this conversation.
+    let (group_info_bytes, stored_epoch): (Vec<u8>, i64) = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn
+            .query(
+                "SELECT group_info, epoch FROM mls_group_info WHERE conversation_id = ?1",
+                libsql::params![conversation_id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => (row.get(0)?, row.get(1)?),
+            None => {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "no GroupInfo stored for {conversation_id} — cannot external-join"
+                )))
+            }
+        }
+    };
+
+    // 2. Run the external commit inside the local_db sync scope.
+    let commit_bytes: Vec<u8> = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+        })?;
+        let provider = PollisProvider::new(db.conn());
+
+        // Deserialize the stored blob. `publish_group_info` stores the
+        // output of `MlsMessage::export_group_info().tls_serialize_*`,
+        // which is an MlsMessage envelope (version u16 + wire_format u16)
+        // wrapping a GroupInfo body. openmls does not expose a public
+        // `into_verifiable_group_info` on `MlsMessageIn` outside of the
+        // `test-utils` feature, so we sanity-check the envelope by
+        // round-tripping through `MlsMessageIn` and then deserialize the
+        // body directly as `VerifiableGroupInfo`.
+        //
+        // `GroupInfo` and `VerifiableGroupInfo` have identical TLS wire
+        // formats — the extra `serialized_payload: Option<Vec<u8>>` on
+        // `GroupInfo` is `#[tls_codec(skip)]`, so the body bytes on the
+        // wire are `payload + signature` for both types.
+        let mut env_reader: &[u8] = &group_info_bytes;
+        let envelope = MlsMessageIn::tls_deserialize(&mut env_reader).map_err(|e| {
+            crate::error::Error::Other(anyhow::anyhow!(
+                "stored group_info envelope failed to deserialize: {e}"
+            ))
+        })?;
+        let _ = envelope;
+
+        const ENVELOPE_HEADER_LEN: usize = 4;
+        if group_info_bytes.len() < ENVELOPE_HEADER_LEN {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "group_info blob too short to contain an MLS message envelope"
+            )));
+        }
+        let mut body_reader: &[u8] = &group_info_bytes[ENVELOPE_HEADER_LEN..];
+        let verifiable_group_info = VerifiableGroupInfo::tls_deserialize(&mut body_reader)
+            .map_err(|e| {
+                crate::error::Error::Other(anyhow::anyhow!(
+                    "stored group_info body failed to deserialize: {e}"
+                ))
+            })?;
+
+        // Load (or create) this device's stable MLS signing keypair.
+        let (sig_keys, sig_pub_bytes) =
+            load_or_create_device_signer(&provider, user_id, &device_id)?;
+
+        let credential = make_credential(user_id, &device_id);
+        let sig_pub = OpenMlsSignaturePublicKey::new(
+            sig_pub_bytes.into(),
+            CS.signature_algorithm(),
+        )
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+        let cred_with_key = CredentialWithKey {
+            credential,
+            signature_key: sig_pub.into(),
+        };
+
+        // Drop any stale local group with the same ID so the external
+        // commit builder doesn't collide.
+        let group_id = GroupId::from_slice(conversation_id.as_bytes());
+        if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
+            let _ = old.delete(provider.storage());
+        }
+
+        let join_config = MlsGroupJoinConfig::builder().build();
+
+        // Drive the external commit builder. The GroupInfo we exported
+        // in step 4 already embeds the ratchet tree extension, so we do
+        // not need to pass a tree separately.
+        let (_joined_group, commit_bundle) = MlsGroup::external_commit_builder()
+            .with_config(join_config)
+            .build_group(&provider, verifiable_group_info, cred_with_key)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+                "external commit build_group: {e}"
+            )))?
+            .load_psks(provider.storage())
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+                "external commit load_psks: {e}"
+            )))?
+            .build(provider.rand(), provider.crypto(), &sig_keys, |_| true)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+                "external commit build: {e}"
+            )))?
+            .finalize(&provider)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+                "external commit finalize: {e}"
+            )))?;
+
+        let (commit_msg, _welcome_msg, _new_group_info) = commit_bundle.into_contents();
+        commit_msg
+            .tls_serialize_detached()
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?
+    };
+
+    // 3. Post the commit to mls_commit_log so existing members will
+    //    process it on their next process_pending_commits pass. We
+    //    record it at the PRE-commit epoch (the epoch carried by the
+    //    GroupInfo we joined from) because that's the convention
+    //    process_pending_commits_inner uses.
+    //
+    // The external commit adds exactly one device (this device) to the
+    // group, so the metadata columns carry a single-element list.
+    let conn = state.remote_db.conn().await?;
+    conn.execute(
+        "INSERT INTO mls_commit_log \
+         (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        libsql::params![
+            conversation_id,
+            stored_epoch,
+            user_id,
+            commit_bytes,
+            user_id,
+            device_id.clone()
+        ],
+    )
+    .await?;
+
+    // 4. Refresh the stored GroupInfo at the new epoch so any NEXT
+    //    new device joining via this same path sees the up-to-date
+    //    tree.
+    if let Err(e) = publish_group_info(state, conversation_id).await {
+        eprintln!(
+            "[mls] external_join_group: publish_group_info failed (non-fatal): {e}"
+        );
+    }
+
+    eprintln!(
+        "[mls] external_join_group: {user_id}:{device_id} joined {conversation_id} from epoch {stored_epoch}"
+    );
+
+    Ok(())
+}
+
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 /// Generate a fresh MLS `KeyPackage` + `SignatureKeyPair` for this device and
@@ -116,15 +695,12 @@ pub async fn generate_mls_key_package(
 
         let provider = PollisProvider::new(db.conn());
 
-        let sig_keys = SignatureKeyPair::new(CS.signature_algorithm())
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
-
-        sig_keys.store(provider.storage())
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
+        let (sig_keys, sig_pub_bytes) =
+            load_or_create_device_signer(&provider, &user_id, &device_id)?;
 
         let credential = make_credential(&user_id, &device_id);
         let sig_pub = OpenMlsSignaturePublicKey::new(
-            sig_keys.to_public_vec().into(),
+            sig_pub_bytes.into(),
             CS.signature_algorithm(),
         ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
         let cred_with_key = CredentialWithKey {
@@ -226,7 +802,9 @@ pub async fn ensure_mls_key_package(
         libsql::params![user_id, device_id],
     ).await?;
 
-    // Generate and publish TARGET fresh packages.
+    // Generate and publish TARGET fresh packages. They all share the same
+    // stable device signing key so one `device_cert` in `user_device`
+    // covers every key package this device ever ships.
     for _ in 0..TARGET {
         let (ref_hex, kp_bytes) = {
             let guard = state.local_db.lock().await;
@@ -235,14 +813,12 @@ pub async fn ensure_mls_key_package(
             })?;
             let provider = PollisProvider::new(db.conn());
 
-            let sig_keys = SignatureKeyPair::new(CS.signature_algorithm())
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
-            sig_keys.store(provider.storage())
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
+            let (sig_keys, sig_pub_bytes) =
+                load_or_create_device_signer(&provider, user_id, device_id)?;
 
             let credential = make_credential(user_id, device_id);
             let sig_pub = OpenMlsSignaturePublicKey::new(
-                sig_keys.to_public_vec().into(),
+                sig_pub_bytes.into(),
                 CS.signature_algorithm(),
             ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
             let cred_with_key = CredentialWithKey {
@@ -313,14 +889,12 @@ async fn replenish_key_packages(
             })?;
             let provider = PollisProvider::new(db.conn());
 
-            let sig_keys = SignatureKeyPair::new(CS.signature_algorithm())
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
-            sig_keys.store(provider.storage())
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
+            let (sig_keys, sig_pub_bytes) =
+                load_or_create_device_signer(&provider, user_id, device_id)?;
 
             let credential = make_credential(user_id, device_id);
             let sig_pub = OpenMlsSignaturePublicKey::new(
-                sig_keys.to_public_vec().into(),
+                sig_pub_bytes.into(),
                 CS.signature_algorithm(),
             ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
             let cred_with_key = CredentialWithKey {
@@ -371,43 +945,51 @@ pub async fn init_mls_group(
     let device_id = state.device_id.lock().await.clone()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
 
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(|| {
-        crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
-    })?;
-    let provider = PollisProvider::new(db.conn());
+    // Scope the local_db guard so it is dropped before the async
+    // publish_group_info call below (which re-acquires it).
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+        })?;
+        let provider = PollisProvider::new(db.conn());
 
-    let sig_keys = SignatureKeyPair::new(CS.signature_algorithm())
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
-    sig_keys.store(provider.storage())
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key store: {e}")))?;
+        let (sig_keys, sig_pub_bytes) =
+            load_or_create_device_signer(&provider, creator_user_id, &device_id)?;
 
-    let credential = make_credential(creator_user_id, &device_id);
-    let sig_pub = OpenMlsSignaturePublicKey::new(
-        sig_keys.to_public_vec().into(),
-        CS.signature_algorithm(),
-    ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
-    let cred_with_key = CredentialWithKey {
-        credential,
-        signature_key: sig_pub.into(),
-    };
+        let credential = make_credential(creator_user_id, &device_id);
+        let sig_pub = OpenMlsSignaturePublicKey::new(
+            sig_pub_bytes.into(),
+            CS.signature_algorithm(),
+        ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+        let cred_with_key = CredentialWithKey {
+            credential,
+            signature_key: sig_pub.into(),
+        };
 
-    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+        let group_id = GroupId::from_slice(conversation_id.as_bytes());
 
-    // Delete any stale group with the same ID so the create below never
-    // collides.  This is a no-op on first creation and essential during
-    // repair (where the old group still exists but is broken/outdated).
-    if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
-        let _ = old.delete(provider.storage());
+        // Delete any stale group with the same ID so the create below never
+        // collides.  This is a no-op on first creation and essential during
+        // repair (where the old group still exists but is broken/outdated).
+        if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
+            let _ = old.delete(provider.storage());
+        }
+
+        let config = MlsGroupCreateConfig::builder()
+            .ciphersuite(CS)
+            .use_ratchet_tree_extension(true)
+            .build();
+
+        MlsGroup::new_with_group_id(&provider, &sig_keys, &config, group_id, cred_with_key)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create mls group: {e}")))?;
     }
 
-    let config = MlsGroupCreateConfig::builder()
-        .ciphersuite(CS)
-        .use_ratchet_tree_extension(true)
-        .build();
-
-    MlsGroup::new_with_group_id(&provider, &sig_keys, &config, group_id, cred_with_key)
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create mls group: {e}")))?;
+    // Publish the epoch-0 GroupInfo so a future device enrolling via the
+    // Secret Key path can join this group via external commit.
+    if let Err(e) = publish_group_info(state, conversation_id).await {
+        eprintln!("[mls] init_mls_group: publish_group_info failed (non-fatal): {e}");
+    }
 
     Ok(())
 }
@@ -610,7 +1192,14 @@ pub async fn add_member_mls_inner(
     target_user_id: &str,
     actor_user_id: &str,
 ) -> crate::error::Result<()> {
-    add_member_mls_impl(state, conversation_id, target_user_id, actor_user_id, None).await
+    add_member_mls_impl(
+        state,
+        conversation_id,
+        target_user_id,
+        actor_user_id,
+        DeviceFilter::default(),
+    )
+    .await
 }
 
 /// Add the user's OTHER devices to an MLS group they just created.
@@ -621,7 +1210,18 @@ pub async fn add_member_mls_for_own_devices(
     user_id: &str,
     exclude_device_id: Option<&str>,
 ) -> crate::error::Result<()> {
-    match add_member_mls_impl(state, conversation_id, user_id, user_id, exclude_device_id).await {
+    match add_member_mls_impl(
+        state,
+        conversation_id,
+        user_id,
+        user_id,
+        DeviceFilter {
+            exclude: exclude_device_id.map(str::to_owned),
+            include_only: None,
+        },
+    )
+    .await
+    {
         Ok(()) => Ok(()),
         Err(e) => {
             let msg = format!("{e}");
@@ -636,6 +1236,29 @@ pub async fn add_member_mls_for_own_devices(
     }
 }
 
+/// Add exactly one specific device of `target_user_id` to an MLS group.
+/// Used by the enrollment flow to graft a newly-enrolled device into every
+/// group the user is already a member of. Non-fatal errors are logged.
+pub async fn add_specific_device_to_group_mls(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    target_user_id: &str,
+    target_device_id: &str,
+    actor_user_id: &str,
+) -> crate::error::Result<()> {
+    add_member_mls_impl(
+        state,
+        conversation_id,
+        target_user_id,
+        actor_user_id,
+        DeviceFilter {
+            exclude: None,
+            include_only: Some(vec![target_device_id.to_owned()]),
+        },
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn add_member_mls(
     state: State<'_, Arc<AppState>>,
@@ -643,7 +1266,27 @@ pub async fn add_member_mls(
     target_user_id: String,
     actor_user_id: String,
 ) -> crate::error::Result<()> {
-    add_member_mls_impl(state.inner(), &conversation_id, &target_user_id, &actor_user_id, None).await
+    add_member_mls_impl(
+        state.inner(),
+        &conversation_id,
+        &target_user_id,
+        &actor_user_id,
+        DeviceFilter::default(),
+    )
+    .await
+}
+
+/// Controls which of a target user's devices `add_member_mls_impl`
+/// considers when building an Add commit.
+#[derive(Default)]
+struct DeviceFilter {
+    /// Skip this device_id if present. Used to exclude the caller's own
+    /// device when adding their sibling devices to a freshly-created group.
+    exclude: Option<String>,
+    /// If `Some`, consider only these device_ids (and nothing else).
+    /// Used by the enrollment flow to add exactly one newly-enrolled
+    /// device to an existing group.
+    include_only: Option<Vec<String>>,
 }
 
 async fn add_member_mls_impl(
@@ -651,43 +1294,133 @@ async fn add_member_mls_impl(
     conversation_id: &str,
     target_user_id: &str,
     actor_user_id: &str,
-    exclude_device_id: Option<&str>,
+    device_filter: DeviceFilter,
 ) -> crate::error::Result<()> {
     let conversation_id = conversation_id.to_owned();
     let target_user_id = target_user_id.to_owned();
     let actor_user_id = actor_user_id.to_owned();
 
     // 1. Look up devices for the target user that have at least one unclaimed
-    //    key package.  Stale devices (e.g. from earlier testing) with no KPs
-    //    are skipped — they can't be added to MLS groups.
-    let device_ids: Vec<String> = {
+    //    key package AND a published device cert that verifies against the
+    //    user's account_id_pub. Stale/unsigned devices are skipped — they
+    //    cannot be added to MLS groups, which is exactly what protects us
+    //    from ghost-device injection by the server or a compromised peer.
+    let verified_devices: Vec<(String, Vec<u8>)> = {
         let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT d.device_id FROM user_device d \
-             WHERE d.user_id = ?1 \
-             AND EXISTS ( \
-                 SELECT 1 FROM mls_key_package kp \
-                 WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
-             )",
-            libsql::params![target_user_id.clone()],
-        ).await?;
-        let mut ids = Vec::new();
+
+        // Fetch account_id_pub once — same for every candidate device.
+        let account_id_pub: Vec<u8> = {
+            let mut rows = conn
+                .query(
+                    "SELECT account_id_pub FROM users WHERE id = ?1",
+                    libsql::params![target_user_id.clone()],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => row.get::<Option<Vec<u8>>>(0)?.ok_or_else(|| {
+                    crate::error::Error::Other(anyhow::anyhow!(
+                        "user {target_user_id} has no account_id_pub — cannot verify any device"
+                    ))
+                })?,
+                None => {
+                    return Err(crate::error::Error::Other(anyhow::anyhow!(
+                        "user {target_user_id} not found"
+                    )))
+                }
+            }
+        };
+
+        // Join user_device to mls_key_package to get only devices that
+        // have both an unclaimed KP and the cert columns populated.
+        let mut rows = conn
+            .query(
+                "SELECT d.device_id, d.device_cert, d.cert_issued_at, \
+                        d.cert_identity_version, d.mls_signature_pub \
+                 FROM user_device d \
+                 WHERE d.user_id = ?1 \
+                 AND EXISTS ( \
+                     SELECT 1 FROM mls_key_package kp \
+                     WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
+                 )",
+                libsql::params![target_user_id.clone()],
+            )
+            .await?;
+
+        let mut verified: Vec<(String, Vec<u8>)> = Vec::new();
         while let Some(row) = rows.next().await? {
             let did: String = row.get(0)?;
-            // Skip the excluded device (e.g. the group creator's current device).
-            if exclude_device_id.map_or(false, |ex| ex == did) {
+
+            if device_filter
+                .exclude
+                .as_deref()
+                .map_or(false, |ex| ex == did)
+            {
                 continue;
             }
-            ids.push(did);
+            if let Some(ref include) = device_filter.include_only {
+                if !include.iter().any(|d| d == &did) {
+                    continue;
+                }
+            }
+
+            let cert: Option<Vec<u8>> = row.get(1).ok().flatten();
+            let issued_at_str: Option<String> = row.get(2).ok().flatten();
+            let cert_identity_version: Option<i64> = row.get(3).ok().flatten();
+            let mls_sig_pub: Option<Vec<u8>> = row.get(4).ok().flatten();
+
+            let (cert, issued_at_str, cert_identity_version, mls_sig_pub) =
+                match (cert, issued_at_str, cert_identity_version, mls_sig_pub) {
+                    (Some(c), Some(t), Some(v), Some(p)) => (c, t, v, p),
+                    _ => {
+                        eprintln!(
+                            "[mls] add_member: device {did} has no cert — skipping (not yet enrolled)"
+                        );
+                        continue;
+                    }
+                };
+
+            let issued_at: u64 = match issued_at_str.parse() {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!(
+                        "[mls] add_member: device {did} cert_issued_at unparseable '{issued_at_str}': {e} — skipping"
+                    );
+                    continue;
+                }
+            };
+
+            if let Err(e) = crate::commands::account_identity::verify_device_cert(
+                &account_id_pub,
+                &did,
+                &mls_sig_pub,
+                cert_identity_version as u32,
+                issued_at,
+                &cert,
+            ) {
+                eprintln!(
+                    "[mls] add_member: device {did} cert verification failed: {e} — skipping"
+                );
+                continue;
+            }
+
+            verified.push((did, mls_sig_pub));
         }
-        ids
+        verified
     };
 
-    if device_ids.is_empty() {
+    if verified_devices.is_empty() {
         return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "No registered devices for {target_user_id}"
+            "No registered devices with valid certs for {target_user_id}"
         )));
     }
+
+    let device_ids: Vec<String> = verified_devices.iter().map(|(d, _)| d.clone()).collect();
+
+    // Index verified pub bytes by device_id so step 3 can double-check
+    // that each claimed KP's leaf signing key matches the cert.
+    use std::collections::HashMap;
+    let verified_pub_by_device: HashMap<String, Vec<u8>> =
+        verified_devices.into_iter().collect();
 
     // 2. Claim one KeyPackage per device.
     let mut kp_bytes_list: Vec<(String, Vec<u8>)> = Vec::new();
@@ -751,6 +1484,35 @@ async fn add_member_mls_impl(
                 eprintln!("[mls] add_member: credential user '{cred_user}' != '{target_user_id}' for device {did}");
                 continue;
             }
+
+            // Verify the credential names the same device the cert was
+            // issued for — rejects key packages whose credential device_id
+            // was tampered with.
+            let cred_device = parse_credential_device_id(kp.leaf_node().credential());
+            if cred_device.as_deref() != Some(did.as_str()) {
+                eprintln!(
+                    "[mls] add_member: credential device '{}' != '{did}' — skipping",
+                    cred_device.unwrap_or_default()
+                );
+                continue;
+            }
+
+            // Verify the leaf's signature key matches the pub bytes
+            // covered by this device's cert. Without this bind, an
+            // attacker could forge a KP that reuses a legitimate
+            // device_id but embeds a signing key they control.
+            let leaf_sig_pub = kp.leaf_node().signature_key().as_slice();
+            let Some(expected_pub) = verified_pub_by_device.get(did) else {
+                eprintln!("[mls] add_member: no verified pub for device {did} — skipping");
+                continue;
+            };
+            if leaf_sig_pub != expected_pub.as_slice() {
+                eprintln!(
+                    "[mls] add_member: leaf signing key for device {did} does not match certified pub — skipping"
+                );
+                continue;
+            }
+
             validated_kps.push(kp);
             added_devs.push(did.clone());
         }
@@ -783,16 +1545,23 @@ async fn add_member_mls_impl(
         (commit_bytes, welcome_bytes, epoch, added_devs)
     };
 
-    // 4. Post commit to remote.
+    // 4. Post commit to remote, including the cross-signing metadata
+    //    (target user_id + comma-separated device_ids) so receivers can
+    //    verify certs before calling `process_message`. See
+    //    MULTI_DEVICE_ENROLLMENT.md §3b.
+    let added_device_ids_csv = added_device_ids.join(",");
     let conn = state.remote_db.conn().await?;
     conn.execute(
-        "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO mls_commit_log \
+         (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         libsql::params![
             conversation_id.clone(),
             epoch as i64,
             actor_user_id,
-            commit_bytes
+            commit_bytes,
+            target_user_id.clone(),
+            added_device_ids_csv
         ],
     ).await?;
 
@@ -805,6 +1574,12 @@ async fn add_member_mls_impl(
              VALUES (?1, ?2, ?3, ?4, ?5)",
             libsql::params![welcome_id, conversation_id.clone(), target_user_id.clone(), did.clone(), welcome_bytes.clone()],
         ).await?;
+    }
+
+    // 6. Refresh the stored GroupInfo so a newly-enrolling device can
+    //    join this group via external commit at the new epoch.
+    if let Err(e) = publish_group_info(state, &conversation_id).await {
+        eprintln!("[mls] add_member: publish_group_info failed (non-fatal): {e}");
     }
 
     Ok(())
@@ -918,12 +1693,18 @@ async fn remove_member_mls_impl(
         "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
          VALUES (?1, ?2, ?3, ?4)",
         libsql::params![
-            conversation_id,
+            conversation_id.clone(),
             epoch as i64,
             actor_user_id,
             commit_bytes
         ],
     ).await?;
+
+    // Refresh the stored GroupInfo at the new epoch so external joiners
+    // use a fresh epoch when constructing their join commit.
+    if let Err(e) = publish_group_info(state, &conversation_id).await {
+        eprintln!("[mls] remove_member: publish_group_info failed (non-fatal): {e}");
+    }
 
     Ok(())
 }
@@ -960,35 +1741,100 @@ pub async fn process_pending_commits_inner(
         group.epoch().as_u64()
     };
 
-    // 2. Fetch pending commits from remote, collected into an owned Vec so
-    //    the `rows` cursor is dropped before any local-DB await below.
+    // 2. Fetch pending commits from remote, along with the add-metadata
+    //    columns (`added_user_id`, `added_device_ids`) so we can verify
+    //    cross-signing certs BEFORE calling `process_message`. Collected
+    //    into an owned Vec so the `rows` cursor is dropped before any
+    //    local-DB await below.
     let conn = state.remote_db.conn().await?;
     let mut rows = conn.query(
-        "SELECT epoch, commit_data \
+        "SELECT epoch, commit_data, added_user_id, added_device_ids \
          FROM mls_commit_log \
          WHERE conversation_id = ?1 AND epoch >= ?2 \
          ORDER BY epoch ASC, seq ASC",
         libsql::params![mls_group_id, initial_epoch as i64],
     ).await?;
 
-    let mut pending: Vec<(i64, Vec<u8>)> = Vec::new();
+    #[derive(Debug)]
+    struct PendingCommit {
+        epoch: i64,
+        commit_data: Vec<u8>,
+        added_user_id: Option<String>,
+        added_device_ids: Vec<String>,
+    }
+
+    let mut pending: Vec<PendingCommit> = Vec::new();
     while let Some(row) = rows.next().await? {
         let epoch: i64 = row.get(0)?;
         let data: Vec<u8> = row.get(1)?;
-        pending.push((epoch, data));
+        let added_user_id: Option<String> = row.get::<Option<String>>(2).ok().flatten();
+        let ids_csv: Option<String> = row.get::<Option<String>>(3).ok().flatten();
+        let added_device_ids: Vec<String> = ids_csv
+            .as_deref()
+            .map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        pending.push(PendingCommit {
+            epoch,
+            commit_data: data,
+            added_user_id,
+            added_device_ids,
+        });
     }
     drop(rows);
 
-    // 3. Apply each commit in epoch order.
+    // 3. Apply each commit in epoch order. For any commit carrying add
+    //    metadata, verify every added device's cross-signing cert
+    //    against the user's account_id_pub BEFORE touching the group
+    //    state.
     let mut current_epoch = initial_epoch;
-    for (row_epoch, commit_data) in pending {
-        if row_epoch as u64 != current_epoch {
+    let mut any_applied = false;
+    'commit_loop: for commit in pending {
+        if commit.epoch as u64 != current_epoch {
             eprintln!(
                 "[mls] process_pending_commits: epoch gap for {mls_group_id}: \
-                 expected {current_epoch}, got {row_epoch} — stopping"
+                 expected {current_epoch}, got {} — stopping",
+                commit.epoch
             );
             break;
         }
+
+        // ── Inbound cert verification ──────────────────────────────
+        // If this commit claims to add any devices, verify each of
+        // their certs chains to the user's published account_id_pub.
+        // A failed verification rejects the ENTIRE commit — we stop
+        // processing rather than skip, because subsequent commits
+        // target a group state we can no longer reach.
+        if let Some(ref added_user_id) = commit.added_user_id {
+            let ok = verify_added_devices(
+                &conn,
+                added_user_id,
+                &commit.added_device_ids,
+            )
+            .await;
+            match ok {
+                Ok(true) => {}
+                Ok(false) => {
+                    eprintln!(
+                        "[mls] process_pending_commits: rejecting commit at epoch {} for {mls_group_id} — cross-signing verification failed for {added_user_id}",
+                        commit.epoch
+                    );
+                    break 'commit_loop;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[mls] process_pending_commits: cert verification error for {mls_group_id}: {e} — stopping"
+                    );
+                    break 'commit_loop;
+                }
+            }
+        }
+
+        let commit_data = commit.commit_data;
 
         // All MLS work is synchronous and scoped so nothing !Send crosses
         // the lock().await boundary.
@@ -1049,6 +1895,19 @@ pub async fn process_pending_commits_inner(
 
         if applied {
             current_epoch += 1;
+            any_applied = true;
+        }
+    }
+
+    // If we merged at least one commit, refresh the stored GroupInfo. The
+    // committer already published when they issued the commit, but
+    // publishing again here keeps the row fresh if the committer's write
+    // failed transiently. The UPSERT's `WHERE excluded.epoch >` guard
+    // means we only overwrite if we have a strictly newer epoch, so
+    // redundant writes are cheap.
+    if any_applied {
+        if let Err(e) = publish_group_info(state, mls_group_id).await {
+            eprintln!("[mls] process_pending_commits: publish_group_info failed (non-fatal): {e}");
         }
     }
 

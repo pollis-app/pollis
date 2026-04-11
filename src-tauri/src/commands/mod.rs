@@ -1,4 +1,6 @@
+pub mod account_identity;
 pub mod auth;
+pub mod device_enrollment;
 pub mod user;
 pub mod groups;
 pub mod messages;

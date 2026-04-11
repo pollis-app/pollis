@@ -957,6 +957,19 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
                 });
             }
         }
+        Some("enrollment_requested") => {
+            if let (Some(request_id), Some(new_device_id), Some(verification_code)) = (
+                data.get("request_id").and_then(|v| v.as_str()),
+                data.get("new_device_id").and_then(|v| v.as_str()),
+                data.get("verification_code").and_then(|v| v.as_str()),
+            ) {
+                let _ = channel.send(RealtimeEvent::EnrollmentRequested {
+                    request_id: request_id.to_owned(),
+                    new_device_id: new_device_id.to_owned(),
+                    verification_code: verification_code.to_owned(),
+                });
+            }
+        }
         _ => {}
     }
 }

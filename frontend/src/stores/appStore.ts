@@ -53,6 +53,21 @@ interface AppStore extends AppState {
   setVoiceParticipants: (participants: VoiceParticipant[]) => void;
   setVoiceActiveSpeakerIds: (ids: string[]) => void;
   setVoiceIsMuted: (muted: boolean) => void;
+  // Pending enrollment approval prompt — set by `useLiveKitRealtime`
+  // when an `EnrollmentRequested` event arrives from the user's inbox
+  // room. Causes the UI to immediately take over with the approval
+  // prompt regardless of which page the user is on. Cleared when the
+  // user approves, rejects, or after the request expires.
+  pendingEnrollmentApproval:
+    | {
+        requestId: string;
+        newDeviceId: string;
+        verificationCode: string;
+      }
+    | null;
+  setPendingEnrollmentApproval: (
+    p: { requestId: string; newDeviceId: string; verificationCode: string } | null,
+  ) => void;
   logout: () => void;
 }
 
@@ -161,6 +176,9 @@ export const useAppStore = create<AppStore>((set) => ({
   setVoiceActiveSpeakerIds: (ids) => set({ voiceActiveSpeakerIds: ids }),
   setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
 
+  pendingEnrollmentApproval: null,
+  setPendingEnrollmentApproval: (p) => set({ pendingEnrollmentApproval: p }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -185,6 +203,7 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceParticipants: [],
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
+    pendingEnrollmentApproval: null,
   }),
 }));
 

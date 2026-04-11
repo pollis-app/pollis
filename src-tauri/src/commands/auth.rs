@@ -16,6 +16,19 @@ pub struct UserProfile {
     pub id: String,
     pub email: String,
     pub username: String,
+    /// Only populated on first-device signup (`verify_otp` / `dev_login`).
+    /// The backend clears this field before persisting the profile to the
+    /// OS keystore so the Secret Key is never written to disk as part of
+    /// the session blob. Frontend is expected to read it once off the
+    /// auth response, show the Emergency Kit screen, then forget it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_secret_key: Option<String>,
+    /// True when this device has signed in against a user that already
+    /// has an `account_id_pub` on the server BUT no local
+    /// `account_id_key` in this device's keystore. The frontend must
+    /// route to the enrollment gate before showing the main app.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub enrollment_required: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -168,18 +181,19 @@ pub async fn verify_otp(
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
-        "SELECT id, username FROM users WHERE email = ?1",
+        "SELECT id, username, account_id_pub FROM users WHERE email = ?1",
         libsql::params![email.clone()],
     ).await?;
 
     let user_row = rows.next().await?;
 
-    let (user_id, username) = if let Some(row) = user_row {
+    let (user_id, username, remote_pub) = if let Some(row) = user_row {
         let id: String = row.get(0)?;
         let uname: String = row.get(1).unwrap_or_else(|_| {
             email.split('@').next().unwrap_or("user").to_string()
         });
-        (id, uname)
+        let pub_bytes: Option<Vec<u8>> = row.get(2).ok();
+        (id, uname, pub_bytes)
     } else {
         let user_id = Ulid::new().to_string();
         // Append the last 4 chars of the ULID so the default username is unique
@@ -191,13 +205,74 @@ pub async fn verify_otp(
             "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
             libsql::params![user_id.clone(), email.clone(), default_username.clone()],
         ).await?;
-        (user_id, default_username)
+        (user_id, default_username, None)
     };
 
-    let profile = UserProfile { id: user_id, email, username };
+    // If the server has an identity but the locally-stored key doesn't
+    // match, this device has been orphaned by a reset on another device
+    // (or its local key is corrupt). Wipe the stale local key so the
+    // normal enrollment gate takes over.
+    if let Some(ref pub_bytes) = remote_pub {
+        let matches = crate::commands::account_identity::has_matching_local_account_identity(
+            &user_id,
+            pub_bytes,
+        )
+        .await
+        .unwrap_or(false);
+        if !matches {
+            if let Err(e) =
+                crate::commands::account_identity::wipe_local_account_identity(&user_id).await
+            {
+                eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
+            }
+        }
+    }
 
-    // Persist session to OS keystore so it survives app restarts
-    let session_bytes = serde_json::to_vec(&profile)
+    let has_identity = remote_pub.is_some();
+
+    // First-device signup (or a pre-identity user): generate the long-lived
+    // account identity key and a Secret Key to hand back to the frontend
+    // exactly once. See MULTI_DEVICE_ENROLLMENT.md.
+    let new_secret_key = if !has_identity {
+        match crate::commands::account_identity::generate_account_identity(
+            state.inner(),
+            &user_id,
+        )
+        .await
+        {
+            Ok(sk) => Some(sk),
+            Err(e) => {
+                eprintln!("[auth] generate_account_identity failed: {e}");
+                return Err(e);
+            }
+        }
+    } else {
+        None
+    };
+
+    // Enrollment required when the user has an identity on the server but
+    // this device doesn't hold a matching local copy of the account_id_key.
+    let enrollment_required = has_identity
+        && !crate::commands::account_identity::has_local_account_identity(&user_id)
+            .await
+            .unwrap_or(false);
+
+    let profile = UserProfile {
+        id: user_id,
+        email,
+        username,
+        new_secret_key: new_secret_key.clone(),
+        enrollment_required,
+    };
+
+    // Persist session to OS keystore so it survives app restarts.
+    // Clear new_secret_key first — it is a one-shot display value and must
+    // never be written to disk as part of the session blob.
+    let persisted = UserProfile {
+        new_secret_key: None,
+        ..profile.clone()
+    };
+    let session_bytes = serde_json::to_vec(&persisted)
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
     keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
@@ -257,8 +332,12 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
         None => return Ok(None),
     };
 
-    let profile: UserProfile = serde_json::from_slice(&bytes)
+    let mut profile: UserProfile = serde_json::from_slice(&bytes)
         .map_err(|e| anyhow::anyhow!("Failed to deserialize session: {e}"))?;
+    // Recomputed below once we know whether the keystore still holds an
+    // account_id_key for this user on this device.
+    profile.new_secret_key = None;
+    profile.enrollment_required = false;
 
     // Verify the user still exists in Turso. After a DB wipe or account deletion
     // the keystore still has the old profile, which would cause FK errors everywhere.
@@ -301,6 +380,51 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     state.load_user_db(&profile.id).await?;
     register_device(state.inner(), &profile.id).await?;
 
+    // Recompute enrollment_required. Two reasons the device might need
+    // enrollment:
+    //   (a) server has an account_id_pub but this device has no local key
+    //   (b) server's pub doesn't match the local key — orphaned by a
+    //       soft-recovery reset on another device
+    // In case (b) we wipe the stale local key so the gate path is clean.
+    let remote_pub: Option<Vec<u8>> = match state.remote_db.conn().await {
+        Ok(conn) => {
+            let mut rows = conn
+                .query(
+                    "SELECT account_id_pub FROM users WHERE id = ?1",
+                    libsql::params![profile.id.clone()],
+                )
+                .await?;
+            match rows.next().await? {
+                Some(row) => row.get::<Option<Vec<u8>>>(0).ok().flatten(),
+                None => None,
+            }
+        }
+        Err(_) => None,
+    };
+
+    if let Some(ref pub_bytes) = remote_pub {
+        let matches = crate::commands::account_identity::has_matching_local_account_identity(
+            &profile.id,
+            pub_bytes,
+        )
+        .await
+        .unwrap_or(false);
+        if !matches {
+            if let Err(e) =
+                crate::commands::account_identity::wipe_local_account_identity(&profile.id).await
+            {
+                eprintln!("[session] wipe_local_account_identity (non-fatal): {e}");
+            }
+        }
+    }
+
+    let has_local_identity = crate::commands::account_identity::has_local_account_identity(
+        &profile.id,
+    )
+    .await
+    .unwrap_or(false);
+    profile.enrollment_required = remote_pub.is_some() && !has_local_identity;
+
     Ok(Some(profile))
 }
 
@@ -310,16 +434,17 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
-        "SELECT id, username FROM users WHERE email = ?1",
+        "SELECT id, username, account_id_pub FROM users WHERE email = ?1",
         libsql::params![email.clone()],
     ).await?;
 
-    let (user_id, username) = if let Some(row) = rows.next().await? {
+    let (user_id, username, remote_pub) = if let Some(row) = rows.next().await? {
         let id: String = row.get(0)?;
         let uname: String = row.get(1).unwrap_or_else(|_| {
             email.split('@').next().unwrap_or("user").to_string()
         });
-        (id, uname)
+        let pub_bytes: Option<Vec<u8>> = row.get(2).ok();
+        (id, uname, pub_bytes)
     } else {
         let user_id = Ulid::new().to_string();
         let suffix = &user_id[user_id.len().saturating_sub(4)..];
@@ -329,11 +454,59 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
             "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
             libsql::params![user_id.clone(), email.clone(), default_username.clone()],
         ).await?;
-        (user_id, default_username)
+        (user_id, default_username, None)
     };
 
-    let profile = UserProfile { id: user_id, email, username };
-    let session_bytes = serde_json::to_vec(&profile)
+    // Orphan-detection: wipe any stale local key that doesn't match
+    // the server's current account_id_pub.
+    if let Some(ref pub_bytes) = remote_pub {
+        let matches = crate::commands::account_identity::has_matching_local_account_identity(
+            &user_id,
+            pub_bytes,
+        )
+        .await
+        .unwrap_or(false);
+        if !matches {
+            if let Err(e) =
+                crate::commands::account_identity::wipe_local_account_identity(&user_id).await
+            {
+                eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
+            }
+        }
+    }
+
+    let has_identity = remote_pub.is_some();
+
+    let new_secret_key = if !has_identity {
+        match crate::commands::account_identity::generate_account_identity(state, &user_id).await {
+            Ok(sk) => Some(sk),
+            Err(e) => {
+                eprintln!("[auth] generate_account_identity failed: {e}");
+                return Err(e);
+            }
+        }
+    } else {
+        None
+    };
+
+    let enrollment_required = has_identity
+        && !crate::commands::account_identity::has_local_account_identity(&user_id)
+            .await
+            .unwrap_or(false);
+
+    let profile = UserProfile {
+        id: user_id,
+        email,
+        username,
+        new_secret_key,
+        enrollment_required,
+    };
+
+    let persisted = UserProfile {
+        new_secret_key: None,
+        ..profile.clone()
+    };
+    let session_bytes = serde_json::to_vec(&persisted)
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
     keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
@@ -372,6 +545,14 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
 
     *state.device_id.lock().await = Some(device_id.clone());
     eprintln!("[auth] device registered: {device_id}");
+
+    // Publish the device cross-signing cert so any client that reads this
+    // row can verify this device belongs to the user. No-op if the device
+    // doesn't yet hold the account identity key (pre-enrollment state).
+    if let Err(e) = crate::commands::mls::ensure_device_cert(state, user_id, &device_id).await {
+        eprintln!("[auth] ensure_device_cert failed (non-fatal): {e}");
+    }
+
     Ok(device_id)
 }
 

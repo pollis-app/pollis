@@ -140,6 +140,18 @@ website/                # Static HTML marketing site (Cloudflare Pages)
 
 **Turso cannot see**: Message content (encrypted), private keys (never leave device)
 
+## Product Principles
+
+### Messages are not expected to live everywhere forever
+
+Message history is explicitly **not** a product guarantee. Messages may be ephemeral, device-local, and unavailable across device changes or identity resets. Do not design features (MLS enrollment, key rotation, recovery, new-device onboarding, storage schemas) around preserving long-lived message history. History sync/backup is at best an optional future feature, never a constraint.
+
+Concrete implications:
+- A new device joining an existing group does not need to receive historical messages.
+- Rotating a user's identity / resetting their account may wipe all prior messages on all of their devices, and that is acceptable.
+- Do not add encrypted key-backup systems (Megolm-style) unless explicitly asked.
+- Given the choice between "simpler model that loses messages" and "complex model that preserves history", pick simpler.
+
 ## Key Files
 
 - `src-tauri/src/lib.rs` — Tauri app entry point, command registration

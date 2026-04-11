@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as api from '../../services/api';
-import type { User } from '../../types';
 import { Button } from '../ui/Button';
 import { InputOtp } from '../ui/InputOtp';
 import { TextInput } from '../ui/TextInput';
 
 interface EmailOTPAuthProps {
-  onSuccess: (user: User) => void | Promise<void>;
+  onSuccess: (result: api.AuthResult) => void | Promise<void>;
   // When set, auto-populates the email field and immediately sends the OTP,
   // advancing straight to the code-entry step.
   prefillEmail?: string;
@@ -87,8 +86,8 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     setIsLoading(true);
     setError(null);
     try {
-      const user = await api.verifyOTP(email.trim(), otp.trim());
-      await onSuccess(user);
+      const result = await api.verifyOTP(email.trim(), otp.trim());
+      await onSuccess(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid code');
     } finally {

@@ -70,6 +70,14 @@ export const RootPage: React.FC = () => {
       type: "system",
       testId: "menu-item-settings",
     },
+    {
+      id: "security",
+      label: "Security",
+      description: "Device enrollments, identity resets",
+      action: () => navigate({ to: "/security" }),
+      type: "system",
+      testId: "menu-item-security",
+    },
     { id: "__sep2__", label: "", type: "separator" },
     {
       id: "logout",
