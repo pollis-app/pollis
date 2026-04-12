@@ -67,6 +67,8 @@ function MainApp() {
   // The user we're enrolling. Set when an enrollment-required login happens
   // so the EnrollmentGateScreen knows whose account it's joining.
   const [pendingEnrollmentUser, setPendingEnrollmentUser] = useState<User | null>(null);
+  const [confirmingWipe, setConfirmingWipe] = useState(false);
+  const [isWiping, setIsWiping] = useState(false);
 
   /// Final phase of any successful sign-in (resume or fresh OTP). Loads
   /// preferences, debug data, and transitions to "ready". Assumes the
@@ -321,14 +323,17 @@ function MainApp() {
                 </p>
               </div>
 
-              {/* Known accounts row — shown when user has signed in before */}
+              {/* Known accounts row — most recent 3, sorted by last_seen desc */}
               {knownAccounts.length > 0 && (
                 <div className="flex flex-col gap-1">
                   <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
                     Previously signed in:
                   </p>
                   <div className="flex flex-wrap gap-2">
-                    {knownAccounts.map((account) => (
+                    {[...knownAccounts]
+                      .sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))
+                      .slice(0, 3)
+                      .map((account) => (
                       <button
                         key={account.user_id}
                         data-testid={`known-account-chip-${account.user_id}`}
@@ -367,6 +372,78 @@ function MainApp() {
               )}
 
               <EmailOTPAuth onSuccess={handleAuthSuccess} prefillEmail={prefillEmail} prefillNonce={prefillNonce} />
+
+              {!confirmingWipe ? (
+                <button
+                  data-testid="wipe-local-data-button"
+                  onClick={() => setConfirmingWipe(true)}
+                  className="text-xs font-mono self-center"
+                  style={{
+                    color: "var(--c-text-muted)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: "0.25rem 0",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color = "#ff6b6b";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
+                  }}
+                >
+                  Wipe this computer
+                </button>
+              ) : (
+                <div
+                  data-testid="wipe-confirm-section"
+                  className="flex flex-col gap-2"
+                  style={{
+                    borderTop: "1px solid var(--c-border)",
+                    paddingTop: "0.75rem",
+                  }}
+                >
+                  <p
+                    className="text-xs font-mono"
+                    style={{ color: "#ff6b6b", lineHeight: 1.5 }}
+                  >
+                    This will delete all local databases, keys, and saved
+                    accounts on this device. Your remote account is not affected.
+                  </p>
+                  <div className="flex gap-2">
+                    <Button
+                      data-testid="wipe-confirm-button"
+                      variant="danger"
+                      className="flex-1"
+                      isLoading={isWiping}
+                      loadingText="Wiping..."
+                      onClick={async () => {
+                        setIsWiping(true);
+                        try {
+                          await api.wipeLocalData();
+                          setKnownAccounts([]);
+                          setConfirmingWipe(false);
+                        } catch (err) {
+                          console.error("[wipe]", err);
+                        } finally {
+                          setIsWiping(false);
+                        }
+                      }}
+                    >
+                      Wipe all local data
+                    </Button>
+                    <Button
+                      data-testid="wipe-cancel-button"
+                      variant="ghost"
+                      className="flex-1"
+                      disabled={isWiping}
+                      onClick={() => setConfirmingWipe(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           </Card>
         </div>

@@ -189,6 +189,7 @@ pub fn run() {
             commands::auth::logout,
             commands::auth::delete_account,
             commands::auth::list_known_accounts,
+            commands::auth::wipe_local_data,
             commands::auth::list_user_devices,
             commands::device_enrollment::start_device_enrollment,
             commands::device_enrollment::poll_enrollment_status,

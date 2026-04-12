@@ -1526,9 +1526,58 @@ async fn add_member_mls_impl(
         let (mut group, signer) = load_group_with_signer(&provider, &conversation_id)?;
         let epoch = group.epoch().as_u64();
 
-        let (commit_msg, welcome_msg, _group_info) = group
-            .add_members(&provider, &signer, &validated_kps)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("add_members: {e}")))?;
+        // Detect stale leaves for the exact (target_user_id, device_id) pairs
+        // we're about to add. Because device signing keys are STABLE (see
+        // `load_or_create_device_signer`), and `leave_group` is leaver-local
+        // with no commit posted, A's view of the tree still contains B's old
+        // leaves after B leaves. A plain `add_members` would then fail with
+        // `validate_key_uniqueness` because the new KeyPackage reuses the
+        // signing key already in the tree. Fix: remove the stale leaves in
+        // the same commit as the Add.
+        let stale_leaves: Vec<LeafNodeIndex> = group
+            .members()
+            .filter_map(|m| {
+                let cred_user = parse_credential_user_id(&m.credential);
+                if cred_user != target_user_id {
+                    return None;
+                }
+                let cred_device = parse_credential_device_id(&m.credential)?;
+                if added_devs.iter().any(|d| d == &cred_device) {
+                    Some(m.index)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let (commit_msg, welcome_msg) = if stale_leaves.is_empty() {
+            let (commit, welcome, _group_info) = group
+                .add_members(&provider, &signer, &validated_kps)
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("add_members: {e}")))?;
+            (commit, welcome)
+        } else {
+            eprintln!(
+                "[mls] add_member: removing {} stale leaf(s) for {target_user_id} before re-add",
+                stale_leaves.len()
+            );
+            let bundle = group
+                .commit_builder()
+                .propose_removals(stale_leaves.iter().cloned())
+                .propose_adds(validated_kps.iter().cloned())
+                .load_psks(provider.storage())
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("load psks: {e}")))?
+                .build(provider.rand(), provider.crypto(), &signer, |_| true)
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("build commit: {e}")))?
+                .stage_commit(&provider)
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("stage commit: {e}")))?;
+            let (commit, welcome_opt, _group_info) = bundle.into_messages();
+            let welcome = welcome_opt.ok_or_else(|| {
+                crate::error::Error::Other(anyhow::anyhow!(
+                    "no welcome produced from add+remove commit"
+                ))
+            })?;
+            (commit, welcome)
+        };
 
         let commit_bytes: Vec<u8> = commit_msg
             .tls_serialize_detached()
@@ -2876,6 +2925,36 @@ mod tests {
         bundle.key_package().tls_serialize_detached().unwrap()
     }
 
+    /// Generate a key package using a pre-existing signing keypair. This
+    /// simulates the production "stable per-device signing key" from
+    /// `load_or_create_device_signer`: every KP the device publishes is
+    /// signed by the same key, so the credential's signature key bytes
+    /// match on every re-issue.
+    fn gen_key_package_with_existing_signer(
+        conn: &rusqlite::Connection,
+        user_id: &str,
+        device_id: &str,
+        sig_keys: &SignatureKeyPair,
+    ) -> Vec<u8> {
+        let provider = PollisProvider::new(conn);
+
+        let credential = make_credential(user_id, device_id);
+        let sig_pub = OpenMlsSignaturePublicKey::new(
+            sig_keys.to_public_vec().into(),
+            CS.signature_algorithm(),
+        ).unwrap();
+        let cred_with_key = CredentialWithKey {
+            credential,
+            signature_key: sig_pub.into(),
+        };
+
+        let bundle = KeyPackage::builder()
+            .build(CS, &provider, sig_keys, cred_with_key)
+            .unwrap();
+
+        bundle.key_package().tls_serialize_detached().unwrap()
+    }
+
     /// Add multiple key packages to a group in a single `add_members` call.
     /// Mirrors production `add_member_mls_impl` which batches all devices.
     fn add_members_batch(
@@ -3100,6 +3179,157 @@ mod tests {
         assert_eq!(
             try_mls_decrypt(&alice_d2_db, conv_id, &new_ct).unwrap(),
             b"new msg"
+        );
+    }
+
+    /// Regression test for the "re-invited user cannot send messages" bug.
+    ///
+    /// Scenario: Bob joins, Bob leaves (local-only — no remove commit is
+    /// posted, which is what production `leave_group` actually does), Alice
+    /// re-invites Bob. Because Bob's device signing key is STABLE across
+    /// re-enrollments, a naive `add_members` call fails with
+    /// `validate_key_uniqueness` — Bob's new leaf signing key is already in
+    /// Alice's tree. The fix: detect the stale leaf and issue a combined
+    /// remove+add commit via `commit_builder`.
+    #[test]
+    fn reinvite_with_stable_signing_key_handles_stale_leaf() {
+        let conv_id = "01JTEST000000000REINVITE01";
+
+        let alice_db = make_db();
+        let bob_db = make_db();
+
+        // Alice creates the group.
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        // Bob's device picks a stable signing key it will reuse across
+        // enrollments (simulates `load_or_create_device_signer`).
+        let bob_signer = {
+            let provider = PollisProvider::new(&bob_db);
+            let sk = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+            sk.store(provider.storage()).unwrap();
+            sk
+        };
+
+        // First enrollment: Bob publishes a KP, Alice adds Bob, Bob joins.
+        let bob_kp_v1 =
+            gen_key_package_with_existing_signer(&bob_db, "bob", "bob_d1", &bob_signer);
+        let (_add1_commit, welcome1) = add_members_batch(&alice_db, conv_id, &[bob_kp_v1]);
+        join_via_welcome(&bob_db, &welcome1);
+
+        // Verify Alice and Bob can talk.
+        let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"first life").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap(),
+            b"first life"
+        );
+
+        // Bob "leaves" — in production this wipes Bob's local state but does
+        // NOT post a remove commit to the group. Alice still has Bob's leaf.
+        // We simulate this by leaving Alice's view untouched and dropping
+        // Bob's local group state on the floor.
+
+        // Second enrollment: Bob publishes a NEW KP using the SAME signer.
+        // Using a fresh bob_db_v2 to model the "Bob re-enrolls fresh" case
+        // (e.g. local wipe) — but the signer is stable, so the leaf signing
+        // key bytes are identical.
+        let bob_db_v2 = make_db();
+        let bob_signer_v2 = {
+            let provider = PollisProvider::new(&bob_db_v2);
+            // Re-create signing keypair using the *same* public bytes would
+            // require importing private scalar — instead, we just reuse the
+            // same object since SignatureKeyPair is Clone'd via storage ops.
+            // To avoid ambiguity, we store a fresh sk into the new provider
+            // and deliberately write its pub bytes into Alice's expected
+            // position by constructing Bob's new KP with that sk.
+            let sk = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+            sk.store(provider.storage()).unwrap();
+            sk
+        };
+
+        // To properly simulate key reuse, rebuild bob_kp_v2 with bob_signer
+        // (the ORIGINAL stable key), but the KP's private-key material needs
+        // to live in bob_db_v2 for Bob to decrypt the welcome. So: store
+        // bob_signer's keypair into bob_db_v2 as well.
+        {
+            let provider_v2 = PollisProvider::new(&bob_db_v2);
+            bob_signer.store(provider_v2.storage()).unwrap();
+        }
+        // Silence unused: we only made bob_signer_v2 to show the contrast
+        // with bob_signer. The actual re-enrollment KP reuses bob_signer.
+        let _ = bob_signer_v2;
+        let bob_kp_v2 =
+            gen_key_package_with_existing_signer(&bob_db_v2, "bob", "bob_d1", &bob_signer);
+
+        // Plain add_members should fail: the signing key is already in the
+        // tree from bob_kp_v1's still-present leaf.
+        {
+            let provider = PollisProvider::new(&alice_db);
+            let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+            let mut reader: &[u8] = &bob_kp_v2;
+            let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
+            let kp = kp_in.validate(provider.crypto(), ProtocolVersion::Mls10).unwrap();
+            let naive = group.add_members(&provider, &signer, &[kp]);
+            assert!(
+                naive.is_err(),
+                "plain add_members must reject duplicate signing key — if this \
+                 starts passing, openmls has changed validation and the stale-leaf \
+                 branch in add_member_mls_impl may no longer be needed"
+            );
+        }
+
+        // Apply the fix: combined remove+add commit via commit_builder.
+        let welcome2_bytes: Vec<u8> = {
+            let provider = PollisProvider::new(&alice_db);
+            let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+
+            // Find Bob's stale leaves.
+            let stale: Vec<LeafNodeIndex> = group.members()
+                .filter_map(|m| {
+                    let u = parse_credential_user_id(&m.credential);
+                    let d = parse_credential_device_id(&m.credential)?;
+                    if u == "bob" && d == "bob_d1" {
+                        Some(m.index)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert_eq!(stale.len(), 1, "expected exactly one stale bob leaf");
+
+            let mut reader: &[u8] = &bob_kp_v2;
+            let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
+            let kp = kp_in.validate(provider.crypto(), ProtocolVersion::Mls10).unwrap();
+
+            let bundle = group
+                .commit_builder()
+                .propose_removals(stale.iter().cloned())
+                .propose_adds(std::iter::once(kp))
+                .load_psks(provider.storage())
+                .unwrap()
+                .build(provider.rand(), provider.crypto(), &signer, |_| true)
+                .unwrap()
+                .stage_commit(&provider)
+                .unwrap();
+
+            let (_commit, welcome_opt, _gi) = bundle.into_messages();
+            let welcome = welcome_opt.expect("welcome must be produced by add proposal");
+            group.merge_pending_commit(&provider).unwrap();
+            welcome.tls_serialize_detached().unwrap()
+        };
+
+        // Bob (new local state) joins via the fresh welcome.
+        join_via_welcome(&bob_db_v2, &welcome2_bytes);
+
+        // Alice and Bob-v2 can now send and receive.
+        let hello = try_mls_encrypt(&alice_db, conv_id, b"welcome back bob").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&bob_db_v2, conv_id, &hello).unwrap(),
+            b"welcome back bob"
+        );
+        let reply = try_mls_encrypt(&bob_db_v2, conv_id, b"thanks alice").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&alice_db, conv_id, &reply).unwrap(),
+            b"thanks alice"
         );
     }
 }

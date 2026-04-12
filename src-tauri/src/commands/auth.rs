@@ -793,6 +793,44 @@ pub fn list_known_accounts() -> crate::accounts::AccountsIndex {
     crate::accounts::read_accounts_index()
 }
 
+/// Delete all local data on this computer: per-user databases, keystore
+/// entries (session, device_id, db_key, account_id_key), the accounts
+/// index, and legacy global keys. Does NOT touch the remote Turso database
+/// — users can re-authenticate on this device later.
+///
+/// Intended for the login screen "wipe this computer" action or for
+/// preparing a clean uninstall across platforms.
+#[tauri::command]
+pub async fn wipe_local_data(state: State<'_, Arc<AppState>>) -> Result<()> {
+    // 1. Close the active local DB if one is loaded.
+    state.unload_user_db().await;
+    *state.device_id.lock().await = None;
+
+    // 2. Read accounts index to enumerate user_ids for keystore cleanup.
+    let index = crate::accounts::read_accounts_index();
+
+    // 3. Delete per-user keystore entries.
+    let per_user_keys = [SESSION_KEY, DEVICE_ID_KEY, "db_key", "account_id_key"];
+    for account in &index.accounts {
+        for key in &per_user_keys {
+            let _ = keystore::delete_for_user(key, &account.user_id).await;
+        }
+    }
+
+    // 4. Delete legacy global keystore entries.
+    let _ = keystore::delete("identity_key_private").await;
+    let _ = keystore::delete("identity_key_public").await;
+
+    // 5. Delete all files in the data directory.
+    let data_dir = crate::db::local::dirs_path();
+    if data_dir.exists() {
+        let _ = std::fs::remove_dir_all(&data_dir);
+    }
+
+    eprintln!("[wipe] local data wiped for {} account(s)", index.accounts.len());
+    Ok(())
+}
+
 /// List all registered devices for a user. Returns each device's ID,
 /// name, timestamps, and whether it is the current device.
 #[tauri::command]

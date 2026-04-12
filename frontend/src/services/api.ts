@@ -148,6 +148,10 @@ export async function listKnownAccounts(): Promise<AccountsIndex> {
   return invoke('list_known_accounts');
 }
 
+export async function wipeLocalData(): Promise<void> {
+  await invoke('wipe_local_data');
+}
+
 export interface DeviceInfo {
   device_id: string;
   device_name: string | null;

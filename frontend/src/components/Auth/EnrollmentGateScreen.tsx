@@ -164,15 +164,8 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
                 className="text-base font-mono font-bold mt-1"
                 style={{ color: "var(--c-text)" }}
               >
-                Enroll this device
+                Authorize this device to add it to your account
               </h1>
-              <p
-                className="text-xs mt-2 font-mono"
-                style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
-              >
-                You're already a Pollis user, but this device hasn't been
-                authorized yet. Pick how you'd like to add it to your account.
-              </p>
             </div>
 
             {state.phase === "choose" && (
