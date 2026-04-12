@@ -4,6 +4,7 @@ import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
+import { Checkbox } from "../ui/Checkbox";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import * as api from "../../services/api";
 
@@ -509,22 +510,13 @@ const ResetConfirmPane: React.FC<{
         </p>
       </div>
 
-      <div>
-        <label
-          className="block text-xs font-mono mb-1"
-          style={{ color: "var(--c-text-dim)" }}
-        >
-          <input
-            type="checkbox"
-            data-testid="reset-acknowledge-checkbox"
-            checked={acknowledged}
-            onChange={(e) => setAcknowledged(e.target.checked)}
-            disabled={isLoading}
-            className="mr-2 align-middle"
-          />
-          I understand that all of my messages and groups will be gone.
-        </label>
-      </div>
+      <Checkbox
+        data-testid="reset-acknowledge-checkbox"
+        label="I understand that all of my messages and groups will be gone."
+        checked={acknowledged}
+        onChange={setAcknowledged}
+        disabled={isLoading}
+      />
 
       <TextInput
         data-testid="reset-confirm-email-input"

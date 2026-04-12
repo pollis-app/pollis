@@ -677,13 +677,14 @@ pub async fn recover_with_secret_key(
 /// and no way to approve. They confirm by typing their email, and we:
 ///   1. Verify the email matches `users.email` for this user_id.
 ///   2. Generate a brand-new `account_id_key` and bump
-///      `users.identity_version`, orphaning every other device and
-///      every existing group membership.
-///   3. Install the new key locally and run `finalize_enrollment` so
-///      this device publishes a fresh cert and KPs. External joins
-///      will fail because the user is no longer in the old groups —
-///      admins must re-add them manually.
-///   4. Return the new Secret Key for the user to save.
+///      `users.identity_version`, orphaning every other device.
+///   3. Remove the user from all groups and DMs (including ownership
+///      handoff), delete stale key packages/welcomes/device rows,
+///      and wipe the local DB.
+///   4. Re-open a fresh local DB and run `finalize_enrollment` so
+///      this device publishes a fresh cert and KPs. The user ends
+///      up in a clean "no groups" state — admins must re-add them.
+///   5. Return the new Secret Key for the user to save.
 ///
 /// This is a destructive operation. The frontend must display a very
 /// clear warning before calling it.
@@ -724,12 +725,156 @@ pub async fn reset_identity_and_recover(
     let new_secret_key =
         crate::commands::account_identity::reset_identity(state.inner(), &user_id).await?;
 
-    // 3. Run the finalization path to publish a new device cert + KPs.
-    //    `finalize_enrollment` will attempt to external-join existing
-    //    groups — expected to fail since the group members still trust
-    //    the OLD account_id_pub — but the errors are logged and
-    //    non-fatal. The device ends up in a "fresh account, no groups"
-    //    state, which matches the soft-recovery contract.
+    // 3. Remove the user from all groups and DMs in Turso so they start
+    //    fresh. Unlike delete_account we do NOT issue MLS remove commits
+    //    (the old identity is already invalidated) and do NOT delete the
+    //    user's sent messages (other members can still read them).
+    {
+        let current_device_id = state.device_id.lock().await.clone();
+
+        // Group membership cleanup (handle ownership first)
+        let mut group_rows = conn
+            .query(
+                "SELECT group_id, role FROM group_member WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await?;
+        let mut memberships: Vec<(String, String)> = Vec::new();
+        while let Some(row) = group_rows.next().await? {
+            memberships.push((row.get(0)?, row.get(1)?));
+        }
+
+        for (gid, role) in &memberships {
+            let mut count_rows = conn
+                .query(
+                    "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+                    libsql::params![gid.clone()],
+                )
+                .await?;
+            let member_count: i64 = if let Some(row) = count_rows.next().await? {
+                row.get(0)?
+            } else {
+                0
+            };
+
+            if member_count <= 1 {
+                // Sole member — delete the entire group
+                let _ = conn
+                    .execute(
+                        "DELETE FROM groups WHERE id = ?1",
+                        libsql::params![gid.clone()],
+                    )
+                    .await;
+                eprintln!("[reset] deleted empty group {gid}");
+            } else if role == "admin" {
+                // Sole admin — promote another member
+                let mut admin_rows = conn
+                    .query(
+                        "SELECT COUNT(*) FROM group_member WHERE group_id = ?1 AND role = 'admin' AND user_id != ?2",
+                        libsql::params![gid.clone(), user_id.clone()],
+                    )
+                    .await?;
+                let other_admins: i64 = if let Some(row) = admin_rows.next().await? {
+                    row.get(0)?
+                } else {
+                    0
+                };
+                if other_admins == 0 {
+                    let mut candidate_rows = conn
+                        .query(
+                            "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
+                            libsql::params![gid.clone(), user_id.clone()],
+                        )
+                        .await?;
+                    if let Some(row) = candidate_rows.next().await? {
+                        let new_admin: String = row.get(0)?;
+                        let _ = conn
+                            .execute(
+                                "UPDATE group_member SET role = 'admin' WHERE group_id = ?1 AND user_id = ?2",
+                                libsql::params![gid.clone(), new_admin.clone()],
+                            )
+                            .await;
+                        eprintln!("[reset] promoted {new_admin} to admin in group {gid}");
+                    }
+                }
+            }
+        }
+
+        // Delete group memberships
+        let _ = conn
+            .execute(
+                "DELETE FROM group_member WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await;
+
+        // Delete DM channel memberships
+        let _ = conn
+            .execute(
+                "DELETE FROM dm_channel_member WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await;
+
+        // Delete MLS key packages (old identity, no longer valid)
+        let _ = conn
+            .execute(
+                "DELETE FROM mls_key_package WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await;
+
+        // Delete pending MLS welcomes
+        let _ = conn
+            .execute(
+                "DELETE FROM mls_welcome WHERE recipient_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await;
+
+        // Delete other devices (they're orphaned by the identity rotation).
+        // Keep the current device row since ensure_device_cert uses UPDATE.
+        if let Some(ref dev_id) = current_device_id {
+            let _ = conn
+                .execute(
+                    "DELETE FROM user_device WHERE user_id = ?1 AND device_id != ?2",
+                    libsql::params![user_id.clone(), dev_id.clone()],
+                )
+                .await;
+        } else {
+            let _ = conn
+                .execute(
+                    "DELETE FROM user_device WHERE user_id = ?1",
+                    libsql::params![user_id.clone()],
+                )
+                .await;
+        }
+
+        // Wipe local DB (MLS group state, cached messages — all invalid now)
+        state.unload_user_db().await;
+        {
+            let data_dir = crate::db::local::dirs_path();
+            let db_path = data_dir.join(format!("pollis_{user_id}.db"));
+            if db_path.exists() {
+                let _ = std::fs::remove_file(&db_path);
+            }
+            let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-wal")));
+            let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-shm")));
+        }
+
+        // Re-open a fresh local DB so finalize_enrollment can write new
+        // MLS state (device signer, key packages, etc.).
+        state.load_user_db(&user_id).await?;
+
+        eprintln!(
+            "[reset] cleaned up memberships, key packages, welcomes, devices, and local DB for {user_id}"
+        );
+    }
+
+    // 4. Run the finalization path to publish a new device cert + KPs.
+    //    Since we deleted all group_member rows above, finalize_enrollment
+    //    will find no groups to external-join, leaving the user in a clean
+    //    "fresh account, no groups" state.
     finalize_enrollment(state.inner(), &user_id).await?;
 
     Ok(new_secret_key)
