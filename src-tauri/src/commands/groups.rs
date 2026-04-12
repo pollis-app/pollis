@@ -198,13 +198,11 @@ pub async fn create_group(
     // Create the per-group MLS group — all channels in this group share it.
     match crate::commands::mls::init_mls_group(state.inner(), &id, &owner_id).await {
         Ok(()) => {
-            // Add the creator's OTHER devices so they receive a Welcome and can
-            // decrypt messages without triggering an independent repair.
-            let current_did = state.device_id.lock().await.clone();
-            if let Err(e) = crate::commands::mls::add_member_mls_for_own_devices(
-                state.inner(), &id, &owner_id, current_did.as_deref(),
+            // Reconcile adds the creator's other devices (if any have KPs).
+            if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+                state.inner(), &id, &owner_id,
             ).await {
-                eprintln!("[mls] create_group: add owner's other devices: {e}");
+                eprintln!("[mls] create_group: reconcile failed: {e}");
             }
         }
         Err(e) => eprintln!("[mls] create_group: mls group init failed (non-fatal): {e}"),
@@ -432,12 +430,19 @@ pub async fn remove_member_from_group(
         libsql::params![group_id.clone(), user_id.clone()],
     ).await?;
 
-    // Remove member from the per-group MLS group (shared by all channels).
-    match crate::commands::mls::remove_member_mls_inner(
-        state.inner(), &group_id, &user_id, &requester_id,
+    // Reconcile removes the member's leaves from the MLS tree.
+    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+        state.inner(), &group_id, &requester_id,
     ).await {
-        Ok(()) => {}
-        Err(e) => eprintln!("[mls] remove_member_from_group: remove_member for group {group_id}: {e}"),
+        eprintln!("[mls] remove_member_from_group: reconcile for group {group_id}: {e}");
+    }
+
+    // Notify group members so they refetch the member list.
+    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
+        &state.livekit,
+        &group_id,
+    ).await {
+        eprintln!("[realtime] remove_member_from_group: notify group {group_id}: {e}");
     }
 
     Ok(())
@@ -497,6 +502,16 @@ pub async fn leave_group(
     match crate::commands::mls::forget_local_mls_group(state.inner(), &group_id).await {
         Ok(()) => {}
         Err(e) => eprintln!("[mls] leave_group: forget local group {group_id}: {e}"),
+    }
+
+    // Signal remaining members to reconcile (removes the leaver's stale leaf).
+    // Use publish_to_room_server since the leaver may not be connected to the room.
+    if let Err(e) = crate::commands::livekit::publish_to_room_server(
+        &state.config,
+        &group_id,
+        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
+    ).await {
+        eprintln!("[realtime] leave_group: notify group {group_id}: {e}");
     }
 
     // If no members remain, delete the group (cascades to channels, invites, etc.)
@@ -833,13 +848,13 @@ pub async fn send_group_invite(
         libsql::params![id, group_id.clone(), inviter_id.clone(), invitee_id.clone()],
     ).await.map_err(|e| db_err(e.into(), "Invite"))?;
 
-    // Pre-generate MLS Welcome for invitee using the per-group MLS group.
-    // All channels in the group share this single MLS group.
-    match crate::commands::mls::add_member_mls_inner(
-        state.inner(), &group_id, &invitee_id, &inviter_id,
+    // Reconcile adds the invitee's devices to the MLS tree now so their
+    // Welcome is ready before they accept — no dependency on simultaneous
+    // online presence between inviter and acceptor.
+    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+        state.inner(), &group_id, &inviter_id,
     ).await {
-        Ok(()) => {}
-        Err(e) => eprintln!("[mls] send_group_invite: add_member for group {group_id}: {e}"),
+        eprintln!("[mls] send_group_invite: reconcile for group {group_id}: {e}");
     }
 
     // Notify invitee via their inbox so the pending invite appears immediately.
@@ -1136,12 +1151,11 @@ pub async fn approve_join_request(
         libsql::params![approver_id.clone(), now, request_id],
     ).await?;
 
-    // Generate MLS Welcome for requester using the per-group MLS group.
-    match crate::commands::mls::add_member_mls_inner(
-        state.inner(), &group_id, &requester_id, &approver_id,
+    // Reconcile adds the requester's devices to the MLS tree.
+    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+        state.inner(), &group_id, &approver_id,
     ).await {
-        Ok(()) => {}
-        Err(e) => eprintln!("[mls] approve_join_request: add_member for group {group_id}: {e}"),
+        eprintln!("[mls] approve_join_request: reconcile for group {group_id}: {e}");
     }
 
     // Notify requester their join request was approved so they see the group immediately.

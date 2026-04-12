@@ -101,28 +101,16 @@ pub async fn create_dm_channel(
     }
 
     // Initialise the MLS group for this DM (creator becomes the sole member).
+    // Reconcile then adds all members' devices (including creator's other devices).
     match crate::commands::mls::init_mls_group(state.inner(), &id, &creator_id).await {
         Ok(()) => {
-            // Add the creator's OTHER devices so they receive a Welcome.
-            let current_did = state.device_id.lock().await.clone();
-            if let Err(e) = crate::commands::mls::add_member_mls_for_own_devices(
-                state.inner(), &id, &creator_id, current_did.as_deref(),
+            if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+                state.inner(), &id, &creator_id,
             ).await {
-                eprintln!("[mls] create_dm_channel: add creator's other devices: {e}");
+                eprintln!("[mls] create_dm_channel: reconcile failed: {e}");
             }
         }
         Err(e) => eprintln!("[mls] create_dm_channel: mls group init failed (non-fatal): {e}"),
-    }
-
-    // Add every non-creator member to the MLS group so they receive a Welcome
-    // and can send/decrypt immediately once they call poll_mls_welcomes.
-    for member in members.iter().filter(|m| m.user_id != creator_id) {
-        match crate::commands::mls::add_member_mls_inner(
-            state.inner(), &id, &member.user_id, &creator_id,
-        ).await {
-            Ok(()) => {}
-            Err(e) => eprintln!("[mls] create_dm_channel: add_member for {}: {e}", member.user_id),
-        }
     }
 
     // Notify non-creator members via their personal inbox rooms so they see
@@ -229,12 +217,11 @@ pub async fn add_user_to_dm_channel(
         eprintln!("[watermark] add_user_to_dm_channel: watermark init failed: {e}");
     }
 
-    // Add new member to the MLS group so they can decrypt future messages.
-    match crate::commands::mls::add_member_mls_inner(
-        state.inner(), &dm_channel_id, &user_id, &added_by,
+    // Reconcile adds the new member's devices to the MLS tree.
+    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+        state.inner(), &dm_channel_id, &added_by,
     ).await {
-        Ok(()) => {}
-        Err(e) => eprintln!("[mls] add_user_to_dm_channel: add_member: {e}"),
+        eprintln!("[mls] add_user_to_dm_channel: reconcile: {e}");
     }
 
     Ok(())
@@ -269,8 +256,15 @@ pub async fn remove_user_from_dm_channel(
 
     conn.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![dm_channel_id, user_id],
+        libsql::params![dm_channel_id.clone(), user_id],
     ).await?;
+
+    // Reconcile removes the member's leaves from the MLS tree (was a security gap).
+    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+        state.inner(), &dm_channel_id, &requester_id,
+    ).await {
+        eprintln!("[mls] remove_user_from_dm_channel: reconcile: {e}");
+    }
 
     Ok(())
 }
@@ -285,8 +279,23 @@ pub async fn leave_dm_channel(
 
     conn.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![dm_channel_id.clone(), user_id],
+        libsql::params![dm_channel_id.clone(), user_id.clone()],
     ).await?;
+
+    // Wipe local MLS state so the leaver can't decrypt future messages.
+    match crate::commands::mls::forget_local_mls_group(state.inner(), &dm_channel_id).await {
+        Ok(()) => {}
+        Err(e) => eprintln!("[mls] leave_dm_channel: forget local group {dm_channel_id}: {e}"),
+    }
+
+    // Signal remaining members to reconcile (removes the leaver's stale leaf).
+    if let Err(e) = crate::commands::livekit::publish_to_room_server(
+        &state.config,
+        &dm_channel_id,
+        serde_json::json!({"type": "membership_changed", "conversation_id": dm_channel_id}),
+    ).await {
+        eprintln!("[realtime] leave_dm_channel: notify room {dm_channel_id}: {e}");
+    }
 
     // If no members remain, clean up the channel and all associated data
     let mut rows = conn.query(

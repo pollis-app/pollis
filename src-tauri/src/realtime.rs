@@ -22,7 +22,9 @@ pub enum RealtimeEvent {
     },
     /// Sent to a user's personal inbox room when they are added to a group
     /// (via invite acceptance or join-request approval).
-    MembershipChanged {},
+    MembershipChanged {
+        conversation_id: Option<String>,
+    },
     /// Sent to a group room when a user joins a voice channel in that group.
     VoiceJoined {
         channel_id: String,

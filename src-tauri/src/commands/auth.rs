@@ -618,12 +618,12 @@ pub async fn delete_account(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // ── Phase 1: MLS key rotation ──────────────────────────────────────
-    // Issue remove commits for every group and DM channel the user belongs
-    // to. This must happen while the local DB is open because
-    // remove_member_mls_inner reads the MLS group state from local SQLite.
-    // Failures are non-fatal — we still proceed with account deletion so
-    // the user isn't stuck, but log each error for debugging.
+    // ── Phase 1: Signal membership change ─────��──────────────────────
+    // Broadcast membership_changed to all groups and DM channels the user
+    // belongs to. Remaining online members will reconcile and remove the
+    // deleting user's stale MLS leaves asynchronously. The user's local DB
+    // (including MLS state) is wiped in Phase 3, so they can't decrypt
+    // regardless.
 
     // Enumerate all groups the user belongs to.
     {
@@ -638,11 +638,10 @@ pub async fn delete_account(
         }
 
         for gid in &group_ids {
-            match crate::commands::mls::remove_member_mls_inner(
-                state.inner(), gid, &user_id, &user_id,
+            if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
+                &state.livekit, gid,
             ).await {
-                Ok(()) => eprintln!("[account] rotated MLS keys for group {gid}"),
-                Err(e) => eprintln!("[account] MLS remove from group {gid} failed (non-fatal): {e}"),
+                eprintln!("[account] membership_changed for group {gid} failed (non-fatal): {e}");
             }
         }
     }
@@ -660,11 +659,12 @@ pub async fn delete_account(
         }
 
         for dm_id in &dm_ids {
-            match crate::commands::mls::remove_member_mls_inner(
-                state.inner(), dm_id, &user_id, &user_id,
+            if let Err(e) = crate::commands::livekit::publish_to_room_server(
+                &state.config,
+                dm_id,
+                serde_json::json!({"type": "membership_changed", "conversation_id": dm_id}),
             ).await {
-                Ok(()) => eprintln!("[account] rotated MLS keys for DM {dm_id}"),
-                Err(e) => eprintln!("[account] MLS remove from DM {dm_id} failed (non-fatal): {e}"),
+                eprintln!("[account] membership_changed for DM {dm_id} failed (non-fatal): {e}");
             }
         }
     }

@@ -106,7 +106,7 @@ impl Device {
 
     /// Add members (by their key packages) to this device's group.
     /// Returns (commit_bytes, welcome_bytes).
-    /// Mirrors: add_member_mls_impl
+    /// Mirrors: reconcile_group_mls_core (add path)
     fn add_members(&self, conv_id: &str, kp_list: &[Vec<u8>]) -> (Vec<u8>, Vec<u8>) {
         let provider = PollisProvider::new(&self.db);
         let (mut group, signer) = load_group(&provider, conv_id);
@@ -248,7 +248,7 @@ fn full_group_lifecycle_with_multi_device() {
     assert!(!dan_d2.has_group(conv_id));
 
     // ── Step 2: add dan-d2 (creator's other device) ─────────────────────
-    // Mirrors: add_member_mls_for_own_devices in create_group
+    // Mirrors: reconcile in create_group (adds creator's other devices)
     let dan_d2_kp = dan_d2.generate_key_package();
     let (_add_d2_commit, dan_d2_welcome) = dan_d1.add_members(conv_id, &[dan_d2_kp]);
     // dan-d2 receives Welcome (via poll_mls_welcomes)
@@ -256,7 +256,7 @@ fn full_group_lifecycle_with_multi_device() {
     assert!(dan_d2.has_group(conv_id));
 
     // ── Step 3: dan-d1 invites guy ──────────────────────────────────────
-    // Mirrors: send_group_invite → add_member_mls_inner
+    // Mirrors: accept_group_invite → reconcile adds invitee's devices
     let guy_kp = guy.generate_key_package();
     let (add_guy_commit, guy_welcome) = dan_d1.add_members(conv_id, &[guy_kp]);
 

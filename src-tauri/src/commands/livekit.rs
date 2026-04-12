@@ -316,6 +316,7 @@ pub async fn connect_rooms(
         let user_id_owned = user_id.clone();
         let username_owned = username.clone();
         let remote_db_connect = Arc::clone(&state.remote_db);
+        let app_state_connect = Arc::clone(state.inner());
 
         eprintln!("[realtime] connecting room {room_id}");
 
@@ -342,6 +343,8 @@ pub async fn connect_rooms(
                     let lk_arc_task = Arc::clone(&lk_arc_connect);
                     let room_id_owned = room_id.clone();
                     let remote_db_task = Arc::clone(&remote_db_connect);
+                    let app_state_task = Arc::clone(&app_state_connect);
+                    let user_id_task = user_id_owned.clone();
 
                     let handle = tokio::spawn(async move {
                         /// Process events until the stream closes. Returns how long
@@ -350,7 +353,9 @@ pub async fn connect_rooms(
                             events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
                             lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
                             remote_db: &Arc<RemoteDb>,
+                            app_state: &Arc<AppState>,
                             room_id: &str,
+                            user_id: &str,
                         ) -> std::time::Duration {
                             let started = std::time::Instant::now();
                             while let Some(event) = events.recv().await {
@@ -361,7 +366,19 @@ pub async fn connect_rooms(
                                             lk.channel.clone()
                                         };
                                         if let Some(ch) = channel {
-                                            dispatch_data(payload.as_slice(), &ch);
+                                            let reconcile_id = dispatch_data(payload.as_slice(), &ch);
+                                            // Trigger MLS reconcile when membership changes.
+                                            if let Some(conv_id) = reconcile_id {
+                                                let state = Arc::clone(app_state);
+                                                let uid = user_id.to_owned();
+                                                tokio::spawn(async move {
+                                                    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+                                                        &state, &conv_id, &uid,
+                                                    ).await {
+                                                        eprintln!("[mls] reconcile triggered by membership_changed for {conv_id}: {e}");
+                                                    }
+                                                });
+                                            }
                                         }
                                     }
                                     RoomEvent::ParticipantDisconnected(participant) => {
@@ -384,7 +401,7 @@ pub async fn connect_rooms(
                             started.elapsed()
                         }
 
-                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &remote_db_task, &room_id_owned).await;
+                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &remote_db_task, &app_state_task, &room_id_owned, &user_id_task).await;
                         eprintln!(
                             "[realtime] event stream closed for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                             alive_dur.as_secs_f64()
@@ -435,7 +452,7 @@ pub async fn connect_rooms(
                                         }
                                     }
 
-                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &remote_db_task, &room_id_owned).await;
+                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &remote_db_task, &app_state_task, &room_id_owned, &user_id_task).await;
                                     eprintln!(
                                         "[realtime] event stream closed again for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                                         alive_dur.as_secs_f64()
@@ -872,14 +889,16 @@ async fn handle_participant_disconnect(
 }
 
 /// Parses a raw DataReceived payload and forwards it to the frontend channel.
-fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
+/// Returns an optional conversation_id when a `membership_changed` event
+/// indicates MLS reconcile should be triggered by the caller.
+fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) -> Option<String> {
     let text = match std::str::from_utf8(payload) {
         Ok(s) => s,
-        Err(_) => return,
+        Err(_) => return None,
     };
     let data: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
-        Err(_) => return,
+        Err(_) => return None,
     };
 
     match data.get("type").and_then(|v| v.as_str()) {
@@ -917,7 +936,16 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
             }
         }
         Some("membership_changed") => {
-            let _ = channel.send(RealtimeEvent::MembershipChanged {});
+            // Extract conversation_id from payload (group_id or conversation_id).
+            let conv_id = data
+                .get("group_id")
+                .or_else(|| data.get("conversation_id"))
+                .and_then(|v| v.as_str())
+                .map(str::to_owned);
+            let _ = channel.send(RealtimeEvent::MembershipChanged {
+                conversation_id: conv_id.clone(),
+            });
+            return conv_id;
         }
         Some("voice_joined") => {
             if let (Some(channel_id), Some(user_id)) = (
@@ -972,6 +1000,7 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) {
         }
         _ => {}
     }
+    None
 }
 
 #[cfg(test)]

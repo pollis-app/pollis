@@ -559,41 +559,35 @@ pub async fn approve_device_enrollment(
         eprintln!("[enrollment] security_event insert failed (non-fatal): {e}");
     }
 
-    // 7. For every group/DM the approver is an MLS member of, invite the
-    //    new device. We look up groups and DMs via remote membership
-    //    tables — `add_specific_device_to_group_mls` is a no-op (logged)
-    //    if the approver doesn't actually have local MLS state for a
-    //    given conversation, which is the correct behavior.
+    // 7. For every group/DM the approver is an MLS member of, reconcile
+    //    the MLS tree so the new device gets added. Reconcile is a no-op
+    //    if the approver doesn't have local MLS state for a conversation.
     let group_ids = fetch_user_group_ids(&conn, &user_id).await?;
     let dm_ids = fetch_user_dm_ids(&conn, &user_id).await?;
 
     for gid in group_ids {
-        if let Err(e) = crate::commands::mls::add_specific_device_to_group_mls(
+        if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
             state.inner(),
             &gid,
-            &user_id,
-            &new_device_id,
             &user_id,
         )
         .await
         {
             eprintln!(
-                "[enrollment] add new device to group {gid} failed (continuing): {e}"
+                "[enrollment] reconcile group {gid} for new device failed (continuing): {e}"
             );
         }
     }
     for dm_id in dm_ids {
-        if let Err(e) = crate::commands::mls::add_specific_device_to_group_mls(
+        if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
             state.inner(),
             &dm_id,
-            &user_id,
-            &new_device_id,
             &user_id,
         )
         .await
         {
             eprintln!(
-                "[enrollment] add new device to dm {dm_id} failed (continuing): {e}"
+                "[enrollment] reconcile dm {dm_id} for new device failed (continuing): {e}"
             );
         }
     }
