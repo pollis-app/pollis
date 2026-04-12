@@ -51,6 +51,12 @@ type RealtimeEvent =
     conversation_id: string | null;
     message_id: string;
     sender_id: string;
+  }
+  | {
+    type: 'enrollment_requested';
+    request_id: string;
+    new_device_id: string;
+    verification_code: string;
   };
 
 export function useLiveKitRealtime() {
@@ -63,6 +69,7 @@ export function useLiveKitRealtime() {
     networkStatus,
     incrementUnread,
     setStatusBarAlert,
+    setPendingEnrollmentApproval,
   } = useAppStore();
 
   const { query: prefsQuery } = usePreferences();
@@ -253,6 +260,18 @@ export function useLiveKitRealtime() {
         } else if (conversationId && conversationId === selectedConversationIdRef.current) {
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
         }
+        return;
+      }
+
+      if (event.type === 'enrollment_requested') {
+        // Immediate UI takeover — the user must explicitly approve or
+        // reject the request. Silently ignoring an enrollment is a quiet
+        // account-takeover vector.
+        setPendingEnrollmentApproval({
+          requestId: event.request_id,
+          newDeviceId: event.new_device_id,
+          verificationCode: event.verification_code,
+        });
         return;
       }
 

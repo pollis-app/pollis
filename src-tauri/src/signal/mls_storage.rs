@@ -80,6 +80,13 @@ impl<'a> MlsStore<'a> {
         Self { conn }
     }
 
+    /// Borrow the underlying connection. Used by sibling modules (e.g.
+    /// `commands::mls`) that need to read/write custom rows in `mls_kv`
+    /// that don't belong to openmls itself.
+    pub fn raw_conn(&self) -> &Connection {
+        self.conn
+    }
+
     // ── primitive KV ops ─────────────────────────────────────────────────────
 
     fn raw_write(&self, storage_key: Vec<u8>, value: Vec<u8>) -> Result<(), MlsStorageError> {

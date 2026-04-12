@@ -22,6 +22,7 @@ import { StartDMPage } from "./pages/StartDMPage";
 import { PreferencesPage } from "./pages/PreferencesPage";
 import { VoiceSettingsPage } from "./pages/VoiceSettingsPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { SecurityPage } from "./pages/SecurityPage";
 import { InvitesPage } from "./pages/InvitesPage";
 import { JoinRequestsPage } from "./pages/JoinRequestsPage";
 import { AllJoinRequestsPage } from "./pages/AllJoinRequestsPage";
@@ -165,6 +166,12 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const securityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security",
+  component: SecurityPage,
+});
+
 const invitesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/invites",
@@ -206,6 +213,7 @@ const routeTree = rootRoute.addChildren([
   preferencesRoute,
   voiceSettingsRoute,
   settingsRoute,
+  securityRoute,
   invitesRoute,
   allJoinRequestsRoute,
   searchRoute,

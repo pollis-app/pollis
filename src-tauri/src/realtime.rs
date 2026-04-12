@@ -46,6 +46,15 @@ pub enum RealtimeEvent {
         message_id: String,
         sender_id: String,
     },
+    /// Sent to a user's personal inbox room when one of their OTHER devices
+    /// has just posted a `device_enrollment_request` row and is waiting for
+    /// approval. Interrupts the UI on every receiving device so the user can
+    /// confirm (the verification code must match the other screen) or reject.
+    EnrollmentRequested {
+        request_id: String,
+        new_device_id: String,
+        verification_code: String,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.
