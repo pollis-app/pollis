@@ -1,0 +1,85 @@
+# Libraries
+
+- `frontend/src/hooks/queries/useGroups.ts`
+  - function useUserGroupsWithChannels: () => void
+  - function useUserGroups: () => void
+  - function useGroupChannels: (groupId) => void
+  - function useCreateGroup: () => void
+  - function useJoinGroup: () => void
+  - function useUpdateGroupIcon: () => void
+  - _...18 more_
+- `frontend/src/hooks/queries/useMessages.ts`
+  - function transformChannelMessage: (m) => Message
+  - function useMessages: (channelId, conversationId) => void
+  - function useChannelMessages: (channelId) => void
+  - function useConversationMessages: (conversationId) => void
+  - function useSendMessage: () => void
+  - function useDMConversations: () => void
+  - _...6 more_
+- `frontend/src/hooks/queries/usePreferences.ts`
+  - function getPreference: (json, key, defaultValue) => T
+  - function usePreferences: () => void
+  - function applyPreferences: (prefs) => void
+  - interface PreferencesData
+- `frontend/src/hooks/queries/useReactions.ts`
+  - function useReactions: (messageId) => void
+  - function useAddReaction: () => void
+  - function useRemoveReaction: () => void
+  - const reactionQueryKeys
+- `frontend/src/hooks/queries/useSearchMessages.ts` — function useSearchMessages: (query) => void, const searchQueryKeys
+- `frontend/src/hooks/queries/useUserProfile.ts`
+  - function useUserProfile: () => void
+  - function useUpdateProfile: () => void
+  - function useUserAvatar: () => void
+  - function useUpdateAvatar: () => void
+  - interface ServiceUserData
+  - const userQueryKeys
+- `frontend/src/hooks/queries/useVoiceParticipants.ts` — function useVoiceParticipants: (channelId) => void, function useVoiceRoomCounts: (channelIds) => void
+- `frontend/src/hooks/useBadge.ts` — function useBadge: () => void
+- `frontend/src/hooks/useLiveKitRealtime.ts` — function useLiveKitRealtime: () => void
+- `frontend/src/hooks/useNetworkStatus.ts` — function useNetworkStatus
+- `frontend/src/hooks/useTauriReady.ts` — function useTauriReady: () => void, function checkIsDesktop: () => boolean
+- `frontend/src/hooks/useVoiceChannel.ts` — function switchVoiceDevice: (kind, deviceName) => void, function useVoiceChannel: (channelId, groupId) => UseVoiceChannelResult
+- `frontend/src/hooks/useWindowState.ts` — function restoreWindowState: () => Promise<void>, function useWindowState: () => void
+- `frontend/src/services/api.ts`
+  - function requestOTP: (email) => Promise<void>
+  - function verifyOTP: (email, code) => Promise<AuthResult>
+  - function getSession: () => Promise<AuthResult | null>
+  - function startDeviceEnrollment: (userId) => Promise<EnrollmentHandle>
+  - function pollEnrollmentStatus: (requestId) => Promise<EnrollmentStatus>
+  - function listPendingEnrollmentRequests: (userId) => Promise<PendingEnrollmentRequest[]>
+  - _...40 more_
+- `frontend/src/services/grpc-web-client.ts` — class ServiceClient, const grpcClient
+- `frontend/src/services/r2-upload.ts`
+  - function uploadAvatar: (userId, _aliasId, file) => Promise<PresignedUploadResponse>
+  - function uploadGroupIcon: (groupId, file) => Promise<PresignedUploadResponse>
+  - function getFileDownloadUrl: (key) => Promise<string>
+  - function downloadAndDecryptMedia: (r2Key, contentHash, mimeType?) => Promise<string>
+- `frontend/src/services/web-storage.ts`
+  - function initDB: () => Promise<IDBDatabase>
+  - function put: (storeName, item) => Promise<void>
+  - function get: (storeName, key) => Promise<T | undefined>
+  - function getAll: (storeName) => Promise<T[]>
+  - function getAllByIndex: (storeName, indexName, key) => Promise<T[]>
+  - function remove: (storeName, key) => Promise<void>
+  - _...7 more_
+- `frontend/src/utils/colorUtils.ts`
+  - function hexToHsl: (hex) => [number, number, number]
+  - function hslToHex: (h, s, l) => string
+  - function applyAccentColor: (hex) => void
+  - function applyBackgroundColor: (hex) => void
+  - function applyFontSize: (px) => void
+  - function readAccentHex: () => string
+  - _...2 more_
+- `frontend/src/utils/fileIcon.ts` — function getFileIcon: (filename) => LucideIcon
+- `frontend/src/utils/imageProcessing.ts`
+  - function resizeImage: (file, options) => Promise<File>
+  - function blurhashFromUrl: (url) => Promise<
+  - function validateImageFile: (file, maxSizeMB) => string | null
+  - function generateThumbnail: (file, size) => Promise<File>
+  - interface ResizeOptions
+- `frontend/src/utils/sfx.ts` — function playSfx: (sound) => void, const SFX
+- `frontend/src/utils/urlRouting.ts`
+  - function deriveSlug
+  - function updateURL
+  - function parseURL

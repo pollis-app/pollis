@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Deep-dive docs:** See `.codesight/wiki/` for detailed documentation — database schemas, MLS flows, component inventory, and Tauri command reference. Start with `.codesight/wiki/index.md`. **Keep these docs updated** as features are developed — update the relevant wiki article alongside code changes without discussion.
+
 ## Project Overview
 
 Pollis is a privacy-first desktop messaging app with end-to-end encryption using MLS (Message Layer Security). Built with Tauri 2 (Rust + React), it combines strong group encryption with Slack's group messaging features. The server never sees message plaintext.
