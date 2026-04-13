@@ -18,6 +18,11 @@ name = "migrate"
 path = "src/bin/migrate.rs"
 required-features = ["migrate-bin"]
 
+[[bin]]
+name = "apply_migrations"
+path = "src/bin/apply_migrations.rs"
+required-features = ["migrate-bin"]
+
 [features]
 migrate-bin = []
 

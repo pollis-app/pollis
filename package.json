@@ -12,6 +12,8 @@
     "lint": "pnpm --filter frontend lint",
     "clean": "pnpm --filter frontend clean && cargo clean --manifest-path src-tauri/Cargo.toml",
     "db:push": "cargo run --manifest-path src-tauri/Cargo.toml --bin migrate --features pollis/migrate-bin",
+    "db:track": "cargo run --manifest-path src-tauri/Cargo.toml --bin apply_migrations --features pollis/migrate-bin -- --track-only",
+    "db:rebuild": "cargo run --manifest-path src-tauri/Cargo.toml --bin apply_migrations --features pollis/migrate-bin -- --full",
     "test:e2e": "playwright test",
     "test:e2e:interactive": "playwright test --ui"
   },
