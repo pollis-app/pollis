@@ -1321,17 +1321,15 @@ pub async fn process_pending_commits_inner(
             let msg_in = match MlsMessageIn::tls_deserialize(&mut reader) {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id}: {e} — deleting stale group");
-                    let _ = group.delete(provider.storage());
-                    return Ok(());
+                    eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
+                    break;
                 }
             };
             let protocol_msg = match msg_in.try_into_protocol_message() {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id}: {e} — deleting stale group");
-                    let _ = group.delete(provider.storage());
-                    return Ok(());
+                    eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
+                    break;
                 }
             };
 
@@ -1339,18 +1337,14 @@ pub async fn process_pending_commits_inner(
                 Ok(processed) => {
                     if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
                         if let Err(e) = group.merge_staged_commit(&provider, *staged) {
-                            eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id}: {e} — deleting stale group");
-                            let _ = group.delete(provider.storage());
-                            return Ok(());
+                            eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
+                            break;
                         }
                     }
                 }
                 Err(e) => {
-                    // AEAD or epoch mismatch — local state is unrecoverable.
-                    // Delete the group so repair recreates it on next send.
-                    eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} — deleting stale group");
-                    let _ = group.delete(provider.storage());
-                    return Ok(());
+                    eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} at epoch {} — stopping", commit.epoch);
+                    break;
                 }
             }
 
@@ -1845,14 +1839,34 @@ pub async fn reconcile_group_mls_impl(
 
     // 5. Post commit + welcome to Turso.
     if let Some(data) = commit_data_opt {
+        // Collect metadata about added devices so receivers can verify
+        // cross-signing certs before processing the commit.
+        let (added_uid, added_dids): (Option<String>, Option<String>) = if outcome.added.is_empty() {
+            (None, None)
+        } else {
+            // All adds in one reconcile commit target devices of different
+            // users, so we record the first user and all device IDs. For
+            // single-user adds (the common case) this is exact.
+            let uid = outcome.added[0].0.clone();
+            let dids = outcome
+                .added
+                .iter()
+                .map(|(_, d)| d.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            (Some(uid), Some(dids))
+        };
         conn.execute(
-            "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO mls_commit_log \
+             (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             libsql::params![
                 conversation_id.clone(),
                 outcome.epoch_before as i64,
                 actor_user_id,
-                data.commit_bytes
+                data.commit_bytes,
+                added_uid,
+                added_dids
             ],
         )
         .await?;

@@ -367,25 +367,28 @@ pub async fn connect_rooms(
                                         };
                                         if let Some(ch) = channel {
                                             let reconcile_id = dispatch_data(payload.as_slice(), &ch);
-                                            // Trigger MLS reconcile when membership changes,
-                                            // then poll Welcomes so a newly-added member
-                                            // picks up the Welcome immediately.
+                                            // On membership changes: process inbound commits
+                                            // so this device advances to the current epoch,
+                                            // and poll Welcomes in case this device was just
+                                            // added to the group. Reconcile is NOT needed
+                                            // here — it already ran on the device that made
+                                            // the change.
                                             if let Some(conv_id) = reconcile_id {
                                                 let state = Arc::clone(app_state);
                                                 let uid = user_id.to_owned();
                                                 tokio::spawn(async move {
-                                                    if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-                                                        &state, &conv_id, &uid,
-                                                    ).await {
-                                                        eprintln!("[mls] reconcile triggered by membership_changed for {conv_id}: {e}");
-                                                    }
                                                     let did = state.device_id.lock().await.clone();
                                                     if let Some(ref did) = did {
                                                         if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(
                                                             &state, &uid, did,
                                                         ).await {
-                                                            eprintln!("[mls] poll_welcomes after membership_changed for {conv_id}: {e}");
+                                                            eprintln!("[mls] poll_welcomes for {conv_id}: {e}");
                                                         }
+                                                    }
+                                                    if let Err(e) = crate::commands::mls::process_pending_commits_inner(
+                                                        &state, &conv_id,
+                                                    ).await {
+                                                        eprintln!("[mls] process_pending_commits for {conv_id}: {e}");
                                                     }
                                                 });
                                             }
