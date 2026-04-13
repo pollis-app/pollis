@@ -367,7 +367,9 @@ pub async fn connect_rooms(
                                         };
                                         if let Some(ch) = channel {
                                             let reconcile_id = dispatch_data(payload.as_slice(), &ch);
-                                            // Trigger MLS reconcile when membership changes.
+                                            // Trigger MLS reconcile when membership changes,
+                                            // then poll Welcomes so a newly-added member
+                                            // picks up the Welcome immediately.
                                             if let Some(conv_id) = reconcile_id {
                                                 let state = Arc::clone(app_state);
                                                 let uid = user_id.to_owned();
@@ -376,6 +378,14 @@ pub async fn connect_rooms(
                                                         &state, &conv_id, &uid,
                                                     ).await {
                                                         eprintln!("[mls] reconcile triggered by membership_changed for {conv_id}: {e}");
+                                                    }
+                                                    let did = state.device_id.lock().await.clone();
+                                                    if let Some(ref did) = did {
+                                                        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(
+                                                            &state, &uid, did,
+                                                        ).await {
+                                                            eprintln!("[mls] poll_welcomes after membership_changed for {conv_id}: {e}");
+                                                        }
                                                     }
                                                 });
                                             }
@@ -889,8 +899,8 @@ async fn handle_participant_disconnect(
 }
 
 /// Parses a raw DataReceived payload and forwards it to the frontend channel.
-/// Returns an optional conversation_id when a `membership_changed` event
-/// indicates MLS reconcile should be triggered by the caller.
+/// Returns a conversation_id when a `membership_changed` event indicates
+/// MLS reconcile should be triggered by the caller.
 fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) -> Option<String> {
     let text = match std::str::from_utf8(payload) {
         Ok(s) => s,

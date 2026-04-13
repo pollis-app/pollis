@@ -148,12 +148,16 @@ pub async fn send_message(
     {
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
-            let _ = crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &sender_id, did).await;
+            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &sender_id, did).await {
+                eprintln!("[messages] send_message: poll_mls_welcomes for {mls_group_id}: {e}");
+            }
         }
     }
 
     // Process pending commits so the local epoch is current before encrypting.
-    let _ = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id).await;
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id).await {
+        eprintln!("[messages] send_message: process_pending_commits for {mls_group_id}: {e}");
+    }
 
     // If the MLS group still doesn't exist locally after polling welcomes and
     // processing commits, return an error rather than repairing.  Repair creates

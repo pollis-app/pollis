@@ -6,7 +6,7 @@ import React, {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "./stores/appStore";
-import { EmailOTPAuth } from "./components/Auth/EmailOTPAuth";
+import { LoginScreen } from "./components/Auth/LoginScreen";
 import { SaveSecretKeyScreen } from "./components/Auth/SaveSecretKeyScreen";
 import { EnrollmentGateScreen } from "./components/Auth/EnrollmentGateScreen";
 import { EnrollmentApprovalPrompt } from "./components/Auth/EnrollmentApprovalPrompt";
@@ -57,18 +57,13 @@ function MainApp() {
 
   const [appState, setAppState] = useState<AppState>("initializing");
   const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
-  // Incremented each time the user clicks a chip so EmailOTPAuth always sees a
-  // new value, even if the same account is clicked again after going back.
-  const [prefillNonce, setPrefillNonce] = useState(0);
-  const [prefillEmail, setPrefillEmail] = useState<string | undefined>(undefined);
   // Pending Secret Key (first-device signup) — held in component state ONLY
   // for the duration of the SaveSecretKeyScreen, never persisted.
   const [pendingSecretKey, setPendingSecretKey] = useState<string | null>(null);
   // The user we're enrolling. Set when an enrollment-required login happens
   // so the EnrollmentGateScreen knows whose account it's joining.
   const [pendingEnrollmentUser, setPendingEnrollmentUser] = useState<User | null>(null);
-  const [confirmingWipe, setConfirmingWipe] = useState(false);
-  const [isWiping, setIsWiping] = useState(false);
+
 
   /// Final phase of any successful sign-in (resume or fresh OTP). Loads
   /// preferences, debug data, and transitions to "ready". Assumes the
@@ -297,157 +292,11 @@ function MainApp() {
 
   if (appState === "email-auth") {
     return (
-      <div
-        data-testid="auth-screen"
-        className="flex flex-col h-full w-full"
-        style={{ background: "var(--c-bg)", position: "relative" }}
-      >
-        {/* DotMatrix background — low opacity, random algorithm each load */}
-        <div style={{ position: "absolute", inset: 0, opacity: 0.35, pointerEvents: "none" }}>
-          <DotMatrix />
-        </div>
-
-        {/* Title bar with proper window controls */}
-        <TitleBar />
-
-        {/* Centered auth card */}
-        <div className="flex-1 flex items-center justify-center" style={{ position: "relative", zIndex: 1 }}>
-          <Card padding="lg" style={{ width: "100%", maxWidth: 360 }}>
-            <div className="flex flex-col gap-5">
-              <div>
-                <h1 className="text-base font-mono font-bold" style={{ color: "var(--c-accent)" }}>
-                  Pollis.
-                </h1>
-                <p className="text-xs mt-1 font-mono" style={{ color: "var(--c-text-muted)" }}>
-                  Enter your email to continue
-                </p>
-              </div>
-
-              {/* Known accounts row — most recent 3, sorted by last_seen desc */}
-              {knownAccounts.length > 0 && (
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                    Previously signed in:
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {[...knownAccounts]
-                      .sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))
-                      .slice(0, 3)
-                      .map((account) => (
-                      <button
-                        key={account.user_id}
-                        data-testid={`known-account-chip-${account.user_id}`}
-                        onClick={() => {
-                          if (account.email) {
-                            setPrefillEmail(account.email);
-                            setPrefillNonce((n) => n + 1);
-                          }
-                        }}
-                        disabled={!account.email}
-                        className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors"
-                        style={{
-                          background: "var(--c-surface)",
-                          border: "2px solid var(--c-border)",
-                          borderRadius: "0.5rem",
-                          color: "var(--c-text-dim)",
-                          cursor: account.email ? "pointer" : "default",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!account.email) {
-                            return;
-                          }
-                          (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-accent)";
-                          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-border)";
-                          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-dim)";
-                        }}
-                      >
-                        <span>{account.username}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <EmailOTPAuth onSuccess={handleAuthSuccess} prefillEmail={prefillEmail} prefillNonce={prefillNonce} />
-
-              {!confirmingWipe ? (
-                <button
-                  data-testid="wipe-local-data-button"
-                  onClick={() => setConfirmingWipe(true)}
-                  className="text-xs font-mono self-center"
-                  style={{
-                    color: "var(--c-text-muted)",
-                    background: "none",
-                    border: "none",
-                    cursor: "pointer",
-                    padding: "0.25rem 0",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.color = "#ff6b6b";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
-                  }}
-                >
-                  Wipe this computer
-                </button>
-              ) : (
-                <div
-                  data-testid="wipe-confirm-section"
-                  className="flex flex-col gap-2"
-                  style={{
-                    borderTop: "1px solid var(--c-border)",
-                    paddingTop: "0.75rem",
-                  }}
-                >
-                  <p
-                    className="text-xs font-mono"
-                    style={{ color: "#ff6b6b", lineHeight: 1.5 }}
-                  >
-                    This will delete all local databases, keys, and saved
-                    accounts on this device. Your remote account is not affected.
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      data-testid="wipe-confirm-button"
-                      variant="danger"
-                      className="flex-1"
-                      isLoading={isWiping}
-                      loadingText="Wiping..."
-                      onClick={async () => {
-                        setIsWiping(true);
-                        try {
-                          await api.wipeLocalData();
-                          setKnownAccounts([]);
-                          setConfirmingWipe(false);
-                        } catch (err) {
-                          console.error("[wipe]", err);
-                        } finally {
-                          setIsWiping(false);
-                        }
-                      }}
-                    >
-                      Wipe all local data
-                    </Button>
-                    <Button
-                      data-testid="wipe-cancel-button"
-                      variant="ghost"
-                      className="flex-1"
-                      disabled={isWiping}
-                      onClick={() => setConfirmingWipe(false)}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
+      <LoginScreen
+        knownAccounts={knownAccounts}
+        onAuthSuccess={handleAuthSuccess}
+        onWipeComplete={() => setKnownAccounts([])}
+      />
     );
   }
 

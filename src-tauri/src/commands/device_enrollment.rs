@@ -559,38 +559,11 @@ pub async fn approve_device_enrollment(
         eprintln!("[enrollment] security_event insert failed (non-fatal): {e}");
     }
 
-    // 7. For every group/DM the approver is an MLS member of, reconcile
-    //    the MLS tree so the new device gets added. Reconcile is a no-op
-    //    if the approver doesn't have local MLS state for a conversation.
-    let group_ids = fetch_user_group_ids(&conn, &user_id).await?;
-    let dm_ids = fetch_user_dm_ids(&conn, &user_id).await?;
-
-    for gid in group_ids {
-        if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-            state.inner(),
-            &gid,
-            &user_id,
-        )
-        .await
-        {
-            eprintln!(
-                "[enrollment] reconcile group {gid} for new device failed (continuing): {e}"
-            );
-        }
-    }
-    for dm_id in dm_ids {
-        if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
-            state.inner(),
-            &dm_id,
-            &user_id,
-        )
-        .await
-        {
-            eprintln!(
-                "[enrollment] reconcile dm {dm_id} for new device failed (continuing): {e}"
-            );
-        }
-    }
+    // 7. MLS group addition is deferred — the new device hasn't published
+    //    KPs yet so reconcile can't add it. Instead, finalize_enrollment on
+    //    the new device publishes KPs and sends an `enrollment_finalized`
+    //    event. The approver (or any sibling) picks that up, reconciles all
+    //    groups, and the new device receives Welcomes.
 
     eprintln!(
         "[enrollment] approved request {request_id} for new device {new_device_id} of user {user_id}"
@@ -997,17 +970,9 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
         eprintln!("[enrollment] finalize: ensure_mls_key_package failed: {e}");
     }
 
-    // Pull any welcomes the approving device posted for us (approval path).
-    if let Err(e) =
-        crate::commands::mls::poll_mls_welcomes_inner(state, user_id, &device_id).await
-    {
-        eprintln!("[enrollment] finalize: poll_mls_welcomes failed: {e}");
-    }
-
-    // External-join any groups/DMs this device still doesn't have locally.
-    // On the approval path this is typically a no-op (welcomes already
-    // populated the groups). On the Secret Key path this is where we
-    // actually become a member of every pre-existing conversation.
+    // External-join every group/DM this user belongs to. The new device
+    // uses the stored GroupInfo to self-add via an MLS external commit —
+    // no coordination with sibling devices required.
     let conn = state.remote_db.conn().await?;
     let group_ids = fetch_user_group_ids(&conn, user_id).await?;
     let dm_ids = fetch_user_dm_ids(&conn, user_id).await?;
@@ -1025,10 +990,6 @@ async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()>
         }
 
         if let Err(e) = crate::commands::mls::external_join_group(state, &conv_id, user_id).await {
-            // Non-fatal: a single group failing shouldn't block enrollment
-            // from completing. The user can retry via the normal "open
-            // channel" path which will also try to external-join if the
-            // group is missing. For now we just log.
             eprintln!(
                 "[enrollment] finalize: external_join_group({conv_id}) failed: {e}"
             );

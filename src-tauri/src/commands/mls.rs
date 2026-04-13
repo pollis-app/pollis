@@ -541,26 +541,20 @@ pub async fn external_join_group(
         let provider = PollisProvider::new(db.conn());
 
         let mut env_reader: &[u8] = &group_info_bytes;
-        let envelope = MlsMessageIn::tls_deserialize(&mut env_reader).map_err(|e| {
+        let msg_in = MlsMessageIn::tls_deserialize(&mut env_reader).map_err(|e| {
             crate::error::Error::Other(anyhow::anyhow!(
                 "stored group_info envelope failed to deserialize: {e}"
             ))
         })?;
-        let _ = envelope;
-
-        const ENVELOPE_HEADER_LEN: usize = 4;
-        if group_info_bytes.len() < ENVELOPE_HEADER_LEN {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "group_info blob too short to contain an MLS message envelope"
-            )));
-        }
-        let mut body_reader: &[u8] = &group_info_bytes[ENVELOPE_HEADER_LEN..];
-        let verifiable_group_info = VerifiableGroupInfo::tls_deserialize(&mut body_reader)
-            .map_err(|e| {
-                crate::error::Error::Other(anyhow::anyhow!(
-                    "stored group_info body failed to deserialize: {e}"
-                ))
-            })?;
+        let verifiable_group_info = match msg_in.extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => gi,
+            other => {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "expected GroupInfo in mls_group_info, got {:?}",
+                    std::mem::discriminant(&other)
+                )));
+            }
+        };
 
         // Load (or create) this device's stable MLS signing keypair.
         let (sig_keys, sig_pub_bytes) =
@@ -584,7 +578,9 @@ pub async fn external_join_group(
             let _ = old.delete(provider.storage());
         }
 
-        let join_config = MlsGroupJoinConfig::builder().build();
+        let join_config = MlsGroupJoinConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
 
         let (_joined_group, commit_bundle) = MlsGroup::external_commit_builder()
             .with_config(join_config)
@@ -1070,7 +1066,9 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     let had_welcomes = !items.is_empty();
     for (id, bytes) in items {
         match apply_welcome(state, &bytes).await {
-            Ok(()) => {}
+            Ok(()) => {
+                eprintln!("[mls] poll_mls_welcomes: applied welcome {id}");
+            }
             Err(e) => {
                 // Mark as delivered even on failure — the private key for this
                 // Welcome was likely orphaned by a DB wipe and will never
@@ -1661,7 +1659,7 @@ pub async fn reconcile_group_mls_impl(
     {
         let mut rows = conn
             .query(
-                "SELECT invitee_id FROM group_invite WHERE group_id = ?1 AND status = 'pending'",
+                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
                 libsql::params![conversation_id.clone()],
             )
             .await?;
@@ -1712,9 +1710,43 @@ pub async fn reconcile_group_mls_impl(
         .clone()
         .unwrap_or_default();
 
-    // 3. Claim one KP per device.
+    // 3. Peek at the current tree to learn which devices are already members.
+    //    This lets us skip claiming KPs for devices that don't need to be added,
+    //    avoiding unnecessary KP exhaustion on repeated reconciles.
+    let already_in_tree: std::collections::HashSet<(String, String)> = {
+        let guard = state.local_db.lock().await;
+        let db = match guard.as_ref() {
+            Some(db) => db,
+            None => {
+                return Ok(ReconcileOutcome::default());
+            }
+        };
+        let provider = PollisProvider::new(db.conn());
+        let group_id = GroupId::from_slice(conversation_id.as_bytes());
+        match MlsGroup::load(provider.storage(), &group_id) {
+            Ok(Some(group)) => group
+                .members()
+                .map(|m| {
+                    let uid = parse_credential_user_id(&m.credential);
+                    let did = parse_credential_device_id(&m.credential).unwrap_or_default();
+                    (uid, did)
+                })
+                .collect(),
+            _ => {
+                return Ok(ReconcileOutcome::default());
+            }
+        }
+    };
+
+    // Only claim KPs for devices not already in the tree.
+    let devices_to_claim: Vec<(String, String)> = device_pairs
+        .into_iter()
+        .filter(|pair| !already_in_tree.contains(pair))
+        .collect();
+
+    // 4. Claim one KP per device that needs to be added.
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
-    for (uid, did) in &device_pairs {
+    for (uid, did) in &devices_to_claim {
         let mut rows = conn
             .query(
                 "UPDATE mls_key_package \
@@ -1733,7 +1765,7 @@ pub async fn reconcile_group_mls_impl(
         }
     }
 
-    // 4. Validate KPs and call the sync core under the local_db lock.
+    // 5. Validate KPs and call the sync core under the local_db lock.
     let (outcome, commit_data_opt) = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
@@ -1835,6 +1867,12 @@ pub async fn reconcile_group_mls_impl(
                 )
                 .await?;
             }
+        }
+
+        // Publish updated GroupInfo so external-join (new device enrollment)
+        // uses the latest tree state.
+        if let Err(e) = publish_group_info(state, &conversation_id).await {
+            eprintln!("[mls] reconcile: publish_group_info failed (non-fatal): {e}");
         }
     }
 
