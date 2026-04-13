@@ -1182,27 +1182,39 @@ pub async fn forget_local_mls_group(
 ///
 /// `mls_group_id` must already be resolved (group_id for channels,
 /// conversation_id for DMs).
+/// Ensure this device has a local MLS group at the latest epoch for
+/// `mls_group_id`. Processes any pending commits from the commit log.
+/// If the local group is missing, evicted, or unrecoverably behind,
+/// falls back to external-join using the published GroupInfo.
+///
+/// `user_id` is needed for the external-join fallback.
 pub async fn process_pending_commits_inner(
     state: &Arc<AppState>,
     mls_group_id: &str,
+    user_id: &str,
 ) -> crate::error::Result<()> {
     // 1. Get the current epoch from the local group.
-    let initial_epoch = {
+    let has_group = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
         let provider = PollisProvider::new(db.conn());
         let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-        let group = match MlsGroup::load(provider.storage(), &group_id) {
-            Ok(Some(g)) => g,
-            _ => {
-                // Group doesn't exist locally (e.g. DB was wiped). Nothing to
-                // process — repair will happen on first send.
-                return Ok(());
+        MlsGroup::load(provider.storage(), &group_id)
+            .ok()
+            .flatten()
+            .map(|g| g.epoch().as_u64())
+    };
+    let initial_epoch = match has_group {
+        Some(epoch) => epoch,
+        None => {
+            // No local group — external-join to create one.
+            if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
+                eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
             }
-        };
-        group.epoch().as_u64()
+            return Ok(());
+        }
     };
 
     // 2. Fetch pending commits from remote, along with the add-metadata
@@ -1343,7 +1355,15 @@ pub async fn process_pending_commits_inner(
                     }
                 }
                 Err(e) => {
-                    eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} at epoch {} — stopping", commit.epoch);
+                    let msg = format!("{e}");
+                    // If we were evicted (kicked), delete the stale group so
+                    // external-join recovery can create a fresh one.
+                    if msg.contains("evicted") {
+                        eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
+                        let _ = group.delete(provider.storage());
+                    } else {
+                        eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} at epoch {} — stopping", commit.epoch);
+                    }
                     break;
                 }
             }
@@ -1389,33 +1409,13 @@ pub async fn process_pending_commits_inner(
 
     if let Some(remote_epoch) = latest_remote_epoch {
         if remote_epoch as u64 > current_epoch {
-            // Extract user_id from the local group's credential before
-            // deleting it.
-            let user_id = {
-                let guard = state.local_db.lock().await;
-                guard.as_ref().and_then(|db| {
-                    let provider = PollisProvider::new(db.conn());
-                    let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-                    MlsGroup::load(provider.storage(), &group_id)
-                        .ok()
-                        .flatten()
-                        .and_then(|g| {
-                            g.own_leaf_node().map(|leaf| {
-                                parse_credential_user_id(leaf.credential())
-                            })
-                        })
-                })
-            };
-
-            if let Some(uid) = user_id {
+            eprintln!(
+                "[mls] process_pending_commits: local epoch {current_epoch} behind remote {remote_epoch} for {mls_group_id} — external-joining to recover"
+            );
+            if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
                 eprintln!(
-                    "[mls] process_pending_commits: local epoch {current_epoch} behind remote {remote_epoch} for {mls_group_id} — external-joining to recover"
+                    "[mls] process_pending_commits: external_join_group recovery failed for {mls_group_id}: {e}"
                 );
-                if let Err(e) = external_join_group(state, mls_group_id, &uid).await {
-                    eprintln!(
-                        "[mls] process_pending_commits: external_join_group recovery failed for {mls_group_id}: {e}"
-                    );
-                }
             }
         }
     }
@@ -1429,6 +1429,7 @@ pub async fn process_pending_commits_inner(
 pub async fn process_pending_commits(
     state: State<'_, Arc<AppState>>,
     conversation_id: String,
+    user_id: String,
 ) -> crate::error::Result<()> {
     let mls_group_id = {
         let conn = state.remote_db.conn().await?;
@@ -1441,7 +1442,7 @@ pub async fn process_pending_commits(
             None => conversation_id,
         }
     };
-    process_pending_commits_inner(state.inner(), &mls_group_id).await
+    process_pending_commits_inner(state.inner(), &mls_group_id, &user_id).await
 }
 
 // ── Phase 4.5: MLS group self-repair ─────────────────────────────────────────

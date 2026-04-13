@@ -154,29 +154,10 @@ pub async fn send_message(
         }
     }
 
-    // Process pending commits so the local epoch is current before encrypting.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id).await {
+    // Ensure this device has a local MLS group at the current epoch.
+    // Processes pending commits; falls back to external-join if needed.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id, &sender_id).await {
         eprintln!("[messages] send_message: process_pending_commits for {mls_group_id}: {e}");
-    }
-
-    // If the MLS group still doesn't exist locally after polling welcomes and
-    // processing commits, attempt to external-join using the published GroupInfo.
-    {
-        let has_group = {
-            let guard = state.local_db.lock().await;
-            guard.as_ref().map_or(false, |db| {
-                crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
-            })
-        };
-        if !has_group {
-            if let Err(e) = crate::commands::mls::external_join_group(
-                state.inner(), &mls_group_id, &sender_id,
-            ).await {
-                return Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "MLS group not available for conversation {conversation_id} and external-join failed: {e}"
-                )));
-            }
-        }
     }
 
     let ciphertext_remote = {
@@ -321,28 +302,9 @@ pub async fn get_channel_messages(
         }
     }
 
-    // Process any pending MLS commits (membership changes) before decrypting
-    // so the local epoch is current and messages from the new epoch are readable.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id).await {
+    // Ensure this device has a local MLS group at the current epoch.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id, &user_id).await {
         eprintln!("[messages] process_pending_commits for {mls_group_id}: {e}");
-    }
-
-    // If the MLS group still doesn't exist locally after polling welcomes and
-    // processing commits, attempt to external-join using the published GroupInfo.
-    {
-        let has_group = {
-            let guard = state.local_db.lock().await;
-            guard.as_ref().map_or(false, |db| {
-                crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
-            })
-        };
-        if !has_group {
-            if let Err(e) = crate::commands::mls::external_join_group(
-                state.inner(), &mls_group_id, &user_id,
-            ).await {
-                eprintln!("[messages] MLS group {mls_group_id} missing locally and external-join failed: {e}");
-            }
-        }
     }
 
     let mut rows = match cursor {
@@ -607,25 +569,9 @@ pub async fn get_dm_messages(
         }
     }
 
-    // Process any pending MLS commits before decrypting.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &dm_channel_id).await {
+    // Ensure this device has a local MLS group at the current epoch.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &dm_channel_id, &user_id).await {
         eprintln!("[messages] process_pending_commits for DM {dm_channel_id}: {e}");
-    }
-
-    {
-        let has_group = {
-            let guard = state.local_db.lock().await;
-            guard.as_ref().map_or(false, |db| {
-                crate::commands::mls::has_local_group(db.conn(), &dm_channel_id)
-            })
-        };
-        if !has_group {
-            if let Err(e) = crate::commands::mls::external_join_group(
-                state.inner(), &dm_channel_id, &user_id,
-            ).await {
-                eprintln!("[messages] MLS group for DM {dm_channel_id} missing locally and external-join failed: {e}");
-            }
-        }
     }
 
     let conn = state.remote_db.conn().await?;

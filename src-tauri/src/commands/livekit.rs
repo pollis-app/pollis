@@ -386,7 +386,7 @@ pub async fn connect_rooms(
                                                         }
                                                     }
                                                     if let Err(e) = crate::commands::mls::process_pending_commits_inner(
-                                                        &state, &conv_id,
+                                                        &state, &conv_id, &uid,
                                                     ).await {
                                                         eprintln!("[mls] process_pending_commits for {conv_id}: {e}");
                                                     }
