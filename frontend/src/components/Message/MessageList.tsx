@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MessageItem } from "./MessageItem";
+import { useBlockedUsers } from "../../hooks/queries";
 import type { Message } from "../../types";
 
 interface MessageListProps {
@@ -31,6 +32,11 @@ export const MessageList: React.FC<MessageListProps> = ({
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevLengthRef = useRef(0);
+  const { data: blockedUsers = [] } = useBlockedUsers();
+  const blockedIds = useMemo(
+    () => new Set(blockedUsers.map((b) => b.user_id)),
+    [blockedUsers],
+  );
   // Saved scroll metrics taken just before a load-more fetch begins, used to
   // restore relative scroll position after older messages are prepended.
   const savedScrollRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
@@ -145,6 +151,30 @@ export const MessageList: React.FC<MessageListProps> = ({
         </p>
       )}
       {sortedMessages.map((message) => {
+        if (blockedIds.has(message.sender_id)) {
+          return (
+            <div
+              key={message.id}
+              data-testid={`message-blocked-${message.id}`}
+              className="px-4 py-1"
+            >
+              <div className="flex items-start gap-2 min-w-0">
+                <span
+                  className="flex-shrink-0 font-mono text-sm italic"
+                  style={{ color: "var(--c-text-dim)" }}
+                >
+                  blocked user
+                </span>
+                <span
+                  className="font-mono text-sm italic"
+                  style={{ color: "var(--c-text-muted)" }}
+                >
+                  [blocked]
+                </span>
+              </div>
+            </div>
+          );
+        }
         const authorUsername = getAuthorUsername
           ? getAuthorUsername(message.sender_id, message)
           : "Unknown";

@@ -30,6 +30,8 @@ import { InviteMemberPage } from "./pages/InviteMemberPage";
 import { MembersPage } from "./pages/MembersPage";
 import { KickMemberPage } from "./pages/KickMemberPage";
 import { SearchPage } from "./pages/Search";
+import { RequestsPage } from "./pages/RequestsPage";
+import { BlockedPage } from "./pages/BlockedPage";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -129,11 +131,23 @@ const dmsRoute = createRoute({
   component: DMsPage,
 });
 
-// /dms/new must come before /dms/$conversationId
+// /dms/new, /dms/requests, /dms/blocked must come before /dms/$conversationId
 const startDMRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/dms/new",
   component: StartDMPage,
+});
+
+const dmRequestsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dms/requests",
+  component: RequestsPage,
+});
+
+const dmBlockedRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/dms/blocked",
+  component: BlockedPage,
 });
 
 const dmRoute = createRoute({
@@ -208,6 +222,8 @@ const routeTree = rootRoute.addChildren([
   voiceChannelRoute,
   dmsRoute,
   startDMRoute,
+  dmRequestsRoute,
+  dmBlockedRoute,
   dmRoute,
   dmSettingsRoute,
   preferencesRoute,

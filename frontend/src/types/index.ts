@@ -180,6 +180,8 @@ export interface UserAlias {
   created_at: number;
 }
 
+export * from "./blocks";
+
 export interface AppState {
   // Current user
   currentUser: User | null;

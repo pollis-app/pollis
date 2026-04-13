@@ -143,6 +143,64 @@ pub async fn send_message(
         }
     };
 
+    // Block enforcement for DMs: if any other participant in this DM
+    // has a block relationship with the sender (either direction),
+    // silently drop the message. The send appears to succeed to the
+    // sender (message is stored locally so their own history looks
+    // consistent) but it is NOT encrypted, NOT posted to Turso, and
+    // NOT broadcast on LiveKit — the recipient never sees it and no
+    // observable signal reveals the block. Group channels are not
+    // gated here; blocks in groups are purely render-side on the
+    // blocker's client.
+    let suppress_delivery = if !is_channel {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn.query(
+            "SELECT user_id
+             FROM dm_channel_member
+             WHERE dm_channel_id = ?1
+               AND user_id <> ?2",
+            libsql::params![conversation_id.clone(), sender_id.clone()],
+        ).await?;
+        let mut blocked = false;
+        while let Some(row) = rows.next().await? {
+            let other: String = row.get(0)?;
+            if crate::commands::blocks::is_blocked_either_way(&conn, &sender_id, &other).await? {
+                blocked = true;
+                break;
+            }
+        }
+        blocked
+    } else {
+        false
+    };
+
+    if suppress_delivery {
+        // Write a local-only row so the sender's own conversation
+        // view stays consistent (history survives reloads). Empty
+        // ciphertext is fine — nothing will ever decrypt this row;
+        // it's only read back via the `content` column.
+        {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(
+                anyhow::anyhow!("Not signed in")
+            ))?;
+            let empty: Vec<u8> = Vec::new();
+            db.conn().execute(
+                "INSERT INTO message (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![id, conversation_id, sender_id, empty, content, reply_to_id, now],
+            )?;
+        }
+        return Ok(Message {
+            id,
+            conversation_id,
+            sender_id,
+            content: Some(content),
+            reply_to_id,
+            sent_at: now,
+        });
+    }
+
     // Poll MLS Welcomes — this device may have been added to the group but
     // hasn't applied the Welcome yet.
     {
