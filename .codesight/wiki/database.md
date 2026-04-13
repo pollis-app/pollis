@@ -4,7 +4,7 @@ Two databases. Remote schema is frozen in `remote_schema.sql`; changes go in num
 
 ## Remote Database (Turso)
 
-Source: `src-tauri/src/db/migrations/remote_schema.sql` + migrations `000001` through `000014`.
+Source: `src-tauri/src/db/migrations/remote_schema.sql` + migrations `000001` through `000015`.
 
 ### users
 - `id` TEXT PK
@@ -60,6 +60,14 @@ Source: `src-tauri/src/db/migrations/remote_schema.sql` + migrations `000001` th
 - `user_id` TEXT NOT NULL FK users
 - `added_by` TEXT NOT NULL
 - `added_at` TEXT NOT NULL DEFAULT now
+- `accepted_at` TEXT _(migration 15, NULL = pending request for this member)_
+
+### user_block _(migration 15)_
+- PK: (`blocker_id`, `blocked_id`)
+- `blocker_id` TEXT NOT NULL FK users
+- `blocked_id` TEXT NOT NULL FK users
+- `created_at` TEXT NOT NULL DEFAULT now
+- Directional — A blocking B does not imply B blocks A. Enforcement checks both directions, so once either side blocks, neither can DM or group-invite the other.
 
 ### group_invite
 - `id` TEXT PK

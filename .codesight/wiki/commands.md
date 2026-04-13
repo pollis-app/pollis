@@ -49,8 +49,20 @@ All backend calls from the frontend use `invoke("command_name", { args })`. Comm
 - `search_messages(user_id, query, conversation_id?)` → `Message[]`
 
 ## dm (`commands/dm.rs`)
-- `create_dm_channel(creator_id, peer_id)` → `DmChannel`
-- `list_dm_conversations(user_id)` → `DmConversation[]`
+- `create_dm_channel(creator_id, member_ids)` → `DmChannel` — seeds creator's `accepted_at` as now, other members' as NULL (pending request). Rejects with `"message request pending"` if a block exists in either direction with any proposed member.
+- `list_dm_channels(user_id)` → `DmChannel[]` — only channels where the caller has accepted (`accepted_at IS NOT NULL`) and neither party has blocked the other.
+- `list_dm_requests(user_id)` → `DmChannel[]` — channels where the caller's `accepted_at IS NULL` and no block exists with the other participant(s).
+- `accept_dm_request(dm_channel_id, user_id)` — idempotent; flips the caller's `accepted_at` to now. The conversation then appears in `list_dm_channels`.
+- `get_dm_channel(dm_channel_id)` → `DmChannel`
+- `add_user_to_dm_channel(dm_channel_id, user_id, added_by)`
+- `remove_user_from_dm_channel(dm_channel_id, user_id, requester_id)`
+- `leave_dm_channel(dm_channel_id, user_id)` — if the last member leaves, channel + envelopes are cleaned up.
+
+## blocks (`commands/blocks.rs`)
+- `block_user(blocker_id, blocked_id)` — idempotent. Inserts `user_block` row and resets `accepted_at = NULL` on the blocker's `dm_channel_member` rows for every DM shared with the blocked user (so after unblock those conversations reappear as requests).
+- `unblock_user(blocker_id, blocked_id)` — deletes the `user_block` row. DM history becomes visible again and un-accepted channels surface in `list_dm_requests`.
+- `list_blocked_users(user_id)` → `BlockedUser[]`
+- Enforced in: `create_dm_channel`, `send_message` (DM only — group-channel sends are not gated), `send_group_invite`. All three return the identical string `"message request pending"` so the sender cannot infer which gate rejected them.
 
 ## mls (`commands/mls.rs`)
 - `reconcile_group_mls(conversation_id, actor_user_id)`

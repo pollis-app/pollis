@@ -3,8 +3,16 @@ use tauri::State;
 use std::sync::Arc;
 use ulid::Ulid;
 
+use crate::commands::blocks::is_blocked_either_way;
 use crate::error::{Error, Result};
 use crate::state::AppState;
+
+/// Generic error string returned whenever a send is suppressed because
+/// of a block — same phrasing whether the recipient has actively
+/// blocked the sender or simply hasn't accepted yet. Keeping this
+/// deliberately uninformative prevents the sender from inferring their
+/// block status.
+pub const BLOCK_ERR: &str = "message request pending";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DmChannel {
@@ -20,6 +28,7 @@ pub struct DmChannelMember {
     pub username: Option<String>,
     pub added_by: String,
     pub added_at: String,
+    pub accepted_at: Option<String>,
 }
 
 /// Fetch members of a DM channel from the remote DB.
@@ -28,7 +37,7 @@ async fn fetch_dm_members(
     dm_channel_id: &str,
 ) -> Result<Vec<DmChannelMember>> {
     let mut rows = conn.query(
-        "SELECT dcm.user_id, u.username, dcm.added_by, dcm.added_at
+        "SELECT dcm.user_id, u.username, dcm.added_by, dcm.added_at, dcm.accepted_at
          FROM dm_channel_member dcm
          LEFT JOIN users u ON u.id = dcm.user_id
          WHERE dcm.dm_channel_id = ?1",
@@ -42,6 +51,7 @@ async fn fetch_dm_members(
             username: row.get(1)?,
             added_by: row.get(2)?,
             added_at: row.get(3)?,
+            accepted_at: row.get(4)?,
         });
     }
     Ok(members)
@@ -61,6 +71,16 @@ pub async fn create_dm_channel(
     }
 
     let conn = state.remote_db.conn().await?;
+
+    // Refuse channel creation if ANY proposed pairing is blocked in
+    // either direction. Return the generic BLOCK_ERR so neither side
+    // can infer why their DM failed.
+    for other_id in member_ids.iter().filter(|id| *id != &creator_id) {
+        if is_blocked_either_way(&conn, &creator_id, other_id).await? {
+            return Err(Error::Other(anyhow::anyhow!(BLOCK_ERR)));
+        }
+    }
+
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -69,21 +89,22 @@ pub async fn create_dm_channel(
         libsql::params![id.clone(), creator_id.clone(), now.clone()],
     ).await?;
 
-    // Add creator as first member
+    // Creator is auto-accepted (they initiated the conversation).
     conn.execute(
-        "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at)
-         VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at, accepted_at)
+         VALUES (?1, ?2, ?3, ?4, ?4)",
         libsql::params![id.clone(), creator_id.clone(), creator_id.clone(), now.clone()],
     ).await?;
 
-    // Add all other members
+    // Every other member starts with accepted_at = NULL — the channel
+    // is a pending request until they accept it.
     for member_id in &member_ids {
         if member_id == &creator_id {
             continue;
         }
         conn.execute(
-            "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at, accepted_at)
+             VALUES (?1, ?2, ?3, ?4, NULL)",
             libsql::params![id.clone(), member_id.clone(), creator_id.clone(), now.clone()],
         ).await?;
     }
@@ -142,11 +163,26 @@ pub async fn list_dm_channels(
 ) -> Result<Vec<DmChannel>> {
     let conn = state.remote_db.conn().await?;
 
+    // Accepted DMs only. Filter hides channels with users I have
+    // blocked — but NOT channels where I am the blocked party. The
+    // blocked user must continue to see the conversation so the
+    // block produces no observable signal on their side (messages
+    // simply stay in the [pending] state, indistinguishable from a
+    // recipient who hasn't accepted yet).
     let mut rows = conn.query(
         "SELECT dc.id, dc.created_by, dc.created_at
          FROM dm_channel dc
          JOIN dm_channel_member dcm ON dcm.dm_channel_id = dc.id
-         WHERE dcm.user_id = ?1",
+         WHERE dcm.user_id = ?1
+           AND dcm.accepted_at IS NOT NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM dm_channel_member other
+             JOIN user_block ub ON
+                  ub.blocker_id = ?1 AND ub.blocked_id = other.user_id
+             WHERE other.dm_channel_id = dc.id
+               AND other.user_id <> ?1
+           )",
         libsql::params![user_id],
     ).await?;
 
@@ -167,6 +203,79 @@ pub async fn list_dm_channels(
     }
 
     Ok(channels)
+}
+
+#[tauri::command]
+pub async fn list_dm_requests(
+    user_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<DmChannel>> {
+    let conn = state.remote_db.conn().await?;
+
+    // Pending requests: my own row is un-accepted and I have not
+    // blocked the other participant. Symmetric to list_dm_channels —
+    // we filter on blocks I have made, not blocks made against me.
+    // A user I blocked never reappears in my requests list; when I
+    // unblock them, their unaccepted channel surfaces here again.
+    let mut rows = conn.query(
+        "SELECT dc.id, dc.created_by, dc.created_at
+         FROM dm_channel dc
+         JOIN dm_channel_member dcm ON dcm.dm_channel_id = dc.id
+         WHERE dcm.user_id = ?1
+           AND dcm.accepted_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1
+             FROM dm_channel_member other
+             JOIN user_block ub ON
+                  ub.blocker_id = ?1 AND ub.blocked_id = other.user_id
+             WHERE other.dm_channel_id = dc.id
+               AND other.user_id <> ?1
+           )
+         ORDER BY dc.created_at DESC",
+        libsql::params![user_id],
+    ).await?;
+
+    let mut channels = Vec::new();
+    while let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        let created_by: String = row.get(1)?;
+        let created_at: String = row.get(2)?;
+
+        let members = fetch_dm_members(&conn, &id).await?;
+
+        channels.push(DmChannel {
+            id,
+            created_by,
+            created_at,
+            members,
+        });
+    }
+
+    Ok(channels)
+}
+
+#[tauri::command]
+pub async fn accept_dm_request(
+    dm_channel_id: String,
+    user_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let conn = state.remote_db.conn().await?;
+    let now = chrono::Utc::now().to_rfc3339();
+
+    // Only flip accepted_at when it's currently NULL — idempotent
+    // and preserves the original acceptance time if the user
+    // clicks accept twice.
+    conn.execute(
+        "UPDATE dm_channel_member
+         SET accepted_at = ?3
+         WHERE dm_channel_id = ?1
+           AND user_id = ?2
+           AND accepted_at IS NULL",
+        libsql::params![dm_channel_id, user_id, now],
+    ).await?;
+
+    Ok(())
 }
 
 #[tauri::command]

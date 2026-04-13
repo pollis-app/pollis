@@ -824,6 +824,15 @@ pub async fn send_group_invite(
         return Err(Error::Other(anyhow::anyhow!("cannot invite yourself to a group")));
     }
 
+    // Silently reject when either party has blocked the other. Returns
+    // the generic BLOCK_ERR so neither side can infer why the invite
+    // failed.
+    if crate::commands::blocks::is_blocked_either_way(&conn, &inviter_id, &invitee_id).await? {
+        return Err(Error::Other(anyhow::anyhow!(
+            crate::commands::dm::BLOCK_ERR
+        )));
+    }
+
     // Check if invitee is already a member
     let mut member_rows = conn.query(
         "SELECT 1 FROM group_member WHERE group_id = ?1 AND user_id = ?2",

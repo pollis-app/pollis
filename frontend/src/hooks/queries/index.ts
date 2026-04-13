@@ -7,3 +7,4 @@ export * from "./useGroups";
 export * from "./useMessages";
 export * from "./useSearchMessages";
 export * from "./useReactions";
+export * from "./useBlocks";
