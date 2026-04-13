@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { ArrowLeft } from 'lucide-react';
 import * as api from '../../services/api';
 import { Button } from '../ui/Button';
 import { InputOtp } from '../ui/InputOtp';
@@ -12,10 +13,16 @@ interface EmailOTPAuthProps {
   // Incremented each time the parent wants to trigger a new prefill, even for
   // the same email address (e.g. clicking the same chip after going back).
   prefillNonce?: number;
+  // Called when the internal step changes so the parent can react (e.g. hide UI).
+  onStepChange?: (step: 'email' | 'otp') => void;
 }
 
-export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEmail, prefillNonce }) => {
-  const [step, setStep] = useState<'email' | 'otp'>('email');
+export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEmail, prefillNonce, onStepChange }) => {
+  const [step, setStepRaw] = useState<'email' | 'otp'>('email');
+  const setStep = (s: 'email' | 'otp') => {
+    setStepRaw(s);
+    onStepChange?.(s);
+  };
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -137,7 +144,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
           className="inline-flex items-center gap-1 leading-none text-xs font-mono"
           style={{ color: 'var(--c-text-muted)' }}
         >
-          🠈 Back
+          <ArrowLeft size={14} /> Back
         </button>
       </div>
     );

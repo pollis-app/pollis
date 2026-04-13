@@ -573,13 +573,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       <>
         <div
           data-testid={`attachment-${attachment.id}`}
-          style={{
-            border: "2px solid var(--c-border)",
-            background: "var(--c-surface-high)",
-            maxWidth: 280,
-            borderRadius: 8,
-            overflow: "hidden",
-          }}
+          style={{ maxWidth: 280 }}
         >
           {/* Preview area — click to open lightbox */}
           <button
@@ -588,11 +582,12 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             aria-label={`View ${attachment.filename}`}
             style={{
               display: "block",
-              width: "100%",
               padding: 0,
               background: "none",
               border: 0,
               cursor: downloadUrl ? "zoom-in" : "default",
+              marginLeft: -16,
+              width: "calc(100% + 16px)",
             }}
           >
             <div
@@ -610,7 +605,6 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
                 <img
                   src={downloadUrl}
                   alt={attachment.filename}
-                  // If the blob URL was revoked (e.g. after send), clear it so auto-load kicks in.
                   onError={() => setDownloadUrl(null)}
                   style={{
                     width: "100%",
@@ -636,7 +630,16 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             </div>
           </button>
 
-          {renderCaptionBar()}
+          <div
+            style={{
+              border: "2px solid var(--c-border)",
+              background: "var(--c-surface-high)",
+              borderRadius: 8,
+              marginTop: 4,
+            }}
+          >
+            {renderCaptionBar()}
+          </div>
         </div>
 
         {/* Full-screen lightbox */}
@@ -752,13 +755,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       <>
         <div
           data-testid={`attachment-${attachment.id}`}
-          style={{
-            border: "2px solid var(--c-border)",
-            background: "var(--c-surface-high)",
-            width: 200,
-            borderRadius: 8,
-            overflow: "hidden",
-          }}
+          style={{ width: 200 }}
         >
           {/* Preview area — click to open lightbox */}
           <button
@@ -777,11 +774,11 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
               cursor: isPending || isLoading ? "default" : "pointer",
               position: "relative",
               overflow: "hidden",
+              borderRadius: 8,
             }}
           >
-            {/* Poster: generated frame > blurhash > film icon */}
             {(poster || (attachment.blurhash && attachment.width && attachment.height)) && (
-              <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+              <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 8 }}>
                 {poster ? (
                   <img
                     src={poster}
@@ -798,7 +795,6 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
                 )}
               </div>
             )}
-            {/* Play icon overlay — always shown so users know it's clickable */}
             <div style={{
               position: "relative",
               zIndex: 1,
@@ -818,13 +814,22 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             </div>
           </button>
 
-          {renderCaptionBar(
-            duration != null ? (
-              <span className="text-xs font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>
-                {formatDuration(duration)}
-              </span>
-            ) : undefined
-          )}
+          <div
+            style={{
+              border: "2px solid var(--c-border)",
+              background: "var(--c-surface-high)",
+              borderRadius: 8,
+              marginTop: 4,
+            }}
+          >
+            {renderCaptionBar(
+              duration != null ? (
+                <span className="text-xs font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>
+                  {formatDuration(duration)}
+                </span>
+              ) : undefined
+            )}
+          </div>
         </div>
 
         {/* Video lightbox */}

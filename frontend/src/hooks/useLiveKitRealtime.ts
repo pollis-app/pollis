@@ -28,7 +28,7 @@ type RealtimeEvent =
   }
   | {
     type: 'membership_changed';
-    group_id?: string;
+    conversation_id?: string | null;
   }
   | {
     type: 'voice_joined';

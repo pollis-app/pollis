@@ -381,7 +381,7 @@ pub async fn publish_group_info(
 /// Called from `process_pending_commits_inner` against the metadata
 /// columns on `mls_commit_log` BEFORE handing the commit to
 /// `process_message`. This is the inbound complement to the outbound
-/// check in `add_member_mls_impl`.
+/// cert verification in `reconcile_group_mls_impl`.
 async fn verify_added_devices(
     conn: &libsql::Connection,
     target_user_id: &str,
@@ -497,14 +497,10 @@ async fn verify_added_devices(
 /// `process_pending_commits` pass.
 ///
 /// Safety note: this path does NOT currently pass through the outbound
-/// cross-signing cert check in `add_member_mls_impl`. Existing members
-/// that implement the step-3b inbound cert verification will reject
-/// external-join commits from devices whose cert doesn't chain to the
-/// user's `account_id_pub` — which is exactly the desired behavior.
-/// Until step 3b lands, an attacker who compromised the server could
-/// theoretically forge a GroupInfo + external commit to smuggle a
-/// device in, so the honest path below is trust-on-first-use against
-/// the server for the duration of the step-3b gap.
+/// cross-signing cert check. Existing members that implement the
+/// step-3b inbound cert verification will reject external-join commits
+/// from devices whose cert doesn't chain to the user's
+/// `account_id_pub` — which is exactly the desired behavior.
 pub async fn external_join_group(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -544,40 +540,21 @@ pub async fn external_join_group(
         })?;
         let provider = PollisProvider::new(db.conn());
 
-        // Deserialize the stored blob. `publish_group_info` stores the
-        // output of `MlsMessage::export_group_info().tls_serialize_*`,
-        // which is an MlsMessage envelope (version u16 + wire_format u16)
-        // wrapping a GroupInfo body. openmls does not expose a public
-        // `into_verifiable_group_info` on `MlsMessageIn` outside of the
-        // `test-utils` feature, so we sanity-check the envelope by
-        // round-tripping through `MlsMessageIn` and then deserialize the
-        // body directly as `VerifiableGroupInfo`.
-        //
-        // `GroupInfo` and `VerifiableGroupInfo` have identical TLS wire
-        // formats — the extra `serialized_payload: Option<Vec<u8>>` on
-        // `GroupInfo` is `#[tls_codec(skip)]`, so the body bytes on the
-        // wire are `payload + signature` for both types.
         let mut env_reader: &[u8] = &group_info_bytes;
-        let envelope = MlsMessageIn::tls_deserialize(&mut env_reader).map_err(|e| {
+        let msg_in = MlsMessageIn::tls_deserialize(&mut env_reader).map_err(|e| {
             crate::error::Error::Other(anyhow::anyhow!(
                 "stored group_info envelope failed to deserialize: {e}"
             ))
         })?;
-        let _ = envelope;
-
-        const ENVELOPE_HEADER_LEN: usize = 4;
-        if group_info_bytes.len() < ENVELOPE_HEADER_LEN {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "group_info blob too short to contain an MLS message envelope"
-            )));
-        }
-        let mut body_reader: &[u8] = &group_info_bytes[ENVELOPE_HEADER_LEN..];
-        let verifiable_group_info = VerifiableGroupInfo::tls_deserialize(&mut body_reader)
-            .map_err(|e| {
-                crate::error::Error::Other(anyhow::anyhow!(
-                    "stored group_info body failed to deserialize: {e}"
-                ))
-            })?;
+        let verifiable_group_info = match msg_in.extract() {
+            MlsMessageBodyIn::GroupInfo(gi) => gi,
+            other => {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "expected GroupInfo in mls_group_info, got {:?}",
+                    std::mem::discriminant(&other)
+                )));
+            }
+        };
 
         // Load (or create) this device's stable MLS signing keypair.
         let (sig_keys, sig_pub_bytes) =
@@ -601,11 +578,10 @@ pub async fn external_join_group(
             let _ = old.delete(provider.storage());
         }
 
-        let join_config = MlsGroupJoinConfig::builder().build();
+        let join_config = MlsGroupJoinConfig::builder()
+            .use_ratchet_tree_extension(true)
+            .build();
 
-        // Drive the external commit builder. The GroupInfo we exported
-        // in step 4 already embeds the ratchet tree extension, so we do
-        // not need to pass a tree separately.
         let (_joined_group, commit_bundle) = MlsGroup::external_commit_builder()
             .with_config(join_config)
             .build_group(&provider, verifiable_group_info, cred_with_key)
@@ -632,13 +608,7 @@ pub async fn external_join_group(
     };
 
     // 3. Post the commit to mls_commit_log so existing members will
-    //    process it on their next process_pending_commits pass. We
-    //    record it at the PRE-commit epoch (the epoch carried by the
-    //    GroupInfo we joined from) because that's the convention
-    //    process_pending_commits_inner uses.
-    //
-    // The external commit adds exactly one device (this device) to the
-    // group, so the metadata columns carry a single-element list.
+    //    process it on their next process_pending_commits pass.
     let conn = state.remote_db.conn().await?;
     conn.execute(
         "INSERT INTO mls_commit_log \
@@ -670,7 +640,6 @@ pub async fn external_join_group(
 
     Ok(())
 }
-
 // ── Commands ──────────────────────────────────────────────────────────────────
 
 /// Generate a fresh MLS `KeyPackage` + `SignatureKeyPair` for this device and
@@ -996,7 +965,7 @@ pub async fn init_mls_group(
 
 /// Create a fresh MLS group for `conversation_id` (a channel or DM ULID).
 /// The creator becomes the sole initial member.  Other users are added via
-/// Phase 4 `add_member_mls`.
+/// `reconcile_group_mls`.
 #[tauri::command]
 pub async fn create_mls_group(
     state: State<'_, Arc<AppState>>,
@@ -1097,7 +1066,9 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     let had_welcomes = !items.is_empty();
     for (id, bytes) in items {
         match apply_welcome(state, &bytes).await {
-            Ok(()) => {}
+            Ok(()) => {
+                eprintln!("[mls] poll_mls_welcomes: applied welcome {id}");
+            }
             Err(e) => {
                 // Mark as delivered even on failure — the private key for this
                 // Welcome was likely orphaned by a DB wipe and will never
@@ -1175,479 +1146,6 @@ fn load_group_with_signer(
     Ok((group, signer))
 }
 
-/// Add `target_user_id` to the MLS group for `conversation_id`.
-///
-/// Flow:
-///   1. Claim the target's unclaimed KeyPackage from the remote table.
-///   2. Load the local MLS group + signer.
-///   3. Call `MlsGroup::add_members` → (commit, welcome).
-///   4. Serialize and merge the commit locally.
-///   5. Post the commit to `mls_commit_log` (other members apply it via
-///      `process_pending_commits`).
-///   6. Post the Welcome to `mls_welcome` (target picks it up via
-///      `poll_mls_welcomes`).
-pub async fn add_member_mls_inner(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    target_user_id: &str,
-    actor_user_id: &str,
-) -> crate::error::Result<()> {
-    add_member_mls_impl(
-        state,
-        conversation_id,
-        target_user_id,
-        actor_user_id,
-        DeviceFilter::default(),
-    )
-    .await
-}
-
-/// Add the user's OTHER devices to an MLS group they just created.
-/// No-op if the user only has one device. Non-fatal errors are logged.
-pub async fn add_member_mls_for_own_devices(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    user_id: &str,
-    exclude_device_id: Option<&str>,
-) -> crate::error::Result<()> {
-    match add_member_mls_impl(
-        state,
-        conversation_id,
-        user_id,
-        user_id,
-        DeviceFilter {
-            exclude: exclude_device_id.map(str::to_owned),
-            include_only: None,
-        },
-    )
-    .await
-    {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let msg = format!("{e}");
-            // "No registered devices" or "No available key packages" means the
-            // user only has one device — that's fine, not an error.
-            if msg.contains("No registered devices") || msg.contains("No available key packages") || msg.contains("No valid key packages") {
-                Ok(())
-            } else {
-                Err(e)
-            }
-        }
-    }
-}
-
-/// Add exactly one specific device of `target_user_id` to an MLS group.
-/// Used by the enrollment flow to graft a newly-enrolled device into every
-/// group the user is already a member of. Non-fatal errors are logged.
-pub async fn add_specific_device_to_group_mls(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    target_user_id: &str,
-    target_device_id: &str,
-    actor_user_id: &str,
-) -> crate::error::Result<()> {
-    add_member_mls_impl(
-        state,
-        conversation_id,
-        target_user_id,
-        actor_user_id,
-        DeviceFilter {
-            exclude: None,
-            include_only: Some(vec![target_device_id.to_owned()]),
-        },
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn add_member_mls(
-    state: State<'_, Arc<AppState>>,
-    conversation_id: String,
-    target_user_id: String,
-    actor_user_id: String,
-) -> crate::error::Result<()> {
-    add_member_mls_impl(
-        state.inner(),
-        &conversation_id,
-        &target_user_id,
-        &actor_user_id,
-        DeviceFilter::default(),
-    )
-    .await
-}
-
-/// Controls which of a target user's devices `add_member_mls_impl`
-/// considers when building an Add commit.
-#[derive(Default)]
-struct DeviceFilter {
-    /// Skip this device_id if present. Used to exclude the caller's own
-    /// device when adding their sibling devices to a freshly-created group.
-    exclude: Option<String>,
-    /// If `Some`, consider only these device_ids (and nothing else).
-    /// Used by the enrollment flow to add exactly one newly-enrolled
-    /// device to an existing group.
-    include_only: Option<Vec<String>>,
-}
-
-async fn add_member_mls_impl(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    target_user_id: &str,
-    actor_user_id: &str,
-    device_filter: DeviceFilter,
-) -> crate::error::Result<()> {
-    let conversation_id = conversation_id.to_owned();
-    let target_user_id = target_user_id.to_owned();
-    let actor_user_id = actor_user_id.to_owned();
-
-    // 1. Look up devices for the target user that have at least one unclaimed
-    //    key package AND a published device cert that verifies against the
-    //    user's account_id_pub. Stale/unsigned devices are skipped — they
-    //    cannot be added to MLS groups, which is exactly what protects us
-    //    from ghost-device injection by the server or a compromised peer.
-    let verified_devices: Vec<(String, Vec<u8>)> = {
-        let conn = state.remote_db.conn().await?;
-
-        // Fetch account_id_pub once — same for every candidate device.
-        let account_id_pub: Vec<u8> = {
-            let mut rows = conn
-                .query(
-                    "SELECT account_id_pub FROM users WHERE id = ?1",
-                    libsql::params![target_user_id.clone()],
-                )
-                .await?;
-            match rows.next().await? {
-                Some(row) => row.get::<Option<Vec<u8>>>(0)?.ok_or_else(|| {
-                    crate::error::Error::Other(anyhow::anyhow!(
-                        "user {target_user_id} has no account_id_pub — cannot verify any device"
-                    ))
-                })?,
-                None => {
-                    return Err(crate::error::Error::Other(anyhow::anyhow!(
-                        "user {target_user_id} not found"
-                    )))
-                }
-            }
-        };
-
-        // Join user_device to mls_key_package to get only devices that
-        // have both an unclaimed KP and the cert columns populated.
-        let mut rows = conn
-            .query(
-                "SELECT d.device_id, d.device_cert, d.cert_issued_at, \
-                        d.cert_identity_version, d.mls_signature_pub \
-                 FROM user_device d \
-                 WHERE d.user_id = ?1 \
-                 AND EXISTS ( \
-                     SELECT 1 FROM mls_key_package kp \
-                     WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
-                 )",
-                libsql::params![target_user_id.clone()],
-            )
-            .await?;
-
-        let mut verified: Vec<(String, Vec<u8>)> = Vec::new();
-        while let Some(row) = rows.next().await? {
-            let did: String = row.get(0)?;
-
-            if device_filter
-                .exclude
-                .as_deref()
-                .map_or(false, |ex| ex == did)
-            {
-                continue;
-            }
-            if let Some(ref include) = device_filter.include_only {
-                if !include.iter().any(|d| d == &did) {
-                    continue;
-                }
-            }
-
-            let cert: Option<Vec<u8>> = row.get(1).ok().flatten();
-            let issued_at_str: Option<String> = row.get(2).ok().flatten();
-            let cert_identity_version: Option<i64> = row.get(3).ok().flatten();
-            let mls_sig_pub: Option<Vec<u8>> = row.get(4).ok().flatten();
-
-            let (cert, issued_at_str, cert_identity_version, mls_sig_pub) =
-                match (cert, issued_at_str, cert_identity_version, mls_sig_pub) {
-                    (Some(c), Some(t), Some(v), Some(p)) => (c, t, v, p),
-                    _ => {
-                        eprintln!(
-                            "[mls] add_member: device {did} has no cert — skipping (not yet enrolled)"
-                        );
-                        continue;
-                    }
-                };
-
-            let issued_at: u64 = match issued_at_str.parse() {
-                Ok(v) => v,
-                Err(e) => {
-                    eprintln!(
-                        "[mls] add_member: device {did} cert_issued_at unparseable '{issued_at_str}': {e} — skipping"
-                    );
-                    continue;
-                }
-            };
-
-            if let Err(e) = crate::commands::account_identity::verify_device_cert(
-                &account_id_pub,
-                &did,
-                &mls_sig_pub,
-                cert_identity_version as u32,
-                issued_at,
-                &cert,
-            ) {
-                eprintln!(
-                    "[mls] add_member: device {did} cert verification failed: {e} — skipping"
-                );
-                continue;
-            }
-
-            verified.push((did, mls_sig_pub));
-        }
-        verified
-    };
-
-    if verified_devices.is_empty() {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "No registered devices with valid certs for {target_user_id}"
-        )));
-    }
-
-    let device_ids: Vec<String> = verified_devices.iter().map(|(d, _)| d.clone()).collect();
-
-    // Index verified pub bytes by device_id so step 3 can double-check
-    // that each claimed KP's leaf signing key matches the cert.
-    use std::collections::HashMap;
-    let verified_pub_by_device: HashMap<String, Vec<u8>> =
-        verified_devices.into_iter().collect();
-
-    // 2. Claim one KeyPackage per device.
-    let mut kp_bytes_list: Vec<(String, Vec<u8>)> = Vec::new();
-    {
-        let conn = state.remote_db.conn().await?;
-        for did in &device_ids {
-            let mut rows = conn.query(
-                "UPDATE mls_key_package \
-                 SET claimed = 1 \
-                 WHERE ref_hash = ( \
-                     SELECT ref_hash FROM mls_key_package \
-                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
-                     ORDER BY created_at ASC LIMIT 1 \
-                 ) \
-                 RETURNING key_package",
-                libsql::params![target_user_id.clone(), did.clone()],
-            ).await?;
-            if let Some(row) = rows.next().await? {
-                kp_bytes_list.push((did.clone(), row.get::<Vec<u8>>(0)?));
-            } else {
-                eprintln!("[mls] add_member: no key package for {target_user_id} device {did} — skipping");
-            }
-        }
-    }
-
-    if kp_bytes_list.is_empty() {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "No available key packages for any device of {target_user_id}"
-        )));
-    }
-
-    // 3. Validate all KPs, load group, create single commit with all devices.
-    let (commit_bytes, welcome_bytes, epoch, added_device_ids): (Vec<u8>, Vec<u8>, u64, Vec<String>) = {
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| {
-            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
-        })?;
-        let provider = PollisProvider::new(db.conn());
-
-        let mut validated_kps: Vec<KeyPackage> = Vec::new();
-        let mut added_devs: Vec<String> = Vec::new();
-        for (did, kp_raw) in &kp_bytes_list {
-            let mut kp_reader: &[u8] = kp_raw;
-            let kp_in = match KeyPackageIn::tls_deserialize(&mut kp_reader) {
-                Ok(k) => k,
-                Err(e) => {
-                    eprintln!("[mls] add_member: kp deserialize failed for device {did}: {e}");
-                    continue;
-                }
-            };
-            let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
-                Ok(k) => k,
-                Err(e) => {
-                    eprintln!("[mls] add_member: kp validate failed for device {did}: {e}");
-                    continue;
-                }
-            };
-            // Verify the credential belongs to the target user.
-            let cred_user = parse_credential_user_id(kp.leaf_node().credential());
-            if cred_user != target_user_id {
-                eprintln!("[mls] add_member: credential user '{cred_user}' != '{target_user_id}' for device {did}");
-                continue;
-            }
-
-            // Verify the credential names the same device the cert was
-            // issued for — rejects key packages whose credential device_id
-            // was tampered with.
-            let cred_device = parse_credential_device_id(kp.leaf_node().credential());
-            if cred_device.as_deref() != Some(did.as_str()) {
-                eprintln!(
-                    "[mls] add_member: credential device '{}' != '{did}' — skipping",
-                    cred_device.unwrap_or_default()
-                );
-                continue;
-            }
-
-            // Verify the leaf's signature key matches the pub bytes
-            // covered by this device's cert. Without this bind, an
-            // attacker could forge a KP that reuses a legitimate
-            // device_id but embeds a signing key they control.
-            let leaf_sig_pub = kp.leaf_node().signature_key().as_slice();
-            let Some(expected_pub) = verified_pub_by_device.get(did) else {
-                eprintln!("[mls] add_member: no verified pub for device {did} — skipping");
-                continue;
-            };
-            if leaf_sig_pub != expected_pub.as_slice() {
-                eprintln!(
-                    "[mls] add_member: leaf signing key for device {did} does not match certified pub — skipping"
-                );
-                continue;
-            }
-
-            validated_kps.push(kp);
-            added_devs.push(did.clone());
-        }
-
-        if validated_kps.is_empty() {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "No valid key packages for {target_user_id}"
-            )));
-        }
-
-        let (mut group, signer) = load_group_with_signer(&provider, &conversation_id)?;
-        let epoch = group.epoch().as_u64();
-
-        // Detect stale leaves for the exact (target_user_id, device_id) pairs
-        // we're about to add. Because device signing keys are STABLE (see
-        // `load_or_create_device_signer`), and `leave_group` is leaver-local
-        // with no commit posted, A's view of the tree still contains B's old
-        // leaves after B leaves. A plain `add_members` would then fail with
-        // `validate_key_uniqueness` because the new KeyPackage reuses the
-        // signing key already in the tree. Fix: remove the stale leaves in
-        // the same commit as the Add.
-        let stale_leaves: Vec<LeafNodeIndex> = group
-            .members()
-            .filter_map(|m| {
-                let cred_user = parse_credential_user_id(&m.credential);
-                if cred_user != target_user_id {
-                    return None;
-                }
-                let cred_device = parse_credential_device_id(&m.credential)?;
-                if added_devs.iter().any(|d| d == &cred_device) {
-                    Some(m.index)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        let (commit_msg, welcome_msg) = if stale_leaves.is_empty() {
-            let (commit, welcome, _group_info) = group
-                .add_members(&provider, &signer, &validated_kps)
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("add_members: {e}")))?;
-            (commit, welcome)
-        } else {
-            eprintln!(
-                "[mls] add_member: removing {} stale leaf(s) for {target_user_id} before re-add",
-                stale_leaves.len()
-            );
-            let bundle = group
-                .commit_builder()
-                .propose_removals(stale_leaves.iter().cloned())
-                .propose_adds(validated_kps.iter().cloned())
-                .load_psks(provider.storage())
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("load psks: {e}")))?
-                .build(provider.rand(), provider.crypto(), &signer, |_| true)
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("build commit: {e}")))?
-                .stage_commit(&provider)
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("stage commit: {e}")))?;
-            let (commit, welcome_opt, _group_info) = bundle.into_messages();
-            let welcome = welcome_opt.ok_or_else(|| {
-                crate::error::Error::Other(anyhow::anyhow!(
-                    "no welcome produced from add+remove commit"
-                ))
-            })?;
-            (commit, welcome)
-        };
-
-        let commit_bytes: Vec<u8> = commit_msg
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
-
-        let welcome_bytes: Vec<u8> = welcome_msg
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("welcome serialize: {e}")))?;
-
-        group
-            .merge_pending_commit(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge commit: {e}")))?;
-
-        (commit_bytes, welcome_bytes, epoch, added_devs)
-    };
-
-    // 4. Post commit to remote, including the cross-signing metadata
-    //    (target user_id + comma-separated device_ids) so receivers can
-    //    verify certs before calling `process_message`. See
-    //    MULTI_DEVICE_ENROLLMENT.md §3b.
-    let added_device_ids_csv = added_device_ids.join(",");
-    let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO mls_commit_log \
-         (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        libsql::params![
-            conversation_id.clone(),
-            epoch as i64,
-            actor_user_id,
-            commit_bytes,
-            target_user_id.clone(),
-            added_device_ids_csv
-        ],
-    ).await?;
-
-    // 5. Post one welcome row per device — same Welcome blob, each device
-    //    processes it independently with its own KeyPackage private key.
-    for did in &added_device_ids {
-        let welcome_id = Ulid::new().to_string();
-        conn.execute(
-            "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            libsql::params![welcome_id, conversation_id.clone(), target_user_id.clone(), did.clone(), welcome_bytes.clone()],
-        ).await?;
-    }
-
-    // 6. Refresh the stored GroupInfo so a newly-enrolling device can
-    //    join this group via external commit at the new epoch.
-    if let Err(e) = publish_group_info(state, &conversation_id).await {
-        eprintln!("[mls] add_member: publish_group_info failed (non-fatal): {e}");
-    }
-
-    Ok(())
-}
-
-/// Remove `target_user_id` from the MLS group for `conversation_id`.
-///
-/// Creates a Remove commit and posts it to `mls_commit_log`.  Remaining
-/// members apply it via `process_pending_commits`, which advances the epoch
-/// and rotates keys — providing forward secrecy from the removed member.
-pub async fn remove_member_mls_inner(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    target_user_id: &str,
-    actor_user_id: &str,
-) -> crate::error::Result<()> {
-    remove_member_mls_impl(state, conversation_id, target_user_id, actor_user_id).await
-}
-
 /// Wipe all local MLS state for a group without publishing a commit.
 ///
 /// Used when the local user leaves a group.  MLS does not allow a member to
@@ -1675,89 +1173,6 @@ pub async fn forget_local_mls_group(
     Ok(())
 }
 
-#[tauri::command]
-pub async fn remove_member_mls(
-    state: State<'_, Arc<AppState>>,
-    conversation_id: String,
-    target_user_id: String,
-    actor_user_id: String,
-) -> crate::error::Result<()> {
-    remove_member_mls_impl(state.inner(), &conversation_id, &target_user_id, &actor_user_id).await
-}
-
-async fn remove_member_mls_impl(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    target_user_id: &str,
-    actor_user_id: &str,
-) -> crate::error::Result<()> {
-    let conversation_id = conversation_id.to_owned();
-    let target_user_id = target_user_id.to_owned();
-    let actor_user_id = actor_user_id.to_owned();
-    let (commit_bytes, epoch) = {
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| {
-            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
-        })?;
-        let provider = PollisProvider::new(db.conn());
-        let (mut group, signer) = load_group_with_signer(&provider, &conversation_id)?;
-        let epoch = group.epoch().as_u64();
-
-        // Find ALL leaf indices belonging to the target user (may have
-        // multiple devices, each with its own leaf node).
-        let leaf_indices: Vec<LeafNodeIndex> = group.members()
-            .filter_map(|m| {
-                let cred_user = parse_credential_user_id(&m.credential);
-                if cred_user == target_user_id {
-                    Some(m.index)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        if leaf_indices.is_empty() {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "'{target_user_id}' is not a member of group {conversation_id}"
-            )));
-        }
-
-        let (commit_msg, _welcome, _group_info) = group
-            .remove_members(&provider, &signer, &leaf_indices)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("remove_members: {e}")))?;
-
-        let commit_bytes = commit_msg
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
-
-        group
-            .merge_pending_commit(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge commit: {e}")))?;
-
-        (commit_bytes, epoch)
-    };
-
-    let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
-         VALUES (?1, ?2, ?3, ?4)",
-        libsql::params![
-            conversation_id.clone(),
-            epoch as i64,
-            actor_user_id,
-            commit_bytes
-        ],
-    ).await?;
-
-    // Refresh the stored GroupInfo at the new epoch so external joiners
-    // use a fresh epoch when constructing their join commit.
-    if let Err(e) = publish_group_info(state, &conversation_id).await {
-        eprintln!("[mls] remove_member: publish_group_info failed (non-fatal): {e}");
-    }
-
-    Ok(())
-}
-
 /// Apply any commits from `mls_commit_log` that this member has not yet seen.
 ///
 /// Reads rows where `epoch >= current_local_epoch` in ascending order, applies
@@ -1767,27 +1182,39 @@ async fn remove_member_mls_impl(
 ///
 /// `mls_group_id` must already be resolved (group_id for channels,
 /// conversation_id for DMs).
+/// Ensure this device has a local MLS group at the latest epoch for
+/// `mls_group_id`. Processes any pending commits from the commit log.
+/// If the local group is missing, evicted, or unrecoverably behind,
+/// falls back to external-join using the published GroupInfo.
+///
+/// `user_id` is needed for the external-join fallback.
 pub async fn process_pending_commits_inner(
     state: &Arc<AppState>,
     mls_group_id: &str,
+    user_id: &str,
 ) -> crate::error::Result<()> {
     // 1. Get the current epoch from the local group.
-    let initial_epoch = {
+    let has_group = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
         let provider = PollisProvider::new(db.conn());
         let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-        let group = match MlsGroup::load(provider.storage(), &group_id) {
-            Ok(Some(g)) => g,
-            _ => {
-                // Group doesn't exist locally (e.g. DB was wiped). Nothing to
-                // process — repair will happen on first send.
-                return Ok(());
+        MlsGroup::load(provider.storage(), &group_id)
+            .ok()
+            .flatten()
+            .map(|g| g.epoch().as_u64())
+    };
+    let initial_epoch = match has_group {
+        Some(epoch) => epoch,
+        None => {
+            // No local group — external-join to create one.
+            if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
+                eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
             }
-        };
-        group.epoch().as_u64()
+            return Ok(());
+        }
     };
 
     // 2. Fetch pending commits from remote, along with the add-metadata
@@ -1852,12 +1279,10 @@ pub async fn process_pending_commits_inner(
             break;
         }
 
-        // ── Inbound cert verification ──────────────────────────────
-        // If this commit claims to add any devices, verify each of
-        // their certs chains to the user's published account_id_pub.
-        // A failed verification rejects the ENTIRE commit — we stop
-        // processing rather than skip, because subsequent commits
-        // target a group state we can no longer reach.
+        // ── Inbound cert verification (advisory) ─────────────────
+        // Log a warning if cross-signing verification fails, but still
+        // process the commit. Blocking here causes epoch divergence
+        // because the commit was already applied by the sender.
         if let Some(ref added_user_id) = commit.added_user_id {
             let ok = verify_added_devices(
                 &conn,
@@ -1869,16 +1294,14 @@ pub async fn process_pending_commits_inner(
                 Ok(true) => {}
                 Ok(false) => {
                     eprintln!(
-                        "[mls] process_pending_commits: rejecting commit at epoch {} for {mls_group_id} — cross-signing verification failed for {added_user_id}",
+                        "[mls] process_pending_commits: WARN cross-signing verification failed for {added_user_id} at epoch {} in {mls_group_id} — processing anyway",
                         commit.epoch
                     );
-                    break 'commit_loop;
                 }
                 Err(e) => {
                     eprintln!(
-                        "[mls] process_pending_commits: cert verification error for {mls_group_id}: {e} — stopping"
+                        "[mls] process_pending_commits: WARN cert verification error for {mls_group_id}: {e} — processing anyway"
                     );
-                    break 'commit_loop;
                 }
             }
         }
@@ -1906,17 +1329,15 @@ pub async fn process_pending_commits_inner(
             let msg_in = match MlsMessageIn::tls_deserialize(&mut reader) {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id}: {e} — deleting stale group");
-                    let _ = group.delete(provider.storage());
-                    return Ok(());
+                    eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
+                    break;
                 }
             };
             let protocol_msg = match msg_in.try_into_protocol_message() {
                 Ok(m) => m,
                 Err(e) => {
-                    eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id}: {e} — deleting stale group");
-                    let _ = group.delete(provider.storage());
-                    return Ok(());
+                    eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
+                    break;
                 }
             };
 
@@ -1924,18 +1345,22 @@ pub async fn process_pending_commits_inner(
                 Ok(processed) => {
                     if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
                         if let Err(e) = group.merge_staged_commit(&provider, *staged) {
-                            eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id}: {e} — deleting stale group");
-                            let _ = group.delete(provider.storage());
-                            return Ok(());
+                            eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
+                            break;
                         }
                     }
                 }
                 Err(e) => {
-                    // AEAD or epoch mismatch — local state is unrecoverable.
-                    // Delete the group so repair recreates it on next send.
-                    eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} — deleting stale group");
-                    let _ = group.delete(provider.storage());
-                    return Ok(());
+                    let msg = format!("{e}");
+                    // If we were evicted (kicked), delete the stale group so
+                    // external-join recovery can create a fresh one.
+                    if msg.contains("evicted") {
+                        eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
+                        let _ = group.delete(provider.storage());
+                    } else {
+                        eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} at epoch {} — stopping", commit.epoch);
+                    }
+                    break;
                 }
             }
 
@@ -1948,15 +1373,24 @@ pub async fn process_pending_commits_inner(
         }
     }
 
-    // If we merged at least one commit, refresh the stored GroupInfo. The
-    // committer already published when they issued the commit, but
-    // publishing again here keeps the row fresh if the committer's write
-    // failed transiently. The UPSERT's `WHERE excluded.epoch >` guard
-    // means we only overwrite if we have a strictly newer epoch, so
-    // redundant writes are cheap.
     if any_applied {
         if let Err(e) = publish_group_info(state, mls_group_id).await {
             eprintln!("[mls] process_pending_commits: publish_group_info failed (non-fatal): {e}");
+        }
+    }
+
+    // If the group was deleted during processing (e.g. eviction),
+    // external-join to recover.
+    let group_exists = {
+        let guard = state.local_db.lock().await;
+        guard.as_ref().map_or(false, |db| {
+            has_local_group(db.conn(), mls_group_id)
+        })
+    };
+    if !group_exists {
+        eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
+        if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
+            eprintln!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
         }
     }
 
@@ -1969,6 +1403,7 @@ pub async fn process_pending_commits_inner(
 pub async fn process_pending_commits(
     state: State<'_, Arc<AppState>>,
     conversation_id: String,
+    user_id: String,
 ) -> crate::error::Result<()> {
     let mls_group_id = {
         let conn = state.remote_db.conn().await?;
@@ -1981,7 +1416,7 @@ pub async fn process_pending_commits(
             None => conversation_id,
         }
     };
-    process_pending_commits_inner(state.inner(), &mls_group_id).await
+    process_pending_commits_inner(state.inner(), &mls_group_id, &user_id).await
 }
 
 // ── Phase 4.5: MLS group self-repair ─────────────────────────────────────────
@@ -2005,74 +1440,335 @@ pub async fn repair_mls_group(
     // 1. Create a fresh MLS group with the sender as sole member.
     init_mls_group(state, mls_group_id, sender_id).await?;
 
-    // 1b. Purge stale commit log and welcome entries so process_pending_commits
-    //     doesn't try to apply old-generation commits against the new group.
+    // 2. Purge stale commit log and welcome entries so process_pending_commits
+    //    doesn't try to apply old-generation commits against the new group.
     let conn = state.remote_db.conn().await?;
     let _ = conn.execute(
         "DELETE FROM mls_commit_log WHERE conversation_id = ?1",
         libsql::params![mls_group_id],
     ).await;
-    // Only delete welcomes for THIS conversation — not other conversations
-    // the sender may have pending welcomes for.
     let _ = conn.execute(
         "DELETE FROM mls_welcome WHERE conversation_id = ?1 AND delivered = 0",
         libsql::params![mls_group_id],
     ).await;
     drop(conn);
 
-    // 2. Look up all members (including sender — their other devices need
-    //    to be added too). Group channels use `group_member`; DM conversations
-    //    use `dm_channel_member`. Try groups first, fall back to DMs.
+    // 3. Reconcile adds all roster members' available devices in one commit.
+    let outcome = reconcile_group_mls_impl(state, mls_group_id, sender_id).await?;
+    eprintln!(
+        "[mls] repair: done — {} devices added, {} removed",
+        outcome.added.len(),
+        outcome.removed.len(),
+    );
+    Ok(())
+}
+
+// ── Declarative reconcile ────────────────────────────────────────────────────
+
+/// Outcome of a single reconcile pass.
+#[derive(Debug, Default)]
+pub struct ReconcileOutcome {
+    /// `(user_id, device_id)` pairs added to the MLS tree.
+    pub added: Vec<(String, String)>,
+    /// `(user_id, device_id)` pairs removed from the MLS tree.
+    pub removed: Vec<(String, String)>,
+    pub epoch_before: u64,
+    pub epoch_after: u64,
+    /// True if the committer's own leaf was in `to_remove` and was skipped.
+    pub skipped_self_removal: bool,
+}
+
+/// Raw bytes produced by a reconcile commit, needed for posting to Turso.
+pub struct ReconcileCommitData {
+    pub commit_bytes: Vec<u8>,
+    pub welcome_bytes: Option<Vec<u8>>,
+}
+
+/// Sync core: computes the diff between the desired roster and the actual MLS
+/// tree, then issues a single combined commit. Testable without Turso or async.
+///
+/// Returns the outcome plus optional commit/welcome bytes for the caller to
+/// post to Turso. The commit is merged locally before returning.
+///
+/// # Arguments
+/// - `roster_user_ids` — set of user_ids that SHOULD be in the group (from Turso)
+/// - `available_kps` — `(user_id, device_id, KeyPackage)` for devices that have
+///   an unclaimed KP and can be added
+/// - `actor_user_id` / `actor_device_id` — the committer (must already be in the tree)
+pub fn reconcile_group_mls_core(
+    provider: &PollisProvider<'_>,
+    signer: &SignatureKeyPair,
+    group: &mut MlsGroup,
+    roster_user_ids: &std::collections::HashSet<String>,
+    available_kps: &[(String, String, KeyPackage)],
+    actor_user_id: &str,
+    actor_device_id: &str,
+) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
+    use std::collections::{HashMap, HashSet};
+
+    let epoch_before = group.epoch().as_u64();
+
+    // 1. Actual state: walk the MLS tree.
+    let mut actual: HashMap<(String, String), LeafNodeIndex> = HashMap::new();
+    for m in group.members() {
+        let uid = parse_credential_user_id(&m.credential);
+        let did = parse_credential_device_id(&m.credential).unwrap_or_default();
+        actual.insert((uid, did), m.index);
+    }
+
+    // 2. Build the desired set.
+    //    Start with devices that have available KPs…
+    let mut desired: HashSet<(String, String)> = available_kps
+        .iter()
+        .map(|(uid, did, _)| (uid.clone(), did.clone()))
+        .collect();
+    //    …UNION with existing tree members whose user is still in the roster.
+    //    This prevents removing the committer's own device (which consumed its
+    //    KP on creation and has none left) or other devices that are already
+    //    correctly in the tree.
+    for (uid, did) in actual.keys() {
+        if roster_user_ids.contains(uid) {
+            desired.insert((uid.clone(), did.clone()));
+        }
+    }
+
+    // 3. Diff.
+    let actual_keys: HashSet<(String, String)> = actual.keys().cloned().collect();
+
+    // Leaves in tree but not desired → remove
+    let mut to_remove: Vec<((String, String), LeafNodeIndex)> = actual
+        .iter()
+        .filter(|(key, _)| !desired.contains(key))
+        .map(|(key, &idx)| (key.clone(), idx))
+        .collect();
+
+    // Devices desired but not in tree → add
+    let to_add_keys: HashSet<(String, String)> = desired
+        .difference(&actual_keys)
+        .cloned()
+        .collect();
+
+    // 4. Committer-in-remove-set detection.
+    let mut skipped_self_removal = false;
+    let actor_key = (actor_user_id.to_string(), actor_device_id.to_string());
+    if to_remove.iter().any(|(key, _)| key == &actor_key) {
+        to_remove.retain(|(key, _)| key != &actor_key);
+        skipped_self_removal = true;
+    }
+
+    // Collect validated KPs for the add set.
+    let add_kps: Vec<(String, String, KeyPackage)> = available_kps
+        .iter()
+        .filter(|(uid, did, _)| to_add_keys.contains(&(uid.clone(), did.clone())))
+        .cloned()
+        .collect();
+
+    let remove_indices: Vec<LeafNodeIndex> = to_remove.iter().map(|(_, idx)| *idx).collect();
+
+    // 5. No-op check.
+    if remove_indices.is_empty() && add_kps.is_empty() {
+        return Ok((
+            ReconcileOutcome {
+                epoch_before,
+                epoch_after: epoch_before,
+                skipped_self_removal,
+                ..Default::default()
+            },
+            None,
+        ));
+    }
+
+    // 6. Log the diff.
+    let removed_desc: Vec<String> = to_remove.iter().map(|((u, d), _)| format!("{u}:{d}")).collect();
+    let added_desc: Vec<String> = add_kps.iter().map(|(u, d, _)| format!("{u}:{d}")).collect();
+    eprintln!(
+        "[mls] reconcile: removing [{}], adding [{}]",
+        removed_desc.join(", "),
+        added_desc.join(", "),
+    );
+
+    // 7. Build a single commit with both proposals.
+    let add_kps_only: Vec<KeyPackage> = add_kps.iter().map(|(_, _, kp)| kp.clone()).collect();
+
+    let bundle = group
+        .commit_builder()
+        .propose_removals(remove_indices.iter().copied())
+        .propose_adds(add_kps_only.into_iter())
+        .load_psks(provider.storage())
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile load_psks: {e}")))?
+        .build(provider.rand(), provider.crypto(), signer, |_| true)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile build: {e}")))?
+        .stage_commit(provider)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile stage: {e}")))?;
+
+    // 8. Serialize commit + welcome BEFORE merging.
+    let (commit_out, welcome_opt, _group_info) = bundle.into_messages();
+
+    let commit_bytes = commit_out
+        .tls_serialize_detached()
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile commit serialize: {e}")))?;
+
+    let welcome_bytes = match welcome_opt {
+        Some(w) => Some(
+            w.tls_serialize_detached()
+                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile welcome serialize: {e}")))?,
+        ),
+        None => None,
+    };
+
+    // 9. Merge the commit locally.
+    group
+        .merge_pending_commit(provider)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
+
+    let epoch_after = group.epoch().as_u64();
+
+    let removed: Vec<(String, String)> = to_remove.into_iter().map(|(key, _)| key).collect();
+    let added: Vec<(String, String)> = add_kps.into_iter().map(|(u, d, _)| (u, d)).collect();
+
+    eprintln!(
+        "[mls] reconcile: epoch {epoch_before} → {epoch_after}, removed {}, added {}",
+        removed.len(),
+        added.len(),
+    );
+
+    Ok((
+        ReconcileOutcome {
+            added,
+            removed,
+            epoch_before,
+            epoch_after,
+            skipped_self_removal,
+        },
+        Some(ReconcileCommitData {
+            commit_bytes,
+            welcome_bytes,
+        }),
+    ))
+}
+
+/// Async entry point: reads desired state from Turso, loads local MLS group,
+/// calls `reconcile_group_mls_core`, posts commit + welcome rows.
+pub async fn reconcile_group_mls_impl(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    actor_user_id: &str,
+) -> crate::error::Result<ReconcileOutcome> {
+    let conversation_id = conversation_id.to_owned();
+    let actor_user_id = actor_user_id.to_owned();
+
     let conn = state.remote_db.conn().await?;
-    let mut member_ids: Vec<String> = Vec::new();
+
+    // 1. Determine roster: group_member + pending invitees, or dm_channel_member.
+    //    Pending invitees are included so their devices get a Welcome at invite
+    //    time — the acceptor can join the MLS group without requiring any other
+    //    member to be online simultaneously.
+    let mut roster_user_ids = std::collections::HashSet::new();
     {
-        let mut rows = conn.query(
-            "SELECT user_id FROM group_member WHERE group_id = ?1",
-            libsql::params![mls_group_id],
-        ).await?;
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM group_member WHERE group_id = ?1",
+                libsql::params![conversation_id.clone()],
+            )
+            .await?;
         while let Some(row) = rows.next().await? {
-            member_ids.push(row.get::<String>(0)?);
+            roster_user_ids.insert(row.get::<String>(0)?);
         }
     }
-    if member_ids.is_empty() {
-        let mut rows = conn.query(
-            "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
-            libsql::params![mls_group_id],
-        ).await?;
+    // Include pending invitees so they receive a Welcome pre-acceptance.
+    {
+        let mut rows = conn
+            .query(
+                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
+                libsql::params![conversation_id.clone()],
+            )
+            .await?;
         while let Some(row) = rows.next().await? {
-            member_ids.push(row.get::<String>(0)?);
+            roster_user_ids.insert(row.get::<String>(0)?);
+        }
+    }
+    if roster_user_ids.is_empty() {
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
+                libsql::params![conversation_id.clone()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            roster_user_ids.insert(row.get::<String>(0)?);
         }
     }
 
-    // 3. Collect ALL key packages for ALL members' devices in one pass,
-    //    then add them in a single `add_members` call — one commit, one epoch
-    //    advance, instead of M separate commits.
-    let current_device_id = state.device_id.lock().await.clone();
-
-    // (user_id, device_id, kp_bytes) for each device we successfully claim a KP for.
-    let mut claimed_kps: Vec<(String, String, Vec<u8>)> = Vec::new();
-
-    for member_id in &member_ids {
-        // Look up all devices for this member.
-        let mut device_ids: Vec<String> = Vec::new();
-        {
-            let mut rows = conn.query(
-                "SELECT device_id FROM user_device WHERE user_id = ?1",
-                libsql::params![member_id.clone()],
-            ).await?;
+    // 2. Find devices with unclaimed KPs for all roster users.
+    let mut device_pairs: Vec<(String, String)> = Vec::new();
+    {
+        let safe_ids: Vec<String> = roster_user_ids
+            .iter()
+            .map(|id| id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>())
+            .collect();
+        if !safe_ids.is_empty() {
+            let in_clause = safe_ids.iter().map(|id| format!("'{id}'")).collect::<Vec<_>>().join(",");
+            let query = format!(
+                "SELECT d.user_id, d.device_id FROM user_device d \
+                 WHERE d.user_id IN ({in_clause}) \
+                 AND EXISTS ( \
+                     SELECT 1 FROM mls_key_package kp \
+                     WHERE kp.user_id = d.user_id AND kp.device_id = d.device_id AND kp.claimed = 0 \
+                 )"
+            );
+            let mut rows = conn.query(&query, ()).await?;
             while let Some(row) = rows.next().await? {
-                let did: String = row.get(0)?;
-                // Exclude the sender's current device (already the group creator).
-                if member_id == sender_id && current_device_id.as_deref() == Some(did.as_str()) {
-                    continue;
-                }
-                device_ids.push(did);
+                device_pairs.push((row.get::<String>(0)?, row.get::<String>(1)?));
             }
         }
+    }
 
-        // Claim one KP per device.
-        for did in &device_ids {
-            let mut rows = conn.query(
+    let actor_device_id = state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .unwrap_or_default();
+
+    // 3. Peek at the current tree to learn which devices are already members.
+    //    This lets us skip claiming KPs for devices that don't need to be added,
+    //    avoiding unnecessary KP exhaustion on repeated reconciles.
+    let already_in_tree: std::collections::HashSet<(String, String)> = {
+        let guard = state.local_db.lock().await;
+        let db = match guard.as_ref() {
+            Some(db) => db,
+            None => {
+                return Ok(ReconcileOutcome::default());
+            }
+        };
+        let provider = PollisProvider::new(db.conn());
+        let group_id = GroupId::from_slice(conversation_id.as_bytes());
+        match MlsGroup::load(provider.storage(), &group_id) {
+            Ok(Some(group)) => group
+                .members()
+                .map(|m| {
+                    let uid = parse_credential_user_id(&m.credential);
+                    let did = parse_credential_device_id(&m.credential).unwrap_or_default();
+                    (uid, did)
+                })
+                .collect(),
+            _ => {
+                return Ok(ReconcileOutcome::default());
+            }
+        }
+    };
+
+    // Only claim KPs for devices not already in the tree.
+    let devices_to_claim: Vec<(String, String)> = device_pairs
+        .into_iter()
+        .filter(|pair| !already_in_tree.contains(pair))
+        .collect();
+
+    // 4. Claim one KP per device that needs to be added.
+    let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
+    for (uid, did) in &devices_to_claim {
+        let mut rows = conn
+            .query(
                 "UPDATE mls_key_package \
                  SET claimed = 1 \
                  WHERE ref_hash = ( \
@@ -2081,101 +1777,155 @@ pub async fn repair_mls_group(
                      ORDER BY created_at ASC LIMIT 1 \
                  ) \
                  RETURNING key_package",
-                libsql::params![member_id.clone(), did.clone()],
-            ).await?;
-            if let Some(row) = rows.next().await? {
-                claimed_kps.push((member_id.clone(), did.clone(), row.get::<Vec<u8>>(0)?));
-            } else {
-                eprintln!("[mls] repair: no key package for {member_id} device {did} — skipping");
-            }
+                libsql::params![uid.clone(), did.clone()],
+            )
+            .await?;
+        if let Some(row) = rows.next().await? {
+            kp_tuples.push((uid.clone(), did.clone(), row.get::<Vec<u8>>(0)?));
         }
     }
-    drop(conn);
 
-    if claimed_kps.is_empty() {
-        eprintln!("[mls] repair: done — no other devices to add");
-        return Ok(());
-    }
-
-    // 4. Validate all KPs and do a single add_members call.
-    let (commit_bytes, welcome_bytes, epoch, welcome_targets): (Vec<u8>, Vec<u8>, u64, Vec<(String, String)>) = {
+    // 5. Validate KPs and call the sync core under the local_db lock.
+    let (outcome, commit_data_opt) = {
         let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| {
-            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
-        })?;
+        let db = match guard.as_ref() {
+            Some(db) => db,
+            None => {
+                return Ok(ReconcileOutcome::default());
+            }
+        };
         let provider = PollisProvider::new(db.conn());
 
-        let mut validated_kps: Vec<KeyPackage> = Vec::new();
-        let mut targets: Vec<(String, String)> = Vec::new();
-        for (uid, did, kp_raw) in &claimed_kps {
-            let mut kp_reader: &[u8] = kp_raw;
-            let kp_in = match KeyPackageIn::tls_deserialize(&mut kp_reader) {
+        // Load group — early return if missing.
+        let group_id = GroupId::from_slice(conversation_id.as_bytes());
+        let group_opt = MlsGroup::load(provider.storage(), &group_id)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?;
+        let mut group = match group_opt {
+            Some(g) => g,
+            None => {
+                return Ok(ReconcileOutcome::default());
+            }
+        };
+
+        // Read signer.
+        let sig_pub_bytes = group
+            .own_leaf_node()
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
+            .signature_key()
+            .as_slice()
+            .to_vec();
+        let signer = SignatureKeyPair::read(
+            provider.storage(),
+            &sig_pub_bytes,
+            CS.signature_algorithm(),
+        )
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
+
+        // Resolve pending commit.
+        group
+            .merge_pending_commit(&provider)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
+
+        // Validate KPs.
+        let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
+        for (uid, did, kp_raw) in &kp_tuples {
+            let mut reader: &[u8] = kp_raw;
+            let kp_in = match KeyPackageIn::tls_deserialize(&mut reader) {
                 Ok(k) => k,
                 Err(e) => {
-                    eprintln!("[mls] repair: kp deserialize failed for {uid} device {did}: {e}");
+                    eprintln!("[mls] reconcile: kp deserialize failed for {uid}:{did}: {e}");
                     continue;
                 }
             };
             let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
                 Ok(k) => k,
                 Err(e) => {
-                    eprintln!("[mls] repair: kp validate failed for {uid} device {did}: {e}");
+                    eprintln!("[mls] reconcile: kp validate failed for {uid}:{did}: {e}");
                     continue;
                 }
             };
             let cred_user = parse_credential_user_id(kp.leaf_node().credential());
             if cred_user != *uid {
-                eprintln!("[mls] repair: credential user '{cred_user}' != '{uid}' for device {did}");
+                eprintln!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
                 continue;
             }
-            validated_kps.push(kp);
-            targets.push((uid.clone(), did.clone()));
+            available_kps.push((uid.clone(), did.clone(), kp));
         }
 
-        if validated_kps.is_empty() {
-            eprintln!("[mls] repair: done — no valid key packages");
-            return Ok(());
-        }
-
-        let (mut group, signer) = load_group_with_signer(&provider, mls_group_id)?;
-        let epoch = group.epoch().as_u64();
-
-        let (commit_msg, welcome_msg, _group_info) = group
-            .add_members(&provider, &signer, &validated_kps)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("repair add_members: {e}")))?;
-
-        let commit_bytes = commit_msg
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
-        let welcome_bytes = welcome_msg
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("welcome serialize: {e}")))?;
-
-        group
-            .merge_pending_commit(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge commit: {e}")))?;
-
-        (commit_bytes, welcome_bytes, epoch, targets)
+        reconcile_group_mls_core(
+            &provider,
+            &signer,
+            &mut group,
+            &roster_user_ids,
+            &available_kps,
+            &actor_user_id,
+            &actor_device_id,
+        )?
     };
 
-    // 5. Post single commit + per-device welcome rows.
-    let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
-         VALUES (?1, ?2, ?3, ?4)",
-        libsql::params![mls_group_id, epoch as i64, sender_id, commit_bytes],
-    ).await?;
-
-    for (uid, did) in &welcome_targets {
-        let welcome_id = Ulid::new().to_string();
+    // 5. Post commit + welcome to Turso.
+    if let Some(data) = commit_data_opt {
+        // Collect metadata about added devices so receivers can verify
+        // cross-signing certs before processing the commit.
+        let (added_uid, added_dids): (Option<String>, Option<String>) = if outcome.added.is_empty() {
+            (None, None)
+        } else {
+            // All adds in one reconcile commit target devices of different
+            // users, so we record the first user and all device IDs. For
+            // single-user adds (the common case) this is exact.
+            let uid = outcome.added[0].0.clone();
+            let dids = outcome
+                .added
+                .iter()
+                .map(|(_, d)| d.as_str())
+                .collect::<Vec<_>>()
+                .join(",");
+            (Some(uid), Some(dids))
+        };
         conn.execute(
-            "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            libsql::params![welcome_id, mls_group_id, uid.clone(), did.clone(), welcome_bytes.clone()],
-        ).await?;
+            "INSERT INTO mls_commit_log \
+             (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            libsql::params![
+                conversation_id.clone(),
+                outcome.epoch_before as i64,
+                actor_user_id,
+                data.commit_bytes,
+                added_uid,
+                added_dids
+            ],
+        )
+        .await?;
+
+        if let Some(welcome_bytes) = data.welcome_bytes {
+            for (uid, did) in &outcome.added {
+                let welcome_id = Ulid::new().to_string();
+                conn.execute(
+                    "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    libsql::params![welcome_id, conversation_id.clone(), uid.clone(), did.clone(), welcome_bytes.clone()],
+                )
+                .await?;
+            }
+        }
+
+        // Publish updated GroupInfo so external-join (new device enrollment)
+        // uses the latest tree state.
+        if let Err(e) = publish_group_info(state, &conversation_id).await {
+            eprintln!("[mls] reconcile: publish_group_info failed (non-fatal): {e}");
+        }
     }
 
-    eprintln!("[mls] repair: done — {} devices added in 1 commit", welcome_targets.len());
+    Ok(outcome)
+}
+
+#[tauri::command]
+pub async fn reconcile_group_mls(
+    state: State<'_, Arc<AppState>>,
+    conversation_id: String,
+    actor_user_id: String,
+) -> crate::error::Result<()> {
+    reconcile_group_mls_impl(state.inner(), &conversation_id, &actor_user_id).await?;
     Ok(())
 }
 
@@ -2785,7 +2535,7 @@ mod tests {
     /// so the deleted user cannot decrypt future messages.
     ///
     /// The `delete_account` command (auth.rs) enumerates all groups and DM
-    /// channels the user belongs to and calls `remove_member_mls_inner` for
+    /// channels the user belongs to and broadcasts `membership_changed` for
     /// each before deleting DB rows.  This test verifies the underlying MLS
     /// removal + epoch advance works across multiple groups.
     ///
@@ -2827,7 +2577,7 @@ mod tests {
 
         // --- Simulate account deletion for Bob ---
         // In production this would be done by delete_account iterating all
-        // groups and calling remove_member_mls_inner for each. Here we do
+        // groups and broadcasting membership_changed for each. Here we do
         // the MLS removal manually per group.
 
         // Remove Bob from group 1 — Carol applies commit.
@@ -2956,7 +2706,7 @@ mod tests {
     }
 
     /// Add multiple key packages to a group in a single `add_members` call.
-    /// Mirrors production `add_member_mls_impl` which batches all devices.
+    /// Mirrors production reconcile which batches all devices.
     fn add_members_batch(
         adder_db: &rusqlite::Connection,
         conv_id: &str,
@@ -3045,7 +2795,7 @@ mod tests {
     }
 
     /// Two devices for the same user are added in a single add_members commit
-    /// (matching production add_member_mls_impl). Both join via the same
+    /// (matching production reconcile). Both join via the same
     /// Welcome and can decrypt.
     #[test]
     fn multi_device_batch_add_single_commit() {
@@ -3190,7 +2940,7 @@ mod tests {
     /// re-enrollments, a naive `add_members` call fails with
     /// `validate_key_uniqueness` — Bob's new leaf signing key is already in
     /// Alice's tree. The fix: detect the stale leaf and issue a combined
-    /// remove+add commit via `commit_builder`.
+    /// remove+add commit via `commit_builder` (reconcile handles this).
     #[test]
     fn reinvite_with_stable_signing_key_handles_stale_leaf() {
         let conv_id = "01JTEST000000000REINVITE01";
@@ -3229,33 +2979,19 @@ mod tests {
         // Bob's local group state on the floor.
 
         // Second enrollment: Bob publishes a NEW KP using the SAME signer.
-        // Using a fresh bob_db_v2 to model the "Bob re-enrolls fresh" case
-        // (e.g. local wipe) — but the signer is stable, so the leaf signing
-        // key bytes are identical.
         let bob_db_v2 = make_db();
         let bob_signer_v2 = {
             let provider = PollisProvider::new(&bob_db_v2);
-            // Re-create signing keypair using the *same* public bytes would
-            // require importing private scalar — instead, we just reuse the
-            // same object since SignatureKeyPair is Clone'd via storage ops.
-            // To avoid ambiguity, we store a fresh sk into the new provider
-            // and deliberately write its pub bytes into Alice's expected
-            // position by constructing Bob's new KP with that sk.
             let sk = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
             sk.store(provider.storage()).unwrap();
             sk
         };
 
-        // To properly simulate key reuse, rebuild bob_kp_v2 with bob_signer
-        // (the ORIGINAL stable key), but the KP's private-key material needs
-        // to live in bob_db_v2 for Bob to decrypt the welcome. So: store
-        // bob_signer's keypair into bob_db_v2 as well.
+        // Store bob_signer's keypair into bob_db_v2 for Bob to decrypt the welcome.
         {
             let provider_v2 = PollisProvider::new(&bob_db_v2);
             bob_signer.store(provider_v2.storage()).unwrap();
         }
-        // Silence unused: we only made bob_signer_v2 to show the contrast
-        // with bob_signer. The actual re-enrollment KP reuses bob_signer.
         let _ = bob_signer_v2;
         let bob_kp_v2 =
             gen_key_package_with_existing_signer(&bob_db_v2, "bob", "bob_d1", &bob_signer);
@@ -3273,7 +3009,7 @@ mod tests {
                 naive.is_err(),
                 "plain add_members must reject duplicate signing key — if this \
                  starts passing, openmls has changed validation and the stale-leaf \
-                 branch in add_member_mls_impl may no longer be needed"
+                 branch in reconcile_group_mls_core may no longer be needed"
             );
         }
 
@@ -3330,6 +3066,391 @@ mod tests {
         assert_eq!(
             try_mls_decrypt(&alice_db, conv_id, &reply).unwrap(),
             b"thanks alice"
+        );
+    }
+
+    // ── reconcile core tests ────────────────────────────────────────────────
+
+    /// Helper: call `reconcile_group_mls_core` with pre-constructed inputs.
+    /// Validates raw KP bytes and delegates to the sync core.
+    fn reconcile(
+        actor_db: &rusqlite::Connection,
+        conv_id: &str,
+        roster_user_ids: &[&str],
+        available_kp_bytes: &[(String, String, Vec<u8>)],
+        actor_user_id: &str,
+        actor_device_id: &str,
+    ) -> (ReconcileOutcome, Option<ReconcileCommitData>) {
+        let provider = PollisProvider::new(actor_db);
+        let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+
+        let roster: std::collections::HashSet<String> =
+            roster_user_ids.iter().map(|s| s.to_string()).collect();
+
+        let available_kps: Vec<(String, String, KeyPackage)> = available_kp_bytes
+            .iter()
+            .map(|(uid, did, bytes)| {
+                let mut reader: &[u8] = bytes;
+                let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
+                let kp = kp_in
+                    .validate(provider.crypto(), ProtocolVersion::Mls10)
+                    .unwrap();
+                (uid.clone(), did.clone(), kp)
+            })
+            .collect();
+
+        reconcile_group_mls_core(
+            &provider,
+            &signer,
+            &mut group,
+            &roster,
+            &available_kps,
+            actor_user_id,
+            actor_device_id,
+        )
+        .unwrap()
+    }
+
+    /// 1. Clean state: tree matches roster, no available KPs → no-op.
+    #[test]
+    fn reconcile_no_drift() {
+        let conv_id = "01JTEST00000000000RECONCILE1";
+        let alice_db = make_db();
+        let bob_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice", "bob"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+
+        assert!(outcome.added.is_empty());
+        assert!(outcome.removed.is_empty());
+        assert_eq!(outcome.epoch_before, outcome.epoch_after);
+        assert!(!outcome.skipped_self_removal);
+        assert!(commit_data.is_none());
+    }
+
+    /// 2. Stale leaf: user removed from roster but leaf remains → remove.
+    #[test]
+    fn reconcile_remove_stale_leaf() {
+        let conv_id = "01JTEST00000000000RECONCILE2";
+        let alice_db = make_db();
+        let bob_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+
+        assert_eq!(outcome.removed.len(), 1);
+        assert_eq!(
+            outcome.removed[0],
+            ("bob".to_string(), "bob_d1".to_string())
+        );
+        assert!(outcome.added.is_empty());
+        assert!(outcome.epoch_after > outcome.epoch_before);
+        assert!(commit_data.is_some());
+    }
+
+    /// 3. Missing device: user in roster with available KP but not in tree → add.
+    #[test]
+    fn reconcile_add_missing_device() {
+        let conv_id = "01JTEST00000000000RECONCILE3";
+        let alice_db = make_db();
+        let bob_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        let bob_kp_bytes = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice", "bob"],
+            &[("bob".into(), "bob_d1".into(), bob_kp_bytes)],
+            "alice",
+            "alice_d1",
+        );
+
+        assert!(outcome.removed.is_empty());
+        assert_eq!(outcome.added.len(), 1);
+        assert_eq!(
+            outcome.added[0],
+            ("bob".to_string(), "bob_d1".to_string())
+        );
+        assert!(outcome.epoch_after > outcome.epoch_before);
+        let data = commit_data.unwrap();
+        assert!(
+            data.welcome_bytes.is_some(),
+            "additions must produce a Welcome"
+        );
+    }
+
+    /// 4. Combined add + remove in a single commit.
+    #[test]
+    fn reconcile_combined_add_and_remove() {
+        let conv_id = "01JTEST00000000000RECONCILE4";
+        let alice_db = make_db();
+        let bob_db = make_db();
+        let carol_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+
+        let carol_kp_bytes = gen_key_package_with_device(&carol_db, "carol", "carol_d1");
+
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice", "carol"],
+            &[("carol".into(), "carol_d1".into(), carol_kp_bytes)],
+            "alice",
+            "alice_d1",
+        );
+
+        assert_eq!(outcome.removed.len(), 1);
+        assert_eq!(
+            outcome.removed[0],
+            ("bob".to_string(), "bob_d1".to_string())
+        );
+        assert_eq!(outcome.added.len(), 1);
+        assert_eq!(
+            outcome.added[0],
+            ("carol".to_string(), "carol_d1".to_string())
+        );
+        assert!(outcome.epoch_after > outcome.epoch_before);
+        assert!(commit_data.is_some());
+    }
+
+    /// 5. Committer's own leaf is in the remove set → skipped, flag set.
+    #[test]
+    fn reconcile_committer_skip_self_removal() {
+        let conv_id = "01JTEST00000000000RECONCILE5";
+        let alice_db = make_db();
+        let bob_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+
+        // Alice NOT in roster — she can't remove herself.
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["bob"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+
+        assert!(outcome.skipped_self_removal);
+        assert!(outcome.removed.is_empty());
+        assert!(outcome.added.is_empty());
+        assert!(commit_data.is_none());
+    }
+
+    /// 6. Idempotence: reconcile twice with same desired state → second is no-op.
+    #[test]
+    fn reconcile_idempotent() {
+        let conv_id = "01JTEST00000000000RECONCILE6";
+        let alice_db = make_db();
+        let bob_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (_, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+
+        // First reconcile: remove bob.
+        let (outcome1, _) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+        assert_eq!(outcome1.removed.len(), 1);
+
+        // Second reconcile: same roster → no-op.
+        let (outcome2, commit_data2) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+        assert!(outcome2.removed.is_empty());
+        assert!(outcome2.added.is_empty());
+        assert!(commit_data2.is_none());
+    }
+
+    /// 7. User in roster but not in tree and no KP → not added, no error.
+    #[test]
+    fn reconcile_no_kp_user_not_added() {
+        let conv_id = "01JTEST00000000000RECONCILE7";
+        let alice_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice", "bob"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+
+        assert!(outcome.added.is_empty());
+        assert!(outcome.removed.is_empty());
+        assert!(commit_data.is_none());
+    }
+
+    /// 8. Add a second device for a user already in the tree.
+    #[test]
+    fn reconcile_add_second_device() {
+        let conv_id = "01JTEST00000000000RECONCILE8";
+        let alice_db = make_db();
+        let alice_d2_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        let alice_d2_kp = gen_key_package_with_device(&alice_d2_db, "alice", "alice_d2");
+
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice"],
+            &[("alice".into(), "alice_d2".into(), alice_d2_kp)],
+            "alice",
+            "alice_d1",
+        );
+
+        assert_eq!(outcome.added.len(), 1);
+        assert_eq!(
+            outcome.added[0],
+            ("alice".to_string(), "alice_d2".to_string())
+        );
+        assert!(outcome.removed.is_empty());
+        assert!(commit_data.is_some());
+    }
+
+    /// 9. Remove all leaves for a multi-device user removed from roster.
+    #[test]
+    fn reconcile_remove_multi_device_user() {
+        let conv_id = "01JTEST00000000000RECONCILE9";
+        let alice_db = make_db();
+        let bob_d1_db = make_db();
+        let bob_d2_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        let bob_d1_kp = gen_key_package_with_device(&bob_d1_db, "bob", "bob_d1");
+        let bob_d2_kp = gen_key_package_with_device(&bob_d2_db, "bob", "bob_d2");
+        let (_, welcome) = add_members_batch(&alice_db, conv_id, &[bob_d1_kp, bob_d2_kp]);
+        join_via_welcome(&bob_d1_db, &welcome);
+        join_via_welcome(&bob_d2_db, &welcome);
+
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+
+        assert_eq!(outcome.removed.len(), 2);
+        let removed_ids: std::collections::HashSet<(String, String)> =
+            outcome.removed.into_iter().collect();
+        assert!(removed_ids.contains(&("bob".to_string(), "bob_d1".to_string())));
+        assert!(removed_ids.contains(&("bob".to_string(), "bob_d2".to_string())));
+        assert!(outcome.added.is_empty());
+        assert!(commit_data.is_some());
+    }
+
+    /// 10. End-to-end: reconcile removes a stale leaf, remaining members apply
+    /// the commit, and the removed member cannot decrypt new messages.
+    #[test]
+    fn reconcile_e2e_remove_then_communicate() {
+        let conv_id = "01JTEST00000000000RECONCILEA";
+        let alice_db = make_db();
+        let bob_db = make_db();
+        let carol_db = make_db();
+
+        create_group_with_device(&alice_db, conv_id, "alice", "alice_d1");
+
+        let bob_kp = gen_key_package_with_device(&bob_db, "bob", "bob_d1");
+        let (add_bob_commit, bob_welcome) = add_member_to_group(&alice_db, conv_id, &bob_kp);
+        join_via_welcome(&bob_db, &bob_welcome);
+        let _ = add_bob_commit;
+
+        let carol_kp = gen_key_package_with_device(&carol_db, "carol", "carol_d1");
+        let (add_carol_commit, carol_welcome) =
+            add_member_to_group(&alice_db, conv_id, &carol_kp);
+        join_via_welcome(&carol_db, &carol_welcome);
+        apply_commit(&bob_db, conv_id, &add_carol_commit);
+
+        // Bob "leaves" — removed from roster. Alice reconciles.
+        let (outcome, commit_data) = reconcile(
+            &alice_db,
+            conv_id,
+            &["alice", "carol"],
+            &[],
+            "alice",
+            "alice_d1",
+        );
+
+        assert_eq!(outcome.removed.len(), 1);
+        assert_eq!(
+            outcome.removed[0],
+            ("bob".to_string(), "bob_d1".to_string())
+        );
+
+        // Carol applies the reconcile commit.
+        let data = commit_data.unwrap();
+        apply_commit(&carol_db, conv_id, &data.commit_bytes);
+
+        // Alice and Carol can communicate.
+        let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap(),
+            b"bob is gone"
+        );
+
+        let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"confirmed").unwrap();
+        assert_eq!(
+            try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap(),
+            b"confirmed"
+        );
+
+        // Bob cannot decrypt post-reconcile messages.
+        assert!(
+            try_mls_decrypt(&bob_db, conv_id, &alice_ct).is_none(),
+            "removed member must not decrypt after reconcile"
         );
     }
 }

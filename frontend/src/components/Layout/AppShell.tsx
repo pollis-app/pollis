@@ -93,7 +93,7 @@ export const AppShell: React.FC = () => {
       if (!firstChannel) {
         continue;
       }
-      invoke('process_pending_commits', { conversationId: firstChannel.id }).catch((err) => {
+      invoke('process_pending_commits', { conversationId: firstChannel.id, userId: currentUser.id }).catch((err) => {
         console.warn(`[mls] process_pending_commits for group ${group.id}:`, err);
       });
     }
@@ -177,7 +177,7 @@ export const AppShell: React.FC = () => {
             const firstChannel = group.channels[0];
             if (firstChannel) {
               mlsPromises.push(
-                invoke('process_pending_commits', { conversationId: firstChannel.id }).catch((err) => {
+                invoke('process_pending_commits', { conversationId: firstChannel.id, userId: currentUser.id }).catch((err) => {
                   console.warn(`[mls] process_pending_commits on sync for ${group.id}:`, err);
                 }),
               );

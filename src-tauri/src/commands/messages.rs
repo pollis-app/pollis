@@ -148,28 +148,16 @@ pub async fn send_message(
     {
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
-            let _ = crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &sender_id, did).await;
+            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &sender_id, did).await {
+                eprintln!("[messages] send_message: poll_mls_welcomes for {mls_group_id}: {e}");
+            }
         }
     }
 
-    // Process pending commits so the local epoch is current before encrypting.
-    let _ = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id).await;
-
-    // If the MLS group still doesn't exist locally after polling welcomes and
-    // processing commits, return an error rather than repairing.  Repair creates
-    // a divergent group that breaks all other participants.
-    {
-        let has_group = {
-            let guard = state.local_db.lock().await;
-            guard.as_ref().map_or(false, |db| {
-                crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
-            })
-        };
-        if !has_group {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not available — this device hasn't received a Welcome yet for conversation {conversation_id}"
-            )));
-        }
+    // Ensure this device has a local MLS group at the current epoch.
+    // Processes pending commits; falls back to external-join if needed.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id, &sender_id).await {
+        eprintln!("[messages] send_message: process_pending_commits for {mls_group_id}: {e}");
     }
 
     let ciphertext_remote = {
@@ -314,27 +302,9 @@ pub async fn get_channel_messages(
         }
     }
 
-    // Process any pending MLS commits (membership changes) before decrypting
-    // so the local epoch is current and messages from the new epoch are readable.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id).await {
+    // Ensure this device has a local MLS group at the current epoch.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id, &user_id).await {
         eprintln!("[messages] process_pending_commits for {mls_group_id}: {e}");
-    }
-
-    // If the MLS group still doesn't exist locally after polling welcomes and
-    // processing commits, log a warning.  Do NOT repair — repair creates an
-    // independent group with different keys and deletes the commit log, which
-    // breaks every other device/user already in the real group.  Messages will
-    // remain encrypted (content=null) until this device receives a proper Welcome.
-    {
-        let has_group = {
-            let guard = state.local_db.lock().await;
-            guard.as_ref().map_or(false, |db| {
-                crate::commands::mls::has_local_group(db.conn(), &mls_group_id)
-            })
-        };
-        if !has_group {
-            eprintln!("[messages] MLS group {mls_group_id} missing locally — messages will be encrypted until a Welcome is received");
-        }
     }
 
     let mut rows = match cursor {
@@ -599,23 +569,9 @@ pub async fn get_dm_messages(
         }
     }
 
-    // Process any pending MLS commits before decrypting.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &dm_channel_id).await {
+    // Ensure this device has a local MLS group at the current epoch.
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &dm_channel_id, &user_id).await {
         eprintln!("[messages] process_pending_commits for DM {dm_channel_id}: {e}");
-    }
-
-    // If the MLS group still doesn't exist locally, log a warning.  Do NOT
-    // repair — see comment in get_channel_messages for rationale.
-    {
-        let has_group = {
-            let guard = state.local_db.lock().await;
-            guard.as_ref().map_or(false, |db| {
-                crate::commands::mls::has_local_group(db.conn(), &dm_channel_id)
-            })
-        };
-        if !has_group {
-            eprintln!("[messages] MLS group for DM {dm_channel_id} missing locally — messages will be encrypted until a Welcome is received");
-        }
     }
 
     let conn = state.remote_db.conn().await?;

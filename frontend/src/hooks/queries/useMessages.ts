@@ -142,7 +142,7 @@ export function useMessages(channelId: string | null, conversationId: string | n
       if (isChannel && channelId && currentUser) {
         // Advance the local MLS epoch before decrypting so any pending
         // member-add or member-remove commits are applied first.
-        await invoke('process_pending_commits', { conversationId: channelId }).catch(() => {});
+        await invoke('process_pending_commits', { conversationId: channelId, userId: currentUser.id }).catch(() => {});
 
         const page = await invoke<MessagePage>('get_channel_messages', {
           userId: currentUser.id,
@@ -159,7 +159,7 @@ export function useMessages(channelId: string | null, conversationId: string | n
         // Drain any pending MLS Welcome messages first — the DM creator may have
         // added us to the MLS group while we were already online.
         await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch(() => {});
-        await invoke('process_pending_commits', { conversationId }).catch(() => {});
+        await invoke('process_pending_commits', { conversationId, userId: currentUser.id }).catch(() => {});
 
         const page = await invoke<MessagePage>('get_dm_messages', {
           userId: currentUser.id,
