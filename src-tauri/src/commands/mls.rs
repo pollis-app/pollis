@@ -1369,6 +1369,57 @@ pub async fn process_pending_commits_inner(
         }
     }
 
+    // If the commit chain is ahead of where we ended up (a commit we
+    // couldn't process), recover by external-joining to the latest
+    // published GroupInfo. This replaces the local group state entirely,
+    // jumping to the current epoch.
+    let latest_remote_epoch: Option<i64> = {
+        let conn = state.remote_db.conn().await?;
+        let mut rows = conn
+            .query(
+                "SELECT epoch FROM mls_group_info WHERE conversation_id = ?1",
+                libsql::params![mls_group_id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Some(row.get(0)?),
+            None => None,
+        }
+    };
+
+    if let Some(remote_epoch) = latest_remote_epoch {
+        if remote_epoch as u64 > current_epoch {
+            // Extract user_id from the local group's credential before
+            // deleting it.
+            let user_id = {
+                let guard = state.local_db.lock().await;
+                guard.as_ref().and_then(|db| {
+                    let provider = PollisProvider::new(db.conn());
+                    let group_id = GroupId::from_slice(mls_group_id.as_bytes());
+                    MlsGroup::load(provider.storage(), &group_id)
+                        .ok()
+                        .flatten()
+                        .and_then(|g| {
+                            g.own_leaf_node().map(|leaf| {
+                                parse_credential_user_id(leaf.credential())
+                            })
+                        })
+                })
+            };
+
+            if let Some(uid) = user_id {
+                eprintln!(
+                    "[mls] process_pending_commits: local epoch {current_epoch} behind remote {remote_epoch} for {mls_group_id} — external-joining to recover"
+                );
+                if let Err(e) = external_join_group(state, mls_group_id, &uid).await {
+                    eprintln!(
+                        "[mls] process_pending_commits: external_join_group recovery failed for {mls_group_id}: {e}"
+                    );
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 

@@ -160,8 +160,7 @@ pub async fn send_message(
     }
 
     // If the MLS group still doesn't exist locally after polling welcomes and
-    // processing commits, return an error rather than repairing.  Repair creates
-    // a divergent group that breaks all other participants.
+    // processing commits, attempt to external-join using the published GroupInfo.
     {
         let has_group = {
             let guard = state.local_db.lock().await;
@@ -170,9 +169,13 @@ pub async fn send_message(
             })
         };
         if !has_group {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "MLS group not available — this device hasn't received a Welcome yet for conversation {conversation_id}"
-            )));
+            if let Err(e) = crate::commands::mls::external_join_group(
+                state.inner(), &mls_group_id, &sender_id,
+            ).await {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "MLS group not available for conversation {conversation_id} and external-join failed: {e}"
+                )));
+            }
         }
     }
 
@@ -325,10 +328,7 @@ pub async fn get_channel_messages(
     }
 
     // If the MLS group still doesn't exist locally after polling welcomes and
-    // processing commits, log a warning.  Do NOT repair — repair creates an
-    // independent group with different keys and deletes the commit log, which
-    // breaks every other device/user already in the real group.  Messages will
-    // remain encrypted (content=null) until this device receives a proper Welcome.
+    // processing commits, attempt to external-join using the published GroupInfo.
     {
         let has_group = {
             let guard = state.local_db.lock().await;
@@ -337,7 +337,11 @@ pub async fn get_channel_messages(
             })
         };
         if !has_group {
-            eprintln!("[messages] MLS group {mls_group_id} missing locally — messages will be encrypted until a Welcome is received");
+            if let Err(e) = crate::commands::mls::external_join_group(
+                state.inner(), &mls_group_id, &user_id,
+            ).await {
+                eprintln!("[messages] MLS group {mls_group_id} missing locally and external-join failed: {e}");
+            }
         }
     }
 
@@ -608,8 +612,6 @@ pub async fn get_dm_messages(
         eprintln!("[messages] process_pending_commits for DM {dm_channel_id}: {e}");
     }
 
-    // If the MLS group still doesn't exist locally, log a warning.  Do NOT
-    // repair — see comment in get_channel_messages for rationale.
     {
         let has_group = {
             let guard = state.local_db.lock().await;
@@ -618,7 +620,11 @@ pub async fn get_dm_messages(
             })
         };
         if !has_group {
-            eprintln!("[messages] MLS group for DM {dm_channel_id} missing locally — messages will be encrypted until a Welcome is received");
+            if let Err(e) = crate::commands::mls::external_join_group(
+                state.inner(), &dm_channel_id, &user_id,
+            ).await {
+                eprintln!("[messages] MLS group for DM {dm_channel_id} missing locally and external-join failed: {e}");
+            }
         }
     }
 
