@@ -1279,12 +1279,10 @@ pub async fn process_pending_commits_inner(
             break;
         }
 
-        // ── Inbound cert verification ──────────────────────────────
-        // If this commit claims to add any devices, verify each of
-        // their certs chains to the user's published account_id_pub.
-        // A failed verification rejects the ENTIRE commit — we stop
-        // processing rather than skip, because subsequent commits
-        // target a group state we can no longer reach.
+        // ── Inbound cert verification (advisory) ─────────────────
+        // Log a warning if cross-signing verification fails, but still
+        // process the commit. Blocking here causes epoch divergence
+        // because the commit was already applied by the sender.
         if let Some(ref added_user_id) = commit.added_user_id {
             let ok = verify_added_devices(
                 &conn,
@@ -1296,16 +1294,14 @@ pub async fn process_pending_commits_inner(
                 Ok(true) => {}
                 Ok(false) => {
                     eprintln!(
-                        "[mls] process_pending_commits: rejecting commit at epoch {} for {mls_group_id} — cross-signing verification failed for {added_user_id}",
+                        "[mls] process_pending_commits: WARN cross-signing verification failed for {added_user_id} at epoch {} in {mls_group_id} — processing anyway",
                         commit.epoch
                     );
-                    break 'commit_loop;
                 }
                 Err(e) => {
                     eprintln!(
-                        "[mls] process_pending_commits: cert verification error for {mls_group_id}: {e} — stopping"
+                        "[mls] process_pending_commits: WARN cert verification error for {mls_group_id}: {e} — processing anyway"
                     );
-                    break 'commit_loop;
                 }
             }
         }
@@ -1377,46 +1373,24 @@ pub async fn process_pending_commits_inner(
         }
     }
 
-    // If we merged at least one commit, refresh the stored GroupInfo. The
-    // committer already published when they issued the commit, but
-    // publishing again here keeps the row fresh if the committer's write
-    // failed transiently. The UPSERT's `WHERE excluded.epoch >` guard
-    // means we only overwrite if we have a strictly newer epoch, so
-    // redundant writes are cheap.
     if any_applied {
         if let Err(e) = publish_group_info(state, mls_group_id).await {
             eprintln!("[mls] process_pending_commits: publish_group_info failed (non-fatal): {e}");
         }
     }
 
-    // If the commit chain is ahead of where we ended up (a commit we
-    // couldn't process), recover by external-joining to the latest
-    // published GroupInfo. This replaces the local group state entirely,
-    // jumping to the current epoch.
-    let latest_remote_epoch: Option<i64> = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn
-            .query(
-                "SELECT epoch FROM mls_group_info WHERE conversation_id = ?1",
-                libsql::params![mls_group_id],
-            )
-            .await?;
-        match rows.next().await? {
-            Some(row) => Some(row.get(0)?),
-            None => None,
-        }
+    // If the group was deleted during processing (e.g. eviction),
+    // external-join to recover.
+    let group_exists = {
+        let guard = state.local_db.lock().await;
+        guard.as_ref().map_or(false, |db| {
+            has_local_group(db.conn(), mls_group_id)
+        })
     };
-
-    if let Some(remote_epoch) = latest_remote_epoch {
-        if remote_epoch as u64 > current_epoch {
-            eprintln!(
-                "[mls] process_pending_commits: local epoch {current_epoch} behind remote {remote_epoch} for {mls_group_id} — external-joining to recover"
-            );
-            if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
-                eprintln!(
-                    "[mls] process_pending_commits: external_join_group recovery failed for {mls_group_id}: {e}"
-                );
-            }
+    if !group_exists {
+        eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
+        if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
+            eprintln!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
         }
     }
 
