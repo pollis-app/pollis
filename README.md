@@ -12,9 +12,9 @@ Messages are encrypted on your device using MLS (Messaging Layer Security) befor
 - **Desktop**: Tauri 2 (Rust + React/TypeScript)
 - **Encryption**: MLS (Messaging Layer Security) for group channel encryption, AES-256-GCM
 - **Remote DB**: Turso (libSQL) — direct from the app, no middleman
-- **Local DB**: SQLite via SQLCipher (encrypted at rest)
+- **Local DB**: SQLite via rusqlite (encrypted at rest, key in OS keystore)
 - **Auth**: Email OTP, session stored in the OS keystore
-- **Real-time**: LiveKit (WebRTC for voice calls and real-time presence)
+- **Real-time**: LiveKit (voice calls via Rust `livekit` crate, real-time presence)
 - **File storage**: Cloudflare R2
 
 ## Security model
@@ -25,7 +25,7 @@ Forward secrecy is provided by MLS's key schedule: each epoch advance rotates th
 
 ## Releases
 
-Builds for macOS (Universal), Windows, and Linux are published automatically on every version tag via GitHub Actions. Binaries are uploaded to Cloudflare R2, and a `latest.json` manifest is written alongside them. The marketing site at [pollis.com](https://pollis.com) reads that manifest on load to always show the current download links.
+Builds for macOS (Apple Silicon), Windows, and Linux are published automatically on every version tag via GitHub Actions. Binaries are uploaded to Cloudflare R2, and a `latest.json` manifest is written alongside them. The marketing site at [pollis.com](https://pollis.com) reads that manifest on load to always show the current download links.
 
 ![Pollis UI](readme/new_app.png)
 
@@ -96,7 +96,7 @@ All dev-only env vars. Set them in `.env.development` or pass inline.
 
 ```bash
 pnpm build            # Current platform
-pnpm build:macos      # Universal binary (Apple Silicon)
+pnpm build:macos      # Universal macOS binary
 pnpm build:linux      # amd64 AppImage, deb, rpm
 pnpm build:windows    # amd64 NSIS installer
 ```
