@@ -83,7 +83,7 @@ fn apply_windows_rounded_corners(window: &tauri::WebviewWindow) {
     };
     if let Ok(hwnd) = window.hwnd() {
         let hwnd = hwnd.0 as HWND;
-        let pref: u32 = DWMWCP_ROUND;
+        let pref: u32 = DWMWCP_ROUND as u32;
         unsafe {
             let _ = DwmSetWindowAttribute(
                 hwnd,
@@ -382,11 +382,11 @@ commands::livekit::get_livekit_token,
         })
         .build(tauri::generate_context!())
         .expect("error while building Pollis")
-        .run(|app, event| {
+        .run(|_app, _event| {
             // On macOS, re-show the window when the dock icon is clicked.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = event {
-                show_on_reopen(app);
+            if let tauri::RunEvent::Reopen { .. } = _event {
+                show_on_reopen(_app);
             }
         });
 }

@@ -442,13 +442,13 @@ async fn attach_remote_track(
 /// hardware interfaces (hw:CARD=X,DEV=0). Everything else — sysdefault,
 /// speex, upmix, vdownmix, front:, iec958:, etc. — is filtered out.
 /// On macOS/Windows all devices pass through.
-fn is_useful_device(name: &str) -> bool {
+fn is_useful_device(_name: &str) -> bool {
     #[cfg(not(target_os = "linux"))]
     return true;
     #[cfg(target_os = "linux")]
     {
-        matches!(name, "default" | "pulse" | "pipewire" | "jack")
-            || (name.starts_with("hw:") && name.contains("DEV=0"))
+        matches!(_name, "default" | "pulse" | "pipewire" | "jack")
+            || (_name.starts_with("hw:") && _name.contains("DEV=0"))
     }
 }
 
