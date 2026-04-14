@@ -13,19 +13,6 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "pollis"
 path = "src/main.rs"
 
-[[bin]]
-name = "migrate"
-path = "src/bin/migrate.rs"
-required-features = ["migrate-bin"]
-
-[[bin]]
-name = "apply_migrations"
-path = "src/bin/apply_migrations.rs"
-required-features = ["migrate-bin"]
-
-[features]
-migrate-bin = []
-
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
