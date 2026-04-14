@@ -1,3 +1,4 @@
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use std::sync::Arc;
@@ -867,6 +868,16 @@ pub async fn search_messages(
 ///
 /// Best-effort on Turso: if the envelope was already cleaned up by the watermark
 /// mechanism the remote delete is a no-op, but the local delete still proceeds.
+///
+/// Attachment cleanup: if the message had one or more attachments, each
+/// content_hash is reference-counted against the sender's other non-deleted
+/// local messages. When no other local message references the same hash, the
+/// `attachment_object` row is removed from Turso and the R2 object is deleted.
+/// Cross-user references are invisible here (attachment metadata lives only
+/// inside the MLS-encrypted payload), so another member re-uploading the same
+/// bytes simply re-registers the dedup row — convergent encryption guarantees
+/// the R2 key is identical. R2 deletion is best-effort and must not fail the
+/// overall delete; orphaned R2 objects can be reclaimed by a future sweep.
 #[tauri::command]
 pub async fn delete_message(
     message_id: String,
@@ -887,22 +898,143 @@ pub async fn delete_message(
         libsql::params![message_id.clone()],
     ).await?;
 
-    // Remove from the sender's local plaintext cache.
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+    // Read the local plaintext content before deleting so we can inspect any
+    // embedded attachment metadata. Then delete the local row and compute
+    // which attachments are no longer referenced by any of this user's other
+    // non-deleted messages. Done inside a single lock scope to avoid races
+    // with concurrent sends.
+    let orphaned: Vec<AttachmentRef> = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-    let rows_affected = db.conn().execute(
-        "DELETE FROM message WHERE id = ?1 AND sender_id = ?2",
-        rusqlite::params![message_id, user_id],
-    )?;
+        let content: Option<String> = db.conn()
+            .query_row(
+                "SELECT content FROM message WHERE id = ?1 AND sender_id = ?2",
+                rusqlite::params![message_id, user_id],
+                |row| row.get(0),
+            )
+            .optional()?;
 
-    if rows_affected == 0 {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "Message not found or you are not the sender"
-        )));
+        let rows_affected = db.conn().execute(
+            "DELETE FROM message WHERE id = ?1 AND sender_id = ?2",
+            rusqlite::params![message_id, user_id],
+        )?;
+
+        if rows_affected == 0 {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "Message not found or you are not the sender"
+            )));
+        }
+
+        let raw = match content {
+            Some(r) => r,
+            None => String::new(),
+        };
+        let attachments = parse_attachment_refs(&raw);
+        if attachments.is_empty() {
+            Vec::new()
+        } else {
+            filter_orphaned_locally(db.conn(), &user_id, &attachments)?
+        }
+    };
+
+    for att in orphaned {
+        cleanup_attachment(&state, &att).await;
     }
 
     Ok(())
+}
+
+/// Attachment identifier extracted from a message's plaintext JSON payload.
+#[derive(Debug, Clone)]
+struct AttachmentRef {
+    content_hash: String,
+    r2_key: String,
+}
+
+/// Parse the `_att` array out of a message's local plaintext content and
+/// return the (content_hash, r2_key) pairs. Returns an empty Vec for plain
+/// text messages, malformed JSON, or any missing fields.
+fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
+    if !raw.starts_with('{') {
+        return Vec::new();
+    }
+    let Ok(parsed) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Vec::new();
+    };
+    let Some(atts) = parsed.get("_att").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    atts.iter()
+        .filter_map(|a| {
+            let hash = a.get("hash")?.as_str()?.to_string();
+            let key = a.get("key")?.as_str()?.to_string();
+            if hash.is_empty() || key.is_empty() {
+                return None;
+            }
+            Some(AttachmentRef { content_hash: hash, r2_key: key })
+        })
+        .collect()
+}
+
+/// Return the subset of the given attachments that are not referenced by any
+/// of the user's other non-deleted local messages. Scans the sender's local
+/// message cache only — cross-user references are invisible because
+/// attachment metadata lives inside the MLS-encrypted payload.
+fn filter_orphaned_locally(
+    conn: &rusqlite::Connection,
+    user_id: &str,
+    candidates: &[AttachmentRef],
+) -> Result<Vec<AttachmentRef>> {
+    let mut stmt = conn.prepare(
+        "SELECT content FROM message
+         WHERE sender_id = ?1 AND deleted_at IS NULL AND content IS NOT NULL",
+    )?;
+    let rows = stmt.query_map(rusqlite::params![user_id], |row| row.get::<_, String>(0))?;
+
+    let mut still_referenced = std::collections::HashSet::<String>::new();
+    for row in rows {
+        let content = row?;
+        for att in parse_attachment_refs(&content) {
+            still_referenced.insert(att.content_hash);
+        }
+    }
+
+    Ok(candidates
+        .iter()
+        .filter(|a| !still_referenced.contains(&a.content_hash))
+        .cloned()
+        .collect())
+}
+
+/// Delete an attachment's Turso dedup row and its R2 object. Best-effort on
+/// both: failures are logged, never bubbled. The attachment_object row is
+/// removed first — if R2 deletion fails, a future re-upload will re-register
+/// the row and overwrite the object, restoring a consistent state.
+async fn cleanup_attachment(state: &AppState, att: &AttachmentRef) {
+    let remote_result = async {
+        let conn = state.remote_db.conn().await?;
+        conn.execute(
+            "DELETE FROM attachment_object WHERE content_hash = ?1",
+            libsql::params![att.content_hash.clone()],
+        ).await?;
+        Ok::<_, crate::error::Error>(())
+    }
+    .await;
+
+    if let Err(e) = remote_result {
+        eprintln!(
+            "[delete_message] failed to remove attachment_object for {}: {e}",
+            att.content_hash
+        );
+    }
+
+    if let Err(e) = crate::commands::r2::delete_r2_object(state, &att.r2_key).await {
+        eprintln!(
+            "[delete_message] failed to delete R2 object {} (hash {}): {e}",
+            att.r2_key, att.content_hash
+        );
+    }
 }
 
 /// Edit a message: updates the sender's local plaintext cache immediately and
