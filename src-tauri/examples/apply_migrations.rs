@@ -16,8 +16,8 @@
 ///
 /// Usage:
 ///   cargo run --manifest-path src-tauri/Cargo.toml \
-///     --bin apply_migrations --features pollis/migrate-bin
-///   cargo run … --bin apply_migrations --features pollis/migrate-bin -- --full
+///     --example apply_migrations
+///   cargo run … --example apply_migrations -- --full
 
 use std::fs;
 use std::path::{Path, PathBuf};
