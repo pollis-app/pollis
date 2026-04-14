@@ -45,7 +45,7 @@ All backend calls from the frontend use `invoke("command_name", { args })`. Comm
 - `get_channel_messages(user_id, channel_id, limit, cursor?)` → `MessagePage`
 - `get_dm_messages(user_id, dm_channel_id, limit, cursor?)` → `MessagePage`
 - `edit_message(message_id, conversation_id, sender_id, new_content)`
-- `delete_message(message_id, conversation_id, sender_id)`
+- `delete_message(message_id, user_id)` — hard-deletes the envelope on Turso + the sender's local row. If the message had attachments (`_att` in the plaintext JSON payload), each `content_hash` is reference-counted against the sender's other non-deleted local messages; unreferenced ones have their `attachment_object` row + R2 object removed (best-effort, logged on failure). Cross-user references are invisible because attachment metadata lives inside the MLS-encrypted payload — convergent encryption means another member re-uploading the same file simply re-registers the dedup row.
 - `search_messages(user_id, query, conversation_id?)` → `Message[]`
 
 ## dm (`commands/dm.rs`)
@@ -97,6 +97,8 @@ All backend calls from the frontend use `invoke("command_name", { args })`. Comm
 - `upload_file(data, key, content_type)` → URL
 - `download_file(key)` → bytes
 - `presign_upload(key, content_type)` → presigned URL
+- `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso.
+- Internal: `delete_r2_object(state, r2_key)` — SigV4 DELETE used by `delete_message` to purge orphaned attachments. Treats 404 as success.
 
 ---
 _Back to [index.md](./index.md)_
