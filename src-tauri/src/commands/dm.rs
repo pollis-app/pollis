@@ -26,6 +26,7 @@ pub struct DmChannel {
 pub struct DmChannelMember {
     pub user_id: String,
     pub username: Option<String>,
+    pub avatar_url: Option<String>,
     pub added_by: String,
     pub added_at: String,
     pub accepted_at: Option<String>,
@@ -37,7 +38,7 @@ async fn fetch_dm_members(
     dm_channel_id: &str,
 ) -> Result<Vec<DmChannelMember>> {
     let mut rows = conn.query(
-        "SELECT dcm.user_id, u.username, dcm.added_by, dcm.added_at, dcm.accepted_at
+        "SELECT dcm.user_id, u.username, u.avatar_url, dcm.added_by, dcm.added_at, dcm.accepted_at
          FROM dm_channel_member dcm
          LEFT JOIN users u ON u.id = dcm.user_id
          WHERE dcm.dm_channel_id = ?1",
@@ -49,9 +50,10 @@ async fn fetch_dm_members(
         members.push(DmChannelMember {
             user_id: row.get(0)?,
             username: row.get(1)?,
-            added_by: row.get(2)?,
-            added_at: row.get(3)?,
-            accepted_at: row.get(4)?,
+            avatar_url: row.get(2)?,
+            added_by: row.get(3)?,
+            added_at: row.get(4)?,
+            accepted_at: row.get(5)?,
         });
     }
     Ok(members)

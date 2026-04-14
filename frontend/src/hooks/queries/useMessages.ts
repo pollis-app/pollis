@@ -42,7 +42,7 @@ type RawDmChannel = {
   id: string;
   created_by: string;
   created_at: string;
-  members: Array<{ user_id: string; username?: string; added_by: string; added_at: string }>;
+  members: Array<{ user_id: string; username?: string; avatar_url?: string; added_by: string; added_at: string }>;
 };
 
 // Parses structured attachment JSON embedded in message content.
@@ -277,6 +277,8 @@ export function useDMConversations() {
           id: c.id,
           user1_id: currentUser.id,
           user2_identifier: other?.username || other?.user_id || 'Unknown',
+          user2_id: other?.user_id,
+          user2_avatar_url: other?.avatar_url,
           created_at: new Date(c.created_at).getTime(),
           updated_at: new Date(c.created_at).getTime(),
         };

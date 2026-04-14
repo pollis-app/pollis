@@ -100,6 +100,23 @@ export function useUserAvatar() {
   });
 }
 
+export function useAvatarBlobUrl(avatarKey: string | null | undefined) {
+  return useQuery({
+    queryKey: ["avatar-blob", avatarKey ?? null],
+    queryFn: async (): Promise<string | null> => {
+      if (!avatarKey) {
+        return null;
+      }
+      const { getFileDownloadUrl } = await import("../../services/r2-upload");
+      return await getFileDownloadUrl(avatarKey);
+    },
+    enabled: !!avatarKey,
+    staleTime: 1000 * 60 * 30,
+    gcTime: 1000 * 60 * 60,
+    retry: 1,
+  });
+}
+
 export function useUpdateAvatar() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);
@@ -121,6 +138,15 @@ export function useUpdateAvatar() {
       });
       queryClient.invalidateQueries({
         queryKey: ["user", "avatar", currentUser?.id],
+      });
+      // Because the R2 key is stable per user (`avatars/{userId}`), the
+      // blob-url cache key doesn't change after re-upload — invalidate it
+      // explicitly so a fresh download_file fires and the new bytes render.
+      queryClient.invalidateQueries({
+        queryKey: ["avatar-blob", avatarUrl],
+      });
+      queryClient.invalidateQueries({
+        queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
       });
     },
   });

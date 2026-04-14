@@ -86,6 +86,8 @@ export interface DMConversation {
   id: string; // ULID (conversation_id)
   user1_id: string; // user_id
   user2_identifier: string; // username/email/phone of other user
+  user2_id?: string;
+  user2_avatar_url?: string;
   created_at: number;
   updated_at: number;
 }
