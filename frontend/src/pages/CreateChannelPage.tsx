@@ -10,10 +10,7 @@ export const CreateChannelPage: React.FC = () => {
   const { setSelectedChannelId } = useAppStore();
 
   return (
-    <PageShell
-      title="New Channel"
-      onBack={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
-    >
+    <PageShell title="New Channel">
       <CreateChannel
         onSuccess={(channelId, channelType) => {
           if (!channelId || channelType === "voice") {

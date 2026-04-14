@@ -12,10 +12,7 @@ export const DMSettingsPage: React.FC = () => {
   const leaveDMMutation = useLeaveDM();
 
   return (
-    <PageShell
-      title="Conversation Settings"
-      onBack={() => navigate({ to: "/dms/$conversationId", params: { conversationId } })}
-    >
+    <PageShell title="Conversation Settings">
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         {leaveDMMutation.isError && (
           <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>

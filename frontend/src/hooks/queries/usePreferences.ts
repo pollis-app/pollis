@@ -50,7 +50,7 @@ export function usePreferences() {
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
         auto_gain_control: getPreference<boolean>(json, "auto_gain_control", true),
-        auto_join_voice: getPreference<boolean>(json, "auto_join_voice", true),
+        auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
       };
     },
     enabled: !!currentUser,

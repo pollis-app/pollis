@@ -25,7 +25,7 @@ use crate::{commands::livekit::make_token, error::Result, state::AppState};
 
 // ── cpal::Stream is Send on Linux and macOS. On Windows WASAPI it is not,
 // so we wrap it with an explicit unsafe impl to allow storage in AppState.
-struct SendableStream(cpal::Stream);
+pub(crate) struct SendableStream(pub(crate) cpal::Stream);
 unsafe impl Send for SendableStream {}
 unsafe impl Sync for SendableStream {}
 
@@ -123,7 +123,7 @@ impl VoiceState {
 
 // ── Internal helpers ──────────────────────────────────────────────────────
 
-fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<cpal::Device> {
+pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<cpal::Device> {
     let device = match name {
         None => {
             // On Linux, ALSA's system default may be a virtual device like
@@ -199,7 +199,7 @@ fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<c
 
 /// Build a cpal input stream that converts mic audio to i16 mono and sends
 /// 10ms chunks to `frame_tx`. Downmixes multi-channel input to mono.
-fn start_mic_stream(
+pub(crate) fn start_mic_stream(
     device: &cpal::Device,
     frame_tx: tokio::sync::mpsc::UnboundedSender<(Vec<i16>, u32)>,
     is_muted: Arc<AtomicBool>,
@@ -276,7 +276,7 @@ fn start_mic_stream(
 
 /// Build a cpal output stream driven by a shared ring buffer.
 /// Returns the stream (kept alive by the caller) and the buffer to push into.
-fn start_speaker_stream(
+pub(crate) fn start_speaker_stream(
     device: &cpal::Device,
 ) -> Result<(SendableStream, u32, u32, Arc<Mutex<VecDeque<f32>>>)> {
     let config = device

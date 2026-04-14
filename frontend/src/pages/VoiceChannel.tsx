@@ -35,7 +35,7 @@ export const VoiceChannelPage: React.FC = () => {
     if (hasAutoJoined.current || isInCall || !preferences.query.data) {
       return;
     }
-    if (preferences.query.data.auto_join_voice !== false) {
+    if (preferences.query.data.auto_join_voice === true) {
       hasAutoJoined.current = true;
       setActiveVoiceChannelId(channelId);
     }

@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { useRouter } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
 import { PageShell } from "../components/Layout/PageShell";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
+import { Button } from "../components/ui/Button";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import { switchVoiceDevice } from "../hooks/useVoiceChannel";
+import { useVoiceTest } from "../hooks/useVoiceTest";
 import type { AudioDevice } from "../types";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
@@ -64,8 +65,8 @@ const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onCh
 );
 
 export const VoiceSettingsPage: React.FC = () => {
-  const router = useRouter();
   const preferences = usePreferences();
+  const test = useVoiceTest();
 
   const [inputs, setInputs] = useState<AudioDevice[]>([]);
   const [outputs, setOutputs] = useState<AudioDevice[]>([]);
@@ -96,11 +97,20 @@ export const VoiceSettingsPage: React.FC = () => {
   const setInput = (id: string) => {
     setSelectedInputState(id);
     switchVoiceDevice("audioinput", id);
+    // Stop any running test so it doesn't keep hitting the stale device.
+    if (test.phase !== "idle") {
+      test.stopMicTest();
+      test.stopPlayback();
+    }
   };
 
   const setOutput = (id: string) => {
     setSelectedOutputState(id);
     switchVoiceDevice("audiooutput", id);
+    if (test.phase !== "idle") {
+      test.stopMicTest();
+      test.stopPlayback();
+    }
   };
 
   const handleNoiseFloor = (val: number) => {
@@ -114,13 +124,13 @@ export const VoiceSettingsPage: React.FC = () => {
     preferences.mutation.mutate({ ...preferences.query.data, auto_gain_control: enabled });
   };
 
-  const autoJoinVoice = preferences.query.data?.auto_join_voice ?? true;
+  const autoJoinVoice = preferences.query.data?.auto_join_voice ?? false;
   const handleAutoJoinVoice = (enabled: boolean) => {
     preferences.mutation.mutate({ ...preferences.query.data, auto_join_voice: enabled });
   };
 
   return (
-    <PageShell title="Voice Settings" onBack={() => router.history.back()} scrollable>
+    <PageShell title="Voice Settings" scrollable>
       <div className="flex flex-col px-6 py-8 gap-8" style={{ maxWidth: 400 }}>
 
         <section className="flex flex-col gap-4 mb-12">
@@ -144,6 +154,141 @@ export const VoiceSettingsPage: React.FC = () => {
             onChange={setOutput}
             fallbackLabel="Default speaker"
           />
+        </section>
+
+        <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">
+          <h2
+            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+          >
+            Test
+          </h2>
+
+          {/* ── Microphone test ────────────────────────────────────────── */}
+          <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
+            <span style={{ color: "var(--c-text-muted)" }}>Microphone</span>
+
+            {/* Level meter. Reserves its height even when idle so the
+                layout doesn't jump on start/stop. */}
+            <div
+              data-testid="voice-test-meter"
+              aria-label="Microphone level"
+              style={{
+                height: 12,
+                background: "var(--c-surface)",
+                borderRadius: 4,
+                overflow: "hidden",
+                border: "1px solid var(--c-border)",
+              }}
+            >
+              <div
+                style={{
+                  width: `${Math.max(test.peak, test.rms) * 100}%`,
+                  height: "100%",
+                  background: test.gated ? "var(--c-text-muted)" : "var(--c-accent)",
+                  transition: "width 60ms linear",
+                }}
+              />
+            </div>
+            {test.phase === "mic_listening" && test.gated && (
+              <span
+                className="text-xs font-mono"
+                style={{ color: "var(--c-text-muted)" }}
+              >
+                below noise gate — raise your voice or lower the gate
+              </span>
+            )}
+
+            <div className="flex flex-wrap gap-2 mt-1">
+              <Button
+                data-testid={
+                  test.phase === "mic_listening"
+                    ? "voice-test-stop-mic"
+                    : "voice-test-start-mic"
+                }
+                variant="secondary"
+                disabled={
+                  test.phase === "recording" || test.phase === "playing"
+                }
+                onClick={() =>
+                  test.phase === "mic_listening"
+                    ? test.stopMicTest()
+                    : test.startMicTest(selectedInput, selectedOutput, false)
+                }
+              >
+                {test.phase === "mic_listening"
+                  ? "Stop mic test"
+                  : "Start mic test"}
+              </Button>
+              <Button
+                data-testid="voice-test-record-playback"
+                variant="secondary"
+                disabled={test.phase === "recording" || test.phase === "playing"}
+                onClick={() =>
+                  test.recordAndPlayBack(selectedInput, selectedOutput, 3000)
+                }
+              >
+                {test.phase === "recording"
+                  ? "Recording…"
+                  : test.phase === "playing"
+                    ? "Playing…"
+                    : "Record 3s & play back"}
+              </Button>
+            </div>
+
+            {/* Always rendered so the section height doesn't jump when the
+                mic test starts/stops. Disabled unless the mic test is live. */}
+            <Switch
+              label="Hear myself (may echo)"
+              checked={test.monitor}
+              disabled={test.phase !== "mic_listening"}
+              onChange={(enabled) => test.setMonitor(enabled, selectedOutput)}
+              description="Loops the mic back through the selected output. Use headphones to avoid feedback."
+            />
+          </div>
+
+          {/* ── Speaker test ───────────────────────────────────────────── */}
+          <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
+            <span style={{ color: "var(--c-text-muted)" }}>Speaker</span>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                data-testid="voice-test-play-sweep"
+                variant="secondary"
+                disabled={test.phase === "playing" || test.phase === "recording"}
+                onClick={() => test.playTone(selectedOutput, "sweep")}
+              >
+                Play sweep
+              </Button>
+              <Button
+                data-testid="voice-test-play-chime"
+                variant="secondary"
+                disabled={test.phase === "playing" || test.phase === "recording"}
+                onClick={() => test.playTone(selectedOutput, "chime")}
+              >
+                Play chime
+              </Button>
+              {/* Always rendered so the row doesn't grow/shrink when a tone
+                  starts/stops. Disabled when there's nothing to stop. */}
+              <Button
+                data-testid="voice-test-stop-playback"
+                variant="secondary"
+                disabled={test.phase !== "playing"}
+                onClick={() => test.stopPlayback()}
+              >
+                Stop
+              </Button>
+            </div>
+          </div>
+
+          {test.error && (
+            <p
+              data-testid="voice-test-error"
+              className="text-xs font-mono"
+              style={{ color: "#ff6b6b" }}
+            >
+              {test.error}
+            </p>
+          )}
         </section>
 
         <section className="flex flex-col gap-4 mb-12">
@@ -176,7 +321,7 @@ export const VoiceSettingsPage: React.FC = () => {
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
           >
-            Behaviour
+            Behavior
           </h2>
           <Switch
             label="Auto Join Voice"

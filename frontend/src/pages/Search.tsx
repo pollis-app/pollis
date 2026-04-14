@@ -9,7 +9,7 @@ export const SearchPage: React.FC = () => {
   const { setSelectedConversationId } = useAppStore();
 
   return (
-    <PageShell title="Search" onBack={() => navigate({ to: "/" })}>
+    <PageShell title="Search">
       <SearchView
         onNavigateToConversation={(conversationId) => {
           setSelectedConversationId(conversationId);

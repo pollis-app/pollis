@@ -1,6 +1,7 @@
 import React from 'react';
 import { X } from 'lucide-react';
 import type { Message } from '../../types';
+import { getUsernameColor, useBackgroundIsLight } from '../../utils/usernameColor';
 
 interface ReplyPreviewProps {
   messageId: string;
@@ -15,11 +16,13 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
   onDismiss,
   onScrollToMessage,
 }) => {
+  const isLightBg = useBackgroundIsLight();
   const message = allMessages.find((m) => m.id === messageId);
   if (!message) {
     return null;
   }
   const author = message.sender_username ?? message.sender_id;
+  const authorColor = getUsernameColor(author, isLightBg);
   const content = message.content_decrypted || '[Encrypted message]';
   const snippet = content.length > 80 ? content.substring(0, 80) + '...' : content;
 
@@ -32,7 +35,7 @@ export const ReplyPreview: React.FC<ReplyPreviewProps> = ({
       <div className="flex-1 min-w-0">
         <span className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
           replying to{' '}
-          <span className="font-semibold" style={{ color: 'var(--c-text-dim)' }}>
+          <span className="font-semibold" style={{ color: authorColor }}>
             {author}
           </span>
         </span>

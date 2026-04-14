@@ -280,6 +280,13 @@ commands::livekit::get_livekit_token,
             commands::voice::set_voice_input_device,
             commands::voice::set_voice_output_device,
             commands::voice::set_noise_floor,
+            commands::voice_test::subscribe_voice_test_events,
+            commands::voice_test::start_mic_test,
+            commands::voice_test::set_mic_test_monitor,
+            commands::voice_test::stop_mic_test,
+            commands::voice_test::record_and_play_back,
+            commands::voice_test::play_test_tone,
+            commands::voice_test::stop_test_playback,
             commands::sfx::play_sfx,
         ])
         // On macOS, hide the window on close instead of quitting.

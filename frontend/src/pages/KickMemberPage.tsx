@@ -12,10 +12,7 @@ export const KickMemberPage: React.FC = () => {
   const member = members.find((m) => m.user_id === userId);
 
   return (
-    <PageShell
-      title="Remove Member"
-      onBack={() => navigate({ to: "/groups/$groupId/members", params: { groupId } })}
-    >
+    <PageShell title="Remove Member">
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         <p className="text-xs font-mono text-center" style={{ color: "var(--c-text-dim)" }}>
           Remove <strong>{member?.username ?? userId}</strong> from this group?

@@ -1,3 +1,5 @@
+import { setBackgroundLightness } from "./usernameColor";
+
 /** Convert a hex color string to [h (0-360), s (0-100), l (0-100)] */
 export function hexToHsl(hex: string): [number, number, number] {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
@@ -45,6 +47,8 @@ export function applyBackgroundColor(hex: string): void {
   document.documentElement.style.setProperty("--bg-h", String(h));
   document.documentElement.style.setProperty("--bg-s", `${s}%`);
   document.documentElement.style.setProperty("--bg-l", `${l}%`);
+  // Notify subscribers (e.g. username coloring) that contrast target shifted.
+  setBackgroundLightness(l);
 }
 
 /** Apply a font size (in px) to the document CSS variable */

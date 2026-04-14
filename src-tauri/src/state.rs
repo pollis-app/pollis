@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore;
 use crate::commands::voice::VoiceState;
+use crate::commands::voice_test::VoiceTestState;
 use crate::realtime::LiveKitState;
 
 #[derive(Clone)]
@@ -23,6 +24,7 @@ pub struct AppState {
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
     pub livekit: Arc<Mutex<LiveKitState>>,
     pub voice: Arc<Mutex<VoiceState>>,
+    pub voice_test: Arc<Mutex<VoiceTestState>>,
     pub update_required: Arc<AtomicBool>,
     /// Per-device ULID, set during login. Each physical device gets a stable ID
     /// stored in the OS keystore so it survives local DB wipes.
@@ -48,6 +50,7 @@ impl AppState {
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
             voice: Arc::new(Mutex::new(VoiceState::new())),
+            voice_test: Arc::new(Mutex::new(VoiceTestState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),

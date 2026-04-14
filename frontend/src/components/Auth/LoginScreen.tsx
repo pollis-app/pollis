@@ -42,7 +42,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
             <div data-testid="wipe-confirm-section" className="flex flex-col gap-5">
               <div>
                 <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>
-                  Wipe this computer
+                  Delete local profiles
                 </h2>
                 <p
                   className="text-xs mt-2 font-mono"
@@ -162,6 +162,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     border: "none",
                     cursor: "pointer",
                     padding: "0.25rem 0",
+                    marginTop: "1rem",
                   }}
                   onMouseEnter={(e) => {
                     (e.currentTarget as HTMLButtonElement).style.color = "#ff6b6b";
@@ -170,7 +171,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                     (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
                   }}
                 >
-                  Wipe this computer
+                  Delete local profiles
                 </button>
               )}
             </div>

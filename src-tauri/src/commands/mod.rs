@@ -12,3 +12,4 @@ pub mod r2;
 pub mod sfx;
 pub mod update;
 pub mod voice;
+pub mod voice_test;

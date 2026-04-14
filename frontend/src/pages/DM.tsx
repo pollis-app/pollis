@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Ban } from "lucide-react";
+import { Ban } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useBlockUser } from "../hooks/queries";
@@ -82,15 +82,6 @@ export const DMPage: React.FC = () => {
           color: "var(--c-text-muted)",
         }}
       >
-        <button
-          onClick={() => navigate({ to: "/dms" })}
-          className="mr-3 inline-flex items-center gap-1 leading-none transition-colors"
-          style={{ color: "var(--c-text-muted)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
-        >
-          <ArrowLeft size={12} />
-        </button>
         <span style={{ flex: 1 }}>{title}</span>
         {canBlock && (
           <Button

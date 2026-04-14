@@ -4,19 +4,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TitleBar } from "./TitleBar";
+import { BreadcrumbNav } from "./BreadcrumbNav";
+import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
 import { Mail } from "lucide-react";
 
 /**
  * AppShell is the root route component rendered by RouterProvider.
- * It owns the terminal chrome (TitleBar, VoiceBar, bottom breadcrumb bar)
+ * It owns the terminal chrome (TitleBar, BreadcrumbNav, VoiceBar, bottom status bar)
  * and renders the matched child route via <Outlet />.
  */
 export const AppShell: React.FC = () => {
@@ -27,7 +28,6 @@ export const AppShell: React.FC = () => {
   const router = useRouter();
 
   const {
-    channels,
     setGroups,
     setChannels,
     activeVoiceChannelId,
@@ -37,7 +37,6 @@ export const AppShell: React.FC = () => {
   } = useAppStore();
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
-  const { data: dmConversations = [] } = useDMConversations();
 
   const currentUser = useAppStore((s) => s.currentUser);
 
@@ -210,8 +209,6 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener("focus", handleWindowFocus);
   }, []);
 
-  // ─── Breadcrumb derived from current route location ──────────────────────────
-
   // Clear the status bar alert when the user navigates to the room that
   // triggered it.
   useEffect(() => {
@@ -232,86 +229,6 @@ export const AppShell: React.FC = () => {
     }
     return false;
   }, [pathname]);
-
-  const breadcrumb = useMemo(() => {
-    if (pathname === "/") {
-      return "";
-    }
-
-    const segments: string[] = [];
-
-    if (pathname.startsWith("/groups")) {
-      segments.push("Groups");
-
-      const groupIdMatch = pathname.match(/^\/groups\/([^/]+)/);
-      const groupId = groupIdMatch?.[1];
-
-      if (groupId && groupId !== "new" && groupId !== "search") {
-        const group = groupsWithChannels?.find((g) => g.id === groupId);
-        if (group) {
-          segments.push(group.name);
-        }
-
-        if (pathname.includes("/channels/")) {
-          const channelIdMatch = pathname.match(/\/channels\/([^/]+)/);
-          const channelId = channelIdMatch?.[1];
-
-          if (channelId && channelId !== "new") {
-            const groupChannels = channels[groupId] ?? [];
-            const ch = groupChannels.find((c) => c.id === channelId);
-            if (ch) {
-              segments.push(ch.name);
-            }
-          } else if (pathname.endsWith("/channels/new")) {
-            segments.push("New Channel");
-          }
-        } else if (pathname.includes("/voice/")) {
-          const channelIdMatch = pathname.match(/\/voice\/([^/]+)/);
-          const channelId = channelIdMatch?.[1];
-          const group = groupsWithChannels?.find((g) => g.id === groupId);
-          const ch = group?.channels.find((c) => c.id === channelId);
-          segments.push(ch?.name ?? "voice");
-        } else if (pathname.endsWith("/join-requests")) {
-          segments.push("Join Requests");
-        } else if (pathname.endsWith("/invite")) {
-          segments.push("Invite Member");
-        } else if (pathname.endsWith("/leave")) {
-          segments.push("Leave Group");
-        }
-      } else if (groupId === "new") {
-        segments.push("Create Group");
-      } else if (groupId === "search") {
-        segments.push("Find Group");
-      }
-    } else if (pathname.startsWith("/dms")) {
-      segments.push("Direct Messages");
-
-      const convIdMatch = pathname.match(/^\/dms\/([^/]+)/);
-      const conversationId = convIdMatch?.[1];
-
-      if (conversationId && conversationId !== "new") {
-        const conv = dmConversations.find((c) => c.id === conversationId);
-        if (conv) {
-          segments.push(`@${conv.user2_identifier}`);
-        }
-        if (pathname.endsWith("/settings")) {
-          segments.push("Conversation Settings");
-        }
-      } else if (conversationId === "new") {
-        segments.push("New Message");
-      }
-    } else if (pathname === "/preferences") {
-      segments.push("Preferences");
-    } else if (pathname === "/settings") {
-      segments.push("Settings");
-    } else if (pathname === "/invites") {
-      segments.push("Invites");
-    } else if (pathname === "/search") {
-      segments.push("Search");
-    }
-
-    return segments.join(" / ");
-  }, [pathname, groupsWithChannels, dmConversations, channels]);
 
   // Find the voice channel name for the VoiceBar
   const voiceChannelName = useMemo(() => {
@@ -345,6 +262,9 @@ export const AppShell: React.FC = () => {
 
       {/* Title bar */}
       <TitleBar />
+
+      {/* Breadcrumb nav — appears on every authenticated page */}
+      <BreadcrumbNav />
 
       {/* Sync indicator — floats top-right below title bar */}
       {isSyncing && (
@@ -397,7 +317,7 @@ export const AppShell: React.FC = () => {
         </div>
       )}
 
-      {/* Bottom bar — breadcrumb left, unread alert right */}
+      {/* Bottom bar — unread summary on the left, status alert on the right */}
       {/* On chat screens, invert: dark bg with accent text. Otherwise: accent bg with dark text. */}
       <div
         style={{
@@ -412,12 +332,7 @@ export const AppShell: React.FC = () => {
           paddingRight: 12,
         }}
       >
-        <span
-          className="text-xs font-mono"
-          style={{ color: isChatScreen ? "var(--c-accent)" : "black" }}
-        >
-          {breadcrumb}
-        </span>
+        <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />
         {statusBarAlert ? (
           <button
             className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"

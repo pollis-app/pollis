@@ -1,9 +1,7 @@
 import React, { useEffect, useRef } from "react";
-import { ArrowLeft } from "lucide-react";
 
 interface PageShellProps {
   title: string;
-  onBack: () => void;
   children: React.ReactNode;
   scrollable?: boolean;
 }
@@ -13,11 +11,11 @@ const FOCUSABLE_SELECTOR =
 
 /**
  * Thin chrome wrapper used by router-driven page components.
- * Renders an arrow-back header and a scrollable (or hidden-overflow) body.
- * On mount, focuses the first interactive element inside the content area
- * so keyboard users land on real content, not the back button.
+ * Renders a title header and a scrollable (or hidden-overflow) body.
+ * Navigation "back" lives in the global BreadcrumbNav, so no back button here.
+ * On mount, focuses the first interactive element inside the content area.
  */
-export const PageShell: React.FC<PageShellProps> = ({ title, onBack, children, scrollable = false }) => {
+export const PageShell: React.FC<PageShellProps> = ({ title, children, scrollable = false }) => {
   const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -40,16 +38,6 @@ export const PageShell: React.FC<PageShellProps> = ({ title, onBack, children, s
           color: "var(--c-text-muted)",
         }}
       >
-        <button
-          tabIndex={-1}
-          onClick={onBack}
-          className="mr-3 inline-flex items-center gap-1 leading-none transition-colors"
-          style={{ color: "var(--c-text-muted)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
-        >
-          <ArrowLeft size={12} />
-        </button>
         <span style={{ flex: 1, color: "var(--c-text)" }}>{title}</span>
       </div>
       <div ref={contentRef} className={`flex-1 ${scrollable ? "overflow-auto" : "overflow-hidden"}`}>

@@ -9,7 +9,7 @@ export const StartDMPage: React.FC = () => {
   const { setSelectedConversationId } = useAppStore();
 
   return (
-    <PageShell title="New Message" onBack={() => navigate({ to: "/dms" })}>
+    <PageShell title="New Message">
       <StartDM
         onSuccess={(conversationId) => {
           setSelectedConversationId(conversationId);

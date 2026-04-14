@@ -19,10 +19,7 @@ export const LeaveGroupPage: React.FC = () => {
   }
 
   return (
-    <PageShell
-      title="Leave Group"
-      onBack={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
-    >
+    <PageShell title="Leave Group">
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         <p className="text-xs font-mono text-center" style={{ color: "var(--c-text-dim)" }}>
           Are you sure you want to leave <strong>{group.name}</strong>?

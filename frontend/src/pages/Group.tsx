@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Hash, Volume2 } from "lucide-react";
+import { ArrowLeft, Hash, Plus, Volume2 } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
@@ -103,7 +103,8 @@ export const GroupPage: React.FC = () => {
     ...(isAdmin ? [
       {
         id: "create-channel",
-        label: "+ New Channel",
+        label: "New Channel",
+        icon: <Plus size={14} />,
         action: () => {
           setSelectedGroupId(group.id);
           navigate({ to: "/groups/$groupId/channels/new", params: { groupId } });

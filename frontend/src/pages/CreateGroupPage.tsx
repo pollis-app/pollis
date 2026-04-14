@@ -7,7 +7,7 @@ export const CreateGroupPage: React.FC = () => {
   const navigate = useNavigate();
 
   return (
-    <PageShell title="Create Group" onBack={() => navigate({ to: "/groups" })}>
+    <PageShell title="Create Group">
       <CreateGroup onSuccess={(groupId) => navigate({ to: "/groups/$groupId", params: { groupId } })} />
     </PageShell>
   );

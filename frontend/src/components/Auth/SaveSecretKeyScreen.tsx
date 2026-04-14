@@ -10,6 +10,11 @@ interface SaveSecretKeyScreenProps {
   /// to the user once. We never store it on disk; once they confirm we
   /// pass control back to the parent.
   secretKey: string;
+  /// Username of the account this key belongs to — used as a suffix on
+  /// the downloaded emergency-kit filename so users with multiple
+  /// accounts can tell their kits apart. Optional; omitted → unsuffixed
+  /// filename.
+  username?: string | null;
   /// Called once the user has typed the key back to confirm they saved it.
   onConfirmed: () => void;
 }
@@ -25,7 +30,14 @@ function normalize(input: string): string {
     .toUpperCase();
 }
 
-function downloadEmergencyKit(secretKey: string) {
+// Restrict filename chars to a conservative alphanumeric/hyphen/
+// underscore set so any exotic username (emoji, slashes, whitespace)
+// can't produce an invalid filename on any OS.
+function sanitizeForFilename(input: string): string {
+  return input.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function downloadEmergencyKit(secretKey: string, username?: string | null) {
   const text = [
     "POLLIS — EMERGENCY KIT",
     "======================",
@@ -49,11 +61,16 @@ function downloadEmergencyKit(secretKey: string) {
     "",
   ].join("\n");
 
+  const safeName = username ? sanitizeForFilename(username) : "";
+  const filename = safeName
+    ? `pollis-emergency-kit-${safeName}.txt`
+    : "pollis-emergency-kit.txt";
+
   const blob = new Blob([text], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "pollis-emergency-kit.txt";
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
@@ -64,6 +81,7 @@ type Phase = "warn" | "show" | "confirm";
 
 export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
   secretKey,
+  username,
   onConfirmed,
 }) => {
   const [phase, setPhase] = useState<Phase>("warn");
@@ -216,7 +234,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                 <Button
                   data-testid="download-secret-key-button"
                   onClick={() => {
-                    downloadEmergencyKit(secretKey);
+                    downloadEmergencyKit(secretKey, username);
                     setDownloaded(true);
                     window.setTimeout(() => setDownloaded(false), 2000);
                   }}

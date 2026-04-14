@@ -8,6 +8,7 @@ import { LinkifiedText } from "../ui/LinkifiedText";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
+import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColor";
 // import { MessageReactions } from "./MessageReactions";
 import type { Message, MessageAttachment } from "../../types";
 
@@ -43,6 +44,13 @@ export const MessageItem: React.FC<MessageItemProps> = ({
 }) => {
   const { currentUser } = useAppStore();
   const isOwn = message.sender_id === currentUser?.id;
+  const isLightBg = useBackgroundIsLight();
+
+  // Stable per-user color for non-own, non-admin authors. Key on username
+  // when available so the same person keeps the same color across groups
+  // even if their user id rotates; fall back to sender_id otherwise.
+  const authorColorKey = message.sender_username ?? message.sender_id;
+  const authorColor = getUsernameColor(authorColorKey, isLightBg);
 
   const replyTo = message.reply_to_message_id
     ? allMessages.find((m) => m.id === message.reply_to_message_id)
@@ -50,6 +58,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
 
   const replyToAuthor = replyTo
     ? (replyTo.sender_username ?? replyTo.sender_id)
+    : null;
+  const replyToAuthorColor = replyTo
+    ? getUsernameColor(replyTo.sender_username ?? replyTo.sender_id, isLightBg)
     : null;
 
   const isDeleted = !!message.deleted_at;
@@ -83,7 +94,10 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           >
             <Reply size={10} style={{ transform: "scaleX(-1)" }} />
             {replyToAuthor && (
-              <span className="font-semibold flex-shrink-0" style={{ color: "var(--c-text-dim)" }}>
+              <span
+                className="font-semibold flex-shrink-0"
+                style={{ color: replyToAuthorColor ?? "var(--c-text-dim)" }}
+              >
                 {replyToAuthor}:
               </span>
             )}
@@ -122,7 +136,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
             paddingLeft: "0.5rem",
             paddingRight: "0.5rem",
           } : {
-            color: isOwn ? "var(--c-accent)" : "var(--c-text-dim)",
+            color: isOwn ? "var(--c-accent)" : authorColor,
           }}
         >
           {authorUsername}

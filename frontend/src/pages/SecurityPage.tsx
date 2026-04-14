@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { useAppStore } from "../stores/appStore";
 import * as api from "../services/api";
@@ -59,7 +58,6 @@ function formatTimestamp(iso: string): string {
 }
 
 export const SecurityPage: React.FC = () => {
-  const navigate = useNavigate();
   const { currentUser } = useAppStore();
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +86,7 @@ export const SecurityPage: React.FC = () => {
   }, [currentUser?.id]);
 
   return (
-    <PageShell title="Security" onBack={() => navigate({ to: "/settings" })} scrollable>
+    <PageShell title="Security" scrollable>
       <div
         className="flex flex-col gap-4 p-4 font-mono"
         data-testid="security-page"

@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Inbox, Ban } from "lucide-react";
+import { ArrowLeft, Inbox, Ban, Plus } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useDMConversations } from "../hooks/queries/useMessages";
@@ -19,6 +19,7 @@ export const DMsPage: React.FC = () => {
   items.push({
     id: "new-dm",
     label: "New Message",
+    icon: <Plus size={14} />,
     action: () => navigate({ to: "/dms/new" }),
     type: "system" as const,
     testId: "menu-item-new-dm",
@@ -38,7 +39,7 @@ export const DMsPage: React.FC = () => {
 
   items.push({
     id: "dm-blocked",
-    label: "Blocked",
+    label: "Blocked Users",
     icon: <Ban size={14} />,
     action: () => navigate({ to: "/dms/blocked" }),
     type: "system" as const,
