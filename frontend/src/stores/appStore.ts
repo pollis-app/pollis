@@ -68,6 +68,8 @@ interface AppStore extends AppState {
   setPendingEnrollmentApproval: (
     p: { requestId: string; newDeviceId: string; verificationCode: string } | null,
   ) => void;
+  updateRequired: boolean;
+  setUpdateRequired: (v: boolean) => void;
   logout: () => void;
 }
 
@@ -178,6 +180,9 @@ export const useAppStore = create<AppStore>((set) => ({
 
   pendingEnrollmentApproval: null,
   setPendingEnrollmentApproval: (p) => set({ pendingEnrollmentApproval: p }),
+
+  updateRequired: false,
+  setUpdateRequired: (v) => set({ updateRequired: v }),
 
   logout: () => set({
     currentUser: null,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Hash, AtSign, Search, ArrowUp, ArrowDown, Volume2 } from "lucide-react";
+import { Hash, AtSign, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon } from "lucide-react";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
@@ -31,6 +31,14 @@ type SearchResultItem =
       name: string;
       breadcrumb: string;
       conversationId: string;
+    }
+  | {
+      type: "page";
+      id: string;
+      name: string;
+      breadcrumb: string;
+      path: string;
+      keywords: string;
     };
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -111,6 +119,21 @@ function buildDMResults(
   }));
 }
 
+const PAGE_RESULTS: SearchResultItem[] = [
+  { type: "page", id: "page-settings", name: "User Settings", breadcrumb: "/settings", path: "/settings", keywords: "account profile username email avatar" },
+  { type: "page", id: "page-preferences", name: "Preferences", breadcrumb: "/preferences", path: "/preferences", keywords: "theme color font notifications appearance" },
+  { type: "page", id: "page-voice-settings", name: "Voice Settings", breadcrumb: "/voice-settings", path: "/voice-settings", keywords: "microphone speaker audio mic noise gate agc auto join" },
+  { type: "page", id: "page-security", name: "Security", breadcrumb: "/security", path: "/security", keywords: "audit log devices identity key rotation" },
+  { type: "page", id: "page-invites", name: "Invites", breadcrumb: "/invites", path: "/invites", keywords: "pending invitations groups" },
+  { type: "page", id: "page-join-requests", name: "Join Requests", breadcrumb: "/join-requests", path: "/join-requests", keywords: "pending group membership" },
+  { type: "page", id: "page-dm-requests", name: "DM Requests", breadcrumb: "/dms/requests", path: "/dms/requests", keywords: "direct message pending" },
+  { type: "page", id: "page-dm-blocked", name: "Blocked Users", breadcrumb: "/dms/blocked", path: "/dms/blocked", keywords: "block list direct message" },
+  { type: "page", id: "page-dm-new", name: "Start DM", breadcrumb: "/dms/new", path: "/dms/new", keywords: "new direct message create" },
+  { type: "page", id: "page-groups", name: "Groups", breadcrumb: "/groups", path: "/groups", keywords: "list all" },
+  { type: "page", id: "page-groups-new", name: "Create Group", breadcrumb: "/groups/new", path: "/groups/new", keywords: "new create" },
+  { type: "page", id: "page-groups-search", name: "Find Groups", breadcrumb: "/groups/search", path: "/groups/search", keywords: "discover search public" },
+];
+
 function filterResults(
   items: SearchResultItem[],
   query: string
@@ -122,7 +145,8 @@ function filterResults(
   return items.filter((item) => {
     const nameMatch = item.name.toLowerCase().includes(trimmed);
     const breadcrumbMatch = item.breadcrumb.toLowerCase().includes(trimmed);
-    return nameMatch || breadcrumbMatch;
+    const keywordMatch = item.type === "page" && item.keywords.toLowerCase().includes(trimmed);
+    return nameMatch || breadcrumbMatch || keywordMatch;
   });
 }
 
@@ -145,7 +169,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
     const channels = buildChannelResults(groupsWithChannels);
     const voiceChannels = buildVoiceResults(groupsWithChannels);
     const dms = buildDMResults(dmConversations);
-    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...dms];
+    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...dms, ...PAGE_RESULTS];
     if (activeVoiceChannelId) {
       const activeIdx = combined.findIndex(
         (i) => i.type === "voice" && i.channelId === activeVoiceChannelId
@@ -202,11 +226,13 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
           to: "/groups/$groupId/voice/$channelId",
           params: { groupId: item.groupId, channelId: item.channelId },
         });
-      } else {
+      } else if (item.type === "dm") {
         navigate({
           to: "/dms/$conversationId",
           params: { conversationId: item.conversationId },
         });
+      } else {
+        navigate({ to: item.path });
       }
     },
     [onClose, navigate]
@@ -324,7 +350,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Jump to channel, voice, or DM..."
+            placeholder="Jump to channel, voice, DM, or settings..."
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -386,8 +412,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
               style={{ color: "var(--c-text-muted)" }}
             >
               {query.trim()
-                ? "No channels, voice channels, or DMs found"
-                : "Jump to a channel, voice channel, or DM"}
+                ? "No matches found"
+                : "Jump to a channel, voice channel, DM, or settings page"}
             </div>
           ) : (
             filteredItems.map((item, index) => {
@@ -418,8 +444,10 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
                       <Hash size={14} />
                     ) : item.type === "voice" ? (
                       <Volume2 size={14} />
-                    ) : (
+                    ) : item.type === "dm" ? (
                       <AtSign size={14} />
+                    ) : (
+                      <SettingsIcon size={14} />
                     )}
                   </div>
 

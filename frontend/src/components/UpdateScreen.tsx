@@ -1,16 +1,17 @@
 import React, { useEffect, useState } from "react";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 
-type UpdatePhase = "checking" | "downloading" | "installing" | "relaunching" | "error";
+type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "relaunching" | "error";
 
 /**
  * Fully automatic update screen. On mount it checks for an update, downloads
  * it, installs it, and relaunches — no user interaction required.
  */
 export const UpdateScreen: React.FC = () => {
-  const [phase, setPhase] = useState<UpdatePhase>("checking");
+  const [phase, setPhase] = useState<UpdatePhase>("preparing");
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -19,6 +20,22 @@ export const UpdateScreen: React.FC = () => {
 
     async function runUpdate() {
       try {
+        // Gracefully tear down voice / realtime before the install.
+        // TerminalApp has already unmounted (appState flipped to
+        // update-required), which triggers useVoiceChannel / realtime
+        // cleanup, but we also invoke leave_voice_channel directly to
+        // guarantee LiveKit is disconnected with its 5s timeout before
+        // the updater overwrites the binary.
+        setPhase("preparing");
+        await invoke("leave_voice_channel").catch(() => {});
+        // Small settle window so any in-flight MLS commits / network
+        // sends can finish before the process is replaced.
+        await new Promise((r) => setTimeout(r, 300));
+
+        if (cancelled) {
+          return;
+        }
+
         setPhase("checking");
         const update = await check();
 
@@ -71,6 +88,8 @@ export const UpdateScreen: React.FC = () => {
 
   const label = (() => {
     switch (phase) {
+      case "preparing":
+        return "Preparing to update…";
       case "checking":
         return "Checking for updates…";
       case "downloading":

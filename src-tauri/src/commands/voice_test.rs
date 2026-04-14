@@ -357,10 +357,14 @@ pub async fn record_and_play_back(
 
     // Set up mic (gated with zero floor so we record the whole signal,
     // not post-gate silence).
-    let (is_muted, test_gate) = {
+    let (is_muted, test_gate, real_noise_floor) = {
         let s = state_arc.lock().await;
         let v = voice_arc.lock().await;
-        (Arc::clone(&v.is_muted), Arc::clone(&s.test_noise_floor))
+        (
+            Arc::clone(&v.is_muted),
+            Arc::clone(&s.test_noise_floor),
+            Arc::clone(&v.noise_floor),
+        )
     };
     let (frame_tx, mut frame_rx) =
         tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
@@ -390,6 +394,14 @@ pub async fn record_and_play_back(
         let deadline = tokio::time::Instant::now()
             + Duration::from_millis(duration_ms as u64);
 
+        // Same level-meter emission as start_mic_test — emit every 3 chunks
+        // (~33 Hz) so users see input feedback while recording.
+        const EMIT_EVERY: u32 = 3;
+        let mut chunks_seen: u32 = 0;
+        let mut acc_peak: i16 = 0;
+        let mut acc_sq: f64 = 0.0;
+        let mut acc_count: usize = 0;
+
         loop {
             let timeout = deadline.saturating_duration_since(tokio::time::Instant::now());
             if timeout.is_zero() {
@@ -397,7 +409,51 @@ pub async fn record_and_play_back(
             }
             match tokio::time::timeout(timeout, frame_rx.recv()).await {
                 Ok(Some((samples, _rate))) => {
+                    let mut chunk_peak: i16 = 0;
+                    let mut chunk_sq: f64 = 0.0;
+                    for &s in &samples {
+                        let a = s.saturating_abs();
+                        if a > chunk_peak {
+                            chunk_peak = a;
+                        }
+                        let f = s as f64;
+                        chunk_sq += f * f;
+                    }
+                    if chunk_peak > acc_peak {
+                        acc_peak = chunk_peak;
+                    }
+                    acc_sq += chunk_sq;
+                    acc_count += samples.len();
+
                     recorded.extend_from_slice(&samples);
+
+                    chunks_seen += 1;
+                    if chunks_seen >= EMIT_EVERY {
+                        let peak_norm = (acc_peak as f32 / 32_768.0).clamp(0.0, 1.0);
+                        let rms_norm = if acc_count > 0 {
+                            ((acc_sq / acc_count as f64).sqrt() as f32 / 32_768.0).clamp(0.0, 1.0)
+                        } else {
+                            0.0
+                        };
+                        let gate = f32::from_bits(real_noise_floor.load(Ordering::Relaxed));
+                        let gated = gate > 0.0 && peak_norm < gate;
+                        let ev = VoiceTestEvent::Frame {
+                            peak: peak_norm,
+                            rms: rms_norm,
+                            gated,
+                        };
+                        {
+                            let s = state_task.lock().await;
+                            if let Some(ch_) = &s.channel {
+                                let _ = ch_.send(ev);
+                            }
+                        }
+                        chunks_seen = 0;
+                        acc_peak = 0;
+                        acc_sq = 0.0;
+                        acc_count = 0;
+                    }
+
                     if recorded.len() >= target_samples {
                         break;
                     }

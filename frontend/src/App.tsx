@@ -54,6 +54,7 @@ function MainApp() {
     pendingEnrollmentApproval,
     setPendingEnrollmentApproval,
   } = useAppStore();
+  const updateRequired = useAppStore((s) => s.updateRequired);
 
   const [appState, setAppState] = useState<AppState>("initializing");
   const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
@@ -263,7 +264,7 @@ function MainApp() {
     setAppState("email-auth");
   }, []);
 
-  if (appState === "update-required") {
+  if (appState === "update-required" || updateRequired) {
     return (
       <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
         <TitleBar />

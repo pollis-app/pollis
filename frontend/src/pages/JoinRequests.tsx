@@ -56,7 +56,7 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
           </span>
         )}
         controls={(req) => [
-          <Button
+          <Button size="sm"
             data-testid={`approve-request-${req.id}`}
             onClick={() => handleApprove(req.id)}
             disabled={approveMutation.isPending || rejectMutation.isPending}
@@ -64,7 +64,7 @@ export const JoinRequests: React.FC<JoinRequestsProps> = ({ groupId, groupName }
           >
             approve
           </Button>,
-          <Button
+          <Button size="sm"
             data-testid={`reject-request-${req.id}`}
             onClick={() => handleReject(req.id)}
             disabled={approveMutation.isPending || rejectMutation.isPending}

@@ -104,7 +104,7 @@ export const Requests: React.FC = () => {
           );
         }}
         controls={(c) => [
-          <Button
+          <Button size="sm"
             data-testid={`accept-request-${c.id}`}
             onClick={() => handleAccept(c.id)}
             disabled={acceptMutation.isPending || blockMutation.isPending}
@@ -112,7 +112,7 @@ export const Requests: React.FC = () => {
           >
             accept
           </Button>,
-          <Button
+          <Button size="sm"
             data-testid={`block-request-${c.id}`}
             onClick={() => handleBlock(c)}
             disabled={acceptMutation.isPending || blockMutation.isPending}

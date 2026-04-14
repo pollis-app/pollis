@@ -15,6 +15,7 @@ interface ButtonProps {
   loadingText?: string;
   className?: string;
   variant?: "primary" | "secondary" | "danger" | "ghost";
+  size?: "sm" | "md";
   type?: "button" | "submit" | "reset";
   onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
   "aria-label"?: string;
@@ -29,6 +30,7 @@ export const Button: React.FC<ButtonProps> = ({
   loadingText = "Loading...",
   className = "",
   variant = "primary",
+  size = "md",
   type = "button",
   onKeyDown,
   "aria-label": ariaLabel,
@@ -75,7 +77,7 @@ export const Button: React.FC<ButtonProps> = ({
       onKeyDown={onKeyDown}
       aria-label={ariaLabel}
       data-testid={testId}
-      className={`inline-flex items-center justify-center gap-2 px-4 py-2 font-mono text-xs font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${className}`}
+      className={`inline-flex items-center justify-center gap-2 font-mono font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
       style={{
         ...variantStyles,
         borderRadius: "4px",

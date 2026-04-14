@@ -27,6 +27,74 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
     }
 }
 
+/// Apply rounded corners to an NSWindow using only public AppKit APIs.
+/// Technique: make the window non-opaque with a clear background, then set
+/// the contentView's CALayer cornerRadius + masksToBounds so the rendered
+/// content is clipped to a rounded rect. The window still has a real
+/// titlebar region; we hide its chrome so only the rounded content shows.
+#[cfg(target_os = "macos")]
+fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
+    use cocoa::appkit::{NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility};
+    use cocoa::base::{id, NO, YES};
+    use objc::{class, msg_send, sel, sel_impl};
+
+    let ns_window = match window.ns_window() {
+        Ok(w) => w as id,
+        Err(_) => return,
+    };
+    unsafe {
+        // Merge in FullSizeContentView so the webview paints under any
+        // titlebar region, and make the titlebar transparent + hide its
+        // title and standard window buttons. Together with clipping the
+        // contentView layer below, this produces a clean rounded window.
+        let mut mask = ns_window.styleMask();
+        mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
+        ns_window.setStyleMask_(mask);
+        ns_window.setTitlebarAppearsTransparent_(YES);
+        ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
+        let close_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowCloseButton);
+        let min_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowMiniaturizeButton);
+        let zoom_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowZoomButton);
+        for btn in [close_btn, min_btn, zoom_btn] {
+            if !btn.is_null() {
+                let _: () = msg_send![btn, setHidden: YES];
+            }
+        }
+        let _: () = msg_send![ns_window, setOpaque: NO];
+        let clear: id = msg_send![class!(NSColor), clearColor];
+        let _: () = msg_send![ns_window, setBackgroundColor: clear];
+        let _: () = msg_send![ns_window, setHasShadow: YES];
+
+        let content_view: id = msg_send![ns_window, contentView];
+        let _: () = msg_send![content_view, setWantsLayer: YES];
+        let layer: id = msg_send![content_view, layer];
+        if !layer.is_null() {
+            let _: () = msg_send![layer, setCornerRadius: radius];
+            let _: () = msg_send![layer, setMasksToBounds: YES];
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn apply_windows_rounded_corners(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Foundation::HWND;
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND,
+    };
+    if let Ok(hwnd) = window.hwnd() {
+        let hwnd = hwnd.0 as HWND;
+        let pref: u32 = DWMWCP_ROUND;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE as u32,
+                &pref as *const _ as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+    }
+}
+
 /// On macOS, re-show the main window when the user clicks the dock icon
 /// (RunEvent::Reopen).
 #[cfg(target_os = "macos")]
@@ -155,6 +223,24 @@ pub fn run() {
             // Capture the window handle before app is moved into the async block.
             #[cfg(target_os = "linux")]
             let main_window = app.get_webview_window("main");
+
+            // Round the window corners using public APIs only (App Store
+            // compliant). We set the contentView's CALayer cornerRadius and
+            // mask it, then make the NSWindow non-opaque with a clear
+            // background so the area outside the rounded rect isn't drawn.
+            // Radius matches `border-radius: 10px` in index.css.
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                apply_macos_rounded_corners(&window, 10.0);
+            }
+
+            // Windows 11 rounds decorated windows via DWM. Since we use
+            // decorations: false we must opt in explicitly. Windows 10 has
+            // no API for this and falls back to square corners.
+            #[cfg(target_os = "windows")]
+            if let Some(window) = app.get_webview_window("main") {
+                apply_windows_rounded_corners(&window);
+            }
 
             tauri::async_runtime::block_on(async move {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;

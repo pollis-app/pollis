@@ -81,6 +81,9 @@ export function useVoiceTest(): UseVoiceTestResult {
         case "playback_started":
           phaseRef.current = "playing";
           setPhase("playing");
+          setPeak(0);
+          setRms(0);
+          setGated(false);
           break;
         case "playback_finished":
           phaseRef.current = "idle";

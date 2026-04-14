@@ -53,7 +53,7 @@ export const Invites: React.FC = () => {
           </div>
         )}
         controls={(invite) => [
-          <Button
+          <Button size="sm"
             data-testid={`accept-invite-${invite.id}`}
             onClick={() => handleAccept(invite.id)}
             disabled={acceptMutation.isPending || declineMutation.isPending}
@@ -61,7 +61,7 @@ export const Invites: React.FC = () => {
           >
             accept
           </Button>,
-          <Button
+          <Button size="sm"
             data-testid={`decline-invite-${invite.id}`}
             onClick={() => handleDecline(invite.id)}
             disabled={acceptMutation.isPending || declineMutation.isPending}

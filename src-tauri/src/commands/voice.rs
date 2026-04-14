@@ -124,6 +124,10 @@ impl VoiceState {
 // ── Internal helpers ──────────────────────────────────────────────────────
 
 pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) -> Result<cpal::Device> {
+    // Frontend sends "default" (or "") to mean "use the OS default" rather
+    // than a real device id. Treat those as None so we don't go looking
+    // for a device literally named "default".
+    let name = name.filter(|n| !n.is_empty() && *n != "default");
     let device = match name {
         None => {
             // On Linux, ALSA's system default may be a virtual device like
@@ -210,9 +214,26 @@ pub(crate) fn start_mic_stream(
         .map_err(|e| anyhow::anyhow!("input config: {e}"))?;
     let channels = config.channels() as usize;
     let sample_format = config.sample_format();
-    // Force 48000 Hz: WebRTC APM only supports 8/16/32/48 kHz.
-    // PipeWire (and most modern audio servers) resample transparently.
-    let sample_rate: u32 = 48000;
+    // Prefer 48 kHz (WebRTC APM only supports 8/16/32/48 kHz), but fall
+    // back to whatever the device actually supports — Bluetooth devices
+    // on macOS (e.g. AirPods in SCO) often only advertise 16/24 kHz, and
+    // forcing 48 kHz makes build_input_stream fail.
+    let preferred_rate: u32 = 48_000;
+    let supports_48k = device
+        .supported_input_configs()
+        .map(|cfgs| {
+            cfgs.filter(|c| c.channels() == config.channels() && c.sample_format() == sample_format)
+                .any(|c| {
+                    c.min_sample_rate().0 <= preferred_rate
+                        && c.max_sample_rate().0 >= preferred_rate
+                })
+        })
+        .unwrap_or(false);
+    let sample_rate: u32 = if supports_48k {
+        preferred_rate
+    } else {
+        config.sample_rate().0
+    };
     let stream_config = cpal::StreamConfig {
         channels: config.channels(),
         sample_rate: cpal::SampleRate(sample_rate),

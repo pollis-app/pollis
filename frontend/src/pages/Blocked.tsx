@@ -38,7 +38,7 @@ export const Blocked: React.FC = () => {
           </span>
         )}
         controls={(b) => [
-          <Button
+          <Button size="sm"
             data-testid={`unblock-${b.user_id}`}
             onClick={() => handleUnblock(b.user_id)}
             disabled={unblockMutation.isPending}

@@ -80,6 +80,14 @@
     border-radius: 10px;
     outline: none;
   }
+
+  /* On macOS the NSWindow contentView layer already clips to a rounded
+     rect, so an extra CSS border-radius here just creates a visible inner
+     edge. Let the OS handle it. */
+  html[data-platform="macos"] body,
+  html[data-platform="macos"] #root {
+    border-radius: 0;
+  }
 }
 
 /* Range slider thumb — themed to accent color (track is handled inline by RangeSlider component) */

@@ -112,7 +112,7 @@ export const AllJoinRequests: React.FC = () => {
                 </span>
               )}
               controls={(req) => [
-                <Button
+                <Button size="sm"
                   data-testid={`approve-request-${req.id}`}
                   onClick={() => handleApprove(req.id, req.group_id)}
                   disabled={approveMutation.isPending || rejectMutation.isPending}
@@ -120,7 +120,7 @@ export const AllJoinRequests: React.FC = () => {
                 >
                   approve
                 </Button>,
-                <Button
+                <Button size="sm"
                   data-testid={`reject-request-${req.id}`}
                   onClick={() => handleReject(req.id, req.group_id)}
                   disabled={approveMutation.isPending || rejectMutation.isPending}

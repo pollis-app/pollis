@@ -8,7 +8,7 @@ import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { getVersion } from "@tauri-apps/api/app";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 import * as api from "../services/api";
 
 interface SettingsProps {
@@ -17,6 +17,7 @@ interface SettingsProps {
 
 export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   const { currentUser } = useAppStore();
+  const setUpdateRequired = useAppStore((s) => s.setUpdateRequired);
 
   const { data: userData, isLoading } = useUserProfile();
   const { data: avatarDownloadUrl } = useUserAvatar();
@@ -192,18 +193,12 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
       return;
     }
     setIsInstalling(true);
-    try {
-      const update = await checkForUpdate();
-      if (!update) {
-        return;
-      }
-      await update.downloadAndInstall();
-      await relaunch();
-    } catch (error) {
-      setUpdateError(error instanceof Error ? error.message : "Failed to install update");
-      setIsInstalling(false);
-    }
-  }, [updateStatus]);
+    // Mark the Rust-side flag and flip the store so App.tsx takes over
+    // with the fullscreen UpdateScreen. The screen handles graceful
+    // voice/network teardown, download, install, and relaunch.
+    await invoke("mark_update_required").catch(() => {});
+    setUpdateRequired(true);
+  }, [updateStatus, setUpdateRequired]);
 
   if (!currentUser) {
     return (

@@ -53,7 +53,7 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
               setRoleMutation.mutate({ groupId, userId: m.user_id, role: newRole });
             }}
           />,
-          <Button
+          <Button size="sm"
             data-testid={`member-kick-${m.user_id}`}
             variant="primary"
             onClick={() =>
