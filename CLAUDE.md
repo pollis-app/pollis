@@ -39,6 +39,15 @@ pnpm build:windows        # Windows amd64
 
 Secrets are managed via **Doppler**, which syncs to GitHub Actions secrets automatically. For local development, create a `.env.development` file manually or use Doppler CLI (`doppler run -- pnpm dev`).
 
+### Testing
+
+```bash
+cargo test --features test-harness --test flows   # Multi-client integration tests
+pnpm test:e2e                                      # Playwright frontend tests
+```
+
+The integration harness (`src-tauri/tests/flows.rs`) drives real `#[tauri::command]` functions through `tauri::test::get_ipc_response` — no `_inner` shims, no mocked DB layer. Each test gets its own per-client `AppState` + `InMemoryKeystore` but shares a disposable Turso instance configured in `.env.test`. See `.codesight/wiki/testing.md` for the full architecture and how to add scenarios.
+
 ## Architecture
 
 ### Network Architecture
