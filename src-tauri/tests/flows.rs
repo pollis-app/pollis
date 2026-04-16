@@ -808,3 +808,156 @@ async fn channel_message_round_trip() {
     drop(alice);
     drop(bob);
 }
+
+/// Scales the group up from 1 → 9 members and back down to 1, sending a
+/// labeled message after every membership change. Verifies:
+///   - After each add, every current member (including the newcomer) can
+///     decrypt the subsequently-sent message. Newcomers cannot decrypt
+///     messages that were sent before they joined — MLS Welcomes do not
+///     carry history, so `content` comes back as null for pre-join envelopes.
+///   - After each remove, the removed member can no longer decrypt any
+///     subsequent message (their epoch is stale; their keys don't open the
+///     new commit).
+///   - Every surviving member's epoch ratchet stays consistent: they keep
+///     decrypting every post-change message, proving that commit processing
+///     (add and remove) advances their local MLS state correctly.
+///   - The creator can finish the test alone and still send + decrypt —
+///     the group state survives the full shrink.
+///
+/// This is the main stress test for MLS epoch ratcheting under heavy
+/// membership churn.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn epoch_ratchet_nine_users_add_remove() {
+    wipe().await;
+
+    // Nine fully-signed-up clients. Index 0 is the creator and stays for
+    // the whole test; indices 1..9 are added in order and then removed in
+    // reverse order.
+    let mut clients: Vec<TestClient> = Vec::with_capacity(9);
+    let mut profiles: Vec<UserProfile> = Vec::with_capacity(9);
+    for i in 0..9 {
+        let mut c = TestClient::new().await;
+        let p = c.sign_up(&format!("user{}@test.local", i + 1)).await;
+        profiles.push(p);
+        clients.push(c);
+    }
+
+    let group_id = clients[0].create_group("Ratchet").await;
+    let channel_id = clients[0].general_channel_id(&group_id).await;
+
+    // ── Growth phase: 2 → 9 members ──
+    for n in 1..9 {
+        // Creator invites user n+1.
+        let invitee_username = profiles[n].username.clone();
+        clients[0].invite(&group_id, &invitee_username).await;
+
+        // Invitee accepts + applies their Welcome.
+        let invite = clients[n]
+            .first_pending_invite()
+            .await
+            .unwrap_or_else(|| panic!("user{} should have pending invite", n + 1));
+        let invite_id = invite["id"].as_str().expect("invite id").to_string();
+        clients[n].accept_invite(&invite_id).await;
+        clients[n].poll().await;
+
+        // Already-members apply the add commit so their local epoch advances.
+        for k in 0..n {
+            clients[k].process_commits_for(&channel_id).await;
+        }
+
+        // Creator sends a step-labeled message.
+        let label = format!("msg-{n}");
+        clients[0].send_channel_message(&channel_id, &label).await;
+
+        // Every current member decrypts the latest message.
+        for k in 0..=n {
+            let msgs = clients[k].fetch_channel_messages(&channel_id).await;
+            let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+            assert!(
+                contents.contains(&label.as_str()),
+                "user{} should decrypt '{}' at growth step {}, got: {:?}",
+                k + 1,
+                label,
+                n,
+                contents
+            );
+        }
+
+        // Newcomer cannot decrypt any of the prior messages — they joined
+        // after those were encrypted to older epochs.
+        if n >= 2 {
+            let newcomer_msgs = clients[n].fetch_channel_messages(&channel_id).await;
+            for prior in 1..n {
+                let prior_label = format!("msg-{prior}");
+                let hit = newcomer_msgs
+                    .iter()
+                    .any(|m| m["content"].as_str() == Some(prior_label.as_str()));
+                assert!(
+                    !hit,
+                    "user{} should NOT decrypt pre-join message '{}'",
+                    n + 1,
+                    prior_label
+                );
+            }
+        }
+    }
+
+    // ── Shrink phase: 9 → 1 members ──
+    // Remove users 9, 8, ..., 2 (user 0 is creator and stays). After each
+    // removal, send a new message and assert (a) every remaining member
+    // decrypts it, (b) the just-removed user cannot.
+    for n in (1..9).rev() {
+        let target_id = profiles[n].id.clone();
+        clients[0].remove_member(&group_id, &target_id).await;
+
+        // Remaining members apply the remove commit.
+        for k in 0..n {
+            clients[k].process_commits_for(&channel_id).await;
+        }
+
+        let label = format!("post-remove-{}", n + 1);
+        clients[0].send_channel_message(&channel_id, &label).await;
+
+        // Remaining members decrypt.
+        for k in 0..n {
+            let msgs = clients[k].fetch_channel_messages(&channel_id).await;
+            let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+            assert!(
+                contents.contains(&label.as_str()),
+                "user{} should decrypt '{}' after removing user{}, got: {:?}",
+                k + 1,
+                label,
+                n + 1,
+                contents
+            );
+        }
+
+        // Removed user cannot decrypt the post-removal message.
+        let removed_msgs = clients[n].fetch_channel_messages(&channel_id).await;
+        let removed_contents: Vec<&str> = removed_msgs
+            .iter()
+            .filter_map(|m| m["content"].as_str())
+            .collect();
+        assert!(
+            !removed_contents.contains(&label.as_str()),
+            "removed user{} should NOT decrypt '{}', got: {:?}",
+            n + 1,
+            label,
+            removed_contents
+        );
+    }
+
+    // Creator alone at epoch N can still send + decrypt.
+    clients[0]
+        .send_channel_message(&channel_id, "alone-again")
+        .await;
+    let msgs = clients[0].fetch_channel_messages(&channel_id).await;
+    let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+    assert!(
+        contents.contains(&"alone-again"),
+        "creator alone should decrypt 'alone-again', got: {contents:?}"
+    );
+
+    drop(clients);
+}
