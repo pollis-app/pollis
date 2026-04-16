@@ -13,6 +13,18 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "pollis"
 path = "src/main.rs"
 
+[[test]]
+name = "flows"
+path = "tests/flows.rs"
+required-features = ["test-harness"]
+
+[features]
+# Exposes `Config::for_test()` + `InMemoryKeystore` + the `test_harness`
+# module to integration tests. Pulls in `tauri/test` so `MockRuntime` is
+# available. Not enabled in release builds — run the harness with
+# `cargo test --features test-harness --test flows`.
+test-harness = ["tauri/test"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -72,6 +84,8 @@ async-trait = "0.1"
 tauri = { version = "2", features = ["test"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 dotenvy = "0.15"
+serial_test = "3"
+tempfile = "3"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_38"] }

@@ -1,12 +1,15 @@
 mod accounts;
-mod config;
+pub mod config;
 pub mod db;
-mod error;
-mod keystore;
+pub mod error;
+pub mod keystore;
 pub mod realtime;
 mod signal;
-mod state;
+pub mod state;
 pub mod commands;
+
+#[cfg(feature = "test-harness")]
+pub mod test_harness;
 
 use std::sync::Arc;
 use tauri::Manager;
