@@ -28,7 +28,7 @@ use rand::RngCore;
 use sha2::Sha256;
 
 use crate::error::{Error, Result};
-use crate::keystore;
+use crate::keystore::Keystore;
 use crate::state::AppState;
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -210,7 +210,7 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
-    keystore::store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
+    state.keystore.store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
 
     let conn = state.remote_db.conn().await?;
 
@@ -238,8 +238,8 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
 
 /// True if this device holds an account identity private key for `user_id`
 /// in its OS keystore.
-pub async fn has_local_account_identity(user_id: &str) -> Result<bool> {
-    Ok(keystore::load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
+pub async fn has_local_account_identity(keystore: &dyn Keystore, user_id: &str) -> Result<bool> {
+    Ok(keystore.load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
         .await?
         .is_some())
 }
@@ -251,10 +251,11 @@ pub async fn has_local_account_identity(user_id: &str) -> Result<bool> {
 ///
 /// A `false` return means this device is orphaned and must re-enroll.
 pub async fn has_matching_local_account_identity(
+    keystore: &dyn Keystore,
     user_id: &str,
     remote_pub: &[u8],
 ) -> Result<bool> {
-    let Some(local_bytes) = keystore::load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id).await?
+    let Some(local_bytes) = keystore.load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id).await?
     else {
         return Ok(false);
     };
@@ -272,8 +273,8 @@ pub async fn has_matching_local_account_identity(
 /// a device discovers (via `has_matching_local_account_identity`) that
 /// the user has rotated their identity on another device and this
 /// device is now orphaned.
-pub async fn wipe_local_account_identity(user_id: &str) -> Result<()> {
-    keystore::delete_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id).await
+pub async fn wipe_local_account_identity(keystore: &dyn Keystore, user_id: &str) -> Result<()> {
+    keystore.delete_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id).await
 }
 
 /// Soft recovery: generate a completely fresh account identity, bumping
@@ -368,7 +369,7 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     // 4. Install the new private key in this device's OS keystore
     //    immediately so the calling device is enrolled under the new
     //    identity.
-    keystore::store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
+    state.keystore.store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
 
     // 5. Record the reset in the security log. Best-effort only.
     let event_id = ulid::Ulid::new().to_string();
@@ -388,8 +389,8 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
 }
 
 /// Load the account identity signing key for `user_id` from the OS keystore.
-pub async fn load_account_id_key(user_id: &str) -> Result<SigningKey> {
-    let bytes = keystore::load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
+pub async fn load_account_id_key(keystore: &dyn Keystore, user_id: &str) -> Result<SigningKey> {
+    let bytes = keystore.load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
         .await?
         .ok_or_else(|| {
             Error::Crypto(format!("account_id_key not in keystore for user {user_id}"))
@@ -467,13 +468,14 @@ fn device_cert_signed_payload(
 /// `issued_at`, `identity_version`, and `mls_signature_pub` in the remote
 /// `user_device` table so other clients can verify.
 pub async fn sign_device_cert(
+    keystore: &dyn Keystore,
     user_id: &str,
     device_id: &str,
     mls_signature_pub: &[u8],
     identity_version: u32,
     issued_at: u64,
 ) -> Result<Vec<u8>> {
-    let signing_key = load_account_id_key(user_id).await?;
+    let signing_key = load_account_id_key(keystore, user_id).await?;
     let payload = device_cert_signed_payload(
         device_id,
         mls_signature_pub,

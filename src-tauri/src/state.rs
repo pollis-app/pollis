@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 
 use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
-use crate::keystore;
+use crate::keystore::{self, Keystore};
 use crate::commands::voice::VoiceState;
 use crate::commands::voice_test::VoiceTestState;
 use crate::realtime::LiveKitState;
@@ -21,6 +21,11 @@ pub struct AppState {
     /// None until a user logs in. Opened per-user as pollis_{user_id}.db.
     pub local_db: Arc<Mutex<Option<LocalDb>>>,
     pub remote_db: Arc<RemoteDb>,
+    /// Pluggable secret store. Production wires an [`OsKeystore`]; integration
+    /// tests inject an [`InMemoryKeystore`] per simulated client so multiple
+    /// users coexist in one test process without sharing session tokens or
+    /// account identity keys.
+    pub keystore: Arc<dyn Keystore>,
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
     pub livekit: Arc<Mutex<LiveKitState>>,
     pub voice: Arc<Mutex<VoiceState>>,
@@ -42,11 +47,26 @@ pub struct AppState {
 impl AppState {
     pub async fn new(config: Config) -> crate::error::Result<Self> {
         let remote_db = RemoteDb::connect(&config.turso_url, &config.turso_token).await?;
+        Ok(Self::new_with_parts(
+            config,
+            Arc::new(remote_db),
+            keystore::default_os_keystore(),
+        ))
+    }
 
-        Ok(Self {
+    /// Build AppState from pre-constructed parts. Production should use
+    /// [`AppState::new`]; tests use this to inject an [`InMemoryKeystore`] and
+    /// a RemoteDb pointed at the disposable test Turso.
+    pub fn new_with_parts(
+        config: Config,
+        remote_db: Arc<RemoteDb>,
+        keystore: Arc<dyn Keystore>,
+    ) -> Self {
+        Self {
             config,
             local_db: Arc::new(Mutex::new(None)),
-            remote_db: Arc::new(remote_db),
+            remote_db,
+            keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
             voice: Arc::new(Mutex::new(VoiceState::new())),
@@ -54,16 +74,16 @@ impl AppState {
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
-        })
+        }
     }
 
     /// Generate (or load) the per-user DB key and open their database.
     pub async fn load_user_db(&self, user_id: &str) -> crate::error::Result<()> {
-        let db_key = match keystore::load_for_user("db_key", user_id).await? {
+        let db_key = match self.keystore.load_for_user("db_key", user_id).await? {
             Some(k) => k,
             None => {
                 let key: Vec<u8> = (0..32).map(|_| rand::random::<u8>()).collect();
-                keystore::store_for_user("db_key", user_id, &key).await?;
+                self.keystore.store_for_user("db_key", user_id, &key).await?;
                 key
             }
         };
@@ -83,7 +103,7 @@ impl AppState {
             // reset to THIS device only.  Without scoping, resetting all of a
             // user's welcomes would cause other devices to re-process welcomes
             // and destroy their working MLS group state.
-            let maybe_device_id = keystore::load_for_user("device_id", user_id).await
+            let maybe_device_id = self.keystore.load_for_user("device_id", user_id).await
                 .ok()
                 .flatten()
                 .and_then(|b| String::from_utf8(b).ok());

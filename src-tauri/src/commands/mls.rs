@@ -207,7 +207,10 @@ pub async fn ensure_device_cert(
 ) -> crate::error::Result<bool> {
     // 0. Bail early if we don't have the account identity locally. This
     //    happens on a new device before step-5 enrollment has run.
-    if !crate::commands::account_identity::has_local_account_identity(user_id).await? {
+    if !crate::commands::account_identity::has_local_account_identity(
+        state.keystore.as_ref(),
+        user_id,
+    ).await? {
         return Ok(false);
     }
 
@@ -253,6 +256,7 @@ pub async fn ensure_device_cert(
         .unwrap_or(0);
 
     let cert = crate::commands::account_identity::sign_device_cert(
+        state.keystore.as_ref(),
         user_id,
         device_id,
         &sig_pub_bytes,

@@ -54,3 +54,59 @@ fn require_env(key: &str, compiled: Option<&'static str>) -> Result<String> {
         .or_else(|| std::env::var(key).ok())
         .ok_or_else(|| Error::Config(format!("missing env var: {key}")))
 }
+
+#[cfg(any(test, feature = "test-harness"))]
+impl Config {
+    /// Build a Config for the integration-test harness. Loads `.env.test`
+    /// (searching up from the workspace) with override semantics so any
+    /// ambient `.env.development` values never leak into tests. R2 /
+    /// LiveKit / Resend fields are filled with placeholders — the harness
+    /// does not touch R2 or real-time media, and OTP delivery is bypassed
+    /// by `DEV_OTP`.
+    pub fn for_test() -> Result<Self> {
+        let env_path = find_env_test_file()?;
+        dotenvy::from_filename_override(&env_path)
+            .map_err(|e| Error::Config(format!("load {}: {e}", env_path.display())))?;
+
+        let turso_url = std::env::var("TURSO_URL")
+            .map_err(|_| Error::Config("TURSO_URL missing from .env.test".into()))?;
+        let turso_token = std::env::var("TURSO_TOKEN")
+            .map_err(|_| Error::Config("TURSO_TOKEN missing from .env.test".into()))?;
+
+        Ok(Self {
+            turso_url,
+            turso_token,
+            r2_endpoint: String::new(),
+            r2_access_key_id: String::new(),
+            r2_secret_access_key: String::new(),
+            r2_region: "auto".into(),
+            r2_public_url: String::new(),
+            livekit_url: String::new(),
+            livekit_api_key: String::new(),
+            livekit_api_secret: String::new(),
+            resend_api_key: String::new(),
+        })
+    }
+}
+
+#[cfg(any(test, feature = "test-harness"))]
+fn find_env_test_file() -> Result<std::path::PathBuf> {
+    let start = std::env::current_dir()
+        .map_err(|e| Error::Config(format!("current_dir: {e}")))?;
+    let mut dir = start.as_path();
+    loop {
+        let candidate = dir.join(".env.test");
+        if candidate.exists() {
+            return Ok(candidate);
+        }
+        dir = match dir.parent() {
+            Some(p) => p,
+            None => {
+                return Err(Error::Config(format!(
+                    ".env.test not found walking up from {}",
+                    start.display()
+                )))
+            }
+        };
+    }
+}
