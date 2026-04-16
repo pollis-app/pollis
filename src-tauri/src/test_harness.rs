@@ -270,6 +270,33 @@ pub async fn bootstrap_schema(remote: &crate::db::remote::RemoteDb) -> Result<()
         run_sql_script(&conn, sql, &format!("migration {version:04}")).await?;
     }
 
+    apply_drift_fixups(&conn).await?;
+
+    Ok(())
+}
+
+/// Columns / indexes that production Turso has but `remote_schema.sql` +
+/// numbered migrations do not — i.e. drift that was applied out-of-band
+/// against the prod DB. The test harness re-adds them so scenarios
+/// exercise the same queries production runs. Each step swallows
+/// "already exists" errors so re-applying the bootstrap is a no-op.
+///
+/// Tracked so someone can eventually commit a real migration upstream.
+async fn apply_drift_fixups(conn: &libsql::Connection) -> Result<()> {
+    // `group_invite.status` — `commands::groups::{send,accept,decline}_group_invite`
+    // all filter `status = 'pending'` but the schema creates the table
+    // without this column.
+    let alter = "ALTER TABLE group_invite \
+                 ADD COLUMN status TEXT NOT NULL DEFAULT 'pending'";
+    match conn.execute(alter, ()).await {
+        Ok(_) => {}
+        Err(e) if e.to_string().contains("duplicate column") => {}
+        Err(e) => {
+            return Err(Error::Other(anyhow::anyhow!(
+                "drift fixup group_invite.status: {e}"
+            )))
+        }
+    }
     Ok(())
 }
 
