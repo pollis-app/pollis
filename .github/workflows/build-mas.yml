@@ -1,0 +1,149 @@
+# Mac App Store build — manual-trigger only, intentionally separate from
+# `desktop-release.yml` so it never fires on tag push (tagged releases are
+# Developer ID notarised builds, not MAS submissions).
+#
+# This workflow builds a MAS-flavoured bundle:
+#   * `--no-default-features --features mas` compiles out the self-updater
+#     and the process-relaunch surface.
+#   * `-c src-tauri/tauri.mas.conf.json` merges a config overlay that swaps
+#     in `Entitlements.mas.plist` and disables updater artifacts.
+#   * `VITE_MAS_BUILD=true` makes the React bundle hide updater UI and
+#     avoids statically importing the updater / process plugins.
+#
+# Signing, provisioning profile installation, and Transporter upload are
+# stubbed below — they'll land in a follow-up PR once the Apple team ID and
+# MAS cert are wired through Doppler / GitHub secrets.
+#
+# To run locally (no signing, no bundle — just a debug check):
+#   cd src-tauri && cargo check --no-default-features --features mas
+#
+# To build the app bundle locally (produces unsigned .app — good for
+# smoke-testing the sandbox entitlements against `codesign --deep -s -` and
+# running under `sandbox-exec`):
+#   cd frontend && VITE_MAS_BUILD=true pnpm build
+#   cd .. && pnpm tauri build \
+#     --target universal-apple-darwin \
+#     --no-default-features --features mas \
+#     -c src-tauri/tauri.mas.conf.json \
+#     --bundles app
+#
+# Still missing for an actual App Store submission (see issue #157):
+#   1. Replace the `osascript` clipboard reader in `src-tauri/src/lib.rs`
+#      with a native `NSPasteboard` call (AppleEvents entitlement otherwise).
+#   2. Tighten `tauri-plugin-shell` / `tauri-plugin-fs` capability scopes.
+#   3. MAS signing cert + provisioning profile import steps below.
+#   4. Transporter dry-run / altool validation before actual submission.
+name: Build MAS
+
+on:
+  # Manual only. Do NOT add `push` / `tags` / `pull_request` triggers — this
+  # workflow is expensive, requires separate signing material, and must not
+  # race with the regular Developer ID release flow in `desktop-release.yml`.
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you running this? (e.g. 'MAS submission rehearsal')"
+        required: false
+        default: "manual MAS build"
+
+jobs:
+  build-mas:
+    name: Build Mac App Store bundle
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # MAS requires a universal binary (Intel + Apple Silicon).
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: mas
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # Production runtime secrets are still needed so the MAS build points
+      # at real Turso / R2 / LiveKit endpoints. Reuse the same names as
+      # `desktop-release.yml` — they're the runtime config, not signing.
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+
+      # TODO(MAS signing): this is where the signing keychain setup goes.
+      # Roughly:
+      #   - Import the MAS Distribution cert (`MAS_CERTIFICATE_P12` +
+      #     `MAS_CERTIFICATE_PASSWORD`) into a temporary keychain.
+      #   - Install the provisioning profile (`MAS_PROVISIONING_PROFILE`)
+      #     into ~/Library/MobileDevice/Provisioning Profiles/.
+      #   - Export `APPLE_SIGNING_IDENTITY` pointing at the "3rd Party Mac
+      #     Developer Application: <name> (<MAS_TEAM_ID>)" identity and
+      #     `APPLE_INSTALLER_IDENTITY` pointing at "3rd Party Mac Developer
+      #     Installer: ...".
+      # Until those secrets exist, the build is intentionally unsigned —
+      # the `.app` comes out usable for sandbox smoke-tests only.
+      - name: Signing setup (STUB)
+        run: |
+          echo "::warning::MAS signing is not yet wired. Produced bundle will be unsigned."
+          # TODO: uncomment once secrets are provisioned
+          # echo "MAS_CERTIFICATE_P12=${{ secrets.MAS_CERTIFICATE_P12 }}" >> $GITHUB_ENV
+          # echo "MAS_CERTIFICATE_PASSWORD=${{ secrets.MAS_CERTIFICATE_PASSWORD }}" >> $GITHUB_ENV
+          # echo "MAS_PROVISIONING_PROFILE=${{ secrets.MAS_PROVISIONING_PROFILE }}" >> $GITHUB_ENV
+          # echo "MAS_TEAM_ID=${{ secrets.MAS_TEAM_ID }}" >> $GITHUB_ENV
+
+      - name: Build frontend with MAS flag
+        env:
+          VITE_MAS_BUILD: "true"
+        run: pnpm --filter frontend build
+
+      - name: Build MAS bundle (unsigned)
+        env:
+          # These are consumed by `tauri-action` / the Tauri CLI when
+          # signing is enabled — left empty so the build doesn't attempt
+          # to sign until the signing stub above is filled in.
+          APPLE_TEAM_ID: ""
+          APPLE_SIGNING_IDENTITY: ""
+        run: |
+          pnpm tauri build \
+            --target universal-apple-darwin \
+            --no-default-features \
+            --features mas \
+            --config src-tauri/tauri.mas.conf.json \
+            --bundles app
+
+      # TODO(MAS signing): replace with a real `codesign` + `productbuild` +
+      # `xcrun altool --upload-app` chain once signing is wired.
+      - name: Submit to App Store Connect (STUB)
+        run: |
+          echo "::warning::Transporter / altool upload not wired. See TODO in workflow."
+          # productbuild --component "$APP_PATH" /Applications --sign "$APPLE_INSTALLER_IDENTITY" Pollis.pkg
+          # xcrun altool --upload-app --type osx --file Pollis.pkg --username "$APPLE_ID" --password "$APPLE_APP_SPECIFIC_PASSWORD"
+
+      - name: Upload MAS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-mas
+          if-no-files-found: warn
+          path: |
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.app
+            src-tauri/target/universal-apple-darwin/release/bundle/macos/*.pkg

@@ -22,7 +22,9 @@ export class ErrorBoundary extends React.Component<
   handleRestart = async () => {
     // In dev mode the app loads from the Vite dev server — relaunch() would
     // restart the binary without a dev server and show "Connection refused".
-    if (import.meta.env.DEV) {
+    // MAS builds compile out `tauri-plugin-process` entirely, so also fall
+    // back to a plain page reload there.
+    if (import.meta.env.DEV || import.meta.env.VITE_MAS_BUILD) {
       window.location.reload();
       return;
     }

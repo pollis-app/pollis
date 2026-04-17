@@ -14,7 +14,12 @@ import { TerminalApp } from "./components/TerminalApp";
 import { TitleBar } from "./components/Layout/TitleBar";
 import { DotMatrix } from "./components/ui/DotMatrix";
 import { Card } from "./components/ui/Card";
-import { UpdateScreen } from "./components/UpdateScreen";
+// UpdateScreen pulls in `@tauri-apps/plugin-updater` + `plugin-process`. We
+// lazy-load it so those plugins are never evaluated in MAS builds (the
+// render path below short-circuits before this import runs).
+const UpdateScreen = React.lazy(() =>
+  import("./components/UpdateScreen").then((m) => ({ default: m.UpdateScreen }))
+);
 import * as api from "./services/api";
 import { getPreference, applyPreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
@@ -96,8 +101,11 @@ function MainApp() {
 
   const checkStoredSession = useCallback(async () => {
     try {
-      // Check for required update before anything else (skip in dev)
-      if (!import.meta.env.DEV) {
+      // Check for required update before anything else (skip in dev).
+      // MAS builds ship without the self-updater plugin — the Mac App Store
+      // handles updates, and bundling `tauri-plugin-updater` is a guaranteed
+      // rejection. `VITE_MAS_BUILD` is set by the MAS build workflow.
+      if (!import.meta.env.DEV && !import.meta.env.VITE_MAS_BUILD) {
         const { check: checkUpdate } = await import("@tauri-apps/plugin-updater");
         const update = await checkUpdate();
         if (update) {
@@ -264,11 +272,15 @@ function MainApp() {
     setAppState("email-auth");
   }, []);
 
-  if (appState === "update-required" || updateRequired) {
+  // MAS builds never render the update flow: the App Store handles updates
+  // and the underlying Tauri plugins are compiled out entirely.
+  if (!import.meta.env.VITE_MAS_BUILD && (appState === "update-required" || updateRequired)) {
     return (
       <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
         <TitleBar />
-        <UpdateScreen />
+        <React.Suspense fallback={null}>
+          <UpdateScreen />
+        </React.Suspense>
       </div>
     );
   }

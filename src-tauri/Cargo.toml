@@ -13,6 +13,24 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 name = "pollis"
 path = "src/main.rs"
 
+[features]
+# Default features pull in the self-updater stack. The Mac App Store build
+# overrides this with `--no-default-features --features mas` so that
+# `tauri-plugin-updater` and the relaunch surface of `tauri-plugin-process`
+# are never compiled in — MAS apps must update through the store and are
+# rejected if they ship a self-updater.
+default = ["updater"]
+
+# Groups the updater-related plugins. Kept separate from `default` so it can
+# be disabled cleanly in MAS builds without having to list every other
+# default feature.
+updater = ["dep:tauri-plugin-updater", "dep:tauri-plugin-process"]
+
+# Mac App Store build flavor. Intentionally empty — its purpose is to be the
+# antonym of `updater` so code can branch on `cfg(feature = "mas")`. Any MAS
+# build should use `--no-default-features --features mas`.
+mas = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -23,8 +41,8 @@ tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-os = "2"
-tauri-plugin-process = "2"
-tauri-plugin-updater = "2"
+tauri-plugin-process = { version = "2", optional = true }
+tauri-plugin-updater = { version = "2", optional = true }
 tauri-plugin-clipboard-manager = "2"
 url = "2"
 serde = { version = "1", features = ["derive"] }

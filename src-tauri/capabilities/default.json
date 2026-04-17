@@ -25,9 +25,6 @@
     "fs:allow-temp-write",
     "notification:default",
     "os:default",
-    "process:allow-exit",
-    "process:allow-restart",
-    "updater:default",
     "clipboard-manager:allow-read-text"
   ]
 }

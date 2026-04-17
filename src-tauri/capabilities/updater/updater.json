@@ -1,0 +1,12 @@
+{
+  "$schema": "../../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "Self-updater + process relaunch permissions. Excluded from MAS builds — Mac App Store apps must update through the store and cannot self-relaunch.",
+  "platforms": ["linux", "macOS", "windows"],
+  "windows": ["main"],
+  "permissions": [
+    "process:allow-exit",
+    "process:allow-restart",
+    "updater:default"
+  ]
+}

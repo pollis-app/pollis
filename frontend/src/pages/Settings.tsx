@@ -7,7 +7,6 @@ import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar } from
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { getVersion } from "@tauri-apps/api/app";
-import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../services/api";
 
@@ -175,6 +174,9 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
     setUpdateError("");
     setUpdateVersion("");
     try {
+      // Dynamic import so MAS builds never evaluate the updater plugin
+      // module (it would throw — the Rust-side plugin isn't registered).
+      const { check: checkForUpdate } = await import("@tauri-apps/plugin-updater");
       const update = await checkForUpdate();
       if (update) {
         setUpdateStatus("available");
@@ -365,7 +367,8 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
             )}
           </section>
 
-          {/* Software Updates */}
+          {/* Software Updates — hidden in MAS builds (App Store handles updates) */}
+          {!import.meta.env.VITE_MAS_BUILD && (
           <section className="flex flex-col gap-4 mb-12">
             <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
               Software Updates
@@ -418,6 +421,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
               )}
             </div>
           </section>
+          )}
 
           {/* Danger zone */}
           <section className="flex flex-col gap-4 mb-12" data-testid="settings-danger-zone">

@@ -204,15 +204,25 @@ pub fn run() {
         std::env::set_var("GST_AUDIO_SINK", "pulsesink");
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_os::init())
+        .plugin(tauri_plugin_clipboard_manager::init());
+
+    // The self-updater stack is compiled out of MAS builds (`--features mas`)
+    // because Mac App Store apps must update through the store. `tauri-plugin-
+    // process` is also omitted because its primary surface (`relaunch`) is
+    // used exclusively by the update flow; keeping it enabled would let the
+    // frontend call `relaunch()` which is also disallowed by MAS review.
+    #[cfg(not(feature = "mas"))]
+    let builder = builder
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
+    builder
         .setup(|app| {
             // Load .env.development in dev builds (no-op if file doesn't exist)
             #[cfg(debug_assertions)]
@@ -356,7 +366,9 @@ commands::livekit::get_livekit_token,
             commands::r2::upload_media,
             commands::r2::download_file,
             commands::r2::download_media,
+            #[cfg(not(feature = "mas"))]
             commands::update::mark_update_required,
+            #[cfg(not(feature = "mas"))]
             commands::update::is_update_required,
             commands::voice::subscribe_voice_events,
             commands::voice::list_audio_devices,

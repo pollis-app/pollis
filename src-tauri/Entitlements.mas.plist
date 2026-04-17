@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Mac App Store entitlements. Paired with `tauri.mas.conf.json` and the `mas`
+  Cargo feature. Notes:
+
+  * App Sandbox is mandatory for MAS distribution.
+  * `network.client` is required for Turso, R2, and LiveKit (all HTTPS/WSS
+    outbound). We do NOT include `network.server` — Pollis never listens.
+  * `device.audio-input` is required for `cpal` microphone capture and
+    LiveKit audio publishing; pairs with `NSMicrophoneUsageDescription` in
+    Info.plist. Skipped: `device.camera` (no camera capture today).
+  * `files.user-selected.read-write` is the read-only-plus-write variant
+    needed by the `dialog` / `fs` plugins to operate on files the user
+    picks via a native file picker. Without it the sandbox rejects every
+    path returned by `open()` / `save()`.
+  * The keychain access group is what the `keyring` crate binds to when
+    talking to the Keychain under the sandbox. Without a matching group
+    the keychain read/write silently succeeds but returns nothing on the
+    next launch.
+
+  TODO(MAS signing): replace `$(AppIdentifierPrefix)com.pollis.app` with the
+  real `<TEAM_ID>.com.pollis.app` once the Apple Developer team ID is wired
+  through the signing pipeline. `$(AppIdentifierPrefix)` is the standard
+  Xcode build-setting placeholder that `codesign` / Tauri's bundler may not
+  expand — explicit interpolation happens in the build workflow.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+
+	<key>com.apple.security.network.client</key>
+	<true/>
+
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<key>com.apple.security.files.user-selected.read-write</key>
+	<true/>
+
+	<key>keychain-access-groups</key>
+	<array>
+		<string>$(AppIdentifierPrefix)com.pollis.app</string>
+	</array>
+</dict>
+</plist>

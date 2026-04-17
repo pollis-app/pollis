@@ -1,6 +1,5 @@
 import React from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { exit } from "@tauri-apps/plugin-process";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { usePendingInvites, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
@@ -86,13 +85,18 @@ export const RootPage: React.FC = () => {
       type: "system",
       testId: "menu-item-logout",
     },
-    {
+    // MAS builds compile out `tauri-plugin-process`, so the Exit item is
+    // hidden there — macOS users quit via Cmd+Q / the app menu anyway.
+    ...(!import.meta.env.VITE_MAS_BUILD ? [{
       id: "exit",
       label: "Exit",
-      action: () => exit(0),
-      type: "system",
+      action: async () => {
+        const { exit } = await import("@tauri-apps/plugin-process");
+        await exit(0);
+      },
+      type: "system" as const,
       testId: "menu-item-exit",
-    },
+    }] : []),
   ];
 
   return <TerminalMenu items={items} />;

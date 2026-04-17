@@ -1,0 +1,15 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "category": "SocialNetworking",
+    "macOS": {
+      "entitlements": "Entitlements.mas.plist",
+      "providerShortName": null,
+      "exceptionDomain": null
+    },
+    "createUpdaterArtifacts": false
+  },
+  "plugins": {
+    "updater": null
+  }
+}
