@@ -1,10 +1,13 @@
 use libsql::{Builder, Database, Connection};
+use tokio::sync::RwLock;
 use crate::error::Result;
 
 const SCHEMA: &str = include_str!("migrations/remote_schema.sql");
 
 pub struct RemoteDb {
-    db: Database,
+    db: RwLock<Database>,
+    url: String,
+    token: String,
 }
 
 impl RemoteDb {
@@ -14,12 +17,45 @@ impl RemoteDb {
         let db = Builder::new_remote(url.to_string(), token.to_string())
             .build()
             .await?;
-        Ok(Self { db })
+        Ok(Self {
+            db: RwLock::new(db),
+            url: url.to_string(),
+            token: token.to_string(),
+        })
     }
 
     pub async fn conn(&self) -> Result<Connection> {
-        Ok(self.db.connect()?)
+        let db = self.db.read().await;
+        Ok(db.connect()?)
     }
+
+    /// Rebuild the underlying libsql `Database`. Long-lived handles can be
+    /// torn down by the server (TCP reset) or have their streams GC'd
+    /// ("stream not found"); neither is recoverable from the existing handle.
+    /// Callers that hit a transient Hrana error should `reconnect()` and retry.
+    pub async fn reconnect(&self) -> Result<()> {
+        let new_db = Builder::new_remote(self.url.clone(), self.token.clone())
+            .build()
+            .await?;
+        let mut db = self.db.write().await;
+        *db = new_db;
+        Ok(())
+    }
+}
+
+/// Heuristic: does this libsql error look like a transient connection/stream
+/// failure that a `reconnect()` + retry can recover from? libsql's error enum
+/// doesn't distinguish these structurally, so match on the rendered message.
+pub fn is_transient_libsql_error(e: &libsql::Error) -> bool {
+    let s = e.to_string().to_lowercase();
+    s.contains("connection reset")
+        || s.contains("connection refused")
+        || s.contains("connection closed")
+        || s.contains("connection error")
+        || s.contains("broken pipe")
+        || s.contains("stream not found")
+        || s.contains("stream expired")
+        || s.contains("timed out")
 }
 
 /// Drop all tables and recreate from the schema file.

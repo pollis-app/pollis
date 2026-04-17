@@ -345,7 +345,12 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 /// don't fire redundantly. `libsql::Connection` doesn't expose transactions
 /// for remote databases here, so we rely on CASCADE and delete in order.
 pub async fn wipe_remote(remote: &crate::db::remote::RemoteDb) -> Result<()> {
-    let conn = remote.conn().await?;
+    // A ~4-minute serialized test run leaves the shared libsql `Database`
+    // handle idle between scenarios. Turso / intermediate hops occasionally
+    // tear that TCP connection down, and the next operation surfaces as
+    // "Connection reset by peer" or "stream not found". Force a fresh
+    // handle at the start of every wipe so each scenario starts clean.
+    remote.reconnect().await?;
 
     // Tables that reference others first, then roots. The list covers the
     // base schema + every table added by migrations 000001–000015.
@@ -375,10 +380,19 @@ pub async fn wipe_remote(remote: &crate::db::remote::RemoteDb) -> Result<()> {
         "users",
     ];
     for t in tables {
-        // DELETE FROM is the portable form libsql supports.
-        conn.execute(&format!("DELETE FROM {t}"), ())
-            .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("wipe {t}: {e}")))?;
+        let mut attempts = 0;
+        loop {
+            let conn = remote.conn().await?;
+            match conn.execute(&format!("DELETE FROM {t}"), ()).await {
+                Ok(_) => break,
+                Err(e) if attempts < 2 && crate::db::remote::is_transient_libsql_error(&e) => {
+                    eprintln!("wipe {t}: transient libsql error, reconnecting and retrying: {e}");
+                    remote.reconnect().await?;
+                    attempts += 1;
+                }
+                Err(e) => return Err(Error::Other(anyhow::anyhow!("wipe {t}: {e}"))),
+            }
+        }
     }
     Ok(())
 }
