@@ -46,13 +46,10 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(config: Config) -> crate::error::Result<Self> {
-        let remote_db = Arc::new(
-            RemoteDb::connect(&config.turso_url, &config.turso_token).await?,
-        );
-        spawn_remote_db_keepalive(remote_db.clone());
+        let remote_db = RemoteDb::connect(&config.turso_url, &config.turso_token).await?;
         Ok(Self::new_with_parts(
             config,
-            remote_db,
+            Arc::new(remote_db),
             keystore::default_os_keystore(),
         ))
     }
@@ -149,28 +146,4 @@ impl AppState {
         }
         Ok(())
     }
-}
-
-/// Periodically probe the libsql connection and reconnect if it has gone
-/// stale (TCP reset after idle, stream GC'd, laptop wake). Without this, a
-/// silently-dead connection would surface as a command failure the first
-/// time the user tries to do something post-wake, forcing an app restart.
-///
-/// The task holds an `Arc<RemoteDb>` and runs for the life of the process.
-/// Spawned only from [`AppState::new`] (production). Integration tests use
-/// [`AppState::new_with_parts`] and do not spawn a keepalive — they reset
-/// connections explicitly between scenarios.
-fn spawn_remote_db_keepalive(remote_db: Arc<RemoteDb>) {
-    const INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(INTERVAL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            if let Err(e) = remote_db.heal_if_stale().await {
-                eprintln!("[keepalive] heal_if_stale returned non-transient error: {e}");
-            }
-        }
-    });
 }
