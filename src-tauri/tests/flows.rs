@@ -2143,3 +2143,135 @@ async fn dm_invite_reject_removes_from_tree() {
     drop(bob_d2);
 }
 
+/// After a reject, alice can open a FRESH DM with bob and both sides
+/// converge again. Every bob device must re-enter the MLS tree with a
+/// brand-new `dm_channel.id`, and no stale state from the rejected DM
+/// may surface.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn dm_re_invite_after_reject() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+
+    let mut bob_d1 = TestClient::new().await;
+    let bob_profile = bob_d1.sign_up("bob@test.local").await;
+    let bob_d2 = enroll_second_device(&bob_d1, "bob@test.local").await;
+
+    // ── Phase 1: create → reject ──
+    let rejected_dm_id = alice
+        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
+        .await;
+    bob_d1.leave_dm(&rejected_dm_id).await;
+
+    // ── Phase 2: fresh DM; a brand-new dm_channel.id ──
+    let dm_id = alice
+        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
+        .await;
+    assert_ne!(
+        dm_id, rejected_dm_id,
+        "second create_dm_channel must produce a distinct dm_channel.id"
+    );
+
+    // Bob sees only the new pending request, not the rejected one.
+    for (client, label) in [(&bob_d1, "bob_d1"), (&bob_d2, "bob_d2")] {
+        let requests = client.list_dm_requests().await;
+        let ids: Vec<&str> = requests
+            .iter()
+            .filter_map(|r| r["id"].as_str())
+            .collect();
+        assert!(
+            ids.contains(&dm_id.as_str()),
+            "{label} should see the NEW dm request {dm_id}, got: {ids:?}"
+        );
+        assert!(
+            !ids.contains(&rejected_dm_id.as_str()),
+            "{label} must not see the rejected dm {rejected_dm_id}, got: {ids:?}"
+        );
+    }
+
+    // bob_d1 accepts. Reconcile pulls in both bob devices.
+    bob_d1.accept_dm_request(&dm_id).await;
+
+    // Warm MLS on all three devices in the fresh DM.
+    alice.fetch_dm_messages(&dm_id).await;
+    bob_d1.fetch_dm_messages(&dm_id).await;
+    bob_d2.fetch_dm_messages(&dm_id).await;
+
+    // ── Phase 3: alice → both bob devices decrypt ──
+    alice
+        .send_channel_message(&dm_id, "fresh-dm alice->bob")
+        .await;
+    for (client, label) in [(&bob_d1, "bob_d1"), (&bob_d2, "bob_d2")] {
+        let msgs = client.fetch_dm_messages(&dm_id).await;
+        let contents: Vec<&str> =
+            msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(
+            contents.contains(&"fresh-dm alice->bob"),
+            "{label} should decrypt 'fresh-dm alice->bob' in re-invited DM, got: {contents:?}"
+        );
+    }
+
+    // ── Phase 4: bob_d2 replies → alice decrypts ──
+    bob_d2
+        .send_channel_message(&dm_id, "fresh-dm bob-d2->alice")
+        .await;
+    let alice_msgs = alice.fetch_dm_messages(&dm_id).await;
+    let alice_contents: Vec<&str> = alice_msgs
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert!(
+        alice_contents.contains(&"fresh-dm bob-d2->alice"),
+        "alice should decrypt bob_d2's reply, got: {alice_contents:?}"
+    );
+
+    // ── Phase 5: no leak on bob's side ──
+    // Bob rejected, so the rejected dm must not appear on any of bob's
+    // devices. Alice's side may still hold a ghost row (leave_dm_channel
+    // only tears down the channel when there are zero remaining members
+    // — alice is still the creator and auto-accepted) but that ghost must
+    // not interfere with the fresh DM. The new DM's id must appear in
+    // alice's accepted list exactly once, while the rejected id's fresh
+    // messages are never mixed into the new conversation.
+    for (list_name, list) in [
+        ("bob_d1 list_dms", bob_d1.list_dms().await),
+        ("bob_d1 list_dm_requests", bob_d1.list_dm_requests().await),
+        ("bob_d2 list_dms", bob_d2.list_dms().await),
+        ("bob_d2 list_dm_requests", bob_d2.list_dm_requests().await),
+    ] {
+        let ids: Vec<&str> = list.iter().filter_map(|c| c["id"].as_str()).collect();
+        assert!(
+            !ids.contains(&rejected_dm_id.as_str()),
+            "{list_name} must not contain the rejected dm id, got: {ids:?}"
+        );
+    }
+    let alice_new_dm_count = alice
+        .list_dms()
+        .await
+        .iter()
+        .filter(|c| c["id"].as_str() == Some(dm_id.as_str()))
+        .count();
+    assert_eq!(
+        alice_new_dm_count, 1,
+        "alice should list the fresh DM exactly once"
+    );
+
+    // The fresh DM's messages must not carry over onto the rejected id —
+    // fetching the rejected id on bob's devices yields no plaintext.
+    for (client, label) in [(&bob_d1, "bob_d1"), (&bob_d2, "bob_d2")] {
+        let msgs = client.fetch_dm_messages(&rejected_dm_id).await;
+        let contents: Vec<&str> =
+            msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(
+            !contents.contains(&"fresh-dm alice->bob"),
+            "{label} must not see fresh-DM plaintext via the rejected id, got: {contents:?}"
+        );
+    }
+
+    drop(alice);
+    drop(bob_d1);
+    drop(bob_d2);
+}
+
