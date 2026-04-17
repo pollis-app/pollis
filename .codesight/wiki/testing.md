@@ -124,6 +124,7 @@ Rules of thumb:
 
 - **`edit_message_across_membership_changes`** covers edits across add and remove. Worth knowing when reading the assertions: `get_channel_messages` applies edit envelopes with `UPDATE message SET content = ?` only — if the recipient has no local row for the edited message (e.g. they joined after the original was sent), the edit does not populate a new row for them. The scenario asserts convergence on members that had the original cached; for late joiners it asserts only that stale plaintext never leaks.
 - **`envelope_cleanup_ttl_or_watermark`** proves each leg of the `message_envelope` cleanup gate in `get_channel_messages`: the 30-day TTL and the all-members-caught-up watermark. It uses two free functions in the tests file (`backdate_envelopes`, `clear_watermarks`) that poke the shared remote DB directly via `TestClient.state.remote_db` — that's the cleanest way to construct states (old envelopes, missing watermark rows) that can't be produced by production commands alone. Do not add Tauri commands just to enable these manipulations.
+- **`dm_multi_device_round_trip`** drives the device-enrollment command chain via the `enroll_second_device` helper and proves the MLS tree in a DM expands to every enrolled device of every member. Alice and Bob each run two devices; the DM's `dm_channel_member` row is still keyed per user, but reconcile populates one MLS leaf per device, so a message sent from any of the four devices decrypts on the other three. A non-member (carol) cannot decrypt any of the messages.
 
 ## Known flakes
 

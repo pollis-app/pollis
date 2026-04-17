@@ -1698,3 +1698,325 @@ async fn envelope_cleanup_ttl_or_watermark() {
     drop(alice);
     drop(bob);
 }
+
+// ─── Multi-device helpers ───────────────────────────────────────────────────
+
+impl TestClient {
+    /// Fetch a DM channel page through the real `get_dm_messages` command.
+    /// Mirrors `fetch_channel_messages` but drives the DM code path, which
+    /// polls welcomes and processes commits before decrypting.
+    async fn fetch_dm_messages(&self, dm_channel_id: &str) -> Vec<serde_json::Value> {
+        let page: serde_json::Value = self
+            .invoke_json(
+                "get_dm_messages",
+                json!({ "userId": self.user_id(), "dmChannelId": dm_channel_id, "limit": 50 }),
+            )
+            .await;
+        page["messages"]
+            .as_array()
+            .expect("messages array")
+            .clone()
+    }
+
+    /// Leave a DM. Used both as "reject pending request" (when the user hasn't
+    /// accepted yet) and "leave accepted channel" — the row is deleted either
+    /// way, so both flows go through this single command.
+    async fn leave_dm(&self, dm_channel_id: &str) {
+        self.invoke_json(
+            "leave_dm_channel",
+            json!({ "dmChannelId": dm_channel_id, "userId": self.user_id() }),
+        )
+        .await;
+    }
+
+    async fn unblock(&self, blocked_user_id: &str) {
+        self.invoke_json(
+            "unblock_user",
+            json!({ "blockerId": self.user_id(), "blockedId": blocked_user_id }),
+        )
+        .await;
+    }
+}
+
+/// Spin up a new `TestClient` and enroll it as a second device for an
+/// existing user. Drives the real `device_enrollment` command chain end to
+/// end — `start_device_enrollment` → `list_pending_enrollment_requests` →
+/// `approve_device_enrollment` → `poll_enrollment_status` — so the returned
+/// client holds a valid local copy of `account_id_key`, has published its
+/// own device cert + MLS key packages, and can participate in MLS groups
+/// immediately.
+///
+/// `primary` must already be signed in as the target user.
+async fn enroll_second_device(primary: &TestClient, email: &str) -> TestClient {
+    // 1. Build a fresh client. Unlike `TestClient::new` → `sign_up`, we sign
+    //    in against the email of an existing user, so `verify_otp` finds the
+    //    user row and returns enrollment_required = true (instead of minting
+    //    a new account).
+    let mut new_client = TestClient::new().await;
+
+    invoke::<()>(
+        &new_client.webview,
+        "request_otp",
+        json!({ "email": email }),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("request_otp({email}) on new device: {e}"));
+
+    let profile: UserProfile = invoke(
+        &new_client.webview,
+        "verify_otp",
+        json!({ "email": email, "code": DEV_OTP }),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("verify_otp({email}) on new device: {e}"));
+
+    assert_eq!(
+        profile.id,
+        primary.user_id(),
+        "second device verify_otp should resolve to the primary's user_id"
+    );
+    assert!(
+        profile.enrollment_required,
+        "second device must see enrollment_required=true"
+    );
+
+    new_client.profile = Some(profile.clone());
+
+    // 2. New device kicks off an enrollment request — ephemeral X25519 pub
+    //    lands on Turso, the private half stays in AppState.
+    let handle: serde_json::Value = new_client
+        .invoke_json(
+            "start_device_enrollment",
+            json!({ "userId": profile.id }),
+        )
+        .await;
+    let request_id = handle["request_id"]
+        .as_str()
+        .expect("request_id")
+        .to_string();
+    let verification_code = handle["verification_code"]
+        .as_str()
+        .expect("verification_code")
+        .to_string();
+
+    // 3. Primary sees the pending request and approves it. The approver
+    //    wraps account_id_key under the requester's ephemeral pub and
+    //    flips the row to 'approved'.
+    let pending: serde_json::Value = primary
+        .invoke_json(
+            "list_pending_enrollment_requests",
+            json!({ "userId": profile.id }),
+        )
+        .await;
+    let pending_arr = pending.as_array().expect("pending array");
+    let matching = pending_arr
+        .iter()
+        .find(|r| r["request_id"].as_str() == Some(request_id.as_str()))
+        .unwrap_or_else(|| {
+            panic!(
+                "primary did not see pending enrollment request {request_id}; \
+                 got {pending_arr:#?}"
+            )
+        });
+    assert_eq!(
+        matching["verification_code"].as_str(),
+        Some(verification_code.as_str()),
+        "verification code should match between devices"
+    );
+
+    primary
+        .invoke_json(
+            "approve_device_enrollment",
+            json!({
+                "requestId": request_id,
+                "verificationCode": verification_code,
+            }),
+        )
+        .await;
+
+    // 4. New device polls until approved. Bounded loop — 20 iterations is
+    //    orders of magnitude more than needed because the approve write
+    //    above has already committed to Turso by the time we get here. No
+    //    raw sleeps.
+    let mut status: String = String::new();
+    for attempt in 0..20 {
+        let resp: serde_json::Value = new_client
+            .invoke_json(
+                "poll_enrollment_status",
+                json!({ "requestId": request_id }),
+            )
+            .await;
+        status = resp["status"]
+            .as_str()
+            .unwrap_or("(missing status)")
+            .to_string();
+        if status == "approved" {
+            break;
+        }
+        if status == "rejected" || status == "expired" {
+            panic!("enrollment terminal status before approval: {status}");
+        }
+        if attempt == 19 {
+            panic!("enrollment never approved; last status={status}");
+        }
+    }
+    assert_eq!(status, "approved", "enrollment should end in 'approved'");
+
+    // 5. Sanity: remote now lists two devices for this user.
+    let devices: serde_json::Value = new_client
+        .invoke_json(
+            "list_user_devices",
+            json!({ "userId": profile.id }),
+        )
+        .await;
+    assert_eq!(
+        devices.as_array().map(|a| a.len()).unwrap_or(0),
+        2,
+        "user should have exactly two registered devices after enrollment, got {devices:?}"
+    );
+
+    new_client
+}
+
+/// Multi-device DM: alice and bob each run two enrolled devices. A DM
+/// between them must reach all four leaves of the MLS tree, because
+/// `dm_channel_member` is keyed per user but the tree expands to every
+/// enrolled device of every member during reconcile. A non-member
+/// (carol) cannot decrypt any of the four messages.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn dm_multi_device_round_trip() {
+    wipe().await;
+
+    // ── Setup: alice_d1 + alice_d2, bob_d1 + bob_d2 ──
+    let mut alice_d1 = TestClient::new().await;
+    let alice_profile = alice_d1.sign_up("alice@test.local").await;
+    let alice_d2 = enroll_second_device(&alice_d1, "alice@test.local").await;
+
+    let mut bob_d1 = TestClient::new().await;
+    let bob_profile = bob_d1.sign_up("bob@test.local").await;
+    let bob_d2 = enroll_second_device(&bob_d1, "bob@test.local").await;
+
+    // ── Create DM: alice_d1 → bob, bob_d1 accepts ──
+    let dm_id = alice_d1
+        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
+        .await;
+
+    // Bob sees the pending request on d1 and accepts.
+    assert_eq!(bob_d1.list_dm_requests().await.len(), 1);
+    bob_d1.accept_dm_request(&dm_id).await;
+
+    // ── Warm MLS on all four devices ──
+    // `get_dm_messages` polls welcomes and processes pending commits, so
+    // each call advances that device's local MLS state to the current
+    // epoch for this conversation.
+    alice_d1.fetch_dm_messages(&dm_id).await;
+    alice_d2.fetch_dm_messages(&dm_id).await;
+    bob_d1.fetch_dm_messages(&dm_id).await;
+    bob_d2.fetch_dm_messages(&dm_id).await;
+
+    // ── Carol: signs up, does NOT join the DM. Baseline for non-member. ──
+    let mut carol = TestClient::new().await;
+    let _carol_profile = carol.sign_up("carol@test.local").await;
+
+    // ── Helper: assert that exactly the three "other" devices decrypt `content`. ──
+    async fn assert_other_three_decrypt(
+        sender_label: &str,
+        content: &str,
+        dm_id: &str,
+        others: [(&TestClient, &str); 3],
+        carol: &TestClient,
+    ) {
+        for (client, label) in others.iter() {
+            let msgs = client.fetch_dm_messages(dm_id).await;
+            let contents: Vec<&str> =
+                msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+            assert!(
+                contents.contains(&content),
+                "{label} should decrypt '{content}' sent by {sender_label}, got: {contents:?}"
+            );
+        }
+        let carol_msgs = carol.fetch_dm_messages(dm_id).await;
+        let carol_contents: Vec<&str> =
+            carol_msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(
+            !carol_contents.contains(&content),
+            "non-member carol must not decrypt '{content}', got: {carol_contents:?}"
+        );
+    }
+
+    // ── Round trip #1: alice_d1 → the other three ──
+    alice_d1
+        .send_channel_message(&dm_id, "hi from alice-d1")
+        .await;
+    assert_other_three_decrypt(
+        "alice_d1",
+        "hi from alice-d1",
+        &dm_id,
+        [
+            (&alice_d2, "alice_d2"),
+            (&bob_d1, "bob_d1"),
+            (&bob_d2, "bob_d2"),
+        ],
+        &carol,
+    )
+    .await;
+
+    // ── Round trip #2: alice_d2 → the other three ──
+    alice_d2
+        .send_channel_message(&dm_id, "hi from alice-d2")
+        .await;
+    assert_other_three_decrypt(
+        "alice_d2",
+        "hi from alice-d2",
+        &dm_id,
+        [
+            (&alice_d1, "alice_d1"),
+            (&bob_d1, "bob_d1"),
+            (&bob_d2, "bob_d2"),
+        ],
+        &carol,
+    )
+    .await;
+
+    // ── Round trip #3: bob_d1 → the other three ──
+    bob_d1
+        .send_channel_message(&dm_id, "hi from bob-d1")
+        .await;
+    assert_other_three_decrypt(
+        "bob_d1",
+        "hi from bob-d1",
+        &dm_id,
+        [
+            (&alice_d1, "alice_d1"),
+            (&alice_d2, "alice_d2"),
+            (&bob_d2, "bob_d2"),
+        ],
+        &carol,
+    )
+    .await;
+
+    // ── Round trip #4: bob_d2 → the other three ──
+    bob_d2
+        .send_channel_message(&dm_id, "hi from bob-d2")
+        .await;
+    assert_other_three_decrypt(
+        "bob_d2",
+        "hi from bob-d2",
+        &dm_id,
+        [
+            (&alice_d1, "alice_d1"),
+            (&alice_d2, "alice_d2"),
+            (&bob_d1, "bob_d1"),
+        ],
+        &carol,
+    )
+    .await;
+
+    drop(alice_d1);
+    drop(alice_d2);
+    drop(bob_d1);
+    drop(bob_d2);
+    drop(carol);
+}
+
