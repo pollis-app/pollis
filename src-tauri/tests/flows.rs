@@ -2275,3 +2275,164 @@ async fn dm_re_invite_after_reject() {
     drop(bob_d2);
 }
 
+/// Count rows in the remote `user_block` table for a given (blocker,
+/// blocked) pair. Lets tests observe the raw row state without going
+/// through a Tauri command that also filters by block.
+async fn user_block_count(
+    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    blocker_id: &str,
+    blocked_id: &str,
+) -> i64 {
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM user_block \
+             WHERE blocker_id = ?1 AND blocked_id = ?2",
+            libsql::params![blocker_id.to_string(), blocked_id.to_string()],
+        )
+        .await
+        .expect("count user_block");
+    let row = rows.next().await.expect("row").expect("some row");
+    row.get::<i64>(0).expect("count")
+}
+
+/// Block lifecycle: search-before, block hides the DM on alice's side but
+/// not bob's, create_dm_channel is refused with BLOCK_ERR, unblock
+/// restores visibility, and create_dm_channel works again after unblock.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn user_block_lifecycle() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let remote = alice.state.remote_db.clone();
+
+    // Before block: search_user_by_username resolves bob for alice.
+    let hit: serde_json::Value = alice
+        .invoke_json(
+            "search_user_by_username",
+            json!({ "username": bob_profile.username.clone() }),
+        )
+        .await;
+    assert_eq!(
+        hit["id"], bob_profile.id,
+        "pre-block search_user_by_username should return bob"
+    );
+    assert_eq!(
+        user_block_count(&remote, &alice_profile.id, &bob_profile.id).await,
+        0,
+        "no user_block row before block_user runs"
+    );
+
+    // Alice creates a DM; bob sees it as a pending request.
+    let dm_id = alice
+        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
+        .await;
+    let bob_requests = bob.list_dm_requests().await;
+    assert!(
+        bob_requests.iter().any(|c| c["id"] == dm_id),
+        "bob should see alice's DM as a pending request pre-block"
+    );
+
+    // ── Block ──
+    alice.block(&bob_profile.id).await;
+    assert_eq!(
+        user_block_count(&remote, &alice_profile.id, &bob_profile.id).await,
+        1,
+        "block_user should insert a user_block row"
+    );
+
+    // Alice's side: DM is hidden from both list_dms and list_dm_requests
+    // (block_user also nulls alice's accepted_at, and list_dm_requests
+    // filters out channels whose other participant she has blocked).
+    assert!(
+        alice
+            .list_dms()
+            .await
+            .iter()
+            .all(|c| c["id"] != dm_id),
+        "post-block: alice's list_dms must not contain the blocked-user's DM"
+    );
+    assert!(
+        alice
+            .list_dm_requests()
+            .await
+            .iter()
+            .all(|c| c["id"] != dm_id),
+        "post-block: alice's list_dm_requests must not contain the blocked-user's DM"
+    );
+
+    // Bob's side must still see the DM — the block is invisible to the
+    // blocked party by design (dm.rs:169-173).
+    let bob_requests_after_block = bob.list_dm_requests().await;
+    assert!(
+        bob_requests_after_block.iter().any(|c| c["id"] == dm_id),
+        "post-block: bob must continue to see the DM on his side, got: {bob_requests_after_block:?}"
+    );
+
+    // create_dm_channel is refused with BLOCK_ERR while the block is
+    // active — mirrors block_prevents_dm_creation.
+    let err = invoke::<serde_json::Value>(
+        &alice.webview,
+        "create_dm_channel",
+        json!({
+            "creatorId": alice_profile.id,
+            "memberIds": [alice_profile.id.clone(), bob_profile.id.clone()],
+        }),
+    )
+    .await
+    .err()
+    .expect("create_dm_channel should fail while blocked");
+    assert!(
+        err.contains("message request pending"),
+        "expected BLOCK_ERR, got: {err}"
+    );
+
+    // ── Unblock ──
+    alice.unblock(&bob_profile.id).await;
+    assert_eq!(
+        user_block_count(&remote, &alice_profile.id, &bob_profile.id).await,
+        0,
+        "unblock_user should remove the user_block row"
+    );
+
+    // Alice sees the original DM again. block_user nulled her
+    // accepted_at, so the unblocked channel resurfaces as a request
+    // (not in list_dms) — both locations are acceptable places for the
+    // restored row, assert it appears in at least one.
+    let alice_dms_ids: Vec<serde_json::Value> = alice.list_dms().await;
+    let alice_req_ids: Vec<serde_json::Value> = alice.list_dm_requests().await;
+    let in_dms = alice_dms_ids.iter().any(|c| c["id"] == dm_id);
+    let in_reqs = alice_req_ids.iter().any(|c| c["id"] == dm_id);
+    assert!(
+        in_dms || in_reqs,
+        "post-unblock: alice should see the original DM again in either list, \
+         dms={alice_dms_ids:?} reqs={alice_req_ids:?}"
+    );
+
+    // create_dm_channel works again — use a fresh peer (carol) so the
+    // lingering alice↔bob DM from above doesn't tangle with a brand-new
+    // channel. Carol signs up now that the block is gone.
+    let mut carol = TestClient::new().await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+    let new_dm_id = alice
+        .create_dm(&[alice_profile.id.as_str(), carol_profile.id.as_str()])
+        .await;
+    assert_ne!(new_dm_id, dm_id, "new DM should have a fresh id");
+    assert!(
+        alice
+            .list_dms()
+            .await
+            .iter()
+            .any(|c| c["id"] == new_dm_id),
+        "post-unblock create_dm_channel should succeed and surface on alice's side"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
