@@ -497,6 +497,37 @@ impl TestClient {
             .expect("messages array")
             .clone()
     }
+
+    /// Change a member's role in a group (`"admin"` or `"member"`).
+    async fn set_member_role(&self, group_id: &str, target_user_id: &str, role: &str) {
+        self.invoke_json(
+            "set_member_role",
+            json!({
+                "groupId": group_id,
+                "userId": target_user_id,
+                "role": role,
+                "requesterId": self.user_id(),
+            }),
+        )
+        .await;
+    }
+
+    /// Return the (user_id, role) pairs for every current member of a group.
+    async fn group_member_roles(&self, group_id: &str) -> Vec<(String, String)> {
+        let members: serde_json::Value = self
+            .invoke_json("get_group_members", json!({ "groupId": group_id }))
+            .await;
+        members
+            .as_array()
+            .expect("members array")
+            .iter()
+            .map(|m| (
+                m["user_id"].as_str().expect("user_id").to_string(),
+                m["role"].as_str().expect("role").to_string(),
+            ))
+            .collect()
+    }
+
 }
 
 // ─── Scenarios ──────────────────────────────────────────────────────────────
@@ -961,3 +992,285 @@ async fn epoch_ratchet_nine_users_add_remove() {
 
     drop(clients);
 }
+
+/// Seeded xorshift64 — deterministic and dependency-free. We intentionally
+/// avoid pulling `StdRng` in from `rand` here so changes to its default
+/// feature set can't silently re-seed this scenario.
+struct XorShift64(u64);
+
+impl XorShift64 {
+    fn new(seed: u64) -> Self {
+        // 0 is a fixed point for xorshift; nudge it if the caller passes 0.
+        Self(if seed == 0 { 0x9E37_79B9_7F4A_7C15 } else { seed })
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+
+    /// Uniform `[0, n)`.
+    fn gen_range(&mut self, n: usize) -> usize {
+        assert!(n > 0);
+        (self.next_u64() as usize) % n
+    }
+}
+
+/// Seeded random churn across membership and role changes. At every step the
+/// harness verifies that:
+///   - `get_group_members` on the creator exactly matches the scenario's
+///     expected membership and per-member admin flag.
+///   - A message sent by the current admin or a current non-admin member
+///     is decryptable by every present member and opaque to every
+///     non-present client (including members removed earlier in the run).
+///
+/// This catches subtle regressions the linear growth test can't hit:
+///   - An admin's epoch becoming stale across role toggles.
+///   - An add/remove/add sequence failing to advance a long-present member's
+///     ratchet.
+///   - `set_member_role` silently mutating membership state.
+///
+/// Uses a fixed xorshift seed; failure logs print the full op sequence via
+/// `eprintln!` so a red run is reproducible.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn random_admin_and_membership_churn() {
+    wipe().await;
+
+    const NUM_OTHERS: usize = 5;
+    const MAX_GROUP_SIZE: usize = 5;
+    const NUM_OPS: usize = 30;
+    const SEED: u64 = 0xC0FFEE_BEEF_F00D;
+
+    // Index 0 is the creator; 1..=5 are other pre-signed-up clients.
+    let mut clients: Vec<TestClient> = Vec::with_capacity(NUM_OTHERS + 1);
+    let mut profiles: Vec<UserProfile> = Vec::with_capacity(NUM_OTHERS + 1);
+    for i in 0..=NUM_OTHERS {
+        let mut c = TestClient::new().await;
+        let p = c.sign_up(&format!("churn{}@test.local", i)).await;
+        profiles.push(p);
+        clients.push(c);
+    }
+
+    let group_id = clients[0].create_group("Churn").await;
+    let channel_id = clients[0].general_channel_id(&group_id).await;
+
+    // Tracked expected state: who is a member, who is an admin. The creator
+    // is always both and stays in the group.
+    use std::collections::BTreeSet;
+    let mut members: BTreeSet<usize> = BTreeSet::from([0]);
+    let mut admins: BTreeSet<usize> = BTreeSet::from([0]);
+
+    // Ordered log of ops executed, printed on failure for reproducibility.
+    let mut op_log: Vec<String> = Vec::new();
+    let mut msg_counter: u32 = 0;
+
+    let mut rng = XorShift64::new(SEED);
+
+    for op_idx in 0..NUM_OPS {
+        // Pick a candidate op; skip if it can't apply.
+        let pick = rng.gen_range(6);
+        let op_name: &'static str = match pick {
+            0 => "add",
+            1 => "remove",
+            2 => "promote",
+            3 => "demote",
+            4 => "send_from_admin",
+            _ => "send_from_member",
+        };
+
+        // Precompute the population each op needs so we can skip cleanly.
+        let non_members: Vec<usize> = (1..=NUM_OTHERS).filter(|i| !members.contains(i)).collect();
+        let removable: Vec<usize> = members.iter().copied().filter(|&i| i != 0).collect();
+        let promotable: Vec<usize> = members
+            .iter()
+            .copied()
+            .filter(|i| !admins.contains(i))
+            .collect();
+        let demotable: Vec<usize> = admins.iter().copied().filter(|&i| i != 0).collect();
+        let current_admins: Vec<usize> = admins.iter().copied().collect();
+        let current_non_admin_members: Vec<usize> = members
+            .iter()
+            .copied()
+            .filter(|i| !admins.contains(i))
+            .collect();
+
+        match op_name {
+            "add" => {
+                if members.len() >= MAX_GROUP_SIZE || non_members.is_empty() {
+                    op_log.push(format!("{op_idx:02}: skip add (size={})", members.len()));
+                    continue;
+                }
+                let idx = non_members[rng.gen_range(non_members.len())];
+                let invitee_username = profiles[idx].username.clone();
+                clients[0].invite(&group_id, &invitee_username).await;
+                let invite = clients[idx]
+                    .first_pending_invite()
+                    .await
+                    .unwrap_or_else(|| {
+                        eprintln!("op_log so far: {op_log:#?}");
+                        panic!("op {op_idx}: user{idx} should have a pending invite")
+                    });
+                let invite_id = invite["id"].as_str().expect("invite id").to_string();
+                clients[idx].accept_invite(&invite_id).await;
+                clients[idx].poll().await;
+
+                // Every already-member (including creator) applies the add commit.
+                for &k in members.iter() {
+                    clients[k].process_commits_for(&channel_id).await;
+                }
+                // Newcomer also processes commits — `poll` applied the Welcome but
+                // later commits could have landed before this point in a real run.
+                clients[idx].process_commits_for(&channel_id).await;
+
+                members.insert(idx);
+                op_log.push(format!("{op_idx:02}: add user{idx}"));
+            }
+            "remove" => {
+                if removable.is_empty() {
+                    op_log.push(format!("{op_idx:02}: skip remove (no removable)"));
+                    continue;
+                }
+                let idx = removable[rng.gen_range(removable.len())];
+                clients[0].remove_member(&group_id, profiles[idx].id.as_str()).await;
+
+                members.remove(&idx);
+                admins.remove(&idx);
+
+                for &k in members.iter() {
+                    clients[k].process_commits_for(&channel_id).await;
+                }
+                op_log.push(format!("{op_idx:02}: remove user{idx}"));
+            }
+            "promote" => {
+                if promotable.is_empty() {
+                    op_log.push(format!("{op_idx:02}: skip promote (no promotable)"));
+                    continue;
+                }
+                let idx = promotable[rng.gen_range(promotable.len())];
+                clients[0]
+                    .set_member_role(&group_id, profiles[idx].id.as_str(), "admin")
+                    .await;
+                admins.insert(idx);
+                op_log.push(format!("{op_idx:02}: promote user{idx}"));
+            }
+            "demote" => {
+                if demotable.is_empty() {
+                    op_log.push(format!("{op_idx:02}: skip demote (no demotable)"));
+                    continue;
+                }
+                let idx = demotable[rng.gen_range(demotable.len())];
+                clients[0]
+                    .set_member_role(&group_id, profiles[idx].id.as_str(), "member")
+                    .await;
+                admins.remove(&idx);
+                op_log.push(format!("{op_idx:02}: demote user{idx}"));
+            }
+            "send_from_admin" => {
+                if current_admins.is_empty() {
+                    op_log.push(format!("{op_idx:02}: skip send_from_admin (impossible)"));
+                    continue;
+                }
+                let idx = current_admins[rng.gen_range(current_admins.len())];
+                msg_counter += 1;
+                let label = format!("op{op_idx:02}-admin{idx}-m{msg_counter}");
+                clients[idx].send_channel_message(&channel_id, &label).await;
+                verify_message_visibility(
+                    &clients, &members, &label, op_idx, &op_log, &channel_id,
+                )
+                .await;
+                op_log.push(format!("{op_idx:02}: send_from_admin user{idx} -> {label}"));
+            }
+            "send_from_member" => {
+                if current_non_admin_members.is_empty() {
+                    op_log.push(format!(
+                        "{op_idx:02}: skip send_from_member (no non-admin members)"
+                    ));
+                    continue;
+                }
+                let idx = current_non_admin_members
+                    [rng.gen_range(current_non_admin_members.len())];
+                msg_counter += 1;
+                let label = format!("op{op_idx:02}-member{idx}-m{msg_counter}");
+                clients[idx].send_channel_message(&channel_id, &label).await;
+                verify_message_visibility(
+                    &clients, &members, &label, op_idx, &op_log, &channel_id,
+                )
+                .await;
+                op_log.push(format!("{op_idx:02}: send_from_member user{idx} -> {label}"));
+            }
+            _ => unreachable!(),
+        }
+
+        // After every op, verify membership + role state matches expectations.
+        let observed = clients[0].group_member_roles(&group_id).await;
+        let observed_ids: BTreeSet<String> =
+            observed.iter().map(|(id, _)| id.clone()).collect();
+        let observed_admin_ids: BTreeSet<String> = observed
+            .iter()
+            .filter(|(_, r)| r == "admin")
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        let expected_ids: BTreeSet<String> =
+            members.iter().map(|&i| profiles[i].id.clone()).collect();
+        let expected_admin_ids: BTreeSet<String> =
+            admins.iter().map(|&i| profiles[i].id.clone()).collect();
+
+        if observed_ids != expected_ids {
+            eprintln!("op log: {op_log:#?}");
+            panic!(
+                "op {op_idx} ({op_name}): group membership mismatch\n  expected: {expected_ids:?}\n  observed: {observed_ids:?}"
+            );
+        }
+        if observed_admin_ids != expected_admin_ids {
+            eprintln!("op log: {op_log:#?}");
+            panic!(
+                "op {op_idx} ({op_name}): admin set mismatch\n  expected: {expected_admin_ids:?}\n  observed: {observed_admin_ids:?}"
+            );
+        }
+    }
+
+    eprintln!("churn op log ({} ops):", op_log.len());
+    for line in &op_log {
+        eprintln!("  {line}");
+    }
+
+    drop(clients);
+}
+
+/// Shared assertion for send-from-admin / send-from-member ops in the churn
+/// scenario: every current member must decrypt the message; no non-member
+/// may see its plaintext.
+async fn verify_message_visibility(
+    clients: &[TestClient],
+    members: &std::collections::BTreeSet<usize>,
+    label: &str,
+    op_idx: usize,
+    op_log: &[String],
+    channel_id: &str,
+) {
+    for k in 0..clients.len() {
+        let msgs = clients[k].fetch_channel_messages(channel_id).await;
+        let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        let has = contents.contains(&label);
+        if members.contains(&k) {
+            if !has {
+                eprintln!("op log: {op_log:#?}");
+                panic!(
+                    "op {op_idx}: member user{k} should decrypt '{label}', got: {contents:?}"
+                );
+            }
+        } else if has {
+            eprintln!("op log: {op_log:#?}");
+            panic!(
+                "op {op_idx}: non-member user{k} should NOT decrypt '{label}', got: {contents:?}"
+            );
+        }
+    }
+}
+
