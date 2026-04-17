@@ -113,6 +113,10 @@ Source: `src-tauri/src/db/migrations/remote_schema.sql` + migrations `000001` th
 - `user_id` TEXT NOT NULL
 - `last_fetched_at` TEXT NOT NULL
 
+Used by the envelope cleanup sweep in `get_channel_messages` and `get_dm_messages` to decide when it is safe to drop a row from `message_envelope`. A row is deleted when EITHER it is older than 30 days OR every current member has watermarked past `sent_at` (the `OR` is deliberate — one slow member must not pin storage; see commit `e32978f`).
+
+**Known limitation (see issue #162):** the PK is `(conversation_id, user_id)`, so multi-device users share a single watermark row — whichever of their devices last fetched sets it. A second device coming online later may find its messages already swept. The intended fix is to re-key on `(conversation_id, user_id, device_id)` and count against `user_device` in the cleanup predicate; this is not yet done.
+
 ### voice_presence _(migration 6)_
 - PK: (`user_id`, `channel_id`)
 - `user_id` TEXT NOT NULL
