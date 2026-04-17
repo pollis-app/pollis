@@ -2020,3 +2020,126 @@ async fn dm_multi_device_round_trip() {
     drop(carol);
 }
 
+/// Rejecting a DM invite must remove EVERY device of the rejecter from the
+/// MLS tree, not just the device that invoked reject. `leave_dm_channel`
+/// deletes the rejecter's single `dm_channel_member` row (there is one row
+/// per user, not per device) and then reconcile removes every leaf in the
+/// MLS tree that belongs to that user. Bob runs two devices, rejects from
+/// `bob_d1`, and neither `bob_d1` nor `bob_d2` may decrypt subsequent
+/// messages sent by alice.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn dm_invite_reject_removes_from_tree() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+
+    let mut bob_d1 = TestClient::new().await;
+    let bob_profile = bob_d1.sign_up("bob@test.local").await;
+    let bob_d2 = enroll_second_device(&bob_d1, "bob@test.local").await;
+
+    // Alice invites bob. Both bob devices land in the MLS tree at creation
+    // time — dm.rs:127 "Reconcile then adds all members' devices".
+    let dm_id = alice
+        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
+        .await;
+
+    // Pre-reject sanity: bob sees the pending request on both devices.
+    assert_eq!(
+        bob_d1.list_dm_requests().await.len(),
+        1,
+        "bob_d1 should see the pending DM request"
+    );
+    assert_eq!(
+        bob_d2.list_dm_requests().await.len(),
+        1,
+        "bob_d2 should see the pending DM request"
+    );
+
+    // bob_d1 rejects. `leave_dm_channel` deletes the `dm_channel_member`
+    // row (per-user, so both bob devices lose membership), forgets this
+    // device's local MLS state, and signals remaining members to
+    // reconcile away the bob leaves.
+    bob_d1.leave_dm(&dm_id).await;
+
+    // `dm_channel_member` has NO rows for bob in this dm.
+    let remote = alice.state.remote_db.clone();
+    let bob_member_count: i64 = {
+        let conn = remote.conn().await.expect("remote conn");
+        let mut rows = conn
+            .query(
+                "SELECT COUNT(*) FROM dm_channel_member \
+                 WHERE dm_channel_id = ?1 AND user_id = ?2",
+                libsql::params![dm_id.clone(), bob_profile.id.clone()],
+            )
+            .await
+            .expect("count bob members");
+        let row = rows.next().await.expect("row").expect("some row");
+        row.get::<i64>(0).expect("count")
+    };
+    assert_eq!(
+        bob_member_count, 0,
+        "bob should have zero dm_channel_member rows after reject"
+    );
+
+    // Alice reconciles her own tree (pulling the membership change into
+    // her local MLS state) and then sends a post-reject message.
+    alice.process_commits_for(&dm_id).await;
+    alice
+        .send_channel_message(&dm_id, "alice post-reject")
+        .await;
+
+    // Neither bob device may decrypt alice's new message — their leaves
+    // are gone from the tree. They may still see an envelope row on the
+    // remote, but the content decrypts to None.
+    for (client, label) in [(&bob_d1, "bob_d1"), (&bob_d2, "bob_d2")] {
+        let msgs = client.fetch_dm_messages(&dm_id).await;
+        let contents: Vec<&str> =
+            msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(
+            !contents.contains(&"alice post-reject"),
+            "{label} must NOT decrypt 'alice post-reject' after reject, got: {contents:?}"
+        );
+    }
+
+    // And the DM no longer appears in either bob device's list/requests —
+    // from bob's side the conversation is fully gone.
+    assert!(
+        bob_d1
+            .list_dm_requests()
+            .await
+            .iter()
+            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+        "bob_d1 must not list the rejected DM as a request"
+    );
+    assert!(
+        bob_d1
+            .list_dms()
+            .await
+            .iter()
+            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+        "bob_d1 must not list the rejected DM as an accepted channel"
+    );
+    assert!(
+        bob_d2
+            .list_dm_requests()
+            .await
+            .iter()
+            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+        "bob_d2 must not list the rejected DM as a request"
+    );
+    assert!(
+        bob_d2
+            .list_dms()
+            .await
+            .iter()
+            .all(|c| c["id"].as_str() != Some(dm_id.as_str())),
+        "bob_d2 must not list the rejected DM as an accepted channel"
+    );
+
+    drop(alice);
+    drop(bob_d1);
+    drop(bob_d2);
+}
+
