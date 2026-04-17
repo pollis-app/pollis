@@ -526,21 +526,27 @@ pub async fn get_channel_messages(
         }
     }
 
-    // Delete envelopes that all current group members have fetched past.
+    // Delete envelopes that are either past the 30-day TTL OR every current
+    // group member has already fetched past. The two gates are OR'd so a
+    // single slow-fetching member can't pin old envelopes indefinitely,
+    // while a fully-caught-up conversation can free storage without waiting
+    // 30 days.
     if let Err(e) = conn.execute(
         "DELETE FROM message_envelope
          WHERE conversation_id = ?1
-         AND sent_at < datetime('now', '-30 days')
-         AND sent_at < (
-             SELECT CASE
-                 WHEN COUNT(gm.user_id) = COUNT(cw.last_fetched_at)
-                 THEN MIN(cw.last_fetched_at)
-                 ELSE NULL
-             END
-             FROM group_member gm
-             JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
-             LEFT JOIN conversation_watermark cw
-                    ON cw.conversation_id = ?1 AND cw.user_id = gm.user_id
+         AND (
+             sent_at < datetime('now', '-30 days')
+             OR sent_at < (
+                 SELECT CASE
+                     WHEN COUNT(gm.user_id) = COUNT(cw.last_fetched_at)
+                     THEN MIN(cw.last_fetched_at)
+                     ELSE NULL
+                 END
+                 FROM group_member gm
+                 JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
+                 LEFT JOIN conversation_watermark cw
+                        ON cw.conversation_id = ?1 AND cw.user_id = gm.user_id
+             )
          )",
         libsql::params![channel_id.clone()],
     ).await {
@@ -785,21 +791,27 @@ pub async fn get_dm_messages(
         }
     }
 
-    // Delete envelopes that all current DM members have fetched past.
+    // Delete envelopes that are either past the 30-day TTL OR every current
+    // DM member has already fetched past. The two gates are OR'd so a
+    // single slow-fetching member can't pin old envelopes indefinitely,
+    // while a fully-caught-up conversation can free storage without waiting
+    // 30 days.
     if let Err(e) = conn.execute(
         "DELETE FROM message_envelope
          WHERE conversation_id = ?1
-         AND sent_at < datetime('now', '-30 days')
-         AND sent_at < (
-             SELECT CASE
-                 WHEN COUNT(dcm.user_id) = COUNT(cw.last_fetched_at)
-                 THEN MIN(cw.last_fetched_at)
-                 ELSE NULL
-             END
-             FROM dm_channel_member dcm
-             LEFT JOIN conversation_watermark cw
-                    ON cw.conversation_id = ?1 AND cw.user_id = dcm.user_id
-             WHERE dcm.dm_channel_id = ?1
+         AND (
+             sent_at < datetime('now', '-30 days')
+             OR sent_at < (
+                 SELECT CASE
+                     WHEN COUNT(dcm.user_id) = COUNT(cw.last_fetched_at)
+                     THEN MIN(cw.last_fetched_at)
+                     ELSE NULL
+                 END
+                 FROM dm_channel_member dcm
+                 LEFT JOIN conversation_watermark cw
+                        ON cw.conversation_id = ?1 AND cw.user_id = dcm.user_id
+                 WHERE dcm.dm_channel_id = ?1
+             )
          )",
         libsql::params![dm_channel_id.clone()],
     ).await {

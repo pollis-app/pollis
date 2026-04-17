@@ -1548,3 +1548,153 @@ async fn edit_message_across_membership_changes() {
     drop(carol);
     drop(dave);
 }
+
+/// Count remaining envelopes for a conversation via a direct libsql query.
+/// Bypasses any Tauri command so we observe the raw row state.
+async fn envelope_count(remote: &Arc<pollis_lib::db::remote::RemoteDb>, conversation_id: &str) -> i64 {
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM message_envelope WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("count query");
+    let row = rows.next().await.expect("row").expect("some row");
+    row.get::<i64>(0).expect("count")
+}
+
+/// Backdate every envelope in a conversation to a known timestamp. Used to
+/// simulate old envelopes without waiting 30 days. Applies to envelopes of
+/// any type.
+async fn backdate_envelopes(
+    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    conversation_id: &str,
+    sent_at: &str,
+) {
+    let conn = remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE message_envelope SET sent_at = ?1 WHERE conversation_id = ?2",
+        libsql::params![sent_at.to_string(), conversation_id.to_string()],
+    )
+    .await
+    .expect("backdate envelopes");
+}
+
+/// Wipe conversation watermarks for a specific conversation so the test can
+/// reconstruct a known lag pattern. Add-member seeding would otherwise leave
+/// recent watermarks that mask the behavior we want to exercise.
+async fn clear_watermarks(
+    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    conversation_id: &str,
+) {
+    let conn = remote.conn().await.expect("remote conn");
+    conn.execute(
+        "DELETE FROM conversation_watermark WHERE conversation_id = ?1",
+        libsql::params![conversation_id.to_string()],
+    )
+    .await
+    .expect("clear watermarks");
+}
+
+/// Exercises the two independent gates in `get_channel_messages`' envelope
+/// cleanup: the 30-day TTL and the all-members-caught-up watermark. They're
+/// OR'd, so either alone is sufficient to delete. The scenario drives
+/// three cases, each time triggering cleanup by having a member fetch:
+///
+/// - **Negative**: young envelope, only the sender has fetched. Neither
+///   gate fires — envelope stays.
+/// - **Watermark-only**: young envelope, both members have fetched past it.
+///   Watermark gate fires even though TTL is far from expired.
+/// - **TTL-only**: envelope backdated past 30 days while watermarks are
+///   deliberately left in a state where the watermark gate cannot fire
+///   (one member's row is absent, so the CASE returns NULL). TTL gate
+///   fires alone and the envelope is deleted.
+///
+/// The backdating + watermark hacks poke the remote DB directly — there's
+/// no production command that lets a test manipulate `sent_at` or
+/// `conversation_watermark`, and we intentionally don't add one.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn envelope_cleanup_ttl_or_watermark() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Cleanup").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+
+    let channel_id = alice.general_channel_id(&group_id).await;
+    alice.process_commits_for(&channel_id).await;
+
+    let remote = alice.state.remote_db.clone();
+
+    // ── Negative: young envelope, only sender fetched ──
+    // Wipe watermarks first so add-member's seeded "now" rows don't satisfy
+    // the watermark gate on their own.
+    clear_watermarks(&remote, &channel_id).await;
+
+    alice.send_channel_message(&channel_id, "neg-hello").await;
+    // Alice fetches — triggers cleanup. Bob has not fetched. The cleanup
+    // subquery requires every current member to have a watermark row; bob
+    // does not, so the watermark gate returns NULL. TTL is fresh (< 30
+    // days). Neither gate fires — envelope stays.
+    alice.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        envelope_count(&remote, &channel_id).await,
+        1,
+        "young envelope with a lagging member should not be cleaned up"
+    );
+
+    // ── Watermark-only: young envelope, both watermarks strictly past it ──
+    // The cleanup query uses `sent_at < MIN(cw)`, and the watermark upsert
+    // uses the latest returned message's `sent_at`. So to delete "neg-hello"
+    // via the watermark gate we need a STRICTLY later message that both
+    // members have fetched — that later message's sent_at becomes the new
+    // watermark, and neg-hello's sent_at becomes strictly less than it.
+    bob.fetch_channel_messages(&channel_id).await;
+    alice.send_channel_message(&channel_id, "neg-hello-2").await;
+    alice.fetch_channel_messages(&channel_id).await;
+    bob.fetch_channel_messages(&channel_id).await;
+    // Both watermarks now sit at sent_at("neg-hello-2"), strictly greater
+    // than sent_at("neg-hello"). The next cleanup trigger evicts the older
+    // envelope but leaves the newer one (whose sent_at equals MIN).
+    alice.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        envelope_count(&remote, &channel_id).await,
+        1,
+        "older envelope should be cleaned once every watermark passes it, while the latest envelope remains"
+    );
+
+    // ── TTL-only: old envelope, watermark gate deliberately broken ──
+    // Send a fresh envelope, then backdate it past the 30-day TTL.
+    alice.send_channel_message(&channel_id, "very-old").await;
+    // Rewind sent_at into the past — well beyond the 30-day threshold.
+    backdate_envelopes(&remote, &channel_id, "2020-01-01T00:00:00+00:00").await;
+    // Wipe watermarks again so the gate cannot accidentally fire: alice's
+    // upsert during her fetch will re-create her row (set to the backdated
+    // sent_at), but bob will be missing until he fetches.  `COUNT(gm) !=
+    // COUNT(cw)` → CASE returns NULL → watermark gate stays false.
+    clear_watermarks(&remote, &channel_id).await;
+    alice.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        envelope_count(&remote, &channel_id).await,
+        0,
+        "old envelope should be cleaned by the TTL gate even when the watermark gate cannot fire"
+    );
+
+    drop(alice);
+    drop(bob);
+}
