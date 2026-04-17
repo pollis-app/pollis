@@ -120,6 +120,10 @@ Rules of thumb:
 - **Register new commands in `build_client_app`.** The `tauri::generate_handler![...]` macro call in `src-tauri/src/test_harness.rs` must include every command invoked by a test.
 - **Add FK-safe wipes.** If you introduce a new table referenced by tests, add it to `wipe_remote` in the correct order (child tables before parent).
 
+## Behaviors the scenarios exercise
+
+- **`edit_message_across_membership_changes`** covers edits across add and remove. Worth knowing when reading the assertions: `get_channel_messages` applies edit envelopes with `UPDATE message SET content = ?` only — if the recipient has no local row for the edited message (e.g. they joined after the original was sent), the edit does not populate a new row for them. The scenario asserts convergence on members that had the original cached; for late joiners it asserts only that stale plaintext never leaks.
+
 ## Known flakes
 
 - **`channel_message_round_trip`** can fail with "stream not found" during `send_group_invite`'s MLS reconcile — a libsql hrana stream timeout. It passes reliably in isolation and in the current suite, but is sensitive to connection state accumulation. If it flakes again, the first suspect is stream lifetime, not test logic.

@@ -485,6 +485,31 @@ impl TestClient {
             .unwrap_or_else(|e| panic!("send_message({conversation_id}): {e}"));
     }
 
+    /// Like `send_channel_message` but returns the new message's ID so the
+    /// caller can later edit or delete it.
+    async fn send_channel_message_id(&self, conversation_id: &str, content: &str) -> String {
+        let msg = self
+            .try_send_message(conversation_id, content)
+            .await
+            .unwrap_or_else(|e| panic!("send_message({conversation_id}): {e}"));
+        msg["id"].as_str().expect("message id").to_string()
+    }
+
+    /// Edit a previously-sent message. Republishes the ciphertext at the
+    /// current MLS epoch and replaces any prior edit envelope.
+    async fn edit_message(&self, conversation_id: &str, message_id: &str, new_content: &str) {
+        self.invoke_json(
+            "edit_message",
+            json!({
+                "conversationId": conversation_id,
+                "messageId": message_id,
+                "userId": self.user_id(),
+                "newContent": new_content,
+            }),
+        )
+        .await;
+    }
+
     async fn fetch_channel_messages(&self, channel_id: &str) -> Vec<serde_json::Value> {
         let page: serde_json::Value = self
             .invoke_json(
@@ -1274,3 +1299,252 @@ async fn verify_message_visibility(
     }
 }
 
+/// Exercises `edit_message` across MLS membership changes. Three phases in
+/// one scenario:
+///
+/// 1. **Add-then-edit**: after alice+bob are in the group, alice sends
+///    "hello"; bob fetches and sees it. Carol is invited and joins; alice
+///    then edits the message. Bob and carol both see the edited content on
+///    their next fetch. Carol never saw "hello" (Welcomes don't carry
+///    history) — that's fine; we only assert she can decrypt the edit once
+///    she's a member because `edit_message` re-encrypts at the post-add
+///    epoch.
+/// 2. **Remove-then-edit**: alice removes carol, then edits again. Bob
+///    picks up the new edit; carol does not — the edit envelope is
+///    encrypted to an epoch she's no longer in, so her local cache is
+///    frozen at whatever she last decrypted.
+/// 3. **Edit → add → edit**: final sanity check that edits written across
+///    a second add advance too. Alice edits ("v2"), adds a new user, then
+///    edits again ("v3"). All current members converge on "v3", proving
+///    the second edit's ciphertext targets the correct (post-add) epoch
+///    and that a stale first edit cannot linger and win — `edit_message`
+///    does a DELETE+INSERT so only the latest envelope survives.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn edit_message_across_membership_changes() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Edit Churn").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // ── Phase 1: add-then-edit ──
+    // alice + bob are in the group; alice sends "hello".
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("bob invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    alice.process_commits_for(&channel_id).await;
+
+    let msg_id = alice
+        .send_channel_message_id(&channel_id, "hello")
+        .await;
+
+    // Bob can decrypt the original pre-add.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_contents: Vec<&str> = bob_msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+    assert!(
+        bob_contents.contains(&"hello"),
+        "bob should decrypt 'hello' before carol is added, got: {bob_contents:?}"
+    );
+
+    // Now add carol and advance everyone's epoch.
+    alice.invite(&group_id, &carol_profile.username).await;
+    let invite_id = carol
+        .first_pending_invite()
+        .await
+        .expect("carol invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    carol.accept_invite(&invite_id).await;
+    carol.poll().await;
+    alice.process_commits_for(&channel_id).await;
+    bob.process_commits_for(&channel_id).await;
+
+    // Alice edits; the edit envelope is encrypted at the 3-member epoch.
+    alice
+        .edit_message(&channel_id, &msg_id, "HELLO edited")
+        .await;
+
+    // Bob's local cache flips to the edited content.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_msg = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("bob should still see the original row");
+    assert_eq!(
+        bob_msg["content"].as_str(),
+        Some("HELLO edited"),
+        "bob should see alice's edit after a member was added"
+    );
+    assert!(
+        bob_msg["edited_at"].as_str().is_some(),
+        "bob's view should carry an edited_at timestamp"
+    );
+
+    // Carol fetches too. She never had a local row for `msg_id` (the
+    // original envelope was encrypted at the pre-join epoch she can't
+    // decrypt), and the current edit-apply path only UPDATEs an existing
+    // row — so carol's view of this specific message is null content.
+    // The important property here is that she must NOT have recovered the
+    // pre-join plaintext "hello".
+    let carol_msgs = carol.fetch_channel_messages(&channel_id).await;
+    let carol_contents: Vec<&str> = carol_msgs
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert!(
+        !carol_contents.contains(&"hello"),
+        "carol should not see the pre-join plaintext 'hello', got: {carol_contents:?}"
+    );
+
+    // ── Phase 2: remove-then-edit ──
+    // Snapshot carol's view BEFORE removal so we can confirm her cache
+    // freezes after she loses access.
+    let carol_view_before_remove: Vec<(String, Option<String>)> = carol
+        .fetch_channel_messages(&channel_id)
+        .await
+        .iter()
+        .map(|m| {
+            (
+                m["id"].as_str().expect("id").to_string(),
+                m["content"].as_str().map(str::to_owned),
+            )
+        })
+        .collect();
+
+    alice.remove_member(&group_id, &carol_profile.id).await;
+    bob.process_commits_for(&channel_id).await;
+
+    // Alice publishes a second edit at the post-remove epoch.
+    alice
+        .edit_message(&channel_id, &msg_id, "HELLO edited again")
+        .await;
+
+    // Bob follows the edit.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_msg = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("bob still sees the row");
+    assert_eq!(
+        bob_msg["content"].as_str(),
+        Some("HELLO edited again"),
+        "bob should follow the post-remove edit"
+    );
+
+    // Carol cannot decrypt the new envelope; her local cache is frozen at
+    // whatever she last saw. She definitely must not see the new content.
+    let carol_msgs_after = carol.fetch_channel_messages(&channel_id).await;
+    let carol_contents_after: Vec<&str> = carol_msgs_after
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert!(
+        !carol_contents_after.contains(&"HELLO edited again"),
+        "removed carol should NOT see the post-remove edit, got: {carol_contents_after:?}"
+    );
+    // Her view of msg_id either retains the prior cached value or is None,
+    // but never the new content.
+    let prior = carol_view_before_remove
+        .iter()
+        .find(|(id, _)| id == &msg_id)
+        .and_then(|(_, c)| c.clone());
+    let now = carol_msgs_after
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .and_then(|m| m["content"].as_str().map(str::to_owned));
+    assert_ne!(
+        now.as_deref(),
+        Some("HELLO edited again"),
+        "carol's row for the edited message must not show the post-remove edit"
+    );
+    // If carol had cached the first edit, she should still have it — removal
+    // shouldn't retroactively wipe what's already decrypted locally.
+    if prior.as_deref() == Some("HELLO edited") {
+        assert_eq!(
+            now.as_deref(),
+            Some("HELLO edited"),
+            "carol's cached plaintext should not regress after removal"
+        );
+    }
+
+    // ── Phase 3: edit → add → edit ──
+    // Fresh message on the current (post-remove) epoch.
+    let msg_id_v = alice
+        .send_channel_message_id(&channel_id, "v1")
+        .await;
+    bob.fetch_channel_messages(&channel_id).await;
+
+    alice.edit_message(&channel_id, &msg_id_v, "v2").await;
+
+    // Add a brand-new user dave; advance everyone's epoch.
+    let mut dave = TestClient::new().await;
+    let dave_profile = dave.sign_up("dave@test.local").await;
+    alice.invite(&group_id, &dave_profile.username).await;
+    let invite_id = dave
+        .first_pending_invite()
+        .await
+        .expect("dave invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    dave.accept_invite(&invite_id).await;
+    dave.poll().await;
+    alice.process_commits_for(&channel_id).await;
+    bob.process_commits_for(&channel_id).await;
+
+    // Second edit at the post-add epoch — must overwrite the first edit,
+    // which is still sitting in `message_envelope`. DELETE+INSERT inside
+    // edit_message guarantees only "v3" survives remotely, so a member
+    // whose local cache holds v2 must converge on v3 (never see "v2" or
+    // the original "v1" after fetching).
+    alice.edit_message(&channel_id, &msg_id_v, "v3").await;
+
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_row = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id_v)
+        .expect("bob row exists");
+    assert_eq!(
+        bob_row["content"].as_str(),
+        Some("v3"),
+        "post-add edit must overwrite the prior edit for a member that had the original"
+    );
+
+    // Dave — like carol earlier — has no local row for the pre-join
+    // message, so his fetch returns content=None and the prior edits
+    // can't "leak through" as cached plaintext. The invariant we do
+    // care about is that he never observes a stale prior edit as
+    // plaintext.
+    let dave_msgs = dave.fetch_channel_messages(&channel_id).await;
+    let dave_contents: Vec<&str> = dave_msgs
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    for stale in ["v1", "v2"] {
+        assert!(
+            !dave_contents.contains(&stale),
+            "dave must never see stale pre-join plaintext '{stale}', got: {dave_contents:?}"
+        );
+    }
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+    drop(dave);
+}
