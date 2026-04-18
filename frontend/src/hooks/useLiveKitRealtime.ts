@@ -255,9 +255,9 @@ export function useLiveKitRealtime() {
       if (event.type === 'edited_message') {
         const channelId = event.channel_id;
         const conversationId = event.conversation_id;
-        if (channelId && channelId === selectedChannelIdRef.current) {
+        if (channelId) {
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
-        } else if (conversationId && conversationId === selectedConversationIdRef.current) {
+        } else if (conversationId) {
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
         }
         return;
@@ -288,11 +288,21 @@ export function useLiveKitRealtime() {
       // conversation data but never trigger notifications or unread badges.
       const isOwnMessage = event.sender_id === currentUserIdRef.current;
 
-      if (channelId && channelId === selectedChannelIdRef.current) {
+      // Always invalidate the affected room's query so re-entering the channel
+      // shows the new message immediately. For currently-selected rooms this
+      // triggers an immediate refetch; for others it just marks stale for next
+      // mount. Without this, React Query's staleTime serves cached pages that
+      // omit messages received while the user was elsewhere.
+      if (channelId) {
         queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
-      } else if (conversationId && conversationId === selectedConversationIdRef.current) {
+      } else if (conversationId) {
         queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
-      } else if (incomingId && !isOwnMessage) {
+      }
+
+      const isSelected =
+        (channelId && channelId === selectedChannelIdRef.current) ||
+        (conversationId && conversationId === selectedConversationIdRef.current);
+      if (!isSelected && incomingId && !isOwnMessage) {
         incrementUnreadRef.current(incomingId);
         if (conversationId) {
           setStatusBarAlertRef.current({ senderUsername, roomId: incomingId });
