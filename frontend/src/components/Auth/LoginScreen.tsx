@@ -88,10 +88,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
           ) : (
             <div className="flex flex-col gap-5">
               <div>
-                <h1 className="text-base font-mono font-bold" style={{ color: "var(--c-accent)" }}>
-                  Pollis.
-                </h1>
-                <p className="text-xs mt-1 font-mono" style={{ color: "var(--c-text-muted)" }}>
+
+                <p className="text-xs mt-1 font-mono" style={{ color: "var(--c-text-accent)" }}>
                   Enter your email to continue
                 </p>
               </div>
@@ -107,39 +105,39 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                       .sort((a, b) => (a.last_seen < b.last_seen ? 1 : -1))
                       .slice(0, 3)
                       .map((account) => (
-                      <button
-                        key={account.user_id}
-                        data-testid={`known-account-chip-${account.user_id}`}
-                        onClick={() => {
-                          if (account.email) {
-                            setPrefillEmail(account.email);
-                            setPrefillNonce((n) => n + 1);
-                          }
-                        }}
-                        disabled={!account.email}
-                        className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors"
-                        style={{
-                          background: "var(--c-surface)",
-                          border: "2px solid var(--c-border)",
-                          borderRadius: "0.5rem",
-                          color: "var(--c-text-dim)",
-                          cursor: account.email ? "pointer" : "default",
-                        }}
-                        onMouseEnter={(e) => {
-                          if (!account.email) {
-                            return;
-                          }
-                          (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-accent)";
-                          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-border)";
-                          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-dim)";
-                        }}
-                      >
-                        <span>{account.username}</span>
-                      </button>
-                    ))}
+                        <button
+                          key={account.user_id}
+                          data-testid={`known-account-chip-${account.user_id}`}
+                          onClick={() => {
+                            if (account.email) {
+                              setPrefillEmail(account.email);
+                              setPrefillNonce((n) => n + 1);
+                            }
+                          }}
+                          disabled={!account.email}
+                          className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors"
+                          style={{
+                            background: "var(--c-surface)",
+                            border: "2px solid var(--c-border)",
+                            borderRadius: "0.5rem",
+                            color: "var(--c-text-dim)",
+                            cursor: account.email ? "pointer" : "default",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (!account.email) {
+                              return;
+                            }
+                            (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-accent)";
+                            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-border)";
+                            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-dim)";
+                          }}
+                        >
+                          <span>{account.username}</span>
+                        </button>
+                      ))}
                   </div>
                 </div>
               )}

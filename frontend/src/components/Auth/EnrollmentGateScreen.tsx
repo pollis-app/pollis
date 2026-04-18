@@ -26,11 +26,11 @@ interface EnrollmentGateScreenProps {
 type GatePhase =
   | { phase: "choose" }
   | {
-      phase: "awaiting-approval";
-      requestId: string;
-      verificationCode: string;
-      expiresAt: string;
-    }
+    phase: "awaiting-approval";
+    requestId: string;
+    verificationCode: string;
+    expiresAt: string;
+  }
   | { phase: "secret-key-fallback" }
   | { phase: "reset-confirm" }
   | { phase: "rejected" }
@@ -154,15 +154,17 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
           }}
         >
           <div className="flex flex-col gap-5">
-            <div>
+            <div style={{
+              borderBottom: "1px solid var(--c-border)",
+            }}>
               <p
-                className="text-xs font-mono uppercase tracking-wider"
+                className="text-sm font-mono uppercase tracking-wider mb-8"
                 style={{ color: "var(--c-accent)", letterSpacing: "0.15em" }}
               >
                 New device
               </p>
               <h1
-                className="text-base font-mono font-bold mt-1"
+                className="text-base font-mono font-bold mt-1 mb-8"
                 style={{ color: "var(--c-text)" }}
               >
                 Authorize this device to add it to your account
@@ -251,18 +253,18 @@ const ChoosePane: React.FC<{
   onCancel: () => void;
   isStarting: boolean;
 }> = ({ onStartApproval, onUseSecretKey, onCancel, isStarting }) => (
-  <div className="flex flex-col gap-3">
+  <div className="flex flex-col gap-3 mb-4">
     <Button
       data-testid="enroll-via-approval-button"
       onClick={onStartApproval}
       isLoading={isStarting}
       loadingText="Requesting…"
-      className="w-full"
+      className="w-full mb-2"
     >
       Approve from another device
     </Button>
     <p
-      className="text-xs font-mono"
+      className="text-xs font-mono mb-4"
       style={{ color: "var(--c-text-muted)" }}
     >
       You'll see a 6-digit code here. Open Pollis on a device you're already
@@ -272,20 +274,19 @@ const ChoosePane: React.FC<{
     <div
       style={{
         borderTop: "1px solid var(--c-border)",
-        marginTop: "0.5rem",
         paddingTop: "1rem",
       }}
     >
       <Button
         data-testid="enroll-via-secret-key-button"
         onClick={onUseSecretKey}
-        variant="ghost"
-        className="w-full"
+        variant="secondary"
+        className="w-full mt-4"
       >
         Use my Secret Key instead
       </Button>
       <p
-        className="text-xs font-mono mt-2"
+        className="text-xs font-mono mt-4"
         style={{ color: "var(--c-text-muted)" }}
       >
         For when you don't have any other Pollis device with you.
@@ -295,8 +296,9 @@ const ChoosePane: React.FC<{
     <Button
       data-testid="enrollment-cancel-button"
       onClick={onCancel}
-      variant="ghost"
-      className="w-full"
+      variant="primary"
+      size="sm"
+      className="w-full mt-12"
     >
       Cancel and sign in as someone else
     </Button>
@@ -388,14 +390,18 @@ const SecretKeyFallbackPane: React.FC<{
         className="text-xs font-mono"
         style={{ color: "var(--c-text)", lineHeight: 1.6 }}
       >
-        Paste the Secret Key from your Emergency Kit. If you saved a PDF or
-        copied it to a password manager, look for a string that starts with
-        <code> A3-</code>.
+        Paste the Secret Key from your Emergency Kit.
+      </p>
+      <p
+        className="text-xs font-mono mb-2"
+        style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+      >
+        Recovery can take a few seconds while this device is registered.
       </p>
       <TextInput
         data-testid="secret-key-recovery-input"
         label="Secret Key"
-        value={value}
+        value={value.trim()}
         onChange={(v) => {
           setValue(v);
           setError(null);
@@ -403,6 +409,7 @@ const SecretKeyFallbackPane: React.FC<{
         placeholder="A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
         error={error ?? undefined}
         disabled={isLoading}
+        className="mb-4"
       />
       <Button
         data-testid="recover-with-secret-key-button"
@@ -410,7 +417,7 @@ const SecretKeyFallbackPane: React.FC<{
         disabled={!value.trim()}
         isLoading={isLoading}
         loadingText="Recovering…"
-        className="w-full"
+        className="w-full mb-4"
       >
         Recover account
       </Button>
@@ -423,29 +430,21 @@ const SecretKeyFallbackPane: React.FC<{
       >
         Back
       </Button>
-      <p
-        className="text-xs font-mono"
-        style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
-      >
-        Recovery can take a few seconds while this device joins each of your
-        existing groups.
-      </p>
+
       <div
         style={{
-          borderTop: "1px solid var(--c-border)",
           marginTop: "0.75rem",
-          paddingTop: "0.75rem",
         }}
       >
-        <button
+        <Button
           data-testid="want-reset-identity-button"
+          variant="danger"
           onClick={onWantReset}
           disabled={isLoading}
-          className="text-xs font-mono underline"
-          style={{ color: "#ff6b6b", background: "none", border: "none", cursor: "pointer" }}
+          className="text-xs font-mono"
         >
           I've lost my Secret Key — reset my account
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -489,38 +488,38 @@ const ResetConfirmPane: React.FC<{
           className="text-sm font-mono font-bold"
           style={{ color: "#ff6b6b" }}
         >
-          Reset this account — destructive
+          Reset this account
         </h2>
         <p
           className="text-xs mt-2 font-mono"
           style={{ color: "var(--c-text)", lineHeight: 1.6 }}
         >
-          This will permanently wipe your identity. You will be removed from
-          every group you're currently in. Every message you've ever sent or
-          received becomes unreadable on every device you own, including this
-          one.
+          Your messages on this device will be wiped for good. You'll
+          leave your groups (admins can invite you back) and your other
+          devices will be signed out.
         </p>
         <p
-          className="text-xs mt-2 font-mono"
+          className="text-xs mt-2 font-mono mb-4"
           style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
         >
-          You'll keep the same email address and username, and a fresh
-          Secret Key will be shown once. Save it carefully — you cannot
-          recover this account again without it.
+          You'll keep your email and username, and a new Secret Key will
+          be shown once. Save it somewhere safe — lose it and the only
+          way back in is to do all of this again.
         </p>
       </div>
 
       <Checkbox
         data-testid="reset-acknowledge-checkbox"
-        label="I understand that all of my messages and groups will be gone."
+        label="I understand that all of my messages will be removed from this device and I will be removed from all of my groups and conversations."
         checked={acknowledged}
         onChange={setAcknowledged}
         disabled={isLoading}
+        className="mb-2"
       />
 
       <TextInput
         data-testid="reset-confirm-email-input"
-        label={`Type your email (${expectedEmail}) to confirm`}
+        label={`Type your email to confirm`}
         value={typedEmail}
         onChange={(v) => {
           setTypedEmail(v);
@@ -538,7 +537,7 @@ const ResetConfirmPane: React.FC<{
         isLoading={isLoading}
         loadingText="Resetting…"
         variant="danger"
-        className="w-full"
+        className="w-full mt-2"
       >
         Yes, reset my account
       </Button>

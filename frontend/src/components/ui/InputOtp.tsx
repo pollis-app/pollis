@@ -75,7 +75,7 @@ export const InputOtp: React.FC<InputOtpProps> = ({
   };
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-1 justify-evenly">
       {digits.map((digit, index) => {
         const isFocused = focusedIndex === index;
         return (
@@ -102,9 +102,9 @@ export const InputOtp: React.FC<InputOtpProps> = ({
             style={{
               background: isFocused ? "var(--c-accent)" : "var(--c-surface)",
               color: isFocused ? "var(--c-bg)" : "var(--c-text)",
-              border: `1px solid ${isFocused ? "var(--c-accent)" : "var(--c-border)"}`,
+              border: `2px solid ${isFocused ? "var(--c-accent)" : "var(--c-border)"}`,
               outline: "none",
-              borderRadius: "4px",
+              borderRadius: "0.25rem",
               opacity: disabled ? 0.5 : 1,
               cursor: disabled ? "not-allowed" : "text",
             }}

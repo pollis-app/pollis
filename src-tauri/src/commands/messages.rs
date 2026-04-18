@@ -9,10 +9,44 @@ use crate::state::AppState;
 
 const QUERY_MESSAGES_BY_SENDER: &str = include_str!("../db/queries/messages_by_sender.sql");
 const QUERY_CHANNEL_PREVIEWS: &str = include_str!("../db/queries/channel_previews.sql");
-const QUERY_CHANNEL_MESSAGES_INITIAL: &str = include_str!("../db/queries/channel_messages_initial.sql");
-const QUERY_CHANNEL_MESSAGES_CURSOR: &str = include_str!("../db/queries/channel_messages_cursor.sql");
-const QUERY_DM_CHANNEL_MESSAGES_INITIAL: &str = include_str!("../db/queries/dm_channel_messages_initial.sql");
-const QUERY_DM_CHANNEL_MESSAGES_CURSOR: &str = include_str!("../db/queries/dm_channel_messages_cursor.sql");
+
+// Envelope cleanup: TTL gate OR watermark gate. Applied by ingest after any
+// persistence that may have advanced this user's watermark.
+const CLEANUP_CHANNEL_ENVELOPES: &str = "\
+DELETE FROM message_envelope
+ WHERE conversation_id = ?1
+   AND (
+     sent_at < datetime('now', '-30 days')
+     OR sent_at < (
+       SELECT CASE
+                WHEN COUNT(gm.user_id) = COUNT(cw.last_fetched_at)
+                THEN MIN(cw.last_fetched_at)
+                ELSE NULL
+              END
+       FROM group_member gm
+       JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
+       LEFT JOIN conversation_watermark cw
+              ON cw.conversation_id = ?1 AND cw.user_id = gm.user_id
+     )
+   )";
+
+const CLEANUP_DM_ENVELOPES: &str = "\
+DELETE FROM message_envelope
+ WHERE conversation_id = ?1
+   AND (
+     sent_at < datetime('now', '-30 days')
+     OR sent_at < (
+       SELECT CASE
+                WHEN COUNT(dcm.user_id) = COUNT(cw.last_fetched_at)
+                THEN MIN(cw.last_fetched_at)
+                ELSE NULL
+              END
+       FROM dm_channel_member dcm
+       LEFT JOIN conversation_watermark cw
+              ON cw.conversation_id = ?1 AND cw.user_id = dcm.user_id
+       WHERE dcm.dm_channel_id = ?1
+     )
+   )";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
@@ -320,6 +354,183 @@ pub struct MessagePage {
     pub next_cursor: Option<MessageCursor>,
 }
 
+/// Pull new envelopes for a channel from remote, decrypt, and persist into the
+/// local `message` table (the authoritative history for this device). Applies
+/// any pending edit envelopes, advances this user's watermark to the max
+/// sent_at successfully persisted up to the first decrypt failure, and runs
+/// envelope GC. Idempotent — repeated calls are a no-op on local state.
+pub async fn ingest_channel_envelopes_inner(
+    state: &Arc<AppState>,
+    user_id: &str,
+    channel_id: &str,
+) -> Result<()> {
+    let conn = state.remote_db.conn().await?;
+
+    // Resolve mls_group_id — all channels in a group share one MLS group.
+    let mls_group_id: String = {
+        let mut rows = conn.query(
+            "SELECT group_id FROM channels WHERE id = ?1",
+            libsql::params![channel_id.to_string()],
+        ).await?;
+        match rows.next().await? {
+            Some(row) => row.get::<String>(0)?,
+            None => return Ok(()),
+        }
+    };
+
+    // Non-members have no MLS key material, no business creating a watermark
+    // row, and would just block cleanup. Short-circuit here so the read path
+    // falls back to whatever is already in local.
+    let is_member: bool = {
+        let mut rows = conn.query(
+            "SELECT 1 FROM group_member
+             WHERE group_id = ?1 AND user_id = ?2
+             LIMIT 1",
+            libsql::params![mls_group_id.clone(), user_id.to_string()],
+        ).await?;
+        rows.next().await?.is_some()
+    };
+    if !is_member {
+        return Ok(());
+    }
+
+    // Advance MLS epoch before decryption so pre-ingest-window commits apply.
+    {
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(did) = device_id {
+            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, &did).await {
+                eprintln!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
+            }
+        }
+    }
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state, &mls_group_id, user_id).await {
+        eprintln!("[ingest] process_pending_commits for {mls_group_id}: {e}");
+    }
+
+    // Pull every envelope for this conversation (message + edit), oldest-first.
+    // Ordering is critical so MLS decryption sees epochs in the order they were
+    // committed and the watermark stops at the first decrypt failure.
+    let envelopes: Vec<(String, String, String, Option<String>, Option<String>, String, String)> = {
+        let mut out = Vec::new();
+        let mut rows = conn.query(
+            "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
+             FROM message_envelope
+             WHERE conversation_id = ?1
+             ORDER BY sent_at ASC, id ASC",
+            libsql::params![channel_id.to_string()],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            out.push((
+                row.get::<String>(0)?,
+                row.get::<String>(1)?,
+                row.get::<String>(2)?,
+                row.get::<Option<String>>(3)?,
+                row.get::<Option<String>>(4)?,
+                row.get::<String>(5)?,
+                row.get::<String>(6)?,
+            ));
+        }
+        out
+    };
+
+    let watermark_ts: Option<String> = persist_envelopes_locally(
+        state,
+        channel_id,
+        &mls_group_id,
+        &envelopes,
+    ).await?;
+
+    if let Some(ts) = watermark_ts {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![channel_id.to_string(), user_id.to_string(), ts],
+        ).await {
+            eprintln!("[watermark] ingest_channel: upsert failed: {e}");
+        }
+    }
+
+    if let Err(e) = conn.execute(
+        CLEANUP_CHANNEL_ENVELOPES,
+        libsql::params![channel_id.to_string()],
+    ).await {
+        eprintln!("[ingest] channel cleanup failed: {e}");
+    }
+
+    Ok(())
+}
+
+/// Shared envelope-persist loop used by both channel and DM ingest. The
+/// `mls_group_id` differs (channel → group_id, DM → conversation_id) so callers
+/// resolve it and pass it in. Returns the max sent_at across all envelopes
+/// processed — regardless of decrypt outcome — suitable for watermark
+/// advancement. Advancing past a failed decrypt is intentional: an envelope
+/// encrypted to an epoch this device never had keys for (e.g. a pre-join
+/// message for a newly-added member) is by definition unreadable by this
+/// device, and pinning cleanup for it would make it live forever on behalf
+/// of every new member that joins. Transient decrypt failures are a risk
+/// traded for forward progress — commit processing above us is supposed to
+/// keep MLS state current.
+async fn persist_envelopes_locally(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    mls_group_id: &str,
+    envelopes: &[(String, String, String, Option<String>, Option<String>, String, String)],
+) -> Result<Option<String>> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+    let mut candidate: Option<String> = None;
+    for (id, sender_id, ciphertext, reply_to_id, target_id, sent_at, env_type) in envelopes {
+        match env_type.as_str() {
+            "message" => {
+                let exists: bool = db.conn().query_row(
+                    "SELECT 1 FROM message WHERE id = ?1",
+                    rusqlite::params![id],
+                    |_| Ok(true),
+                ).optional()?.unwrap_or(false);
+                if !exists {
+                    let ct_bytes = ciphertext.strip_prefix("mls:")
+                        .and_then(|h| hex::decode(h).ok());
+                    let plaintext = ct_bytes.as_ref()
+                        .and_then(|b| crate::commands::mls::try_mls_decrypt(db.conn(), mls_group_id, b))
+                        .and_then(|b| String::from_utf8(b).ok());
+                    if let (Some(text), Some(bytes)) = (plaintext, ct_bytes) {
+                        let _ = db.conn().execute(
+                            "INSERT OR IGNORE INTO message
+                             (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            rusqlite::params![id, conversation_id, sender_id, bytes, text, reply_to_id, sent_at],
+                        );
+                    }
+                }
+            }
+            "edit" => {
+                if let Some(tid) = target_id.as_ref() {
+                    let plaintext = ciphertext.strip_prefix("mls:")
+                        .and_then(|h| hex::decode(h).ok())
+                        .and_then(|b| crate::commands::mls::try_mls_decrypt(db.conn(), mls_group_id, &b))
+                        .and_then(|b| String::from_utf8(b).ok());
+                    if let Some(text) = plaintext {
+                        let now = chrono::Utc::now().to_rfc3339();
+                        let _ = db.conn().execute(
+                            "UPDATE message SET content = ?1, edited_at = ?2
+                             WHERE id = ?3 AND deleted_at IS NULL",
+                            rusqlite::params![text, now, tid],
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+        // Always advance candidate — see doc comment.
+        candidate = Some(sent_at.clone());
+    }
+    Ok(candidate)
+}
+
 /// Fetch a page of messages for a channel the user is a member of.
 ///
 /// First call: omit `cursor` to get the most recent `limit` messages.
@@ -334,172 +545,12 @@ pub async fn get_channel_messages(
     state: State<'_, Arc<AppState>>,
 ) -> Result<MessagePage> {
     let limit = limit.unwrap_or(50);
-    let conn = state.remote_db.conn().await?;
 
-    // All channels in a group share one MLS group (keyed by group_id).
-    let mls_group_id = {
-        let mut gid_rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![channel_id.clone()],
-        ).await?;
-        match gid_rows.next().await? {
-            Some(row) => row.get::<String>(0)?,
-            None => channel_id.clone(),
-        }
-    };
+    ingest_channel_envelopes_inner(state.inner(), &user_id, &channel_id).await?;
 
-    // Poll MLS Welcomes first — this device may have been added to the group
-    // (e.g. creator's second device, or invite acceptance) but hasn't applied
-    // the Welcome yet.  Without this, process_pending_commits has no group to
-    // apply commits to, and the fallback repair creates a divergent group.
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(ref did) = device_id {
-            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &user_id, did).await {
-                eprintln!("[messages] poll_mls_welcomes for {mls_group_id}: {e}");
-            }
-        }
-    }
+    let mut messages = read_local_channel_page(state.inner(), &channel_id, &cursor, limit).await?;
+    attach_sender_usernames(state.inner(), &mut messages).await?;
 
-    // Ensure this device has a local MLS group at the current epoch.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &mls_group_id, &user_id).await {
-        eprintln!("[messages] process_pending_commits for {mls_group_id}: {e}");
-    }
-
-    let mut rows = match cursor {
-        None => {
-            conn.query(
-                QUERY_CHANNEL_MESSAGES_INITIAL,
-                libsql::params![user_id.clone(), channel_id.clone(), limit],
-            ).await?
-        }
-        Some(c) => {
-            conn.query(
-                QUERY_CHANNEL_MESSAGES_CURSOR,
-                libsql::params![user_id.clone(), channel_id.clone(), c.sent_at, c.id, limit],
-            ).await?
-        }
-    };
-
-    let mut raw_messages = Vec::new();
-    while let Some(row) = rows.next().await? {
-        raw_messages.push((
-            row.get::<String>(0)?,
-            row.get::<String>(1)?,
-            row.get::<String>(2)?,
-            row.get::<Option<String>>(3)?,
-            row.get::<String>(4)?,
-            row.get::<Option<String>>(5)?,
-            row.get::<String>(6)?,
-        ));
-    }
-
-    // Fetch any pending edit envelopes for this conversation and apply them to
-    // local DB before processing message envelopes. This ensures the message
-    // processing loop below reads up-to-date plaintext from the local cache.
-    let edit_envelopes: Vec<(String, String, String)> = {
-        let mut edits = Vec::new();
-        if let Ok(mut edit_rows) = conn.query(
-            "SELECT id, target_message_id, ciphertext FROM message_envelope
-             WHERE conversation_id = ?1 AND type = 'edit'
-             ORDER BY sent_at ASC",
-            libsql::params![channel_id.clone()],
-        ).await {
-            while let Ok(Some(row)) = edit_rows.next().await {
-                if let (Ok(id), Ok(target), Ok(ct)) = (
-                    row.get::<String>(0),
-                    row.get::<String>(1),
-                    row.get::<String>(2),
-                ) {
-                    edits.push((id, target, ct));
-                }
-            }
-        }
-        edits
-    };
-
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-
-    // Apply edit envelopes: decrypt and patch the local message cache.
-    for (_edit_id, target_id, ciphertext) in &edit_envelopes {
-        let plaintext = ciphertext.strip_prefix("mls:")
-            .and_then(|hex_str| hex::decode(hex_str).ok())
-            .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &mls_group_id, &bytes))
-            .and_then(|b| String::from_utf8(b).ok());
-        if let Some(text) = plaintext {
-            let now = chrono::Utc::now().to_rfc3339();
-            let _ = db.conn().execute(
-                "UPDATE message SET content = ?1, edited_at = ?2
-                 WHERE id = ?3 AND deleted_at IS NULL",
-                rusqlite::params![text, now, target_id],
-            );
-        }
-    }
-
-    // Sort oldest-first so MLS epoch ordering is preserved during decryption.
-    raw_messages.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut messages: Vec<ChannelMessage> = raw_messages.into_iter().map(|(id, conv_id, sender_id, sender_username, ciphertext, reply_to_id, sent_at)| {
-        // Read local state: content (plaintext cache), edited_at, deleted_at.
-        let local_row: Option<(Option<String>, Option<String>, Option<String>)> = db.conn().query_row(
-            "SELECT content, edited_at, deleted_at FROM message WHERE id = ?1",
-            rusqlite::params![&id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).ok();
-
-        let (edited_at, deleted_at) = local_row
-            .as_ref()
-            .map(|(_, e, d)| (e.clone(), d.clone()))
-            .unwrap_or((None, None));
-
-        let content = if deleted_at.is_some() {
-            // Soft-deleted messages show no content.
-            None
-        } else {
-            // Check local cache first (covers own messages sent from this
-            // device and previously-decrypted peer messages).
-            let cached = local_row.and_then(|(c, _, _)| c);
-            if cached.is_some() {
-                cached
-            } else {
-                // Cache miss — decrypt via MLS. For own-user messages sent
-                // from a different device, sender_id == user_id but the
-                // plaintext only exists on the sending device's local DB.
-                let plaintext = ciphertext.strip_prefix("mls:")
-                    .and_then(|hex_str| hex::decode(hex_str).ok())
-                    .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &mls_group_id, &bytes))
-                    .and_then(|b| String::from_utf8(b).ok());
-                if let Some(ref text) = plaintext {
-                    let _ = db.conn().execute(
-                        "INSERT OR REPLACE INTO message
-                         (id, conversation_id, sender_id, ciphertext, content, sent_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        rusqlite::params![id, conv_id, sender_id, ciphertext.as_bytes(), text, sent_at],
-                    );
-                }
-                plaintext
-            }
-        };
-        ChannelMessage {
-            id,
-            conversation_id: conv_id,
-            sender_id,
-            sender_username,
-            ciphertext,
-            content,
-            reply_to_id,
-            sent_at,
-            edited_at,
-            deleted_at,
-        }
-    }).collect();
-
-    // Restore newest-first order for the response (frontend expects newest at top).
-    messages.reverse();
-
-    // If we got a full page there are likely more; expose a cursor to the
-    // oldest row so the caller can fetch the next older page.
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
             sent_at: m.sent_at.clone(),
@@ -509,51 +560,127 @@ pub async fn get_channel_messages(
         None
     };
 
-    // Upsert the caller's watermark using the latest sent_at from the returned
-    // messages, not wall-clock time. This ensures cleanup only removes envelopes
-    // that every member has actually fetched past. Skip if there are no messages
-    // (nothing new was fetched, so the watermark should not advance).
-    let max_sent_at = messages.iter().map(|m| m.sent_at.as_str()).max().map(str::to_owned);
-    if let Some(watermark_ts) = max_sent_at {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![channel_id.clone(), user_id.clone(), watermark_ts],
-        ).await {
-            eprintln!("[watermark] get_channel_messages: upsert failed: {e}");
+    Ok(MessagePage { messages, next_cursor })
+}
+
+/// Read a page of messages for a conversation from the local `message` table,
+/// newest-first. Used by both channel and DM read paths after ingest has
+/// persisted any new envelopes.
+async fn read_local_channel_page(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    cursor: &Option<MessageCursor>,
+    limit: i64,
+) -> Result<Vec<ChannelMessage>> {
+    let guard = state.local_db.lock().await;
+    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+    fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChannelMessage> {
+        let ct: Vec<u8> = row.get(3)?;
+        let content: Option<String> = row.get(4)?;
+        let deleted_at: Option<String> = row.get(8)?;
+        Ok(ChannelMessage {
+            id: row.get(0)?,
+            conversation_id: row.get(1)?,
+            sender_id: row.get(2)?,
+            sender_username: None,
+            ciphertext: format!("mls:{}", hex::encode(&ct)),
+            // Soft-deleted messages mask content to None regardless of cache.
+            content: if deleted_at.is_some() { None } else { content },
+            reply_to_id: row.get(5)?,
+            sent_at: row.get(6)?,
+            edited_at: row.get(7)?,
+            deleted_at,
+        })
+    }
+
+    let mut rows: Vec<ChannelMessage> = Vec::new();
+    match cursor {
+        None => {
+            let mut stmt = db.conn().prepare(
+                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at
+                 FROM message
+                 WHERE conversation_id = ?1
+                 ORDER BY sent_at DESC, id DESC
+                 LIMIT ?2"
+            )?;
+            let mapped = stmt.query_map(rusqlite::params![conversation_id, limit], row_to_message)?;
+            for r in mapped {
+                if let Ok(m) = r {
+                    rows.push(m);
+                }
+            }
+        }
+        Some(c) => {
+            let mut stmt = db.conn().prepare(
+                "SELECT id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at, edited_at, deleted_at
+                 FROM message
+                 WHERE conversation_id = ?1
+                   AND (sent_at < ?2 OR (sent_at = ?2 AND id < ?3))
+                 ORDER BY sent_at DESC, id DESC
+                 LIMIT ?4"
+            )?;
+            let mapped = stmt.query_map(rusqlite::params![conversation_id, c.sent_at, c.id, limit], row_to_message)?;
+            for r in mapped {
+                if let Ok(m) = r {
+                    rows.push(m);
+                }
+            }
         }
     }
 
-    // Delete envelopes that are either past the 30-day TTL OR every current
-    // group member has already fetched past. The two gates are OR'd so a
-    // single slow-fetching member can't pin old envelopes indefinitely,
-    // while a fully-caught-up conversation can free storage without waiting
-    // 30 days.
-    if let Err(e) = conn.execute(
-        "DELETE FROM message_envelope
-         WHERE conversation_id = ?1
-         AND (
-             sent_at < datetime('now', '-30 days')
-             OR sent_at < (
-                 SELECT CASE
-                     WHEN COUNT(gm.user_id) = COUNT(cw.last_fetched_at)
-                     THEN MIN(cw.last_fetched_at)
-                     ELSE NULL
-                 END
-                 FROM group_member gm
-                 JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
-                 LEFT JOIN conversation_watermark cw
-                        ON cw.conversation_id = ?1 AND cw.user_id = gm.user_id
-             )
-         )",
-        libsql::params![channel_id.clone()],
-    ).await {
-        eprintln!("[watermark] get_channel_messages: cleanup failed: {e}");
-    }
+    Ok(rows)
+}
 
-    Ok(MessagePage { messages, next_cursor })
+/// Batch-resolve sender usernames from the remote `users` table and attach
+/// them to the page. A missing user (deleted, never existed) simply stays as
+/// `None` on that message.
+async fn attach_sender_usernames(
+    state: &Arc<AppState>,
+    messages: &mut [ChannelMessage],
+) -> Result<()> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+    let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in messages.iter() {
+        ids.insert(m.sender_id.clone());
+    }
+    let ids_vec: Vec<String> = ids.into_iter().collect();
+    let placeholders = (1..=ids_vec.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("SELECT id, username FROM users WHERE id IN ({placeholders})");
+    let params: Vec<libsql::Value> = ids_vec
+        .iter()
+        .map(|s| libsql::Value::Text(s.clone()))
+        .collect();
+
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn.query(&sql, libsql::params_from_iter(params)).await?;
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    while let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        let name: String = row.get(1)?;
+        map.insert(id, name);
+    }
+    for m in messages.iter_mut() {
+        m.sender_username = map.get(&m.sender_id).cloned();
+    }
+    Ok(())
+}
+
+/// Frontend-triggerable ingest for a channel. Used by LiveKit real-time hints
+/// and channel-focus pre-warm paths that want to persist new envelopes without
+/// reading a page.
+#[tauri::command]
+pub async fn ingest_channel_envelopes(
+    user_id: String,
+    channel_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    ingest_channel_envelopes_inner(state.inner(), &user_id, &channel_id).await
 }
 
 /// All messages sent by a given user across all their channels,
@@ -612,6 +739,92 @@ pub async fn list_channel_previews(
     Ok(previews)
 }
 
+/// Pull new envelopes for a DM from remote, decrypt, and persist into the local
+/// `message` table. DM MLS group is keyed by conversation_id directly.
+pub async fn ingest_dm_envelopes_inner(
+    state: &Arc<AppState>,
+    user_id: &str,
+    dm_channel_id: &str,
+) -> Result<()> {
+    let conn = state.remote_db.conn().await?;
+
+    let is_member: bool = {
+        let mut rows = conn.query(
+            "SELECT 1 FROM dm_channel_member
+             WHERE dm_channel_id = ?1 AND user_id = ?2
+             LIMIT 1",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
+        ).await?;
+        rows.next().await?.is_some()
+    };
+    if !is_member {
+        return Ok(());
+    }
+
+    {
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(did) = device_id {
+            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, &did).await {
+                eprintln!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
+            }
+        }
+    }
+    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state, dm_channel_id, user_id).await {
+        eprintln!("[ingest] process_pending_commits for DM {dm_channel_id}: {e}");
+    }
+
+    let envelopes: Vec<(String, String, String, Option<String>, Option<String>, String, String)> = {
+        let mut out = Vec::new();
+        let mut rows = conn.query(
+            "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
+             FROM message_envelope
+             WHERE conversation_id = ?1
+             ORDER BY sent_at ASC, id ASC",
+            libsql::params![dm_channel_id.to_string()],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            out.push((
+                row.get::<String>(0)?,
+                row.get::<String>(1)?,
+                row.get::<String>(2)?,
+                row.get::<Option<String>>(3)?,
+                row.get::<Option<String>>(4)?,
+                row.get::<String>(5)?,
+                row.get::<String>(6)?,
+            ));
+        }
+        out
+    };
+
+    let watermark_ts: Option<String> = persist_envelopes_locally(
+        state,
+        dm_channel_id,
+        dm_channel_id,
+        &envelopes,
+    ).await?;
+
+    if let Some(ts) = watermark_ts {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string(), ts],
+        ).await {
+            eprintln!("[watermark] ingest_dm: upsert failed: {e}");
+        }
+    }
+
+    if let Err(e) = conn.execute(
+        CLEANUP_DM_ENVELOPES,
+        libsql::params![dm_channel_id.to_string()],
+    ).await {
+        eprintln!("[ingest] dm cleanup failed: {e}");
+    }
+
+    Ok(())
+}
+
 /// Fetch a page of messages for a DM channel the user is a member of.
 /// Results are ordered newest-first.
 #[tauri::command]
@@ -624,146 +837,10 @@ pub async fn get_dm_messages(
 ) -> Result<MessagePage> {
     let limit = limit.unwrap_or(50);
 
-    // Poll MLS Welcomes first — this device may have a pending Welcome.
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(ref did) = device_id {
-            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state.inner(), &user_id, did).await {
-                eprintln!("[messages] poll_mls_welcomes for DM {dm_channel_id}: {e}");
-            }
-        }
-    }
+    ingest_dm_envelopes_inner(state.inner(), &user_id, &dm_channel_id).await?;
 
-    // Ensure this device has a local MLS group at the current epoch.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state.inner(), &dm_channel_id, &user_id).await {
-        eprintln!("[messages] process_pending_commits for DM {dm_channel_id}: {e}");
-    }
-
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = match cursor {
-        None => {
-            conn.query(
-                QUERY_DM_CHANNEL_MESSAGES_INITIAL,
-                libsql::params![user_id.clone(), dm_channel_id.clone(), limit],
-            ).await?
-        }
-        Some(c) => {
-            conn.query(
-                QUERY_DM_CHANNEL_MESSAGES_CURSOR,
-                libsql::params![user_id.clone(), dm_channel_id.clone(), c.sent_at, c.id, limit],
-            ).await?
-        }
-    };
-
-    let mut raw_messages = Vec::new();
-    while let Some(row) = rows.next().await? {
-        raw_messages.push((
-            row.get::<String>(0)?,
-            row.get::<String>(1)?,
-            row.get::<String>(2)?,
-            row.get::<Option<String>>(3)?,
-            row.get::<String>(4)?,
-            row.get::<Option<String>>(5)?,
-            row.get::<String>(6)?,
-        ));
-    }
-
-    // Fetch pending edit envelopes and apply them before reading message cache.
-    let edit_envelopes: Vec<(String, String, String)> = {
-        let mut edits = Vec::new();
-        if let Ok(mut edit_rows) = conn.query(
-            "SELECT id, target_message_id, ciphertext FROM message_envelope
-             WHERE conversation_id = ?1 AND type = 'edit'
-             ORDER BY sent_at ASC",
-            libsql::params![dm_channel_id.clone()],
-        ).await {
-            while let Ok(Some(row)) = edit_rows.next().await {
-                if let (Ok(id), Ok(target), Ok(ct)) = (
-                    row.get::<String>(0),
-                    row.get::<String>(1),
-                    row.get::<String>(2),
-                ) {
-                    edits.push((id, target, ct));
-                }
-            }
-        }
-        edits
-    };
-
-    let guard = state.local_db.lock().await;
-    let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-
-    // Apply edit envelopes: decrypt and patch the local message cache.
-    // DM MLS group is keyed by conversation_id directly.
-    for (_edit_id, target_id, ciphertext) in &edit_envelopes {
-        let plaintext = ciphertext.strip_prefix("mls:")
-            .and_then(|hex_str| hex::decode(hex_str).ok())
-            .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &dm_channel_id, &bytes))
-            .and_then(|b| String::from_utf8(b).ok());
-        if let Some(text) = plaintext {
-            let now = chrono::Utc::now().to_rfc3339();
-            let _ = db.conn().execute(
-                "UPDATE message SET content = ?1, edited_at = ?2
-                 WHERE id = ?3 AND deleted_at IS NULL",
-                rusqlite::params![text, now, target_id],
-            );
-        }
-    }
-
-    // Sort oldest-first so MLS epoch ordering is preserved during decryption.
-    raw_messages.sort_by(|a, b| a.0.cmp(&b.0));
-
-    let mut messages: Vec<ChannelMessage> = raw_messages.into_iter().map(|(id, conv_id, sender_id, sender_username, ciphertext, reply_to_id, sent_at)| {
-        // Read local state: content (plaintext cache), edited_at, deleted_at.
-        let local_row: Option<(Option<String>, Option<String>, Option<String>)> = db.conn().query_row(
-            "SELECT content, edited_at, deleted_at FROM message WHERE id = ?1",
-            rusqlite::params![&id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).ok();
-
-        let (edited_at, deleted_at) = local_row
-            .as_ref()
-            .map(|(_, e, d)| (e.clone(), d.clone()))
-            .unwrap_or((None, None));
-
-        let content = if deleted_at.is_some() {
-            None
-        } else {
-            let cached = local_row.and_then(|(c, _, _)| c);
-            if cached.is_some() {
-                cached
-            } else {
-                let plaintext = ciphertext.strip_prefix("mls:")
-                    .and_then(|hex_str| hex::decode(hex_str).ok())
-                    .and_then(|bytes| crate::commands::mls::try_mls_decrypt(db.conn(), &conv_id, &bytes))
-                    .and_then(|b| String::from_utf8(b).ok());
-                if let Some(ref text) = plaintext {
-                    let _ = db.conn().execute(
-                        "INSERT OR REPLACE INTO message
-                         (id, conversation_id, sender_id, ciphertext, content, sent_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                        rusqlite::params![id, conv_id, sender_id, ciphertext.as_bytes(), text, sent_at],
-                    );
-                }
-                plaintext
-            }
-        };
-        ChannelMessage {
-            id,
-            conversation_id: conv_id,
-            sender_id,
-            sender_username,
-            ciphertext,
-            content,
-            reply_to_id,
-            sent_at,
-            edited_at,
-            deleted_at,
-        }
-    }).collect();
-
-    messages.reverse();
+    let mut messages = read_local_channel_page(state.inner(), &dm_channel_id, &cursor, limit).await?;
+    attach_sender_usernames(state.inner(), &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
@@ -774,51 +851,17 @@ pub async fn get_dm_messages(
         None
     };
 
-    // Upsert the caller's watermark using the latest sent_at from the returned
-    // messages, not wall-clock time. This ensures cleanup only removes envelopes
-    // that every member has actually fetched past. Skip if there are no messages
-    // (nothing new was fetched, so the watermark should not advance).
-    let max_sent_at = messages.iter().map(|m| m.sent_at.as_str()).max().map(str::to_owned);
-    if let Some(watermark_ts) = max_sent_at {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![dm_channel_id.clone(), user_id.clone(), watermark_ts],
-        ).await {
-            eprintln!("[watermark] get_dm_messages: upsert failed: {e}");
-        }
-    }
-
-    // Delete envelopes that are either past the 30-day TTL OR every current
-    // DM member has already fetched past. The two gates are OR'd so a
-    // single slow-fetching member can't pin old envelopes indefinitely,
-    // while a fully-caught-up conversation can free storage without waiting
-    // 30 days.
-    if let Err(e) = conn.execute(
-        "DELETE FROM message_envelope
-         WHERE conversation_id = ?1
-         AND (
-             sent_at < datetime('now', '-30 days')
-             OR sent_at < (
-                 SELECT CASE
-                     WHEN COUNT(dcm.user_id) = COUNT(cw.last_fetched_at)
-                     THEN MIN(cw.last_fetched_at)
-                     ELSE NULL
-                 END
-                 FROM dm_channel_member dcm
-                 LEFT JOIN conversation_watermark cw
-                        ON cw.conversation_id = ?1 AND cw.user_id = dcm.user_id
-                 WHERE dcm.dm_channel_id = ?1
-             )
-         )",
-        libsql::params![dm_channel_id.clone()],
-    ).await {
-        eprintln!("[watermark] get_dm_messages: cleanup failed: {e}");
-    }
-
     Ok(MessagePage { messages, next_cursor })
+}
+
+/// Frontend-triggerable ingest for a DM channel.
+#[tauri::command]
+pub async fn ingest_dm_envelopes(
+    user_id: String,
+    dm_channel_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    ingest_dm_envelopes_inner(state.inner(), &user_id, &dm_channel_id).await
 }
 
 /// A search result from the local message cache.

@@ -11,9 +11,9 @@
     "build:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'",
     "lint": "pnpm --filter frontend lint",
     "clean": "pnpm --filter frontend clean && cargo clean --manifest-path src-tauri/Cargo.toml",
-    "db:push": "cargo run --manifest-path src-tauri/Cargo.toml --bin migrate --features pollis/migrate-bin",
-    "db:track": "cargo run --manifest-path src-tauri/Cargo.toml --bin apply_migrations --features pollis/migrate-bin -- --track-only",
-    "db:rebuild": "cargo run --manifest-path src-tauri/Cargo.toml --bin apply_migrations --features pollis/migrate-bin -- --full",
+    "db:push": "cargo run --manifest-path src-tauri/Cargo.toml --example migrate",
+    "db:track": "cargo run --manifest-path src-tauri/Cargo.toml --example apply_migrations -- --track-only",
+    "db:rebuild": "cargo run --manifest-path src-tauri/Cargo.toml --example apply_migrations -- --full",
     "test:e2e": "playwright test",
     "test:e2e:interactive": "playwright test --ui"
   },

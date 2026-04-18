@@ -122,7 +122,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
             <div className="flex flex-col gap-5">
               <div>
                 <h1
-                  className="text-base font-mono font-bold"
+                  className="text-base font-mono font-bold mb-8"
                   style={{ color: "#ff6b6b" }}
                 >
                   Read before continuing
@@ -136,15 +136,15 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   existing one.
                 </p>
                 <p
-                  className="text-xs mt-3 font-mono"
-                  style={{ color: "var(--c-text)", lineHeight: 1.6 }}
+                  className="text-xs mt-4 font-mono"
+                  style={{ color: "var(--c-text-dim)", lineHeight: 1.6 }}
                 >
-                  It is shown <strong>once</strong> and never stored on a server.
-                  Lose it and every device, and the account is unrecoverable.
+                  It is shown <strong style={{ color: "var(--c-text)" }}>once</strong> and never stored.
+                  If you lose it and every device, and the account is unrecoverable.
                 </p>
                 <p
-                  className="text-xs mt-3 font-mono"
-                  style={{ color: "var(--c-text-muted)", lineHeight: 1.6 }}
+                  className="text-xs mt-3 mb-4 font-mono"
+                  style={{ color: "var(--c-text)", lineHeight: 1.6 }}
                 >
                   Have a password manager open, or be ready to print or write
                   it down somewhere safe.
@@ -184,14 +184,14 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
             <div className="flex flex-col gap-5">
               <div>
                 <h1
-                  className="text-base font-mono font-bold"
+                  className="text-base font-mono font-bold mb-4"
                   style={{ color: "var(--c-accent)" }}
                 >
                   Your Secret Key
                 </h1>
                 <p
                   className="text-xs mt-1 font-mono"
-                  style={{ color: "var(--c-text-muted)" }}
+                  style={{ color: "var(--c-text-dim)" }}
                 >
                   Save this somewhere safe. You will not see it again.
                 </p>
@@ -204,17 +204,32 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                   background: "var(--c-surface)",
                   border: "2px solid var(--c-accent)",
                   borderRadius: "0.5rem",
-                  padding: "1rem",
+                  padding: "0.5rem",
                   color: "var(--c-accent)",
                   wordBreak: "break-all",
                   textAlign: "center",
                   letterSpacing: "0.05em",
+                  marginBottom: "1rem",
                 }}
               >
                 {secretKey}
               </div>
 
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 mb-4 items-center">
+
+                <Button
+                  data-testid="download-secret-key-button"
+                  onClick={() => {
+                    downloadEmergencyKit(secretKey, username);
+                    setDownloaded(true);
+                    window.setTimeout(() => setDownloaded(false), 2000);
+                  }}
+                  variant="primary"
+                  className="w-full"
+                  size="sm"
+                >
+                  {downloaded ? "Downloaded" : "Download Emergency Kit (.txt)"}
+                </Button>
                 <Button
                   data-testid="copy-secret-key-button"
                   onClick={() => {
@@ -224,24 +239,13 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                         setCopied(true);
                         window.setTimeout(() => setCopied(false), 2000);
                       })
-                      .catch(() => {});
+                      .catch(() => { });
                   }}
                   variant="ghost"
-                  className="w-full"
+                  className="w-fit-content mx-auto"
+                  size="sm"
                 >
                   {copied ? "Copied" : "Copy to clipboard"}
-                </Button>
-                <Button
-                  data-testid="download-secret-key-button"
-                  onClick={() => {
-                    downloadEmergencyKit(secretKey, username);
-                    setDownloaded(true);
-                    window.setTimeout(() => setDownloaded(false), 2000);
-                  }}
-                  variant="ghost"
-                  className="w-full"
-                >
-                  {downloaded ? "Downloaded" : "Download Emergency Kit (.txt)"}
                 </Button>
               </div>
 
