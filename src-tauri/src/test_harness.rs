@@ -205,6 +205,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         15,
         include_str!("db/migrations/000015_dm_requests_and_blocks.sql"),
     ),
+    (
+        16,
+        include_str!("db/migrations/000016_watermark_device_scope.sql"),
+    ),
 ];
 
 /// Apply the base schema + any missing migrations to the shared test DB.
