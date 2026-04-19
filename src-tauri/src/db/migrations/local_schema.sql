@@ -38,11 +38,12 @@ CREATE TABLE IF NOT EXISTS dm_conversation (
 
 -- User preferences (local-first mirror of remote user_preferences).
 -- Single-row table — the DB file is already scoped to one user.
+-- No seed row: a missing (or literal '{}') row tells get_preferences to pull
+-- from remote and cache here. save_preferences upserts into this table.
 CREATE TABLE IF NOT EXISTS preferences (
     preferences TEXT NOT NULL DEFAULT '{}',
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
-INSERT OR IGNORE INTO preferences (preferences) VALUES ('{}');
 
 -- UI state (window geometry, etc.)
 CREATE TABLE IF NOT EXISTS ui_state (
