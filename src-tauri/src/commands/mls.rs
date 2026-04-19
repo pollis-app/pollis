@@ -207,7 +207,10 @@ pub async fn ensure_device_cert(
 ) -> crate::error::Result<bool> {
     // 0. Bail early if we don't have the account identity locally. This
     //    happens on a new device before step-5 enrollment has run.
-    if !crate::commands::account_identity::has_local_account_identity(user_id).await? {
+    if !crate::commands::account_identity::has_local_account_identity(
+        state.keystore.as_ref(),
+        user_id,
+    ).await? {
         return Ok(false);
     }
 
@@ -253,6 +256,7 @@ pub async fn ensure_device_cert(
         .unwrap_or(0);
 
     let cert = crate::commands::account_identity::sign_device_cert(
+        state.keystore.as_ref(),
         user_id,
         device_id,
         &sig_pub_bytes,
@@ -1484,18 +1488,19 @@ pub struct ReconcileCommitData {
     pub welcome_bytes: Option<Vec<u8>>,
 }
 
-/// Sync core: computes the diff between the desired roster and the actual MLS
-/// tree, then issues a single combined commit. Testable without Turso or async.
+/// Sync core (staged variant): computes the diff between the desired roster
+/// and the actual MLS tree, then issues a single combined commit. Does NOT
+/// merge the commit locally — the commit is left as a pending commit on the
+/// group. The caller is responsible for either calling `merge_pending_commit`
+/// (after successfully persisting the commit/welcome rows to Turso) or
+/// `clear_pending_commit` (on remote failure) to avoid split-brain between
+/// the local epoch and the remote commit log.
 ///
 /// Returns the outcome plus optional commit/welcome bytes for the caller to
-/// post to Turso. The commit is merged locally before returning.
-///
-/// # Arguments
-/// - `roster_user_ids` — set of user_ids that SHOULD be in the group (from Turso)
-/// - `available_kps` — `(user_id, device_id, KeyPackage)` for devices that have
-///   an unclaimed KP and can be added
-/// - `actor_user_id` / `actor_device_id` — the committer (must already be in the tree)
-pub fn reconcile_group_mls_core(
+/// post to Turso. On the returned `ReconcileOutcome`, `epoch_after` reflects
+/// the epoch the commit WILL produce when merged (i.e. `epoch_before + 1`
+/// when a commit is staged, equal to `epoch_before` on no-op).
+pub fn reconcile_group_mls_core_staged(
     provider: &PollisProvider<'_>,
     signer: &SignatureKeyPair,
     group: &mut MlsGroup,
@@ -1587,7 +1592,10 @@ pub fn reconcile_group_mls_core(
         added_desc.join(", "),
     );
 
-    // 7. Build a single commit with both proposals.
+    // 7. Build a single commit with both proposals. `stage_commit` writes the
+    //    commit as a pending commit on the group (persisted via the storage
+    //    provider), but does NOT advance the group's epoch — that only
+    //    happens on `merge_pending_commit`.
     let add_kps_only: Vec<KeyPackage> = add_kps.iter().map(|(_, _, kp)| kp.clone()).collect();
 
     let bundle = group
@@ -1601,7 +1609,8 @@ pub fn reconcile_group_mls_core(
         .stage_commit(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile stage: {e}")))?;
 
-    // 8. Serialize commit + welcome BEFORE merging.
+    // 8. Serialize commit + welcome. These bytes are available pre-merge
+    //    directly from the commit bundle.
     let (commit_out, welcome_opt, _group_info) = bundle.into_messages();
 
     let commit_bytes = commit_out
@@ -1616,18 +1625,16 @@ pub fn reconcile_group_mls_core(
         None => None,
     };
 
-    // 9. Merge the commit locally.
-    group
-        .merge_pending_commit(provider)
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
-
-    let epoch_after = group.epoch().as_u64();
+    // `epoch_after` is the epoch this commit will produce when merged. We
+    // don't merge here, but we can report it deterministically: a staged
+    // commit always advances the epoch by exactly one.
+    let epoch_after = epoch_before + 1;
 
     let removed: Vec<(String, String)> = to_remove.into_iter().map(|(key, _)| key).collect();
     let added: Vec<(String, String)> = add_kps.into_iter().map(|(u, d, _)| (u, d)).collect();
 
     eprintln!(
-        "[mls] reconcile: epoch {epoch_before} → {epoch_after}, removed {}, added {}",
+        "[mls] reconcile: staged epoch {epoch_before} → {epoch_after}, removed {}, added {} (pending merge)",
         removed.len(),
         added.len(),
     );
@@ -1645,6 +1652,48 @@ pub fn reconcile_group_mls_core(
             welcome_bytes,
         }),
     ))
+}
+
+/// Sync core: computes the diff between the desired roster and the actual MLS
+/// tree, then issues a single combined commit. Testable without Turso or async.
+///
+/// Returns the outcome plus optional commit/welcome bytes for the caller to
+/// post to Turso. The commit is merged locally before returning.
+///
+/// NOTE: async callers should prefer the staged variant
+/// (`reconcile_group_mls_core_staged`) so remote persistence can happen
+/// *before* the local merge, avoiding split-brain on remote failure. This
+/// thin wrapper exists for test helpers and any path that deliberately wants
+/// a local-only merge.
+pub fn reconcile_group_mls_core(
+    provider: &PollisProvider<'_>,
+    signer: &SignatureKeyPair,
+    group: &mut MlsGroup,
+    roster_user_ids: &std::collections::HashSet<String>,
+    available_kps: &[(String, String, KeyPackage)],
+    actor_user_id: &str,
+    actor_device_id: &str,
+) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
+    let (mut outcome, commit_data_opt) = reconcile_group_mls_core_staged(
+        provider,
+        signer,
+        group,
+        roster_user_ids,
+        available_kps,
+        actor_user_id,
+        actor_device_id,
+    )?;
+
+    // If a commit was staged, merge it locally. No-op runs leave the group
+    // in Operational state with no pending commit, so the merge is skipped.
+    if commit_data_opt.is_some() {
+        group
+            .merge_pending_commit(provider)
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
+        outcome.epoch_after = group.epoch().as_u64();
+    }
+
+    Ok((outcome, commit_data_opt))
 }
 
 /// Async entry point: reads desired state from Turso, loads local MLS group,
@@ -1852,7 +1901,12 @@ pub async fn reconcile_group_mls_impl(
             available_kps.push((uid.clone(), did.clone(), kp));
         }
 
-        reconcile_group_mls_core(
+        // Stage the commit: builds the commit locally and writes it as a
+        // PENDING commit on the group (persisted to MLS storage) WITHOUT
+        // advancing the local epoch. The merge is deferred until after the
+        // remote INSERTs succeed so a remote failure cannot leave the local
+        // group ahead of the remote commit log.
+        reconcile_group_mls_core_staged(
             &provider,
             &signer,
             &mut group,
@@ -1863,7 +1917,15 @@ pub async fn reconcile_group_mls_impl(
         )?
     };
 
-    // 5. Post commit + welcome to Turso.
+    // 5. Post commit + welcome to Turso FIRST, then merge locally.
+    //
+    //    Ordering rationale: if any remote INSERT fails (e.g. libsql hrana
+    //    "stream not found" after the slow MLS crypto work evicted the
+    //    stream), we must NOT advance the local epoch — otherwise this
+    //    client is at epoch N+1 while no other member can see the commit,
+    //    producing permanent split-brain. On remote failure we roll back
+    //    the local pending commit via `clear_pending_commit` so the next
+    //    reconcile recomputes from scratch.
     if let Some(data) = commit_data_opt {
         // Collect metadata about added devices so receivers can verify
         // cross-signing certs before processing the commit.
@@ -1882,37 +1944,109 @@ pub async fn reconcile_group_mls_impl(
                 .join(",");
             (Some(uid), Some(dids))
         };
-        conn.execute(
-            "INSERT INTO mls_commit_log \
-             (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            libsql::params![
-                conversation_id.clone(),
-                outcome.epoch_before as i64,
-                actor_user_id,
-                data.commit_bytes,
-                added_uid,
-                added_dids
-            ],
-        )
-        .await?;
 
-        if let Some(welcome_bytes) = data.welcome_bytes {
-            for (uid, did) in &outcome.added {
-                let welcome_id = Ulid::new().to_string();
-                conn.execute(
-                    "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
-                    libsql::params![welcome_id, conversation_id.clone(), uid.clone(), did.clone(), welcome_bytes.clone()],
-                )
-                .await?;
+        // Try the remote INSERTs on a FRESH connection. The libsql hrana
+        // stream captured at the top of this function may have been evicted
+        // by the server during the slow MLS crypto work above; reusing it
+        // would produce "stream not found" for the critical writes. A fresh
+        // connection here is not a retry — it's preventing a stale stream
+        // from being our only attempt. On failure, roll back the local
+        // pending commit before returning.
+        let remote_result: crate::error::Result<()> = async {
+            let write_conn = state.remote_db.conn().await?;
+            write_conn.execute(
+                "INSERT INTO mls_commit_log \
+                 (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                libsql::params![
+                    conversation_id.clone(),
+                    outcome.epoch_before as i64,
+                    actor_user_id.clone(),
+                    data.commit_bytes,
+                    added_uid,
+                    added_dids
+                ],
+            )
+            .await?;
+
+            if let Some(welcome_bytes) = data.welcome_bytes {
+                for (uid, did) in &outcome.added {
+                    let welcome_id = Ulid::new().to_string();
+                    write_conn.execute(
+                        "INSERT INTO mls_welcome (id, conversation_id, recipient_id, recipient_device_id, welcome_data) \
+                         VALUES (?1, ?2, ?3, ?4, ?5)",
+                        libsql::params![welcome_id, conversation_id.clone(), uid.clone(), did.clone(), welcome_bytes.clone()],
+                    )
+                    .await?;
+                }
             }
+            Ok(())
         }
+        .await;
 
-        // Publish updated GroupInfo so external-join (new device enrollment)
-        // uses the latest tree state.
-        if let Err(e) = publish_group_info(state, &conversation_id).await {
-            eprintln!("[mls] reconcile: publish_group_info failed (non-fatal): {e}");
+        match remote_result {
+            Err(e) => {
+                // Remote failed — clear the local pending commit so the
+                // next reconcile doesn't merge a commit the remote never
+                // saw. Without this, the top-of-block `merge_pending_commit`
+                // on the next run would re-introduce the exact split-brain
+                // this reordering is designed to prevent.
+                eprintln!(
+                    "[mls] reconcile: remote persist failed, clearing local pending commit: {e}"
+                );
+                let guard = state.local_db.lock().await;
+                if let Some(db) = guard.as_ref() {
+                    let provider = PollisProvider::new(db.conn());
+                    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+                    match MlsGroup::load(provider.storage(), &group_id) {
+                        Ok(Some(mut group)) => {
+                            if let Err(clear_err) = group.clear_pending_commit(provider.storage()) {
+                                eprintln!(
+                                    "[mls] reconcile: clear_pending_commit failed after remote error: {clear_err}"
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            eprintln!("[mls] reconcile: group vanished during rollback");
+                        }
+                        Err(load_err) => {
+                            eprintln!("[mls] reconcile: group load failed during rollback: {load_err}");
+                        }
+                    }
+                }
+                return Err(e);
+            }
+            Ok(()) => {
+                // Remote persisted — now merge locally to advance the epoch.
+                // Scope the provider + group tightly so neither crosses an
+                // await (PollisProvider wraps &rusqlite::Connection which
+                // is not Send).
+                {
+                    let guard = state.local_db.lock().await;
+                    let db = match guard.as_ref() {
+                        Some(db) => db,
+                        None => {
+                            return Ok(outcome);
+                        }
+                    };
+                    let provider = PollisProvider::new(db.conn());
+                    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+                    let mut group = MlsGroup::load(provider.storage(), &group_id)
+                        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load for merge: {e}")))?
+                        .ok_or_else(|| {
+                            crate::error::Error::Other(anyhow::anyhow!("group missing at merge time"))
+                        })?;
+                    group
+                        .merge_pending_commit(&provider)
+                        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
+                }
+
+                // Publish updated GroupInfo so external-join (new device
+                // enrollment) uses the latest tree state. Non-fatal.
+                if let Err(e) = publish_group_info(state, &conversation_id).await {
+                    eprintln!("[mls] reconcile: publish_group_info failed (non-fatal): {e}");
+                }
+            }
         }
     }
 

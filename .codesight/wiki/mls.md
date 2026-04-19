@@ -41,10 +41,19 @@ Steps:
 3. **Peek at tree** to see who's already a member (avoids wasting KPs)
 4. **Claim KPs** only for devices not in the tree
 5. **Diff**: desired set vs actual tree → compute adds and removes
-6. **Build commit** with both add and remove proposals
-7. **Merge locally** and serialize commit + welcome
-8. **Write to Turso**: commit to `mls_commit_log`, welcome(s) to `mls_welcome`
-9. **Publish GroupInfo** so external-join works
+6. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
+7. **Write to Turso on a fresh connection**: commit to `mls_commit_log`, welcome(s) to `mls_welcome`
+8. **On success**: `merge_pending_commit` locally → advance the local epoch
+9. **On failure**: `clear_pending_commit` → leave local state at the prior epoch; caller can retry
+10. **Publish GroupInfo** so external-join works
+
+### Ordering invariant
+
+The remote DB is the source of truth for MLS state. Staging the commit locally, writing it remotely on a **fresh** libsql connection, and only then merging locally means:
+- A libsql stream eviction (hrana idle GC) mid-reconcile cannot advance the local epoch past a commit that never reached the server.
+- A retry after a remote failure sees a clean local state rather than a doomed "local is ahead of remote" configuration.
+
+See commit `83df6ef` for the rationale; breaking this ordering re-introduces the 9-user churn flake.
 
 ## How Other Devices Catch Up
 

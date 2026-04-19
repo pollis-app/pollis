@@ -334,7 +334,7 @@ pub async fn poll_enrollment_status(
             // Install into the keystore as `account_id_key_{user_id}` —
             // matches the slot `account_identity::load_account_id_key`
             // reads from.
-            crate::keystore::store_for_user("account_id_key", &user_id, &account_id_private)
+            state.keystore.store_for_user("account_id_key", &user_id, &account_id_private)
                 .await?;
 
             // Proceed to publish our device cert + pick up welcomes.
@@ -475,7 +475,7 @@ pub async fn approve_device_enrollment(
     // 2. Load the approver's account_id_key and wrap it to the requester's
     //    ephemeral pub via ECDH + HKDF + AES-256-GCM.
     let signing_key =
-        crate::commands::account_identity::load_account_id_key(&user_id).await?;
+        crate::commands::account_identity::load_account_id_key(state.keystore.as_ref(), &user_id).await?;
     let account_id_private = signing_key.to_bytes();
 
     let wrapped = {
@@ -617,7 +617,7 @@ pub async fn recover_with_secret_key(
 
     // 3. Install into the OS keystore under the same slot the normal
     //    account_identity module reads from.
-    crate::keystore::store_for_user("account_id_key", &user_id, &account_id_private).await?;
+    state.keystore.store_for_user("account_id_key", &user_id, &account_id_private).await?;
 
     // 4. Finalize enrollment — publishes the device cert, the key
     //    packages, pulls any welcomes (none on this path), and then

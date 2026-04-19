@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
-use crate::keystore;
 use crate::state::AppState;
 use ulid::Ulid;
 
@@ -214,6 +213,7 @@ pub async fn verify_otp(
     // normal enrollment gate takes over.
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
+            state.keystore.as_ref(),
             &user_id,
             pub_bytes,
         )
@@ -221,7 +221,7 @@ pub async fn verify_otp(
         .unwrap_or(false);
         if !matches {
             if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(&user_id).await
+                crate::commands::account_identity::wipe_local_account_identity(state.keystore.as_ref(), &user_id).await
             {
                 eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
             }
@@ -253,7 +253,7 @@ pub async fn verify_otp(
     // Enrollment required when the user has an identity on the server but
     // this device doesn't hold a matching local copy of the account_id_key.
     let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(&user_id)
+        && !crate::commands::account_identity::has_local_account_identity(state.keystore.as_ref(), &user_id)
             .await
             .unwrap_or(false);
 
@@ -274,7 +274,7 @@ pub async fn verify_otp(
     };
     let session_bytes = serde_json::to_vec(&persisted)
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
-    keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
+    state.keystore.store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
     register_device(state.inner(), &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
@@ -327,7 +327,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
         None => return Ok(None),
     };
 
-    let bytes = match keystore::load_for_user(SESSION_KEY, &user_id).await? {
+    let bytes = match state.keystore.load_for_user(SESSION_KEY, &user_id).await? {
         Some(b) => b,
         None => return Ok(None),
     };
@@ -354,7 +354,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
                     match rows.next().await {
                         Ok(None) => {
                             // Turso confirmed the user doesn't exist — stale session
-                            let _ = keystore::delete_for_user(SESSION_KEY, &user_id).await;
+                            let _ = state.keystore.delete_for_user(SESSION_KEY, &user_id).await;
                             let _ = crate::accounts::clear_last_active_user();
                             return Ok(None);
                         }
@@ -404,6 +404,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
 
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
+            state.keystore.as_ref(),
             &profile.id,
             pub_bytes,
         )
@@ -411,7 +412,10 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
         .unwrap_or(false);
         if !matches {
             if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(&profile.id).await
+                crate::commands::account_identity::wipe_local_account_identity(
+                    state.keystore.as_ref(),
+                    &profile.id,
+                ).await
             {
                 eprintln!("[session] wipe_local_account_identity (non-fatal): {e}");
             }
@@ -419,6 +423,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     }
 
     let has_local_identity = crate::commands::account_identity::has_local_account_identity(
+        state.keystore.as_ref(),
         &profile.id,
     )
     .await
@@ -461,6 +466,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     // the server's current account_id_pub.
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
+            state.keystore.as_ref(),
             &user_id,
             pub_bytes,
         )
@@ -468,7 +474,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
         .unwrap_or(false);
         if !matches {
             if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(&user_id).await
+                crate::commands::account_identity::wipe_local_account_identity(state.keystore.as_ref(), &user_id).await
             {
                 eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
             }
@@ -490,7 +496,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     };
 
     let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(&user_id)
+        && !crate::commands::account_identity::has_local_account_identity(state.keystore.as_ref(), &user_id)
             .await
             .unwrap_or(false);
 
@@ -508,7 +514,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     };
     let session_bytes = serde_json::to_vec(&persisted)
         .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
-    keystore::store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
+    state.keystore.store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
     register_device(state, &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
@@ -519,12 +525,12 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
 /// call (persisted in the OS keystore), inserts/updates the remote `user_device`
 /// table, and stores the id in `AppState.device_id`.
 async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String> {
-    let device_id = match keystore::load_for_user(DEVICE_ID_KEY, user_id).await? {
+    let device_id = match state.keystore.load_for_user(DEVICE_ID_KEY, user_id).await? {
         Some(bytes) => String::from_utf8(bytes)
             .map_err(|e| anyhow::anyhow!("corrupt device_id in keystore: {e}"))?,
         None => {
             let id = Ulid::new().to_string();
-            keystore::store_for_user(DEVICE_ID_KEY, user_id, id.as_bytes()).await?;
+            state.keystore.store_for_user(DEVICE_ID_KEY, user_id, id.as_bytes()).await?;
             id
         }
     };
@@ -566,7 +572,7 @@ pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Resul
     let device_id = state.device_id.lock().await.take();
 
     if let Some(ref uid) = user_id {
-        let _ = keystore::delete_for_user(SESSION_KEY, uid).await;
+        let _ = state.keystore.delete_for_user(SESSION_KEY, uid).await;
     }
 
     state.unload_user_db().await;
@@ -582,10 +588,10 @@ pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Resul
                     ).await;
                 }
             }
-            let _ = keystore::delete("identity_key_private").await;
-            let _ = keystore::delete("identity_key_public").await;
-            let _ = keystore::delete_for_user("db_key", uid).await;
-            let _ = keystore::delete_for_user(DEVICE_ID_KEY, uid).await;
+            let _ = state.keystore.delete("identity_key_private").await;
+            let _ = state.keystore.delete("identity_key_public").await;
+            let _ = state.keystore.delete_for_user("db_key", uid).await;
+            let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, uid).await;
             let data_dir = crate::db::local::dirs_path();
             let db_path = data_dir.join(format!("pollis_{uid}.db"));
             if db_path.exists() {
@@ -774,9 +780,9 @@ pub async fn delete_account(
     }
 
     // Clear all keystore entries
-    let _ = keystore::delete_for_user(SESSION_KEY, &user_id).await;
-    let _ = keystore::delete_for_user("db_key", &user_id).await;
-    let _ = keystore::delete_for_user(DEVICE_ID_KEY, &user_id).await;
+    let _ = state.keystore.delete_for_user(SESSION_KEY, &user_id).await;
+    let _ = state.keystore.delete_for_user("db_key", &user_id).await;
+    let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, &user_id).await;
     *state.device_id.lock().await = None;
 
     // Remove from local accounts index
@@ -813,13 +819,13 @@ pub async fn wipe_local_data(state: State<'_, Arc<AppState>>) -> Result<()> {
     let per_user_keys = [SESSION_KEY, DEVICE_ID_KEY, "db_key", "account_id_key"];
     for account in &index.accounts {
         for key in &per_user_keys {
-            let _ = keystore::delete_for_user(key, &account.user_id).await;
+            let _ = state.keystore.delete_for_user(key, &account.user_id).await;
         }
     }
 
     // 4. Delete legacy global keystore entries.
-    let _ = keystore::delete("identity_key_private").await;
-    let _ = keystore::delete("identity_key_public").await;
+    let _ = state.keystore.delete("identity_key_private").await;
+    let _ = state.keystore.delete("identity_key_public").await;
 
     // 5. Delete all files in the data directory.
     let data_dir = crate::db::local::dirs_path();

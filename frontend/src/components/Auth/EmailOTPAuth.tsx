@@ -39,7 +39,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
     }
     hasAutoSubmittedRef.current = true;
     handleVerifyOTP();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otp]);
 
   // Fire whenever the parent bumps the nonce (chip click). Skip nonce === 0
@@ -65,7 +65,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
       .finally(() => {
         setIsLoading(false);
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prefillNonce]);
 
   const handleRequestOTP = async (e: React.FormEvent) => {
@@ -133,7 +133,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
             isLoading={isLoading}
             loadingText="Verifying…"
             disabled={otp.length < 6}
-            className="w-full"
+            className="w-full mb-8"
           >
             Verify
           </Button>

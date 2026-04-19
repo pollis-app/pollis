@@ -1,12 +1,15 @@
 mod accounts;
-mod config;
+pub mod config;
 pub mod db;
-mod error;
-mod keystore;
+pub mod error;
+pub mod keystore;
 pub mod realtime;
 mod signal;
-mod state;
+pub mod state;
 pub mod commands;
+
+#[cfg(feature = "test-harness")]
+pub mod test_harness;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -328,6 +331,8 @@ pub fn run() {
             commands::messages::send_message,
             commands::messages::get_channel_messages,
             commands::messages::get_dm_messages,
+            commands::messages::ingest_channel_envelopes,
+            commands::messages::ingest_dm_envelopes,
             commands::messages::list_messages_by_sender,
             commands::messages::list_channel_previews,
             commands::messages::search_messages,

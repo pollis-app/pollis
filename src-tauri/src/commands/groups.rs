@@ -844,7 +844,7 @@ pub async fn send_group_invite(
 
     // Check for existing pending invite
     let mut existing = conn.query(
-        "SELECT 1 FROM group_invite WHERE group_id = ?1 AND invitee_id = ?2 AND status = 'pending'",
+        "SELECT 1 FROM group_invite WHERE group_id = ?1 AND invitee_id = ?2",
         libsql::params![group_id.clone(), invitee_id.clone()],
     ).await?;
     if existing.next().await?.is_some() {
@@ -891,7 +891,7 @@ pub async fn get_pending_invites(
          FROM group_invite gi
          JOIN groups g ON g.id = gi.group_id
          LEFT JOIN users u ON u.id = gi.inviter_id
-         WHERE gi.invitee_id = ?1 AND gi.status = 'pending'
+         WHERE gi.invitee_id = ?1
          ORDER BY gi.created_at DESC",
         libsql::params![user_id],
     ).await?;
@@ -921,7 +921,7 @@ pub async fn accept_group_invite(
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
-        "SELECT group_id FROM group_invite WHERE id = ?1 AND invitee_id = ?2 AND status = 'pending'",
+        "SELECT group_id FROM group_invite WHERE id = ?1 AND invitee_id = ?2",
         libsql::params![invite_id.clone(), user_id.clone()],
     ).await?;
 
@@ -963,7 +963,7 @@ pub async fn decline_group_invite(
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
-        "SELECT 1 FROM group_invite WHERE id = ?1 AND invitee_id = ?2 AND status = 'pending'",
+        "SELECT 1 FROM group_invite WHERE id = ?1 AND invitee_id = ?2",
         libsql::params![invite_id.clone(), user_id],
     ).await?;
 

@@ -25,23 +25,23 @@ export const Checkbox: React.FC<CheckboxProps> = ({
         cursor: disabled ? "not-allowed" : "pointer",
         lineHeight: 1.6,
       }}
+      onClick={() => {
+        if (!disabled) {
+          onChange(!checked);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (!disabled && (e.key === " " || e.key === "Enter")) {
+          e.preventDefault();
+          onChange(!checked);
+        }
+      }}
     >
       <span
         data-testid={testId}
         role="checkbox"
         aria-checked={checked}
         tabIndex={0}
-        onClick={() => {
-          if (!disabled) {
-            onChange(!checked);
-          }
-        }}
-        onKeyDown={(e) => {
-          if (!disabled && (e.key === " " || e.key === "Enter")) {
-            e.preventDefault();
-            onChange(!checked);
-          }
-        }}
         className="flex-shrink-0 flex items-center justify-center mt-px"
         style={{
           width: 16,

@@ -1,10 +1,13 @@
 use libsql::{Builder, Database, Connection};
+use tokio::sync::RwLock;
 use crate::error::Result;
 
 const SCHEMA: &str = include_str!("migrations/remote_schema.sql");
 
 pub struct RemoteDb {
-    db: Database,
+    db: RwLock<Database>,
+    url: String,
+    token: String,
 }
 
 impl RemoteDb {
@@ -14,12 +17,100 @@ impl RemoteDb {
         let db = Builder::new_remote(url.to_string(), token.to_string())
             .build()
             .await?;
-        Ok(Self { db })
+        Ok(Self {
+            db: RwLock::new(db),
+            url: url.to_string(),
+            token: token.to_string(),
+        })
     }
 
     pub async fn conn(&self) -> Result<Connection> {
-        Ok(self.db.connect()?)
+        let db = self.db.read().await;
+        Ok(db.connect()?)
     }
+
+    /// Rebuild the underlying libsql `Database`. Long-lived handles can be
+    /// torn down by the server (TCP reset) or have their streams GC'd
+    /// ("stream not found"); neither is recoverable from the existing handle.
+    /// Callers that hit a transient Hrana error should `reconnect()` and retry.
+    pub async fn reconnect(&self) -> Result<()> {
+        let new_db = Builder::new_remote(self.url.clone(), self.token.clone())
+            .build()
+            .await?;
+        let mut db = self.db.write().await;
+        *db = new_db;
+        Ok(())
+    }
+
+    /// Cheap round-trip to verify the connection is alive. Used by the
+    /// keepalive task and by `heal_if_stale`.
+    pub async fn ping(&self) -> std::result::Result<(), libsql::Error> {
+        let conn = {
+            let db = self.db.read().await;
+            db.connect()?
+        };
+        conn.query("SELECT 1", ()).await?;
+        Ok(())
+    }
+
+    /// Probe the connection; if the probe fails with a transient error,
+    /// reconnect. Non-transient failures are surfaced. Safe to call
+    /// concurrently — callers may observe a reconnect in progress but will
+    /// block only briefly on the write lock.
+    pub async fn heal_if_stale(&self) -> Result<()> {
+        match self.ping().await {
+            Ok(()) => Ok(()),
+            Err(e) if is_transient_libsql_error(&e) => {
+                eprintln!("[remote_db] ping failed ({e}); reconnecting");
+                self.reconnect().await
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Run a DB operation with transparent reconnect on transient libsql
+    /// failures. The closure receives a fresh `Connection`; if it returns a
+    /// transient error on the first try, `RemoteDb` rebuilds the underlying
+    /// `Database` and invokes the closure again. Non-transient errors — and
+    /// transient errors on the second attempt — are surfaced.
+    ///
+    /// Use this at call sites where a single operation failing mid-flight
+    /// would force the user to restart the app (message send, list fetches
+    /// after wake-from-sleep). For multi-statement flows, either wrap each
+    /// statement individually or accept that a mid-flow reset aborts the
+    /// whole operation.
+    pub async fn with_retry<F, Fut, T>(&self, op: F) -> Result<T>
+    where
+        F: Fn(Connection) -> Fut,
+        Fut: std::future::Future<Output = std::result::Result<T, libsql::Error>>,
+    {
+        let conn = self.conn().await?;
+        match op(conn).await {
+            Ok(v) => Ok(v),
+            Err(e) if is_transient_libsql_error(&e) => {
+                eprintln!("[remote_db] transient error ({e}); reconnecting and retrying once");
+                self.reconnect().await?;
+                let conn = self.conn().await?;
+                Ok(op(conn).await?)
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+/// Heuristic: does this libsql error look like a transient connection/stream
+/// failure that a `reconnect()` + retry can recover from? libsql's error enum
+/// doesn't distinguish these structurally, so match on the rendered message.
+pub fn is_transient_libsql_error(e: &libsql::Error) -> bool {
+    let s = e.to_string().to_lowercase();
+    s.contains("connection reset")
+        || s.contains("connection refused")
+        || s.contains("connection closed")
+        || s.contains("connection error")
+        || s.contains("broken pipe")
+        || s.contains("stream not found")
+        || s.contains("stream expired")
+        || s.contains("timed out")
 }
 
 /// Drop all tables and recreate from the schema file.

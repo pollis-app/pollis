@@ -10,6 +10,7 @@ Start here. Navigate to the article you need.
 - [Tauri Commands](./commands.md) — Rust backend command reference
 - [UI Components](./ui.md) — React component inventory
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
+- [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
 
 ## Quick Reference
 
