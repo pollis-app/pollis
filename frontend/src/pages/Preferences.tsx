@@ -23,6 +23,7 @@ export const Preferences: React.FC = () => {
   const [bgLightness, setBgLightness] = useState<number>(4);
   const [fontSize, setFontSize] = useState<number>(15);
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
+  const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
@@ -34,6 +35,9 @@ export const Preferences: React.FC = () => {
       applyPreferences(query.data);
       if (query.data.allow_desktop_notifications !== undefined) {
         setAllowDesktopNotifications(query.data.allow_desktop_notifications);
+      }
+      if (query.data.allow_sound_effects !== undefined) {
+        setAllowSoundEffects(query.data.allow_sound_effects);
       }
     }
   }, [query.data]);
@@ -59,7 +63,7 @@ export const Preferences: React.FC = () => {
   const save = useCallback((opts: {
     accentH?: number; accentS?: number;
     bgH?: number; bgS?: number; bgL?: number;
-    fs?: number; notifications?: boolean;
+    fs?: number; notifications?: boolean; soundEffects?: boolean;
   }) => {
     const ah = opts.accentH ?? hue;
     const as_ = opts.accentS ?? saturation;
@@ -68,15 +72,18 @@ export const Preferences: React.FC = () => {
     const bl = opts.bgL ?? bgLightness;
     const fs = opts.fs ?? fontSize;
     const notif = opts.notifications ?? allowDesktopNotifications;
+    const sfx = opts.soundEffects ?? allowSoundEffects;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
     mutation.mutate({
+      ...query.data,
       accent_color: accentHex,
       background_color: bgHex,
       font_size: String(fs),
       allow_desktop_notifications: notif,
+      allow_sound_effects: sfx,
     });
-  }, [mutation, hue, saturation, bgHue, bgSaturation, bgLightness, fontSize, allowDesktopNotifications]);
+  }, [mutation, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, fontSize, allowDesktopNotifications, allowSoundEffects]);
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
@@ -102,6 +109,11 @@ export const Preferences: React.FC = () => {
     setFontSize(val);
     document.documentElement.style.setProperty("--font-size-base", `${val}px`);
     save({ fs: val });
+  };
+
+  const handleAllowSoundEffects = (val: boolean) => {
+    setAllowSoundEffects(val);
+    save({ soundEffects: val });
   };
 
   const handleAllowDesktopNotifications = async (val: boolean) => {
@@ -341,9 +353,15 @@ export const Preferences: React.FC = () => {
             </h2>
             <Switch
               id="pref-notifications"
-              label="Desktop notifications & sounds"
+              label="Desktop notifications"
               checked={allowDesktopNotifications}
               onChange={handleAllowDesktopNotifications}
+            />
+            <Switch
+              id="pref-sound-effects"
+              label="Sound effects"
+              checked={allowSoundEffects}
+              onChange={handleAllowSoundEffects}
             />
           </section>
 

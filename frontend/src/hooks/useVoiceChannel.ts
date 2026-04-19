@@ -4,6 +4,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { usePreferences } from './queries/usePreferences';
+import { playSfx, SFX } from '../utils/sfx';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -58,6 +59,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
   // Track participants as a map so we can update mute state in-place
   const participantsRef = useRef<Map<string, { identity: string; name: string; isMuted: boolean; isLocal: boolean }>>(new Map());
   const localIdentityRef = useRef<string>('');
+  const joinedRef = useRef<boolean>(false);
 
   const flushParticipants = useCallback(() => {
     setVoiceParticipants(Array.from(participantsRef.current.values()));
@@ -177,14 +179,20 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
             joined: false,
           }).catch(() => {});
         }
-      } else if (groupId) {
-        invoke('publish_voice_presence', {
-          groupId,
-          channelId,
-          userId: currentUser.id,
-          displayName: currentUser.username ?? currentUser.id,
-          joined: true,
-        }).catch(() => {});
+      } else {
+        joinedRef.current = true;
+        if (preferences.query.data?.allow_sound_effects ?? true) {
+          playSfx(SFX.join);
+        }
+        if (groupId) {
+          invoke('publish_voice_presence', {
+            groupId,
+            channelId,
+            userId: currentUser.id,
+            displayName: currentUser.username ?? currentUser.id,
+            joined: true,
+          }).catch(() => {});
+        }
       }
     };
 
@@ -200,8 +208,17 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       setVoiceActiveSpeakerIds([]);
       setVoiceIsMuted(false);
       setIsLocalSpeaking(false);
+      // Only play leave sfx (and publish presence) if we actually completed
+      // the join. React.StrictMode double-invokes effects in dev (mount →
+      // cleanup → mount), so without this guard the first mount's cleanup
+      // fires a phantom leave before we've even joined.
+      const didJoin = joinedRef.current;
+      joinedRef.current = false;
+      if (didJoin && (preferences.query.data?.allow_sound_effects ?? true)) {
+        playSfx(SFX.leave);
+      }
       invoke('leave_voice_channel').catch(() => {});
-      if (groupId && currentUser) {
+      if (didJoin && groupId && currentUser) {
         invoke('publish_voice_presence', {
           groupId,
           channelId,
@@ -224,6 +241,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
     setVoiceIsMuted,
     setIsLocalSpeaking,
     setActiveVoiceChannelId,
+    preferences.query.data?.allow_sound_effects,
   ]);
 
   const toggleMute = useCallback(async () => {

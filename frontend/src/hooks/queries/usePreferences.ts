@@ -9,6 +9,7 @@ export interface PreferencesData {
   background_color?: string;
   font_size?: string;
   allow_desktop_notifications?: boolean;
+  allow_sound_effects?: boolean;
   auto_gain_control?: boolean;
   auto_join_voice?: boolean;
 }
@@ -50,6 +51,7 @@ export function usePreferences() {
         background_color: getPreference<string | undefined>(json, "background_color", undefined),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
+        allow_sound_effects: getPreference<boolean>(json, "allow_sound_effects", true),
         auto_gain_control: getPreference<boolean>(json, "auto_gain_control", true),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
       };
