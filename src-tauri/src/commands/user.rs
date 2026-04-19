@@ -60,7 +60,9 @@ pub async fn get_preferences(
     user_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<String> {
-    // Try local first (local-first: DB is open while user is signed in)
+    // Try local first. An empty-object row is treated as "not yet synced" so we
+    // fall through to remote — this also fixes legacy devices whose local DB
+    // was seeded with '{}' before preferences sync existed.
     {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
@@ -73,12 +75,13 @@ pub async fn get_preferences(
                 )
                 .ok();
             if let Some(p) = prefs {
-                return Ok(p);
+                if p != "{}" {
+                    return Ok(p);
+                }
             }
         }
     }
 
-    // Fall back to remote
     let conn = state.remote_db.conn().await?;
     let mut rows = conn.query(
         "SELECT preferences FROM user_preferences WHERE user_id = ?1",
@@ -86,6 +89,7 @@ pub async fn get_preferences(
     ).await?;
     if let Some(row) = rows.next().await? {
         let prefs: String = row.get(0)?;
+        upsert_local_preferences(state.inner(), &prefs).await;
         return Ok(prefs);
     }
 
@@ -98,18 +102,8 @@ pub async fn save_preferences(
     preferences_json: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
-    // Write to local first (best-effort, fast)
-    {
-        let guard = state.local_db.lock().await;
-        if let Some(db) = guard.as_ref() {
-            let _ = db.conn().execute(
-                "UPDATE preferences SET preferences = ?1, updated_at = datetime('now')",
-                rusqlite::params![preferences_json.clone()],
-            );
-        }
-    }
+    upsert_local_preferences(state.inner(), &preferences_json).await;
 
-    // Write to remote
     let conn = state.remote_db.conn().await?;
     conn.execute(
         "INSERT INTO user_preferences (user_id, preferences, updated_at) VALUES (?1, ?2, datetime('now'))
@@ -118,6 +112,20 @@ pub async fn save_preferences(
     ).await?;
 
     Ok(())
+}
+
+async fn upsert_local_preferences(state: &Arc<AppState>, preferences_json: &str) {
+    let guard = state.local_db.lock().await;
+    if let Some(db) = guard.as_ref() {
+        let _ = db.conn().execute(
+            "INSERT OR IGNORE INTO preferences (preferences) VALUES (?1)",
+            rusqlite::params![preferences_json],
+        );
+        let _ = db.conn().execute(
+            "UPDATE preferences SET preferences = ?1, updated_at = datetime('now')",
+            rusqlite::params![preferences_json],
+        );
+    }
 }
 
 #[tauri::command]
