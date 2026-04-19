@@ -16,7 +16,7 @@ import { DotMatrix } from "./components/ui/DotMatrix";
 import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
 import * as api from "./services/api";
-import { getPreference, applyPreferences } from "./hooks/queries/usePreferences";
+import { getPreference, applyPreferences, useApplyPreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
 import type { User, AccountInfo } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
@@ -163,6 +163,12 @@ function MainApp() {
   }, [appState]);
 
   useWindowState();
+
+  // Re-apply visual preferences whenever the prefs query resolves. Covers
+  // both the login path and the app-reopen path (stored session) — without
+  // this, prefs only applied via completeSignIn's one-shot fetch, which
+  // could silently miss on reopen if the request raced the UI.
+  useApplyPreferences();
 
   // Safety net: if currentUser is cleared (e.g. account deletion) but appState
   // is still "ready", redirect to auth so the user isn't stuck on a blank screen.

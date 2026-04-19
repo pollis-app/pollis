@@ -60,40 +60,52 @@ pub async fn get_preferences(
     user_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<String> {
-    // Try local first. An empty-object row is treated as "not yet synced" so we
-    // fall through to remote — this also fixes legacy devices whose local DB
-    // was seeded with '{}' before preferences sync existed.
-    {
-        let guard = state.local_db.lock().await;
-        if let Some(db) = guard.as_ref() {
-            let prefs: Option<String> = db
-                .conn()
-                .query_row(
-                    "SELECT preferences FROM preferences LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .ok();
-            if let Some(p) = prefs {
-                if p != "{}" {
+    // Remote is authoritative so changes made on another device are visible
+    // immediately on this one. The local row is a last-known-good cache used
+    // only when the remote read fails (offline / flaky connection).
+    match fetch_remote_preferences(&state, &user_id).await {
+        Ok(Some(prefs)) => {
+            upsert_local_preferences(state.inner(), &prefs).await;
+            Ok(prefs)
+        }
+        Ok(None) => Ok("{}".to_string()),
+        Err(e) => {
+            eprintln!("[preferences] remote fetch failed ({e}); falling back to local cache");
+            let guard = state.local_db.lock().await;
+            if let Some(db) = guard.as_ref() {
+                let prefs: Option<String> = db
+                    .conn()
+                    .query_row(
+                        "SELECT preferences FROM preferences LIMIT 1",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .ok();
+                if let Some(p) = prefs {
                     return Ok(p);
                 }
             }
+            Ok("{}".to_string())
         }
     }
+}
 
+async fn fetch_remote_preferences(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<Option<String>> {
     let conn = state.remote_db.conn().await?;
-    let mut rows = conn.query(
-        "SELECT preferences FROM user_preferences WHERE user_id = ?1",
-        libsql::params![user_id],
-    ).await?;
+    let mut rows = conn
+        .query(
+            "SELECT preferences FROM user_preferences WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
     if let Some(row) = rows.next().await? {
         let prefs: String = row.get(0)?;
-        upsert_local_preferences(state.inner(), &prefs).await;
-        return Ok(prefs);
+        return Ok(Some(prefs));
     }
-
-    Ok("{}".to_string())
+    Ok(None)
 }
 
 #[tauri::command]
