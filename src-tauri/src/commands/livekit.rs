@@ -457,6 +457,17 @@ pub async fn connect_rooms(
                                         .collect();
                                     reconcile_voice_presence(&remote_db_task, &room_id_owned, &online_ids).await;
 
+                                    // Notify frontend so it can resync state that
+                                    // may have drifted during the outage.
+                                    {
+                                        let lk = lk_arc_task.lock().await;
+                                        if let Some(ch) = lk.channel.clone() {
+                                            let _ = ch.send(RealtimeEvent::RealtimeReconnected {
+                                                room_id: room_id_owned.clone(),
+                                            });
+                                        }
+                                    }
+
                                     // Update the room reference in the map
                                     {
                                         let mut lk = lk_arc_task.lock().await;

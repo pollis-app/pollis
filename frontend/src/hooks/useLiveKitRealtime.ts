@@ -57,6 +57,10 @@ type RealtimeEvent =
     request_id: string;
     new_device_id: string;
     verification_code: string;
+  }
+  | {
+    type: 'realtime_reconnected';
+    room_id: string;
   };
 
 export function useLiveKitRealtime() {
@@ -279,6 +283,14 @@ export function useLiveKitRealtime() {
         } else if (conversationId) {
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
         }
+        return;
+      }
+
+      if (event.type === 'realtime_reconnected') {
+        // The event stream doesn't replay missed events, so resync state
+        // that may have drifted during the outage.
+        queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
+        queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants'] });
         return;
       }
 

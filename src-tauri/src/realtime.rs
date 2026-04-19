@@ -57,6 +57,13 @@ pub enum RealtimeEvent {
         new_device_id: String,
         verification_code: String,
     },
+    /// Sent after a room's event stream recovers from a drop. The frontend
+    /// uses this to resync state that may have changed during the outage
+    /// (voice presence, etc.) since the event stream itself doesn't replay
+    /// missed events.
+    RealtimeReconnected {
+        room_id: String,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

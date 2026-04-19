@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { usePreferences } from './queries/usePreferences';
@@ -55,6 +56,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
   } = useAppStore();
 
   const preferences = usePreferences();
+  const queryClient = useQueryClient();
 
   // Track participants as a map so we can update mute state in-place
   const participantsRef = useRef<Map<string, { identity: string; name: string; isMuted: boolean; isLocal: boolean }>>(new Map());
@@ -218,14 +220,41 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         playSfx(SFX.leave);
       }
       invoke('leave_voice_channel').catch(() => {});
+
+      // Optimistically remove self from the voice-participants cache so the
+      // observer list in the UI drops us immediately instead of waiting for
+      // the presence DELETE to round-trip through Turso.
+      if (didJoin && channelId && currentUser) {
+        const localIdentity = `voice-${currentUser.id}`;
+        queryClient.setQueryData<Array<{ identity: string; name: string }>>(
+          ['voice-participants', channelId],
+          (prev) => (prev ? prev.filter((p) => p.identity !== localIdentity) : prev),
+        );
+      }
+
       if (didJoin && groupId && currentUser) {
-        invoke('publish_voice_presence', {
-          groupId,
-          channelId,
-          userId: currentUser.id,
-          displayName: currentUser.username ?? currentUser.id,
-          joined: false,
-        }).catch(() => {});
+        const userId = currentUser.id;
+        const displayName = currentUser.username ?? currentUser.id;
+        const leaveChannelId = channelId;
+        // Wait for the DELETE to land before invalidating, otherwise the
+        // refetch races the write and re-adds the stale row.
+        (async () => {
+          try {
+            await invoke('publish_voice_presence', {
+              groupId,
+              channelId: leaveChannelId,
+              userId,
+              displayName,
+              joined: false,
+            });
+          } catch {}
+          queryClient.invalidateQueries({ queryKey: ['voice-room-counts'] });
+          if (leaveChannelId) {
+            queryClient.invalidateQueries({
+              queryKey: ['voice-participants', leaveChannelId],
+            });
+          }
+        })();
       }
     };
   }, [
@@ -242,6 +271,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
     setIsLocalSpeaking,
     setActiveVoiceChannelId,
     preferences.query.data?.allow_sound_effects,
+    queryClient,
   ]);
 
   const toggleMute = useCallback(async () => {
