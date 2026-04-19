@@ -113,10 +113,14 @@ pub async fn create_dm_channel(
 
     let members = fetch_dm_members(&conn, &id).await?;
 
-    // Initialize watermark rows for all members so envelope cleanup can proceed.
+    // Initialize watermark rows for every (member, device) pair so envelope
+    // cleanup isn't blocked by devices that didn't exist at channel creation
+    // (those are seeded by `register_device`).
     for member in &members {
         if let Err(e) = conn.execute(
-            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, last_fetched_at) VALUES (?1, ?2, datetime('now'))",
+            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             SELECT ?1, ?2, ud.device_id, datetime('now')
+             FROM user_device ud WHERE ud.user_id = ?2",
             libsql::params![id.clone(), member.user_id.clone()],
         ).await {
             eprintln!("[watermark] create_dm_channel: watermark init failed for {}: {e}", member.user_id);
@@ -319,10 +323,12 @@ pub async fn add_user_to_dm_channel(
         libsql::params![dm_channel_id.clone(), user_id.clone(), added_by.clone(), now],
     ).await?;
 
-    // Initialize watermark for the new member so pre-join messages don't
-    // block envelope cleanup indefinitely.
+    // Initialize watermark for every device of the new member so pre-join
+    // messages don't block envelope cleanup indefinitely.
     if let Err(e) = conn.execute(
-        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, last_fetched_at) VALUES (?1, ?2, datetime('now'))",
+        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+         SELECT ?1, ?2, ud.device_id, datetime('now')
+         FROM user_device ud WHERE ud.user_id = ?2",
         libsql::params![dm_channel_id.clone(), user_id.clone()],
     ).await {
         eprintln!("[watermark] add_user_to_dm_channel: watermark init failed: {e}");
@@ -438,8 +444,9 @@ mod tests {
         CREATE TABLE IF NOT EXISTS conversation_watermark (
             conversation_id TEXT NOT NULL,
             user_id         TEXT NOT NULL,
+            device_id       TEXT NOT NULL,
             last_fetched_at TEXT NOT NULL,
-            PRIMARY KEY (conversation_id, user_id)
+            PRIMARY KEY (conversation_id, user_id, device_id)
         );
     ";
 
@@ -747,10 +754,17 @@ mod tests {
         setup(&conn);
         create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
 
-        // Simulate watermark init
+        conn.execute(
+            "INSERT INTO user_device (device_id, user_id) VALUES
+               ('alice-d1', 'alice'), ('alice-d2', 'alice'), ('bob-d1', 'bob')",
+            [],
+        ).unwrap();
+
         for uid in ["alice", "bob"] {
             conn.execute(
-                "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, last_fetched_at) VALUES (?1, ?2, datetime('now'))",
+                "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                 SELECT ?1, ?2, ud.device_id, datetime('now')
+                 FROM user_device ud WHERE ud.user_id = ?2",
                 rusqlite::params!["dm1", uid],
             ).unwrap();
         }
@@ -760,7 +774,7 @@ mod tests {
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(count, 2);
+        assert_eq!(count, 3, "2 alice devices + 1 bob device");
     }
 
     #[test]
@@ -769,10 +783,17 @@ mod tests {
         setup(&conn);
         create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
 
+        conn.execute(
+            "INSERT INTO user_device (device_id, user_id) VALUES ('alice-d1', 'alice')",
+            [],
+        ).unwrap();
+
         // Insert twice — INSERT OR IGNORE should not error or duplicate
         for _ in 0..2 {
             conn.execute(
-                "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, last_fetched_at) VALUES ('dm1', 'alice', datetime('now'))",
+                "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                 SELECT 'dm1', 'alice', ud.device_id, datetime('now')
+                 FROM user_device ud WHERE ud.user_id = 'alice'",
                 [],
             ).unwrap();
         }

@@ -549,6 +549,28 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
         libsql::params![device_id.clone(), user_id, device_name],
     ).await?;
 
+    // Seed watermark rows for every conversation the user is already a member
+    // of so this device doesn't retroactively block envelope cleanup (see #162).
+    // Pre-registration messages aren't decryptable here anyway — MLS welcomes
+    // only flow forward — so anchoring the watermark at "now" is correct.
+    if let Err(e) = conn.execute(
+        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+         SELECT c.id, ?1, ?2, datetime('now')
+         FROM channels c
+         JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
+        libsql::params![user_id, device_id.clone()],
+    ).await {
+        eprintln!("[watermark] register_device: channel seed failed: {e}");
+    }
+    if let Err(e) = conn.execute(
+        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+         SELECT dcm.dm_channel_id, ?1, ?2, datetime('now')
+         FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
+        libsql::params![user_id, device_id.clone()],
+    ).await {
+        eprintln!("[watermark] register_device: dm seed failed: {e}");
+    }
+
     *state.device_id.lock().await = Some(device_id.clone());
     eprintln!("[auth] device registered: {device_id}");
 

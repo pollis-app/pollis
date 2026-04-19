@@ -246,12 +246,15 @@ async fn add_member_to_group(
         libsql::params![group_id, user_id],
     ).await?;
 
-    // Initialize watermark rows for all channels in the group so pre-join
-    // messages don't block envelope cleanup indefinitely.
+    // Initialize watermark rows for every (channel, device) pair so pre-join
+    // messages don't block envelope cleanup indefinitely. Devices registered
+    // after this point are seeded by `register_device`.
     if let Err(e) = conn.execute(
-        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-         SELECT c.id, ?1, datetime('now')
-         FROM channels c WHERE c.group_id = ?2",
+        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+         SELECT c.id, ?1, ud.device_id, datetime('now')
+         FROM channels c
+         JOIN user_device ud ON ud.user_id = ?1
+         WHERE c.group_id = ?2",
         libsql::params![user_id, group_id],
     ).await {
         eprintln!("[watermark] add_member_to_group: watermark init failed: {e}");
@@ -1241,8 +1244,9 @@ mod tests {
         CREATE TABLE IF NOT EXISTS conversation_watermark (
             conversation_id TEXT NOT NULL,
             user_id         TEXT NOT NULL,
+            device_id       TEXT NOT NULL,
             last_fetched_at TEXT NOT NULL,
-            PRIMARY KEY (conversation_id, user_id)
+            PRIMARY KEY (conversation_id, user_id, device_id)
         );
     ";
 
@@ -1577,15 +1581,22 @@ mod tests {
         let conn = db();
         setup(&conn);
 
-        // Simulate add_member_to_group watermark init
+        // Carol has two devices. Seeding must produce one row per (channel, device).
+        conn.execute(
+            "INSERT INTO user_device (device_id, user_id) VALUES ('carol-d1', 'carol'), ('carol-d2', 'carol')",
+            [],
+        ).unwrap();
+
         conn.execute(
             "INSERT OR IGNORE INTO group_member (group_id, user_id, role) VALUES ('g1', 'carol', 'member')",
             [],
         ).unwrap();
         conn.execute(
-            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-             SELECT c.id, ?1, datetime('now')
-             FROM channels c WHERE c.group_id = ?2",
+            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             SELECT c.id, ?1, ud.device_id, datetime('now')
+             FROM channels c
+             JOIN user_device ud ON ud.user_id = ?1
+             WHERE c.group_id = ?2",
             rusqlite::params!["carol", "g1"],
         ).unwrap();
 
@@ -1594,7 +1605,7 @@ mod tests {
             [],
             |row| row.get(0),
         ).unwrap();
-        assert_eq!(watermark_count, 2, "should have watermarks for ch1 and ch2");
+        assert_eq!(watermark_count, 4, "2 channels × 2 devices");
     }
 
     // ── get_group_members ──────────────────────────────────────────────────

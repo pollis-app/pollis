@@ -107,15 +107,19 @@ Source: `src-tauri/src/db/migrations/remote_schema.sql` + migrations `000001` th
 - `size_bytes` INTEGER NOT NULL
 - `created_at` TEXT NOT NULL DEFAULT now
 
-### conversation_watermark _(migration 5)_
-- PK: (`conversation_id`, `user_id`)
+### conversation_watermark _(migration 5, re-keyed in migration 16)_
+- PK: (`conversation_id`, `user_id`, `device_id`)
 - `conversation_id` TEXT NOT NULL
 - `user_id` TEXT NOT NULL
+- `device_id` TEXT NOT NULL
 - `last_fetched_at` TEXT NOT NULL
 
-Used by the envelope cleanup sweep in `get_channel_messages` and `get_dm_messages` to decide when it is safe to drop a row from `message_envelope`. A row is deleted when EITHER it is older than 30 days OR every current member has watermarked past `sent_at` (the `OR` is deliberate — one slow member must not pin storage; see commit `e32978f`).
+Used by the envelope cleanup sweep in `get_channel_messages` and `get_dm_messages` to decide when it is safe to drop a row from `message_envelope`. A row is deleted when EITHER it is older than 30 days OR every registered device of every current member has watermarked past `sent_at` (the `OR` is deliberate — one slow device must not pin storage forever; the TTL is the hard ceiling).
 
-**Known limitation (see issue #162):** the PK is `(conversation_id, user_id)`, so multi-device users share a single watermark row — whichever of their devices last fetched sets it. A second device coming online later may find its messages already swept. The intended fix is to re-key on `(conversation_id, user_id, device_id)` and count against `user_device` in the cleanup predicate; this is not yet done.
+Seed paths (so a new device or a pre-join user doesn't block cleanup retroactively):
+- `add_member_to_group` seeds one row per (channel, device) for the joining user at join time.
+- `create_dm_channel` / `add_user_to_dm_channel` seed per (member, device).
+- `register_device` seeds per conversation the user is already a member of, for the newly-registered device.
 
 ### voice_presence _(migration 6)_
 - PK: (`user_id`, `channel_id`)

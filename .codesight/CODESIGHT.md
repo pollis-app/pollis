@@ -36,6 +36,7 @@
 ### conversation_watermark
 - conversation_id: text (required, fk)
 - user_id: text (required, fk)
+- device_id: text (required, fk)
 - last_fetched_at: text (required)
 
 ### voice_presence

@@ -10,8 +10,9 @@ use crate::state::AppState;
 const QUERY_MESSAGES_BY_SENDER: &str = include_str!("../db/queries/messages_by_sender.sql");
 const QUERY_CHANNEL_PREVIEWS: &str = include_str!("../db/queries/channel_previews.sql");
 
-// Envelope cleanup: TTL gate OR watermark gate. Applied by ingest after any
-// persistence that may have advanced this user's watermark.
+// Envelope cleanup: TTL gate OR watermark gate. Watermark gate is keyed on
+// (user, device) — a multi-device user whose other device hasn't synced keeps
+// envelopes alive until either every device catches up or the TTL expires.
 const CLEANUP_CHANNEL_ENVELOPES: &str = "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
@@ -19,14 +20,17 @@ DELETE FROM message_envelope
      sent_at < datetime('now', '-30 days')
      OR sent_at < (
        SELECT CASE
-                WHEN COUNT(gm.user_id) = COUNT(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
                 THEN MIN(cw.last_fetched_at)
                 ELSE NULL
               END
        FROM group_member gm
        JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
+       JOIN user_device ud ON ud.user_id = gm.user_id
        LEFT JOIN conversation_watermark cw
-              ON cw.conversation_id = ?1 AND cw.user_id = gm.user_id
+              ON cw.conversation_id = ?1
+             AND cw.user_id = ud.user_id
+             AND cw.device_id = ud.device_id
      )
    )";
 
@@ -37,13 +41,16 @@ DELETE FROM message_envelope
      sent_at < datetime('now', '-30 days')
      OR sent_at < (
        SELECT CASE
-                WHEN COUNT(dcm.user_id) = COUNT(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
                 THEN MIN(cw.last_fetched_at)
                 ELSE NULL
               END
        FROM dm_channel_member dcm
+       JOIN user_device ud ON ud.user_id = dcm.user_id
        LEFT JOIN conversation_watermark cw
-              ON cw.conversation_id = ?1 AND cw.user_id = dcm.user_id
+              ON cw.conversation_id = ?1
+             AND cw.user_id = ud.user_id
+             AND cw.device_id = ud.device_id
        WHERE dcm.dm_channel_id = ?1
      )
    )";
@@ -441,14 +448,17 @@ pub async fn ingest_channel_envelopes_inner(
     ).await?;
 
     if let Some(ts) = watermark_ts {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![channel_id.to_string(), user_id.to_string(), ts],
-        ).await {
-            eprintln!("[watermark] ingest_channel: upsert failed: {e}");
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(did) = device_id {
+            if let Err(e) = conn.execute(
+                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+                libsql::params![channel_id.to_string(), user_id.to_string(), did, ts],
+            ).await {
+                eprintln!("[watermark] ingest_channel: upsert failed: {e}");
+            }
         }
     }
 
@@ -804,14 +814,17 @@ pub async fn ingest_dm_envelopes_inner(
     ).await?;
 
     if let Some(ts) = watermark_ts {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![dm_channel_id.to_string(), user_id.to_string(), ts],
-        ).await {
-            eprintln!("[watermark] ingest_dm: upsert failed: {e}");
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(did) = device_id {
+            if let Err(e) = conn.execute(
+                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+                libsql::params![dm_channel_id.to_string(), user_id.to_string(), did, ts],
+            ).await {
+                eprintln!("[watermark] ingest_dm: upsert failed: {e}");
+            }
         }
     }
 
