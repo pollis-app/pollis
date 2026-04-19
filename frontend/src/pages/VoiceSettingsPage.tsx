@@ -131,7 +131,8 @@ export const VoiceSettingsPage: React.FC = () => {
 
   return (
     <PageShell title="Voice Settings" scrollable>
-      <div className="flex flex-col px-6 py-8 gap-8" style={{ maxWidth: 400 }}>
+      <div className="flex justify-center px-6 py-8">
+      <div className="flex flex-col gap-8 w-full" style={{ maxWidth: 400 }}>
 
         <section className="flex flex-col gap-4 mb-12">
           <h2
@@ -341,6 +342,7 @@ export const VoiceSettingsPage: React.FC = () => {
           />
         </section>
 
+      </div>
       </div>
     </PageShell>
   );
