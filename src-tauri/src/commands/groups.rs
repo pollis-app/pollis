@@ -1248,6 +1248,13 @@ mod tests {
             last_fetched_at TEXT NOT NULL,
             PRIMARY KEY (conversation_id, user_id, device_id)
         );
+        CREATE TABLE IF NOT EXISTS user_device (
+            device_id   TEXT PRIMARY KEY,
+            user_id     TEXT NOT NULL,
+            device_name TEXT,
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            last_seen   TEXT NOT NULL DEFAULT (datetime('now'))
+        );
     ";
 
     fn db() -> Connection {
