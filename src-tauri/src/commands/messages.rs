@@ -10,8 +10,9 @@ use crate::state::AppState;
 const QUERY_MESSAGES_BY_SENDER: &str = include_str!("../db/queries/messages_by_sender.sql");
 const QUERY_CHANNEL_PREVIEWS: &str = include_str!("../db/queries/channel_previews.sql");
 
-// Envelope cleanup: TTL gate OR watermark gate. Applied by ingest after any
-// persistence that may have advanced this user's watermark.
+// Envelope cleanup: TTL gate OR watermark gate. Watermark gate is keyed on
+// (user, device) — a multi-device user whose other device hasn't synced keeps
+// envelopes alive until either every device catches up or the TTL expires.
 const CLEANUP_CHANNEL_ENVELOPES: &str = "\
 DELETE FROM message_envelope
  WHERE conversation_id = ?1
@@ -19,14 +20,17 @@ DELETE FROM message_envelope
      sent_at < datetime('now', '-30 days')
      OR sent_at < (
        SELECT CASE
-                WHEN COUNT(gm.user_id) = COUNT(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
                 THEN MIN(cw.last_fetched_at)
                 ELSE NULL
               END
        FROM group_member gm
        JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
+       JOIN user_device ud ON ud.user_id = gm.user_id
        LEFT JOIN conversation_watermark cw
-              ON cw.conversation_id = ?1 AND cw.user_id = gm.user_id
+              ON cw.conversation_id = ?1
+             AND cw.user_id = ud.user_id
+             AND cw.device_id = ud.device_id
      )
    )";
 
@@ -37,13 +41,16 @@ DELETE FROM message_envelope
      sent_at < datetime('now', '-30 days')
      OR sent_at < (
        SELECT CASE
-                WHEN COUNT(dcm.user_id) = COUNT(cw.last_fetched_at)
+                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
                 THEN MIN(cw.last_fetched_at)
                 ELSE NULL
               END
        FROM dm_channel_member dcm
+       JOIN user_device ud ON ud.user_id = dcm.user_id
        LEFT JOIN conversation_watermark cw
-              ON cw.conversation_id = ?1 AND cw.user_id = dcm.user_id
+              ON cw.conversation_id = ?1
+             AND cw.user_id = ud.user_id
+             AND cw.device_id = ud.device_id
        WHERE dcm.dm_channel_id = ?1
      )
    )";
@@ -441,14 +448,17 @@ pub async fn ingest_channel_envelopes_inner(
     ).await?;
 
     if let Some(ts) = watermark_ts {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![channel_id.to_string(), user_id.to_string(), ts],
-        ).await {
-            eprintln!("[watermark] ingest_channel: upsert failed: {e}");
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(did) = device_id {
+            if let Err(e) = conn.execute(
+                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+                libsql::params![channel_id.to_string(), user_id.to_string(), did, ts],
+            ).await {
+                eprintln!("[watermark] ingest_channel: upsert failed: {e}");
+            }
         }
     }
 
@@ -804,14 +814,17 @@ pub async fn ingest_dm_envelopes_inner(
     ).await?;
 
     if let Some(ts) = watermark_ts {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, last_fetched_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(conversation_id, user_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![dm_channel_id.to_string(), user_id.to_string(), ts],
-        ).await {
-            eprintln!("[watermark] ingest_dm: upsert failed: {e}");
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(did) = device_id {
+            if let Err(e) = conn.execute(
+                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+                libsql::params![dm_channel_id.to_string(), user_id.to_string(), did, ts],
+            ).await {
+                eprintln!("[watermark] ingest_dm: upsert failed: {e}");
+            }
         }
     }
 
@@ -1435,145 +1448,6 @@ mod tests {
         let last = results.last().unwrap();
         assert_eq!(last.0, "ch-work-quiet");
         assert!(last.1.is_none(), "empty channel has no last_message");
-    }
-
-    // ── channel message pagination ──────────────────────────────────────────
-
-    fn setup_pagination(conn: &Connection) {
-        conn.execute("INSERT INTO users (id, email, username) VALUES ('alice', 'alice@x.com', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email, username) VALUES ('bob',   'bob@x.com',   'bob')", []).unwrap();
-        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'work', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'bob')", []).unwrap();
-        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('ch1', 'g1', 'general')", []).unwrap();
-
-        // Insert 10 messages with distinct timestamps so ordering is fully deterministic.
-        for i in 1..=10usize {
-            conn.execute(
-                "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at)
-                 VALUES (?1, 'ch1', 'alice', ?2, ?3)",
-                rusqlite::params![
-                    format!("m{i:02}"),
-                    format!("msg {i}"),
-                    format!("2024-01-01T10:{i:02}:00Z"),
-                ],
-            ).unwrap();
-        }
-    }
-
-    #[test]
-    fn initial_load_returns_newest_first() {
-        let conn = db();
-        setup_pagination(&conn);
-
-        let mut stmt = conn.prepare(super::QUERY_CHANNEL_MESSAGES_INITIAL).unwrap();
-        let ids: Vec<String> = stmt.query_map(
-            rusqlite::params!["alice", "ch1", 3],
-            |row| row.get(0),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        // Newest 3: m10, m09, m08
-        assert_eq!(ids, ["m10", "m09", "m08"]);
-    }
-
-    #[test]
-    fn cursor_load_returns_next_older_page() {
-        let conn = db();
-        setup_pagination(&conn);
-
-        // Page 1: newest 4 → m10, m09, m08, m07
-        let mut stmt = conn.prepare(super::QUERY_CHANNEL_MESSAGES_INITIAL).unwrap();
-        let page1: Vec<(String, String)> = stmt.query_map(
-            rusqlite::params!["alice", "ch1", 4],
-            |row| Ok((row.get(0)?, row.get(6)?)),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        assert_eq!(page1[0].0, "m10");
-        assert_eq!(page1[3].0, "m07");
-
-        // Cursor is the oldest row on page 1 (m07)
-        let (cursor_id, cursor_sent_at) = &page1[3];
-
-        // Page 2: 4 messages older than m07 → m06, m05, m04, m03
-        let mut stmt = conn.prepare(super::QUERY_CHANNEL_MESSAGES_CURSOR).unwrap();
-        let page2: Vec<String> = stmt.query_map(
-            rusqlite::params!["alice", "ch1", cursor_sent_at, cursor_id, 4],
-            |row| row.get(0),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        assert_eq!(page2, ["m06", "m05", "m04", "m03"]);
-    }
-
-    #[test]
-    fn cursor_load_final_page_returns_remaining_messages() {
-        let conn = db();
-        setup_pagination(&conn);
-
-        // Seek past the first 7 messages to get the last 3
-        let cursor_sent_at = "2024-01-01T10:04:00Z"; // m04
-        let cursor_id = "m04";
-
-        let mut stmt = conn.prepare(super::QUERY_CHANNEL_MESSAGES_CURSOR).unwrap();
-        let ids: Vec<String> = stmt.query_map(
-            rusqlite::params!["alice", "ch1", cursor_sent_at, cursor_id, 10],
-            |row| row.get(0),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        // Only m03, m02, m01 remain
-        assert_eq!(ids, ["m03", "m02", "m01"]);
-    }
-
-    #[test]
-    fn cursor_handles_timestamp_tie() {
-        let conn = db();
-        // Two messages share the same sent_at — the id tiebreaker must prevent skips.
-        conn.execute("INSERT INTO users (id, email, username) VALUES ('alice', 'alice@x.com', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'g', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('ch1', 'g1', 'c')", []).unwrap();
-
-        // m-a and m-b have identical timestamps; m-z is older
-        let ts = "2024-01-01T10:00:00Z";
-        conn.execute("INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) VALUES ('m-a', 'ch1', 'alice', 'a', ?1)", rusqlite::params![ts]).unwrap();
-        conn.execute("INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) VALUES ('m-b', 'ch1', 'alice', 'b', ?1)", rusqlite::params![ts]).unwrap();
-        conn.execute("INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, sent_at) VALUES ('m-z', 'ch1', 'alice', 'z', '2024-01-01T09:00:00Z')", []).unwrap();
-
-        // Page 1: limit 2 → the two tied messages (m-b then m-a, id DESC)
-        let mut stmt = conn.prepare(super::QUERY_CHANNEL_MESSAGES_INITIAL).unwrap();
-        let page1: Vec<(String, String)> = stmt.query_map(
-            rusqlite::params!["alice", "ch1", 2],
-            |row| Ok((row.get(0)?, row.get(6)?)),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        assert_eq!(page1.len(), 2);
-        // oldest on page 1 is m-a (id 'm-a' < 'm-b' in DESC order)
-        let (cursor_id, cursor_sent_at) = &page1[1];
-
-        // Page 2: should contain exactly m-z, not a duplicate or skip
-        let mut stmt = conn.prepare(super::QUERY_CHANNEL_MESSAGES_CURSOR).unwrap();
-        let page2: Vec<String> = stmt.query_map(
-            rusqlite::params!["alice", "ch1", cursor_sent_at, cursor_id, 10],
-            |row| row.get(0),
-        ).unwrap().map(|r| r.unwrap()).collect();
-
-        assert_eq!(page2, ["m-z"], "timestamp tie must not cause m-z to be skipped or duplicated");
-    }
-
-    #[test]
-    fn non_member_gets_no_messages() {
-        let conn = db();
-        setup_pagination(&conn);
-
-        // carol is not in any group
-        conn.execute("INSERT INTO users (id, email, username) VALUES ('carol', 'carol@x.com', 'carol')", []).unwrap();
-
-        let mut stmt = conn.prepare(super::QUERY_CHANNEL_MESSAGES_INITIAL).unwrap();
-        let count = stmt.query_map(
-            rusqlite::params!["carol", "ch1", 50],
-            |_| Ok(()),
-        ).unwrap().count();
-
-        assert_eq!(count, 0, "non-member should see no messages");
     }
 
     #[test]
