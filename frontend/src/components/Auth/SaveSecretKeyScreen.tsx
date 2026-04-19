@@ -10,11 +10,11 @@ interface SaveSecretKeyScreenProps {
   /// to the user once. We never store it on disk; once they confirm we
   /// pass control back to the parent.
   secretKey: string;
-  /// Username of the account this key belongs to — used as a suffix on
-  /// the downloaded emergency-kit filename so users with multiple
-  /// accounts can tell their kits apart. Optional; omitted → unsuffixed
-  /// filename.
-  username?: string | null;
+  /// Email address of the account this key belongs to — used as a
+  /// suffix on the downloaded emergency-kit filename so users with
+  /// multiple accounts can tell their kits apart. Optional; omitted →
+  /// unsuffixed filename.
+  email?: string | null;
   /// Called once the user has typed the key back to confirm they saved it.
   onConfirmed: () => void;
 }
@@ -31,13 +31,19 @@ function normalize(input: string): string {
 }
 
 // Restrict filename chars to a conservative alphanumeric/hyphen/
-// underscore set so any exotic username (emoji, slashes, whitespace)
+// underscore set so any exotic input (emoji, slashes, whitespace)
 // can't produce an invalid filename on any OS.
 function sanitizeForFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
-function downloadEmergencyKit(secretKey: string, username?: string | null) {
+// Compact YYYYMMDD-HHMMSS in local time.
+function compactTimestamp(d: Date): string {
+  const p = (n: number) => n.toString().padStart(2, "0");
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+function downloadEmergencyKit(secretKey: string, email?: string | null) {
   const text = [
     "POLLIS — EMERGENCY KIT",
     "======================",
@@ -61,10 +67,16 @@ function downloadEmergencyKit(secretKey: string, username?: string | null) {
     "",
   ].join("\n");
 
-  const safeName = username ? sanitizeForFilename(username) : "";
-  const filename = safeName
-    ? `pollis-emergency-kit-${safeName}.txt`
-    : "pollis-emergency-kit.txt";
+  const parts = ["pollis-emergency-kit"];
+  if (import.meta.env.DEV) {
+    parts.push("DEV");
+  }
+  const safeEmail = email ? sanitizeForFilename(email) : "";
+  if (safeEmail) {
+    parts.push(safeEmail);
+  }
+  parts.push(compactTimestamp(new Date()));
+  const filename = `${parts.join("-")}.txt`;
 
   const blob = new Blob([text], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
@@ -81,7 +93,7 @@ type Phase = "warn" | "show" | "confirm";
 
 export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
   secretKey,
-  username,
+  email,
   onConfirmed,
 }) => {
   const [phase, setPhase] = useState<Phase>("warn");
@@ -220,7 +232,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                 <Button
                   data-testid="download-secret-key-button"
                   onClick={() => {
-                    downloadEmergencyKit(secretKey, username);
+                    downloadEmergencyKit(secretKey, email);
                     setDownloaded(true);
                     window.setTimeout(() => setDownloaded(false), 2000);
                   }}

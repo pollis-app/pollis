@@ -396,7 +396,7 @@ function MainApp() {
     return (
       <SaveSecretKeyScreen
         secretKey={pendingSecretKey}
-        username={pendingEnrollmentUser?.username ?? currentUser?.username ?? null}
+        email={pendingEnrollmentUser?.email ?? currentUser?.email ?? null}
         onConfirmed={handleSecretKeySaved}
       />
     );
