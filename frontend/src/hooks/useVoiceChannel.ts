@@ -195,6 +195,11 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
             joined: true,
           }).catch(() => {});
         }
+        // LiveKit doesn't echo our own broadcast back, so the observers in
+        // other clients refetch but we don't. Invalidate locally so the
+        // sidebar "N in call" label updates for the joining user too.
+        queryClient.invalidateQueries({ queryKey: ['voice-room-counts'] });
+        queryClient.invalidateQueries({ queryKey: ['voice-participants', channelId] });
       }
     };
 
@@ -219,11 +224,9 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       if (didJoin && (preferences.query.data?.allow_sound_effects ?? true)) {
         playSfx(SFX.leave);
       }
-      invoke('leave_voice_channel').catch(() => {});
-
       // Optimistically remove self from the voice-participants cache so the
       // observer list in the UI drops us immediately instead of waiting for
-      // the presence DELETE to round-trip through Turso.
+      // the RoomService refetch to round-trip.
       if (didJoin && channelId && currentUser) {
         const localIdentity = `voice-${currentUser.id}`;
         queryClient.setQueryData<Array<{ identity: string; name: string }>>(
@@ -236,9 +239,14 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         const userId = currentUser.id;
         const displayName = currentUser.username ?? currentUser.id;
         const leaveChannelId = channelId;
-        // Wait for the DELETE to land before invalidating, otherwise the
-        // refetch races the write and re-adds the stale row.
+        // Order matters: wait for the voice disconnect to land on LiveKit's
+        // server BEFORE broadcasting voice_left and invalidating. Otherwise
+        // observers refetch while LiveKit still counts us as present, and
+        // the "N in call" label in the sidebar stays stuck at the old value.
         (async () => {
+          try {
+            await invoke('leave_voice_channel');
+          } catch {}
           try {
             await invoke('publish_voice_presence', {
               groupId,
@@ -255,6 +263,11 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
             });
           }
         })();
+      } else {
+        // Didn't fully join (e.g. StrictMode phantom cleanup). Still fire
+        // leave_voice_channel in the background in case any partial state
+        // needs tearing down.
+        invoke('leave_voice_channel').catch(() => {});
       }
     };
   }, [
