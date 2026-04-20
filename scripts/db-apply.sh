@@ -34,21 +34,24 @@ APPLIED=$(post '{"requests":[
   {"type":"close"}
 ]}' | jq -r '.results[0].response.result.rows[]?[0].value')
 
-# Adoption: if schema_migrations is empty but the DB already has user data
-# (the `users` table exists), silently record v0 instead of running the baseline.
-# This handles first-run against a DB that predates this tooling.
-if [ -z "${APPLIED:-}" ]; then
-  HAS_USERS=$(post '{"requests":[
-    {"type":"execute","stmt":{"sql":"SELECT 1 FROM sqlite_master WHERE type='"'"'table'"'"' AND name='"'"'users'"'"' LIMIT 1"}},
+# Adoption: if v0 isn't recorded but the DB already has user tables (anything
+# beyond the tracking tables), silently record v0 instead of running the
+# baseline. Covers both first-run against a pre-existing prod DB (v1..vN
+# already applied, no v0) and any future adoption of an established DB.
+# Greenfield DBs (no tables at all) fall through and run the baseline.
+if ! printf '%s\n' ${APPLIED:-} | grep -qx "0"; then
+  OTHER_TABLES=$(post '{"requests":[
+    {"type":"execute","stmt":{"sql":"SELECT COUNT(*) FROM sqlite_master WHERE type='"'"'table'"'"' AND name NOT IN ('"'"'schema_migrations'"'"', '"'"'sqlite_sequence'"'"')"}},
     {"type":"close"}
-  ]}' | jq -r '.results[0].response.result.rows | length')
-  if [ "$HAS_USERS" -gt 0 ]; then
+  ]}' | jq -r '.results[0].response.result.rows[0][0].value')
+  if [ "${OTHER_TABLES:-0}" -gt 0 ]; then
     echo "Adopting existing DB: recording v0 baseline without running baseline SQL"
     post '{"requests":[
       {"type":"execute","stmt":{"sql":"INSERT INTO schema_migrations (version, description) VALUES (0, '"'"'baseline'"'"')"}},
       {"type":"close"}
     ]}' > /dev/null
-    APPLIED="0"
+    APPLIED="${APPLIED:+$APPLIED
+}0"
   fi
 fi
 
