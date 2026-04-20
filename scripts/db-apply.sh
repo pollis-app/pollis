@@ -55,11 +55,19 @@ if ! printf '%s\n' ${APPLIED:-} | grep -qx "0"; then
   fi
 fi
 
-# Collect pending migration files in version order.
+# Collect pending migration files in version order. Every .sql file in the
+# migrations directory must match NNNNNN_description.sql — anything else is a
+# mistake (e.g. someone dropped an unrelated schema file in here) and we abort
+# loudly rather than try to apply it.
 PENDING=()
 for f in "$MIGRATIONS_DIR"/*.sql; do
   [ -e "$f" ] || continue
   base=$(basename "$f")
+  if ! [[ "$base" =~ ^[0-9]{6}_[a-zA-Z0-9_]+\.sql$ ]]; then
+    echo "Refusing to run: $base does not match NNNNNN_description.sql." >&2
+    echo "Only remote-DB migration files belong in $MIGRATIONS_DIR." >&2
+    exit 1
+  fi
   version=$(echo "$base" | sed -E 's/^0*([0-9]+)_.*/\1/')
   if ! printf '%s\n' ${APPLIED:-} | grep -qx "$version"; then
     PENDING+=("$f")

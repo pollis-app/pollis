@@ -1059,7 +1059,7 @@ if let Ok(Some(old_key)) = keystore::load("local_db_key").await {
 - `src-tauri/src/commands/auth.rs` — Refactor auth commands
 - `src-tauri/src/commands/user.rs` — Ensure DB-aware preference fetch
 - `src-tauri/src/lib.rs` — Register new commands + modules
-- `src-tauri/src/db/migrations/local_schema.sql` — Add `ui_state` table
+- `src-tauri/src/db/local_schema.sql` — Add `ui_state` table
 - `frontend/src/App.tsx` — Update startup flow
 - `frontend/src/hooks/useWindowState.ts` — DB-backed window state
 

@@ -235,7 +235,7 @@ that class of bug.
 
 ## Local Database (SQLite, per-user, encrypted)
 
-Source: `src-tauri/src/db/migrations/local_schema.sql`
+Source: `src-tauri/src/db/local_schema.sql`
 
 File path: `pollis_{user_id}.db`, encrypted with a key from the OS keystore.
 

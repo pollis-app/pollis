@@ -9,7 +9,7 @@ use crate::error::Result;
 // Version 7: attachment table removed — dedup lives on Turso, metadata in message payload.
 // Version 8: message table gains edited_at and deleted_at columns.
 const LOCAL_SCHEMA_VERSION: &str = "8";
-const SCHEMA: &str = include_str!("migrations/local_schema.sql");
+const SCHEMA: &str = include_str!("local_schema.sql");
 
 pub struct LocalDb {
     conn: Connection,
