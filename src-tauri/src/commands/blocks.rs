@@ -126,29 +126,12 @@ pub async fn list_blocked_users(
 mod tests {
     use rusqlite::Connection;
 
-    const REMOTE_V001: &str = include_str!("../db/migrations/remote_schema.sql");
-    const MIGRATION_15: &str =
-        include_str!("../db/migrations/000015_dm_requests_and_blocks.sql");
+    const BASELINE: &str = include_str!("../db/migrations/000000_baseline.sql");
 
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        conn.execute_batch(REMOTE_V001).unwrap();
-        // remote_schema.sql is frozen and does not ship the
-        // schema_migrations tracking table (that's created by
-        // migration 000001 in prod). Create it here so the tail
-        // INSERT inside MIGRATION_15 can run.
-        conn.execute_batch(
-            "CREATE TABLE schema_migrations (
-                 version     INTEGER PRIMARY KEY,
-                 description TEXT NOT NULL,
-                 applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
-             );",
-        )
-        .unwrap();
-        // Applying MIGRATION_15 adds accepted_at + user_block and
-        // doubles as a smoke test that the migration parses.
-        conn.execute_batch(MIGRATION_15).unwrap();
+        conn.execute_batch(BASELINE).unwrap();
         conn
     }
 

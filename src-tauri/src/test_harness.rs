@@ -172,57 +172,20 @@ pub async fn invoke_unit(
 
 // ── Schema bootstrap ────────────────────────────────────────────────────────
 //
-// The test Turso instance starts empty. We need to apply the base schema +
-// every numbered migration before any test can run. The production
-// `pnpm db:push` / `pnpm db:migrate` binaries aren't in-tree right now, so
-// the harness embeds the migrations itself with `include_str!` and tracks
-// applied versions in `schema_migrations` the same way production does.
+// The test Turso instance starts empty. Apply the canonical baseline (which
+// captures the full current schema) on first run, and stamp
+// `schema_migrations` so the DB looks adopted.
 
-const BASE_SCHEMA: &str = include_str!("db/migrations/remote_schema.sql");
+const BASELINE: &str = include_str!("db/migrations/000000_baseline.sql");
 
-/// (version, sql) for every numbered migration. Ordering matters — run them
-/// in ascending version order and skip any whose version already exists in
-/// `schema_migrations`.
-const MIGRATIONS: &[(i64, &str)] = &[
-    (1, include_str!("db/migrations/000001_unique_username.sql")),
-    (2, include_str!("db/migrations/000002_envelope_delivered_index.sql")),
-    (3, include_str!("db/migrations/000003_mls.sql")),
-    (4, include_str!("db/migrations/000004_drop_signal.sql")),
-    (5, include_str!("db/migrations/000005_watermark.sql")),
-    (6, include_str!("db/migrations/000006_voice_presence.sql")),
-    (7, include_str!("db/migrations/000007_attachment_object.sql")),
-    (8, include_str!("db/migrations/000008_admin_roles.sql")),
-    (9, include_str!("db/migrations/000009_cleanup.sql")),
-    (10, include_str!("db/migrations/000010_envelope_edit_type.sql")),
-    (11, include_str!("db/migrations/000011_user_device.sql")),
-    (12, include_str!("db/migrations/000012_voice_presence_unique.sql")),
-    (
-        13,
-        include_str!("db/migrations/000013_account_identity_and_enrollment.sql"),
-    ),
-    (14, include_str!("db/migrations/000014_commit_metadata.sql")),
-    (
-        15,
-        include_str!("db/migrations/000015_dm_requests_and_blocks.sql"),
-    ),
-    (
-        16,
-        include_str!("db/migrations/000016_watermark_device_scope.sql"),
-    ),
-    (
-        18,
-        include_str!("db/migrations/000018_drop_voice_presence.sql"),
-    ),
-];
-
-/// Apply the base schema + any missing migrations to the shared test DB.
-/// Idempotent: safe to call on every test run.
+/// Apply the baseline schema to the shared test DB if it hasn't been applied
+/// yet. Idempotent: safe to call on every test run.
 pub async fn bootstrap_schema(remote: &crate::db::remote::RemoteDb) -> Result<()> {
     let conn = remote.conn().await?;
 
-    // Does the base schema exist? `users` is the oldest table and is never
-    // dropped by a migration — use it as a marker.
-    let has_base = conn
+    // `users` is created by the baseline and never dropped — use it as a
+    // marker for "baseline already applied."
+    let has_baseline = conn
         .query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
             (),
@@ -234,49 +197,27 @@ pub async fn bootstrap_schema(remote: &crate::db::remote::RemoteDb) -> Result<()
         .map_err(|e| Error::Other(anyhow::anyhow!("probe sqlite_master row: {e}")))?
         .is_some();
 
-    if !has_base {
-        run_sql_script(&conn, BASE_SCHEMA, "base schema").await?;
+    if !has_baseline {
+        run_sql_script(&conn, BASELINE, "baseline").await?;
     }
 
-    // `schema_migrations` is created by migration 1. Before applying it for
-    // the first time there is nothing to probe — treat that as "nothing
-    // applied".
-    let has_migrations_table = conn
-        .query(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_migrations'",
-            (),
-        )
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("probe schema_migrations: {e}")))?
-        .next()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("probe schema_migrations row: {e}")))?
-        .is_some();
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (
+             version     INTEGER PRIMARY KEY,
+             description TEXT NOT NULL,
+             applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
+         )",
+        (),
+    )
+    .await
+    .map_err(|e| Error::Other(anyhow::anyhow!("create schema_migrations: {e}")))?;
 
-    let mut applied: std::collections::HashSet<i64> = std::collections::HashSet::new();
-    if has_migrations_table {
-        let mut rows = conn
-            .query("SELECT version FROM schema_migrations", ())
-            .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("select schema_migrations: {e}")))?;
-        while let Some(row) = rows
-            .next()
-            .await
-            .map_err(|e| Error::Other(anyhow::anyhow!("schema_migrations row: {e}")))?
-        {
-            let v: i64 = row
-                .get(0)
-                .map_err(|e| Error::Other(anyhow::anyhow!("schema_migrations version: {e}")))?;
-            applied.insert(v);
-        }
-    }
-
-    for (version, sql) in MIGRATIONS {
-        if applied.contains(version) {
-            continue;
-        }
-        run_sql_script(&conn, sql, &format!("migration {version:04}")).await?;
-    }
+    conn.execute(
+        "INSERT OR IGNORE INTO schema_migrations (version, description) VALUES (0, 'baseline')",
+        (),
+    )
+    .await
+    .map_err(|e| Error::Other(anyhow::anyhow!("stamp baseline: {e}")))?;
 
     Ok(())
 }

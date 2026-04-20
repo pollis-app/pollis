@@ -2,7 +2,8 @@ use libsql::{Builder, Database, Connection};
 use tokio::sync::RwLock;
 use crate::error::Result;
 
-const SCHEMA: &str = include_str!("migrations/remote_schema.sql");
+#[cfg(test)]
+const BASELINE: &str = include_str!("migrations/000000_baseline.sql");
 
 pub struct RemoteDb {
     db: RwLock<Database>,
@@ -12,7 +13,7 @@ pub struct RemoteDb {
 
 impl RemoteDb {
     /// Connect to the remote database. The schema must already be up to date —
-    /// run `pnpm db:migrate` before shipping a new schema version.
+    /// run `pnpm db:apply <env>` before shipping a new schema version.
     pub async fn connect(url: &str, token: &str) -> Result<Self> {
         let db = Builder::new_remote(url.to_string(), token.to_string())
             .build()
@@ -113,57 +114,6 @@ pub fn is_transient_libsql_error(e: &libsql::Error) -> bool {
         || s.contains("timed out")
 }
 
-/// Drop all tables and recreate from the schema file.
-/// Called by `pnpm db:push`. Not called by the app.
-pub async fn push_schema(url: &str, token: &str) -> Result<()> {
-    let db = Builder::new_remote(url.to_string(), token.to_string())
-        .build()
-        .await?;
-    let conn = db.connect()?;
-
-    // Drop all tables in reverse dependency order (leaf tables first so FK
-    // constraints don't block the drops).
-    let drop_sql = "
-        DROP TABLE IF EXISTS message_reaction;
-        DROP TABLE IF EXISTS group_invite;
-        DROP TABLE IF EXISTS group_join_request;
-        DROP TABLE IF EXISTS user_preferences;
-        DROP TABLE IF EXISTS dm_channel_member;
-        DROP TABLE IF EXISTS dm_channel;
-        DROP TABLE IF EXISTS message_envelope;
-        DROP TABLE IF EXISTS channels;
-        DROP TABLE IF EXISTS group_member;
-        DROP TABLE IF EXISTS groups;
-        DROP TABLE IF EXISTS users
-    ";
-    run_statements(&conn, drop_sql).await?;
-
-    run_statements(&conn, SCHEMA).await?;
-    Ok(())
-}
-
-/// Split a SQL file on `;` and execute each non-empty, non-comment statement.
-/// Safe for DDL-only files (no embedded semicolons inside string literals).
-async fn run_statements(conn: &Connection, sql: &str) -> Result<()> {
-    for raw in sql.split(';') {
-        // Strip line comments and surrounding whitespace.
-        let stmt: String = raw
-            .lines()
-            .filter(|l| !l.trim_start().starts_with("--"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let stmt = stmt.trim();
-        if !stmt.is_empty() {
-            conn.execute(stmt, ()).await.map_err(|e| {
-                crate::error::Error::Other(anyhow::anyhow!(
-                    "Migration failed on statement:\n{}\n\nError: {}", stmt, e
-                ))
-            })?;
-        }
-    }
-    Ok(())
-}
-
 // Remote schema tests use rusqlite in-memory to avoid a SQLite threading
 // conflict: libsql-sys bundles SQLite with SQLITE_THREADSAFE=0, which clashes
 // with rusqlite-bundled's multi-threaded configuration when both exist in the
@@ -175,7 +125,7 @@ mod tests {
     fn db() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db");
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        conn.execute_batch(super::SCHEMA).unwrap();
+        conn.execute_batch(super::BASELINE).unwrap();
         conn
     }
 
@@ -183,7 +133,7 @@ mod tests {
     fn migration_creates_tables() {
         let conn = db();
         // Each insert will fail if the table doesn't exist.
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@example.com')", []).expect("users");
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@example.com', 'u1')", []).expect("users");
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Test', 'u1')", []).expect("groups");
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []).expect("group_member");
         conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'general')", []).expect("channels");
@@ -193,8 +143,8 @@ mod tests {
     #[test]
     fn user_email_must_be_unique() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'same@example.com')", []).unwrap();
-        let result = conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'same@example.com')", []);
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'same@example.com', 'u1')", []).unwrap();
+        let result = conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'same@example.com', 'u2')", []);
         assert!(result.is_err(), "duplicate email should violate UNIQUE constraint");
     }
 
@@ -223,8 +173,8 @@ mod tests {
     #[test]
     fn group_with_admin_and_member() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('admin', 'admin@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('member', 'member@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('admin', 'admin@x.com', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('member', 'member@x.com', 'member')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Crew', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'admin', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'member', 'member')", []).unwrap();
@@ -241,7 +191,7 @@ mod tests {
     #[test]
     fn channel_belongs_to_group() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'u@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'u@x.com', 'u1')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
 
         for name in ["general", "random", "announcements"] {
@@ -265,7 +215,7 @@ mod tests {
     #[test]
     fn group_member_defaults_to_member_role() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         // No role supplied — should default to 'member'
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []).unwrap();
@@ -281,7 +231,7 @@ mod tests {
     #[test]
     fn creator_is_inserted_as_admin() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'admin')", []).unwrap();
 
@@ -296,8 +246,8 @@ mod tests {
     #[test]
     fn set_member_role_toggles_between_admin_and_member() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u2', 'member')", []).unwrap();
@@ -330,7 +280,7 @@ mod tests {
     #[test]
     fn migration_008_owner_role_becomes_admin() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         // Simulate pre-migration data
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'owner')", []).unwrap();
@@ -348,7 +298,7 @@ mod tests {
     #[test]
     fn duplicate_membership_violates_primary_key() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id) VALUES ('g1', 'u1')", []).unwrap();
 
@@ -360,8 +310,8 @@ mod tests {
     fn admin_role_check_matches_only_admin() {
         // Mirrors the SQL pattern used in every admin-gated command
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('a', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('m', 'm@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('a', 'a@x.com', 'a')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('m', 'm@x.com', 'm')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'a')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'a', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'm', 'member')", []).unwrap();
@@ -382,8 +332,8 @@ mod tests {
     #[test]
     fn remove_member_leaves_admin_intact() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('a', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('m', 'm@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('a', 'a@x.com', 'a')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('m', 'm@x.com', 'm')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'a')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'a', 'admin')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'm', 'member')", []).unwrap();
@@ -408,7 +358,7 @@ mod tests {
     #[test]
     fn delete_group_cascades_to_members_and_channels() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute("INSERT INTO group_member (group_id, user_id, role) VALUES ('g1', 'u1', 'admin')", []).unwrap();
         conn.execute("INSERT INTO channels (id, group_id, name) VALUES ('c1', 'g1', 'general')", []).unwrap();
@@ -434,8 +384,8 @@ mod tests {
     #[test]
     fn invite_can_be_created_and_queried() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute(
             "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES ('inv1', 'g1', 'u1', 'u2')",
@@ -454,9 +404,9 @@ mod tests {
     #[test]
     fn invite_deleted_on_accept_or_decline() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u3', 'c@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u3', 'c@x.com', 'u3')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute(
             "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES ('inv1', 'g1', 'u1', 'u2')",
@@ -484,8 +434,8 @@ mod tests {
     #[test]
     fn join_request_defaults_to_pending() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute(
             "INSERT INTO group_join_request (id, group_id, requester_id) VALUES ('jr1', 'g1', 'u2')",
@@ -503,9 +453,9 @@ mod tests {
     #[test]
     fn join_request_approve_and_reject_flows() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('admin', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u3', 'c@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('admin', 'a@x.com', 'admin')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u3', 'c@x.com', 'u3')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'admin')", []).unwrap();
         conn.execute(
             "INSERT INTO group_join_request (id, group_id, requester_id) VALUES ('jr1', 'g1', 'u2')",
@@ -534,8 +484,8 @@ mod tests {
     #[test]
     fn join_request_rejects_invalid_status() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
         conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'G', 'u1')", []).unwrap();
         conn.execute(
             "INSERT INTO group_join_request (id, group_id, requester_id) VALUES ('jr1', 'g1', 'u2')",
@@ -551,8 +501,8 @@ mod tests {
     #[test]
     fn dm_channel_with_two_members() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
         conn.execute("INSERT INTO dm_channel (id, created_by) VALUES ('dm1', 'u1')", []).unwrap();
         conn.execute(
             "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'u1', 'u1')",
@@ -574,8 +524,8 @@ mod tests {
     #[test]
     fn dm_channel_delete_cascades_to_members() {
         let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'a@x.com')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u2', 'b@x.com')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u1', 'a@x.com', 'u1')", []).unwrap();
+        conn.execute("INSERT INTO users (id, email, username) VALUES ('u2', 'b@x.com', 'u2')", []).unwrap();
         conn.execute("INSERT INTO dm_channel (id, created_by) VALUES ('dm1', 'u1')", []).unwrap();
         conn.execute(
             "INSERT INTO dm_channel_member (dm_channel_id, user_id, added_by) VALUES ('dm1', 'u1', 'u1')",
@@ -602,23 +552,23 @@ mod tests {
     fn attachment_object_deduplicates_by_content_hash() {
         let conn = db();
         conn.execute(
-            "INSERT INTO attachment_object (content_hash, r2_key, mime_type, size_bytes)
-             VALUES ('abc123', 'r2/abc123', 'image/png', 1024)",
+            "INSERT INTO attachment_object (content_hash, r2_key)
+             VALUES ('abc123', 'r2/abc123')",
             [],
         ).unwrap();
 
         // Same content_hash from a different upload must fail
         let result = conn.execute(
-            "INSERT INTO attachment_object (content_hash, r2_key, mime_type, size_bytes)
-             VALUES ('abc123', 'r2/different', 'image/png', 1024)",
+            "INSERT INTO attachment_object (content_hash, r2_key)
+             VALUES ('abc123', 'r2/different')",
             [],
         );
         assert!(result.is_err(), "duplicate content_hash should violate PRIMARY KEY");
 
         // Different hash must succeed
         conn.execute(
-            "INSERT INTO attachment_object (content_hash, r2_key, mime_type, size_bytes)
-             VALUES ('def456', 'r2/def456', 'image/jpeg', 2048)",
+            "INSERT INTO attachment_object (content_hash, r2_key)
+             VALUES ('def456', 'r2/def456')",
             [],
         ).unwrap();
 

@@ -1237,7 +1237,7 @@ pub async fn reject_join_request(
 mod tests {
     use rusqlite::Connection;
 
-    const REMOTE_V001: &str = include_str!("../db/migrations/remote_schema.sql");
+    const BASELINE: &str = include_str!("../db/migrations/000000_baseline.sql");
 
     /// Extra tables from numbered migrations that the base schema doesn't include.
     const EXTRA_TABLES: &str = "
@@ -1260,7 +1260,7 @@ mod tests {
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        conn.execute_batch(REMOTE_V001).unwrap();
+        conn.execute_batch(BASELINE).unwrap();
         conn.execute_batch(EXTRA_TABLES).unwrap();
         conn
     }

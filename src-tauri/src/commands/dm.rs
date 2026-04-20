@@ -438,7 +438,7 @@ pub async fn leave_dm_channel(
 mod tests {
     use rusqlite::Connection;
 
-    const REMOTE_V001: &str = include_str!("../db/migrations/remote_schema.sql");
+    const BASELINE: &str = include_str!("../db/migrations/000000_baseline.sql");
 
     const EXTRA_TABLES: &str = "
         CREATE TABLE IF NOT EXISTS conversation_watermark (
@@ -460,7 +460,7 @@ mod tests {
     fn db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        conn.execute_batch(REMOTE_V001).unwrap();
+        conn.execute_batch(BASELINE).unwrap();
         conn.execute_batch(EXTRA_TABLES).unwrap();
         conn
     }

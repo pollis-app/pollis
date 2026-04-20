@@ -1,6 +1,36 @@
 # Database
 
-Two databases. Remote schema is frozen in `remote_schema.sql`; changes go in numbered migration files (`000NNN_*.sql`) run by hand against Turso. Local schema is in `local_schema.sql`.
+Two databases. Remote schema starts from `000000_baseline.sql` (a full canonical dump) plus additive migrations (`000NNN_*.sql`). Local schema is in `local_schema.sql`.
+
+## How schema changes ship
+
+1. Write a new migration file: `src-tauri/src/db/migrations/000NNN_description.sql`. Version number must be the next integer.
+2. Run it by hand against your dev Turso DB to test.
+3. Merge to main. When a release tag is pushed, `.github/workflows/desktop-release.yml` runs `scripts/db-apply.sh` against **production** after all builds succeed and before the release job uploads artifacts. A migration failure aborts the release.
+
+The bash runner (pure `curl` + `jq`, no Node/toolchain install) reads `schema_migrations` from the target DB, diffs against the files on disk, and applies pending ones atomically (libsql batch with step conditions — any failure rolls the whole batch back and records nothing).
+
+Nobody ever applies migrations to prod by hand. Prod is CI-only.
+
+## Migrations must be additive and backward-compatible
+
+**This is the hard rule. Every migration must be safe for the currently-shipped version of the desktop app to run against.**
+
+Why: desktop users update on their own schedule. After a release ships, there will be a mix of old-and-new app versions hitting prod for days or weeks. The schema must work for both.
+
+Safe (additive):
+- `CREATE TABLE` (new table)
+- `ALTER TABLE … ADD COLUMN` — column must be nullable or have a DEFAULT so old INSERTs without the column still succeed
+- `CREATE INDEX`
+- New CHECK constraints that every existing row already satisfies
+
+Unsafe (requires a multi-release dance — don't do these casually):
+- `DROP TABLE`, `DROP COLUMN`, `ALTER … RENAME`
+- Changing a nullable column to `NOT NULL`
+- Tightening a CHECK constraint
+- Anything that makes the old app's SQL fail
+
+If you genuinely need to remove something, the pattern is: (1) ship an app version that no longer reads/writes the doomed thing, (2) wait long enough that nearly all users have updated, (3) *then* drop it in a later migration. Stage over multiple releases.
 
 ## Remote Database (Turso)
 
