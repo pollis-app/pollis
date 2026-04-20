@@ -39,13 +39,6 @@
 - device_id: text (required, fk)
 - last_fetched_at: text (required)
 
-### voice_presence
-- user_id: text (required, fk)
-- group_id: text (required, fk)
-- channel_id: text (required, fk)
-- display_name: text (required)
-- joined_at: text (required)
-
 ### attachment_object
 - content_hash: text (pk)
 - r2_key: text (required)

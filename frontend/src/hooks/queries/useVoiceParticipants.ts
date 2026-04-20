@@ -16,7 +16,6 @@ export function useVoiceParticipants(channelId: string | null) {
     queryKey: ['voice-participants', channelId],
     queryFn: () => invoke<VoiceParticipantInfo[]>('list_voice_participants', { channelId: channelId! }),
     enabled: !!channelId,
-    refetchInterval: 10_000,
   });
 }
 

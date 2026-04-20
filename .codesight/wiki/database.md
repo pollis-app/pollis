@@ -121,13 +121,11 @@ Seed paths (so a new device or a pre-join user doesn't block cleanup retroactive
 - `create_dm_channel` / `add_user_to_dm_channel` seed per (member, device).
 - `register_device` seeds per conversation the user is already a member of, for the newly-registered device.
 
-### voice_presence _(migration 6)_
-- PK: (`user_id`, `channel_id`)
-- `user_id` TEXT NOT NULL
-- `group_id` TEXT NOT NULL FK groups
-- `channel_id` TEXT NOT NULL FK channels
-- `display_name` TEXT NOT NULL
-- `joined_at` TEXT NOT NULL DEFAULT now
+### voice_presence _(removed in migration 18)_
+Dropped. LiveKit's `RoomService.ListParticipants` / `ListRooms` is the source
+of truth for who is currently in a voice channel. The shadow table drifted
+on every crash/force-kill/network blip; querying LiveKit directly closed
+that class of bug.
 
 ### user_device _(migration 11 + 13)_
 - `device_id` TEXT PK

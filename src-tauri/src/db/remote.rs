@@ -202,38 +202,22 @@ mod tests {
     fn user_fields_roundtrip() {
         let conn = db();
         conn.execute(
-            "INSERT INTO users (id, email, username, identity_key, avatar_url)
-             VALUES ('u1', 'alice@example.com', 'alice', 'deadbeef', 'https://example.com/avatar.png')",
+            "INSERT INTO users (id, email, username, avatar_url)
+             VALUES ('u1', 'alice@example.com', 'alice', 'https://example.com/avatar.png')",
             [],
         ).unwrap();
 
-        let (id, email, username, identity_key, avatar_url): (String, String, String, String, String) =
+        let (id, email, username, avatar_url): (String, String, String, String) =
             conn.query_row(
-                "SELECT id, email, username, identity_key, avatar_url FROM users WHERE id = 'u1'",
+                "SELECT id, email, username, avatar_url FROM users WHERE id = 'u1'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             ).unwrap();
 
         assert_eq!(id, "u1");
         assert_eq!(email, "alice@example.com");
         assert_eq!(username, "alice");
-        assert_eq!(identity_key, "deadbeef");
         assert_eq!(avatar_url, "https://example.com/avatar.png");
-    }
-
-    #[test]
-    fn identity_key_can_be_updated() {
-        let conn = db();
-        conn.execute("INSERT INTO users (id, email) VALUES ('u1', 'bob@example.com')", []).unwrap();
-        conn.execute("UPDATE users SET identity_key = 'mypublickeyhex' WHERE id = 'u1'", []).unwrap();
-
-        let key: String = conn.query_row(
-            "SELECT identity_key FROM users WHERE id = 'u1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-
-        assert_eq!(key, "mypublickeyhex");
     }
 
     #[test]

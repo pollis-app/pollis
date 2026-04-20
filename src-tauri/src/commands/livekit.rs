@@ -2,8 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::db::remote::RemoteDb;
-
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use livekit::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -35,6 +33,134 @@ struct VideoGrants {
     can_publish: bool,
     can_subscribe: bool,
     can_publish_data: bool,
+}
+
+// ── LiveKit server (RoomService) API ───────────────────────────────────────
+//
+// The server API is a separate Twirp-over-HTTPS endpoint from the WebSocket
+// URL used by the client SDK. We talk to it directly with reqwest rather
+// than pulling in the `livekit-api` crate. This is the source of truth for
+// "who is in a voice room right now" — our own DB used to shadow this state
+// but that's been removed since LiveKit itself already tracks it and keeps
+// it consistent across crashes, force-kills, and bad network.
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminGrants {
+    room_admin: bool,
+    room_list: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    room: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminClaims {
+    iss: String,
+    sub: String,
+    iat: u64,
+    exp: u64,
+    nbf: u64,
+    video: AdminGrants,
+}
+
+fn make_admin_token(config: &Config, room: Option<&str>) -> Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?
+        .as_secs();
+    let claims = AdminClaims {
+        iss: config.livekit_api_key.clone(),
+        sub: "pollis-backend".to_string(),
+        iat: now,
+        exp: now + 300,
+        nbf: now,
+        video: AdminGrants {
+            room_admin: true,
+            room_list: true,
+            room: room.map(str::to_string),
+        },
+    };
+    let mut header = Header::new(Algorithm::HS256);
+    header.typ = Some("JWT".to_string());
+    let key = EncodingKey::from_secret(config.livekit_api_secret.as_bytes());
+    encode(&header, &claims, &key)
+        .map_err(|e| Error::Other(anyhow::anyhow!("JWT sign: {e}")))
+}
+
+fn twirp_base(livekit_url: &str) -> String {
+    if let Some(rest) = livekit_url.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else if let Some(rest) = livekit_url.strip_prefix("ws://") {
+        format!("http://{rest}")
+    } else {
+        livekit_url.to_string()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RsParticipantsResp {
+    #[serde(default)]
+    participants: Vec<RsParticipant>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RsParticipant {
+    #[serde(default)]
+    identity: String,
+    #[serde(default)]
+    name: String,
+}
+
+async fn room_service_list_participants(
+    config: &Config,
+    room: &str,
+) -> Result<Vec<VoiceParticipantInfo>> {
+    if config.livekit_url.is_empty() || config.livekit_api_key.is_empty() {
+        return Ok(vec![]);
+    }
+    let token = make_admin_token(config, Some(room))?;
+    let url = format!(
+        "{}/twirp/livekit.RoomService/ListParticipants",
+        twirp_base(&config.livekit_url)
+    );
+    let resp = reqwest::Client::new()
+        .post(&url)
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "room": room }))
+        .send()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ListParticipants http: {e}")))?;
+    let status = resp.status();
+    if !status.is_success() {
+        // 404 from LiveKit means the room doesn't exist yet (no one has joined)
+        // — treat as empty rather than an error so the UI just shows no voice
+        // participants instead of an alert.
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Ok(vec![]);
+        }
+        let body = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "ListParticipants {status}: {body}"
+        )));
+    }
+    let parsed: RsParticipantsResp = resp
+        .json()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ListParticipants decode: {e}")))?;
+    Ok(parsed
+        .participants
+        .into_iter()
+        // Filter out internal "server" participants used for data-channel fanout.
+        .filter(|p| p.identity != "server" && p.identity != "pollis-backend")
+        .map(|p| VoiceParticipantInfo {
+            name: if p.name.is_empty() {
+                p.identity.clone()
+            } else {
+                p.name.clone()
+            },
+            identity: p.identity,
+        })
+        .collect())
 }
 
 pub(crate) fn make_token(config: &Config, room_name: &str, identity: &str, display_name: &str) -> Result<String> {
@@ -179,7 +305,14 @@ pub struct VoiceRoomCount {
 }
 
 /// Returns the participant count for each of the given voice channels by
-/// querying voice_presence in Turso. No LiveKit REST calls.
+/// asking LiveKit's RoomService. Channels with no active room return count=0.
+///
+/// We call `ListParticipants` per channel instead of `ListRooms` because
+/// `ListRooms.numParticipants` can lag behind `ListParticipants` for several
+/// seconds after the last participant disconnects — the room lingers with a
+/// stale count until its `empty_timeout` fires. Using the same source as
+/// `list_voice_participants` guarantees the sidebar count and the member
+/// list never disagree.
 #[tauri::command]
 pub async fn list_voice_room_counts(
     channel_ids: Vec<String>,
@@ -189,24 +322,27 @@ pub async fn list_voice_room_counts(
         return Ok(vec![]);
     }
 
-    let counts = query_voice_counts(&state.remote_db, &channel_ids).await?;
-    Ok(channel_ids
-        .into_iter()
-        .map(|id| {
-            let count = counts.get(&id).copied().unwrap_or(0);
+    let futs = channel_ids.iter().map(|id| {
+        let id = id.clone();
+        let config = state.config.clone();
+        async move {
+            let count = room_service_list_participants(&config, &id)
+                .await
+                .map(|v| v.len())
+                .unwrap_or(0);
             VoiceRoomCount { channel_id: id, count }
-        })
-        .collect())
+        }
+    });
+    Ok(futures_util::future::join_all(futs).await)
 }
 
-/// Returns the participants in a voice channel by querying voice_presence.
-/// No LiveKit REST calls.
+/// Returns the participants in a voice channel by asking LiveKit's RoomService.
 #[tauri::command]
 pub async fn list_voice_participants(
     channel_id: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Vec<VoiceParticipantInfo>> {
-    query_voice_participants(&state.remote_db, &channel_id).await
+    room_service_list_participants(&state.config, &channel_id).await
 }
 
 // ── Legacy commands (kept for potential future use) ────────────────────────
@@ -315,7 +451,6 @@ pub async fn connect_rooms(
         let identity_owned = identity.clone();
         let user_id_owned = user_id.clone();
         let username_owned = username.clone();
-        let remote_db_connect = Arc::clone(&state.remote_db);
         let app_state_connect = Arc::clone(state.inner());
 
         eprintln!("[realtime] connecting room {room_id}");
@@ -325,24 +460,11 @@ pub async fn connect_rooms(
                 Ok((room, mut events)) => {
                     let room = Arc::new(room);
 
-                    // On connect, reconcile voice_presence: delete rows for any user who
-                    // has a presence record for this group but is not currently in the room.
-                    // This cleans up orphaned rows from previous crash disconnects.
-                    // Extract user_id from participant identities (may be "user_id:device_id").
-                    let online_ids: HashSet<String> = room
-                        .remote_participants()
-                        .keys()
-                        .map(|id| id.to_string().split(':').next().unwrap_or_default().to_string())
-                        .chain(std::iter::once(user_id_owned.clone()))
-                        .collect();
-                    reconcile_voice_presence(&remote_db_connect, &room_id, &online_ids).await;
-
                     // Clone the Arc so the event task can look up the channel
                     // each time it fires — this handles the case where subscribe_realtime
                     // is called after connect_rooms (no race condition).
                     let lk_arc_task = Arc::clone(&lk_arc_connect);
                     let room_id_owned = room_id.clone();
-                    let remote_db_task = Arc::clone(&remote_db_connect);
                     let app_state_task = Arc::clone(&app_state_connect);
                     let user_id_task = user_id_owned.clone();
 
@@ -352,9 +474,7 @@ pub async fn connect_rooms(
                         async fn run_event_loop(
                             events: &mut tokio::sync::mpsc::UnboundedReceiver<RoomEvent>,
                             lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
-                            remote_db: &Arc<RemoteDb>,
                             app_state: &Arc<AppState>,
-                            room_id: &str,
                             user_id: &str,
                         ) -> std::time::Duration {
                             let started = std::time::Instant::now();
@@ -394,27 +514,13 @@ pub async fn connect_rooms(
                                             }
                                         }
                                     }
-                                    RoomEvent::ParticipantDisconnected(participant) => {
-                                        let identity = participant.identity().to_string();
-                                        // Extract user_id from identity (may be "user_id:device_id").
-                                        let uid = identity.split(':').next().unwrap_or(&identity);
-                                        // Clean up any voice presence rows for this user in
-                                        // this group and notify the frontend for each.
-                                        handle_participant_disconnect(
-                                            remote_db,
-                                            lk_arc,
-                                            room_id,
-                                            uid,
-                                        )
-                                        .await;
-                                    }
                                     _ => {}
                                 }
                             }
                             started.elapsed()
                         }
 
-                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &remote_db_task, &app_state_task, &room_id_owned, &user_id_task).await;
+                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &app_state_task, &user_id_task).await;
                         eprintln!(
                             "[realtime] event stream closed for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                             alive_dur.as_secs_f64()
@@ -448,14 +554,16 @@ pub async fn connect_rooms(
                                     let new_room = Arc::new(new_room);
                                     eprintln!("[realtime] reconnected room {room_id_owned}");
 
-                                    // Reconcile again on reconnect.
-                                    let online_ids: HashSet<String> = new_room
-                                        .remote_participants()
-                                        .keys()
-                                        .map(|id| id.to_string().split(':').next().unwrap_or_default().to_string())
-                                        .chain(std::iter::once(user_id_owned.clone()))
-                                        .collect();
-                                    reconcile_voice_presence(&remote_db_task, &room_id_owned, &online_ids).await;
+                                    // Notify frontend so it can resync state that
+                                    // may have drifted during the outage.
+                                    {
+                                        let lk = lk_arc_task.lock().await;
+                                        if let Some(ch) = lk.channel.clone() {
+                                            let _ = ch.send(RealtimeEvent::RealtimeReconnected {
+                                                room_id: room_id_owned.clone(),
+                                            });
+                                        }
+                                    }
 
                                     // Update the room reference in the map
                                     {
@@ -465,7 +573,7 @@ pub async fn connect_rooms(
                                         }
                                     }
 
-                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &remote_db_task, &app_state_task, &room_id_owned, &user_id_task).await;
+                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &app_state_task, &user_id_task).await;
                                     eprintln!(
                                         "[realtime] event stream closed again for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                                         alive_dur.as_secs_f64()
@@ -614,8 +722,11 @@ pub async fn publish_membership_changed_to_room(
     Ok(())
 }
 
-/// Records a voice join or leave in the DB and notifies group members via the
-/// LiveKit data channel so their participant counts update in real time.
+/// Broadcasts a voice join/leave event into the group's data channel so other
+/// online members refetch the participant list. LiveKit is the source of
+/// truth for who is actually in a voice room — this command does not write
+/// to any DB; it only pushes the realtime nudge that triggers observers to
+/// call `list_voice_participants` / `list_voice_room_counts` again.
 #[tauri::command]
 pub async fn publish_voice_presence(
     group_id: String,
@@ -625,26 +736,6 @@ pub async fn publish_voice_presence(
     joined: bool,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
-    // Write to DB first — this is the source of truth.
-    let conn = state.remote_db.conn().await?;
-    if joined {
-        conn.execute(
-            "INSERT OR REPLACE INTO voice_presence (user_id, group_id, channel_id, display_name, joined_at) \
-             VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            libsql::params![user_id.clone(), group_id.clone(), channel_id.clone(), display_name.clone()],
-        )
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("voice_presence insert: {e}")))?;
-    } else {
-        conn.execute(
-            "DELETE FROM voice_presence WHERE user_id = ?1 AND channel_id = ?2",
-            libsql::params![user_id.clone(), channel_id.clone()],
-        )
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("voice_presence delete: {e}")))?;
-    }
-
-    // Notify other online group members to refetch via the data channel.
     let room = {
         let lk = state.livekit.lock().await;
         lk.rooms.get(&group_id).map(|(r, _)| Arc::clone(r))
@@ -734,172 +825,6 @@ pub async fn publish_ping(
 }
 
 // ── Internal helpers ───────────────────────────────────────────────────────
-
-/// Query voice_presence counts for multiple channel IDs in one SQL statement.
-async fn query_voice_counts(
-    remote_db: &RemoteDb,
-    channel_ids: &[String],
-) -> Result<std::collections::HashMap<String, usize>> {
-    let conn = remote_db.conn().await?;
-    let placeholders = channel_ids
-        .iter()
-        .enumerate()
-        .map(|(i, _)| format!("?{}", i + 1))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "SELECT channel_id, COUNT(*) FROM voice_presence WHERE channel_id IN ({}) GROUP BY channel_id",
-        placeholders
-    );
-    let params: Vec<libsql::Value> = channel_ids
-        .iter()
-        .map(|id| libsql::Value::Text(id.clone()))
-        .collect();
-    let mut rows = conn
-        .query(&sql, libsql::params_from_iter(params))
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("query_voice_counts: {e}")))?;
-    let mut map = std::collections::HashMap::new();
-    while let Some(row) = rows.next().await.map_err(|e| Error::Other(anyhow::anyhow!("{e}")))? {
-        let ch_id: String = row.get(0).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
-        let cnt: i64 = row.get(1).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
-        map.insert(ch_id, cnt as usize);
-    }
-    Ok(map)
-}
-
-/// Query voice_presence participant list for a single channel.
-async fn query_voice_participants(
-    remote_db: &RemoteDb,
-    channel_id: &str,
-) -> Result<Vec<VoiceParticipantInfo>> {
-    let conn = remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT user_id, display_name FROM voice_presence WHERE channel_id = ?1",
-            libsql::params![channel_id.to_owned()],
-        )
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("query_voice_participants: {e}")))?;
-    let mut list = Vec::new();
-    while let Some(row) = rows.next().await.map_err(|e| Error::Other(anyhow::anyhow!("{e}")))? {
-        let identity: String = row.get(0).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
-        let name: String = row.get(1).map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?;
-        list.push(VoiceParticipantInfo { identity, name });
-    }
-    Ok(list)
-}
-
-/// On group room connect/reconnect: delete voice_presence rows for any user in
-/// this group who is NOT currently in the group room (i.e. crashed previously).
-async fn reconcile_voice_presence(
-    remote_db: &RemoteDb,
-    group_id: &str,
-    online_ids: &HashSet<String>,
-) {
-    let conn = match remote_db.conn().await {
-        Ok(c) => c,
-        Err(e) => { eprintln!("[presence] reconcile conn error: {e}"); return; }
-    };
-
-    // Fetch all user_ids with presence rows for this group.
-    let mut rows = match conn
-        .query(
-            "SELECT DISTINCT user_id FROM voice_presence WHERE group_id = ?1",
-            libsql::params![group_id.to_owned()],
-        )
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => { eprintln!("[presence] reconcile query error: {e}"); return; }
-    };
-
-    let mut stale: Vec<String> = Vec::new();
-    while let Ok(Some(row)) = rows.next().await {
-        if let Ok(uid) = row.get::<String>(0) {
-            if !online_ids.contains(&uid) {
-                stale.push(uid);
-            }
-        }
-    }
-
-    for uid in stale {
-        if let Err(e) = conn
-            .execute(
-                "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
-                libsql::params![uid.clone(), group_id.to_owned()],
-            )
-            .await
-        {
-            eprintln!("[presence] reconcile delete error for {uid}: {e}");
-        } else {
-            eprintln!("[presence] reconciled stale presence for {uid} in group {group_id}");
-        }
-    }
-}
-
-/// Called when a participant disconnects from a group room (graceful or crash).
-/// Deletes their voice_presence rows and pushes VoiceLeft events to the frontend.
-async fn handle_participant_disconnect(
-    remote_db: &RemoteDb,
-    lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
-    group_id: &str,
-    user_id: &str,
-) {
-    let conn = match remote_db.conn().await {
-        Ok(c) => c,
-        Err(e) => { eprintln!("[presence] disconnect conn error: {e}"); return; }
-    };
-
-    // Find which channels this user was in before deleting.
-    let mut rows = match conn
-        .query(
-            "SELECT channel_id FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
-            libsql::params![user_id.to_owned(), group_id.to_owned()],
-        )
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => { eprintln!("[presence] disconnect query error: {e}"); return; }
-    };
-
-    let mut affected_channels: Vec<String> = Vec::new();
-    while let Ok(Some(row)) = rows.next().await {
-        if let Ok(ch_id) = row.get::<String>(0) {
-            affected_channels.push(ch_id);
-        }
-    }
-
-    if affected_channels.is_empty() {
-        return;
-    }
-
-    // Delete the rows.
-    if let Err(e) = conn
-        .execute(
-            "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
-            libsql::params![user_id.to_owned(), group_id.to_owned()],
-        )
-        .await
-    {
-        eprintln!("[presence] disconnect delete error: {e}");
-        return;
-    }
-
-    // Notify the frontend for each affected channel.
-    let channel = {
-        let lk = lk_arc.lock().await;
-        lk.channel.clone()
-    };
-    if let Some(ch) = channel {
-        for channel_id in affected_channels {
-            let _ = ch.send(RealtimeEvent::VoiceLeft {
-                channel_id,
-                user_id: user_id.to_owned(),
-            });
-        }
-    }
-}
 
 /// Parses a raw DataReceived payload and forwards it to the frontend channel.
 /// Returns a conversation_id when a `membership_changed` event indicates
@@ -1016,386 +941,3 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) -
     None
 }
 
-#[cfg(test)]
-mod tests {
-    use rusqlite::Connection;
-
-    const REMOTE_V001: &str = include_str!("../db/migrations/remote_schema.sql");
-
-    const VOICE_PRESENCE: &str = "
-        CREATE TABLE IF NOT EXISTS voice_presence (
-            user_id      TEXT NOT NULL,
-            group_id     TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
-            channel_id   TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
-            display_name TEXT NOT NULL,
-            joined_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-            PRIMARY KEY (user_id, channel_id),
-            UNIQUE (user_id, group_id)
-        );
-        CREATE INDEX IF NOT EXISTS idx_voice_presence_channel ON voice_presence(channel_id);
-        CREATE INDEX IF NOT EXISTS idx_voice_presence_group   ON voice_presence(group_id);
-    ";
-
-    fn db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
-        conn.execute_batch(REMOTE_V001).unwrap();
-        conn.execute_batch(VOICE_PRESENCE).unwrap();
-        conn
-    }
-
-    fn setup(conn: &Connection) {
-        conn.execute("INSERT INTO users (id, email, username) VALUES ('alice', 'alice@x.com', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email, username) VALUES ('bob',   'bob@x.com',   'bob')", []).unwrap();
-        conn.execute("INSERT INTO users (id, email, username) VALUES ('carol', 'carol@x.com', 'carol')", []).unwrap();
-
-        conn.execute("INSERT INTO groups (id, name, owner_id) VALUES ('g1', 'Test Group', 'alice')", []).unwrap();
-        conn.execute("INSERT INTO channels (id, group_id, name, channel_type) VALUES ('vc1', 'g1', 'voice-1', 'voice')", []).unwrap();
-        conn.execute("INSERT INTO channels (id, group_id, name, channel_type) VALUES ('vc2', 'g1', 'voice-2', 'voice')", []).unwrap();
-    }
-
-    /// Simulate `publish_voice_presence(joined=true)`.
-    fn join(conn: &Connection, user_id: &str, group_id: &str, channel_id: &str, display_name: &str) {
-        conn.execute(
-            "INSERT OR REPLACE INTO voice_presence (user_id, group_id, channel_id, display_name, joined_at) \
-             VALUES (?1, ?2, ?3, ?4, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
-            rusqlite::params![user_id, group_id, channel_id, display_name],
-        ).unwrap();
-    }
-
-    /// Simulate `publish_voice_presence(joined=false)`.
-    fn leave(conn: &Connection, user_id: &str, channel_id: &str) {
-        conn.execute(
-            "DELETE FROM voice_presence WHERE user_id = ?1 AND channel_id = ?2",
-            rusqlite::params![user_id, channel_id],
-        ).unwrap();
-    }
-
-    /// Simulate `query_voice_participants` — returns (user_id, display_name) pairs.
-    fn participants(conn: &Connection, channel_id: &str) -> Vec<(String, String)> {
-        conn.prepare("SELECT user_id, display_name FROM voice_presence WHERE channel_id = ?1")
-            .unwrap()
-            .query_map(rusqlite::params![channel_id], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect()
-    }
-
-    /// Simulate `query_voice_counts` for a single channel.
-    fn count(conn: &Connection, channel_id: &str) -> i64 {
-        conn.query_row(
-            "SELECT COUNT(*) FROM voice_presence WHERE channel_id = ?1",
-            rusqlite::params![channel_id],
-            |row| row.get(0),
-        ).unwrap()
-    }
-
-    // ── basic join/leave ───────────────────────────────────────────────────
-
-    #[test]
-    fn single_user_joins_and_appears_in_channel() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-
-        let p = participants(&conn, "vc1");
-        assert_eq!(p.len(), 1);
-        assert_eq!(p[0], ("alice".into(), "alice".into()));
-    }
-
-    #[test]
-    fn single_user_leaves_and_disappears() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        leave(&conn, "alice", "vc1");
-
-        assert_eq!(count(&conn, "vc1"), 0);
-    }
-
-    // ── multiple users join/leave at different times ───────────────────────
-
-    #[test]
-    fn multiple_users_join_same_channel() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc1", "bob");
-
-        assert_eq!(count(&conn, "vc1"), 2);
-        let p = participants(&conn, "vc1");
-        let ids: Vec<&str> = p.iter().map(|(id, _)| id.as_str()).collect();
-        assert!(ids.contains(&"alice"));
-        assert!(ids.contains(&"bob"));
-    }
-
-    #[test]
-    fn first_user_leaves_second_stays() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc1", "bob");
-        leave(&conn, "alice", "vc1");
-
-        assert_eq!(count(&conn, "vc1"), 1);
-        let p = participants(&conn, "vc1");
-        assert_eq!(p[0].0, "bob");
-    }
-
-    #[test]
-    fn staggered_join_leave_join() {
-        let conn = db();
-        setup(&conn);
-
-        // Alice joins, then Bob joins, then Alice leaves, then Carol joins.
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc1", "bob");
-        leave(&conn, "alice", "vc1");
-        join(&conn, "carol", "g1", "vc1", "carol");
-
-        assert_eq!(count(&conn, "vc1"), 2);
-        let p = participants(&conn, "vc1");
-        let ids: Vec<&str> = p.iter().map(|(id, _)| id.as_str()).collect();
-        assert!(ids.contains(&"bob"));
-        assert!(ids.contains(&"carol"));
-        assert!(!ids.contains(&"alice"));
-    }
-
-    #[test]
-    fn all_users_leave_channel_is_empty() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc1", "bob");
-        join(&conn, "carol", "g1", "vc1", "carol");
-
-        leave(&conn, "alice", "vc1");
-        leave(&conn, "bob", "vc1");
-        leave(&conn, "carol", "vc1");
-
-        assert_eq!(count(&conn, "vc1"), 0);
-        assert!(participants(&conn, "vc1").is_empty());
-    }
-
-    // ── multiple channels ─────────────────────────────────────────────────
-
-    #[test]
-    fn users_in_different_channels_isolated() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc2", "bob");
-
-        assert_eq!(count(&conn, "vc1"), 1);
-        assert_eq!(count(&conn, "vc2"), 1);
-        assert_eq!(participants(&conn, "vc1")[0].0, "alice");
-        assert_eq!(participants(&conn, "vc2")[0].0, "bob");
-    }
-
-    #[test]
-    fn user_in_one_channel_only_via_unique_constraint() {
-        let conn = db();
-        setup(&conn);
-
-        // UNIQUE (user_id, group_id) means joining a second channel in the
-        // same group atomically evicts the row for the first channel via
-        // INSERT OR REPLACE. The schema enforces single-channel-per-group
-        // even if the app's leave step crashed or raced.
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "alice", "g1", "vc2", "alice");
-
-        let total: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM voice_presence WHERE user_id = 'alice'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(total, 1, "UNIQUE(user_id, group_id) must collapse to a single row");
-
-        // The surviving row is the most recent channel.
-        assert_eq!(count(&conn, "vc1"), 0, "old channel row should be evicted");
-        assert_eq!(count(&conn, "vc2"), 1, "new channel row should be present");
-        let p = participants(&conn, "vc2");
-        assert_eq!(p[0].0, "alice");
-    }
-
-    // ── rejoin same channel (INSERT OR REPLACE) ───────────────────────────
-
-    #[test]
-    fn rejoin_same_channel_does_not_duplicate() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "alice", "g1", "vc1", "alice");
-
-        assert_eq!(count(&conn, "vc1"), 1, "INSERT OR REPLACE should not create a duplicate");
-    }
-
-    #[test]
-    fn rejoin_updates_display_name() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "alice", "g1", "vc1", "Alice (renamed)");
-
-        let p = participants(&conn, "vc1");
-        assert_eq!(p.len(), 1);
-        assert_eq!(p[0].1, "Alice (renamed)");
-    }
-
-    // ── crash recovery: reconcile_voice_presence ──────────────────────────
-
-    #[test]
-    fn reconcile_removes_stale_users() {
-        let conn = db();
-        setup(&conn);
-
-        // Simulate: alice and bob both have presence rows, but only alice
-        // is actually online (bob crashed).
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc1", "bob");
-
-        // Reconciliation: fetch all users with presence, compare against online set.
-        let online: std::collections::HashSet<String> = ["alice"].iter().map(|s| s.to_string()).collect();
-
-        let all_present: Vec<String> = conn
-            .prepare("SELECT DISTINCT user_id FROM voice_presence WHERE group_id = ?1")
-            .unwrap()
-            .query_map(rusqlite::params!["g1"], |row| row.get(0))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-
-        let stale: Vec<&String> = all_present.iter().filter(|uid| !online.contains(*uid)).collect();
-        assert_eq!(stale, vec!["bob"]);
-
-        // Delete stale
-        for uid in &stale {
-            conn.execute(
-                "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
-                rusqlite::params![uid.as_str(), "g1"],
-            ).unwrap();
-        }
-
-        assert_eq!(count(&conn, "vc1"), 1);
-        assert_eq!(participants(&conn, "vc1")[0].0, "alice");
-    }
-
-    // ── participant disconnect cleanup ─────────────────────────────────────
-
-    #[test]
-    fn disconnect_removes_user_from_all_channels_in_group() {
-        let conn = db();
-        setup(&conn);
-
-        // Bob is in vc2; alice is in vc1. UNIQUE(user_id, group_id) means
-        // bob can only ever be in one channel per group at a time.
-        join(&conn, "bob", "g1", "vc2", "bob");
-        join(&conn, "alice", "g1", "vc1", "alice");
-
-        // Simulate handle_participant_disconnect: find affected channels, then delete.
-        let affected: Vec<String> = conn
-            .prepare("SELECT channel_id FROM voice_presence WHERE user_id = ?1 AND group_id = ?2")
-            .unwrap()
-            .query_map(rusqlite::params!["bob", "g1"], |row| row.get(0))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-        assert_eq!(affected.len(), 1);
-        assert_eq!(affected[0], "vc2");
-
-        conn.execute(
-            "DELETE FROM voice_presence WHERE user_id = ?1 AND group_id = ?2",
-            rusqlite::params!["bob", "g1"],
-        ).unwrap();
-
-        assert_eq!(count(&conn, "vc1"), 1, "alice should remain");
-        assert_eq!(count(&conn, "vc2"), 0, "bob's channel should be cleared");
-        assert_eq!(participants(&conn, "vc1")[0].0, "alice");
-    }
-
-    #[test]
-    fn disconnect_no_presence_is_noop() {
-        let conn = db();
-        setup(&conn);
-
-        // carol has no presence rows
-        let affected: Vec<String> = conn
-            .prepare("SELECT channel_id FROM voice_presence WHERE user_id = ?1 AND group_id = ?2")
-            .unwrap()
-            .query_map(rusqlite::params!["carol", "g1"], |row| row.get(0))
-            .unwrap()
-            .map(|r| r.unwrap())
-            .collect();
-        assert!(affected.is_empty());
-    }
-
-    // ── cascade deletes ───────────────────────────────────────────────────
-
-    #[test]
-    fn deleting_channel_cascades_presence() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc1", "bob");
-
-        conn.execute("DELETE FROM channels WHERE id = 'vc1'", []).unwrap();
-
-        let total: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM voice_presence WHERE channel_id = 'vc1'",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(total, 0, "presence should be cascade-deleted with channel");
-    }
-
-    #[test]
-    fn deleting_group_cascades_presence() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        join(&conn, "bob", "g1", "vc2", "bob");
-
-        conn.execute("DELETE FROM groups WHERE id = 'g1'", []).unwrap();
-
-        let total: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM voice_presence",
-            [],
-            |row| row.get(0),
-        ).unwrap();
-        assert_eq!(total, 0, "all presence should be cascade-deleted with group");
-    }
-
-    // ── leave idempotent ──────────────────────────────────────────────────
-
-    #[test]
-    fn leave_when_not_present_is_noop() {
-        let conn = db();
-        setup(&conn);
-
-        // carol never joined — leave should not error
-        leave(&conn, "carol", "vc1");
-        assert_eq!(count(&conn, "vc1"), 0);
-    }
-
-    #[test]
-    fn double_leave_is_noop() {
-        let conn = db();
-        setup(&conn);
-
-        join(&conn, "alice", "g1", "vc1", "alice");
-        leave(&conn, "alice", "vc1");
-        leave(&conn, "alice", "vc1");
-
-        assert_eq!(count(&conn, "vc1"), 0);
-    }
-}

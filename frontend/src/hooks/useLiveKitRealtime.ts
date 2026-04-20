@@ -57,6 +57,10 @@ type RealtimeEvent =
     request_id: string;
     new_device_id: string;
     verification_code: string;
+  }
+  | {
+    type: 'realtime_reconnected';
+    room_id: string;
   };
 
 export function useLiveKitRealtime() {
@@ -152,12 +156,24 @@ export function useLiveKitRealtime() {
   const currentUserIdRef = useRef<string | null>(currentUser?.id ?? null);
   useEffect(() => { currentUserIdRef.current = currentUser?.id ?? null; }, [currentUser?.id]);
 
-  // Sound is independent of OS notification permission — tied only to the user's
-  // allow_desktop_notifications preference.
-  const allowSoundRef = useRef<boolean>(prefsQuery.data?.allow_desktop_notifications ?? false);
+  // Sound effects have their own preference, separate from OS notifications —
+  // users often want silent badges without giving up the ping/join/leave cues,
+  // or vice versa. Defaults on so first-time users hear the app come alive.
+  const allowSoundRef = useRef<boolean>(prefsQuery.data?.allow_sound_effects ?? true);
   useEffect(() => {
-    allowSoundRef.current = prefsQuery.data?.allow_desktop_notifications ?? false;
-  }, [prefsQuery.data?.allow_desktop_notifications]);
+    allowSoundRef.current = prefsQuery.data?.allow_sound_effects ?? true;
+  }, [prefsQuery.data?.allow_sound_effects]);
+
+  // Track the voice room the user is currently connected to so we only play
+  // join/leave cues for rooms they can actually hear.
+  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const activeVoiceChannelIdRef = useRef<string | null>(activeVoiceChannelId);
+  useEffect(() => { activeVoiceChannelIdRef.current = activeVoiceChannelId; }, [activeVoiceChannelId]);
+
+  // Per-room ping cooldown. A flood of messages from one conversation should
+  // ping once, not once-per-message.
+  const lastPingAtRef = useRef<Map<string, number>>(new Map());
+  const PING_COOLDOWN_MS = 2500;
 
   // ── OS-level window focus via Tauri events ────────────────────────────────
   // DOM focus/blur don't fire on minimize in Tauri — use the OS window events.
@@ -245,10 +261,17 @@ export function useLiveKitRealtime() {
       if (event.type === 'voice_joined' || event.type === 'voice_left') {
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants', event.channel_id] });
-        // TODO: play join/leave sound for other users' voice activity (not the local user's own actions).
-        // if (event.user_id !== currentUserIdRef.current) {
-        //   playSfx(event.type === 'voice_joined' ? SFX.join : SFX.leave);
-        // }
+        // LiveKit's data channel doesn't echo packets back to the sender,
+        // so own-user join/leave is handled locally in useVoiceChannel.ts.
+        // Here we only fire for OTHER participants, and only when the user
+        // is in the same room — otherwise it's noise from unrelated rooms.
+        if (
+          allowSoundRef.current
+          && event.user_id !== currentUserIdRef.current
+          && event.channel_id === activeVoiceChannelIdRef.current
+        ) {
+          playSfx(event.type === 'voice_joined' ? SFX.join : SFX.leave);
+        }
         return;
       }
 
@@ -260,6 +283,14 @@ export function useLiveKitRealtime() {
         } else if (conversationId) {
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
         }
+        return;
+      }
+
+      if (event.type === 'realtime_reconnected') {
+        // The event stream doesn't replay missed events, so resync state
+        // that may have drifted during the outage.
+        queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
+        queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants'] });
         return;
       }
 
@@ -314,6 +345,22 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "channel", channelId] });
       } else if (conversationId) {
         queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "conversation", conversationId] });
+      }
+
+      // Ping on incoming messages when the window is unfocused. A per-room
+      // cooldown prevents a 10-message burst from pinging 10 times.
+      if (
+        !isOwnMessage
+        && !isWindowFocusedRef.current
+        && allowSoundRef.current
+        && incomingId
+      ) {
+        const now = Date.now();
+        const last = lastPingAtRef.current.get(incomingId) ?? 0;
+        if (now - last >= PING_COOLDOWN_MS) {
+          lastPingAtRef.current.set(incomingId, now);
+          playSfx(SFX.ping);
+        }
       }
 
       if (!isOwnMessage && !isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {

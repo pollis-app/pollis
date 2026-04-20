@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — FAQ</title>
+  <meta name="description"
+    content="Frequently asked questions about Pollis, a privacy-first end-to-end encrypted desktop messenger." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — FAQ" />
+  <meta property="og:description" content="Frequently asked questions about Pollis." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <style>
+    .faq-main {
+      width: 100%;
+      max-width: 760px;
+      padding: 4rem 2rem 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .faq-header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .faq-title {
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      color: var(--c-accent);
+      margin-bottom: 0.75rem;
+    }
+
+    .faq-subtitle {
+      color: var(--c-text-muted);
+      font-size: 0.95rem;
+    }
+
+    .faq-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--c-text-muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      margin-bottom: 2rem;
+      transition: color 0.15s;
+    }
+
+    .faq-back:hover {
+      color: var(--c-accent);
+    }
+
+    .mode-toggle {
+      display: flex;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-bottom: 2.5rem;
+      font-size: 0.85rem;
+    }
+
+    .mode-toggle button {
+      background: transparent;
+      border: 1px solid var(--c-border);
+      color: var(--c-text-muted);
+      padding: 0.4rem 0.9rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: inherit;
+      transition: all 0.15s;
+    }
+
+    .mode-toggle button:hover {
+      color: var(--c-text);
+    }
+
+    .mode-toggle button.active {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+      background: rgba(253, 186, 116, 0.06);
+    }
+
+    .faq-item {
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1rem;
+      background: rgba(255, 255, 255, 0.02);
+      transition: border-color 0.15s;
+    }
+
+    .faq-item:hover {
+      border-color: var(--c-accent);
+    }
+
+    .faq-question {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--c-accent);
+      margin-bottom: 0.6rem;
+      line-height: 1.4;
+    }
+
+    .faq-answer {
+      font-size: 0.95rem;
+      color: var(--c-text);
+      line-height: 1.65;
+    }
+
+    .faq-answer p + p {
+      margin-top: 0.6rem;
+    }
+
+    .faq-answer code {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.85em;
+      padding: 0.1rem 0.35rem;
+      background: rgba(253, 186, 116, 0.08);
+      border-radius: 4px;
+      color: var(--c-accent);
+    }
+
+    .faq-answer a {
+      color: var(--c-accent);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(253, 186, 116, 0.3);
+    }
+
+    .faq-answer a:hover {
+      border-bottom-color: var(--c-accent);
+    }
+
+    .faq-answer strong {
+      color: var(--c-accent);
+    }
+
+    /* Mode-specific visibility — default to plain, toggle reveals dev. */
+    .faq-answer .dev { display: none; }
+    body.dev-mode .faq-answer .plain { display: none; }
+    body.dev-mode .faq-answer .dev { display: block; }
+  </style>
+</head>
+
+<body>
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="faq-main">
+      <a href="index.html" class="faq-back">&larr; Back to Pollis</a>
+
+      <div class="faq-header">
+        <h1 class="faq-title">Frequently Asked Questions</h1>
+        <p class="faq-subtitle">Short answers. Flip to dev mode if you want the technical version.</p>
+      </div>
+
+      <div class="mode-toggle" role="tablist" aria-label="Answer detail level">
+        <button type="button" data-mode="plain" class="active" aria-pressed="true">Plain</button>
+        <button type="button" data-mode="dev" aria-pressed="false">Dev</button>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">What is Pollis?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>A desktop messaging app with group channels and direct messages, like Slack, but your messages are encrypted on your device before they leave it. The people running Pollis can't read them.</p>
+          </div>
+          <div class="dev">
+            <p>Tauri 2 desktop client (Rust + React) that connects directly to a Turso/libSQL backend. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>; the server only stores ciphertext envelopes plus routing metadata. No intermediate app server.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">How is it different from Slack, Signal, or Discord?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Slack and Discord can read your messages. Signal can't read yours either, but it's phone-number based and built for personal chats. Pollis is built for group workspaces like Slack, but with Signal-style privacy.</p>
+          </div>
+          <div class="dev">
+            <p>Slack/Discord: plaintext server storage. Signal: Double Ratchet, phone-number identity, optimized for 1:1 + small groups. Pollis: MLS-based group ratchet, username + email identity, Slack-style multi-channel workspaces, native desktop only.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Is it really end-to-end encrypted?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Yes. Messages are encrypted on your device using the same kind of cryptography banks and secure messengers use. Your private keys never leave your computer.</p>
+            <p>The server can see <strong>who</strong> is messaging <strong>when</strong>, but not <strong>what</strong>.</p>
+          </div>
+          <div class="dev">
+            <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. Private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) through the <code>keyring</code> crate — never on disk, never sent anywhere.</p>
+            <p>Server sees: user IDs, group/channel membership, message timestamps, sizes, public keys. Server does not see: plaintext, file contents, private keys.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">What happens to my messages if I get a new device or reset my account?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>You will likely lose your old messages. This is on purpose.</p>
+            <p>A new device only sees messages sent after it's added. Resetting your account wipes prior messages. We don't back up your history to the cloud, because doing so would be a target for attackers and subpoenas.</p>
+            <p>If you need a permanent archive of everything you've ever said, Pollis isn't the right tool.</p>
+          </div>
+          <div class="dev">
+            <p>Message history is not a product guarantee. A new device joining an existing MLS group receives keys for the current epoch only — no historical backfill. Identity reset wipes local message storage. No encrypted cloud backup (no Megolm-style key-backup), and none is planned. This is explicit in <code>CLAUDE.md</code> as a design principle: simpler model, smaller attack surface, no key escrow.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Which platforms are supported?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>macOS, Windows, and Linux.</p>
+          </div>
+          <div class="dev">
+            <p>macOS (universal binary — Apple Silicon + Intel), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Built with Tauri 2.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Is there an iOS or Android app?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>No.</p>
+          </div>
+          <div class="dev">
+            <p>No. Voice/media is implemented directly in Rust (not in the webview), so mobile isn't a UI-only port — it would require native clients.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Is Pollis open source?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>The source is public on <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">GitHub</a>. You can read it, build it, and check our work.</p>
+          </div>
+          <div class="dev">
+            <p>Source lives at <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">github.com/actuallydan/pollis</a>. Check the repo for the current license.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Is it free?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Yes.</p>
+          </div>
+          <div class="dev">
+            <p>Yes.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Why MLS instead of Signal Protocol?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Pollis is built around group chats. MLS is a newer standard designed for groups; Signal's protocol is great for 1:1 but gets slow and expensive at group scale.</p>
+          </div>
+          <div class="dev">
+            <p>MLS (RFC 9420) provides a single group key ratchet with O(log n) membership changes. Signal's Double Ratchet pairwise-ratchets between every member, so a group of N costs O(N) per sender per message. For a Slack-style product with large channels, MLS is the right primitive.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Do you store my email address?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Yes — we need it to send you sign-in codes. No phone number required.</p>
+          </div>
+          <div class="dev">
+            <p>Yes. Email OTP is the auth primitive, so the email is stored server-side to deliver the OTP and bind it to the account. Session tokens are held in the OS keystore.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">How do I create or join a group?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Anyone can create a group inside the app. To add someone, invite them by their Pollis username — they need an account already.</p>
+          </div>
+          <div class="dev">
+            <p>Groups are created via the <code>create_group</code> Tauri command; members are added by username via <code>invite_to_group</code>. Adding someone generates an MLS Welcome that seeds their device into the group ratchet at the current epoch. DMs are implemented as 2-person MLS groups.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">What happens if the server goes down?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>You won't be able to send or receive new messages until it's back, but you can still open the app and read what you already have. A server outage is never a privacy problem — only a reachability one.</p>
+          </div>
+          <div class="dev">
+            <p>The server is required for message delivery, MLS commit routing, and R2 uploads. Read-only operation against the local encrypted SQLite store still works during an outage. Because the server can't decrypt, downtime has no confidentiality impact.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Where do my files go when I attach something?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Files are encrypted on your device before upload. The storage provider only ever sees scrambled bytes; only people in the group can decrypt them.</p>
+          </div>
+          <div class="dev">
+            <p>Attachments are encrypted client-side and uploaded to Cloudflare R2. The decryption key travels inside the MLS-encrypted message, so R2 only ever holds ciphertext. Recipients fetch by key and decrypt locally.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Should I trust Pollis with my life?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Pollis is in open preview and has not been independently audited. If your physical safety depends on unbreakable communication, use a mature, audited tool built for that threat model.</p>
+          </div>
+          <div class="dev">
+            <p>Open preview status — no third-party cryptographic audit yet. Protocol choices (MLS, keystore-backed identity, client-side encryption) target a Slack-style workspace threat model, not a nation-state adversary. For high-risk use, pick a tool with a documented audit history.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
+            <g transform="translate(-140,-7559)">
+              <g transform="translate(56,160)">
+                <path
+                  d="M94,7399 C99.523,7399 104,7403.59 104,7409.253 C104,7413.782 101.138,7417.624 97.167,7418.981 C96.66,7419.082 96.48,7418.762 96.48,7418.489 C96.48,7418.151 96.492,7417.047 96.492,7415.675 C96.492,7414.719 96.172,7414.095 95.813,7413.777 C98.04,7413.523 100.38,7412.656 100.38,7408.718 C100.38,7407.598 99.992,7406.684 99.35,7405.966 C99.454,7405.707 99.797,7404.664 99.252,7403.252 C99.252,7403.252 98.414,7402.977 96.505,7404.303 C95.706,7404.076 94.85,7403.962 94,7403.958 C93.15,7403.962 92.295,7404.076 91.497,7404.303 C89.586,7402.977 88.746,7403.252 88.746,7403.252 C88.203,7404.664 88.546,7405.707 88.649,7405.966 C88.01,7406.684 87.619,7407.598 87.619,7408.718 C87.619,7412.646 89.954,7413.526 92.175,7413.785 C91.889,7414.041 91.63,7414.493 91.54,7415.156 C90.97,7415.418 89.522,7415.871 88.63,7414.304 C88.63,7414.304 88.101,7413.319 87.097,7413.247 C87.097,7413.247 86.122,7413.234 87.029,7413.87 C87.029,7413.87 87.684,7414.185 88.139,7415.37 C88.139,7415.37 88.726,7417.2 91.508,7416.58 C91.513,7417.437 91.522,7418.245 91.522,7418.489 C91.522,7418.76 91.338,7419.077 90.839,7418.982 C86.865,7417.627 84,7413.783 84,7409.253 C84,7403.59 88.478,7399 94,7399" />
+              </g>
+            </g>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "\u00A9 " + new Date().getFullYear() + " Pollis. All rights reserved.";
+
+    (function () {
+      var KEY = "pollis-faq-mode";
+      var buttons = document.querySelectorAll(".mode-toggle button");
+      var saved = localStorage.getItem(KEY);
+      if (saved === "dev") {
+        document.body.classList.add("dev-mode");
+        buttons.forEach(function (b) {
+          var active = b.dataset.mode === "dev";
+          b.classList.toggle("active", active);
+          b.setAttribute("aria-pressed", active ? "true" : "false");
+        });
+      }
+      buttons.forEach(function (b) {
+        b.addEventListener("click", function () {
+          var mode = b.dataset.mode;
+          document.body.classList.toggle("dev-mode", mode === "dev");
+          localStorage.setItem(KEY, mode);
+          buttons.forEach(function (other) {
+            var active = other.dataset.mode === mode;
+            other.classList.toggle("active", active);
+            other.setAttribute("aria-pressed", active ? "true" : "false");
+          });
+        });
+      });
+    })();
+  </script>
+</body>
+
+</html>

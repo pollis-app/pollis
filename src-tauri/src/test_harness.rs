@@ -209,6 +209,10 @@ const MIGRATIONS: &[(i64, &str)] = &[
         16,
         include_str!("db/migrations/000016_watermark_device_scope.sql"),
     ),
+    (
+        18,
+        include_str!("db/migrations/000018_drop_voice_presence.sql"),
+    ),
 ];
 
 /// Apply the base schema + any missing migrations to the shared test DB.
@@ -368,7 +372,6 @@ pub async fn wipe_remote(remote: &crate::db::remote::RemoteDb) -> Result<()> {
         "dm_channel",
         "message_envelope",
         "conversation_watermark",
-        "voice_presence",
         "mls_commit_log",
         "mls_welcome",
         "mls_key_package",

@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
@@ -8,6 +9,7 @@ export interface PreferencesData {
   background_color?: string;
   font_size?: string;
   allow_desktop_notifications?: boolean;
+  allow_sound_effects?: boolean;
   auto_gain_control?: boolean;
   auto_join_voice?: boolean;
 }
@@ -49,6 +51,7 @@ export function usePreferences() {
         background_color: getPreference<string | undefined>(json, "background_color", undefined),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
+        allow_sound_effects: getPreference<boolean>(json, "allow_sound_effects", true),
         auto_gain_control: getPreference<boolean>(json, "auto_gain_control", true),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
       };
@@ -93,4 +96,21 @@ export function applyPreferences(prefs: PreferencesData): void {
       applyFontSize(px);
     }
   }
+}
+
+/**
+ * Subscribe to the preferences query and re-apply visual prefs to CSS vars
+ * whenever the data arrives or changes. Mounted once near the app root so
+ * both the login path and the app-reopen path (stored session) end up
+ * applying CSS via the same mechanism, without a one-shot invoke in the
+ * signed-in flow that could silently fail.
+ */
+export function useApplyPreferences(): void {
+  const { query } = usePreferences();
+  const data = query.data;
+  useEffect(() => {
+    if (data) {
+      applyPreferences(data);
+    }
+  }, [data?.accent_color, data?.background_color, data?.font_size]);
 }

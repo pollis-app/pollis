@@ -1,9 +1,11 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { flushSync } from 'react-dom';
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { usePreferences } from './queries/usePreferences';
+import { playSfx, SFX } from '../utils/sfx';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -54,10 +56,12 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
   } = useAppStore();
 
   const preferences = usePreferences();
+  const queryClient = useQueryClient();
 
   // Track participants as a map so we can update mute state in-place
   const participantsRef = useRef<Map<string, { identity: string; name: string; isMuted: boolean; isLocal: boolean }>>(new Map());
   const localIdentityRef = useRef<string>('');
+  const joinedRef = useRef<boolean>(false);
 
   const flushParticipants = useCallback(() => {
     setVoiceParticipants(Array.from(participantsRef.current.values()));
@@ -177,14 +181,25 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
             joined: false,
           }).catch(() => {});
         }
-      } else if (groupId) {
-        invoke('publish_voice_presence', {
-          groupId,
-          channelId,
-          userId: currentUser.id,
-          displayName: currentUser.username ?? currentUser.id,
-          joined: true,
-        }).catch(() => {});
+      } else {
+        joinedRef.current = true;
+        if (preferences.query.data?.allow_sound_effects ?? true) {
+          playSfx(SFX.join);
+        }
+        if (groupId) {
+          invoke('publish_voice_presence', {
+            groupId,
+            channelId,
+            userId: currentUser.id,
+            displayName: currentUser.username ?? currentUser.id,
+            joined: true,
+          }).catch(() => {});
+        }
+        // LiveKit doesn't echo our own broadcast back, so the observers in
+        // other clients refetch but we don't. Invalidate locally so the
+        // sidebar "N in call" label updates for the joining user too.
+        queryClient.invalidateQueries({ queryKey: ['voice-room-counts'] });
+        queryClient.invalidateQueries({ queryKey: ['voice-participants', channelId] });
       }
     };
 
@@ -200,15 +215,59 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       setVoiceActiveSpeakerIds([]);
       setVoiceIsMuted(false);
       setIsLocalSpeaking(false);
-      invoke('leave_voice_channel').catch(() => {});
-      if (groupId && currentUser) {
-        invoke('publish_voice_presence', {
-          groupId,
-          channelId,
-          userId: currentUser.id,
-          displayName: currentUser.username ?? currentUser.id,
-          joined: false,
-        }).catch(() => {});
+      // Only play leave sfx (and publish presence) if we actually completed
+      // the join. React.StrictMode double-invokes effects in dev (mount →
+      // cleanup → mount), so without this guard the first mount's cleanup
+      // fires a phantom leave before we've even joined.
+      const didJoin = joinedRef.current;
+      joinedRef.current = false;
+      if (didJoin && (preferences.query.data?.allow_sound_effects ?? true)) {
+        playSfx(SFX.leave);
+      }
+      // Optimistically remove self from the voice-participants cache so the
+      // observer list in the UI drops us immediately instead of waiting for
+      // the RoomService refetch to round-trip.
+      if (didJoin && channelId && currentUser) {
+        const localIdentity = `voice-${currentUser.id}`;
+        queryClient.setQueryData<Array<{ identity: string; name: string }>>(
+          ['voice-participants', channelId],
+          (prev) => (prev ? prev.filter((p) => p.identity !== localIdentity) : prev),
+        );
+      }
+
+      if (didJoin && groupId && currentUser) {
+        const userId = currentUser.id;
+        const displayName = currentUser.username ?? currentUser.id;
+        const leaveChannelId = channelId;
+        // Order matters: wait for the voice disconnect to land on LiveKit's
+        // server BEFORE broadcasting voice_left and invalidating. Otherwise
+        // observers refetch while LiveKit still counts us as present, and
+        // the "N in call" label in the sidebar stays stuck at the old value.
+        (async () => {
+          try {
+            await invoke('leave_voice_channel');
+          } catch {}
+          try {
+            await invoke('publish_voice_presence', {
+              groupId,
+              channelId: leaveChannelId,
+              userId,
+              displayName,
+              joined: false,
+            });
+          } catch {}
+          queryClient.invalidateQueries({ queryKey: ['voice-room-counts'] });
+          if (leaveChannelId) {
+            queryClient.invalidateQueries({
+              queryKey: ['voice-participants', leaveChannelId],
+            });
+          }
+        })();
+      } else {
+        // Didn't fully join (e.g. StrictMode phantom cleanup). Still fire
+        // leave_voice_channel in the background in case any partial state
+        // needs tearing down.
+        invoke('leave_voice_channel').catch(() => {});
       }
     };
   }, [
@@ -224,6 +283,8 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
     setVoiceIsMuted,
     setIsLocalSpeaking,
     setActiveVoiceChannelId,
+    preferences.query.data?.allow_sound_effects,
+    queryClient,
   ]);
 
   const toggleMute = useCallback(async () => {
