@@ -125,11 +125,57 @@ jobs:
           echo "OPENSSL_DIR=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md" >> $GITHUB_ENV
           echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
 
+      - name: Install Artifact Signing client + SignTool
+        shell: pwsh
+        run: |
+          $toolsDir = Join-Path $env:RUNNER_TEMP "artifact-signing"
+          New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+          nuget install Microsoft.Windows.SDK.BuildTools -OutputDirectory $toolsDir -ExcludeVersion
+          nuget install Microsoft.ArtifactSigning.Client -OutputDirectory $toolsDir -ExcludeVersion
+
+          $signtool = Get-ChildItem -Path $toolsDir -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Select-Object -First 1
+          $dlib = Get-ChildItem -Path $toolsDir -Recurse -Filter Azure.CodeSigning.Dlib.dll |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Select-Object -First 1
+
+          if (-not $signtool) { throw "signtool.exe not found under $toolsDir" }
+          if (-not $dlib)     { throw "Azure.CodeSigning.Dlib.dll not found under $toolsDir" }
+
+          "SIGNTOOL_PATH=$($signtool.FullName)"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SIGNING_DLIB_PATH=$($dlib.FullName)"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Write Artifact Signing metadata
+        shell: pwsh
+        env:
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+        run: |
+          $metadataPath = Join-Path $env:RUNNER_TEMP "sign-metadata.json"
+          [ordered]@{
+            Endpoint               = $env:AZURE_SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:AZURE_SIGNING_ACCOUNT
+            CertificateProfileName = $env:AZURE_CERT_PROFILE
+          } | ConvertTo-Json | Out-File -FilePath $metadataPath -Encoding utf8
+          "SIGN_METADATA_PATH=$metadataPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Build Windows
         shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          TAURI_WINDOWS_SIGN_COMMAND: >-
+            "${{ env.SIGNTOOL_PATH }}" sign /v /fd SHA256
+            /tr http://timestamp.acs.microsoft.com /td SHA256
+            /dlib "${{ env.SIGNING_DLIB_PATH }}"
+            /dmdf "${{ env.SIGN_METADATA_PATH }}"
+            "%1"
         run: pnpm build:windows
 
       - name: Upload Windows artifact

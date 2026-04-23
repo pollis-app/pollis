@@ -11,6 +11,7 @@ Start here. Navigate to the article you need.
 - [UI Components](./ui.md) — React component inventory
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
+- [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
 
 ## Quick Reference
 
