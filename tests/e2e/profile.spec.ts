@@ -11,12 +11,12 @@ test.describe('User settings', () => {
   });
 
   test('navigates to settings page', async ({ page }) => {
-    await terminalNavigate(page, 'menu-item-settings');
+    await terminalNavigate(page, 'breadcrumb-settings-button', 'menu-item-user');
     await expect(page.locator('[data-testid="settings-page"]')).toBeVisible();
   });
 
   test('loads existing profile data', async ({ page }) => {
-    await terminalNavigate(page, 'menu-item-settings');
+    await terminalNavigate(page, 'breadcrumb-settings-button', 'menu-item-user');
     await page.waitForSelector('[data-testid="settings-page"]');
 
     await page.waitForFunction(() => {
@@ -32,7 +32,7 @@ test.describe('User settings', () => {
   });
 
   test('saves updated username', async ({ page }) => {
-    await terminalNavigate(page, 'menu-item-settings');
+    await terminalNavigate(page, 'breadcrumb-settings-button', 'menu-item-user');
     await page.waitForSelector('[data-testid="settings-page"]');
 
     await page.waitForFunction(() => {
@@ -48,13 +48,16 @@ test.describe('User settings', () => {
   });
 
   test('navigates back from settings via Escape', async ({ page }) => {
-    await terminalNavigate(page, 'menu-item-settings');
+    await terminalNavigate(page, 'breadcrumb-settings-button', 'menu-item-user');
     await page.waitForSelector('[data-testid="settings-page"]');
 
+    // First Escape returns to the Settings hub
     await page.keyboard.press('Escape');
-
     await expect(page.locator('[data-testid="settings-page"]')).not.toBeVisible();
-    // Root menu should be visible again
+    await expect(page.locator('[data-testid="menu-item-user"]')).toBeVisible();
+
+    // Second Escape returns to Root
+    await page.keyboard.press('Escape');
     await expect(page.locator('[data-testid="menu-item-groups"]')).toBeVisible();
   });
 });
@@ -65,7 +68,7 @@ test.describe('Preferences', () => {
     await page.goto('/');
     await waitForApp(page);
 
-    await terminalNavigate(page, 'menu-item-preferences');
+    await terminalNavigate(page, 'breadcrumb-settings-button', 'menu-item-preferences');
     await expect(page.locator('[data-testid="preferences-page"]')).toBeVisible();
   });
 });

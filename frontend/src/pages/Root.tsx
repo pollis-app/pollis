@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { exit } from "@tauri-apps/plugin-process";
-import { Users, MessageCircle, Mail, UserPlus, Palette, User, ShieldCheck, LogOut, Power } from "lucide-react";
+import { Users, MessageCircle, Mail, UserPlus, LogOut, Power } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { usePendingInvites, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
@@ -9,7 +9,7 @@ import { useDMConversations } from "../hooks/queries/useMessages";
 import type { RouterContext } from "../types/router";
 
 export const RootPage: React.FC = () => {
-  const { currentUser, unreadCounts } = useAppStore();
+  const { unreadCounts } = useAppStore();
   const navigate = useNavigate();
   const router = useRouter();
   const { onLogout } = router.options.context as RouterContext;
@@ -59,34 +59,6 @@ export const RootPage: React.FC = () => {
       testId: "menu-item-join-requests",
     }] : []),
     { id: "__sep1__", label: "", type: "separator" },
-    {
-      id: "preferences",
-      label: "Preferences",
-      icon: <Palette size={14} />,
-      description: "Colors, font size, etc.",
-      action: () => navigate({ to: "/preferences" }),
-      type: "system",
-      testId: "menu-item-preferences",
-    },
-    {
-      id: "settings",
-      label: "Settings",
-      icon: <User size={14} />,
-      description: currentUser ? currentUser.email : undefined,
-      action: () => navigate({ to: "/settings" }),
-      type: "system",
-      testId: "menu-item-settings",
-    },
-    {
-      id: "security",
-      label: "Security",
-      icon: <ShieldCheck size={14} />,
-      description: "Device enrollments, identity resets",
-      action: () => navigate({ to: "/security" }),
-      type: "system",
-      testId: "menu-item-security",
-    },
-    { id: "__sep2__", label: "", type: "separator" },
     {
       id: "logout",
       label: "Log out",

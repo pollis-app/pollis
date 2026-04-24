@@ -120,7 +120,8 @@ function buildDMResults(
 }
 
 const PAGE_RESULTS: SearchResultItem[] = [
-  { type: "page", id: "page-settings", name: "User Settings", breadcrumb: "/settings", path: "/settings", keywords: "account profile username email avatar" },
+  { type: "page", id: "page-settings", name: "User", breadcrumb: "/user", path: "/user", keywords: "account profile username email avatar settings" },
+  { type: "page", id: "page-settings-hub", name: "Settings", breadcrumb: "/settings", path: "/settings", keywords: "preferences user security" },
   { type: "page", id: "page-preferences", name: "Preferences", breadcrumb: "/preferences", path: "/preferences", keywords: "theme color font notifications appearance" },
   { type: "page", id: "page-voice-settings", name: "Voice Settings", breadcrumb: "/voice-settings", path: "/voice-settings", keywords: "microphone speaker audio mic noise gate agc auto join" },
   { type: "page", id: "page-security", name: "Security", breadcrumb: "/security", path: "/security", keywords: "audit log devices identity key rotation" },

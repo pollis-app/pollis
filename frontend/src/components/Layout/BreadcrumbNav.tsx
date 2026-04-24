@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, Settings as SettingsIcon } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -106,14 +106,19 @@ export const BreadcrumbNav: React.FC = () => {
           });
         }
       }
-    } else if (pathname === "/preferences") {
-      out.push({ label: "Preferences", to: "/preferences" });
-    } else if (pathname === "/voice-settings") {
-      out.push({ label: "Voice Settings", to: "/voice-settings" });
     } else if (pathname === "/settings") {
       out.push({ label: "Settings", to: "/settings" });
+    } else if (pathname === "/preferences") {
+      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Preferences", to: "/preferences" });
+    } else if (pathname === "/user") {
+      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "User", to: "/user" });
     } else if (pathname === "/security") {
+      out.push({ label: "Settings", to: "/settings" });
       out.push({ label: "Security", to: "/security" });
+    } else if (pathname === "/voice-settings") {
+      out.push({ label: "Voice Settings", to: "/voice-settings" });
     } else if (pathname === "/invites") {
       out.push({ label: "Invites", to: "/invites" });
     } else if (pathname === "/join-requests") {
@@ -135,10 +140,7 @@ export const BreadcrumbNav: React.FC = () => {
     router.navigate({ to: parentTo });
   };
 
-  // At the root there's nowhere to go back to and no trail to show — omit the bar entirely
-  if (!parentTo) {
-    return null;
-  }
+  const isOnSettingsHub = pathname === "/settings";
 
   return (
     <div
@@ -155,33 +157,37 @@ export const BreadcrumbNav: React.FC = () => {
         paddingRight: 12,
       }}
     >
-      <button
-        data-testid="breadcrumb-back-button"
-        onClick={handleBack}
-        aria-label="Back"
-        className="flex items-center justify-center transition-colors"
-        style={{
-          width: 20,
-          height: 20,
-          background: "none",
-          border: "none",
-          padding: 0,
-          color: "var(--c-text-muted)",
-          cursor: "pointer",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
-        }}
-      >
-        <ChevronLeft size={14} />
-      </button>
+      {parentTo ? (
+        <button
+          data-testid="breadcrumb-back-button"
+          onClick={handleBack}
+          aria-label="Back"
+          className="flex items-center justify-center transition-colors"
+          style={{
+            width: 20,
+            height: 20,
+            background: "none",
+            border: "none",
+            padding: 0,
+            color: "var(--c-text-muted)",
+            cursor: "pointer",
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
+          }}
+        >
+          <ChevronLeft size={14} />
+        </button>
+      ) : (
+        <div style={{ width: 20, height: 20 }} aria-hidden="true" />
+      )}
       <span
         data-testid="breadcrumb-trail"
         className="text-xs font-mono truncate"
-        style={{ color: "var(--c-text-muted)" }}
+        style={{ color: "var(--c-text-muted)", flex: 1 }}
       >
         {segments.map((seg, i) => (
           <React.Fragment key={`${seg.to}-${i}`}>
@@ -213,6 +219,29 @@ export const BreadcrumbNav: React.FC = () => {
           </React.Fragment>
         ))}
       </span>
+      <button
+        data-testid="breadcrumb-settings-button"
+        onClick={() => router.navigate({ to: "/settings" })}
+        aria-label="Settings"
+        className="flex items-center justify-center transition-colors"
+        style={{
+          width: 20,
+          height: 20,
+          background: "none",
+          border: "none",
+          padding: 0,
+          color: isOnSettingsHub ? "var(--c-accent)" : "var(--c-text-muted)",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = isOnSettingsHub ? "var(--c-accent)" : "var(--c-text-muted)";
+        }}
+      >
+        <SettingsIcon size={14} />
+      </button>
     </div>
   );
 };

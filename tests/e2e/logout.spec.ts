@@ -55,8 +55,8 @@ test.describe('Logout flow', () => {
     await expect(page.locator('[data-testid="terminal-app"]')).not.toBeVisible();
   });
 
-  test('Log out is also accessible from Settings page', async ({ page }) => {
-    await terminalNavigate(page, 'menu-item-settings');
+  test('Log out is also accessible from User page', async ({ page }) => {
+    await terminalNavigate(page, 'breadcrumb-settings-button', 'menu-item-user');
     await page.waitForSelector('[data-testid="settings-page"]');
 
     // Settings page header has a Log out button on the right
