@@ -1,9 +1,8 @@
 import React, { useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Ban } from "lucide-react";
+import { User } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
-import { useBlockUser } from "../hooks/queries";
 import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
 import { invoke } from "@tauri-apps/api/core";
@@ -16,7 +15,6 @@ export const DMPage: React.FC = () => {
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
   const currentUser = useAppStore((s) => s.currentUser);
-  const blockMutation = useBlockUser();
 
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
   const [memberCount, setMemberCount] = React.useState<number>(0);
@@ -56,22 +54,8 @@ export const DMPage: React.FC = () => {
 
   const title = conv ? `@${conv.user2_identifier}` : "Direct Message";
 
-  // Blocks are per-user, not per-channel. For group DMs (3+ members) we'd need
-  // a submenu to pick which user to block — skipped for now.
-  const canBlock = memberCount === 2 && otherUserId != null;
-
-  const handleBlock = async () => {
-    if (!otherUserId) {
-      return;
-    }
-    try {
-      await blockMutation.mutateAsync(otherUserId);
-      navigate({ to: "/dms" });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error("Failed to block user:", msg);
-    }
-  };
+  // Profile link shown for 1:1 DMs. Group DMs (3+ members) would need a picker.
+  const canShowProfile = memberCount === 2 && otherUserId != null;
 
   return (
     <div className="flex flex-col h-full">
@@ -83,17 +67,16 @@ export const DMPage: React.FC = () => {
         }}
       >
         <span style={{ flex: 1 }}>{title}</span>
-        {canBlock && (
+        {canShowProfile && (
           <Button
-            data-testid="dm-header-block"
-            onClick={handleBlock}
-            disabled={blockMutation.isPending}
+            data-testid="dm-header-profile"
+            onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
             variant="ghost"
-            aria-label="Block user"
+            aria-label="View profile"
             className="!px-2 !py-0.5"
           >
-            <Ban size={12} />
-            <span>block</span>
+            <User size={12} />
+            <span>profile</span>
           </Button>
         )}
       </div>

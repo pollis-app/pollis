@@ -114,6 +114,8 @@ export const BreadcrumbNav: React.FC = () => {
     } else if (pathname === "/user") {
       out.push({ label: "Settings", to: "/settings" });
       out.push({ label: "User", to: "/user" });
+    } else if (pathname.startsWith("/user/")) {
+      out.push({ label: "Profile", to: pathname });
     } else if (pathname === "/security") {
       out.push({ label: "Settings", to: "/settings" });
       out.push({ label: "Security", to: "/security" });

@@ -23,6 +23,7 @@ import { PreferencesPage } from "./pages/PreferencesPage";
 import { VoiceSettingsPage } from "./pages/VoiceSettingsPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { SettingsHubPage } from "./pages/SettingsHub";
+import { UserProfilePage } from "./pages/UserProfile";
 import { SecurityPage } from "./pages/SecurityPage";
 import { InvitesPage } from "./pages/InvitesPage";
 import { JoinRequestsPage } from "./pages/JoinRequestsPage";
@@ -187,6 +188,12 @@ const userRoute = createRoute({
   component: SettingsPage,
 });
 
+const userProfileRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/user/$userId",
+  component: UserProfilePage,
+});
+
 const securityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/security",
@@ -237,6 +244,7 @@ const routeTree = rootRoute.addChildren([
   voiceSettingsRoute,
   settingsRoute,
   userRoute,
+  userProfileRoute,
   securityRoute,
   invitesRoute,
   allJoinRequestsRoute,

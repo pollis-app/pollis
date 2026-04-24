@@ -16,6 +16,32 @@ export const userQueryKeys = {
   profile: (userId: string | null) => ["user", "profile", userId] as const,
 };
 
+export function useOtherUserProfile(userId: string | null | undefined) {
+  return useQuery({
+    queryKey: userQueryKeys.profile(userId ?? null),
+    queryFn: async (): Promise<{ id: string; username: string; avatar_url?: string } | null> => {
+      if (!userId) {
+        return null;
+      }
+      const profile = await invoke<{ id: string; username?: string; avatar_url?: string } | null>(
+        'get_user_profile',
+        { userId },
+      );
+      if (!profile) {
+        return null;
+      }
+      return {
+        id: profile.id,
+        username: profile.username ?? '',
+        avatar_url: profile.avatar_url,
+      };
+    },
+    enabled: !!userId,
+    staleTime: 1000 * 60,
+    gcTime: 1000 * 60 * 5,
+  });
+}
+
 export function useUserProfile() {
   const currentUser = useAppStore((state) => state.currentUser);
 
