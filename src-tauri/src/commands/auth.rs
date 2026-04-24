@@ -647,8 +647,6 @@ pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Resul
                     ).await;
                 }
             }
-            let _ = state.keystore.delete("identity_key_private").await;
-            let _ = state.keystore.delete("identity_key_public").await;
             let _ = state.keystore.delete_for_user("db_key", uid).await;
             let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, uid).await;
             let data_dir = crate::db::local::dirs_path();
@@ -859,9 +857,9 @@ pub fn list_known_accounts() -> Result<crate::accounts::AccountsIndex> {
 }
 
 /// Delete all local data on this computer: per-user databases, keystore
-/// entries (session, device_id, db_key, account_id_key), the accounts
-/// index, and legacy global keys. Does NOT touch the remote Turso database
-/// — users can re-authenticate on this device later.
+/// entries (session, device_id, db_key, account_id_key), and the accounts
+/// index. Does NOT touch the remote Turso database — users can
+/// re-authenticate on this device later.
 ///
 /// Intended for the login screen "wipe this computer" action or for
 /// preparing a clean uninstall across platforms.
@@ -883,11 +881,7 @@ pub async fn wipe_local_data(state: State<'_, Arc<AppState>>) -> Result<()> {
         }
     }
 
-    // 4. Delete legacy global keystore entries.
-    let _ = state.keystore.delete("identity_key_private").await;
-    let _ = state.keystore.delete("identity_key_public").await;
-
-    // 5. Delete all files in the data directory.
+    // 4. Delete all files in the data directory.
     let data_dir = crate::db::local::dirs_path();
     if data_dir.exists() {
         let _ = std::fs::remove_dir_all(&data_dir);
