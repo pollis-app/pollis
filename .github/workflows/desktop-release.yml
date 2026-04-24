@@ -162,6 +162,15 @@ jobs:
           } | ConvertTo-Json | Out-File -FilePath $metadataPath -Encoding utf8
           "SIGN_METADATA_PATH=$metadataPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Inject Windows signCommand into tauri.conf.json
+        shell: bash
+        run: |
+          CMD="\"$SIGNTOOL_PATH\" sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib \"$SIGNING_DLIB_PATH\" /dmdf \"$SIGN_METADATA_PATH\" %1"
+          jq --arg cmd "$CMD" '.bundle.windows = ((.bundle.windows // {}) + { signCommand: $cmd })' \
+            src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          echo "signCommand injected:"
+          jq '.bundle.windows.signCommand' src-tauri/tauri.conf.json
+
       - name: Build Windows
         shell: bash
         env:
@@ -170,12 +179,6 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          TAURI_WINDOWS_SIGN_COMMAND: >-
-            "${{ env.SIGNTOOL_PATH }}" sign /v /fd SHA256
-            /tr http://timestamp.acs.microsoft.com /td SHA256
-            /dlib "${{ env.SIGNING_DLIB_PATH }}"
-            /dmdf "${{ env.SIGN_METADATA_PATH }}"
-            "%1"
         run: pnpm build:windows
 
       - name: Upload Windows artifact
