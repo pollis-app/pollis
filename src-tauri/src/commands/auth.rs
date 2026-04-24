@@ -321,7 +321,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     }
 
     // Identify the last active user from the local accounts index.
-    let index = crate::accounts::read_accounts_index();
+    let index = crate::accounts::read_accounts_index()?;
     let user_id = match index.last_active_user {
         Some(uid) => uid,
         None => {
@@ -621,7 +621,10 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
 /// Clear the persisted session (logout). Optionally wipe the per-user DB and identity keys.
 #[tauri::command]
 pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Result<()> {
-    let index = crate::accounts::read_accounts_index();
+    // If the index is corrupt we still want the user to be able to log out.
+    // `accounts.json` has already been renamed to `.bad-<ts>.json` by the
+    // read path, so a default (empty) index is the honest state of the world.
+    let index = crate::accounts::read_accounts_index().unwrap_or_default();
     let user_id = index.last_active_user;
 
     // Grab the device_id before clearing it.
@@ -851,7 +854,7 @@ pub async fn delete_account(
 /// Return the list of accounts that have previously signed in on this device.
 /// Used by the login screen to show a "continue as" picker.
 #[tauri::command]
-pub fn list_known_accounts() -> crate::accounts::AccountsIndex {
+pub fn list_known_accounts() -> Result<crate::accounts::AccountsIndex> {
     crate::accounts::read_accounts_index()
 }
 
@@ -869,7 +872,8 @@ pub async fn wipe_local_data(state: State<'_, Arc<AppState>>) -> Result<()> {
     *state.device_id.lock().await = None;
 
     // 2. Read accounts index to enumerate user_ids for keystore cleanup.
-    let index = crate::accounts::read_accounts_index();
+    //    A corrupt index here is survivable — we're nuking everything anyway.
+    let index = crate::accounts::read_accounts_index().unwrap_or_default();
 
     // 3. Delete per-user keystore entries.
     let per_user_keys = [SESSION_KEY, DEVICE_ID_KEY, "db_key", "account_id_key"];

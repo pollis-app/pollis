@@ -63,13 +63,42 @@ mod backend {
         base.join("dev-keystore.json")
     }
 
-    fn read_map() -> HashMap<String, String> {
+    fn read_map() -> Result<HashMap<String, String>> {
         let path = store_path();
-        let Ok(data) = std::fs::read_to_string(&path) else { return HashMap::new() };
-        serde_json::from_str(&data).unwrap_or_default()
+        let data = match std::fs::read_to_string(&path) {
+            Ok(d) => d,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
+            Err(e) => return Err(Error::Keystore(format!("read dev-keystore.json: {e}"))),
+        };
+        match serde_json::from_str(&data) {
+            Ok(m) => Ok(m),
+            Err(parse_err) => {
+                // Refuse to silently replace a corrupt keystore with an empty
+                // one — the next write would erase every stored key for every
+                // user on this device. Back it up loud and bail.
+                let ts = chrono::Utc::now().timestamp();
+                let backup = path.with_file_name(format!("dev-keystore.bad-{ts}.json"));
+                if let Err(rename_err) = std::fs::rename(&path, &backup) {
+                    eprintln!(
+                        "[keystore] failed to rename corrupt dev-keystore.json to {}: {rename_err}",
+                        backup.display()
+                    );
+                }
+                eprintln!(
+                    "[keystore] dev-keystore.json was corrupt ({parse_err}); backed up to {}",
+                    backup.display()
+                );
+                Err(Error::Keystore(format!(
+                    "dev keystore corrupt; backed up to {}",
+                    backup.display()
+                )))
+            }
+        }
     }
 
     fn write_map(map: &HashMap<String, String>) -> Result<()> {
+        use std::io::Write;
+
         let path = store_path();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -77,8 +106,21 @@ mod backend {
         }
         let data = serde_json::to_string(map)
             .map_err(|e| Error::Keystore(format!("serialize: {e}")))?;
-        std::fs::write(&path, data)
-            .map_err(|e| Error::Keystore(format!("write: {e}")))?;
+
+        // Atomic write: tempfile + fsync + rename. A crash before the rename
+        // leaves the old file intact. Without this, a crash mid-write turned
+        // the keystore into a zero-byte file and bounced every user to OTP.
+        let tmp = path.with_extension("json.tmp");
+        {
+            let mut f = std::fs::File::create(&tmp)
+                .map_err(|e| Error::Keystore(format!("open dev-keystore.json.tmp: {e}")))?;
+            f.write_all(data.as_bytes())
+                .map_err(|e| Error::Keystore(format!("write dev-keystore.json.tmp: {e}")))?;
+            f.sync_all()
+                .map_err(|e| Error::Keystore(format!("fsync dev-keystore.json.tmp: {e}")))?;
+        }
+        std::fs::rename(&tmp, &path)
+            .map_err(|e| Error::Keystore(format!("rename dev-keystore.json.tmp: {e}")))?;
         Ok(())
     }
 
@@ -86,7 +128,7 @@ mod backend {
         let key = namespaced(key);
         let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, value);
         tokio::task::spawn_blocking(move || {
-            let mut map = read_map();
+            let mut map = read_map()?;
             map.insert(key, encoded);
             write_map(&map)
         })
@@ -97,7 +139,7 @@ mod backend {
     pub async fn load(key: &str) -> Result<Option<Vec<u8>>> {
         let key = namespaced(key);
         tokio::task::spawn_blocking(move || {
-            let map = read_map();
+            let map = read_map()?;
             match map.get(&key) {
                 None => Ok(None),
                 Some(encoded) => {
@@ -117,7 +159,7 @@ mod backend {
     pub async fn delete(key: &str) -> Result<()> {
         let key = namespaced(key);
         tokio::task::spawn_blocking(move || {
-            let mut map = read_map();
+            let mut map = read_map()?;
             map.remove(&key);
             write_map(&map)
         })
