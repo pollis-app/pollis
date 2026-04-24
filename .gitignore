@@ -70,4 +70,6 @@ temp/
 .mcp.json
 
 src-tauri/target/
+# Cargo workspace build output (repo root)
+/target/
 dev-keystore.json

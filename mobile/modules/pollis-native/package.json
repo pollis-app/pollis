@@ -1,0 +1,32 @@
+{
+  "name": "pollis-native",
+  "version": "0.0.0",
+  "description": "Pollis Rust core bridge",
+  "main": "src/index",
+  "codegenConfig": {
+    "name": "PollisNativeSpec",
+    "type": "modules",
+    "jsSrcsDir": "src"
+  },
+  "author": "Dan <dankral01@gmail.com> (https://github.com/actuallydan)",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/actuallydan/pollis#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/actuallydan/pollis.git"
+  },
+  "create-react-native-library": {
+    "type": "turbo-module",
+    "languages": "kotlin-objc",
+    "tools": [
+      "eslint",
+      "jest",
+      "lefthook",
+      "release-it"
+    ],
+    "version": "0.62.0"
+  },
+  "dependencies": {
+    "uniffi-bindgen-react-native": "0.31.0-2"
+  }
+}

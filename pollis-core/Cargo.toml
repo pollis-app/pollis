@@ -1,0 +1,24 @@
+[package]
+name = "pollis-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+name = "pollis_core"
+# cdylib for Android (.so loaded by JNI), staticlib for iOS xcframework,
+# rlib so the desktop src-tauri crate can depend on us as a normal Rust lib.
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+[dependencies]
+uniffi = { version = "0.31", features = [] }
+
+[features]
+# When enabled, emits a `uniffi-bindgen` bin target so we can run the
+# binding generator without installing a separate crate.
+cli = ["uniffi/cli"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+required-features = ["cli"]

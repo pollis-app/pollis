@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = [
+    "src-tauri",
+    "pollis-core",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.77"
+
+[profile.dev]
+incremental = true
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

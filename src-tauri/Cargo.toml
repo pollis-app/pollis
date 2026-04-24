@@ -35,6 +35,7 @@ test-harness = ["tauri/test"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+pollis-core = { path = "../pollis-core" }
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
@@ -103,12 +104,3 @@ objc = "0.2.7"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
-[profile.dev]
-incremental = true
-
-[profile.release]
-panic = "abort"
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true

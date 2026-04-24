@@ -1,0 +1,57 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# generated native folders (regenerate with `expo prebuild`)
+/ios
+/android
+
+# pollis-native turbo module — uniffi-generated + build artifacts
+# Regenerate with:
+#   cd modules/pollis-native && \
+#   uniffi-bindgen-react-native build android --config ubrn.config.yaml --and-generate
+modules/pollis-native/cpp/
+modules/pollis-native/src/generated/
+modules/pollis-native/src/index.tsx
+modules/pollis-native/src/NativePollisNative.ts
+modules/pollis-native/android/CMakeLists.txt
+modules/pollis-native/android/build/
+modules/pollis-native/android/.cxx/
+# jniLibs with compiled Rust .a files (CMake links them in)
+modules/pollis-native/android/android/
+# iOS xcframework (built from Rust .a files by `ubrn build ios`)
+modules/pollis-native/PollisNativeFramework.xcframework/
