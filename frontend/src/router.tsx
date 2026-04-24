@@ -25,6 +25,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { SettingsHubPage } from "./pages/SettingsHub";
 import { UserProfilePage } from "./pages/UserProfile";
 import { SecurityPage } from "./pages/SecurityPage";
+import { ChangePinPage } from "./pages/ChangePinPage";
 import { InvitesPage } from "./pages/InvitesPage";
 import { JoinRequestsPage } from "./pages/JoinRequestsPage";
 import { AllJoinRequestsPage } from "./pages/AllJoinRequestsPage";
@@ -200,6 +201,12 @@ const securityRoute = createRoute({
   component: SecurityPage,
 });
 
+const changePinRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/security/change-pin",
+  component: ChangePinPage,
+});
+
 const invitesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/invites",
@@ -246,6 +253,7 @@ const routeTree = rootRoute.addChildren([
   userRoute,
   userProfileRoute,
   securityRoute,
+  changePinRoute,
   invitesRoute,
   allJoinRequestsRoute,
   searchRoute,

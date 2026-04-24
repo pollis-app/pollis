@@ -8,6 +8,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "./stores/appStore";
 import { LoginScreen } from "./components/Auth/LoginScreen";
 import { SaveSecretKeyScreen } from "./components/Auth/SaveSecretKeyScreen";
+import { PinCreateScreen } from "./components/Auth/PinCreateScreen";
+import { PinEntryScreen } from "./components/Auth/PinEntryScreen";
 import { EnrollmentGateScreen } from "./components/Auth/EnrollmentGateScreen";
 import { EnrollmentApprovalPrompt } from "./components/Auth/EnrollmentApprovalPrompt";
 import { TerminalApp } from "./components/TerminalApp";
@@ -27,6 +29,8 @@ type AppState =
   | "loading"
   | "email-auth"
   | "save-secret-key"
+  | "pin-create"
+  | "pin-entry"
   | "enrollment-required"
   | "logout-confirm"
   | "identity-setup"
@@ -64,6 +68,11 @@ function MainApp() {
   // The user we're enrolling. Set when an enrollment-required login happens
   // so the EnrollmentGateScreen knows whose account it's joining.
   const [pendingEnrollmentUser, setPendingEnrollmentUser] = useState<User | null>(null);
+  // User queued for PIN setup (post-signup, post-enrollment, or
+  // post-upgrade when `pin_set` is false but the user already has a
+  // session) or PIN entry (returning user whose PIN is set but has not
+  // been entered this boot).
+  const [pendingPinUser, setPendingPinUser] = useState<User | null>(null);
 
 
   /// Final phase of any successful sign-in (resume or fresh OTP). Loads
@@ -118,6 +127,25 @@ function MainApp() {
           setAppState("enrollment-required");
           return;
         }
+
+        // PIN gate.  `is_unlocked` resets on every boot since it only
+        // lives in memory.  `pin_set` tells us whether there's a PIN
+        // to enter in the first place — users who upgraded from a
+        // pre-PIN build land here with `pin_set=false` and are routed
+        // to the create screen, which wraps their existing `db_key` /
+        // `account_id_key` in place.
+        const unlockState = await api.getUnlockState();
+        if (unlockState.pin_set && !unlockState.is_unlocked) {
+          setPendingPinUser(session.user);
+          setAppState("pin-entry");
+          return;
+        }
+        if (!unlockState.pin_set) {
+          setPendingPinUser(session.user);
+          setAppState("pin-create");
+          return;
+        }
+
         await completeSignIn(session.user);
       } else {
         // No active session — load known accounts for the login screen
@@ -196,33 +224,98 @@ function MainApp() {
       return;
     }
 
-    // Branch 3: normal returning user. Boot straight to identity setup.
-    setAppState("identity-setup");
-    await completeSignIn(result.user);
-  }, [completeSignIn]);
+    // Branch 3: normal returning user. Gate on PIN — either enter it
+    // (if one has been set on this device) or create one.
+    try {
+      const unlockState = await api.getUnlockState();
+      setPendingPinUser(result.user);
+      setAppState(unlockState.pin_set ? "pin-entry" : "pin-create");
+    } catch (err) {
+      console.error("[App] getUnlockState failed, falling back to PIN create:", err);
+      setPendingPinUser(result.user);
+      setAppState("pin-create");
+    }
+  }, []);
 
   const handleSecretKeySaved = useCallback(async () => {
     setPendingSecretKey(null);
     if (pendingEnrollmentUser) {
+      // Fresh signup / soft recovery flow: hand off to PIN create
+      // before the main app. `initialize_identity` has already run (or
+      // is about to), so `account_id_key_{uid}` exists in the keystore
+      // and `set_pin` can wrap it.
       const user = pendingEnrollmentUser;
       setPendingEnrollmentUser(null);
-      setAppState("identity-setup");
-      await completeSignIn(user);
+      setPendingPinUser(user);
+      setAppState("pin-create");
     } else {
       setAppState("email-auth");
     }
-  }, [pendingEnrollmentUser, completeSignIn]);
+  }, [pendingEnrollmentUser]);
 
   const handleEnrolled = useCallback(async () => {
     if (pendingEnrollmentUser) {
       const user = pendingEnrollmentUser;
       setPendingEnrollmentUser(null);
+      setPendingPinUser(user);
+      setAppState("pin-create");
+    } else {
+      setAppState("email-auth");
+    }
+  }, [pendingEnrollmentUser]);
+
+  const handlePinCreated = useCallback(async () => {
+    if (pendingPinUser) {
+      const user = pendingPinUser;
+      setPendingPinUser(null);
       setAppState("identity-setup");
       await completeSignIn(user);
     } else {
       setAppState("email-auth");
     }
-  }, [pendingEnrollmentUser, completeSignIn]);
+  }, [pendingPinUser, completeSignIn]);
+
+  const handlePinUnlocked = useCallback(async () => {
+    if (pendingPinUser) {
+      const user = pendingPinUser;
+      setPendingPinUser(null);
+      setAppState("identity-setup");
+      await completeSignIn(user);
+    } else {
+      setAppState("email-auth");
+    }
+  }, [pendingPinUser, completeSignIn]);
+
+  const handlePinForgot = useCallback(async () => {
+    // "Forgot PIN" bails to Secret-Key recovery. We treat it as an
+    // enrollment-required flow for the same user: the backend will
+    // wipe the wrapped blobs on successful recovery and the user will
+    // set a new PIN at the end of that flow.
+    if (pendingPinUser) {
+      setPendingEnrollmentUser(pendingPinUser);
+      setPendingPinUser(null);
+      setAppState("enrollment-required");
+    } else {
+      setAppState("email-auth");
+    }
+  }, [pendingPinUser]);
+
+  const handlePinSwitchAccount = useCallback(async () => {
+    setPendingPinUser(null);
+    try {
+      await api.logout(false);
+    } catch (err) {
+      console.error("[App] logout during pin switch-account failed:", err);
+    }
+    useAppStore.getState().logout();
+    try {
+      const index = await api.listKnownAccounts();
+      setKnownAccounts(index.accounts);
+    } catch {
+      // Non-critical
+    }
+    setAppState("email-auth");
+  }, []);
 
   const handleEnrollmentCancelled = useCallback(async () => {
     setPendingEnrollmentUser(null);
@@ -404,6 +497,28 @@ function MainApp() {
         secretKey={pendingSecretKey}
         email={pendingEnrollmentUser?.email ?? currentUser?.email ?? null}
         onConfirmed={handleSecretKeySaved}
+      />
+    );
+  }
+
+  if (appState === "pin-create" && pendingPinUser) {
+    return (
+      <PinCreateScreen
+        onCreated={handlePinCreated}
+        headline="Set a PIN"
+        subline="4 digits. You'll use it to unlock Pollis on this device."
+      />
+    );
+  }
+
+  if (appState === "pin-entry" && pendingPinUser) {
+    return (
+      <PinEntryScreen
+        userId={pendingPinUser.id}
+        username={pendingPinUser.username}
+        onUnlocked={handlePinUnlocked}
+        onForgotPin={handlePinForgot}
+        onSwitchAccount={handlePinSwitchAccount}
       />
     );
   }

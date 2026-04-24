@@ -85,6 +85,21 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     case 'get_session':
       return store.session;
 
+    case 'get_unlock_state':
+      // E2E mock reports "PIN already set and unlocked" so existing
+      // session-based tests fall through App.tsx's PIN gate straight
+      // to the main app without pin-entry / pin-create screens.
+      return {
+        last_active_user: store.session?.id ?? null,
+        is_unlocked: true,
+        pin_set: true,
+      };
+
+    case 'set_pin':
+    case 'unlock':
+    case 'lock':
+      return null;
+
     case 'initialize_identity':
       return null;
 
