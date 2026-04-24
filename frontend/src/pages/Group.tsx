@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Hash, Plus, Volume2 } from "lucide-react";
+import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
@@ -96,6 +96,7 @@ export const GroupPage: React.FC = () => {
     {
       id: "members",
       label: "Members",
+      icon: <Users size={14} />,
       action: () => navigate({ to: "/groups/$groupId/members", params: { groupId } }),
       type: "system" as const,
       testId: "menu-item-members",
@@ -115,6 +116,7 @@ export const GroupPage: React.FC = () => {
       {
         id: "invite-member",
         label: "Invite Member",
+        icon: <UserPlus size={14} />,
         action: () => navigate({ to: "/groups/$groupId/invite", params: { groupId } }),
         type: "system" as const,
         testId: "menu-item-invite-member",
@@ -122,6 +124,7 @@ export const GroupPage: React.FC = () => {
       {
         id: "join-requests",
         label: "Join Requests",
+        icon: <Inbox size={14} />,
         action: () => navigate({ to: "/groups/$groupId/join-requests", params: { groupId } }),
         badge: joinRequests.length > 0 ? joinRequests.length : undefined,
         type: "system" as const,
@@ -131,6 +134,7 @@ export const GroupPage: React.FC = () => {
     {
       id: "leave-group",
       label: "Leave Group",
+      icon: <LogOut size={14} />,
       action: () => navigate({ to: "/groups/$groupId/leave", params: { groupId } }),
       type: "system" as const,
       testId: "menu-item-leave-group",

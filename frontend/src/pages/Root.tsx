@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { exit } from "@tauri-apps/plugin-process";
+import { Users, MessageCircle, Mail, UserPlus, Palette, User, ShieldCheck, LogOut, Power } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { usePendingInvites, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
@@ -23,6 +24,7 @@ export const RootPage: React.FC = () => {
     {
       id: "groups",
       label: "Groups",
+      icon: <Users size={14} />,
       description: "Communities, Organizations, Teams, and overly-ambitious group chats",
       action: () => navigate({ to: "/groups" }),
       testId: "menu-item-groups",
@@ -30,6 +32,7 @@ export const RootPage: React.FC = () => {
     {
       id: "dms",
       label: "Direct Messages",
+      icon: <MessageCircle size={14} />,
       description: "Private, end-to-end encrypted conversations with individuals",
       action: () => navigate({ to: "/dms" }),
       badge: totalDMUnread > 0 ? totalDMUnread : undefined,
@@ -38,6 +41,7 @@ export const RootPage: React.FC = () => {
     {
       id: "invites",
       label: "Invites",
+      icon: <Mail size={14} />,
       description: pendingInvites.length > 0
         ? <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{pendingInvites.length} pending</span>
         : "No pending invites",
@@ -48,6 +52,7 @@ export const RootPage: React.FC = () => {
     ...(pendingJoinRequests.length > 0 ? [{
       id: "join-requests",
       label: "Join Requests",
+      icon: <UserPlus size={14} />,
       description: <span className="status-bar-blink" style={{ color: "var(--c-accent)" }}>{pendingJoinRequests.length} pending</span>,
       action: () => navigate({ to: "/join-requests" }),
       type: "system" as const,
@@ -57,6 +62,7 @@ export const RootPage: React.FC = () => {
     {
       id: "preferences",
       label: "Preferences",
+      icon: <Palette size={14} />,
       description: "Colors, font size, etc.",
       action: () => navigate({ to: "/preferences" }),
       type: "system",
@@ -65,6 +71,7 @@ export const RootPage: React.FC = () => {
     {
       id: "settings",
       label: "Settings",
+      icon: <User size={14} />,
       description: currentUser ? currentUser.email : undefined,
       action: () => navigate({ to: "/settings" }),
       type: "system",
@@ -73,6 +80,7 @@ export const RootPage: React.FC = () => {
     {
       id: "security",
       label: "Security",
+      icon: <ShieldCheck size={14} />,
       description: "Device enrollments, identity resets",
       action: () => navigate({ to: "/security" }),
       type: "system",
@@ -82,6 +90,7 @@ export const RootPage: React.FC = () => {
     {
       id: "logout",
       label: "Log out",
+      icon: <LogOut size={14} />,
       action: onLogout,
       type: "system",
       testId: "menu-item-logout",
@@ -89,6 +98,7 @@ export const RootPage: React.FC = () => {
     {
       id: "exit",
       label: "Exit",
+      icon: <Power size={14} />,
       action: () => exit(0),
       type: "system",
       testId: "menu-item-exit",
