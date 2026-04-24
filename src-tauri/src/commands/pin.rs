@@ -415,10 +415,10 @@ pub async fn set_pin(
         .await?;
     store_pin_meta(keystore, &user_id, &meta).await?;
 
-    // Initial-set path only: drop the legacy session blob now that a
-    // real unlock factor exists. We keep the unwrapped `db_key` /
-    // `account_id_key` slots alive until stage 6 so the rest of the
-    // app (which still reads them directly) keeps functioning.
+    // Initial-set path only: clean up the legacy `session_{uid}` blob
+    // left behind by a pre-PIN build on this device. Current
+    // `verify_otp` doesn't write it anymore, but an upgrader's keychain
+    // may still carry one from before the rollout.
     if old_pin.is_none() {
         let _ = keystore
             .delete_for_user(SESSION_SLOT_LEGACY, &user_id)

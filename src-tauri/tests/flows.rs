@@ -2453,16 +2453,16 @@ async fn pin_set_lock_unlock_roundtrip() {
     let profile = alice.sign_up("alice@test.local").await;
     let uid = profile.id.clone();
 
-    // Pre-PIN sign_up path still writes the legacy session blob.
-    let session_before = alice
-        .state
-        .keystore
-        .load_for_user("session", &uid)
-        .await
-        .unwrap();
+    // Session blob is gone post-stage-6: verify_otp no longer writes it.
     assert!(
-        session_before.is_some(),
-        "sign_up should still populate the legacy session blob until stage 6"
+        alice
+            .state
+            .keystore
+            .load_for_user("session", &uid)
+            .await
+            .unwrap()
+            .is_none(),
+        "verify_otp must not write the legacy session blob"
     );
 
     // Before set_pin, nothing is unlocked and no PIN is set.
