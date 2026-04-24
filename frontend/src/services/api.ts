@@ -51,6 +51,33 @@ export async function verifyOTP(email: string, code: string): Promise<AuthResult
   return rawProfileToAuthResult(profile, false);
 }
 
+// ── PIN ────────────────────────────────────────────────────────────────────
+
+export interface UnlockStateSnapshot {
+  last_active_user: string | null;
+  is_unlocked: boolean;
+  pin_set: boolean;
+}
+
+export async function getUnlockState(): Promise<UnlockStateSnapshot> {
+  return invoke<UnlockStateSnapshot>('get_unlock_state');
+}
+
+/// Initial set (omit `oldPin`) or change (provide `oldPin`). The backend
+/// rewraps `db_key` and `account_id_key` under the new PIN, writes
+/// `pin_meta`, and drops the legacy `session_{uid}` blob on initial set.
+export async function setPin(newPin: string, oldPin?: string): Promise<void> {
+  await invoke('set_pin', { newPin, oldPin: oldPin ?? null });
+}
+
+export async function unlockWithPin(userId: string, pin: string): Promise<void> {
+  await invoke('unlock', { userId, pin });
+}
+
+export async function lockUnlock(): Promise<void> {
+  await invoke('lock');
+}
+
 export async function getSession(): Promise<AuthResult | null> {
   const profile = await invoke<RawUserProfile | null>('get_session');
   if (!profile) {

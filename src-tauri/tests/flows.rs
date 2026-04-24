@@ -2436,3 +2436,158 @@ async fn user_block_lifecycle() {
     drop(bob);
     drop(carol);
 }
+
+// ─── PIN lifecycle ──────────────────────────────────────────────────────────
+
+/// set_pin → lock → unlock roundtrip against the real command pipeline.
+///
+/// Also asserts that the legacy `session_{uid}` blob written by the
+/// pre-PIN `verify_otp` path is removed once a PIN is set — one of the
+/// concrete sources of issue #184 bouncing users back to OTP.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn pin_set_lock_unlock_roundtrip() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let uid = profile.id.clone();
+
+    // Session blob is gone post-stage-6: verify_otp no longer writes it.
+    assert!(
+        alice
+            .state
+            .keystore
+            .load_for_user("session", &uid)
+            .await
+            .unwrap()
+            .is_none(),
+        "verify_otp must not write the legacy session blob"
+    );
+
+    // Before set_pin, nothing is unlocked and no PIN is set.
+    let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
+    assert_eq!(snap["is_unlocked"], false);
+    assert_eq!(snap["pin_set"], false);
+    assert_eq!(snap["last_active_user"], uid);
+
+    // Initial set. `oldPin` omitted.
+    invoke::<()>(&alice.webview, "set_pin", json!({ "newPin": "4321" }))
+        .await
+        .expect("set_pin");
+
+    // set_pin populates AppState.unlock, so we're unlocked without a
+    // separate unlock call. pin_meta exists. Legacy session is gone.
+    let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
+    assert_eq!(snap["is_unlocked"], true);
+    assert_eq!(snap["pin_set"], true);
+    assert!(
+        alice
+            .state
+            .keystore
+            .load_for_user("session", &uid)
+            .await
+            .unwrap()
+            .is_none(),
+        "set_pin should drop the legacy session blob"
+    );
+    assert!(
+        alice
+            .state
+            .keystore
+            .load_for_user("pin_meta", &uid)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        alice
+            .state
+            .keystore
+            .load_for_user("db_key_wrapped", &uid)
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    // Lock → not unlocked, pin_set still true.
+    invoke::<()>(&alice.webview, "lock", json!({})).await.expect("lock");
+    let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
+    assert_eq!(snap["is_unlocked"], false);
+    assert_eq!(snap["pin_set"], true);
+
+    // Wrong PIN is rejected.
+    let err = invoke::<serde_json::Value>(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": uid, "pin": "0000" }),
+    )
+    .await
+    .expect_err("wrong PIN must fail");
+    assert!(
+        err.to_lowercase().contains("pin"),
+        "expected pin-related error, got: {err}"
+    );
+
+    // Correct PIN re-unlocks.
+    let outcome: serde_json::Value = invoke(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": uid, "pin": "4321" }),
+    )
+    .await
+    .expect("unlock with correct PIN");
+    assert_eq!(outcome["user_id"], uid);
+
+    let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
+    assert_eq!(snap["is_unlocked"], true);
+
+    drop(alice);
+}
+
+/// Changing the PIN: old fails after change, new succeeds.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn pin_change_roundtrip() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let uid = profile.id.clone();
+
+    invoke::<()>(&alice.webview, "set_pin", json!({ "newPin": "1111" }))
+        .await
+        .expect("initial set_pin");
+
+    // Change: old=1111 → new=2222.
+    invoke::<()>(
+        &alice.webview,
+        "set_pin",
+        json!({ "oldPin": "1111", "newPin": "2222" }),
+    )
+    .await
+    .expect("change set_pin");
+
+    invoke::<()>(&alice.webview, "lock", json!({})).await.unwrap();
+
+    // Old PIN must now fail.
+    let err = invoke::<serde_json::Value>(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": uid, "pin": "1111" }),
+    )
+    .await
+    .expect_err("old PIN must fail after change");
+    assert!(err.to_lowercase().contains("pin"), "unexpected error: {err}");
+
+    // New PIN succeeds.
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": uid, "pin": "2222" }),
+    )
+    .await
+    .expect("new PIN must unlock");
+
+    drop(alice);
+}

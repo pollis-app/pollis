@@ -11,6 +11,9 @@ pub enum Error {
     #[error("Keystore error: {0}")]
     Keystore(String),
 
+    #[error("Accounts index was corrupt. Backed up to {backup_path}. Please sign in again.")]
+    AccountsIndexCorrupt { backup_path: String },
+
     #[error("Crypto error: {0}")]
     Crypto(String),
 

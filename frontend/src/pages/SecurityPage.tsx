@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
+import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
 import * as api from "../services/api";
 
@@ -58,6 +60,7 @@ function formatTimestamp(iso: string): string {
 }
 
 export const SecurityPage: React.FC = () => {
+  const navigate = useNavigate();
   const { currentUser } = useAppStore();
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,6 +95,27 @@ export const SecurityPage: React.FC = () => {
         data-testid="security-page"
         style={{ color: "var(--c-text)" }}
       >
+        <div>
+          <h2 className="text-sm font-bold" style={{ color: "var(--c-accent)" }}>
+            PIN
+          </h2>
+          <p
+            className="text-xs mt-1"
+            style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
+          >
+            The local PIN unlocks Pollis on this device. It never leaves
+            the device and can't be recovered — use your Secret Key if
+            you forget it.
+          </p>
+          <Button
+            data-testid="change-pin-button"
+            className="mt-3"
+            onClick={() => navigate({ to: "/security/change-pin" })}
+          >
+            Change PIN
+          </Button>
+        </div>
+
         <div>
           <h2 className="text-sm font-bold" style={{ color: "var(--c-accent)" }}>
             Security events

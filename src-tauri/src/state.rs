@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore::{self, Keystore};
+use crate::commands::pin::UnlockState;
 use crate::commands::voice::VoiceState;
 use crate::commands::voice_test::VoiceTestState;
 use crate::realtime::LiveKitState;
@@ -42,6 +43,11 @@ pub struct AppState {
     /// Stored in memory only — if the app restarts mid-enrollment the user
     /// starts over. The 10-minute request TTL bounds the exposure.
     pub enrollment_ephemeral_keys: Arc<Mutex<HashMap<String, Vec<u8>>>>,
+    /// In-memory PIN unlock state. `Some` once the user has entered a
+    /// valid PIN (or just set one via `set_pin`); dropped by `lock`.
+    /// Not yet load-bearing — stage 6 flips the app over to reading the
+    /// unwrapped keys from here instead of the legacy keystore slots.
+    pub unlock: Arc<Mutex<Option<UnlockState>>>,
 }
 
 impl AppState {
@@ -74,6 +80,7 @@ impl AppState {
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
+            unlock: Arc::new(Mutex::new(None)),
         }
     }
 

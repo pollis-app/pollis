@@ -30,29 +30,40 @@ impl LocalDb {
         let key_pragma = format!("PRAGMA key = \"x'{}'\"", hex::encode(key));
 
         // Check if the stored schema version matches. If not, wipe and recreate.
+        //
+        // Be narrow about what justifies nuking a user's encrypted DB: wrong
+        // SQLCipher key, missing schema_version row, or an explicit version
+        // mismatch. Any *other* rusqlite failure (lock contention mid-open,
+        // transient I/O) is surfaced instead — we refuse to eat the local
+        // database on an error we don't understand.
         if db_path.exists() {
-            match Connection::open(db_path) {
-                Ok(conn) => {
-                    // Apply key before any SQL — required for SQLCipher.
-                    let _ = conn.execute_batch(&key_pragma);
-                    let version: Option<String> = conn
-                        .query_row(
-                            "SELECT value FROM kv WHERE key = 'schema_version'",
-                            [],
-                            |row| row.get(0),
-                        )
-                        .ok();
-                    if version.as_deref() != Some(LOCAL_SCHEMA_VERSION) {
-                        drop(conn);
-                        std::fs::remove_file(db_path).map_err(|e| {
-                            crate::error::Error::Other(anyhow::anyhow!("remove stale db: {e}"))
-                        })?;
-                    }
+            let conn = Connection::open(db_path)?;
+            // Key must be applied before any SQL — required for SQLCipher.
+            conn.execute_batch(&key_pragma)?;
+
+            let version_res = conn.query_row(
+                "SELECT value FROM kv WHERE key = 'schema_version'",
+                [],
+                |row| row.get::<_, String>(0),
+            );
+
+            let should_wipe = match version_res {
+                Ok(v) => v != LOCAL_SCHEMA_VERSION,
+                Err(rusqlite::Error::QueryReturnedNoRows) => true,
+                Err(rusqlite::Error::SqliteFailure(ffi_err, _))
+                    if ffi_err.code == rusqlite::ErrorCode::NotADatabase =>
+                {
+                    // Wrong SQLCipher key or genuinely not-a-database bytes.
+                    true
                 }
-                Err(_) => {
-                    // Unreadable (wrong key or corrupt) — delete and start fresh.
-                    std::fs::remove_file(db_path).ok();
-                }
+                Err(e) => return Err(e.into()),
+            };
+
+            if should_wipe {
+                drop(conn);
+                std::fs::remove_file(db_path).map_err(|e| {
+                    crate::error::Error::Other(anyhow::anyhow!("remove stale db: {e}"))
+                })?;
             }
         }
 

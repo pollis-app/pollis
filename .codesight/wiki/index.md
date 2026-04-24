@@ -12,6 +12,7 @@ Start here. Navigate to the article you need.
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
 - [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
+- [PIN Design](./pin-design.md) — Local PIN unlock: KDF/AEAD choices, blob format, lifecycle, threat model
 
 ## Quick Reference
 

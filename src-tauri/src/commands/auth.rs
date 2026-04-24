@@ -7,7 +7,6 @@ use crate::error::Result;
 use crate::state::AppState;
 use ulid::Ulid;
 
-const SESSION_KEY: &str = "session";
 const DEVICE_ID_KEY: &str = "device_id";
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -265,16 +264,9 @@ pub async fn verify_otp(
         enrollment_required,
     };
 
-    // Persist session to OS keystore so it survives app restarts.
-    // Clear new_secret_key first — it is a one-shot display value and must
-    // never be written to disk as part of the session blob.
-    let persisted = UserProfile {
-        new_secret_key: None,
-        ..profile.clone()
-    };
-    let session_bytes = serde_json::to_vec(&persisted)
-        .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
-    state.keystore.store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
+    // accounts.json is the durable record of "who has signed in on
+    // this device" — the prior `session_{uid}` keystore blob was a
+    // redundant second source of truth and a flaky one (issue #184).
     state.load_user_db(&profile.id).await?;
     register_device(state.inner(), &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
@@ -303,9 +295,13 @@ pub async fn dev_login(
     }
 }
 
-/// Load the persisted session from the OS keystore.
-/// Verifies the user still exists in Turso — if not, clears the stale session and returns None.
-/// Returns None if the user has never signed in or has logged out.
+/// Rehydrate the current user's profile on app boot.
+///
+/// Reads `accounts.json` (durable, crash-safe) for `last_active_user`
+/// and reconstructs the `UserProfile` from that entry. Previously this
+/// also read a `session_{uid}` keystore blob — a redundant second
+/// source of truth whose transient read failures were a direct cause
+/// of issue #184 kicking users back to OTP. The blob is gone.
 #[tauri::command]
 pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserProfile>> {
     // In development, DEV_EMAIL bypasses the normal session check and logs in directly.
@@ -321,44 +317,30 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     }
 
     // Identify the last active user from the local accounts index.
-    let index = crate::accounts::read_accounts_index();
-    let user_id = match index.last_active_user {
-        Some(uid) => uid,
+    let index = crate::accounts::read_accounts_index()?;
+    let account = match index
+        .last_active_user
+        .and_then(|uid| index.accounts.iter().find(|a| a.user_id == uid).cloned())
+    {
+        Some(a) => a,
         None => {
             eprintln!("[session] no last_active_user in accounts index — showing login");
             return Ok(None);
         }
     };
 
-    let bytes = match state.keystore.load_for_user(SESSION_KEY, &user_id).await {
-        Ok(Some(b)) => b,
-        Ok(None) => {
-            eprintln!("[session] keystore has no session for user {user_id} — showing login");
-            return Ok(None);
-        }
-        Err(e) => {
-            eprintln!("[session] keystore read failed for user {user_id} ({e}) — bouncing to login");
-            return Err(e);
-        }
+    let mut profile = UserProfile {
+        id: account.user_id.clone(),
+        email: account.email.clone().unwrap_or_default(),
+        username: account.username.clone(),
+        new_secret_key: None,
+        enrollment_required: false,
     };
 
-    let mut profile: UserProfile = match serde_json::from_slice(&bytes) {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("[session] session blob deserialize failed for user {user_id} ({e}) — bouncing to login");
-            return Err(anyhow::anyhow!("Failed to deserialize session: {e}").into());
-        }
-    };
-    // Recomputed below once we know whether the keystore still holds an
-    // account_id_key for this user on this device.
-    profile.new_secret_key = None;
-    profile.enrollment_required = false;
-
-    // Verify the user still exists in Turso. After a DB wipe or account deletion
-    // the keystore still has the old profile, which would cause FK errors everywhere.
-    // Only clear the session if Turso definitively confirms the user is gone.
-    // Network errors are treated as "assume valid" so a flaky connection at startup
-    // doesn't force the user to re-authenticate every time.
+    // Verify the user still exists in Turso. After an account deletion
+    // elsewhere the local record is stale and would cause FK errors.
+    // Network failures are treated as "assume valid" so a flaky
+    // connection at startup doesn't force re-authentication.
     match state.remote_db.conn().await {
         Ok(conn) => {
             match conn.query(
@@ -368,26 +350,25 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
                 Ok(mut rows) => {
                     match rows.next().await {
                         Ok(None) => {
-                            // Turso confirmed the user doesn't exist — stale session
-                            let _ = state.keystore.delete_for_user(SESSION_KEY, &user_id).await;
-                            let _ = crate::accounts::clear_last_active_user();
+                            // Turso confirmed the user doesn't exist — stale local record.
+                            let _ = crate::accounts::remove_account(&profile.id);
                             return Ok(None);
                         }
                         Ok(Some(_)) => {
-                            // User confirmed to exist — session is valid
+                            // User confirmed to exist — proceed.
                         }
                         Err(e) => {
-                            eprintln!("[session] failed to read Turso row ({e}); using cached session");
+                            eprintln!("[session] failed to read Turso row ({e}); proceeding from accounts.json");
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[session] Turso query failed ({e}); using cached session");
+                    eprintln!("[session] Turso query failed ({e}); proceeding from accounts.json");
                 }
             }
         }
         Err(e) => {
-            eprintln!("[session] Turso connection failed ({e}); using cached session");
+            eprintln!("[session] Turso connection failed ({e}); proceeding from accounts.json");
         }
     }
 
@@ -542,13 +523,6 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
         enrollment_required,
     };
 
-    let persisted = UserProfile {
-        new_secret_key: None,
-        ..profile.clone()
-    };
-    let session_bytes = serde_json::to_vec(&persisted)
-        .map_err(|e| anyhow::anyhow!("Failed to serialize session: {e}"))?;
-    state.keystore.store_for_user(SESSION_KEY, &profile.id, &session_bytes).await?;
     state.load_user_db(&profile.id).await?;
     register_device(state, &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
@@ -621,17 +595,17 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
 /// Clear the persisted session (logout). Optionally wipe the per-user DB and identity keys.
 #[tauri::command]
 pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Result<()> {
-    let index = crate::accounts::read_accounts_index();
+    // If the index is corrupt we still want the user to be able to log out.
+    // `accounts.json` has already been renamed to `.bad-<ts>.json` by the
+    // read path, so a default (empty) index is the honest state of the world.
+    let index = crate::accounts::read_accounts_index().unwrap_or_default();
     let user_id = index.last_active_user;
 
     // Grab the device_id before clearing it.
     let device_id = state.device_id.lock().await.take();
 
-    if let Some(ref uid) = user_id {
-        let _ = state.keystore.delete_for_user(SESSION_KEY, uid).await;
-    }
-
     state.unload_user_db().await;
+    *state.unlock.lock().await = None;
 
     if delete_data {
         if let Some(ref uid) = user_id {
@@ -644,9 +618,11 @@ pub async fn logout(state: State<'_, Arc<AppState>>, delete_data: bool) -> Resul
                     ).await;
                 }
             }
-            let _ = state.keystore.delete("identity_key_private").await;
-            let _ = state.keystore.delete("identity_key_public").await;
             let _ = state.keystore.delete_for_user("db_key", uid).await;
+            let _ = state.keystore.delete_for_user("db_key_wrapped", uid).await;
+            let _ = state.keystore.delete_for_user("account_id_key", uid).await;
+            let _ = state.keystore.delete_for_user("account_id_key_wrapped", uid).await;
+            let _ = state.keystore.delete_for_user("pin_meta", uid).await;
             let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, uid).await;
             let data_dir = crate::db::local::dirs_path();
             let db_path = data_dir.join(format!("pollis_{uid}.db"));
@@ -835,11 +811,15 @@ pub async fn delete_account(
         let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-shm")));
     }
 
-    // Clear all keystore entries
-    let _ = state.keystore.delete_for_user(SESSION_KEY, &user_id).await;
+    // Clear all keystore entries.
     let _ = state.keystore.delete_for_user("db_key", &user_id).await;
+    let _ = state.keystore.delete_for_user("db_key_wrapped", &user_id).await;
+    let _ = state.keystore.delete_for_user("account_id_key", &user_id).await;
+    let _ = state.keystore.delete_for_user("account_id_key_wrapped", &user_id).await;
+    let _ = state.keystore.delete_for_user("pin_meta", &user_id).await;
     let _ = state.keystore.delete_for_user(DEVICE_ID_KEY, &user_id).await;
     *state.device_id.lock().await = None;
+    *state.unlock.lock().await = None;
 
     // Remove from local accounts index
     let _ = crate::accounts::remove_account(&user_id);
@@ -851,14 +831,14 @@ pub async fn delete_account(
 /// Return the list of accounts that have previously signed in on this device.
 /// Used by the login screen to show a "continue as" picker.
 #[tauri::command]
-pub fn list_known_accounts() -> crate::accounts::AccountsIndex {
+pub fn list_known_accounts() -> Result<crate::accounts::AccountsIndex> {
     crate::accounts::read_accounts_index()
 }
 
 /// Delete all local data on this computer: per-user databases, keystore
-/// entries (session, device_id, db_key, account_id_key), the accounts
-/// index, and legacy global keys. Does NOT touch the remote Turso database
-/// — users can re-authenticate on this device later.
+/// entries (device_id, wrapped keys, pin_meta, legacy unwrapped keys),
+/// and the accounts index. Does NOT touch the remote Turso database —
+/// users can re-authenticate on this device later.
 ///
 /// Intended for the login screen "wipe this computer" action or for
 /// preparing a clean uninstall across platforms.
@@ -867,23 +847,28 @@ pub async fn wipe_local_data(state: State<'_, Arc<AppState>>) -> Result<()> {
     // 1. Close the active local DB if one is loaded.
     state.unload_user_db().await;
     *state.device_id.lock().await = None;
+    *state.unlock.lock().await = None;
 
     // 2. Read accounts index to enumerate user_ids for keystore cleanup.
-    let index = crate::accounts::read_accounts_index();
+    //    A corrupt index here is survivable — we're nuking everything anyway.
+    let index = crate::accounts::read_accounts_index().unwrap_or_default();
 
     // 3. Delete per-user keystore entries.
-    let per_user_keys = [SESSION_KEY, DEVICE_ID_KEY, "db_key", "account_id_key"];
+    let per_user_keys = [
+        DEVICE_ID_KEY,
+        "db_key",
+        "db_key_wrapped",
+        "account_id_key",
+        "account_id_key_wrapped",
+        "pin_meta",
+    ];
     for account in &index.accounts {
         for key in &per_user_keys {
             let _ = state.keystore.delete_for_user(key, &account.user_id).await;
         }
     }
 
-    // 4. Delete legacy global keystore entries.
-    let _ = state.keystore.delete("identity_key_private").await;
-    let _ = state.keystore.delete("identity_key_public").await;
-
-    // 5. Delete all files in the data directory.
+    // 4. Delete all files in the data directory.
     let data_dir = crate::db::local::dirs_path();
     if data_dir.exists() {
         let _ = std::fs::remove_dir_all(&data_dir);
