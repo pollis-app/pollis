@@ -236,6 +236,19 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({
           queryKey: messageQueryKeys.dmConversations(currentUser.id),
         });
+        // Apply the Welcome now instead of waiting for the invitee to open
+        // the DM or restart the app. Without this, any message the inviter
+        // sends in the meantime can't be decrypted until the invitee
+        // manually triggers a poll.
+        invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+          console.warn('[realtime] dm_created: poll_mls_welcomes failed:', err);
+        });
+        invoke('process_pending_commits', {
+          conversationId: event.conversation_id,
+          userId: currentUser.id,
+        }).catch((err) => {
+          console.warn('[realtime] dm_created: process_pending_commits failed:', err);
+        });
         return;
       }
 
@@ -245,6 +258,19 @@ export function useLiveKitRealtime() {
         // member queries (["groups", groupId, "members"]).
         queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
+        // Same as dm_created: a membership change may have added us to an
+        // MLS group, so pull the Welcome and catch up on commits immediately.
+        invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+          console.warn('[realtime] membership_changed: poll_mls_welcomes failed:', err);
+        });
+        if (event.conversation_id) {
+          invoke('process_pending_commits', {
+            conversationId: event.conversation_id,
+            userId: currentUser.id,
+          }).catch((err) => {
+            console.warn('[realtime] membership_changed: process_pending_commits failed:', err);
+          });
+        }
         return;
       }
 
