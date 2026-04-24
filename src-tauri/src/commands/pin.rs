@@ -41,6 +41,13 @@ const DB_KEY_WRAPPED_SLOT: &str = "db_key_wrapped";
 const ACCOUNT_ID_KEY_WRAPPED_SLOT: &str = "account_id_key_wrapped";
 const DB_KEY_SLOT_LEGACY: &str = "db_key";
 const ACCOUNT_ID_KEY_SLOT_LEGACY: &str = "account_id_key";
+/// Legacy `session_{user_id}` blob — duplicate source of truth for
+/// "who was signed in," written by pre-PIN `verify_otp`. A transient
+/// read failure on this slot was one of the paths behind #184. Stage 3
+/// added the PIN as the real unlock factor; `set_pin` deletes the blob
+/// once the wrap succeeds so we don't have two sources of truth during
+/// the migration window.
+const SESSION_SLOT_LEGACY: &str = "session";
 
 // ── KDF tuning ───────────────────────────────────────────────────────
 //
@@ -407,6 +414,16 @@ pub async fn set_pin(
         .store_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, &user_id, &account_id_key_blob)
         .await?;
     store_pin_meta(keystore, &user_id, &meta).await?;
+
+    // Initial-set path only: drop the legacy session blob now that a
+    // real unlock factor exists. We keep the unwrapped `db_key` /
+    // `account_id_key` slots alive until stage 6 so the rest of the
+    // app (which still reads them directly) keeps functioning.
+    if old_pin.is_none() {
+        let _ = keystore
+            .delete_for_user(SESSION_SLOT_LEGACY, &user_id)
+            .await;
+    }
 
     // Seed AppState.unlock so the caller doesn't have to re-enter the
     // PIN they literally just set.
