@@ -324,16 +324,31 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     let index = crate::accounts::read_accounts_index();
     let user_id = match index.last_active_user {
         Some(uid) => uid,
-        None => return Ok(None),
+        None => {
+            eprintln!("[session] no last_active_user in accounts index — showing login");
+            return Ok(None);
+        }
     };
 
-    let bytes = match state.keystore.load_for_user(SESSION_KEY, &user_id).await? {
-        Some(b) => b,
-        None => return Ok(None),
+    let bytes = match state.keystore.load_for_user(SESSION_KEY, &user_id).await {
+        Ok(Some(b)) => b,
+        Ok(None) => {
+            eprintln!("[session] keystore has no session for user {user_id} — showing login");
+            return Ok(None);
+        }
+        Err(e) => {
+            eprintln!("[session] keystore read failed for user {user_id} ({e}) — bouncing to login");
+            return Err(e);
+        }
     };
 
-    let mut profile: UserProfile = serde_json::from_slice(&bytes)
-        .map_err(|e| anyhow::anyhow!("Failed to deserialize session: {e}"))?;
+    let mut profile: UserProfile = match serde_json::from_slice(&bytes) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[session] session blob deserialize failed for user {user_id} ({e}) — bouncing to login");
+            return Err(anyhow::anyhow!("Failed to deserialize session: {e}").into());
+        }
+    };
     // Recomputed below once we know whether the keystore still holds an
     // account_id_key for this user on this device.
     profile.new_secret_key = None;
@@ -377,8 +392,14 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     }
 
     // Open the per-user local database.
-    state.load_user_db(&profile.id).await?;
-    register_device(state.inner(), &profile.id).await?;
+    if let Err(e) = state.load_user_db(&profile.id).await {
+        eprintln!("[session] load_user_db failed for user {} ({e}) — bouncing to login", profile.id);
+        return Err(e);
+    }
+    if let Err(e) = register_device(state.inner(), &profile.id).await {
+        eprintln!("[session] register_device failed for user {} ({e}) — bouncing to login", profile.id);
+        return Err(e);
+    }
 
     // Recompute enrollment_required. Two reasons the device might need
     // enrollment:
@@ -388,18 +409,31 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     // In case (b) we wipe the stale local key so the gate path is clean.
     let remote_pub: Option<Vec<u8>> = match state.remote_db.conn().await {
         Ok(conn) => {
-            let mut rows = conn
+            match conn
                 .query(
                     "SELECT account_id_pub FROM users WHERE id = ?1",
                     libsql::params![profile.id.clone()],
                 )
-                .await?;
-            match rows.next().await? {
-                Some(row) => row.get::<Option<Vec<u8>>>(0).ok().flatten(),
-                None => None,
+                .await
+            {
+                Ok(mut rows) => match rows.next().await {
+                    Ok(Some(row)) => row.get::<Option<Vec<u8>>>(0).ok().flatten(),
+                    Ok(None) => None,
+                    Err(e) => {
+                        eprintln!("[session] enrollment-recompute row read failed ({e}) — bouncing to login");
+                        return Err(e.into());
+                    }
+                },
+                Err(e) => {
+                    eprintln!("[session] enrollment-recompute query failed ({e}) — bouncing to login");
+                    return Err(e.into());
+                }
             }
         }
-        Err(_) => None,
+        Err(e) => {
+            eprintln!("[session] enrollment-recompute Turso connect failed ({e}) — bouncing to login");
+            return Err(e);
+        }
     };
 
     if let Some(ref pub_bytes) = remote_pub {
