@@ -9,7 +9,7 @@ export const SettingsPage: React.FC = () => {
   const { onDeleteAccount } = router.options.context as RouterContext;
 
   return (
-    <PageShell title="Settings" scrollable>
+    <PageShell title="User" scrollable>
       <Settings onDeleteAccount={onDeleteAccount} />
     </PageShell>
   );

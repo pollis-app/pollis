@@ -474,15 +474,17 @@ pub async fn ingest_channel_envelopes_inner(
 
 /// Shared envelope-persist loop used by both channel and DM ingest. The
 /// `mls_group_id` differs (channel → group_id, DM → conversation_id) so callers
-/// resolve it and pass it in. Returns the max sent_at across all envelopes
-/// processed — regardless of decrypt outcome — suitable for watermark
-/// advancement. Advancing past a failed decrypt is intentional: an envelope
-/// encrypted to an epoch this device never had keys for (e.g. a pre-join
-/// message for a newly-added member) is by definition unreadable by this
-/// device, and pinning cleanup for it would make it live forever on behalf
-/// of every new member that joins. Transient decrypt failures are a risk
-/// traded for forward progress — commit processing above us is supposed to
-/// keep MLS state current.
+/// resolve it and pass it in.
+///
+/// Returns the max sent_at across envelopes that were either successfully
+/// handled (decrypted + stored, or applied as an edit) or already present
+/// locally (idempotent no-op). A decrypt failure does *not* advance the
+/// watermark past its envelope — this keeps failed envelopes alive in
+/// `message_envelope` so a subsequent ingest (after commits/welcomes catch
+/// up) can retry them. The 30-day absolute cutoff in CLEANUP_*_ENVELOPES is
+/// the backstop for envelopes that are permanently undecryptable (e.g.
+/// encrypted to an epoch this device never joined, like pre-join history
+/// for a newly-added member).
 async fn persist_envelopes_locally(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -493,6 +495,13 @@ async fn persist_envelopes_locally(
     let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
     let mut candidate: Option<String> = None;
+    let mut advance = |sent_at: &str| {
+        match candidate.as_deref() {
+            Some(current) if current >= sent_at => {}
+            _ => candidate = Some(sent_at.to_string()),
+        }
+    };
+
     for (id, sender_id, ciphertext, reply_to_id, target_id, sent_at, env_type) in envelopes {
         match env_type.as_str() {
             "message" => {
@@ -501,21 +510,26 @@ async fn persist_envelopes_locally(
                     rusqlite::params![id],
                     |_| Ok(true),
                 ).optional()?.unwrap_or(false);
-                if !exists {
-                    let ct_bytes = ciphertext.strip_prefix("mls:")
-                        .and_then(|h| hex::decode(h).ok());
-                    let plaintext = ct_bytes.as_ref()
-                        .and_then(|b| crate::commands::mls::try_mls_decrypt(db.conn(), mls_group_id, b))
-                        .and_then(|b| String::from_utf8(b).ok());
-                    if let (Some(text), Some(bytes)) = (plaintext, ct_bytes) {
-                        let _ = db.conn().execute(
-                            "INSERT OR IGNORE INTO message
-                             (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                            rusqlite::params![id, conversation_id, sender_id, bytes, text, reply_to_id, sent_at],
-                        );
-                    }
+                if exists {
+                    advance(sent_at);
+                    continue;
                 }
+                let ct_bytes = ciphertext.strip_prefix("mls:")
+                    .and_then(|h| hex::decode(h).ok());
+                let plaintext = ct_bytes.as_ref()
+                    .and_then(|b| crate::commands::mls::try_mls_decrypt(db.conn(), mls_group_id, b))
+                    .and_then(|b| String::from_utf8(b).ok());
+                if let (Some(text), Some(bytes)) = (plaintext, ct_bytes) {
+                    let _ = db.conn().execute(
+                        "INSERT OR IGNORE INTO message
+                         (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        rusqlite::params![id, conversation_id, sender_id, bytes, text, reply_to_id, sent_at],
+                    );
+                    advance(sent_at);
+                }
+                // Decrypt failed — leave the envelope in message_envelope for
+                // a future retry and do NOT advance the watermark past it.
             }
             "edit" => {
                 if let Some(tid) = target_id.as_ref() {
@@ -530,13 +544,14 @@ async fn persist_envelopes_locally(
                              WHERE id = ?3 AND deleted_at IS NULL",
                             rusqlite::params![text, now, tid],
                         );
+                        advance(sent_at);
                     }
                 }
             }
-            _ => {}
+            _ => {
+                advance(sent_at);
+            }
         }
-        // Always advance candidate — see doc comment.
-        candidate = Some(sent_at.clone());
     }
     Ok(candidate)
 }

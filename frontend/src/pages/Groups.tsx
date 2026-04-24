@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, Users, Plus, Search } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
@@ -45,6 +45,7 @@ export const GroupsPage: React.FC = () => {
         return {
           id: g.id,
           label: g.name,
+          icon: <Users size={14} />,
           description,
           action: () => {
             setSelectedGroupId(g.id);
@@ -68,6 +69,7 @@ export const GroupsPage: React.FC = () => {
     {
       id: "create-group",
       label: "Create Group",
+      icon: <Plus size={14} />,
       action: () => navigate({ to: "/groups/new" }),
       type: "system",
       testId: "menu-item-create-group",
@@ -75,6 +77,7 @@ export const GroupsPage: React.FC = () => {
     {
       id: "search-group",
       label: "Find Group",
+      icon: <Search size={14} />,
       action: () => navigate({ to: "/groups/search" }),
       type: "system",
       testId: "menu-item-find-group",
