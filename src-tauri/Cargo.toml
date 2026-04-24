@@ -4,6 +4,12 @@ version = "1.0.0"
 edition = "2021"
 rust-version = "1.77"
 default-run = "pollis"
+# Disable Cargo's auto-discovery of src/bin/*.rs and examples/*.rs. Stray
+# files in those directories (e.g. revived vestiges of removed binaries)
+# would otherwise be compiled and break CI. Declare any real bin/example
+# explicitly with [[bin]] / [[example]] below.
+autobins = false
+autoexamples = false
 
 [lib]
 name = "pollis_lib"
