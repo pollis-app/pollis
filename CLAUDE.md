@@ -153,15 +153,24 @@ website/                # Static HTML marketing site (Cloudflare Pages)
 
 ## Product Principles
 
-### Messages are not expected to live everywhere forever
+### Messages must work. History is bounded, not flaky.
 
-Message history is explicitly **not** a product guarantee. Messages may be ephemeral, device-local, and unavailable across device changes or identity resets. Do not design features (MLS enrollment, key rotation, recovery, new-device onboarding, storage schemas) around preserving long-lived message history. History sync/backup is at best an optional future feature, never a constraint.
+Sending and receiving messages is the entire point of the app. Messages must not silently fail, get dropped, or become undeliverable under normal conditions. "We don't guarantee history" is **not** a license for sends to break, fail, or go invisible to a recipient who is a current member of the conversation. If something you're building can cause a message to be lost, dropped, or undecryptable for someone who was in the conversation when the message was sent, that is a bug — fix it.
+
+The bounded-history principle means exactly two things, and nothing more:
+
+1. **Messages sent before you joined the MLS tree are not visible to you.** If you were added to a channel/DM at epoch N, you will never see messages sent at epochs < N. That's a cryptographic property of MLS and is acceptable.
+2. **New devices for an existing user don't inherit past messages.** If you add a second device, it starts empty. No history backup, no key-backup (no Megolm). Acceptable.
+
+Everything else — delivering a message to every current member, letting the recipient decrypt it, surviving a normal offline/online cycle, showing up after the recipient accepts a pending DM request, re-syncing after a reconnect — **must work**. Unless it is cryptographically impossible or infeasible, a user should be able to read their messages from any device where they are a current member.
+
+When designing: given the choice between "simpler model that silently drops messages" and "slightly more complex model that delivers them," **pick the one that delivers**. Simplicity stops being a virtue the moment it breaks the product's core job.
 
 Concrete implications:
-- A new device joining an existing group does not need to receive historical messages.
-- Rotating a user's identity / resetting their account may wipe all prior messages on all of their devices, and that is acceptable.
+- A new device joining an existing group does not need to receive historical messages from before it joined.
+- Rotating a user's identity / resetting their account may wipe prior messages on their devices, and that is acceptable.
 - Do not add encrypted key-backup systems (Megolm-style) unless explicitly asked.
-- Given the choice between "simpler model that loses messages" and "complex model that preserves history", pick simpler.
+- But: if a user is a member of a conversation and a message was sent at an epoch they were a member of, they **must** be able to read it. Engineer for that.
 
 ## Key Files
 
