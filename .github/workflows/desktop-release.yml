@@ -165,9 +165,19 @@ jobs:
       - name: Inject Windows signCommand into tauri.conf.json
         shell: bash
         run: |
-          CMD="\"$SIGNTOOL_PATH\" sign /v /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib \"$SIGNING_DLIB_PATH\" /dmdf \"$SIGN_METADATA_PATH\" %1"
-          jq --arg cmd "$CMD" '.bundle.windows = ((.bundle.windows // {}) + { signCommand: $cmd })' \
-            src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          # Object form avoids Tauri's naive whitespace-split on the string form,
+          # which would otherwise pass literal quotes through to CreateProcessW
+          # and trip ERROR_INVALID_NAME (os error 123) on Windows paths.
+          jq \
+            --arg cmd "$SIGNTOOL_PATH" \
+            --arg dlib "$SIGNING_DLIB_PATH" \
+            --arg meta "$SIGN_METADATA_PATH" \
+            '.bundle.windows = ((.bundle.windows // {}) + {
+              signCommand: {
+                cmd: $cmd,
+                args: ["sign","/v","/fd","SHA256","/tr","http://timestamp.acs.microsoft.com","/td","SHA256","/dlib",$dlib,"/dmdf",$meta,"%1"]
+              }
+            })' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
           echo "signCommand injected:"
           jq '.bundle.windows.signCommand' src-tauri/tauri.conf.json
 
