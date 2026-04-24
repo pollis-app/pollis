@@ -1,5 +1,6 @@
 pub mod account_identity;
 pub mod auth;
+pub mod pin;
 pub mod blocks;
 pub mod device_enrollment;
 pub mod user;
