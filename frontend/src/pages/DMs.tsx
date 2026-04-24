@@ -54,7 +54,6 @@ export const DMsPage: React.FC = () => {
         id: c.id,
         label: c.user2_identifier,
         icon: <Avatar avatarKey={c.user2_avatar_url} size={24} alt={`${c.user2_identifier} avatar`} testId={`dm-avatar-${c.id}`} />,
-        iconChip: false,
         description: <LastMessagePreview conversationId={c.id} />,
         action: () => {
           setSelectedConversationId(c.id);

@@ -9,9 +9,6 @@ export interface TerminalMenuItem {
   action?: () => void;
   disabled?: boolean;
   icon?: React.ReactNode;
-  // When true (default), the icon renders inside a rounded color chip. Opt out
-  // for icons that carry their own background (e.g. <Avatar>).
-  iconChip?: boolean;
   // "separator" renders a horizontal rule; "system" dims the item (for nav/action items vs content items)
   type?: "separator" | "system";
   testId?: string;
@@ -212,21 +209,9 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                   }}
                 >
                   {item.icon && (
-                    item.iconChip === false ? (
-                      <span className="flex-shrink-0" style={{ color: isSelected ? "var(--c-accent)" : "var(--c-text-dim)" }}>
-                        {item.icon}
-                      </span>
-                    ) : (
-                      <span
-                        className="flex-shrink-0 inline-flex items-center justify-center w-6 h-6 rounded"
-                        style={{
-                          background: isSelected ? "var(--c-accent)" : "var(--c-text-dim)",
-                          color: isSelected ? "var(--c-active)" : "var(--c-bg)",
-                        }}
-                      >
-                        {item.icon}
-                      </span>
-                    )
+                    <span className="flex-shrink-0" style={{ color: isSelected ? "var(--c-accent)" : "var(--c-text-dim)" }}>
+                      {item.icon}
+                    </span>
                   )}
                   <span>{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
