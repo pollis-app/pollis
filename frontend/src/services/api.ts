@@ -74,6 +74,17 @@ export async function unlockWithPin(userId: string, pin: string): Promise<void> 
   await invoke('unlock', { userId, pin });
 }
 
+/// Finalize an enrollment after the user has set their PIN. Idempotent
+/// for the fresh-signup case: publishes the device cert + a fresh MLS
+/// key package, then external-joins every group/DM the user is already
+/// a member of where this device has no local MLS state. Run from the
+/// pin-create completion handler so it covers the fresh signup, the
+/// device-approval enrollment, the Secret-Key recovery, and the
+/// identity-reset paths uniformly.
+export async function finalizeDeviceEnrollment(userId: string): Promise<void> {
+  await invoke('finalize_device_enrollment', { userId });
+}
+
 export async function lockUnlock(): Promise<void> {
   await invoke('lock');
 }

@@ -269,6 +269,17 @@ function MainApp() {
       const user = pendingPinUser;
       setPendingPinUser(null);
       setAppState("identity-setup");
+      // Run after set_pin (already done in PinCreateScreen) so the
+      // local DB is open and AppState.unlock carries the
+      // account_id_key. Idempotent for fresh signup; required for
+      // enrollment / Secret-Key recovery / identity-reset paths so
+      // the device cert is published and the device external-joins
+      // the user's existing groups + DMs.
+      try {
+        await api.finalizeDeviceEnrollment(user.id);
+      } catch (err) {
+        console.error("[App] finalizeDeviceEnrollment failed:", err);
+      }
       await completeSignIn(user);
     } else {
       setAppState("email-auth");
