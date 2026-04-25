@@ -6,6 +6,7 @@ import { useUserGroupsWithChannels, useAllGroupMembers, type GroupMemberWithGrou
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
 import type { GroupWithChannels } from "../services/api";
+import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -270,6 +271,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
       block: "nearest",
     });
   }, [selectedIndex]);
+
+  // Issue #176: when the highlighted result is a voice channel, warm the
+  // LiveKit connection so pressing Enter feels instant.
+  useEffect(() => {
+    const item = filteredItems[selectedIndex];
+    if (item && item.type === "voice") {
+      warmVoiceChannel(item.channelId);
+    }
+  }, [selectedIndex, filteredItems]);
 
   const handleSelect = useCallback(
     (item: SearchResultItem) => {

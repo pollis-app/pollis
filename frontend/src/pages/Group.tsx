@@ -6,6 +6,7 @@ import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
+import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 export const GroupPage: React.FC = () => {
   const navigate = useNavigate();
@@ -77,6 +78,9 @@ export const GroupPage: React.FC = () => {
       action: () => {
         navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId: ch.id } });
       },
+      // Selecting (hover or keyboard) a voice row signals intent to maybe
+      // join — pre-warm DNS/TLS to LiveKit so the actual Join is fast.
+      onSelect: () => warmVoiceChannel(ch.id),
       badge: count > 0 ? count : 0,
       testId: `channel-option-${ch.id}`,
     };
