@@ -31,7 +31,7 @@ export const Avatar: React.FC<AvatarProps> = ({
     alignItems: "center",
     justifyContent: "center",
     background: "var(--c-surface, var(--c-bg))",
-    border: isProfile ? "2px solid var(--c-border)" : "none",
+    border: isProfile ? "3px solid var(--c-accent)" : "none",
     flexShrink: 0,
   };
 
