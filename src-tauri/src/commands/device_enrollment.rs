@@ -475,7 +475,7 @@ pub async fn approve_device_enrollment(
     // 2. Load the approver's account_id_key and wrap it to the requester's
     //    ephemeral pub via ECDH + HKDF + AES-256-GCM.
     let signing_key =
-        crate::commands::account_identity::load_account_id_key(state.keystore.as_ref(), &user_id).await?;
+        crate::commands::account_identity::load_account_id_key(state.inner(), &user_id).await?;
     let account_id_private = signing_key.to_bytes();
 
     let wrapped = {

@@ -212,7 +212,7 @@ pub async fn verify_otp(
     // normal enrollment gate takes over.
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state.keystore.as_ref(),
+            state.inner(),
             &user_id,
             pub_bytes,
         )
@@ -220,7 +220,7 @@ pub async fn verify_otp(
         .unwrap_or(false);
         if !matches {
             if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(state.keystore.as_ref(), &user_id).await
+                crate::commands::account_identity::wipe_local_account_identity(state.inner(), &user_id).await
             {
                 eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
             }
@@ -252,7 +252,7 @@ pub async fn verify_otp(
     // Enrollment required when the user has an identity on the server but
     // this device doesn't hold a matching local copy of the account_id_key.
     let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state.keystore.as_ref(), &user_id)
+        && !crate::commands::account_identity::has_local_account_identity(state.inner(), &user_id)
             .await
             .unwrap_or(false);
 
@@ -419,7 +419,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
 
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state.keystore.as_ref(),
+            state.inner(),
             &profile.id,
             pub_bytes,
         )
@@ -428,7 +428,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
         if !matches {
             if let Err(e) =
                 crate::commands::account_identity::wipe_local_account_identity(
-                    state.keystore.as_ref(),
+                    state.inner(),
                     &profile.id,
                 ).await
             {
@@ -438,7 +438,7 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
     }
 
     let has_local_identity = crate::commands::account_identity::has_local_account_identity(
-        state.keystore.as_ref(),
+        state.inner(),
         &profile.id,
     )
     .await
@@ -481,7 +481,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     // the server's current account_id_pub.
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state.keystore.as_ref(),
+            state,
             &user_id,
             pub_bytes,
         )
@@ -489,7 +489,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
         .unwrap_or(false);
         if !matches {
             if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(state.keystore.as_ref(), &user_id).await
+                crate::commands::account_identity::wipe_local_account_identity(state, &user_id).await
             {
                 eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
             }
@@ -511,7 +511,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     };
 
     let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state.keystore.as_ref(), &user_id)
+        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
             .await
             .unwrap_or(false);
 
