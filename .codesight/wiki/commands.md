@@ -3,14 +3,21 @@
 All backend calls from the frontend use `invoke("command_name", { args })`. Commands are registered in `src-tauri/src/lib.rs` and implemented in `src-tauri/src/commands/`.
 
 ## auth (`commands/auth.rs`)
-- `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes
+- `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes. Requires the local DB to be open (post-`set_pin` / `unlock`).
 - `get_identity()` — check if MLS identity exists locally
 - `request_otp(email)` — send OTP code to email
-- `verify_otp(email, code)` → `AuthResult` — verify OTP, create session
-- `get_session()` → `AuthResult | null` — check for existing session
+- `verify_otp(email, code)` → `AuthResult` — verify OTP, register the device. Does **not** open the local DB; `set_pin` (signup) or `unlock` (resume) does.
+- `get_session()` → `AuthResult | null` — rebuild profile from `accounts.json`. Does not open the local DB.
 - `logout(delete_data)` — clear session, optionally delete local data
 - `delete_account(user_id)` — delete account from Turso + local
 - `wipe_local_data()` — delete all local databases and keystore entries
+
+## pin (`commands/pin.rs`)
+PIN is cryptographically load-bearing — see `pin-design.md`.
+- `set_pin(old_pin?, new_pin)` — initial-set sources from `AppState.unlock` (canonical) or the legacy plaintext keystore slots (upgrade fallback). Wraps both keys, deletes the legacy slots, opens the local DB via `load_user_db_with_key`, publishes the device cert.
+- `unlock(user_id, pin)` → `UnlockOutcome` — verify PIN, populate `AppState.unlock`, open the local DB, migrate away any #195-vintage legacy slots, publish the device cert.
+- `lock()` — drop `AppState.unlock` and close the local DB. Until the next `unlock`, every DB-touching command fails with "Not signed in".
+- `get_unlock_state()` → `{ last_active_user, is_unlocked, pin_set }` — frontend uses this to route between pin-entry, pin-create, and the main app.
 
 ## user (`commands/user.rs`)
 - `get_user_profile(user_id)` → `User`
@@ -71,12 +78,15 @@ All backend calls from the frontend use `invoke("command_name", { args })`. Comm
 - `generate_mls_key_package(user_id)` → JSON
 
 ## device_enrollment (`commands/device_enrollment.rs`)
+Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key recovery, identity reset) hands the bytes to `AppState.unlock` — never to the keystore unwrapped. The frontend then routes to pin-create; `set_pin` wraps under the user's PIN and opens the local DB.
 - `start_device_enrollment(user_id)` → `EnrollmentHandle`
-- `poll_enrollment_status(request_id)` → `EnrollmentStatus`
+- `poll_enrollment_status(request_id)` → `EnrollmentStatus`. On `Approved`, populates `AppState.unlock`; defers cert / KP / external-join to `finalize_device_enrollment`.
 - `approve_device_enrollment(request_id, user_id, verification_code)`
 - `reject_device_enrollment(request_id, user_id)`
 - `list_pending_enrollment_requests(user_id)` → `PendingEnrollmentRequest[]`
-- `recover_with_secret_key(user_id, secret_key)`
+- `recover_with_secret_key(user_id, secret_key)` — same handoff pattern as the approval path.
+- `reset_identity_and_recover(user_id, email)` — soft recovery; `reset_identity` populates `AppState.unlock` with the new keypair before this command's local-DB cleanup runs.
+- `finalize_device_enrollment(user_id)` — call after `set_pin` completes. Publishes the device cert + a fresh MLS key package, then external-joins every existing group / DM the device isn't in yet. Idempotent for fresh signup.
 - `list_user_devices(user_id)` → `DeviceInfo[]`
 - `reset_identity(user_id)` → new secret key
 
