@@ -26,9 +26,13 @@ use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
+use crate::commands::pin::UnlockState;
 use crate::error::{Error, Result};
 use crate::state::AppState;
+
+const DB_KEY_LEN: usize = 32;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -184,7 +188,14 @@ pub fn unwrap_recovery_blob(
 /// Generate a fresh account identity for `user_id`. Writes:
 ///   - `users.account_id_pub` and `users.identity_version = 1`
 ///   - a new row in `account_recovery`
-///   - the private key into this device's OS keystore
+///   - the private key + a freshly generated `db_key` into
+///     `AppState.unlock` (NOT the keystore — the only on-disk copy is
+///     the server-side `account_recovery` blob, which is wrapped under
+///     the Secret Key).
+///
+/// `set_pin` is the next step the frontend takes; it reads from
+/// `AppState.unlock` and writes the PIN-wrapped slots, at which point
+/// the keys exist on disk only as ciphertext.
 ///
 /// Returns the formatted Secret Key to show the user exactly once.
 /// Caller is responsible for ensuring the user has no existing identity
@@ -209,8 +220,6 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
-    state.keystore.store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
-
     let conn = state.remote_db.conn().await?;
 
     conn.execute(
@@ -232,7 +241,26 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     )
     .await?;
 
+    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
+
     Ok(secret_key_display)
+}
+
+/// Build an `UnlockState` carrying the supplied account identity
+/// private key plus a freshly generated `db_key`. Used by every "we
+/// just produced raw key material and have no PIN yet" path:
+/// fresh signup, identity reset, and device-enrollment unwrap.
+pub(crate) fn unlock_state_with_fresh_db_key(
+    user_id: &str,
+    account_id_private: &[u8],
+) -> UnlockState {
+    let mut db_key = vec![0u8; DB_KEY_LEN];
+    OsRng.fill_bytes(&mut db_key);
+    UnlockState {
+        user_id: user_id.to_string(),
+        db_key: Zeroizing::new(db_key),
+        account_id_key: Zeroizing::new(account_id_private.to_vec()),
+    }
 }
 
 /// Keystore slot for the PIN-wrapped copy of the account identity key.
@@ -440,10 +468,10 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     )
     .await?;
 
-    // 4. Install the new private key in this device's OS keystore
-    //    immediately so the calling device is enrolled under the new
-    //    identity.
-    state.keystore.store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
+    // 4. Install the new private key in AppState.unlock so the calling
+    //    device is enrolled under the new identity. The bytes never
+    //    touch the keystore unwrapped — set_pin will wrap them.
+    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
 
     // 5. Record the reset in the security log. Best-effort only.
     let event_id = ulid::Ulid::new().to_string();
