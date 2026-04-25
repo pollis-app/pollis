@@ -20,6 +20,61 @@ json_field() {
     echo "$1" | grep -o "\"$2\":[[:space:]]*\"[^\"]*\"" | sed 's/.*":[[:space:]]*"\(.*\)"/\1/'
 }
 
+# Remove artifacts from previous install.sh runs. Preserves user data
+# (databases, accounts.json, keystore) under ~/.local/share/pollis/.
+cleanup_local_install() {
+    local removed=0
+    local target
+    for target in \
+        "$HOME/.local/bin/pollis" \
+        "$HOME/.local/share/pollis/pollis.AppImage" \
+        "$HOME/.local/share/applications/pollis.desktop"
+    do
+        if [[ -e "$target" ]]; then
+            rm -f "$target"
+            removed=1
+        fi
+    done
+    if [[ $removed -eq 1 ]]; then
+        info "Removed leftover files from a previous install (user data preserved)."
+    fi
+}
+
+uninstall_linux() {
+    info "Uninstalling Pollis..."
+    if command -v dpkg >/dev/null 2>&1 && dpkg -l pollis >/dev/null 2>&1; then
+        sudo dpkg -r pollis || true
+    fi
+    if command -v rpm >/dev/null 2>&1 && rpm -q pollis >/dev/null 2>&1; then
+        if command -v dnf >/dev/null 2>&1; then
+            sudo dnf remove -y pollis || true
+        else
+            sudo yum remove -y pollis || true
+        fi
+    fi
+    cleanup_local_install
+    success "Pollis uninstalled. User data preserved at ~/.local/share/pollis/."
+}
+
+uninstall_macos() {
+    info "Uninstalling Pollis..."
+    if [[ -d "/Applications/$APP_NAME.app" ]]; then
+        if ! rm -rf "/Applications/$APP_NAME.app" 2>/dev/null; then
+            sudo rm -rf "/Applications/$APP_NAME.app"
+        fi
+    fi
+    success "Pollis uninstalled."
+}
+
+if [[ "${1:-}" == "uninstall" ]]; then
+    case "$(uname -s)" in
+        Darwin) uninstall_macos ;;
+        Linux)  uninstall_linux ;;
+        *)      error "Unsupported OS: $(uname -s)." ;;
+    esac
+    exit 0
+fi
+
 info "Fetching latest release info..."
 LATEST=$(curl -fsSL "$LATEST_URL") || error "Could not reach $LATEST_URL"
 VERSION=$(json_field "$LATEST" "version")
@@ -72,6 +127,8 @@ install_linux_deb() {
     tmpdir=$(mktemp -d)
     deb_path="$tmpdir/pollis.deb"
 
+    cleanup_local_install
+
     info "Downloading $APP_NAME $VERSION (.deb)..."
     curl -fsSL --progress-bar "$deb_url" -o "$deb_path"
 
@@ -92,6 +149,8 @@ install_linux_rpm() {
     local tmpdir rpm_path
     tmpdir=$(mktemp -d)
     rpm_path="$tmpdir/pollis.rpm"
+
+    cleanup_local_install
 
     info "Downloading $APP_NAME $VERSION (.rpm)..."
     curl -fsSL --progress-bar "$rpm_url" -o "$rpm_path"

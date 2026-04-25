@@ -59,6 +59,9 @@
           "libpulse.so.0()(64bit)",
           "libdbus-1.so.3()(64bit)"
         ]
+      },
+      "appimage": {
+        "bundleMediaFramework": true
       }
     },
     "createUpdaterArtifacts": true
