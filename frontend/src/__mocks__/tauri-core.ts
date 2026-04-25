@@ -101,6 +101,7 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       return null;
 
     case 'initialize_identity':
+    case 'finalize_device_enrollment':
       return null;
 
     case 'get_user_profile': {

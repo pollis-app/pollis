@@ -29,6 +29,10 @@ use tauri::{App, WebviewWindow};
 use tokio::sync::OnceCell;
 
 const DEV_OTP: &str = "000000";
+/// Fixed PIN used by `TestClient::sign_up` so every harness client
+/// has its DB open after signup. Real users get four random digits;
+/// the test value is just a constant.
+const TEST_PIN: &str = "0000";
 
 // ─── World ──────────────────────────────────────────────────────────────────
 
@@ -125,8 +129,14 @@ impl TestClient {
     }
 
     /// First-device signup via the real OTP flow (bypassed by `DEV_OTP`).
-    /// Populates `self.profile` and warms the local DB so downstream commands
-    /// work. Returns the final profile.
+    /// Populates `self.profile`, sets a fixed test PIN ("0000") so the
+    /// local SQLCipher DB opens, and runs `initialize_identity` to
+    /// publish the device's MLS key package. Returns the final profile.
+    ///
+    /// PIN is required: post-#194, `verify_otp` deliberately leaves the
+    /// local DB closed; `set_pin` is what calls `load_user_db_with_key`.
+    /// Skipping it would make every DB-touching command in the test
+    /// harness fail with "Not signed in".
     async fn sign_up(&mut self, email: &str) -> UserProfile {
         invoke::<()>(&self.webview, "request_otp", json!({ "email": email }))
             .await
@@ -139,6 +149,14 @@ impl TestClient {
         )
         .await
         .unwrap_or_else(|e| panic!("verify_otp({email}): {e}"));
+
+        invoke::<()>(
+            &self.webview,
+            "set_pin",
+            json!({ "newPin": TEST_PIN, "oldPin": null }),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("set_pin({TEST_PIN}): {e}"));
 
         invoke::<serde_json::Value>(
             &self.webview,
@@ -1862,7 +1880,36 @@ async fn enroll_second_device(primary: &TestClient, email: &str) -> TestClient {
     }
     assert_eq!(status, "approved", "enrollment should end in 'approved'");
 
-    // 5. Sanity: remote now lists two devices for this user.
+    // 5. Post-#194: poll_enrollment_status now hands the unwrapped
+    //    account_id_key to AppState.unlock instead of writing it raw,
+    //    and defers finalize_enrollment. The test must mirror what
+    //    App.tsx does after pin-create completes:
+    //       set_pin → finalize_device_enrollment → initialize_identity.
+    invoke::<()>(
+        &new_client.webview,
+        "set_pin",
+        json!({ "newPin": TEST_PIN, "oldPin": null }),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("set_pin on enrolled device: {e}"));
+
+    invoke::<()>(
+        &new_client.webview,
+        "finalize_device_enrollment",
+        json!({ "userId": profile.id }),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("finalize_device_enrollment: {e}"));
+
+    invoke::<serde_json::Value>(
+        &new_client.webview,
+        "initialize_identity",
+        json!({ "userId": profile.id }),
+    )
+    .await
+    .unwrap_or_else(|e| panic!("initialize_identity on enrolled device: {e}"));
+
+    // 6. Sanity: remote now lists two devices for this user.
     let devices: serde_json::Value = new_client
         .invoke_json(
             "list_user_devices",
@@ -2441,9 +2488,11 @@ async fn user_block_lifecycle() {
 
 /// set_pin → lock → unlock roundtrip against the real command pipeline.
 ///
-/// Also asserts that the legacy `session_{uid}` blob written by the
-/// pre-PIN `verify_otp` path is removed once a PIN is set — one of the
-/// concrete sources of issue #184 bouncing users back to OTP.
+/// `TestClient::sign_up` already calls `set_pin(TEST_PIN)` so the local
+/// DB opens. This test focuses on the lock/unlock half of the cycle:
+/// asserts the wrapped blobs and pin_meta are present, the legacy
+/// session blob is gone, lock drops unlock state, wrong PIN fails,
+/// correct PIN restores access.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn pin_set_lock_unlock_roundtrip() {
@@ -2453,62 +2502,23 @@ async fn pin_set_lock_unlock_roundtrip() {
     let profile = alice.sign_up("alice@test.local").await;
     let uid = profile.id.clone();
 
-    // Session blob is gone post-stage-6: verify_otp no longer writes it.
-    assert!(
-        alice
-            .state
-            .keystore
-            .load_for_user("session", &uid)
-            .await
-            .unwrap()
-            .is_none(),
-        "verify_otp must not write the legacy session blob"
-    );
-
-    // Before set_pin, nothing is unlocked and no PIN is set.
-    let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
-    assert_eq!(snap["is_unlocked"], false);
-    assert_eq!(snap["pin_set"], false);
-    assert_eq!(snap["last_active_user"], uid);
-
-    // Initial set. `oldPin` omitted.
-    invoke::<()>(&alice.webview, "set_pin", json!({ "newPin": "4321" }))
-        .await
-        .expect("set_pin");
-
-    // set_pin populates AppState.unlock, so we're unlocked without a
-    // separate unlock call. pin_meta exists. Legacy session is gone.
+    // sign_up's set_pin populated AppState.unlock and persisted the
+    // wrapped blobs. Legacy session blob never written; legacy
+    // unwrapped slots deleted (load-bearing post-#194).
     let snap: serde_json::Value = alice.invoke_json("get_unlock_state", json!({})).await;
     assert_eq!(snap["is_unlocked"], true);
     assert_eq!(snap["pin_set"], true);
-    assert!(
-        alice
-            .state
-            .keystore
-            .load_for_user("session", &uid)
-            .await
-            .unwrap()
-            .is_none(),
-        "set_pin should drop the legacy session blob"
-    );
-    assert!(
-        alice
-            .state
-            .keystore
-            .load_for_user("pin_meta", &uid)
-            .await
-            .unwrap()
-            .is_some()
-    );
-    assert!(
-        alice
-            .state
-            .keystore
-            .load_for_user("db_key_wrapped", &uid)
-            .await
-            .unwrap()
-            .is_some()
-    );
+    assert_eq!(snap["last_active_user"], uid);
+
+    let ks = alice.state.keystore.as_ref();
+    assert!(ks.load_for_user("session", &uid).await.unwrap().is_none());
+    assert!(ks.load_for_user("db_key", &uid).await.unwrap().is_none(),
+        "legacy db_key slot must be deleted post-set_pin");
+    assert!(ks.load_for_user("account_id_key", &uid).await.unwrap().is_none(),
+        "legacy account_id_key slot must be deleted post-set_pin");
+    assert!(ks.load_for_user("pin_meta", &uid).await.unwrap().is_some());
+    assert!(ks.load_for_user("db_key_wrapped", &uid).await.unwrap().is_some());
+    assert!(ks.load_for_user("account_id_key_wrapped", &uid).await.unwrap().is_some());
 
     // Lock → not unlocked, pin_set still true.
     invoke::<()>(&alice.webview, "lock", json!({})).await.expect("lock");
@@ -2520,7 +2530,7 @@ async fn pin_set_lock_unlock_roundtrip() {
     let err = invoke::<serde_json::Value>(
         &alice.webview,
         "unlock",
-        json!({ "userId": uid, "pin": "0000" }),
+        json!({ "userId": uid, "pin": "9999" }),
     )
     .await
     .expect_err("wrong PIN must fail");
@@ -2533,7 +2543,7 @@ async fn pin_set_lock_unlock_roundtrip() {
     let outcome: serde_json::Value = invoke(
         &alice.webview,
         "unlock",
-        json!({ "userId": uid, "pin": "4321" }),
+        json!({ "userId": uid, "pin": TEST_PIN }),
     )
     .await
     .expect("unlock with correct PIN");
@@ -2555,15 +2565,11 @@ async fn pin_change_roundtrip() {
     let profile = alice.sign_up("alice@test.local").await;
     let uid = profile.id.clone();
 
-    invoke::<()>(&alice.webview, "set_pin", json!({ "newPin": "1111" }))
-        .await
-        .expect("initial set_pin");
-
-    // Change: old=1111 → new=2222.
+    // sign_up set TEST_PIN. Change to 2222.
     invoke::<()>(
         &alice.webview,
         "set_pin",
-        json!({ "oldPin": "1111", "newPin": "2222" }),
+        json!({ "oldPin": TEST_PIN, "newPin": "2222" }),
     )
     .await
     .expect("change set_pin");
@@ -2574,7 +2580,7 @@ async fn pin_change_roundtrip() {
     let err = invoke::<serde_json::Value>(
         &alice.webview,
         "unlock",
-        json!({ "userId": uid, "pin": "1111" }),
+        json!({ "userId": uid, "pin": TEST_PIN }),
     )
     .await
     .expect_err("old PIN must fail after change");
@@ -2588,6 +2594,147 @@ async fn pin_change_roundtrip() {
     )
     .await
     .expect("new PIN must unlock");
+
+    drop(alice);
+}
+
+/// Lock closes the local DB. With the DB closed, DB-touching commands
+/// fail until unlock re-opens it. This is the load-bearing property:
+/// the PIN isn't merely a UI gate, it gates SQLCipher decryption.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn pin_locks_db_access() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let uid = profile.id.clone();
+
+    // Sanity: signed in, DB open, list_messages returns Ok (empty
+    // is fine — we just need a command that touches local_db).
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "list_messages",
+        json!({ "conversationId": "nonexistent" }),
+    )
+    .await
+    .expect("list_messages before lock");
+
+    invoke::<()>(&alice.webview, "lock", json!({})).await.expect("lock");
+
+    // After lock, the DB handle is dropped — list_messages must fail.
+    let err = invoke::<serde_json::Value>(
+        &alice.webview,
+        "list_messages",
+        json!({ "conversationId": "nonexistent" }),
+    )
+    .await
+    .expect_err("list_messages must fail while locked");
+    let err_lower = err.to_lowercase();
+    assert!(
+        err_lower.contains("not signed in")
+            || err_lower.contains("locked")
+            || err_lower.contains("database"),
+        "expected DB-closed error, got: {err}"
+    );
+
+    // Correct PIN reopens.
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": uid, "pin": TEST_PIN }),
+    )
+    .await
+    .expect("unlock with correct PIN");
+
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "list_messages",
+        json!({ "conversationId": "nonexistent" }),
+    )
+    .await
+    .expect("list_messages after unlock");
+
+    drop(alice);
+}
+
+/// Wrong PIN must NOT open the local DB. The wrapped blobs stay
+/// untouched, AppState.unlock stays empty, and DB-touching commands
+/// continue to fail.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn wrong_pin_keeps_db_locked() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let uid = profile.id.clone();
+
+    invoke::<()>(&alice.webview, "lock", json!({})).await.expect("lock");
+
+    // Capture the wrapped blobs before any failed unlock attempts.
+    let ks = alice.state.keystore.clone();
+    let wrapped_db_before = ks
+        .load_for_user("db_key_wrapped", &uid)
+        .await
+        .unwrap()
+        .expect("wrapped db_key present after sign_up");
+    let wrapped_aik_before = ks
+        .load_for_user("account_id_key_wrapped", &uid)
+        .await
+        .unwrap()
+        .expect("wrapped account_id_key present after sign_up");
+
+    // Wrong PIN.
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": uid, "pin": "9999" }),
+    )
+    .await
+    .expect_err("wrong PIN must fail");
+
+    // DB still closed — list_messages must still fail.
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "list_messages",
+        json!({ "conversationId": "nonexistent" }),
+    )
+    .await
+    .expect_err("list_messages must fail after wrong PIN");
+
+    // Wrapped blobs untouched (only the failed_attempts counter inside
+    // pin_meta should have changed; the key blobs themselves are
+    // immutable until set_pin or lockout-nuke).
+    let wrapped_db_after = ks
+        .load_for_user("db_key_wrapped", &uid)
+        .await
+        .unwrap()
+        .expect("wrapped db_key still present");
+    let wrapped_aik_after = ks
+        .load_for_user("account_id_key_wrapped", &uid)
+        .await
+        .unwrap()
+        .expect("wrapped account_id_key still present");
+    assert_eq!(wrapped_db_before, wrapped_db_after);
+    assert_eq!(wrapped_aik_before, wrapped_aik_after);
+
+    // Correct PIN still opens it.
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "unlock",
+        json!({ "userId": uid, "pin": TEST_PIN }),
+    )
+    .await
+    .expect("correct PIN must succeed after a wrong attempt");
+
+    invoke::<serde_json::Value>(
+        &alice.webview,
+        "list_messages",
+        json!({ "conversationId": "nonexistent" }),
+    )
+    .await
+    .expect("list_messages after unlock");
 
     drop(alice);
 }

@@ -212,7 +212,7 @@ pub async fn verify_otp(
     // normal enrollment gate takes over.
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state.keystore.as_ref(),
+            state.inner(),
             &user_id,
             pub_bytes,
         )
@@ -220,7 +220,7 @@ pub async fn verify_otp(
         .unwrap_or(false);
         if !matches {
             if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(state.keystore.as_ref(), &user_id).await
+                crate::commands::account_identity::wipe_local_account_identity(state.inner(), &user_id).await
             {
                 eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
             }
@@ -252,7 +252,7 @@ pub async fn verify_otp(
     // Enrollment required when the user has an identity on the server but
     // this device doesn't hold a matching local copy of the account_id_key.
     let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state.keystore.as_ref(), &user_id)
+        && !crate::commands::account_identity::has_local_account_identity(state.inner(), &user_id)
             .await
             .unwrap_or(false);
 
@@ -267,7 +267,11 @@ pub async fn verify_otp(
     // accounts.json is the durable record of "who has signed in on
     // this device" — the prior `session_{uid}` keystore blob was a
     // redundant second source of truth and a flaky one (issue #184).
-    state.load_user_db(&profile.id).await?;
+    //
+    // The local DB is NOT opened here — set_pin (or unlock, on a
+    // returning device) opens it via load_user_db_with_key under the
+    // PIN-gated db_key. Until then, AppState.local_db is None and
+    // any DB-touching command fails fast.
     register_device(state.inner(), &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
 
@@ -372,22 +376,22 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
         }
     }
 
-    // Open the per-user local database.
-    if let Err(e) = state.load_user_db(&profile.id).await {
-        eprintln!("[session] load_user_db failed for user {} ({e}) — bouncing to login", profile.id);
-        return Err(e);
-    }
+    // The local DB is NOT opened here. The frontend's next call is
+    // get_unlock_state; if pin_set && !is_unlocked it routes to the
+    // PIN entry screen, where unlock opens the DB under the
+    // unwrapped db_key. The orphan recompute (was here before #194)
+    // moves with it — has_matching_local_account_identity can't
+    // verify against a still-locked key anyway.
     if let Err(e) = register_device(state.inner(), &profile.id).await {
         eprintln!("[session] register_device failed for user {} ({e}) — bouncing to login", profile.id);
         return Err(e);
     }
 
-    // Recompute enrollment_required. Two reasons the device might need
-    // enrollment:
-    //   (a) server has an account_id_pub but this device has no local key
-    //   (b) server's pub doesn't match the local key — orphaned by a
-    //       soft-recovery reset on another device
-    // In case (b) we wipe the stale local key so the gate path is clean.
+    // Conservative: if the wrapped slot is absent AND no plaintext
+    // copy exists, this device is orphaned/unenrolled. has_local_
+    // account_identity returns true for the wrapped-only (locked)
+    // case, so we don't false-positive an enrollment gate just
+    // because the user hasn't entered their PIN yet.
     let remote_pub: Option<Vec<u8>> = match state.remote_db.conn().await {
         Ok(conn) => {
             match conn
@@ -417,28 +421,8 @@ pub async fn get_session(state: State<'_, Arc<AppState>>) -> Result<Option<UserP
         }
     };
 
-    if let Some(ref pub_bytes) = remote_pub {
-        let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state.keystore.as_ref(),
-            &profile.id,
-            pub_bytes,
-        )
-        .await
-        .unwrap_or(false);
-        if !matches {
-            if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(
-                    state.keystore.as_ref(),
-                    &profile.id,
-                ).await
-            {
-                eprintln!("[session] wipe_local_account_identity (non-fatal): {e}");
-            }
-        }
-    }
-
     let has_local_identity = crate::commands::account_identity::has_local_account_identity(
-        state.keystore.as_ref(),
+        state.inner(),
         &profile.id,
     )
     .await
@@ -481,7 +465,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     // the server's current account_id_pub.
     if let Some(ref pub_bytes) = remote_pub {
         let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state.keystore.as_ref(),
+            state,
             &user_id,
             pub_bytes,
         )
@@ -489,7 +473,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
         .unwrap_or(false);
         if !matches {
             if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(state.keystore.as_ref(), &user_id).await
+                crate::commands::account_identity::wipe_local_account_identity(state, &user_id).await
             {
                 eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
             }
@@ -511,7 +495,7 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
     };
 
     let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state.keystore.as_ref(), &user_id)
+        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
             .await
             .unwrap_or(false);
 
@@ -523,7 +507,6 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
         enrollment_required,
     };
 
-    state.load_user_db(&profile.id).await?;
     register_device(state, &profile.id).await?;
     crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
     Ok(profile)
@@ -582,12 +565,11 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
     *state.device_id.lock().await = Some(device_id.clone());
     eprintln!("[auth] device registered: {device_id}");
 
-    // Publish the device cross-signing cert so any client that reads this
-    // row can verify this device belongs to the user. No-op if the device
-    // doesn't yet hold the account identity key (pre-enrollment state).
-    if let Err(e) = crate::commands::mls::ensure_device_cert(state, user_id, &device_id).await {
-        eprintln!("[auth] ensure_device_cert failed (non-fatal): {e}");
-    }
+    // Device-cert publish moved out of register_device. It needs the
+    // unwrapped account_id_key, which post-#194 lives in AppState.unlock
+    // and isn't populated until set_pin / unlock runs. set_pin and
+    // unlock both invoke ensure_device_cert as part of the same
+    // roundtrip so the cert lands at the natural moment.
 
     Ok(device_id)
 }

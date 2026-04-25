@@ -1,5 +1,21 @@
 # PIN and Session Cleanup
 
+## Status
+
+- **#184** (merged) — accounts.json is crash-safe; legacy `identity_key_*` slots removed; `session_{uid}` blob deleted; `get_session` rebuilds from accounts.json.
+- **#195** (merged) — PIN wrap/unwrap primitives, `set_pin` / `unlock` / `lock` / `get_unlock_state`, PIN screens, `AppState.unlock` populated. PIN was a UX gate at this stage — keys still also lived plaintext in the keystore.
+- **#194** (this branch) — PIN is now load-bearing. `db_key` and `account_id_key` exist on disk only as ciphertext in `*_wrapped_{uid}` slots. The local SQLCipher DB cannot open until `AppState.unlock` is populated, which only happens after `set_pin` (initial), `unlock` (correct PIN), or a fresh signup / enrollment unwrap that hands raw bytes directly to `unlock` without ever writing them to the keystore.
+
+The rest of this document is the design note that drove the work — kept for context, not authoritative on the final shape. Where implementation diverges, the code wins. Notable divergences:
+
+- `verify_otp` does not return `pin_required_to_complete_signup`; the frontend reads `get_unlock_state` to decide between pin-create and pin-entry.
+- A new Tauri command, `finalize_device_enrollment`, runs the cert / key-package / external-join work after `set_pin` completes (formerly bundled into the enrollment commands themselves).
+- The "we just produced raw key material and have no PIN yet" handoff goes through `account_identity::unlock_state_with_fresh_db_key`, which generates a fresh `db_key` alongside the account_id_key and replaces `AppState.unlock`. `set_pin` reads from there instead of the legacy keystore slots (which remain only as a migration fallback for upgraders coming from a pre-PIN build).
+
+---
+
+## Original design note
+
 Working design note. Not for commit. Iterate freely.
 
 ## Problem statement

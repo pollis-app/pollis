@@ -307,15 +307,23 @@ pub struct UnlockStateSnapshot {
 
 /// Set the PIN for the currently-active user.
 ///
-/// * If `old_pin` is `None`, this is first-time setup: we look up the
-///   user's existing unwrapped `db_key_{uid}` / `account_id_key_{uid}`
-///   from the keystore (creating a fresh `db_key` if none exists, same
-///   policy as `AppState::load_user_db`) and wrap them under the new
-///   PIN.
-/// * If `old_pin` is `Some`, we unwrap with the old PIN and re-wrap
-///   under the new one. The write is atomic from the caller's point of
-///   view — wrapped blobs only hit the keystore after both unwraps and
-///   both new wraps succeed.
+/// * If `old_pin` is `None`, this is first-time setup. The raw key
+///   material to wrap is sourced in priority order from:
+///     1. `AppState.unlock` — populated by `verify_otp` /
+///        `generate_account_identity`, by `reset_identity`, or by an
+///        enrollment unwrap (the canonical path).
+///     2. Legacy `db_key_{uid}` / `account_id_key_{uid}` keystore
+///        slots — pre-PIN builds. Read once, then deleted after the
+///        wrap succeeds.
+/// * If `old_pin` is `Some`, this is the change-PIN flow: unwrap with
+///   the old PIN, rewrap under the new one.
+///
+/// On success: writes the three PIN-protected blobs (`pin_meta`,
+/// `db_key_wrapped`, `account_id_key_wrapped`), deletes the legacy
+/// unwrapped slots, populates `AppState.unlock`, and opens the local
+/// SQLCipher DB under the same `db_key`. Best-effort `ensure_device_cert`
+/// follows so a fresh signup publishes its cert as part of the same
+/// roundtrip.
 #[tauri::command]
 pub async fn set_pin(
     state: State<'_, Arc<AppState>>,
@@ -331,46 +339,15 @@ pub async fn set_pin(
 
     let keystore = state.keystore.as_ref();
 
-    // Source the raw bytes we're about to wrap.
     let (db_key, account_id_key): (Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>) = match old_pin {
         Some(ref old) => {
             validate_pin(old)?;
-            // Change path: unwrap with old PIN, rewrap under new PIN.
             let unlocked = unlock_inner(keystore, &user_id, old).await?;
             (unlocked.db_key, unlocked.account_id_key)
         }
-        None => {
-            // Initial-set path: the user's keys currently live at the
-            // legacy unwrapped slots. Load or generate `db_key`, and
-            // require an `account_id_key` to exist.
-            let db_key = match keystore
-                .load_for_user(DB_KEY_SLOT_LEGACY, &user_id)
-                .await?
-            {
-                Some(k) => Zeroizing::new(k),
-                None => {
-                    let mut k = vec![0u8; 32];
-                    rand::rngs::OsRng.fill_bytes(&mut k);
-                    keystore
-                        .store_for_user(DB_KEY_SLOT_LEGACY, &user_id, &k)
-                        .await?;
-                    Zeroizing::new(k)
-                }
-            };
-            let account_id_key = keystore
-                .load_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, &user_id)
-                .await?
-                .map(Zeroizing::new)
-                .ok_or_else(|| {
-                    Error::Other(anyhow::anyhow!(
-                        "account_id_key missing; initialize_identity must run before set_pin"
-                    ))
-                })?;
-            (db_key, account_id_key)
-        }
+        None => source_initial_keys(state.inner(), &user_id).await?,
     };
 
-    // Fresh salt + nonce on every (re)wrap.
     let mut salt = [0u8; SALT_LEN];
     rand::rngs::OsRng.fill_bytes(&mut salt);
     let kek = derive_kek(
@@ -381,8 +358,8 @@ pub async fn set_pin(
         ARGON2_P_COST,
     )?;
 
-    // Verifier blob: encrypt a fixed plaintext so we can reject wrong
-    // PINs without unwrapping the big keys.
+    // Verifier blob: encrypt a fixed plaintext so wrong-PIN rejection
+    // doesn't have to unwrap the big keys.
     let verifier_nonce_raw = XChaCha20Poly1305::generate_nonce(&mut AeadOsRng);
     let verifier_nonce: [u8; 24] = verifier_nonce_raw.into();
     let verifier_cipher = XChaCha20Poly1305::new((&*kek).into());
@@ -415,25 +392,73 @@ pub async fn set_pin(
         .await?;
     store_pin_meta(keystore, &user_id, &meta).await?;
 
-    // Initial-set path only: clean up the legacy `session_{uid}` blob
-    // left behind by a pre-PIN build on this device. Current
-    // `verify_otp` doesn't write it anymore, but an upgrader's keychain
-    // may still carry one from before the rollout.
+    // The wrapped blobs are now durable. Delete every plaintext slot
+    // we know about — legacy db_key, legacy account_id_key, legacy
+    // session blob. Idempotent for the unlock-sourced path.
+    let _ = keystore
+        .delete_for_user(DB_KEY_SLOT_LEGACY, &user_id)
+        .await;
+    let _ = keystore
+        .delete_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, &user_id)
+        .await;
     if old_pin.is_none() {
         let _ = keystore
             .delete_for_user(SESSION_SLOT_LEGACY, &user_id)
             .await;
     }
 
-    // Seed AppState.unlock so the caller doesn't have to re-enter the
-    // PIN they literally just set.
     *state.unlock.lock().await = Some(UnlockState {
         user_id: user_id.clone(),
-        db_key,
+        db_key: db_key.clone(),
         account_id_key,
     });
 
+    state.load_user_db_with_key(&user_id, &db_key).await?;
+
+    if let Some(device_id) = state.device_id.lock().await.clone() {
+        if let Err(e) =
+            crate::commands::mls::ensure_device_cert(state.inner(), &user_id, &device_id).await
+        {
+            eprintln!("[pin] set_pin: ensure_device_cert failed (non-fatal): {e}");
+        }
+    }
+
     Ok(())
+}
+
+/// Source the raw `(db_key, account_id_key)` for the initial-set path.
+///
+/// Tier 1: `AppState.unlock` is the canonical post-#194 source. Fresh
+/// signup, identity reset, and device enrollment all populate it.
+///
+/// Tier 2: legacy plaintext keystore slots from a pre-PIN build. Read
+/// the bytes here so the wrap step works; `set_pin` deletes the slots
+/// after the wrap succeeds.
+async fn source_initial_keys(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<(Zeroizing<Vec<u8>>, Zeroizing<Vec<u8>>)> {
+    {
+        let guard = state.unlock.lock().await;
+        if let Some(u) = guard.as_ref() {
+            if u.user_id == user_id {
+                return Ok((u.db_key.clone(), u.account_id_key.clone()));
+            }
+        }
+    }
+
+    let keystore = state.keystore.as_ref();
+    let legacy_db_key = keystore.load_for_user(DB_KEY_SLOT_LEGACY, user_id).await?;
+    let legacy_account_id_key = keystore
+        .load_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, user_id)
+        .await?;
+
+    match (legacy_db_key, legacy_account_id_key) {
+        (Some(dk), Some(aik)) => Ok((Zeroizing::new(dk), Zeroizing::new(aik))),
+        _ => Err(Error::Other(anyhow::anyhow!(
+            "no key material to wrap; sign in again"
+        ))),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -442,10 +467,15 @@ pub struct UnlockOutcome {
     pub attempts_remaining: Option<u32>,
 }
 
-/// Verify a PIN and populate `AppState.unlock`.
+/// Verify a PIN, populate `AppState.unlock`, open the local DB.
 ///
-/// Returns the user_id that was unlocked. The frontend then calls the
-/// existing identity / session commands the same way it did before.
+/// Side effects on success:
+/// - Drops any legacy plaintext keystore slots left behind by a #195-
+///   vintage build (where `set_pin` wrote the wrapped form but didn't
+///   delete the unwrapped originals).
+/// - Opens the per-user SQLCipher DB under the unwrapped `db_key`.
+/// - Best-effort `ensure_device_cert` so a freshly-resumed device
+///   re-publishes its cert if the previous attempt was deferred.
 #[tauri::command]
 pub async fn unlock(
     state: State<'_, Arc<AppState>>,
@@ -456,11 +486,33 @@ pub async fn unlock(
     let keystore = state.keystore.as_ref();
     let unlocked = unlock_inner(keystore, &user_id, &pin).await?;
 
+    let db_key = unlocked.db_key.clone();
     *state.unlock.lock().await = Some(UnlockState {
         user_id: unlocked.user_id.clone(),
         db_key: unlocked.db_key,
         account_id_key: unlocked.account_id_key,
     });
+
+    // Migrate away from #195-vintage residue — the wrapped blobs are
+    // already in place; the legacy plaintext slots sitting next to
+    // them are stale duplicates.
+    let _ = keystore
+        .delete_for_user(DB_KEY_SLOT_LEGACY, &user_id)
+        .await;
+    let _ = keystore
+        .delete_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, &user_id)
+        .await;
+
+    state.load_user_db_with_key(&user_id, &db_key).await?;
+
+    if let Some(device_id) = state.device_id.lock().await.clone() {
+        if let Err(e) =
+            crate::commands::mls::ensure_device_cert(state.inner(), &user_id, &device_id).await
+        {
+            eprintln!("[pin] unlock: ensure_device_cert failed (non-fatal): {e}");
+        }
+    }
+
     Ok(UnlockOutcome {
         user_id: unlocked.user_id,
         attempts_remaining: None,
@@ -546,12 +598,14 @@ async fn unlock_inner(
     })
 }
 
-/// Drop the in-memory unlock state. Does NOT close the active local DB
-/// or clear the accounts index — this is the "screen lock" primitive,
-/// not the "log out" one.
+/// Drop the in-memory unlock state and close the open local DB. The
+/// next DB-touching command will fail with "Not signed in" until
+/// `unlock` runs. Accounts index is left intact — this is the "screen
+/// lock" primitive, not the "log out" one.
 #[tauri::command]
 pub async fn lock(state: State<'_, Arc<AppState>>) -> Result<()> {
     *state.unlock.lock().await = None;
+    state.unload_user_db().await;
     Ok(())
 }
 

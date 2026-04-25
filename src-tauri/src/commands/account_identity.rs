@@ -26,10 +26,13 @@ use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
+use crate::commands::pin::UnlockState;
 use crate::error::{Error, Result};
-use crate::keystore::Keystore;
 use crate::state::AppState;
+
+const DB_KEY_LEN: usize = 32;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -185,7 +188,14 @@ pub fn unwrap_recovery_blob(
 /// Generate a fresh account identity for `user_id`. Writes:
 ///   - `users.account_id_pub` and `users.identity_version = 1`
 ///   - a new row in `account_recovery`
-///   - the private key into this device's OS keystore
+///   - the private key + a freshly generated `db_key` into
+///     `AppState.unlock` (NOT the keystore — the only on-disk copy is
+///     the server-side `account_recovery` blob, which is wrapped under
+///     the Secret Key).
+///
+/// `set_pin` is the next step the frontend takes; it reads from
+/// `AppState.unlock` and writes the PIN-wrapped slots, at which point
+/// the keys exist on disk only as ciphertext.
 ///
 /// Returns the formatted Secret Key to show the user exactly once.
 /// Caller is responsible for ensuring the user has no existing identity
@@ -210,8 +220,6 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
-    state.keystore.store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
-
     let conn = state.remote_db.conn().await?;
 
     conn.execute(
@@ -233,48 +241,142 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     )
     .await?;
 
+    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
+
     Ok(secret_key_display)
 }
 
-/// True if this device holds an account identity private key for `user_id`
-/// in its OS keystore.
-pub async fn has_local_account_identity(keystore: &dyn Keystore, user_id: &str) -> Result<bool> {
-    Ok(keystore.load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
+/// Build an `UnlockState` carrying the supplied account identity
+/// private key plus a freshly generated `db_key`. Used by every "we
+/// just produced raw key material and have no PIN yet" path:
+/// fresh signup, identity reset, and device-enrollment unwrap.
+pub(crate) fn unlock_state_with_fresh_db_key(
+    user_id: &str,
+    account_id_private: &[u8],
+) -> UnlockState {
+    let mut db_key = vec![0u8; DB_KEY_LEN];
+    OsRng.fill_bytes(&mut db_key);
+    UnlockState {
+        user_id: user_id.to_string(),
+        db_key: Zeroizing::new(db_key),
+        account_id_key: Zeroizing::new(account_id_private.to_vec()),
+    }
+}
+
+/// Keystore slot for the PIN-wrapped copy of the account identity key.
+/// Mirrors `commands::pin::ACCOUNT_ID_KEY_WRAPPED_SLOT` — duplicated here
+/// to avoid a cross-module visibility leak just for a string constant.
+const ACCOUNT_ID_KEY_WRAPPED_SLOT: &str = "account_id_key_wrapped";
+
+/// True if this device holds an account identity private key for `user_id`.
+///
+/// The key may live in any of three forms during the PIN rollout:
+///   1. Plaintext in `AppState.unlock` (post-PIN-unlock, OR fresh signup
+///      between `verify_otp` and `set_pin`).
+///   2. Ciphertext in `account_id_key_wrapped_{user_id}` (PIN set, locked).
+///   3. Plaintext in `account_id_key_{user_id}` (legacy, pre-PIN build).
+///
+/// Returning `true` means at least one of those is present — i.e. this
+/// device is not orphaned, even if it's currently locked.
+pub async fn has_local_account_identity(state: &AppState, user_id: &str) -> Result<bool> {
+    {
+        let guard = state.unlock.lock().await;
+        if let Some(u) = guard.as_ref() {
+            if u.user_id == user_id {
+                return Ok(true);
+            }
+        }
+    }
+    if state
+        .keystore
+        .load_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, user_id)
+        .await?
+        .is_some()
+    {
+        return Ok(true);
+    }
+    Ok(state
+        .keystore
+        .load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
         .await?
         .is_some())
 }
 
-/// True if the locally-stored account identity key's public half matches
-/// the `remote_pub` bytes read from `users.account_id_pub`. Returns
-/// `false` if the key is absent locally OR if it doesn't match (the
-/// user rotated their identity via soft recovery on another device).
+/// True if the locally-known account identity key's public half matches
+/// the `remote_pub` bytes read from `users.account_id_pub`.
 ///
-/// A `false` return means this device is orphaned and must re-enroll.
+/// Behavior depends on how the key is stored locally:
+///   - Plaintext in `AppState.unlock` or in the legacy keystore slot →
+///     derive pub-half and compare.
+///   - Ciphertext only (locked, PIN set) → return `Ok(true)`. We can't
+///     verify a match without the unwrapped key, so deferral is the
+///     honest answer; the orphan recompute moves into `unlock` itself
+///     once the bytes are available.
+///   - Nothing locally → `Ok(false)` (orphaned/unenrolled).
 pub async fn has_matching_local_account_identity(
-    keystore: &dyn Keystore,
+    state: &AppState,
     user_id: &str,
     remote_pub: &[u8],
 ) -> Result<bool> {
-    let Some(local_bytes) = keystore.load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id).await?
+    {
+        let guard = state.unlock.lock().await;
+        if let Some(u) = guard.as_ref() {
+            if u.user_id == user_id {
+                return Ok(account_id_pub_matches(&u.account_id_key, remote_pub));
+            }
+        }
+    }
+    if state
+        .keystore
+        .load_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, user_id)
+        .await?
+        .is_some()
+    {
+        // Locked: defer the match check until `unlock` runs.
+        return Ok(true);
+    }
+    let Some(local_bytes) = state
+        .keystore
+        .load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
+        .await?
     else {
         return Ok(false);
     };
-    if local_bytes.len() != ED25519_PRIVATE_LEN {
-        return Ok(false);
-    }
-    let mut arr = [0u8; ED25519_PRIVATE_LEN];
-    arr.copy_from_slice(&local_bytes);
-    let signing_key = SigningKey::from_bytes(&arr);
-    let local_pub: [u8; 32] = signing_key.verifying_key().to_bytes();
-    Ok(local_pub.as_slice() == remote_pub)
+    Ok(account_id_pub_matches(&local_bytes, remote_pub))
 }
 
-/// Delete the locally-stored account identity private key. Called when
-/// a device discovers (via `has_matching_local_account_identity`) that
-/// the user has rotated their identity on another device and this
-/// device is now orphaned.
-pub async fn wipe_local_account_identity(keystore: &dyn Keystore, user_id: &str) -> Result<()> {
-    keystore.delete_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id).await
+fn account_id_pub_matches(private_bytes: &[u8], remote_pub: &[u8]) -> bool {
+    if private_bytes.len() != ED25519_PRIVATE_LEN {
+        return false;
+    }
+    let mut arr = [0u8; ED25519_PRIVATE_LEN];
+    arr.copy_from_slice(private_bytes);
+    let signing_key = SigningKey::from_bytes(&arr);
+    let local_pub: [u8; 32] = signing_key.verifying_key().to_bytes();
+    local_pub.as_slice() == remote_pub
+}
+
+/// Delete every local copy of the account identity private key —
+/// the in-memory `AppState.unlock` snapshot, the wrapped keystore
+/// slot, and the legacy plaintext keystore slot. Called when a device
+/// discovers it has been orphaned by an identity reset on another
+/// device.
+pub async fn wipe_local_account_identity(state: &AppState, user_id: &str) -> Result<()> {
+    {
+        let mut guard = state.unlock.lock().await;
+        let matches = guard.as_ref().is_some_and(|u| u.user_id == user_id);
+        if matches {
+            *guard = None;
+        }
+    }
+    let _ = state
+        .keystore
+        .delete_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, user_id)
+        .await;
+    state
+        .keystore
+        .delete_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
+        .await
 }
 
 /// Soft recovery: generate a completely fresh account identity, bumping
@@ -366,10 +468,10 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     )
     .await?;
 
-    // 4. Install the new private key in this device's OS keystore
-    //    immediately so the calling device is enrolled under the new
-    //    identity.
-    state.keystore.store_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id, &private_bytes).await?;
+    // 4. Install the new private key in AppState.unlock so the calling
+    //    device is enrolled under the new identity. The bytes never
+    //    touch the keystore unwrapped — set_pin will wrap them.
+    *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
 
     // 5. Record the reset in the security log. Best-effort only.
     let event_id = ulid::Ulid::new().to_string();
@@ -388,13 +490,48 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     Ok(secret_key_display)
 }
 
-/// Load the account identity signing key for `user_id` from the OS keystore.
-pub async fn load_account_id_key(keystore: &dyn Keystore, user_id: &str) -> Result<SigningKey> {
-    let bytes = keystore.load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
+/// Load the account identity signing key for `user_id`.
+///
+/// Source priority:
+///   1. `AppState.unlock` (post-PIN-unlock, or fresh signup between
+///      `verify_otp` and `set_pin`).
+///   2. Legacy `account_id_key_{user_id}` keystore slot (pre-PIN builds).
+///
+/// Returns `Error::Crypto("locked")` when the wrapped slot is present
+/// but `AppState.unlock` is empty — the caller is expected to surface
+/// that to the frontend so it can prompt for the PIN.
+pub async fn load_account_id_key(state: &AppState, user_id: &str) -> Result<SigningKey> {
+    {
+        let guard = state.unlock.lock().await;
+        if let Some(u) = guard.as_ref() {
+            if u.user_id == user_id {
+                return signing_key_from_bytes(&u.account_id_key);
+            }
+        }
+    }
+
+    if state
+        .keystore
+        .load_for_user(ACCOUNT_ID_KEY_WRAPPED_SLOT, user_id)
+        .await?
+        .is_some()
+    {
+        return Err(Error::Crypto(
+            "account_id_key locked: enter PIN to unlock".into(),
+        ));
+    }
+
+    let bytes = state
+        .keystore
+        .load_for_user(ACCOUNT_ID_KEY_KEYSTORE_SLOT, user_id)
         .await?
         .ok_or_else(|| {
             Error::Crypto(format!("account_id_key not in keystore for user {user_id}"))
         })?;
+    signing_key_from_bytes(&bytes)
+}
+
+fn signing_key_from_bytes(bytes: &[u8]) -> Result<SigningKey> {
     if bytes.len() != ED25519_PRIVATE_LEN {
         return Err(Error::Crypto(format!(
             "account_id_key has wrong length: {} (expected {})",
@@ -403,7 +540,7 @@ pub async fn load_account_id_key(keystore: &dyn Keystore, user_id: &str) -> Resu
         )));
     }
     let mut arr = [0u8; ED25519_PRIVATE_LEN];
-    arr.copy_from_slice(&bytes);
+    arr.copy_from_slice(bytes);
     Ok(SigningKey::from_bytes(&arr))
 }
 
@@ -468,14 +605,14 @@ fn device_cert_signed_payload(
 /// `issued_at`, `identity_version`, and `mls_signature_pub` in the remote
 /// `user_device` table so other clients can verify.
 pub async fn sign_device_cert(
-    keystore: &dyn Keystore,
+    state: &AppState,
     user_id: &str,
     device_id: &str,
     mls_signature_pub: &[u8],
     identity_version: u32,
     issued_at: u64,
 ) -> Result<Vec<u8>> {
-    let signing_key = load_account_id_key(keystore, user_id).await?;
+    let signing_key = load_account_id_key(state, user_id).await?;
     let payload = device_cert_signed_payload(
         device_id,
         mls_signature_pub,
