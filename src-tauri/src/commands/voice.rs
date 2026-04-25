@@ -4,6 +4,7 @@ use std::{
         atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
+    time::{Duration, Instant},
 };
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -22,6 +23,39 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::{commands::livekit::make_token, error::Result, state::AppState};
+
+/// Warm-cached LiveKit credentials for a single channel. Issued by
+/// `prepare_voice_connection` on user "intent" (hover, route entry) and
+/// consumed by `join_voice_channel` to skip the synchronous JWT mint.
+///
+/// The DNS/TLS warmth is the bigger win — we kick off a one-shot HTTPS
+/// request to the LiveKit host so its address and TLS session are in the
+/// process-wide cache by the time `Room::connect` opens the WebSocket.
+pub struct VoiceWarmup {
+    pub channel_id: String,
+    pub token: String,
+    /// When the prepared token was created. Used to discard stale entries.
+    pub created_at: Instant,
+    /// When the underlying user identity was captured. Mismatches against
+    /// the join-time identity invalidate the cached token.
+    pub user_id: String,
+    pub display_name: String,
+    /// Background warmup task (DNS/TLS). Aborted if a new prep supersedes
+    /// this one so spamming hover doesn't pile up requests.
+    pub task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl Drop for VoiceWarmup {
+    fn drop(&mut self) {
+        if let Some(t) = self.task.take() {
+            t.abort();
+        }
+    }
+}
+
+/// Warm tokens are cheap to mint but not free; cap freshness to 5 min so a
+/// long-stale prep can't deliver an expired credential to `join_voice_channel`.
+const VOICE_WARMUP_TTL: Duration = Duration::from_secs(300);
 
 // ── cpal::Stream is Send on Linux and macOS. On Windows WASAPI it is not,
 // so we wrap it with an explicit unsafe impl to allow storage in AppState.
@@ -86,6 +120,27 @@ impl PlaybackState {
     }
 }
 
+// ── Join-path timing instrumentation ──────────────────────────────────────
+//
+// Each phase below measures wall time around a discrete chunk of the join
+// flow. All values are milliseconds. `total_join_ms` is wall time from
+// `join_voice_channel` entry until first publish_track resolves. Stored on
+// `VoiceState.last_join_timings` and exposed via the `get_last_join_timings`
+// Tauri command so the frontend can dump them to the dev console.
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct JoinTimings {
+    pub channel_id: String,
+    pub jwt_mint_ms: u64,
+    pub room_connect_ms: u64,
+    pub mic_init_ms: u64,
+    pub first_publish_ms: u64,
+    pub total_join_ms: u64,
+    /// UNIX epoch ms when `join_voice_channel` started — useful for
+    /// correlating with frontend click timestamps later.
+    pub join_started_at_ms: u64,
+}
+
 // ── Top-level voice state held in AppState ────────────────────────────────
 
 pub struct VoiceState {
@@ -101,6 +156,12 @@ pub struct VoiceState {
     /// Noise gate threshold stored as f32 bits. 0.0 = off. Persists across calls.
     pub noise_floor: Arc<AtomicU32>,
     pub current_input_device: Option<String>,
+    /// Optional precomputed token + DNS/TLS warmer for the next channel
+    /// the user is likely to join. See [`VoiceWarmup`].
+    pub warmup: Option<VoiceWarmup>,
+    /// Most recent `join_voice_channel` timing record. Populated at the end
+    /// of every successful join; read by `get_last_join_timings`.
+    pub last_join_timings: Arc<Mutex<Option<JoinTimings>>>,
 }
 
 impl VoiceState {
@@ -117,6 +178,8 @@ impl VoiceState {
             is_muted: Arc::new(AtomicBool::new(false)),
             noise_floor: Arc::new(AtomicU32::new(0u32)),
             current_input_device: None,
+            warmup: None,
+            last_join_timings: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -521,8 +584,133 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
     .map_err(|e| anyhow::anyhow!("device enumeration panicked: {e}").into())
 }
 
+/// "Hot mic" warmup: signals user intent to (maybe) join `channel_id` so the
+/// client can pre-pay the latency before they actually click Join. Mirrors
+/// `room.prepareConnection(url, token)` from the JS livekit-client SDK,
+/// which has no equivalent in the `livekit` Rust crate (v0.7) — the Rust
+/// `Room::connect` is the only entry point and it commits to the room.
+///
+/// What we do instead:
+///  1. Mint and cache the LiveKit token so the synchronous JWT work is
+///     already done by the time the user clicks Join.
+///  2. Fire a one-shot HTTPS request to the LiveKit server's RoomService
+///     endpoint (`twirp_base/.../ListParticipants`). This warms:
+///       - DNS for the LiveKit host in the OS resolver cache,
+///       - the TLS session ticket cache used by `rustls` (rustls keeps a
+///         per-process cache that the LiveKit WS handshake can reuse),
+///       - reqwest's HTTPS connection pool, used for the same host's API.
+///     The body of the response is irrelevant; we want the network plumbing
+///     to be primed.
+///
+/// Idempotent + cancel-safe: a second call with the same channel_id while
+/// the first warmup is still running is a no-op. Calling with a different
+/// channel_id supersedes the pending one (its DNS/TLS work is wasted, but
+/// it's a background task — no user impact).
+///
+/// Frontend should call this on intent points: route entry to a voice
+/// channel page, hover/keyboard-select on a voice item in TerminalMenu /
+/// SearchPanel, etc. Cheap enough to call eagerly.
+#[tauri::command]
+pub async fn prepare_voice_connection(
+    channel_id: String,
+    user_id: String,
+    display_name: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let url = state.config.livekit_url.clone();
+    if url.is_empty() {
+        // No LiveKit configured — nothing to warm. Silent success so the
+        // frontend can call this unconditionally.
+        return Ok(());
+    }
+
+    // ── De-dupe: skip if we already have a fresh warmup for this exact
+    // channel + identity. Cheap to mint a token, but firing the HTTPS
+    // request again would be wasted work.
+    {
+        let voice = state.voice.lock().await;
+        if let Some(w) = &voice.warmup {
+            if w.channel_id == channel_id
+                && w.user_id == user_id
+                && w.display_name == display_name
+                && w.created_at.elapsed() < VOICE_WARMUP_TTL
+            {
+                return Ok(());
+            }
+        }
+    }
+
+    let token = make_token(
+        &state.config,
+        &channel_id,
+        &format!("voice-{user_id}"),
+        &display_name,
+    )?;
+
+    // Fire the DNS/TLS warmup in the background. If the user immediately
+    // clicks Join, they'll race this — that's fine, the worst case is a
+    // single redundant TLS handshake. Errors are non-fatal: this whole
+    // command is best-effort.
+    let warm_url = url.clone();
+    let task = tokio::spawn(async move {
+        // Reuse the same twirp transform `livekit::room_service_list_participants`
+        // uses; we don't import it to keep the dependency direction clean.
+        let twirp = if let Some(rest) = warm_url.strip_prefix("wss://") {
+            format!("https://{rest}")
+        } else if let Some(rest) = warm_url.strip_prefix("ws://") {
+            format!("http://{rest}")
+        } else {
+            warm_url.clone()
+        };
+        let probe = format!("{twirp}/rtc/validate");
+        // Short timeout — if the server is slow there's nothing to gain by
+        // hanging on. The handshake is what we care about, not the response.
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return,
+        };
+        let started = Instant::now();
+        match client.get(&probe).send().await {
+            Ok(_resp) => {
+                eprintln!(
+                    "[voice] warmup probe to {twirp} completed in {:.0}ms",
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+            Err(e) => {
+                eprintln!("[voice] warmup probe failed (non-fatal): {e}");
+            }
+        }
+    });
+
+    // Stash the warm credentials. Replacing any prior entry triggers Drop
+    // on the previous warmup, which aborts its still-running background task
+    // so a fast hover-flip doesn't pile up redundant probes.
+    let mut voice = state.voice.lock().await;
+    voice.warmup = Some(VoiceWarmup {
+        channel_id,
+        token,
+        created_at: Instant::now(),
+        user_id,
+        display_name,
+        task: Some(task),
+    });
+
+    Ok(())
+}
+
 /// Connect to a LiveKit voice room and publish the local microphone.
 /// Step 2: mic input added. Playback of remote tracks comes next.
+///
+/// Performance: the LiveKit network handshake (DNS, TLS, WS upgrade) and
+/// the cpal mic init (ALSA enumeration + device open) are independent and
+/// both block for hundreds of milliseconds on cold starts. We run them
+/// concurrently with `tokio::join!` so total join latency is ~max(net, mic)
+/// rather than net+mic. If `prepare_voice_connection` was called for this
+/// channel, DNS/TLS is already warm and we reuse the precomputed token.
 #[tauri::command]
 pub async fn join_voice_channel(
     channel_id: String,
@@ -533,51 +721,108 @@ pub async fn join_voice_channel(
     auto_gain_control: bool,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
+    // Wall-clock anchor for `total_join_ms` and per-phase deltas.
+    let join_start = Instant::now();
+    let join_started_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
     let url = state.config.livekit_url.clone();
     if url.is_empty() {
         return Err(anyhow::anyhow!("LiveKit is not configured on this server").into());
     }
 
-    let token = make_token(
-        &state.config,
-        &channel_id,
-        &format!("voice-{user_id}"),
-        &display_name,
-    )?;
+    // Try to consume a fresh warmup for this exact channel + identity. If
+    // the warmup is stale or for a different room/user we mint a new token.
+    // VoiceWarmup implements Drop (to abort its background task) so we can't
+    // simply destructure it; clone the token out before dropping the entry.
+    let cached_token: Option<String> = {
+        let mut voice = state.voice.lock().await;
+        let usable = voice
+            .warmup
+            .as_ref()
+            .map(|w| {
+                w.channel_id == channel_id
+                    && w.user_id == user_id
+                    && w.display_name == display_name
+                    && w.created_at.elapsed() < VOICE_WARMUP_TTL
+            })
+            .unwrap_or(false);
+        if usable {
+            let cloned = voice.warmup.as_ref().map(|w| w.token.clone());
+            // Drop the entry now — its background task is no longer needed.
+            voice.warmup = None;
+            cloned
+        } else {
+            // Anything else cached (different channel / stale) is dead weight.
+            voice.warmup = None;
+            None
+        }
+    };
+    // ── Phase: jwt_mint ────────────────────────────────────────────────────
+    // 0 if a warmup-cached token was usable.
+    let jwt_mint_ms;
+    let token: String = match cached_token {
+        Some(t) => {
+            jwt_mint_ms = 0;
+            t
+        }
+        None => {
+            let jwt_start = Instant::now();
+            let t = make_token(
+                &state.config,
+                &channel_id,
+                &format!("voice-{user_id}"),
+                &display_name,
+            )?;
+            jwt_mint_ms = jwt_start.elapsed().as_millis() as u64;
+            t
+        }
+    };
 
-    eprintln!("[voice] connecting to room {channel_id}…");
-    let (room, mut events) = Room::connect(&url, &token, RoomOptions::default())
-        .await
-        .map_err(|e| anyhow::anyhow!("LiveKit connect: {e}"))?;
-    eprintln!("[voice] connected to room {channel_id}");
-
-    let room = Arc::new(room);
-
-    // ── Mic open, frames dropped (diagnostic step) ───────────────────────────
-    // Open the mic and receive frames but don't call capture_frame yet.
-    // If this crashes, the bug is in cpal. If stable, it's in capture_frame.
+    // ── Run room connect and mic init concurrently ─────────────────────────
+    // Both are independent and individually expensive on cold starts. Running
+    // them with `tokio::join!` cuts the user-visible delay to ~max(net, mic).
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
-    let is_muted = {
+    let (is_muted, noise_floor) = {
         let voice = state.voice.lock().await;
         voice.is_muted.store(false, Ordering::Relaxed);
-        Arc::clone(&voice.is_muted)
-    };
-    let noise_floor = {
-        let voice = state.voice.lock().await;
-        Arc::clone(&voice.noise_floor)
+        (Arc::clone(&voice.is_muted), Arc::clone(&voice.noise_floor))
     };
 
     let input_device_clone = input_device.clone();
-    eprintln!("[voice] opening mic…");
-    let (mic_stream, mic_rate) = tokio::task::spawn_blocking(move || {
-        let host = cpal::default_host();
-        let dev = get_device(&host, input_device_clone.as_deref(), true)?;
-        eprintln!("[voice] mic device: {:?}", dev.name());
-        start_mic_stream(&dev, frame_tx, is_muted, noise_floor)
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
-    eprintln!("[voice] mic opened at {mic_rate} Hz");
+
+    let connect_started = Instant::now();
+    let mic_started = Instant::now();
+    eprintln!("[voice] connecting to room {channel_id} and opening mic in parallel…");
+
+    let connect_fut = async {
+        let r = Room::connect(&url, &token, RoomOptions::default()).await;
+        let elapsed_ms = connect_started.elapsed().as_millis() as u64;
+        (r, elapsed_ms)
+    };
+    let mic_fut = async {
+        tokio::task::spawn_blocking(move || {
+            let host = cpal::default_host();
+            let dev = get_device(&host, input_device_clone.as_deref(), true)?;
+            eprintln!("[voice] mic device: {:?}", dev.name());
+            let r = start_mic_stream(&dev, frame_tx, is_muted, noise_floor);
+            let elapsed_ms = mic_started.elapsed().as_millis() as u64;
+            r.map(|(stream, rate)| (stream, rate, elapsed_ms))
+        })
+        .await
+    };
+
+    let (connect_pair, mic_res) = tokio::join!(connect_fut, mic_fut);
+    let (connect_res, room_connect_ms) = connect_pair;
+    let (room, mut events) =
+        connect_res.map_err(|e| anyhow::anyhow!("LiveKit connect: {e}"))?;
+    let (mic_stream, mic_rate, mic_init_ms) = mic_res
+        .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
+    eprintln!("[voice] connected to room {channel_id}, mic at {mic_rate} Hz");
+
+    let room = Arc::new(room);
 
     let audio_source = NativeAudioSource::new(
         AudioSourceOptions {
@@ -596,6 +841,8 @@ pub async fn join_voice_channel(
     );
 
     eprintln!("[voice] publishing track…");
+    // ── Phase: first_publish ───────────────────────────────────────────────
+    let publish_start = Instant::now();
     room.local_participant()
         .publish_track(
             LocalTrack::Audio(local_track.clone()),
@@ -603,6 +850,7 @@ pub async fn join_voice_channel(
         )
         .await
         .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
+    let first_publish_ms = publish_start.elapsed().as_millis() as u64;
     eprintln!("[voice] track published");
 
     // Buffer mic frames into exact 10ms chunks, detect local speaking, and
@@ -753,13 +1001,35 @@ pub async fn join_voice_channel(
                     }
                     break;
                 }
-                RoomEvent::ConnectionStateChanged(state) => {
-                    eprintln!("[voice] connection state: {state:?}");
+                RoomEvent::ConnectionStateChanged(conn_state) => {
+                    eprintln!("[voice] connection state: {conn_state:?}");
                 }
                 _ => {}
             }
         }
     });
+
+    // ── Phase: total_join + record timings ─────────────────────────────────
+    let total_join_ms = join_start.elapsed().as_millis() as u64;
+
+    let timings = JoinTimings {
+        channel_id: channel_id.clone(),
+        jwt_mint_ms,
+        room_connect_ms,
+        mic_init_ms,
+        first_publish_ms,
+        total_join_ms,
+        join_started_at_ms,
+    };
+    eprintln!(
+        "[voice/timings] channel={} jwt={}ms connect={}ms mic={}ms publish={}ms total={}ms",
+        channel_id,
+        jwt_mint_ms,
+        room_connect_ms,
+        mic_init_ms,
+        first_publish_ms,
+        total_join_ms,
+    );
 
     // ── Store state ───────────────────────────────────────────────────────────
     let mut voice = state.voice.lock().await;
@@ -772,8 +1042,22 @@ pub async fn join_voice_channel(
     voice.frame_task = Some(frame_task);
     voice.room_task = Some(room_task);
     voice.current_input_device = input_device;
+    *voice.last_join_timings.lock().unwrap() = Some(timings);
 
     Ok(())
+}
+
+/// Return the most recent `join_voice_channel` timing record. The frontend
+/// calls this immediately after a successful join and dumps the values into
+/// the dev console for analysis. Returns `None` if no join has completed
+/// since process start.
+#[tauri::command]
+pub async fn get_last_join_timings(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Option<JoinTimings>> {
+    let voice = state.voice.lock().await;
+    let snapshot = voice.last_join_timings.lock().unwrap().clone();
+    Ok(snapshot)
 }
 
 /// Disconnect from the current voice room and release all audio resources.
