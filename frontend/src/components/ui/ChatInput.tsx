@@ -222,6 +222,16 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [expandedPreview]);
 
+  // Refocus the textarea after the pre-send preview lightbox closes so
+  // typing resumes immediately without an extra click.
+  const prevExpandedPreviewRef = useRef(expandedPreview);
+  useEffect(() => {
+    if (prevExpandedPreviewRef.current && !expandedPreview) {
+      textareaRef.current?.focus();
+    }
+    prevExpandedPreviewRef.current = expandedPreview;
+  }, [expandedPreview]);
+
   // ── Shared path-based attachment builder (picker + OS drag-drop) ─────────
   const handlePaths = useCallback(async (paths: string[]) => {
     // De-dupe against already-queued paths.
@@ -438,7 +448,17 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     invoke<string[]>("read_clipboard_files").then((paths) => {
       if (paths.length > 0) {
         handlePaths(paths);
+        return;
       }
+      // WebKitGTK doesn't expose clipboard images as DataTransferItem files
+      // the way macOS WebKit does, so screenshots / "copy image" from a
+      // browser fall through to here. Fetch the raster image from the OS
+      // clipboard via Rust, write it to temp, and import as an attachment.
+      invoke<string>("read_clipboard_image_to_temp").then((path) => {
+        if (path) {
+          handlePaths([path]);
+        }
+      }).catch(() => { /* no image on clipboard */ });
     }).catch(() => { /* clipboard unreadable */ });
   }, [handleBrowserFile, handlePaths]);
 

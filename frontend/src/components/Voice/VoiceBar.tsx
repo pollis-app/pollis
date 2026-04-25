@@ -11,7 +11,7 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const { voiceParticipants, voiceIsMuted, voiceActiveSpeakerIds } = useAppStore();
+  const { voiceParticipants, voiceIsMuted, voiceActiveSpeakerIds, currentUser } = useAppStore();
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
@@ -20,6 +20,12 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
   )?.id ?? null;
 
   const { toggleMute, leave } = useVoiceChannel(channelId, groupId);
+
+  // Local participant identity is `voice-${userId}` (see useVoiceChannel.ts).
+  // The voice bar is feedback about *other* speakers, so always exclude self.
+  const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
+  const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter((id) => id !== localIdentity);
+  const lastRemoteSpeakerId = remoteActiveSpeakerIds.at(-1);
 
   return (
     <div
@@ -99,10 +105,10 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         style={{ marginLeft: "auto", color: "var(--c-text-dim)" }}
         className="flex items-center gap-1"
       >
-        {voiceActiveSpeakerIds.length > 0
+        {lastRemoteSpeakerId
           ? <>
             <Volume2 size={12} style={{ verticalAlign: "middle" }} />
-            {voiceParticipants.find(p => voiceActiveSpeakerIds.at(-1) === p.identity)?.name}
+            {voiceParticipants.find(p => p.identity === lastRemoteSpeakerId)?.name}
           </>
           : null}
       </span>
