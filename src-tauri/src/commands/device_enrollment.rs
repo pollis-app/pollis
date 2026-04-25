@@ -331,14 +331,17 @@ pub async fn poll_enrollment_status(
             let account_id_private =
                 unwrap_account_key(&wrapped, &priv_bytes)?;
 
-            // Install into the keystore as `account_id_key_{user_id}` —
-            // matches the slot `account_identity::load_account_id_key`
-            // reads from.
-            state.keystore.store_for_user("account_id_key", &user_id, &account_id_private)
-                .await?;
-
-            // Proceed to publish our device cert + pick up welcomes.
-            finalize_enrollment(state.inner(), &user_id).await?;
+            // Hand off to AppState.unlock with a freshly generated db_key.
+            // The frontend's next step is pin-create; set_pin wraps these
+            // bytes under the user's PIN and opens the local DB.
+            // finalize_device_enrollment runs after that to publish the
+            // device cert, key packages, and external-join existing groups.
+            *state.unlock.lock().await = Some(
+                crate::commands::account_identity::unlock_state_with_fresh_db_key(
+                    &user_id,
+                    &account_id_private,
+                ),
+            );
 
             Ok(EnrollmentStatus::Approved)
         }
@@ -615,17 +618,18 @@ pub async fn recover_with_secret_key(
         &wrapped_key,
     )?;
 
-    // 3. Install into the OS keystore under the same slot the normal
-    //    account_identity module reads from.
-    state.keystore.store_for_user("account_id_key", &user_id, &account_id_private).await?;
+    // 3. Hand the unwrapped key to AppState.unlock with a freshly
+    //    generated db_key. Frontend proceeds to pin-create; set_pin
+    //    wraps both, and finalize_device_enrollment finishes the
+    //    cert / KP / external-join work.
+    *state.unlock.lock().await = Some(
+        crate::commands::account_identity::unlock_state_with_fresh_db_key(
+            &user_id,
+            &account_id_private,
+        ),
+    );
 
-    // 4. Finalize enrollment — publishes the device cert, the key
-    //    packages, pulls any welcomes (none on this path), and then
-    //    externally joins every group/DM the user is a member of but
-    //    this device isn't in yet.
-    finalize_enrollment(state.inner(), &user_id).await?;
-
-    // 5. Record a security event so the user can audit this in the
+    // 4. Record a security event so the user can audit this in the
     //    Security settings page.
     let conn = state.remote_db.conn().await?;
     let device_id = state.device_id.lock().await.clone().unwrap_or_default();
@@ -829,20 +833,16 @@ pub async fn reset_identity_and_recover(
             let _ = std::fs::remove_file(data_dir.join(format!("pollis_{user_id}.db-shm")));
         }
 
-        // Re-open a fresh local DB so finalize_enrollment can write new
-        // MLS state (device signer, key packages, etc.).
-        state.load_user_db(&user_id).await?;
+        // Don't reopen the DB here — reset_identity (above) already
+        // populated AppState.unlock with the new account_id_key and a
+        // fresh db_key. The frontend routes to pin-create next; set_pin
+        // wraps and opens the new DB, finalize_device_enrollment
+        // publishes the device cert + key packages.
 
         eprintln!(
             "[reset] cleaned up memberships, key packages, welcomes, devices, and local DB for {user_id}"
         );
     }
-
-    // 4. Run the finalization path to publish a new device cert + KPs.
-    //    Since we deleted all group_member rows above, finalize_enrollment
-    //    will find no groups to external-join, leaving the user in a clean
-    //    "fresh account, no groups" state.
-    finalize_enrollment(state.inner(), &user_id).await?;
 
     Ok(new_secret_key)
 }
@@ -948,6 +948,22 @@ pub async fn reject_device_enrollment(
 ///      GroupInfo. This is the critical step for the Secret Key path
 ///      where no welcomes exist — but it's also safe for the approval
 ///      path because it short-circuits when `has_local_group` is true.
+/// Tauri-exposed wrapper around `finalize_enrollment`. Frontend invokes
+/// this after `set_pin` (or change-PIN flow) completes for an enrollment
+/// path: device approval, Secret-Key recovery, or identity reset. By
+/// that point the local DB is open and `AppState.unlock` carries the
+/// account identity, so the cert / KP / external-join work succeeds.
+///
+/// Safe to call when there's nothing to do — `ensure_*` and the
+/// external-join loop are idempotent.
+#[tauri::command]
+pub async fn finalize_device_enrollment(
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+) -> Result<()> {
+    finalize_enrollment(state.inner(), &user_id).await
+}
+
 async fn finalize_enrollment(state: &Arc<AppState>, user_id: &str) -> Result<()> {
     let device_id = state
         .device_id

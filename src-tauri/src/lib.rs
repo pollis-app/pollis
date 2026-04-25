@@ -291,6 +291,7 @@ pub fn run() {
             commands::device_enrollment::reject_device_enrollment,
             commands::device_enrollment::recover_with_secret_key,
             commands::device_enrollment::reset_identity_and_recover,
+            commands::device_enrollment::finalize_device_enrollment,
             commands::device_enrollment::list_security_events,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
