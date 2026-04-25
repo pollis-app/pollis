@@ -43,6 +43,33 @@ interface UseVoiceChannelResult {
   leave: () => void;
 }
 
+// Mirrors `JoinTimings` in src-tauri/src/commands/voice.rs.
+interface JoinTimings {
+  channel_id: string;
+  jwt_mint_ms: number;
+  room_connect_ms: number;
+  mic_init_ms: number;
+  first_publish_ms: number;
+  total_join_ms: number;
+  join_started_at_ms: number;
+}
+
+function pad(label: string): string {
+  return (label + ':').padEnd(16, ' ');
+}
+
+function formatJoinTimings(t: JoinTimings, intentToInvokeMs: number): string {
+  return [
+    `[voice/join] timings (channel=${t.channel_id}):`,
+    `  intent_to_invoke: ${intentToInvokeMs}ms (click → invoke('join_voice_channel'))`,
+    `  ${pad('jwt_mint')}${t.jwt_mint_ms}ms`,
+    `  ${pad('room_connect')}${t.room_connect_ms}ms`,
+    `  ${pad('mic_init')}${t.mic_init_ms}ms`,
+    `  ${pad('first_publish')}${t.first_publish_ms}ms`,
+    `  ${pad('total_join')}${t.total_join_ms}ms`,
+  ].join('\n');
+}
+
 export function useVoiceChannel(channelId: string | null, groupId: string | null = null): UseVoiceChannelResult {
   const { isReady: isTauriReady } = useTauriReady();
   const {
@@ -161,6 +188,12 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       });
       flushParticipants();
 
+      // Capture the wall-clock anchor for "user intent → backend started"
+      // so we can report how much time JS / IPC plumbing add on top of the
+      // Rust-measured phases. `intentTs` is the moment this hook decided to
+      // call into Rust; the Rust `join_voice_channel` records its own start
+      // immediately on entry, so `total_join_ms` excludes the IPC hop.
+      const intentTs = performance.now();
       await invoke('join_voice_channel', {
         channelId,
         userId: currentUser.id,
@@ -169,6 +202,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         outputDevice,
         autoGainControl,
       });
+      const intentToInvokeMs = Math.round(performance.now() - intentTs);
 
       if (cancelled) {
         await invoke('leave_voice_channel');
@@ -200,6 +234,20 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         // sidebar "N in call" label updates for the joining user too.
         queryClient.invalidateQueries({ queryKey: ['voice-room-counts'] });
         queryClient.invalidateQueries({ queryKey: ['voice-participants', channelId] });
+
+        // Dump the per-phase timings to the dev console so they can be
+        // copy-pasted into the issue thread for analysis. Best-effort —
+        // a missing record (first run, race) is not fatal.
+        invoke<JoinTimings | null>('get_last_join_timings')
+          .then((timings) => {
+            if (timings) {
+              // eslint-disable-next-line no-console
+              console.log(formatJoinTimings(timings, intentToInvokeMs));
+            }
+          })
+          .catch((e) => {
+            console.warn('[VoiceChannel] get_last_join_timings failed:', e);
+          });
       }
     };
 

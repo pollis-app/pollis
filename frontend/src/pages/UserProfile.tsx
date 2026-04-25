@@ -64,6 +64,7 @@ export const UserProfilePage: React.FC = () => {
               size={96}
               alt={`${profile.username} avatar`}
               testId="user-profile-avatar"
+              variant="profile"
             />
             <div
               data-testid="user-profile-username"

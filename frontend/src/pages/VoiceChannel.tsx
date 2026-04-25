@@ -7,6 +7,7 @@ import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { useVoiceParticipants } from "../hooks/queries/useVoiceParticipants";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import { Button } from "../components/ui/Button";
+import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 export const VoiceChannelPage: React.FC = () => {
   const navigate = useNavigate();
@@ -28,6 +29,14 @@ export const VoiceChannelPage: React.FC = () => {
   useEffect(() => {
     joinLeaveRef.current?.focus();
   }, []);
+
+  // Issue #176: arriving on this page is intent to maybe join. Warm DNS/TLS
+  // + token now so clicking Join is one round trip instead of cold-start.
+  useEffect(() => {
+    if (!isInCall) {
+      warmVoiceChannel(channelId);
+    }
+  }, [channelId, isInCall]);
 
   // Auto-join once when preferences load, if the preference is enabled.
   const hasAutoJoined = useRef(false);
@@ -58,7 +67,7 @@ export const VoiceChannelPage: React.FC = () => {
         >
           <ArrowLeft size={12} />
         </button>
-        <span style={{ flex: 1, color: "var(--c-text)" }} className="flex items-center gap-1.5">
+        <span style={{ flex: 1, color: "var(--c-accent)" }} className="flex items-center gap-1.5">
           <Volume2 size={12} />
           {channelName}
         </span>

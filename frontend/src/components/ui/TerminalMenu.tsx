@@ -17,6 +17,10 @@ export interface TerminalMenuItem {
   // Secondary action rendered as a ⋮ button on the right of the row
   secondaryAction?: () => void;
   secondaryActionLabel?: string;
+  // Fires when the row first becomes the selected item (via hover or keyboard
+  // navigation). Used for "intent" warmups — e.g. eagerly preparing a voice
+  // channel connection so clicking Join feels instant.
+  onSelect?: () => void;
 }
 
 interface TerminalMenuProps {
@@ -110,6 +114,18 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     itemRefs.current[selectedIndex]?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [selectedIndex]);
 
+  // Fire `onSelect` for the currently-highlighted row so callers can prefetch
+  // / warm up resources tied to that item (e.g. LiveKit DNS+TLS for a voice
+  // channel about to be joined). Intentionally re-runs when the items array
+  // identity changes so a freshly-rendered list still warms its first row.
+  useEffect(() => {
+    const item = items[selectedIndex];
+    if (item && item.type !== "separator" && !item.disabled) {
+      item.onSelect?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIndex, itemIds]);
+
   const handleItemClick = useCallback((item: TerminalMenuItem, index: number) => {
     setSelectedIndex(index);
     if (!item.disabled) {
@@ -199,7 +215,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
 
               <div className="flex-1 min-w-0">
                 <div
-                  className="font-sans text-sm flex items-center gap-2"
+                  className="font-sans text-sm flex items-center gap-3"
                   style={{
                     color: isSelected
                       ? "var(--c-accent)"

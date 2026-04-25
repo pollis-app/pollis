@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Hash, AtSign, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon } from "lucide-react";
-import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
+import { Avatar } from "./ui/Avatar";
+import { useUserGroupsWithChannels, useAllGroupMembers, type GroupMemberWithGroup } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
 import type { GroupWithChannels } from "../services/api";
+import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -31,6 +33,14 @@ type SearchResultItem =
       name: string;
       breadcrumb: string;
       conversationId: string;
+    }
+  | {
+      type: "user";
+      id: string;
+      name: string;
+      breadcrumb: string;
+      userId: string;
+      avatarKey?: string | null;
     }
   | {
       type: "page";
@@ -119,11 +129,56 @@ function buildDMResults(
   }));
 }
 
+function buildUserResults(
+  groupMembers: GroupMemberWithGroup[],
+  dmConversations: Array<{ user2_id?: string; user2_identifier: string; user2_avatar_url?: string }> | undefined,
+  currentUserId: string | null,
+): SearchResultItem[] {
+  const seen = new Set<string>();
+  const out: SearchResultItem[] = [];
+
+  for (const m of groupMembers) {
+    if (!m.user_id || m.user_id === currentUserId || seen.has(m.user_id)) {
+      continue;
+    }
+    seen.add(m.user_id);
+    const username = m.username || m.display_name || m.user_id;
+    out.push({
+      type: "user",
+      id: `user-${m.user_id}`,
+      name: `@${username}`,
+      breadcrumb: `/user/${username}`,
+      userId: m.user_id,
+      avatarKey: m.avatar_url ?? null,
+    });
+  }
+
+  if (dmConversations) {
+    for (const c of dmConversations) {
+      const userId = c.user2_id;
+      if (!userId || userId === currentUserId || seen.has(userId)) {
+        continue;
+      }
+      seen.add(userId);
+      out.push({
+        type: "user",
+        id: `user-${userId}`,
+        name: `@${c.user2_identifier}`,
+        breadcrumb: `/user/${c.user2_identifier}`,
+        userId,
+        avatarKey: c.user2_avatar_url ?? null,
+      });
+    }
+  }
+
+  return out;
+}
+
 const PAGE_RESULTS: SearchResultItem[] = [
   { type: "page", id: "page-settings", name: "User", breadcrumb: "/user", path: "/user", keywords: "account profile username email avatar settings" },
   { type: "page", id: "page-settings-hub", name: "Settings", breadcrumb: "/settings", path: "/settings", keywords: "preferences user security" },
   { type: "page", id: "page-preferences", name: "Preferences", breadcrumb: "/preferences", path: "/preferences", keywords: "theme color font notifications appearance" },
-  { type: "page", id: "page-voice-settings", name: "Voice Settings", breadcrumb: "/voice-settings", path: "/voice-settings", keywords: "microphone speaker audio mic noise gate agc auto join" },
+  { type: "page", id: "page-voice-settings", name: "Voice Settings", breadcrumb: "/settings/voice", path: "/voice-settings", keywords: "microphone speaker audio mic noise gate agc auto join" },
   { type: "page", id: "page-security", name: "Security", breadcrumb: "/security", path: "/security", keywords: "audit log devices identity key rotation" },
   { type: "page", id: "page-invites", name: "Invites", breadcrumb: "/invites", path: "/invites", keywords: "pending invitations groups" },
   { type: "page", id: "page-join-requests", name: "Join Requests", breadcrumb: "/join-requests", path: "/join-requests", keywords: "pending group membership" },
@@ -163,14 +218,17 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations } = useDMConversations();
+  const { members: allGroupMembers } = useAllGroupMembers();
   const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const currentUserId = useAppStore((s) => s.currentUser?.id ?? null);
 
   // Build the full list of searchable items, active voice channel sorted to top
   const allItems = useMemo(() => {
     const channels = buildChannelResults(groupsWithChannels);
     const voiceChannels = buildVoiceResults(groupsWithChannels);
     const dms = buildDMResults(dmConversations);
-    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...dms, ...PAGE_RESULTS];
+    const users = buildUserResults(allGroupMembers, dmConversations, currentUserId);
+    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...dms, ...users, ...PAGE_RESULTS];
     if (activeVoiceChannelId) {
       const activeIdx = combined.findIndex(
         (i) => i.type === "voice" && i.channelId === activeVoiceChannelId
@@ -181,7 +239,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
       }
     }
     return combined;
-  }, [groupsWithChannels, dmConversations, activeVoiceChannelId]);
+  }, [groupsWithChannels, dmConversations, allGroupMembers, activeVoiceChannelId, currentUserId]);
 
   // Filter based on query
   const filteredItems = useMemo(
@@ -214,6 +272,15 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
     });
   }, [selectedIndex]);
 
+  // Issue #176: when the highlighted result is a voice channel, warm the
+  // LiveKit connection so pressing Enter feels instant.
+  useEffect(() => {
+    const item = filteredItems[selectedIndex];
+    if (item && item.type === "voice") {
+      warmVoiceChannel(item.channelId);
+    }
+  }, [selectedIndex, filteredItems]);
+
   const handleSelect = useCallback(
     (item: SearchResultItem) => {
       onClose();
@@ -231,6 +298,11 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
         navigate({
           to: "/dms/$conversationId",
           params: { conversationId: item.conversationId },
+        });
+      } else if (item.type === "user") {
+        navigate({
+          to: "/user/$userId",
+          params: { userId: item.userId },
         });
       } else {
         navigate({ to: item.path });
@@ -351,7 +423,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Jump to channel, voice, DM, or settings..."
+            placeholder="Jump to channel, voice, DM, user, or settings..."
             autoComplete="off"
             autoCorrect="off"
             autoCapitalize="off"
@@ -414,7 +486,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
             >
               {query.trim()
                 ? "No matches found"
-                : "Jump to a channel, voice channel, DM, or settings page"}
+                : "Jump to a channel, voice channel, DM, user, or settings page"}
             </div>
           ) : (
             filteredItems.map((item, index) => {
@@ -447,6 +519,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
                       <Volume2 size={14} />
                     ) : item.type === "dm" ? (
                       <AtSign size={14} />
+                    ) : item.type === "user" ? (
+                      <Avatar avatarKey={item.avatarKey ?? null} size={20} alt={item.name} />
                     ) : (
                       <SettingsIcon size={14} />
                     )}

@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Palette, User, ShieldCheck } from "lucide-react";
+import { Palette, User, ShieldCheck, Volume2 } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 
 export const SettingsHubPage: React.FC = () => {
@@ -22,6 +22,14 @@ export const SettingsHubPage: React.FC = () => {
       description: "Profile, username, avatar",
       action: () => navigate({ to: "/user" }),
       testId: "menu-item-user",
+    },
+    {
+      id: "voice",
+      label: "Voice",
+      icon: <Volume2 size={14} />,
+      description: "Microphone, speaker, audio processing",
+      action: () => navigate({ to: "/voice-settings" }),
+      testId: "menu-item-voice-settings",
     },
     {
       id: "security",

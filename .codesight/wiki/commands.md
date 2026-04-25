@@ -96,11 +96,13 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `connect_rooms(room_ids, user_id, username)`
 
 ## voice (`commands/voice.rs`)
-- `join_voice(channel_id, group_id, user_id, display_name)`
-- `leave_voice(channel_id)`
-- `set_voice_muted(muted)`
-- `set_voice_deafened(deafened)`
-- `switch_audio_device(kind, device_name)`
+- `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Mints + caches a LiveKit token and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
+- `join_voice_channel(channel_id, user_id, display_name, input_device, output_device, auto_gain_control)` — connect to LiveKit and publish the local mic. Consumes a fresh warmup if present and runs `Room::connect` + cpal mic init concurrently to minimise cold-start latency.
+- `leave_voice_channel()`
+- `toggle_voice_mute()`
+- `set_voice_input_device(device_name)` / `set_voice_output_device(device_name)`
+- `set_noise_floor(threshold)`
+- `subscribe_voice_events(on_event: Channel)`
 - `list_audio_devices()` → `AudioDevice[]`
 
 ## r2 (`commands/r2.rs`)

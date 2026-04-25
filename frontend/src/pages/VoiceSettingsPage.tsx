@@ -191,14 +191,18 @@ export const VoiceSettingsPage: React.FC = () => {
                 }}
               />
             </div>
-            {test.phase === "mic_listening" && test.gated && (
-              <span
-                className="text-xs font-mono"
-                style={{ color: "var(--c-text-muted)" }}
-              >
-                below noise gate — raise your voice or lower the gate
-              </span>
-            )}
+            {/* Always rendered so toggling visibility doesn't shift the rest of
+                the section as gating ticks on/off mid-speech. */}
+            <span
+              className="text-xs font-mono"
+              aria-hidden={!(test.phase === "mic_listening" && test.gated)}
+              style={{
+                color: "var(--c-text-muted)",
+                opacity: test.phase === "mic_listening" && test.gated ? 1 : 0,
+              }}
+            >
+              below noise gate — raise your voice or lower the gate
+            </span>
 
             <div className="flex flex-col gap-2 mt-4">
               <div className="flex">

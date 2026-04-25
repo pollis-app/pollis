@@ -56,16 +56,7 @@ export const GroupsPage: React.FC = () => {
         };
       });
 
-  let items: TerminalMenuItem[] = [];
-
-  if (groupItems.length) {
-    items = items.concat([
-      ...groupItems,
-      { id: "__sep__", label: "", type: "separator" },
-    ]);
-  }
-
-  items = items.concat([
+  let items: TerminalMenuItem[] = [
     {
       id: "create-group",
       label: "Create Group",
@@ -82,14 +73,20 @@ export const GroupsPage: React.FC = () => {
       type: "system",
       testId: "menu-item-find-group",
     },
-    {
-      id: "__back__",
-      label: "Go back",
-      icon: <ArrowLeft size={14} />,
-      action: () => navigate({ to: "/" }),
-      type: "system",
-    },
-  ]);
+  ];
+
+  if (groupItems.length) {
+    items.push({ id: "__sep__", label: "", type: "separator" });
+    items = items.concat(groupItems);
+  }
+
+  items.push({
+    id: "__back__",
+    label: "Go back",
+    icon: <ArrowLeft size={14} />,
+    action: () => navigate({ to: "/" }),
+    type: "system",
+  });
 
   return (
     <TerminalMenu

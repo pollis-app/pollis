@@ -7,6 +7,7 @@ interface AvatarProps {
   size?: number;
   alt?: string;
   testId?: string;
+  variant?: "list" | "profile";
 }
 
 export const Avatar: React.FC<AvatarProps> = ({
@@ -14,21 +15,23 @@ export const Avatar: React.FC<AvatarProps> = ({
   size = 24,
   alt = "Avatar",
   testId,
+  variant = "list",
 }) => {
   const { data: blobUrl } = useAvatarBlobUrl(avatarKey ?? null);
 
   const dim = `${size}px`;
+  const isProfile = variant === "profile";
 
   const containerStyle: React.CSSProperties = {
     width: dim,
     height: dim,
-    borderRadius: "50%",
+    borderRadius: isProfile ? "0.5rem" : "50%",
     overflow: "hidden",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     background: "var(--c-surface, var(--c-bg))",
-    border: "1px solid var(--c-border)",
+    border: isProfile ? "3px solid var(--c-accent)" : "none",
     flexShrink: 0,
   };
 
