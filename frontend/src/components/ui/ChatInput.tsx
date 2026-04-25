@@ -222,6 +222,16 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [expandedPreview]);
 
+  // Refocus the textarea after the pre-send preview lightbox closes so
+  // typing resumes immediately without an extra click.
+  const prevExpandedPreviewRef = useRef(expandedPreview);
+  useEffect(() => {
+    if (prevExpandedPreviewRef.current && !expandedPreview) {
+      textareaRef.current?.focus();
+    }
+    prevExpandedPreviewRef.current = expandedPreview;
+  }, [expandedPreview]);
+
   // ── Shared path-based attachment builder (picker + OS drag-drop) ─────────
   const handlePaths = useCallback(async (paths: string[]) => {
     // De-dupe against already-queued paths.
