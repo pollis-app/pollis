@@ -128,6 +128,14 @@ export const MainContent: React.FC = () => {
     }
   }, [nextCursor]);
 
+  // MessageItem dispatches this when an attachment lightbox closes so focus
+  // returns to the chat input — keeps the keyboard-driven flow intact.
+  useEffect(() => {
+    const handler = () => chatInputRef.current?.focus();
+    window.addEventListener("pollis:focus-chat-input", handler);
+    return () => window.removeEventListener("pollis:focus-chat-input", handler);
+  }, []);
+
   // Merge older fetched pages with the live initial page, deduplicated and
   // sorted oldest-first. Dedup keeps the first occurrence by message ID.
   const allMessages = useMemo(() => {

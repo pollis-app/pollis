@@ -347,6 +347,18 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     return () => window.removeEventListener("keydown", handler, { capture: true });
   }, [viewerOpen]);
 
+  // After the lightbox closes, return focus to the chat input. MessageItem
+  // doesn't own the input ref, so signal via a window event that MainContent
+  // listens for. Only fire on a true→false transition so unrelated unmounts
+  // (virtualized scroll, channel switch) don't steal focus.
+  const prevViewerOpenRef = useRef(viewerOpen);
+  useEffect(() => {
+    if (prevViewerOpenRef.current && !viewerOpen) {
+      window.dispatchEvent(new Event("pollis:focus-chat-input"));
+    }
+    prevViewerOpenRef.current = viewerOpen;
+  }, [viewerOpen]);
+
   // Video: read duration + capture a poster frame via canvas.
   // Safe to seek now that gst-plugins-good is installed.
   useEffect(() => {
