@@ -176,6 +176,47 @@ fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
     }
 }
 
+/// Read a raster image from the OS clipboard, encode it as PNG, and write
+/// it to a temporary file. Returns the absolute path, or an empty string
+/// if the clipboard does not contain image data.
+///
+/// Used as a fallback for clipboard content that the WebKit paste event
+/// doesn't expose as `DataTransferItem` files — notably screenshots and
+/// images copied from a browser on Linux. macOS WebKit surfaces these as
+/// JS File objects directly, so this is mainly a Linux/Windows path.
+#[tauri::command]
+async fn read_clipboard_image_to_temp(app: tauri::AppHandle) -> String {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+
+    let image = match app.clipboard().read_image() {
+        Ok(img) => img,
+        Err(_) => return String::new(),
+    };
+
+    let width = image.width();
+    let height = image.height();
+    let rgba = image.rgba().to_vec();
+
+    let buffer = match image::RgbaImage::from_raw(width, height, rgba) {
+        Some(buf) => buf,
+        None => return String::new(),
+    };
+
+    let path = std::env::temp_dir().join(format!(
+        "pollis-paste-{}.png",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+
+    if buffer.save(&path).is_err() {
+        return String::new();
+    }
+
+    path.to_string_lossy().into_owned()
+}
+
 /// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)
 /// or close it on Windows/Linux.
 #[tauri::command]
@@ -269,6 +310,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             hide_window,
             read_clipboard_files,
+            read_clipboard_image_to_temp,
             commands::auth::initialize_identity,
             commands::auth::get_identity,
             commands::auth::request_otp,

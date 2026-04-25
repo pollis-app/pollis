@@ -438,7 +438,17 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     invoke<string[]>("read_clipboard_files").then((paths) => {
       if (paths.length > 0) {
         handlePaths(paths);
+        return;
       }
+      // WebKitGTK doesn't expose clipboard images as DataTransferItem files
+      // the way macOS WebKit does, so screenshots / "copy image" from a
+      // browser fall through to here. Fetch the raster image from the OS
+      // clipboard via Rust, write it to temp, and import as an attachment.
+      invoke<string>("read_clipboard_image_to_temp").then((path) => {
+        if (path) {
+          handlePaths([path]);
+        }
+      }).catch(() => { /* no image on clipboard */ });
     }).catch(() => { /* clipboard unreadable */ });
   }, [handleBrowserFile, handlePaths]);
 
