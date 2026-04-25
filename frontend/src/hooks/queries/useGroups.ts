@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import * as api from "../../services/api";
@@ -325,6 +325,50 @@ export function useDeclineInvite() {
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.pendingInvites(currentUser?.id ?? null) });
     },
   });
+}
+
+export interface GroupMemberWithGroup extends GroupMember {
+  group_id: string;
+  group_name: string;
+}
+
+/**
+ * Fetches members for every group the current user is in, returning a flat
+ * deduplicated list keyed by user_id. Used by Cmd+K search to surface users.
+ */
+export function useAllGroupMembers(): { members: GroupMemberWithGroup[] } {
+  const { data: groups = [] } = useUserGroupsWithChannels();
+
+  const queries = useQueries({
+    queries: groups.map((g) => ({
+      queryKey: groupQueryKeys.members(g.id),
+      queryFn: async (): Promise<GroupMember[]> => invoke<GroupMember[]>('get_group_members', { groupId: g.id }),
+      staleTime: 1000 * 30,
+      refetchOnWindowFocus: true,
+    })),
+  });
+
+  return useMemo(() => {
+    const seen = new Set<string>();
+    const out: GroupMemberWithGroup[] = [];
+    queries.forEach((q, i) => {
+      const groupId = groups[i]?.id;
+      const groupName = groups[i]?.name ?? "";
+      if (!groupId || !q.data) {
+        return;
+      }
+      for (const m of q.data) {
+        if (seen.has(m.user_id)) {
+          continue;
+        }
+        seen.add(m.user_id);
+        out.push({ ...m, group_id: groupId, group_name: groupName });
+      }
+    });
+    return { members: out };
+    // queries is a fresh array each render; rely on length + data signatures
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groups, queries.map((q) => q.dataUpdatedAt).join(",")]);
 }
 
 export function useGroupMembers(groupId: string | null) {

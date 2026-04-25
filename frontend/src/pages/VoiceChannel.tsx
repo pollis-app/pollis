@@ -58,7 +58,7 @@ export const VoiceChannelPage: React.FC = () => {
         >
           <ArrowLeft size={12} />
         </button>
-        <span style={{ flex: 1, color: "var(--c-text)" }} className="flex items-center gap-1.5">
+        <span style={{ flex: 1, color: "var(--c-accent)" }} className="flex items-center gap-1.5">
           <Volume2 size={12} />
           {channelName}
         </span>

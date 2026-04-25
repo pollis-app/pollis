@@ -266,14 +266,14 @@ export const AppShell: React.FC = () => {
       {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
 
-      {/* Sync indicator — floats top-right below title bar */}
+      {/* Sync indicator — floats top-right below title bar, left of the persistent cog */}
       {isSyncing && (
         <div
           className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
           style={{
             position: "absolute",
             top: 36 + 7,
-            right: 12,
+            right: 40,
             zIndex: 50,
             color: "var(--c-accent-dim)",
           }}

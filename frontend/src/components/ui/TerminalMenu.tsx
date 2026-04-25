@@ -199,7 +199,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
 
               <div className="flex-1 min-w-0">
                 <div
-                  className="font-sans text-sm flex items-center gap-2"
+                  className="font-sans text-sm flex items-center gap-3"
                   style={{
                     color: isSelected
                       ? "var(--c-accent)"

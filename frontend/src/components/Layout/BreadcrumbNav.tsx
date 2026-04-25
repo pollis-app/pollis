@@ -120,7 +120,8 @@ export const BreadcrumbNav: React.FC = () => {
       out.push({ label: "Settings", to: "/settings" });
       out.push({ label: "Security", to: "/security" });
     } else if (pathname === "/voice-settings") {
-      out.push({ label: "Voice Settings", to: "/voice-settings" });
+      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Voice", to: "/voice-settings" });
     } else if (pathname === "/invites") {
       out.push({ label: "Invites", to: "/invites" });
     } else if (pathname === "/join-requests") {

@@ -1,10 +1,10 @@
 import React, { useMemo } from "react";
 import { useRouter } from "@tanstack/react-router";
-import { Hash, MessageCircle, UserPlus } from "lucide-react";
+import { Hash, MessageCircle, UserPlus, Mail } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
-import { useAllPendingJoinRequests } from "../../hooks/queries/useGroups";
+import { useAllPendingJoinRequests, usePendingInvites } from "../../hooks/queries/useGroups";
 
 interface SummaryItemProps {
   icon: React.ReactNode;
@@ -73,6 +73,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = ({ color }) => 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
   const { data: pendingJoinRequests = [] } = useAllPendingJoinRequests();
+  const { data: pendingInvites = [] } = usePendingInvites();
 
   const groupUnread = useMemo(() => {
     let sum = 0;
@@ -93,6 +94,7 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = ({ color }) => 
   }, [dmConversations, unreadCounts]);
 
   const joinRequestCount = pendingJoinRequests.length;
+  const inviteCount = pendingInvites.length;
 
   return (
     <div data-testid="status-bar-summary" className="flex items-center gap-3">
@@ -118,6 +120,14 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = ({ color }) => 
         count={joinRequestCount}
         to="/join-requests"
         label="Pending join requests"
+        color={color}
+      />
+      <SummaryItem
+        testId="status-bar-invites"
+        icon={<Mail size={12} />}
+        count={inviteCount}
+        to="/invites"
+        label="Pending invites"
         color={color}
       />
     </div>
