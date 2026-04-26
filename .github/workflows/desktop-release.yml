@@ -48,6 +48,11 @@ jobs:
           echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
+      # webrtc-audio-processing-sys (vendored): meson + ninja drive the C++
+      # build, clang/cmake are already on macOS GitHub runners.
+      - name: Install audio-processing build deps
+        run: brew install meson ninja
+
       - name: Install dependencies
         run: pnpm install
 
@@ -118,6 +123,13 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
+
+      # webrtc-audio-processing-sys (vendored) drives its C++ build with
+      # meson + ninja. cmake/clang/MSVC are already on the windows-latest
+      # runner via Visual Studio 2022.
+      - name: Install audio-processing build deps
+        shell: pwsh
+        run: choco install -y meson ninja
 
       - name: Install OpenSSL via vcpkg
         shell: bash
@@ -239,7 +251,11 @@ jobs:
             libasound2-dev \
             libpulse-dev \
             libdbus-1-dev \
-            rpm
+            rpm \
+            cmake \
+            clang \
+            meson \
+            ninja-build
 
       - name: Load production secrets
         run: |

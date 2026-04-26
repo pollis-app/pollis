@@ -4,6 +4,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
 import { applyAccentColor, applyBackgroundColor, applyFontSize } from "../../utils/colorUtils";
 
+/**
+ * Mirrors `voice_apm::NsLevel` in src-tauri.
+ */
+export type NoiseSuppressionLevel = "off" | "low" | "moderate" | "high";
+
 export interface PreferencesData {
   accent_color?: string;
   background_color?: string;
@@ -11,7 +16,55 @@ export interface PreferencesData {
   allow_desktop_notifications?: boolean;
   allow_sound_effects?: boolean;
   auto_gain_control?: boolean;
+  /** AGC target loudness (dB below full scale). Smaller = louder. Range 6..=15. */
+  agc_target_dbfs?: number;
+  noise_suppression_level?: NoiseSuppressionLevel;
+  /** Acoustic echo cancellation. */
+  echo_cancellation?: boolean;
   auto_join_voice?: boolean;
+}
+
+/** Defaults must match `voice_apm::ApmConfig::default` in src-tauri. */
+export const APM_DEFAULTS = {
+  auto_gain_control: true,
+  agc_target_dbfs: 9,
+  noise_suppression_level: "moderate" as NoiseSuppressionLevel,
+  echo_cancellation: true,
+} as const;
+
+/**
+ * The Rust-side `voice_apm::ApmConfig` shape. Sent over the IPC for both
+ * `join_voice_channel` and the live `set_voice_audio_processing` command.
+ * Field names are wire-format (no camelCase rewrite — they're inside an
+ * object argument, not top-level invoke params).
+ */
+export interface ApmConfig {
+  agc_enabled: boolean;
+  agc_target_dbfs: number;
+  ns_level: NoiseSuppressionLevel;
+  aec_enabled: boolean;
+}
+
+/**
+ * Project the user-facing voice prefs onto the APM config the backend
+ * expects. Falls back to defaults whenever a pref is undefined so a
+ * partially-loaded preferences row never produces NaNs or bad enum values.
+ */
+export function preferencesToApmConfig(prefs: PreferencesData | undefined): ApmConfig {
+  return {
+    agc_enabled: prefs?.auto_gain_control ?? APM_DEFAULTS.auto_gain_control,
+    agc_target_dbfs: clampAgcTarget(prefs?.agc_target_dbfs ?? APM_DEFAULTS.agc_target_dbfs),
+    ns_level: prefs?.noise_suppression_level ?? APM_DEFAULTS.noise_suppression_level,
+    aec_enabled: prefs?.echo_cancellation ?? APM_DEFAULTS.echo_cancellation,
+  };
+}
+
+/** AGC target is exposed in 6..=15 dBFS and the backend clamps to 0..=31. */
+function clampAgcTarget(v: number): number {
+  if (!Number.isFinite(v)) {
+    return APM_DEFAULTS.agc_target_dbfs;
+  }
+  return Math.max(6, Math.min(15, Math.round(v)));
 }
 
 /**
@@ -52,7 +105,14 @@ export function usePreferences() {
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
         allow_sound_effects: getPreference<boolean>(json, "allow_sound_effects", true),
-        auto_gain_control: getPreference<boolean>(json, "auto_gain_control", true),
+        auto_gain_control: getPreference<boolean>(json, "auto_gain_control", APM_DEFAULTS.auto_gain_control),
+        agc_target_dbfs: getPreference<number>(json, "agc_target_dbfs", APM_DEFAULTS.agc_target_dbfs),
+        noise_suppression_level: getPreference<NoiseSuppressionLevel>(
+          json,
+          "noise_suppression_level",
+          APM_DEFAULTS.noise_suppression_level,
+        ),
+        echo_cancellation: getPreference<boolean>(json, "echo_cancellation", APM_DEFAULTS.echo_cancellation),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
       };
     },

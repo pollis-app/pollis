@@ -4,7 +4,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
-import { usePreferences } from './queries/usePreferences';
+import { usePreferences, preferencesToApmConfig } from './queries/usePreferences';
 import { notify } from '../utils/notify';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
@@ -106,7 +106,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       const inputDevice: string | null = prefs.input && prefs.input !== 'default' ? prefs.input : null;
       const outputDevice: string | null = prefs.output && prefs.output !== 'default' ? prefs.output : null;
 
-      const autoGainControl = preferences.query.data?.auto_gain_control ?? true;
+      const audioProcessing = preferencesToApmConfig(preferences.query.data);
 
       const localIdentity = `voice-${currentUser.id}`;
       localIdentityRef.current = localIdentity;
@@ -200,7 +200,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         displayName: currentUser.username ?? currentUser.id,
         inputDevice,
         outputDevice,
-        autoGainControl,
+        audioProcessing,
       });
       const intentToInvokeMs = Math.round(performance.now() - intentTs);
 

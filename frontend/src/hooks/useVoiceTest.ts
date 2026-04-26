@@ -3,7 +3,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 // Mirrors VoiceTestEvent in src-tauri/src/commands/voice_test.rs
 type VoiceTestEvent =
-  | { type: "frame"; peak: number; rms: number; gated: boolean }
+  | { type: "frame"; peak: number; rms: number }
   | { type: "recording_started" }
   | { type: "recording_finished" }
   | { type: "playback_started" }
@@ -20,7 +20,6 @@ export type TonePreset = "sweep" | "chime";
 interface UseVoiceTestResult {
   peak: number;
   rms: number;
-  gated: boolean;
   monitor: boolean;
   phase: VoiceTestPhase;
   error: string | null;
@@ -43,7 +42,6 @@ interface UseVoiceTestResult {
 export function useVoiceTest(): UseVoiceTestResult {
   const [peak, setPeak] = useState(0);
   const [rms, setRms] = useState(0);
-  const [gated, setGated] = useState(false);
   const [phase, setPhase] = useState<VoiceTestPhase>("idle");
   const [monitor, setMonitorState] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +57,6 @@ export function useVoiceTest(): UseVoiceTestResult {
   const resetMeter = useCallback(() => {
     setPeak(0);
     setRms(0);
-    setGated(false);
   }, []);
 
   useEffect(() => {
@@ -69,7 +66,6 @@ export function useVoiceTest(): UseVoiceTestResult {
         case "frame":
           setPeak(ev.peak);
           setRms(ev.rms);
-          setGated(ev.gated);
           break;
         case "recording_started":
           phaseRef.current = "recording";
@@ -83,14 +79,12 @@ export function useVoiceTest(): UseVoiceTestResult {
           setPhase("playing");
           setPeak(0);
           setRms(0);
-          setGated(false);
           break;
         case "playback_finished":
           phaseRef.current = "idle";
           setPhase("idle");
           setPeak(0);
           setRms(0);
-          setGated(false);
           break;
       }
     };
@@ -202,7 +196,6 @@ export function useVoiceTest(): UseVoiceTestResult {
   return {
     peak,
     rms,
-    gated,
     monitor,
     phase,
     error,
