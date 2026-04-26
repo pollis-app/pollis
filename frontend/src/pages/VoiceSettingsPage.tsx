@@ -362,12 +362,12 @@ export const VoiceSettingsPage: React.FC = () => {
             label="AGC Target Loudness"
             value={agcTarget}
             onChange={(v) => savePrefsAndPushApm({ agc_target_dbfs: v })}
-            min={6}
+            min={3}
             max={15}
             step={1}
             disabled={!autoGain}
-            sublabel="Lower = louder. The slider value is dB below full scale; raise it (toward 15) if AGC pumping is audible, lower it (toward 6) if your voice sounds quiet on the receiving end."
-            description={`${agcTarget} dBFS`}
+            sublabel="Lower = louder. Slider value is dB of headroom below full scale: 3 is very loud (clips on hot mics), 15 is quiet. Most setups land at 6."
+            description={`${agcTarget} dB headroom`}
           />
 
           <NoiseSuppressionSelect

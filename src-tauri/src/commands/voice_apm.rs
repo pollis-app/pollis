@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use webrtc_audio_processing::{
     config::{
-        EchoCanceller, GainController, GainController1, GainControllerMode, HighPassFilter,
+        AdaptiveDigital, EchoCanceller, GainController, GainController2, HighPassFilter,
         NoiseSuppression, NoiseSuppressionLevel,
     },
     Config, Processor,
@@ -50,10 +50,11 @@ pub const DEFAULT_APM_RATE_HZ: u32 = 48_000;
 pub struct ApmConfig {
     /// AGC on/off. Mirrors the existing `auto_gain_control` preference.
     pub agc_enabled: bool,
-    /// AGC target loudness in dB below full scale. Smaller magnitude is
-    /// louder. WebRTC AGC1 documents the field as 0..=31; we expose 6..=15
-    /// to the user since values outside that range either pump or sound
-    /// quiet on most hardware.
+    /// AGC target loudness expressed as headroom from full scale in dB.
+    /// Smaller magnitude = louder; clamped to 3..=15 in the UI. Maps to
+    /// WebRTC AGC2's `headroom_db`. Default 6 dB matches the canonical
+    /// WebRTC default for AdaptiveDigital and is meaningfully louder than
+    /// AGC1's old defaults.
     pub agc_target_dbfs: u8,
     /// Noise suppression aggressiveness.
     pub ns_level: NsLevel,
@@ -66,8 +67,12 @@ impl Default for ApmConfig {
     fn default() -> Self {
         Self {
             agc_enabled: true,
-            agc_target_dbfs: 9,
-            ns_level: NsLevel::Moderate,
+            // 6 dB headroom: WebRTC AGC2 canonical default. Lower values
+            // (3) clip easily on hot mics; higher (12+) sound quiet.
+            agc_target_dbfs: 6,
+            // High by default — Moderate matched libwebrtc's old default
+            // and produced no audible change for users upgrading.
+            ns_level: NsLevel::High,
             aec_enabled: true,
         }
     }
@@ -109,16 +114,28 @@ impl ApmConfig {
         };
 
         let gain_controller = if self.agc_enabled {
-            Some(GainController::GainController1(GainController1 {
-                // AdaptiveDigital is pure software gain — appropriate for
-                // our pipeline since we don't drive hardware mic level.
-                mode: GainControllerMode::AdaptiveDigital,
-                target_level_dbfs: self.agc_target_dbfs.clamp(0, 31),
-                // 9 dB compression catches quiet speech without smashing
-                // shouts. WebRTC's documented default for adaptive digital.
-                compression_gain_db: 9,
-                enable_limiter: true,
-                analog_gain_controller: None,
+            // AGC2 with AdaptiveDigital — modern WebRTC AGC. Speech-presence
+            // gated, up to 30 dB of boost for quiet talkers, with built-in
+            // noise-floor limiter. AGC1 (the older controller) is what
+            // libwebrtc internally enables when `auto_gain_control: true`,
+            // and its hardcoded conservative target is what made the issue's
+            // "voice too quiet" complaint show up — switching to AGC2 is
+            // the whole point of owning APM ourselves.
+            Some(GainController::GainController2(GainController2 {
+                // No hardware analog control on a desktop app — the OS owns mic gain.
+                input_volume_controller_enabled: false,
+                adaptive_digital: Some(AdaptiveDigital {
+                    headroom_db: f32::from(self.agc_target_dbfs.clamp(3, 15)),
+                    // WebRTC defaults: max +30 dB total, +8 dB initial,
+                    // 3 dB/s max change rate, output noise floor -50 dBFS.
+                    max_gain_db: 30.0,
+                    initial_gain_db: 8.0,
+                    max_gain_change_db_per_second: 3.0,
+                    max_output_noise_level_dbfs: -50.0,
+                }),
+                // FixedDigital is a static post-gain on top of AdaptiveDigital.
+                // 0 dB = no extra static gain; the adaptive stage does the work.
+                fixed_digital: webrtc_audio_processing::config::FixedDigital { gain_db: 0.0 },
             }))
         } else {
             None
@@ -157,6 +174,11 @@ impl ApmStage {
         let processor = Processor::new(sample_rate_hz)
             .map_err(|e| format!("APM init failed: {e}"))?;
         processor.set_config(config.to_processor_config());
+        eprintln!(
+            "[voice/apm] engaged @ {sample_rate_hz} Hz: AGC2={} (headroom={} dB), \
+             NS={:?}, AEC={}",
+            config.agc_enabled, config.agc_target_dbfs, config.ns_level, config.aec_enabled,
+        );
         Ok(Self {
             processor: Arc::new(processor),
             sample_rate_hz,
@@ -185,6 +207,10 @@ impl ApmStage {
     /// changed submodules are re-initialised.
     pub fn set_config(&mut self, config: ApmConfig) {
         self.processor.set_config(config.to_processor_config());
+        eprintln!(
+            "[voice/apm] reconfigured: AGC2={} (headroom={} dB), NS={:?}, AEC={}",
+            config.agc_enabled, config.agc_target_dbfs, config.ns_level, config.aec_enabled,
+        );
         self.config = config;
     }
 }

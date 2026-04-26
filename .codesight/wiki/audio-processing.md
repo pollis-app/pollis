@@ -10,8 +10,8 @@ libwebrtc's internal APM, which we cannot tune from Rust.
 One `Processor` instance per voice session handles:
 
 - **HPF** — high-pass filter, removes mains hum and AC noise.
-- **NS** — noise suppression, configurable Off / Low / Moderate / High.
-- **AGC** — adaptive digital gain, configurable target dBFS (default 9 — i.e. peak ≈ −9 dBFS = comfortably loud).
+- **NS** — noise suppression, configurable Off / Low / Moderate / High (default High).
+- **AGC2 AdaptiveDigital** — modern WebRTC AGC: speech-presence-gated, up to +30 dB boost for quiet talkers, with a built-in noise-floor limiter (`max_output_noise_level_dbfs` = −50). Configurable headroom (default 6 dB; lower = louder).
 - **AEC3** — full echo canceller with internal delay estimation.
 
 libwebrtc's `AudioSourceOptions { echo_cancellation, noise_suppression, auto_gain_control }` are all set to `false` at the LiveKit `NativeAudioSource` so the signal is touched exactly once.
@@ -82,12 +82,12 @@ We run AEC3 in `EchoCanceller::Full { stream_delay_ms: None }` — APM3's intern
 
 `ApmConfig` (Rust ↔ wire JSON, no rename):
 
-| Field             | Type          | Default     | Notes |
-|-------------------|---------------|-------------|-------|
-| `agc_enabled`     | bool          | `true`      | mirrors the existing `auto_gain_control` preference |
-| `agc_target_dbfs` | u8            | `9`         | clamped to 0..=31; UI exposes 6..=15 |
-| `ns_level`        | enum (string) | `"moderate"`| `"off" \| "low" \| "moderate" \| "high"` |
-| `aec_enabled`     | bool          | `true`      | |
+| Field             | Type          | Default  | Notes |
+|-------------------|---------------|----------|-------|
+| `agc_enabled`     | bool          | `true`   | mirrors the existing `auto_gain_control` preference |
+| `agc_target_dbfs` | u8            | `6`      | AGC2 `headroom_db`; UI exposes 3..=15 (lower = louder) |
+| `ns_level`        | enum (string) | `"high"` | `"off" \| "low" \| "moderate" \| "high"` |
+| `aec_enabled`     | bool          | `true`   | |
 
 Per-user persistence is via `usePreferences` keys `auto_gain_control` / `agc_target_dbfs` / `noise_suppression_level` / `echo_cancellation`. `preferencesToApmConfig(prefs)` projects them into the wire shape.
 
@@ -114,7 +114,7 @@ For local Linux dev: `pacman -S meson ninja clang cmake` (Arch) or the equivalen
 
 - No resampler in the AEC reference path. Speaker-rate ≠ APM-rate sessions run without a render reference (logged at session start). Adding `rubato` for these edge cases is on the radar but unnecessary for the 99% case.
 - No per-host calibration of `stream_delay_ms`; we let APM3 estimate. Worth profiling per-platform before tuning.
-- AGC2 (the newer adaptive-digital-only controller) is not yet exposed; we run AGC1 in `AdaptiveDigital` mode because it's the only controller with the `target_level_dbfs` knob the issue called for.
+- Transient (keyboard/click) suppression is not available in this APM version — the crate hardcodes `transient_suppression.enabled = false` because upstream WebRTC deprecated it. For click suppression we'd need an ML denoiser (RNNoise, NSNet, etc.) layered upstream, which the issue scoped out.
 
 ---
 _Back to [index.md](./index.md)_

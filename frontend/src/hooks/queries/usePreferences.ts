@@ -27,8 +27,8 @@ export interface PreferencesData {
 /** Defaults must match `voice_apm::ApmConfig::default` in src-tauri. */
 export const APM_DEFAULTS = {
   auto_gain_control: true,
-  agc_target_dbfs: 9,
-  noise_suppression_level: "moderate" as NoiseSuppressionLevel,
+  agc_target_dbfs: 6,
+  noise_suppression_level: "high" as NoiseSuppressionLevel,
   echo_cancellation: true,
 } as const;
 
@@ -59,12 +59,12 @@ export function preferencesToApmConfig(prefs: PreferencesData | undefined): ApmC
   };
 }
 
-/** AGC target is exposed in 6..=15 dBFS and the backend clamps to 0..=31. */
+/** AGC target is exposed in 3..=15 dB and the backend clamps the same. */
 function clampAgcTarget(v: number): number {
   if (!Number.isFinite(v)) {
     return APM_DEFAULTS.agc_target_dbfs;
   }
-  return Math.max(6, Math.min(15, Math.round(v)));
+  return Math.max(3, Math.min(15, Math.round(v)));
 }
 
 /**
