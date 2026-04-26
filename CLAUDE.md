@@ -193,10 +193,16 @@ Concrete implications:
 - **Prefer editing existing files** over creating new ones
 - **Always use `pnpm`** not `npm`
 - **Never add Claude as a co-author on commits** — do not include `Co-Authored-By:` trailers or any Claude attribution in commit messages
+- **Keep commit messages to a single line** unless the commit spans many file changes or a large body of work
+- **Keep PR descriptions terse** — don't over-explain or over-detail unless the PR spans many commits or a large body of work
 - **Never remove `data-testid` attributes** from JSX/HTML — they are used by Playwright E2E tests (`pnpm test:e2e`)
 - **Never reinvent UI components** — always use existing components from `frontend/src/components/ui/`. Toggles/switches use `Switch`, buttons use `Button`, text inputs use `TextInput`, etc. Do not build custom styled `<button>` or `<input>` elements when a ui/ component already exists.
 - **NO MODALS** — this is absolute. No fixed-position overlays, no backdrops, no dialog elements, no modal patterns of any kind. The only exception is the Cmd+K search menu. If a flow needs confirmation or input, replace the chat input bar (edit/delete bar pattern in `MainContent`) or navigate to a new page/view. A full page with two buttons is preferable to a modal.
 - **Confirmation and editing flows replace the chat input bar** — render a bar in place of the chat input at the bottom of `MainContent`, following the edit/delete bar pattern already established there.
+
+## Design Choices
+
+When weighing a design decision — or answering the user's question about one — look at how production apps like Slack, Discord, Linear, or other well-architected products handle the same problem. Use them as reference. Don't reinvent solved problems.
 
 ## Coding Style
 
