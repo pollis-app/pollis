@@ -1,16 +1,12 @@
 import { useEffect, useRef, useMemo } from 'react';
 import { Channel, invoke } from '@tauri-apps/api/core';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-// Note: we invoke the Rust-side notification plugin directly instead of using
-// the JS wrapper, because the wrapper's sendNotification/requestPermission use
-// `window.Notification` which WKWebView on macOS doesn't properly support.
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { messageQueryKeys, useDMConversations } from './queries/useMessages';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
-import { playSfx, SFX } from '../utils/sfx';
+import { notify, setNotifyPrefs } from '../utils/notify';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -71,9 +67,6 @@ export function useLiveKitRealtime() {
     selectedConversationId,
     currentUser,
     networkStatus,
-    incrementUnread,
-    setStatusBarAlert,
-    setPendingEnrollmentApproval,
   } = useAppStore();
 
   const { query: prefsQuery } = usePreferences();
@@ -133,36 +126,13 @@ export function useLiveKitRealtime() {
   useEffect(() => { selectedChannelIdRef.current = selectedChannelId; }, [selectedChannelId]);
   useEffect(() => { selectedConversationIdRef.current = selectedConversationId; }, [selectedConversationId]);
 
-  const isWindowFocusedRef = useRef<boolean>(true);
-
-  const allowNotificationsRef = useRef<boolean>(prefsQuery.data?.allow_desktop_notifications ?? false);
-
-  const notificationPermissionRef = useRef<boolean>(false);
-
-  // Keep the notification preference ref in sync with the saved preference.
-  useEffect(() => {
-    allowNotificationsRef.current = prefsQuery.data?.allow_desktop_notifications ?? false;
-  }, [prefsQuery.data?.allow_desktop_notifications]);
-
-  // queryClient and incrementUnread change reference on every render but are
-  // stable in practice; keep refs so the handler doesn't need to be recreated.
+  // queryClient changes reference on every render but is stable in practice;
+  // keep a ref so the channel handler doesn't need to be recreated.
   const queryClientRef = useRef(queryClient);
   useEffect(() => { queryClientRef.current = queryClient; }, [queryClient]);
-  const incrementUnreadRef = useRef(incrementUnread);
-  useEffect(() => { incrementUnreadRef.current = incrementUnread; }, [incrementUnread]);
-  const setStatusBarAlertRef = useRef(setStatusBarAlert);
-  useEffect(() => { setStatusBarAlertRef.current = setStatusBarAlert; }, [setStatusBarAlert]);
 
   const currentUserIdRef = useRef<string | null>(currentUser?.id ?? null);
   useEffect(() => { currentUserIdRef.current = currentUser?.id ?? null; }, [currentUser?.id]);
-
-  // Sound effects have their own preference, separate from OS notifications —
-  // users often want silent badges without giving up the ping/join/leave cues,
-  // or vice versa. Defaults on so first-time users hear the app come alive.
-  const allowSoundRef = useRef<boolean>(prefsQuery.data?.allow_sound_effects ?? true);
-  useEffect(() => {
-    allowSoundRef.current = prefsQuery.data?.allow_sound_effects ?? true;
-  }, [prefsQuery.data?.allow_sound_effects]);
 
   // Track the voice room the user is currently connected to so we only play
   // join/leave cues for rooms they can actually hear.
@@ -170,56 +140,32 @@ export function useLiveKitRealtime() {
   const activeVoiceChannelIdRef = useRef<string | null>(activeVoiceChannelId);
   useEffect(() => { activeVoiceChannelIdRef.current = activeVoiceChannelId; }, [activeVoiceChannelId]);
 
-  // Per-room ping cooldown. A flood of messages from one conversation should
-  // ping once, not once-per-message.
-  const lastPingAtRef = useRef<Map<string, number>>(new Map());
-  const PING_COOLDOWN_MS = 2500;
-
-  // ── OS-level window focus via Tauri events ────────────────────────────────
-  // DOM focus/blur don't fire on minimize in Tauri — use the OS window events.
+  // ── Notification permission + prefs → notify() ────────────────────────────
+  // Re-checks the OS permission whenever the user's notification preference
+  // changes so toggling "on" in Preferences → granting the OS prompt →
+  // immediately makes notify() start firing OS banners.
 
   useEffect(() => {
     if (!isTauriReady) {
       return;
     }
-    let unlisten: (() => void) | undefined;
-    const setup = async () => {
-      const win = getCurrentWindow();
-      unlisten = await win.onFocusChanged(({ payload: focused }) => {
-        isWindowFocusedRef.current = focused;
-      });
-    };
-    setup().catch((err) => { console.error('[realtime] window listener setup failed:', err); });
-    return () => {
-      unlisten?.();
-    };
-  }, [isTauriReady]);
+    const allowSound = prefsQuery.data?.allow_sound_effects ?? true;
+    const allowOsNotif = prefsQuery.data?.allow_desktop_notifications ?? false;
 
-  // ── Notification permission ────────────────────────────────────────────────
-  // Re-checks whenever the user's notification preference changes so that
-  // toggling "on" in Preferences → granting the OS prompt → immediately
-  // updates the ref used by the channel handler.
-
-  useEffect(() => {
-    if (!isTauriReady) {
-      return;
-    }
-    const check = async () => {
-      // Returns true/false/null (null = prompt needed)
+    const sync = async () => {
       const result: boolean | null = await invoke('plugin:notification|is_permission_granted');
-      if (result === true) {
-        notificationPermissionRef.current = true;
-        return;
-      }
-      if (allowNotificationsRef.current) {
+      let granted = result === true;
+      if (!granted && allowOsNotif) {
         const state: string = await invoke('plugin:notification|request_permission');
-        notificationPermissionRef.current = state === 'granted';
-      } else {
-        notificationPermissionRef.current = false;
+        granted = state === 'granted';
       }
+      setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: granted });
     };
-    check().catch((err) => { console.error('[realtime] notification permission check failed:', err); });
-  }, [isTauriReady, prefsQuery.data?.allow_desktop_notifications]);
+    sync().catch((err) => {
+      console.error('[realtime] notification permission sync failed:', err);
+      setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: false });
+    });
+  }, [isTauriReady, prefsQuery.data?.allow_sound_effects, prefsQuery.data?.allow_desktop_notifications]);
 
   // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
   // Recreated if the user identity changes (e.g. logout → login as someone else).
@@ -248,6 +194,12 @@ export function useLiveKitRealtime() {
           userId: currentUser.id,
         }).catch((err) => {
           console.warn('[realtime] dm_created: process_pending_commits failed:', err);
+        });
+        notify('dm_request', {
+          roomId: event.conversation_id,
+          title: 'New conversation',
+          body: 'Someone started a conversation with you',
+          senderUsername: 'New DM',
         });
         return;
       }
@@ -292,11 +244,10 @@ export function useLiveKitRealtime() {
         // Here we only fire for OTHER participants, and only when the user
         // is in the same room — otherwise it's noise from unrelated rooms.
         if (
-          allowSoundRef.current
-          && event.user_id !== currentUserIdRef.current
+          event.user_id !== currentUserIdRef.current
           && event.channel_id === activeVoiceChannelIdRef.current
         ) {
-          playSfx(event.type === 'voice_joined' ? SFX.join : SFX.leave);
+          notify(event.type === 'voice_joined' ? 'voice_other_join' : 'voice_other_leave');
         }
         return;
       }
@@ -323,11 +274,16 @@ export function useLiveKitRealtime() {
       if (event.type === 'enrollment_requested') {
         // Immediate UI takeover — the user must explicitly approve or
         // reject the request. Silently ignoring an enrollment is a quiet
-        // account-takeover vector.
-        setPendingEnrollmentApproval({
-          requestId: event.request_id,
-          newDeviceId: event.new_device_id,
-          verificationCode: event.verification_code,
+        // account-takeover vector. Sound + OS notification + overlay are
+        // all configured on the 'enrollment' category.
+        notify('enrollment', {
+          title: 'New device sign-in',
+          body: 'A new device is requesting access to your account',
+          enrollment: {
+            requestId: event.request_id,
+            newDeviceId: event.new_device_id,
+            verificationCode: event.verification_code,
+          },
         });
         return;
       }
@@ -356,16 +312,6 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
       }
 
-      const isSelected =
-        (channelId && channelId === selectedChannelIdRef.current) ||
-        (conversationId && conversationId === selectedConversationIdRef.current);
-      if (!isSelected && incomingId && !isOwnMessage) {
-        incrementUnreadRef.current(incomingId);
-        if (conversationId) {
-          setStatusBarAlertRef.current({ senderUsername, roomId: incomingId });
-        }
-      }
-
       // Always update the last-message preview regardless of which channel is selected
       if (channelId) {
         queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "channel", channelId] });
@@ -373,33 +319,21 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "conversation", conversationId] });
       }
 
-      // Ping on incoming messages when the window is unfocused. A per-room
-      // cooldown prevents a 10-message burst from pinging 10 times.
-      if (
-        !isOwnMessage
-        && !isWindowFocusedRef.current
-        && allowSoundRef.current
-        && incomingId
-      ) {
-        const now = Date.now();
-        const last = lastPingAtRef.current.get(incomingId) ?? 0;
-        if (now - last >= PING_COOLDOWN_MS) {
-          lastPingAtRef.current.set(incomingId, now);
-          playSfx(SFX.ping);
-        }
+      const isSelected =
+        (channelId && channelId === selectedChannelIdRef.current) ||
+        (conversationId && conversationId === selectedConversationIdRef.current);
+      if (isOwnMessage || isSelected || !incomingId) {
+        return;
       }
 
-      if (!isOwnMessage && !isWindowFocusedRef.current && allowNotificationsRef.current && notificationPermissionRef.current) {
-        const title = incomingId
-          ? (roomNameMapRef.current.get(incomingId) ?? 'New message')
-          : 'New message';
-        const body = `${senderUsername}: New message`;
-        try {
-          invoke('plugin:notification|notify', { options: { title, body } }).catch(() => {});
-        } catch {
-          // ignore
-        }
-      }
+      const title = roomNameMapRef.current.get(incomingId) ?? 'New message';
+      const body = `${senderUsername}: New message`;
+      notify(conversationId ? 'direct_message' : 'channel_message', {
+        roomId: incomingId,
+        title,
+        body,
+        senderUsername,
+      });
     };
 
     invoke('subscribe_realtime', { onEvent: channel }).catch((err) => {
