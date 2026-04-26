@@ -25,6 +25,10 @@ type RealtimeEvent =
   | {
     type: 'membership_changed';
     conversation_id?: string | null;
+    // 'invite' = you've been invited to a group (ping/notify)
+    // 'approval' = your join request was approved (silent)
+    // omitted = generic reconcile (silent — refetch only)
+    kind?: 'invite' | 'approval' | null;
   }
   | {
     type: 'voice_joined';
@@ -205,9 +209,9 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'membership_changed') {
-        // Invalidate all group and invite queries — covers both invite received
-        // and join-request approved scenarios. The ['groups'] prefix also covers
-        // member queries (["groups", groupId, "members"]).
+        // Invalidate all group and invite queries — covers invite received,
+        // join-request approved, member removed, member left. The ['groups']
+        // prefix also covers member queries (["groups", groupId, "members"]).
         queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
         // Same as dm_created: a membership change may have added us to an
@@ -221,6 +225,15 @@ export function useLiveKitRealtime() {
             userId: currentUser.id,
           }).catch((err) => {
             console.warn('[realtime] membership_changed: process_pending_commits failed:', err);
+          });
+        }
+        // Only invites raise a user-facing notification. Approvals and
+        // generic reconciles are silent — query invalidation handles them.
+        if (event.kind === 'invite') {
+          notify('group_invite', {
+            roomId: event.conversation_id ?? undefined,
+            title: 'New group invite',
+            body: 'You have been invited to a group',
           });
         }
         return;

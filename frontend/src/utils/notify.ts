@@ -10,6 +10,7 @@ export type Category =
   | 'voice_self_join'
   | 'voice_self_leave'
   | 'dm_request'
+  | 'group_invite'
   | 'enrollment';
 
 type CategoryConfig = {
@@ -26,14 +27,20 @@ type CategoryConfig = {
 // below applies these by reading user prefs + OS permission and firing the
 // matching outputs. Cooldown is applied per (category, roomId) and only to
 // sound and OS notification — never to the badge or status-bar alert.
+//
+// Convention: anything that fires `osNotif` should also fire `sound: 'ping'`
+// so the user always hears every system notification. Pings are reserved for
+// personal events (DMs, invites, enrollment) — channel chatter only updates
+// the unread badge so noisy rooms don't become a constant ping.
 const CATEGORIES: Record<Category, CategoryConfig> = {
   direct_message:    { sound: 'ping',  osNotif: true,  badge: true, alert: true, cooldownMs: 2500 },
-  channel_message:   { sound: 'ping',                  badge: true,              cooldownMs: 2500 },
+  channel_message:   {                                  badge: true,              cooldownMs: 2500 },
   voice_other_join:  { sound: 'join'                                                              },
   voice_other_leave: { sound: 'leave'                                                             },
   voice_self_join:   { sound: 'join'                                                              },
   voice_self_leave:  { sound: 'leave'                                                             },
   dm_request:        { sound: 'ping',  osNotif: true,               alert: true                   },
+  group_invite:      { sound: 'ping',  osNotif: true                                              },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
 };
 
