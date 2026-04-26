@@ -21,9 +21,18 @@ pub enum RealtimeEvent {
         conversation_id: String,
     },
     /// Sent to a user's personal inbox room when they are added to a group
-    /// (via invite acceptance or join-request approval).
+    /// (via invite acceptance or join-request approval), or to a group room
+    /// when its membership changes for any other reason.
+    ///
+    /// `kind` discriminates the cause so the frontend can decide whether to
+    /// raise a user-facing notification:
+    /// - `Some("invite")`     — you've been invited to a group (ping/notify)
+    /// - `Some("approval")`   — your join request was approved (silent — you asked for this)
+    /// - `None` / other       — generic reconcile (silent — refetch only)
     MembershipChanged {
         conversation_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kind: Option<String>,
     },
     /// Sent to a group room when a user joins a voice channel in that group.
     VoiceJoined {

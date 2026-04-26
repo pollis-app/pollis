@@ -880,8 +880,10 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) -
                 .or_else(|| data.get("conversation_id"))
                 .and_then(|v| v.as_str())
                 .map(str::to_owned);
+            let kind = data.get("kind").and_then(|v| v.as_str()).map(str::to_owned);
             let _ = channel.send(RealtimeEvent::MembershipChanged {
                 conversation_id: conv_id.clone(),
+                kind,
             });
             return conv_id;
         }
