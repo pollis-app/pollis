@@ -14,4 +14,5 @@ pub mod sfx;
 pub mod update;
 pub mod voice;
 pub mod voice_apm;
+pub mod voice_denoiser;
 pub mod voice_test;

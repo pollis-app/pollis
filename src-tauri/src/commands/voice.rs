@@ -25,7 +25,7 @@ use tokio::time::MissedTickBehavior;
 use webrtc_audio_processing::Processor as ApmProcessor;
 
 use crate::{
-    commands::{livekit::make_token, voice_apm},
+    commands::{livekit::make_token, voice_apm, voice_denoiser},
     error::Result,
     state::AppState,
 };
@@ -217,6 +217,12 @@ pub struct VoiceState {
     /// APM stage for the current voice session. Owns the WebRTC AudioProcessing
     /// `Processor` and its config. `None` outside a call.
     pub apm: Option<voice_apm::ApmStage>,
+    /// Optional RNNoise denoiser running upstream of APM. Held behind an
+    /// `Arc<Mutex<…>>` because the frame_task needs `&mut` access (RNNoise
+    /// is stateful) and `set_voice_audio_processing` mutates the slot when
+    /// the user toggles Click Suppression mid-call. `None` outside a call,
+    /// or when the mic isn't running at 48 kHz (RNNoise is rate-locked).
+    pub denoiser: Arc<Mutex<Option<voice_denoiser::DenoiserStage>>>,
     /// Optional precomputed token + DNS/TLS warmer for the next channel
     /// the user is likely to join. See [`VoiceWarmup`].
     pub warmup: Option<VoiceWarmup>,
@@ -239,6 +245,7 @@ impl VoiceState {
             is_muted: Arc::new(AtomicBool::new(false)),
             current_input_device: None,
             apm: None,
+            denoiser: Arc::new(Mutex::new(None)),
             warmup: None,
             last_join_timings: Arc::new(Mutex::new(None)),
         }
@@ -1078,6 +1085,29 @@ pub async fn join_voice_channel(
     let apm_handle = apm_stage.as_ref().map(|s| s.handle());
     let apm_frame_samples = voice_apm::frame_samples(mic_rate);
 
+    // Build the RNNoise denoiser if the user wants click suppression and
+    // the mic is at the rate the model was trained on. Other rates pass
+    // through to APM unchanged — RNNoise is rate-locked at 48 kHz.
+    let denoiser_arc = Arc::clone(&{
+        let voice = state.voice.lock().await;
+        Arc::clone(&voice.denoiser)
+    });
+    {
+        let mut slot = denoiser_arc.lock().unwrap();
+        *slot = if audio_processing.click_suppression && mic_rate == voice_denoiser::REQUIRED_RATE_HZ {
+            eprintln!("[voice/rnnoise] engaged @ {mic_rate} Hz");
+            Some(voice_denoiser::DenoiserStage::new())
+        } else {
+            if audio_processing.click_suppression {
+                eprintln!(
+                    "[voice/rnnoise] requested but mic rate is {mic_rate} Hz; \
+                     RNNoise needs 48000 Hz — disabling for this session"
+                );
+            }
+            None
+        };
+    }
+
     // Disable libwebrtc's internal AudioProcessingModule — APM is the only
     // stage that touches the mic signal. Leaving libwebrtc's APM on would
     // double-process and produce pumping/swirling artefacts.
@@ -1117,6 +1147,7 @@ pub async fn join_voice_channel(
     let voice_arc_frame = Arc::clone(&state.voice);
     let local_identity = format!("voice-{user_id}");
     let apm_for_capture = apm_handle.clone();
+    let denoiser_for_capture = Arc::clone(&denoiser_arc);
     let frame_task = tokio::spawn(async move {
         let chunk_size = (mic_rate / 100) as usize;
         let mut buf: Vec<i16> = Vec::new();
@@ -1128,6 +1159,17 @@ pub async fn join_voice_channel(
             buf.extend_from_slice(&samples);
             while buf.len() >= chunk_size {
                 let mut chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+
+                // RNNoise (if enabled) runs first so APM gets a cleaner signal:
+                // its NS / AGC adapt to actual voice energy instead of the
+                // typing/click noise floor. Std Mutex; the lock is held for
+                // ~0.1 ms per frame (single-writer) and never crosses an await.
+                {
+                    let mut guard = denoiser_for_capture.lock().unwrap();
+                    if let Some(d) = guard.as_mut() {
+                        d.process(&mut chunk);
+                    }
+                }
 
                 // APM mutates the chunk in place (AGC + NS + HPF + AEC capture).
                 if let Some(apm) = &apm_for_capture {
@@ -1365,6 +1407,9 @@ pub async fn leave_voice_channel(state: State<'_, Arc<AppState>>) -> Result<()> 
         voice.audio_source = None;
         voice.input_stream = None;
         voice.apm = None;
+        if let Ok(mut slot) = voice.denoiser.lock() {
+            *slot = None;
+        }
         voice.is_muted.store(false, Ordering::Relaxed);
         voice.current_input_device = None;
 
@@ -1477,10 +1522,29 @@ pub async fn set_voice_input_device(
         voice.apm = new_apm_stage;
     }
 
+    // Reset the RNNoise state on every device switch — RNN hidden state is
+    // tied to the previous mic's spectrum and isn't useful afterwards.
+    // Re-engage it iff the new mic is at the right rate and the user still
+    // has click suppression enabled.
+    let want_denoiser = voice
+        .apm
+        .as_ref()
+        .map(|a| a.config().click_suppression)
+        .unwrap_or(false);
+    {
+        let mut slot = voice.denoiser.lock().unwrap();
+        *slot = if want_denoiser && new_rate == voice_denoiser::REQUIRED_RATE_HZ {
+            Some(voice_denoiser::DenoiserStage::new())
+        } else {
+            None
+        };
+    }
+
     // Abort the old frame-feed task and start a new one on the new channel.
     if let Some(t) = voice.frame_task.take() { t.abort(); }
     let source = voice.audio_source.clone().unwrap();
     let apm_for_capture = voice.apm.as_ref().map(|a| a.handle());
+    let denoiser_for_capture = Arc::clone(&voice.denoiser);
     let task = tokio::spawn(async move {
         let mut buf: Vec<i16> = Vec::new();
         while let Some((samples, rate)) = frame_rx.recv().await {
@@ -1488,6 +1552,12 @@ pub async fn set_voice_input_device(
             let chunk_size = (rate / 100) as usize;
             while buf.len() >= chunk_size {
                 let mut chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+                {
+                    let mut guard = denoiser_for_capture.lock().unwrap();
+                    if let Some(d) = guard.as_mut() {
+                        d.process(&mut chunk);
+                    }
+                }
                 if let Some(apm) = &apm_for_capture {
                     if let Err(e) = voice_apm::run_capture(apm, &mut chunk, chunk_size) {
                         eprintln!("[voice] APM capture error (frame dropped): {e}");
@@ -1545,15 +1615,39 @@ pub async fn set_voice_output_device(
 
 /// Update the live APM configuration without rejoining. Internal AEC / AGC /
 /// NS state is preserved across config changes — only the changed submodule
-/// re-initialises. No-op when no voice session is active.
+/// re-initialises. The RNNoise denoiser is created or dropped to match the
+/// new `click_suppression` flag (its RNN state isn't worth preserving across
+/// toggles). No-op when no voice session is active.
 #[tauri::command]
 pub async fn set_voice_audio_processing(
     config: voice_apm::ApmConfig,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     let mut voice = state.voice.lock().await;
+
+    // Mic rate is fixed at session start; reuse it for the denoiser-rate check.
+    let mic_rate = voice.apm.as_ref().map(|a| a.sample_rate_hz());
+
     if let Some(stage) = voice.apm.as_mut() {
-        stage.set_config(config);
+        stage.set_config(config.clone());
     }
+
+    // Reconcile the RNNoise slot with the new flag.
+    if let Some(rate) = mic_rate {
+        let mut slot = voice.denoiser.lock().unwrap();
+        let want = config.click_suppression && rate == voice_denoiser::REQUIRED_RATE_HZ;
+        match (want, slot.is_some()) {
+            (true, false) => {
+                eprintln!("[voice/rnnoise] enabled mid-call");
+                *slot = Some(voice_denoiser::DenoiserStage::new());
+            }
+            (false, true) => {
+                eprintln!("[voice/rnnoise] disabled mid-call");
+                *slot = None;
+            }
+            _ => { /* already in the desired state */ }
+        }
+    }
+
     Ok(())
 }

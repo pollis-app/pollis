@@ -23,6 +23,8 @@ export interface PreferencesData {
   noise_suppression_level?: NoiseSuppressionLevel;
   /** Acoustic echo cancellation. */
   echo_cancellation?: boolean;
+  /** RNNoise click/keystroke suppression (separate from APM's spectral NS). */
+  click_suppression?: boolean;
   auto_join_voice?: boolean;
 }
 
@@ -33,6 +35,7 @@ export const APM_DEFAULTS = {
   agc_target_dbfs: 6,
   noise_suppression_level: "high" as NoiseSuppressionLevel,
   echo_cancellation: true,
+  click_suppression: false,
 } as const;
 
 /**
@@ -47,6 +50,7 @@ export interface ApmConfig {
   agc_target_dbfs: number;
   ns_level: NoiseSuppressionLevel;
   aec_enabled: boolean;
+  click_suppression: boolean;
 }
 
 /**
@@ -61,6 +65,7 @@ export function preferencesToApmConfig(prefs: PreferencesData | undefined): ApmC
     agc_target_dbfs: clampAgcTarget(prefs?.agc_target_dbfs ?? APM_DEFAULTS.agc_target_dbfs),
     ns_level: prefs?.noise_suppression_level ?? APM_DEFAULTS.noise_suppression_level,
     aec_enabled: prefs?.echo_cancellation ?? APM_DEFAULTS.echo_cancellation,
+    click_suppression: prefs?.click_suppression ?? APM_DEFAULTS.click_suppression,
   };
 }
 
@@ -126,6 +131,7 @@ export function usePreferences() {
           APM_DEFAULTS.noise_suppression_level,
         ),
         echo_cancellation: getPreference<boolean>(json, "echo_cancellation", APM_DEFAULTS.echo_cancellation),
+        click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
       };
     },

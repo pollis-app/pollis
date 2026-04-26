@@ -173,6 +173,7 @@ export const VoiceSettingsPage: React.FC = () => {
   const agcTarget = preferences.query.data?.agc_target_dbfs ?? 6;
   const nsLevel: NoiseSuppressionLevel = preferences.query.data?.noise_suppression_level ?? "high";
   const aecEnabled = preferences.query.data?.echo_cancellation ?? true;
+  const clickSuppression = preferences.query.data?.click_suppression ?? false;
 
   const autoJoinVoice = preferences.query.data?.auto_join_voice ?? false;
   const handleAutoJoinVoice = (enabled: boolean) => {
@@ -392,6 +393,13 @@ export const VoiceSettingsPage: React.FC = () => {
             checked={aecEnabled}
             onChange={(enabled) => savePrefsAndPushApm({ echo_cancellation: enabled })}
             description="Stops the speaker output from being picked up by the mic and bouncing back to the other side. Leave this on unless you're always on headphones."
+          />
+
+          <Switch
+            label="Click Suppression (RNNoise)"
+            checked={clickSuppression}
+            onChange={(enabled) => savePrefsAndPushApm({ click_suppression: enabled })}
+            description="ML-based denoiser that catches keyboard typing, mouse clicks, and other transients the standard noise suppression misses. Adds about 5% of one CPU core; only runs at 48 kHz mics. Recommended: drop Noise Suppression to Low or Off when this is on, otherwise both stages chew on the same signal."
           />
         </section>
 

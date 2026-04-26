@@ -67,6 +67,13 @@ pub struct ApmConfig {
     /// Echo cancellation on/off. Off is occasionally useful for headset users
     /// who want raw mic-only processing, but most voice setups want this on.
     pub aec_enabled: bool,
+    /// Run RNNoise (via `nnnoiseless`) as a pre-APM denoiser. APM's spectral
+    /// NS misses transients — keyboard clicks, mouse clicks, hard consonants;
+    /// RNNoise was trained specifically on those. Off by default since it
+    /// adds ~5% of one core during voice and only kicks in at 48 kHz.
+    /// Lives in this struct (rather than its own) so the wire shape stays
+    /// flat and `set_voice_audio_processing` is a single round-trip.
+    pub click_suppression: bool,
 }
 
 impl Default for ApmConfig {
@@ -81,6 +88,7 @@ impl Default for ApmConfig {
             // and produced no audible change for users upgrading.
             ns_level: NsLevel::High,
             aec_enabled: true,
+            click_suppression: false,
         }
     }
 }
@@ -199,12 +207,13 @@ impl ApmStage {
         processor.set_config(config.to_processor_config());
         eprintln!(
             "[voice/apm] engaged @ {sample_rate_hz} Hz: boost={} dB, AGC2={} (headroom={} dB), \
-             NS={:?}, AEC={}",
+             NS={:?}, AEC={}, RNNoise={}",
             config.mic_boost_db,
             config.agc_enabled,
             config.agc_target_dbfs,
             config.ns_level,
             config.aec_enabled,
+            config.click_suppression,
         );
         Ok(Self {
             processor: Arc::new(processor),
@@ -235,12 +244,13 @@ impl ApmStage {
     pub fn set_config(&mut self, config: ApmConfig) {
         self.processor.set_config(config.to_processor_config());
         eprintln!(
-            "[voice/apm] reconfigured: boost={} dB, AGC2={} (headroom={} dB), NS={:?}, AEC={}",
+            "[voice/apm] reconfigured: boost={} dB, AGC2={} (headroom={} dB), NS={:?}, AEC={}, RNNoise={}",
             config.mic_boost_db,
             config.agc_enabled,
             config.agc_target_dbfs,
             config.ns_level,
             config.aec_enabled,
+            config.click_suppression,
         );
         self.config = config;
     }

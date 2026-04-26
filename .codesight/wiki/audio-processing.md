@@ -1,9 +1,10 @@
 # Audio Processing
 
-The voice channel mic-side pipeline is owned by us end-to-end via the
-[`webrtc-audio-processing`](https://crates.io/crates/webrtc-audio-processing)
-crate (PulseAudio's repackaged WebRTC AudioProcessing module). Replaces
-libwebrtc's internal APM, which we cannot tune from Rust.
+The voice channel mic-side pipeline is owned by us end-to-end. Two stages,
+both pre-LiveKit:
+
+- **RNNoise** (via [`nnnoiseless`](https://crates.io/crates/nnnoiseless)) — optional ML denoiser, off by default. Handles transients APM misses.
+- **APM** (via [`webrtc-audio-processing`](https://crates.io/crates/webrtc-audio-processing)) — the PulseAudio repackage of WebRTC's AudioProcessing module. AGC2 + spectral NS + HPF + AEC. Replaces libwebrtc's internal APM, which we cannot tune from Rust.
 
 ## What APM does
 
@@ -22,7 +23,8 @@ libwebrtc's `AudioSourceOptions { echo_cancellation, noise_suppression, auto_gai
 Capture (mic):
   cpal i16 mono callback (10ms chunks, 48 kHz preferred)
     └─→ frame_task: rebuffer to exact APM frame size (rate / 100 samples)
-        └─→ apm.process_capture_frame()         // AGC + NS + HPF + AEC capture side
+        ├─→ DenoiserStage::process              // RNNoise (when click_suppression on, 48 kHz only)
+        └─→ apm.process_capture_frame()         // AGC2 + NS + HPF + AEC capture side
             └─→ NativeAudioSource.capture_frame  // → LiveKit publish
 
 Render (mixed playback, what's about to hit the speaker):
@@ -47,9 +49,10 @@ sync with what actually comes out of the speaker.
 ## Source files
 
 - `src-tauri/src/commands/voice_apm.rs` — `ApmStage`, `ApmConfig`, helpers (`run_capture`, `analyze_render`).
+- `src-tauri/src/commands/voice_denoiser.rs` — `DenoiserStage` wrapping `nnnoiseless::DenoiseState`. 48 kHz only.
 - `src-tauri/src/commands/voice.rs` — pipeline wiring: `start_mic_stream`, `start_speaker_stream`, `run_drain_task`, `run_mixer_task`, `ensure_playback`, `register_remote_track`. Tauri commands `join_voice_channel` / `set_voice_audio_processing` / `set_voice_input_device` / `set_voice_output_device`.
 - `frontend/src/hooks/queries/usePreferences.ts` — `ApmConfig`, `preferencesToApmConfig`, `APM_DEFAULTS`.
-- `frontend/src/pages/VoiceSettingsPage.tsx` — UI surface (AGC switch + target slider, NS dropdown, AEC switch). Mid-call changes push via `set_voice_audio_processing`.
+- `frontend/src/pages/VoiceSettingsPage.tsx` — UI surface (mic boost slider, AGC switch + target slider, NS dropdown, AEC switch, Click Suppression switch). Mid-call changes push via `set_voice_audio_processing`.
 
 ## Sample-rate model
 
@@ -82,12 +85,14 @@ We run AEC3 in `EchoCanceller::Full { stream_delay_ms: None }` — APM3's intern
 
 `ApmConfig` (Rust ↔ wire JSON, no rename):
 
-| Field             | Type          | Default  | Notes |
-|-------------------|---------------|----------|-------|
-| `agc_enabled`     | bool          | `true`   | mirrors the existing `auto_gain_control` preference |
-| `agc_target_dbfs` | u8            | `6`      | AGC2 `headroom_db`; UI exposes 3..=15 (lower = louder) |
-| `ns_level`        | enum (string) | `"high"` | `"off" \| "low" \| "moderate" \| "high"` |
-| `aec_enabled`     | bool          | `true`   | |
+| Field               | Type          | Default  | Notes |
+|---------------------|---------------|----------|-------|
+| `mic_boost_db`      | u8            | `0`      | Pre-AGC pre-amplifier; UI exposes 0..=20 dB. 0 = off. |
+| `agc_enabled`       | bool          | `true`   | mirrors the existing `auto_gain_control` preference |
+| `agc_target_dbfs`   | u8            | `6`      | AGC2 `headroom_db`; UI exposes 3..=15 (lower = louder) |
+| `ns_level`          | enum (string) | `"high"` | `"off" \| "low" \| "moderate" \| "high"` |
+| `aec_enabled`       | bool          | `true`   | |
+| `click_suppression` | bool          | `false`  | Enables RNNoise upstream of APM. Requires 48 kHz mic. |
 
 Per-user persistence is via `usePreferences` keys `auto_gain_control` / `agc_target_dbfs` / `noise_suppression_level` / `echo_cancellation`. `preferencesToApmConfig(prefs)` projects them into the wire shape.
 
@@ -114,7 +119,7 @@ For local Linux dev: `pacman -S meson ninja clang cmake` (Arch) or the equivalen
 
 - No resampler in the AEC reference path. Speaker-rate ≠ APM-rate sessions run without a render reference (logged at session start). Adding `rubato` for these edge cases is on the radar but unnecessary for the 99% case.
 - No per-host calibration of `stream_delay_ms`; we let APM3 estimate. Worth profiling per-platform before tuning.
-- Transient (keyboard/click) suppression is not available in this APM version — the crate hardcodes `transient_suppression.enabled = false` because upstream WebRTC deprecated it. For click suppression we'd need an ML denoiser (RNNoise, NSNet, etc.) layered upstream, which the issue scoped out.
+- RNNoise (the click-suppression path) is 48 kHz only. Bluetooth SCO devices at 16/24 kHz can't run it. Discord uses a heavier proprietary denoiser (Krisp) for higher quality; an open-source upgrade path is DeepFilterNet, which isn't published to crates.io yet (would require a git dep + ~5 MB model).
 
 ---
 _Back to [index.md](./index.md)_
