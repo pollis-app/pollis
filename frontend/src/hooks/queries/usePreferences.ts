@@ -15,8 +15,10 @@ export interface PreferencesData {
   font_size?: string;
   allow_desktop_notifications?: boolean;
   allow_sound_effects?: boolean;
+  /** Pre-AGC mic boost in dB. 0..=20; 0 = off. */
+  mic_boost_db?: number;
   auto_gain_control?: boolean;
-  /** AGC target loudness (dB below full scale). Smaller = louder. Range 6..=15. */
+  /** AGC target loudness (dB headroom from full scale). Smaller = louder. Range 3..=15. */
   agc_target_dbfs?: number;
   noise_suppression_level?: NoiseSuppressionLevel;
   /** Acoustic echo cancellation. */
@@ -26,6 +28,7 @@ export interface PreferencesData {
 
 /** Defaults must match `voice_apm::ApmConfig::default` in src-tauri. */
 export const APM_DEFAULTS = {
+  mic_boost_db: 0,
   auto_gain_control: true,
   agc_target_dbfs: 6,
   noise_suppression_level: "high" as NoiseSuppressionLevel,
@@ -39,6 +42,7 @@ export const APM_DEFAULTS = {
  * object argument, not top-level invoke params).
  */
 export interface ApmConfig {
+  mic_boost_db: number;
   agc_enabled: boolean;
   agc_target_dbfs: number;
   ns_level: NoiseSuppressionLevel;
@@ -52,6 +56,7 @@ export interface ApmConfig {
  */
 export function preferencesToApmConfig(prefs: PreferencesData | undefined): ApmConfig {
   return {
+    mic_boost_db: clampMicBoost(prefs?.mic_boost_db ?? APM_DEFAULTS.mic_boost_db),
     agc_enabled: prefs?.auto_gain_control ?? APM_DEFAULTS.auto_gain_control,
     agc_target_dbfs: clampAgcTarget(prefs?.agc_target_dbfs ?? APM_DEFAULTS.agc_target_dbfs),
     ns_level: prefs?.noise_suppression_level ?? APM_DEFAULTS.noise_suppression_level,
@@ -65,6 +70,13 @@ function clampAgcTarget(v: number): number {
     return APM_DEFAULTS.agc_target_dbfs;
   }
   return Math.max(3, Math.min(15, Math.round(v)));
+}
+
+function clampMicBoost(v: number): number {
+  if (!Number.isFinite(v)) {
+    return APM_DEFAULTS.mic_boost_db;
+  }
+  return Math.max(0, Math.min(20, Math.round(v)));
 }
 
 /**
@@ -105,6 +117,7 @@ export function usePreferences() {
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
         allow_sound_effects: getPreference<boolean>(json, "allow_sound_effects", true),
+        mic_boost_db: getPreference<number>(json, "mic_boost_db", APM_DEFAULTS.mic_boost_db),
         auto_gain_control: getPreference<boolean>(json, "auto_gain_control", APM_DEFAULTS.auto_gain_control),
         agc_target_dbfs: getPreference<number>(json, "agc_target_dbfs", APM_DEFAULTS.agc_target_dbfs),
         noise_suppression_level: getPreference<NoiseSuppressionLevel>(

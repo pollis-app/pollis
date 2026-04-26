@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use webrtc_audio_processing::{
     config::{
-        AdaptiveDigital, EchoCanceller, GainController, GainController2, HighPassFilter,
-        NoiseSuppression, NoiseSuppressionLevel,
+        AdaptiveDigital, CaptureAmplifier, EchoCanceller, GainController, GainController2,
+        HighPassFilter, NoiseSuppression, NoiseSuppressionLevel, PreAmplifier,
     },
     Config, Processor,
 };
@@ -48,6 +48,12 @@ pub const DEFAULT_APM_RATE_HZ: u32 = 48_000;
 /// which calls [`ApmStage::set_config`].
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct ApmConfig {
+    /// Pre-AGC mic boost in dB. Applied as a fixed pre-amplifier *before*
+    /// the AGC stage, so it lifts quiet input into a range where AGC's
+    /// speech-presence detector reliably engages. 0..=20; 0 = off.
+    /// Useful for naturally quiet talkers — combine with a low
+    /// `agc_target_dbfs` (3–4) for maximum perceived loudness.
+    pub mic_boost_db: u8,
     /// AGC on/off. Mirrors the existing `auto_gain_control` preference.
     pub agc_enabled: bool,
     /// AGC target loudness expressed as headroom from full scale in dB.
@@ -66,6 +72,7 @@ pub struct ApmConfig {
 impl Default for ApmConfig {
     fn default() -> Self {
         Self {
+            mic_boost_db: 0,
             agc_enabled: true,
             // 6 dB headroom: WebRTC AGC2 canonical default. Lower values
             // (3) clip easily on hot mics; higher (12+) sound quiet.
@@ -141,7 +148,23 @@ impl ApmConfig {
             None
         };
 
+        // Pre-amplifier: a fixed linear gain applied to capture before any
+        // other APM stage. Lifts very quiet talkers into a range where AGC's
+        // speech-presence detector engages reliably. Bypassed when the user
+        // hasn't asked for any boost, so APM's signal path is identical to
+        // pre-boost behaviour at mic_boost_db == 0.
+        let capture_amplifier = if self.mic_boost_db > 0 {
+            // dB → linear: 10^(dB/20). +6 dB = ×2, +20 dB = ×10.
+            let gain = 10f32.powf(f32::from(self.mic_boost_db.min(20)) / 20.0);
+            Some(CaptureAmplifier::PreAmplifier(PreAmplifier {
+                fixed_gain_factor: gain,
+            }))
+        } else {
+            None
+        };
+
         Config {
+            capture_amplifier,
             high_pass_filter: Some(HighPassFilter::default()),
             echo_canceller,
             noise_suppression,
@@ -175,9 +198,13 @@ impl ApmStage {
             .map_err(|e| format!("APM init failed: {e}"))?;
         processor.set_config(config.to_processor_config());
         eprintln!(
-            "[voice/apm] engaged @ {sample_rate_hz} Hz: AGC2={} (headroom={} dB), \
+            "[voice/apm] engaged @ {sample_rate_hz} Hz: boost={} dB, AGC2={} (headroom={} dB), \
              NS={:?}, AEC={}",
-            config.agc_enabled, config.agc_target_dbfs, config.ns_level, config.aec_enabled,
+            config.mic_boost_db,
+            config.agc_enabled,
+            config.agc_target_dbfs,
+            config.ns_level,
+            config.aec_enabled,
         );
         Ok(Self {
             processor: Arc::new(processor),
@@ -208,8 +235,12 @@ impl ApmStage {
     pub fn set_config(&mut self, config: ApmConfig) {
         self.processor.set_config(config.to_processor_config());
         eprintln!(
-            "[voice/apm] reconfigured: AGC2={} (headroom={} dB), NS={:?}, AEC={}",
-            config.agc_enabled, config.agc_target_dbfs, config.ns_level, config.aec_enabled,
+            "[voice/apm] reconfigured: boost={} dB, AGC2={} (headroom={} dB), NS={:?}, AEC={}",
+            config.mic_boost_db,
+            config.agc_enabled,
+            config.agc_target_dbfs,
+            config.ns_level,
+            config.aec_enabled,
         );
         self.config = config;
     }

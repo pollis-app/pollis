@@ -168,9 +168,10 @@ export const VoiceSettingsPage: React.FC = () => {
     void pushApmConfig(preferencesToApmConfig(next));
   };
 
+  const micBoost = preferences.query.data?.mic_boost_db ?? 0;
   const autoGain = preferences.query.data?.auto_gain_control ?? true;
-  const agcTarget = preferences.query.data?.agc_target_dbfs ?? 9;
-  const nsLevel: NoiseSuppressionLevel = preferences.query.data?.noise_suppression_level ?? "moderate";
+  const agcTarget = preferences.query.data?.agc_target_dbfs ?? 6;
+  const nsLevel: NoiseSuppressionLevel = preferences.query.data?.noise_suppression_level ?? "high";
   const aecEnabled = preferences.query.data?.echo_cancellation ?? true;
 
   const autoJoinVoice = preferences.query.data?.auto_join_voice ?? false;
@@ -350,6 +351,17 @@ export const VoiceSettingsPage: React.FC = () => {
           >
             Audio Processing
           </h2>
+
+          <RangeSlider
+            label="Microphone Boost"
+            value={micBoost}
+            onChange={(v) => savePrefsAndPushApm({ mic_boost_db: v })}
+            min={0}
+            max={20}
+            step={1}
+            sublabel="Linear pre-AGC gain. If you're naturally quiet and AGC isn't pulling you up enough, raise this. +6 dB doubles amplitude; +20 dB is 10×. Pair with a low AGC headroom (3–4) for maximum loudness."
+            description={micBoost === 0 ? "off" : `+${micBoost} dB`}
+          />
 
           <Switch
             label="Auto Gain Control"
