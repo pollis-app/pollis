@@ -870,10 +870,12 @@ pub async fn send_group_invite(
     }
 
     // Notify invitee via their inbox so the pending invite appears immediately.
+    // `kind: "invite"` lets the frontend raise a ping/OS notification — a
+    // generic membership_changed (kind: null) would only invalidate queries.
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
         &state.config,
         &invitee_id,
-        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
+        serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "invite"}),
     ).await {
         eprintln!("[inbox] send_group_invite: notify {invitee_id} failed: {e}");
     }
@@ -1171,10 +1173,12 @@ pub async fn approve_join_request(
     }
 
     // Notify requester their join request was approved so they see the group immediately.
+    // `kind: "approval"` keeps this silent on the requester's device — they
+    // initiated the request, so an unsolicited ping isn't warranted.
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
         &state.config,
         &requester_id,
-        serde_json::json!({"type": "membership_changed", "group_id": group_id}),
+        serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "approval"}),
     ).await {
         eprintln!("[inbox] approve_join_request: notify {requester_id} failed: {e}");
     }

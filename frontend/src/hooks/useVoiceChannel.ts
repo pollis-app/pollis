@@ -5,7 +5,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { usePreferences } from './queries/usePreferences';
-import { playSfx, SFX } from '../utils/sfx';
+import { notify } from '../utils/notify';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -217,9 +217,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         }
       } else {
         joinedRef.current = true;
-        if (preferences.query.data?.allow_sound_effects ?? true) {
-          playSfx(SFX.join);
-        }
+        notify('voice_self_join');
         if (groupId) {
           invoke('publish_voice_presence', {
             groupId,
@@ -269,8 +267,8 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       // fires a phantom leave before we've even joined.
       const didJoin = joinedRef.current;
       joinedRef.current = false;
-      if (didJoin && (preferences.query.data?.allow_sound_effects ?? true)) {
-        playSfx(SFX.leave);
+      if (didJoin) {
+        notify('voice_self_leave');
       }
       // Optimistically remove self from the voice-participants cache so the
       // observer list in the UI drops us immediately instead of waiting for
@@ -331,7 +329,6 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
     setVoiceIsMuted,
     setIsLocalSpeaking,
     setActiveVoiceChannelId,
-    preferences.query.data?.allow_sound_effects,
     queryClient,
   ]);
 
