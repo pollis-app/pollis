@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
     time::{Duration, Instant},
@@ -21,8 +21,14 @@ use livekit::{
 };
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tokio::time::MissedTickBehavior;
+use webrtc_audio_processing::Processor as ApmProcessor;
 
-use crate::{commands::livekit::make_token, error::Result, state::AppState};
+use crate::{
+    commands::{livekit::make_token, voice_apm},
+    error::Result,
+    state::AppState,
+};
 
 /// Warm-cached LiveKit credentials for a single channel. Issued by
 /// `prepare_voice_connection` on user "intent" (hover, route entry) and
@@ -86,37 +92,91 @@ pub struct AudioDevice {
     pub kind: String, // "input" | "output"
 }
 
-// ── Playback state shared between VoiceState and the room event task ─────
+// ── Playback pipeline ─────────────────────────────────────────────────────
+//
+// All remote audio funnels through a single mixer → one cpal output stream.
+// That gives us one stable point at which to tap the "what's about to hit
+// the speaker" signal as APM's render (AEC) reference. The previous
+// per-track stream model worked for output but had no single mix point.
+//
+// Layout:
+//
+//   [NativeAudioStream per remote track] ─ drain task ─→ track_buffers[k]
+//                                                            │
+//                                              mixer task (10ms tick)
+//                                                            ▼
+//                                         output_ring (interleaved f32)
+//                                                            │
+//                                               cpal output stream callback
+
+/// Per-track f32 mono ring buffers, keyed by `"{identity}-{sid}"`. Drain
+/// tasks push into them; the mixer drains them every 10 ms. Held in an
+/// `Arc<Mutex<…>>` because both the drain tasks and the mixer task reach
+/// into it from different tokio workers; the lock window is always a
+/// single insert/drain so it never overlaps an `await`.
+pub type TrackBuffers = Arc<Mutex<HashMap<String, VecDeque<f32>>>>;
+
+/// Capacity per per-track buffer. 200 ms at 48 kHz mono = 9_600 samples;
+/// anything older than that is dropped to keep latency low. Same number
+/// the previous per-track ring used.
+const TRACK_BUFFER_CAP_SAMPLES: usize = 9_600;
 
 pub struct PlaybackState {
-    // cpal output streams keyed by track key ("identity-sid")
-    pub streams: HashMap<String, SendableStream>,
-    // tasks draining NativeAudioStream → ring buffer
-    pub tasks: HashMap<String, tokio::task::JoinHandle<()>>,
-    // raw RtcAudioTrack refs kept so output device switching can rebuild streams
-    pub rtc_tracks: HashMap<String, libwebrtc::audio_track::RtcAudioTrack>,
-    // participant identity keyed by track key — needed to re-attach on device switch
-    pub identities: HashMap<String, String>,
+    /// Per-remote-track f32 mono ring buffers fed by drain tasks.
+    pub track_buffers: TrackBuffers,
+    /// The single shared cpal output stream. `None` until `start_playback`.
+    pub output_stream: Option<SendableStream>,
+    /// The interleaved-f32 ring the cpal output callback drains. Same Arc
+    /// shared with the mixer task so both speak to one buffer.
+    pub output_ring: Option<Arc<Mutex<VecDeque<f32>>>>,
+    pub output_channels: u32,
+    pub output_sample_rate: u32,
     pub output_device_name: Option<String>,
+    /// Per-track NativeAudioStream drain tasks.
+    pub drain_tasks: HashMap<String, tokio::task::JoinHandle<()>>,
+    /// Raw RtcAudioTrack refs, kept so `set_voice_output_device` can rebuild
+    /// the speaker stream while preserving subscriptions.
+    pub rtc_tracks: HashMap<String, libwebrtc::audio_track::RtcAudioTrack>,
+    /// Identity per `track_key`, used by `set_voice_output_device` to
+    /// re-emit speaking events on the new pipeline if needed.
+    pub identities: HashMap<String, String>,
+    /// Single mixer task running at 10 ms cadence.
+    pub mixer_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl PlaybackState {
     fn new() -> Self {
         Self {
-            streams: HashMap::new(),
-            tasks: HashMap::new(),
+            track_buffers: Arc::new(Mutex::new(HashMap::new())),
+            output_stream: None,
+            output_ring: None,
+            output_channels: 0,
+            output_sample_rate: 0,
+            output_device_name: None,
+            drain_tasks: HashMap::new(),
             rtc_tracks: HashMap::new(),
             identities: HashMap::new(),
-            output_device_name: None,
+            mixer_task: None,
         }
     }
 
-    /// Stop and drop all active playback for every remote track.
+    /// Stop and drop everything: per-track drain tasks, the mixer, the
+    /// cpal output stream. Track refs are kept so a follow-up
+    /// `start_playback` (e.g. on output-device switch) can reattach.
     fn stop_all(&mut self) {
-        for (_, task) in self.tasks.drain() {
-            task.abort();
+        for (_, t) in self.drain_tasks.drain() {
+            t.abort();
         }
-        self.streams.clear();
+        if let Some(t) = self.mixer_task.take() {
+            t.abort();
+        }
+        self.output_stream = None;
+        self.output_ring = None;
+        self.output_sample_rate = 0;
+        self.output_channels = 0;
+        if let Ok(mut buffers) = self.track_buffers.lock() {
+            buffers.clear();
+        }
     }
 }
 
@@ -153,9 +213,10 @@ pub struct VoiceState {
     pub room_task: Option<tokio::task::JoinHandle<()>>,
     pub playback: Arc<Mutex<PlaybackState>>,
     pub is_muted: Arc<AtomicBool>,
-    /// Noise gate threshold stored as f32 bits. 0.0 = off. Persists across calls.
-    pub noise_floor: Arc<AtomicU32>,
     pub current_input_device: Option<String>,
+    /// APM stage for the current voice session. Owns the WebRTC AudioProcessing
+    /// `Processor` and its config. `None` outside a call.
+    pub apm: Option<voice_apm::ApmStage>,
     /// Optional precomputed token + DNS/TLS warmer for the next channel
     /// the user is likely to join. See [`VoiceWarmup`].
     pub warmup: Option<VoiceWarmup>,
@@ -176,8 +237,8 @@ impl VoiceState {
             room_task: None,
             playback: Arc::new(Mutex::new(PlaybackState::new())),
             is_muted: Arc::new(AtomicBool::new(false)),
-            noise_floor: Arc::new(AtomicU32::new(0u32)),
             current_input_device: None,
+            apm: None,
             warmup: None,
             last_join_timings: Arc::new(Mutex::new(None)),
         }
@@ -270,7 +331,6 @@ pub(crate) fn start_mic_stream(
     device: &cpal::Device,
     frame_tx: tokio::sync::mpsc::UnboundedSender<(Vec<i16>, u32)>,
     is_muted: Arc<AtomicBool>,
-    noise_floor: Arc<AtomicU32>,
 ) -> Result<(SendableStream, u32)> {
     let config = device
         .default_input_config()
@@ -309,30 +369,22 @@ pub(crate) fn start_mic_stream(
         ($T:ty, $to_f32:expr) => {{
             let frame_tx = frame_tx.clone();
             let is_muted = Arc::clone(&is_muted);
-            let noise_floor = Arc::clone(&noise_floor);
             device.build_input_stream::<$T, _, _>(
                 &stream_config,
                 move |data: &[$T], _| {
                     if is_muted.load(Ordering::Relaxed) {
                         return;
                     }
-                    let threshold = f32::from_bits(noise_floor.load(Ordering::Relaxed));
                     let f32s: Vec<f32> = data.iter().copied().map($to_f32).collect();
-                    if threshold > 0.0 {
-                        let peak = f32s.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-                        if peak < threshold {
-                            return;
-                        }
-                    }
                     let mono: Vec<i16> = if channels == 1 {
                         f32s.iter()
-                            .map(|&s| (s * 32767.0).clamp(-32768.0, 32767.0) as i16)
+                            .map(|&s| (s * 32_767.0).clamp(-32_768.0, 32_767.0) as i16)
                             .collect()
                     } else {
                         f32s.chunks(channels)
                             .map(|ch| {
                                 let avg = ch.iter().sum::<f32>() / channels as f32;
-                                (avg * 32767.0).clamp(-32768.0, 32767.0) as i16
+                                (avg * 32_767.0).clamp(-32_768.0, 32_767.0) as i16
                             })
                             .collect()
                     };
@@ -360,16 +412,36 @@ pub(crate) fn start_mic_stream(
 
 /// Build a cpal output stream driven by a shared ring buffer.
 /// Returns the stream (kept alive by the caller) and the buffer to push into.
+///
+/// `preferred_rate` is the rate we'd like to run at; we'll honour it when
+/// the device supports it and fall back to its default rate otherwise. The
+/// caller can compare the returned rate against `preferred_rate` to decide
+/// whether the AEC render reference can be tapped without resampling.
 pub(crate) fn start_speaker_stream(
     device: &cpal::Device,
+    preferred_rate: u32,
 ) -> Result<(SendableStream, u32, u32, Arc<Mutex<VecDeque<f32>>>)> {
     let config = device
         .default_output_config()
         .map_err(|e| anyhow::anyhow!("output config: {e}"))?;
     let channels = config.channels() as u32;
     let sample_format = config.sample_format();
-    // Force 48000 Hz to match the NativeAudioSource encoding rate.
-    let sample_rate: u32 = 48000;
+
+    let supports_preferred = device
+        .supported_output_configs()
+        .map(|cfgs| {
+            cfgs.filter(|c| c.channels() == config.channels() && c.sample_format() == sample_format)
+                .any(|c| {
+                    c.min_sample_rate().0 <= preferred_rate
+                        && c.max_sample_rate().0 >= preferred_rate
+                })
+        })
+        .unwrap_or(false);
+    let sample_rate: u32 = if supports_preferred {
+        preferred_rate
+    } else {
+        config.sample_rate().0
+    };
     let stream_config = cpal::StreamConfig {
         channels: config.channels(),
         sample_rate: cpal::SampleRate(sample_rate),
@@ -410,91 +482,255 @@ pub(crate) fn start_speaker_stream(
     Ok((SendableStream(stream), sample_rate, channels, buf))
 }
 
-/// Attach a NativeAudioStream to a speaker output device. Async: blocking ALSA
-/// device setup runs in spawn_blocking, then a tokio task drains frames into
-/// the ring buffer. Call via tokio::spawn so the room event loop isn't blocked.
-async fn attach_remote_track(
-    output_device_name: Option<String>,
+// ── Mixer + per-track drain ───────────────────────────────────────────────
+
+/// Drain a remote track's `NativeAudioStream` into a per-track ring buffer
+/// and emit speaking-state transitions. Runs as one tokio task per
+/// subscribed remote audio track. The mixer reads from the buffer.
+async fn run_drain_task(
     rtc_track: libwebrtc::audio_track::RtcAudioTrack,
-    playback: Arc<Mutex<PlaybackState>>,
     track_key: String,
+    track_buffers: TrackBuffers,
     voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
     participant_identity: String,
+    sample_rate: u32,
 ) {
-    // Build the cpal output stream on a blocking thread (ALSA syscalls).
-    let result = tokio::task::spawn_blocking(move || {
-        let host = cpal::default_host();
-        let output_dev = get_device(&host, output_device_name.as_deref(), false)?;
-        start_speaker_stream(&output_dev)
-    })
-    .await;
+    let mut audio_stream = NativeAudioStream::new(rtc_track, sample_rate as i32, 1);
 
-    let (stream, sample_rate, channels, buf) = match result {
-        Ok(Ok(v)) => v,
-        Ok(Err(e)) => {
-            eprintln!("[voice] speaker stream error for {track_key}: {e}");
-            return;
+    let mut onset_frames: u32 = 0;
+    let mut speak_hold: u32 = 0;
+    let mut is_speaking = false;
+
+    eprintln!("[voice] remote drain task started for {track_key}");
+    while let Some(frame) = audio_stream.next().await {
+        let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
+
+        if peak > 1000 {
+            onset_frames += 1;
+            if onset_frames >= 2 {
+                speak_hold = 12;
+            }
+        } else {
+            onset_frames = 0;
+            if speak_hold > 0 {
+                speak_hold -= 1;
+            }
         }
-        Err(e) => {
-            eprintln!("[voice] speaker stream panicked for {track_key}: {e}");
-            return;
-        }
-    };
-
-    let mut audio_stream =
-        NativeAudioStream::new(rtc_track.clone(), sample_rate as i32, channels as i32);
-
-    // Cap the ring buffer at 200ms to keep audio fresh and latency low.
-    let max_buf = (sample_rate * channels / 5) as usize;
-    let task_key = track_key.clone();
-    let voice_arc_task = voice_arc.clone();
-    let identity_task = participant_identity.clone();
-    let task = tokio::spawn(async move {
-        eprintln!("[voice] remote drain task started for {task_key}");
-        let mut onset_frames: u32 = 0;
-        let mut speak_hold: u32 = 0;
-        let mut is_speaking = false;
-        while let Some(frame) = audio_stream.next().await {
-            let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
-
-            if peak > 1000 {
-                onset_frames += 1;
-                if onset_frames >= 2 {
-                    speak_hold = 12;
-                }
-            } else {
-                onset_frames = 0;
-                if speak_hold > 0 {
-                    speak_hold -= 1;
+        let now_speaking = speak_hold > 0;
+        if now_speaking != is_speaking {
+            is_speaking = now_speaking;
+            let voice = voice_arc.lock().await;
+            if let Some(ch) = &voice.channel {
+                if is_speaking {
+                    let _ = ch.send(VoiceEvent::SpeakingStarted {
+                        identity: participant_identity.clone(),
+                    });
+                } else {
+                    let _ = ch.send(VoiceEvent::SpeakingStopped {
+                        identity: participant_identity.clone(),
+                    });
                 }
             }
-            let now_speaking = speak_hold > 0;
-            if now_speaking != is_speaking {
-                is_speaking = now_speaking;
-                let voice = voice_arc_task.lock().await;
-                if let Some(ch) = &voice.channel {
-                    if is_speaking {
-                        let _ = ch.send(VoiceEvent::SpeakingStarted { identity: identity_task.clone() });
-                    } else {
-                        let _ = ch.send(VoiceEvent::SpeakingStopped { identity: identity_task.clone() });
+        }
+
+        let mut buffers = track_buffers.lock().unwrap();
+        let buf = buffers.entry(track_key.clone()).or_insert_with(VecDeque::new);
+        buf.extend(frame.data.iter().map(|&s| s as f32 / 32_768.0));
+        while buf.len() > TRACK_BUFFER_CAP_SAMPLES {
+            buf.pop_front();
+        }
+    }
+    eprintln!("[voice] remote drain task ended for {track_key}");
+
+    // Stream closed — clean up our buffer slot so the mixer doesn't keep
+    // reading a dead entry.
+    let mut buffers = track_buffers.lock().unwrap();
+    buffers.remove(&track_key);
+}
+
+/// Mix every active per-track buffer into a single 10 ms frame, send a copy
+/// to APM as the AEC render reference, and push the frame (channel-duplicated)
+/// onto the cpal output ring. Runs at 100 Hz for the duration of the voice
+/// session; aborted on `leave_voice_channel` or output-device switch.
+async fn run_mixer_task(
+    track_buffers: TrackBuffers,
+    output_ring: Arc<Mutex<VecDeque<f32>>>,
+    output_channels: u32,
+    output_capacity_samples: usize,
+    apm_processor: Option<Arc<ApmProcessor>>,
+    apm_frame_samples: usize,
+) {
+    let mut interval = tokio::time::interval(Duration::from_millis(10));
+    // Skip catch-up bursts: under sustained load we'd rather lose 10 ms than
+    // process several frames back-to-back and inject a click.
+    interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+
+    let mut mix = vec![0.0f32; apm_frame_samples];
+
+    loop {
+        interval.tick().await;
+
+        // Reset mix to silence
+        for s in mix.iter_mut() {
+            *s = 0.0;
+        }
+
+        // Sum available samples from each track. Tracks that don't have
+        // a full 10 ms ready contribute partial silence — that's a tiny
+        // glitch but fixing it would require waiting, which would
+        // back-pressure the mixer.
+        {
+            let mut buffers = track_buffers.lock().unwrap();
+            for buf in buffers.values_mut() {
+                let take = buf.len().min(apm_frame_samples);
+                for slot in mix.iter_mut().take(take) {
+                    if let Some(s) = buf.pop_front() {
+                        *slot += s;
                     }
                 }
             }
+        }
 
-            let samples: Vec<f32> =
-                frame.data.iter().map(|&s| s as f32 / 32768.0).collect();
-            let mut b = buf.lock().unwrap();
-            b.extend(samples);
-            while b.len() > max_buf {
-                b.pop_front();
+        // Soft-clip in case multiple participants stack onto a near-full
+        // sample. Hard clipping past ±1.0 sounds harsh; we just hold here.
+        for s in mix.iter_mut() {
+            *s = s.clamp(-1.0, 1.0);
+        }
+
+        // AEC render reference: APM analyses the about-to-play signal so its
+        // echo subtraction has something to subtract on the next capture.
+        if let Some(apm) = &apm_processor {
+            let _ = voice_apm::analyze_render(apm, &mix, apm_frame_samples);
+        }
+
+        // Push to the cpal output ring. The output stream's callback
+        // de-interleaves, so we duplicate mono → output_channels here.
+        {
+            let mut ring = output_ring.lock().unwrap();
+            for s in mix.iter() {
+                for _ in 0..output_channels {
+                    ring.push_back(*s);
+                }
+            }
+            while ring.len() > output_capacity_samples {
+                ring.pop_front();
             }
         }
-        eprintln!("[voice] remote drain task ended for {task_key}");
-    });
+    }
+}
 
-    let mut pb = playback.lock().unwrap();
-    pb.streams.insert(track_key.clone(), stream);
-    pb.tasks.insert(track_key.clone(), task);
+/// Open the speaker, spawn the mixer task. Idempotent: if a stream is
+/// already running on `output_device_name`, return the existing
+/// `(sample_rate, ring)` without rebuilding. Otherwise tear the old one
+/// down first.
+async fn ensure_playback(
+    voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
+    output_device_name: Option<String>,
+    apm_handle: Option<Arc<ApmProcessor>>,
+    apm_rate: u32,
+    apm_frame_samples: usize,
+) -> Result<()> {
+    // ── Reuse existing stream if already on the requested device. ─────────
+    {
+        let voice = voice_arc.lock().await;
+        let pb = voice.playback.lock().unwrap();
+        if pb.output_stream.is_some()
+            && pb.output_device_name.as_deref() == output_device_name.as_deref()
+        {
+            return Ok(());
+        }
+    }
+
+    // Tear down any existing pipeline first so device-switch is clean.
+    {
+        let voice = voice_arc.lock().await;
+        let mut pb = voice.playback.lock().unwrap();
+        pb.stop_all();
+    }
+
+    // Open the new cpal output stream on a blocking thread (ALSA syscalls).
+    let output_device_name_for_open = output_device_name.clone();
+    let (stream, sample_rate, channels, output_ring) = tokio::task::spawn_blocking(move || {
+        let host = cpal::default_host();
+        let dev = get_device(&host, output_device_name_for_open.as_deref(), false)?;
+        start_speaker_stream(&dev, apm_rate)
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
+
+    // If the speaker can't run at the APM rate (very rare; e.g. forced
+    // device override), the AEC render reference would be at the wrong
+    // rate. Disabling the tap is preferable to feeding APM aliased data.
+    let apm_for_mixer = if sample_rate == apm_rate {
+        apm_handle
+    } else {
+        eprintln!(
+            "[voice] speaker rate {sample_rate} Hz != APM rate {apm_rate} Hz; \
+             AEC render reference disabled for this session"
+        );
+        None
+    };
+
+    let (track_buffers, output_capacity_samples) = {
+        let voice = voice_arc.lock().await;
+        let pb = voice.playback.lock().unwrap();
+        let cap = (sample_rate as usize) * (channels as usize) / 5; // 200 ms
+        (Arc::clone(&pb.track_buffers), cap)
+    };
+
+    let mixer_task = tokio::spawn(run_mixer_task(
+        track_buffers,
+        Arc::clone(&output_ring),
+        channels,
+        output_capacity_samples,
+        apm_for_mixer,
+        apm_frame_samples,
+    ));
+
+    let voice = voice_arc.lock().await;
+    let mut pb = voice.playback.lock().unwrap();
+    pb.output_stream = Some(stream);
+    pb.output_ring = Some(output_ring);
+    pb.output_sample_rate = sample_rate;
+    pb.output_channels = channels;
+    pb.output_device_name = output_device_name;
+    pb.mixer_task = Some(mixer_task);
+    Ok(())
+}
+
+/// Subscribe a newly-arrived remote audio track to the playback pipeline:
+/// spawn its drain task, register it for mixing. Output stream + mixer are
+/// expected to be already running (set up at join time).
+async fn register_remote_track(
+    rtc_track: libwebrtc::audio_track::RtcAudioTrack,
+    track_key: String,
+    voice_arc: Arc<tokio::sync::Mutex<VoiceState>>,
+    participant_identity: String,
+    apm_rate: u32,
+) {
+    let track_buffers = {
+        let voice = voice_arc.lock().await;
+        let pb = voice.playback.lock().unwrap();
+        Arc::clone(&pb.track_buffers)
+    };
+
+    let task_key = track_key.clone();
+    let voice_for_task = Arc::clone(&voice_arc);
+    let identity_for_task = participant_identity.clone();
+    let task = tokio::spawn(run_drain_task(
+        rtc_track.clone(),
+        task_key,
+        track_buffers,
+        voice_for_task,
+        identity_for_task,
+        apm_rate,
+    ));
+
+    let voice = voice_arc.lock().await;
+    let mut pb = voice.playback.lock().unwrap();
+    if let Some(prev) = pb.drain_tasks.insert(track_key.clone(), task) {
+        prev.abort();
+    }
     pb.rtc_tracks.insert(track_key.clone(), rtc_track);
     pb.identities.insert(track_key, participant_identity);
 }
@@ -702,8 +938,13 @@ pub async fn prepare_voice_connection(
     Ok(())
 }
 
-/// Connect to a LiveKit voice room and publish the local microphone.
-/// Step 2: mic input added. Playback of remote tracks comes next.
+/// Connect to a LiveKit voice room, publish the local microphone, and start
+/// the remote-playback pipeline (single shared mixer + cpal output stream).
+///
+/// `audio_processing` carries the user's APM preferences (AGC, NS, AEC).
+/// libwebrtc's internal AudioProcessingModule is disabled at the
+/// `AudioSourceOptions` level so we don't double-process: APM is the only
+/// stage that touches the mic signal between cpal and `capture_frame`.
 ///
 /// Performance: the LiveKit network handshake (DNS, TLS, WS upgrade) and
 /// the cpal mic init (ALSA enumeration + device open) are independent and
@@ -717,8 +958,8 @@ pub async fn join_voice_channel(
     user_id: String,
     display_name: String,
     input_device: Option<String>,
-    _output_device: Option<String>,
-    auto_gain_control: bool,
+    output_device: Option<String>,
+    audio_processing: voice_apm::ApmConfig,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     // Wall-clock anchor for `total_join_ms` and per-phase deltas.
@@ -785,10 +1026,10 @@ pub async fn join_voice_channel(
     // Both are independent and individually expensive on cold starts. Running
     // them with `tokio::join!` cuts the user-visible delay to ~max(net, mic).
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
-    let (is_muted, noise_floor) = {
+    let is_muted = {
         let voice = state.voice.lock().await;
         voice.is_muted.store(false, Ordering::Relaxed);
-        (Arc::clone(&voice.is_muted), Arc::clone(&voice.noise_floor))
+        Arc::clone(&voice.is_muted)
     };
 
     let input_device_clone = input_device.clone();
@@ -807,7 +1048,7 @@ pub async fn join_voice_channel(
             let host = cpal::default_host();
             let dev = get_device(&host, input_device_clone.as_deref(), true)?;
             eprintln!("[voice] mic device: {:?}", dev.name());
-            let r = start_mic_stream(&dev, frame_tx, is_muted, noise_floor);
+            let r = start_mic_stream(&dev, frame_tx, is_muted);
             let elapsed_ms = mic_started.elapsed().as_millis() as u64;
             r.map(|(stream, rate)| (stream, rate, elapsed_ms))
         })
@@ -824,11 +1065,27 @@ pub async fn join_voice_channel(
 
     let room = Arc::new(room);
 
+    // ── Build APM at the mic's actual rate ────────────────────────────────
+    // WebRTC supports 8/16/32/48 kHz. Anything else (e.g. legacy 44.1) means
+    // we can't run APM for this session; we log and proceed without it.
+    let apm_stage = match voice_apm::ApmStage::new(mic_rate, audio_processing.clone()) {
+        Ok(stage) => Some(stage),
+        Err(e) => {
+            eprintln!("[voice] APM disabled: {e}");
+            None
+        }
+    };
+    let apm_handle = apm_stage.as_ref().map(|s| s.handle());
+    let apm_frame_samples = voice_apm::frame_samples(mic_rate);
+
+    // Disable libwebrtc's internal AudioProcessingModule — APM is the only
+    // stage that touches the mic signal. Leaving libwebrtc's APM on would
+    // double-process and produce pumping/swirling artefacts.
     let audio_source = NativeAudioSource::new(
         AudioSourceOptions {
-            echo_cancellation: true,
-            noise_suppression: true,
-            auto_gain_control,
+            echo_cancellation: false,
+            noise_suppression: false,
+            auto_gain_control: false,
         },
         mic_rate,
         1,
@@ -853,12 +1110,13 @@ pub async fn join_voice_channel(
     let first_publish_ms = publish_start.elapsed().as_millis() as u64;
     eprintln!("[voice] track published");
 
-    // Buffer mic frames into exact 10ms chunks, detect local speaking, and
-    // feed to capture_frame. Speaking is detected client-side from audio peaks
-    // so the indicator works without waiting for the LiveKit server.
+    // ── Mic frame task: rebuffer to exact 10ms, run APM, capture_frame ────
+    // Speaking detection runs on the post-APM peak so the indicator follows
+    // the user's effective level (after AGC + NS) rather than raw input.
     let audio_source_task = audio_source.clone();
     let voice_arc_frame = Arc::clone(&state.voice);
     let local_identity = format!("voice-{user_id}");
+    let apm_for_capture = apm_handle.clone();
     let frame_task = tokio::spawn(async move {
         let chunk_size = (mic_rate / 100) as usize;
         let mut buf: Vec<i16> = Vec::new();
@@ -869,7 +1127,16 @@ pub async fn join_voice_channel(
         while let Some((samples, rate)) = frame_rx.recv().await {
             buf.extend_from_slice(&samples);
             while buf.len() >= chunk_size {
-                let chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+                let mut chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+
+                // APM mutates the chunk in place (AGC + NS + HPF + AEC capture).
+                if let Some(apm) = &apm_for_capture {
+                    if let Err(e) = voice_apm::run_capture(apm, &mut chunk, chunk_size) {
+                        eprintln!("[voice] APM capture error (frame dropped): {e}");
+                        continue;
+                    }
+                }
+
                 let peak = chunk.iter().map(|&s| s.abs()).max().unwrap_or(0);
 
                 // Speaking detection: require 2 consecutive above-threshold frames to trigger,
@@ -911,11 +1178,26 @@ pub async fn join_voice_channel(
         }
     });
 
+    // ── Open the speaker pipeline: single output stream + mixer task ──────
+    // Doing this BEFORE the room event loop starts means the very first
+    // TrackSubscribed has somewhere to push its decoded frames.
+    if let Err(e) = ensure_playback(
+        Arc::clone(&state.voice),
+        output_device.clone(),
+        apm_handle.clone(),
+        mic_rate,
+        apm_frame_samples,
+    )
+    .await
+    {
+        eprintln!("[voice] playback init failed (speaker disabled this session): {e}");
+    }
+
     // ── Seed participant list ─────────────────────────────────────────────────
     // Emit ParticipantJoined for participants already in the room.
     // Do NOT attach tracks here — TrackSubscribed fires for pre-existing
     // subscribed tracks once the event loop drains buffered events, and
-    // attaching twice creates competing NativeAudioStream sinks.
+    // attaching twice creates competing draining tasks.
     {
         let voice = state.voice.lock().await;
         if let Some(ch) = &voice.channel {
@@ -936,10 +1218,7 @@ pub async fn join_voice_channel(
     }
 
     let voice_arc = Arc::clone(&state.voice);
-    let playback_arc = {
-        let v = state.voice.lock().await;
-        Arc::clone(&v.playback)
-    };
+    let apm_rate_for_room = mic_rate;
     let room_task = tokio::spawn(async move {
         while let Some(event) = events.recv().await {
             match event {
@@ -967,29 +1246,29 @@ pub async fn join_voice_channel(
                     if let RemoteTrack::Audio(audio_track) = track {
                         let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
                         eprintln!("[voice] track subscribed: {track_key}");
-                        let output_device_name = {
-                            let pb = playback_arc.lock().unwrap();
-                            pb.output_device_name.clone()
-                        };
-                        tokio::spawn(attach_remote_track(
-                            output_device_name,
+                        register_remote_track(
                             audio_track.rtc_track(),
-                            Arc::clone(&playback_arc),
                             track_key,
                             Arc::clone(&voice_arc),
                             participant.identity().to_string(),
-                        ));
+                            apm_rate_for_room,
+                        )
+                        .await;
                     }
                 }
                 RoomEvent::TrackUnsubscribed { track, publication: _, participant } => {
                     if let RemoteTrack::Audio(audio_track) = track {
                         let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
                         eprintln!("[voice] track unsubscribed: {track_key}");
-                        let mut pb = playback_arc.lock().unwrap();
-                        if let Some(t) = pb.tasks.remove(&track_key) { t.abort(); }
-                        pb.streams.remove(&track_key);
+                        let voice = voice_arc.lock().await;
+                        let mut pb = voice.playback.lock().unwrap();
+                        if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
                         pb.rtc_tracks.remove(&track_key);
                         pb.identities.remove(&track_key);
+                        let buffers_arc = Arc::clone(&pb.track_buffers);
+                        drop(pb);
+                        drop(voice);
+                        buffers_arc.lock().unwrap().remove(&track_key);
                     }
                 }
 
@@ -1042,6 +1321,7 @@ pub async fn join_voice_channel(
     voice.frame_task = Some(frame_task);
     voice.room_task = Some(room_task);
     voice.current_input_device = input_device;
+    voice.apm = apm_stage;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
 
     Ok(())
@@ -1077,11 +1357,14 @@ pub async fn leave_voice_channel(state: State<'_, Arc<AppState>>) -> Result<()> 
             let mut pb = voice.playback.lock().unwrap();
             pb.stop_all();
             pb.rtc_tracks.clear();
+            pb.identities.clear();
+            pb.output_device_name = None;
         }
 
         voice.local_track = None;
         voice.audio_source = None;
         voice.input_stream = None;
+        voice.apm = None;
         voice.is_muted.store(false, Ordering::Relaxed);
         voice.current_input_device = None;
 
@@ -1108,6 +1391,12 @@ pub async fn toggle_voice_mute(state: State<'_, Arc<AppState>>) -> Result<bool> 
     let new_muted = !voice.is_muted.load(Ordering::Relaxed);
     voice.is_muted.store(new_muted, Ordering::Relaxed);
 
+    // Hint APM that the output is muted so its AGC/AEC stop adapting to
+    // silence frames during the mute window.
+    if let Some(apm) = &voice.apm {
+        apm.handle().set_output_will_be_muted(new_muted);
+    }
+
     // Signal to remote participants via the LiveKit publication
     if let Some(room) = &voice.room {
         let pubs = room.local_participant().track_publications();
@@ -1126,7 +1415,8 @@ pub async fn toggle_voice_mute(state: State<'_, Arc<AppState>>) -> Result<bool> 
 }
 
 /// Switch the microphone device mid-call. Stops the current input stream and
-/// restarts it on the new device without disconnecting from the room.
+/// restarts it on the new device. Rebuilds APM if the new device's sample
+/// rate differs from the current one — APM is rate-locked at construction.
 #[tauri::command]
 pub async fn set_voice_input_device(
     device_name: String,
@@ -1140,38 +1430,70 @@ pub async fn set_voice_input_device(
         return Ok(());
     }
 
-    // Extract shared atomics then drop the lock — cpal init makes blocking ALSA
-    // syscalls and must not hold the async mutex.
+    // Extract shared atomics + current APM rate / config before dropping the
+    // lock — cpal init makes blocking ALSA syscalls and must not hold the
+    // async mutex.
     let is_muted_clone = Arc::clone(&voice.is_muted);
-    let noise_floor_clone = Arc::clone(&voice.noise_floor);
+    let prev_apm_rate = voice.apm.as_ref().map(|a| a.sample_rate_hz());
+    let prev_apm_config = voice.apm.as_ref().map(|a| a.config().clone());
     drop(voice);
 
     let (frame_tx, mut frame_rx) = tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
     let device_name_clone = device_name.clone();
-    let (new_mic, _) = tokio::task::spawn_blocking(move || {
+    let (new_mic, new_rate) = tokio::task::spawn_blocking(move || {
         let host = cpal::default_host();
         let device = get_device(&host, Some(&device_name_clone), true)?;
-        start_mic_stream(&device, frame_tx, is_muted_clone, noise_floor_clone)
+        start_mic_stream(&device, frame_tx, is_muted_clone)
     })
     .await
     .map_err(|e| anyhow::anyhow!("audio init panicked: {e}"))??;
+
+    // Rebuild APM if the new mic rate differs from the previous one.
+    let rate_changed = prev_apm_rate.map(|r| r != new_rate).unwrap_or(true);
+    let new_apm_stage = if rate_changed {
+        match (
+            prev_apm_config.clone(),
+            voice_apm::ApmStage::new(
+                new_rate,
+                prev_apm_config.unwrap_or_default(),
+            ),
+        ) {
+            (_, Ok(s)) => Some(s),
+            (_, Err(e)) => {
+                eprintln!("[voice] APM rebuild on mic switch failed: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let mut voice = state.voice.lock().await;
 
     // Swap the input stream — dropping the old one stops it
     voice.input_stream = Some(new_mic);
     voice.current_input_device = Some(device_name);
+    if rate_changed {
+        voice.apm = new_apm_stage;
+    }
 
     // Abort the old frame-feed task and start a new one on the new channel.
     if let Some(t) = voice.frame_task.take() { t.abort(); }
     let source = voice.audio_source.clone().unwrap();
+    let apm_for_capture = voice.apm.as_ref().map(|a| a.handle());
     let task = tokio::spawn(async move {
         let mut buf: Vec<i16> = Vec::new();
         while let Some((samples, rate)) = frame_rx.recv().await {
             buf.extend_from_slice(&samples);
             let chunk_size = (rate / 100) as usize;
             while buf.len() >= chunk_size {
-                let chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+                let mut chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+                if let Some(apm) = &apm_for_capture {
+                    if let Err(e) = voice_apm::run_capture(apm, &mut chunk, chunk_size) {
+                        eprintln!("[voice] APM capture error (frame dropped): {e}");
+                        continue;
+                    }
+                }
                 let frame = AudioFrame {
                     data: chunk.into(),
                     sample_rate: rate,
@@ -1187,49 +1509,51 @@ pub async fn set_voice_input_device(
     Ok(())
 }
 
-/// Switch the speaker device mid-call. Rebuilds output streams for all
-/// currently-subscribed remote audio tracks.
+/// Switch the speaker device mid-call. Tears down the current cpal output
+/// stream + mixer task and rebuilds them on the new device. Per-track drain
+/// tasks keep running — `track_buffers` is preserved across the switch, so
+/// the new mixer picks up where the old one left off without re-subscribing.
 #[tauri::command]
 pub async fn set_voice_output_device(
     device_name: String,
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     let voice_arc = Arc::clone(&state.voice);
-    let voice = voice_arc.lock().await;
-    let playback_arc = Arc::clone(&voice.playback);
-    drop(voice);
 
-    let rtc_tracks: Vec<(String, libwebrtc::audio_track::RtcAudioTrack, String)> = {
-        let mut pb = playback_arc.lock().unwrap();
-        pb.stop_all();
-        pb.output_device_name = Some(device_name.clone());
-        pb.rtc_tracks.iter().map(|(k, t)| {
-            let identity = pb.identities.get(k).cloned().unwrap_or_default();
-            (k.clone(), t.clone(), identity)
-        }).collect()
+    let (apm_handle, apm_rate, apm_frame_samples) = {
+        let voice = voice_arc.lock().await;
+        let (handle, rate, samples) = match &voice.apm {
+            Some(stage) => (
+                Some(stage.handle()),
+                stage.sample_rate_hz(),
+                stage.frame_samples(),
+            ),
+            None => (None, voice_apm::DEFAULT_APM_RATE_HZ, voice_apm::frame_samples(voice_apm::DEFAULT_APM_RATE_HZ)),
+        };
+        (handle, rate, samples)
     };
 
-    // Re-attach each remote track to the new output device.
-    for (key, rtc_track, identity) in rtc_tracks {
-        tokio::spawn(attach_remote_track(
-            Some(device_name.clone()),
-            rtc_track,
-            Arc::clone(&playback_arc),
-            key,
-            Arc::clone(&voice_arc),
-            identity,
-        ));
-    }
-
-    Ok(())
+    ensure_playback(
+        voice_arc,
+        Some(device_name),
+        apm_handle,
+        apm_rate,
+        apm_frame_samples,
+    )
+    .await
 }
 
-/// Set the noise gate threshold for the local microphone. Frames whose peak
-/// amplitude is below this value are silenced. Pass 0.0 to disable the gate.
-/// Range: 0.0 (off) to ~0.1 (aggressive). Persists across join/leave.
+/// Update the live APM configuration without rejoining. Internal AEC / AGC /
+/// NS state is preserved across config changes — only the changed submodule
+/// re-initialises. No-op when no voice session is active.
 #[tauri::command]
-pub async fn set_noise_floor(threshold: f32, state: State<'_, Arc<AppState>>) -> Result<()> {
-    let voice = state.voice.lock().await;
-    voice.noise_floor.store(threshold.to_bits(), Ordering::Relaxed);
+pub async fn set_voice_audio_processing(
+    config: voice_apm::ApmConfig,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let mut voice = state.voice.lock().await;
+    if let Some(stage) = voice.apm.as_mut() {
+        stage.set_config(config);
+    }
     Ok(())
 }

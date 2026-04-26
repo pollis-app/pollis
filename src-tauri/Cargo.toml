@@ -77,6 +77,11 @@ zeroize = { version = "1", features = ["derive"] }
 livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
 libwebrtc = "0.3"
 cpal = "0.15"
+# Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us
+# end-to-end and tunable from Rust. The system pkg-config build branch wants
+# webrtc-audio-processing-2 >= 2.1 which most distros don't ship yet, and we'd
+# rather every platform build the same source than chase a moving target.
+webrtc-audio-processing = { version = "2", features = ["bundled"] }
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 blurhash = "0.2"
