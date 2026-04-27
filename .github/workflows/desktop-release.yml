@@ -98,6 +98,15 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # Activate the VS2022 x64 developer environment so cl.exe / link.exe /
+      # the SDK headers + libs are on PATH/INCLUDE/LIB for subsequent steps.
+      # Without this, meson auto-detects Strawberry Perl's MinGW g++ first
+      # and the MinGW <windows.foundation.h> blows up against MSVC-built deps.
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Stamp version from git tag
         shell: bash
         run: |
@@ -206,6 +215,11 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          # Force meson + cc to use MSVC; without this, meson's auto-detection
+          # picks Strawberry Perl's MinGW g++ from C:\Strawberry\c\bin and
+          # webrtc-audio-processing-sys fails on MinGW header redefinitions.
+          CC: cl
+          CXX: cl
         run: pnpm build:windows
 
       - name: Upload Windows artifact
