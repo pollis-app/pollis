@@ -77,11 +77,6 @@ zeroize = { version = "1", features = ["derive"] }
 livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
 libwebrtc = "0.3"
 cpal = "0.15"
-# Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us
-# end-to-end and tunable from Rust. The system pkg-config build branch wants
-# webrtc-audio-processing-2 >= 2.1 which most distros don't ship yet, and we'd
-# rather every platform build the same source than chase a moving target.
-webrtc-audio-processing = { version = "2", features = ["bundled"] }
 # RNNoise (Rust port) — runs as a pre-APM NS stage when the user enables
 # Click Suppression. Handles transients (keyboard clicks, mouse clicks)
 # that APM's spectral NS misses. Default features pull in clap/dasp/hound
@@ -105,6 +100,18 @@ tokio = { version = "1", features = ["full", "test-util"] }
 dotenvy = "0.15"
 serial_test = "3"
 tempfile = "3"
+
+# Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us
+# end-to-end and tunable from Rust. The system pkg-config build branch wants
+# webrtc-audio-processing-2 >= 2.1 which most distros don't ship yet.
+#
+# Windows is excluded: webrtc-audio-processing-sys 2.0.4 vendors a meson +
+# abseil-cpp build that has zero MSVC support upstream (see
+# https://github.com/tonarino/webrtc-audio-processing/issues/34, open since
+# 2023). Voice still works on Windows — it just runs without AEC/AGC/NS.
+# voice_apm.rs provides no-op stubs gated on this same cfg.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+webrtc-audio-processing = { version = "2", features = ["bundled"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_38"] }

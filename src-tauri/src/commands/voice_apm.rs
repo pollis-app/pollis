@@ -21,16 +21,36 @@
 //! APM rate is locked to the cpal mic input rate. WebRTC supports
 //! 8/16/32/48 kHz, and the rest of the pipeline (mic stream, speaker stream,
 //! mixer) is configured to match.
+//!
+//! Windows: `webrtc-audio-processing-sys` doesn't build with MSVC (upstream
+//! has no Windows CI; see Cargo.toml comment). On Windows the public API
+//! here resolves to no-op stubs — voice still works, just without AEC/AGC/NS.
 
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+
+#[cfg(not(target_os = "windows"))]
 use webrtc_audio_processing::{
     config::{
         AdaptiveDigital, CaptureAmplifier, EchoCanceller, GainController, GainController2,
         HighPassFilter, NoiseSuppression, NoiseSuppressionLevel, PreAmplifier,
     },
-    Config, Processor,
+    Config,
 };
+
+/// The underlying APM processor. Re-exported from `webrtc-audio-processing`
+/// where the crate builds; a unit-like stub on Windows so the rest of the
+/// voice pipeline keeps a single set of types.
+#[cfg(not(target_os = "windows"))]
+pub use webrtc_audio_processing::Processor;
+
+#[cfg(target_os = "windows")]
+pub struct Processor;
+
+#[cfg(target_os = "windows")]
+impl Processor {
+    pub fn set_output_will_be_muted(&self, _muted: bool) {}
+}
 
 /// Number of mono samples in a 10ms APM frame at `sample_rate_hz`.
 pub const fn frame_samples(sample_rate_hz: u32) -> usize {
@@ -102,6 +122,7 @@ pub enum NsLevel {
     High,
 }
 
+#[cfg(not(target_os = "windows"))]
 impl ApmConfig {
     fn to_processor_config(&self) -> Config {
         let noise_suppression = match self.ns_level {
@@ -196,6 +217,7 @@ impl ApmStage {
     /// match the mic stream rate (and the render reference rate); otherwise
     /// `process_capture_frame` / `analyze_render_frame` will panic on frame
     /// size mismatches.
+    #[cfg(not(target_os = "windows"))]
     pub fn new(sample_rate_hz: u32, config: ApmConfig) -> Result<Self, String> {
         if !matches!(sample_rate_hz, 8_000 | 16_000 | 32_000 | 48_000) {
             return Err(format!(
@@ -222,6 +244,31 @@ impl ApmStage {
         })
     }
 
+    #[cfg(target_os = "windows")]
+    pub fn new(sample_rate_hz: u32, config: ApmConfig) -> Result<Self, String> {
+        if !matches!(sample_rate_hz, 8_000 | 16_000 | 32_000 | 48_000) {
+            return Err(format!(
+                "APM only supports 8/16/32/48 kHz, got {sample_rate_hz} Hz"
+            ));
+        }
+        eprintln!(
+            "[voice/apm] disabled on Windows (webrtc-audio-processing-sys has no MSVC \
+             support upstream); requested config is stored but not applied: \
+             boost={} dB, AGC2={} (headroom={} dB), NS={:?}, AEC={}, RNNoise={}",
+            config.mic_boost_db,
+            config.agc_enabled,
+            config.agc_target_dbfs,
+            config.ns_level,
+            config.aec_enabled,
+            config.click_suppression,
+        );
+        Ok(Self {
+            processor: Arc::new(Processor),
+            sample_rate_hz,
+            config,
+        })
+    }
+
     pub fn handle(&self) -> Arc<Processor> {
         Arc::clone(&self.processor)
     }
@@ -241,6 +288,7 @@ impl ApmStage {
     /// Apply a new config without recreating the processor. Internal state
     /// (echo estimate, noise estimate, AGC envelope) is preserved; only
     /// changed submodules are re-initialised.
+    #[cfg(not(target_os = "windows"))]
     pub fn set_config(&mut self, config: ApmConfig) {
         self.processor.set_config(config.to_processor_config());
         eprintln!(
@@ -254,12 +302,20 @@ impl ApmStage {
         );
         self.config = config;
     }
+
+    #[cfg(target_os = "windows")]
+    pub fn set_config(&mut self, config: ApmConfig) {
+        // No-op on Windows: APM isn't running, but we still store the config
+        // so reads (and the eventual real-APM swap-in) reflect user prefs.
+        self.config = config;
+    }
 }
 
 /// Run APM on a 10ms i16 mono capture frame, in place. `samples.len()` must
 /// equal [`ApmStage::frame_samples`]. Converts to non-interleaved f32 for the
 /// FFI call and converts back; the round-trip is the same precision loss
 /// libwebrtc's internal pipeline already incurs.
+#[cfg(not(target_os = "windows"))]
 pub fn run_capture(
     processor: &Processor,
     samples: &mut [i16],
@@ -274,9 +330,22 @@ pub fn run_capture(
     Ok(())
 }
 
+/// Windows no-op: passes the capture frame through untouched. Returns
+/// [`std::convert::Infallible`] in the error position so the call site's
+/// `if let Err(e)` pattern still type-checks.
+#[cfg(target_os = "windows")]
+pub fn run_capture(
+    _processor: &Processor,
+    _samples: &mut [i16],
+    _expected_len: usize,
+) -> Result<(), std::convert::Infallible> {
+    Ok(())
+}
+
 /// Feed a 10ms f32 mono render frame (what's about to hit the speaker) into
 /// APM as the AEC reference. Doesn't modify the frame; APM only inspects.
 /// `samples.len()` must equal [`ApmStage::frame_samples`].
+#[cfg(not(target_os = "windows"))]
 pub fn analyze_render(
     processor: &Processor,
     samples: &[f32],
@@ -284,4 +353,14 @@ pub fn analyze_render(
 ) -> Result<(), webrtc_audio_processing::Error> {
     debug_assert_eq!(samples.len(), expected_len, "render frame size mismatch");
     processor.analyze_render_frame([samples])
+}
+
+/// Windows no-op: APM has no AEC reference to feed.
+#[cfg(target_os = "windows")]
+pub fn analyze_render(
+    _processor: &Processor,
+    _samples: &[f32],
+    _expected_len: usize,
+) -> Result<(), std::convert::Infallible> {
+    Ok(())
 }
