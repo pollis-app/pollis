@@ -98,25 +98,6 @@ jobs:
         with:
           workspaces: src-tauri
 
-      # Activate the VS2022 x64 developer environment so cl.exe / link.exe /
-      # the SDK headers + libs are on PATH/INCLUDE/LIB for subsequent steps.
-      # Without this, meson auto-detects Strawberry Perl's MinGW g++ first
-      # and the MinGW <windows.foundation.h> blows up against MSVC-built deps.
-      - name: Set up MSVC developer environment
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      # The windows-latest image ships Git for Windows with C:\Program Files\
-      # Git\usr\bin on the system PATH, and that dir contains GNU coreutils'
-      # `link` (a unix hard-link tool) named link.exe. rustc's PATH lookup
-      # for link.exe finds it before MSVC's, so the build dies on the first
-      # crate. Standard windows-latest fix: delete the GNU link.exe — Git
-      # itself doesn't use it.
-      - name: Remove conflicting GNU link.exe
-        shell: pwsh
-        run: Remove-Item "C:\Program Files\Git\usr\bin\link.exe" -Force -ErrorAction SilentlyContinue
-
       - name: Stamp version from git tag
         shell: bash
         run: |
@@ -142,17 +123,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install
-
-      # webrtc-audio-processing-sys (vendored) drives its C++ build with
-      # meson + ninja. cmake/clang/MSVC are already on the windows-latest
-      # runner via Visual Studio 2022. Installing meson through chocolatey's
-      # MSI writes PATH only to the system registry, so subsequent shells
-      # don't see it; install via pip instead so it lands on the live PATH.
-      - name: Install audio-processing build deps
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade 'meson>=1.3'
-          choco install -y ninja
 
       - name: Install OpenSSL via vcpkg
         shell: bash
@@ -217,22 +187,14 @@ jobs:
           echo "signCommand injected:"
           jq '.bundle.windows.signCommand' src-tauri/tauri.conf.json
 
-      # Use pwsh (not bash) so rustc's link.exe lookup hits MSVC's link.exe,
-      # not the GNU coreutils `link` shipped under C:\Program Files\Git\usr\bin
-      # which Git Bash prepends to PATH at startup and which fails as a linker.
       - name: Build Windows
-        shell: pwsh
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          # Force meson + cc to use MSVC; without this, meson's auto-detection
-          # picks Strawberry Perl's MinGW g++ from C:\Strawberry\c\bin and
-          # webrtc-audio-processing-sys fails on MinGW header redefinitions.
-          CC: cl
-          CXX: cl
         run: pnpm build:windows
 
       - name: Upload Windows artifact

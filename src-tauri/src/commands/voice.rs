@@ -22,10 +22,9 @@ use livekit::{
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use tokio::time::MissedTickBehavior;
-use webrtc_audio_processing::Processor as ApmProcessor;
 
 use crate::{
-    commands::{livekit::make_token, voice_apm, voice_denoiser},
+    commands::{livekit::make_token, voice_apm, voice_apm::Processor as ApmProcessor, voice_denoiser},
     error::Result,
     state::AppState,
 };
