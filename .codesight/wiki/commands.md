@@ -97,13 +97,14 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 
 ## voice (`commands/voice.rs`)
 - `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Mints + caches a LiveKit token and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
-- `join_voice_channel(channel_id, user_id, display_name, input_device, output_device, auto_gain_control)` — connect to LiveKit and publish the local mic. Consumes a fresh warmup if present and runs `Room::connect` + cpal mic init concurrently to minimise cold-start latency.
+- `join_voice_channel(channel_id, user_id, display_name, input_device, output_device, audio_processing)` — connect to LiveKit and publish the local mic. `audio_processing` is the `ApmConfig` struct (AGC + NS + AEC settings) — see [Audio Processing](./audio-processing.md). Consumes a fresh warmup if present and runs `Room::connect` + cpal mic init concurrently to minimise cold-start latency.
 - `leave_voice_channel()`
 - `toggle_voice_mute()`
-- `set_voice_input_device(device_name)` / `set_voice_output_device(device_name)`
-- `set_noise_floor(threshold)`
+- `set_voice_input_device(device_name)` / `set_voice_output_device(device_name)` — switch device mid-call. Input switch rebuilds APM if the new device's sample rate differs.
+- `set_voice_audio_processing(config)` — push live APM config (AGC target, NS level, AEC on/off) without rejoining. Internal echo / noise / AGC state is preserved; only the changed submodule re-initialises.
 - `subscribe_voice_events(on_event: Channel)`
 - `list_audio_devices()` → `AudioDevice[]`
+- `get_last_join_timings()` — debug: most recent `JoinTimings` record (jwt, room connect, mic init, first publish, total).
 
 ## r2 (`commands/r2.rs`)
 - `upload_file(data, key, content_type)` → URL

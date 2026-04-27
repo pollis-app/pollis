@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::f32::consts::PI;
 use std::sync::{
-    atomic::{AtomicBool, AtomicU32, Ordering},
+    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
@@ -15,6 +15,11 @@ use crate::commands::voice::{
 use crate::error::Result;
 use crate::state::AppState;
 
+/// Speaker rate the test harness asks cpal for. Matches the call-path
+/// default; if the device can't honour it, cpal falls back to its native
+/// rate (handled inside `start_speaker_stream`).
+const TEST_SPEAKER_RATE_HZ: u32 = 48_000;
+
 // ── Events pushed to the frontend ─────────────────────────────────────────
 
 /// Lifecycle + meter events for the Voice Settings test harness.
@@ -24,11 +29,11 @@ use crate::state::AppState;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum VoiceTestEvent {
-    /// Mic level sample. `peak` and `rms` are normalized 0.0..1.0 and are
-    /// computed on the raw (ungated) signal so the meter still moves when
-    /// the user speaks below the current noise floor. `gated` reports
-    /// whether the same sample would be dropped by the real gate.
-    Frame { peak: f32, rms: f32, gated: bool },
+    /// Mic level sample. `peak` and `rms` are normalised 0.0..1.0 and are
+    /// computed on the raw (pre-APM) signal so the meter still moves under
+    /// quiet input — useful for verifying that the device is actually
+    /// receiving audio.
+    Frame { peak: f32, rms: f32 },
     RecordingStarted,
     RecordingFinished,
     PlaybackStarted,
@@ -46,10 +51,6 @@ pub struct VoiceTestState {
     pub mic_stream: Option<SendableStream>,
     pub mic_task: Option<tokio::task::JoinHandle<()>>,
     pub monitor_enabled: Arc<AtomicBool>,
-    /// Always zero — `start_mic_stream` gates before forwarding, and we
-    /// want the meter to see every frame. Real gate status is computed in
-    /// the emit task against the live voice `noise_floor`.
-    pub test_noise_floor: Arc<AtomicU32>,
     // ── Output (shared between monitor / tone / record-playback) ──
     pub output_stream: Option<SendableStream>,
     pub output_buf: Option<Arc<Mutex<VecDeque<f32>>>>,
@@ -66,7 +67,6 @@ impl VoiceTestState {
             mic_stream: None,
             mic_task: None,
             monitor_enabled: Arc::new(AtomicBool::new(false)),
-            test_noise_floor: Arc::new(AtomicU32::new(0u32)),
             output_stream: None,
             output_buf: None,
             output_channels: 2,
@@ -122,7 +122,7 @@ async fn ensure_output(
     let (stream, sample_rate, channels, buf) = tokio::task::spawn_blocking(move || {
         let host = cpal::default_host();
         let dev = get_device(&host, Some(&dev_name), false)?;
-        start_speaker_stream(&dev)
+        start_speaker_stream(&dev, TEST_SPEAKER_RATE_HZ)
     })
     .await
     .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
@@ -193,15 +193,10 @@ pub async fn start_mic_test(
     };
 
     // Pull the shared atomics we need before spawning the blocking init.
-    let (is_muted, test_gate, monitor_flag, real_noise_floor) = {
+    let (is_muted, monitor_flag) = {
         let s = state_arc.lock().await;
         let voice = state.voice.lock().await;
-        (
-            Arc::clone(&voice.is_muted),
-            Arc::clone(&s.test_noise_floor),
-            Arc::clone(&s.monitor_enabled),
-            Arc::clone(&voice.noise_floor),
-        )
+        (Arc::clone(&voice.is_muted), Arc::clone(&s.monitor_enabled))
     };
     monitor_flag.store(monitor, Ordering::Relaxed);
 
@@ -212,7 +207,7 @@ pub async fn start_mic_test(
     let (mic_stream, _mic_rate) = tokio::task::spawn_blocking(move || {
         let host = cpal::default_host();
         let dev = get_device(&host, Some(&input_id), true)?;
-        start_mic_stream(&dev, frame_tx, is_muted, test_gate)
+        start_mic_stream(&dev, frame_tx, is_muted)
     })
     .await
     .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
@@ -277,14 +272,8 @@ pub async fn start_mic_test(
                 } else {
                     0.0
                 };
-                let gate = f32::from_bits(real_noise_floor.load(Ordering::Relaxed));
-                let gated = gate > 0.0 && peak_norm < gate;
 
-                let ev = VoiceTestEvent::Frame {
-                    peak: peak_norm,
-                    rms: rms_norm,
-                    gated,
-                };
+                let ev = VoiceTestEvent::Frame { peak: peak_norm, rms: rms_norm };
                 {
                     let s = state_task.lock().await;
                     if let Some(ch_) = &s.channel {
@@ -355,16 +344,12 @@ pub async fn record_and_play_back(
         stop_everything(&mut s);
     }
 
-    // Set up mic (gated with zero floor so we record the whole signal,
-    // not post-gate silence).
-    let (is_muted, test_gate, real_noise_floor) = {
-        let s = state_arc.lock().await;
+    // Set up mic — APM is voice-channel-only; the test harness records the
+    // raw input so users hear what their device is actually delivering.
+    let is_muted = {
+        let _s = state_arc.lock().await;
         let v = voice_arc.lock().await;
-        (
-            Arc::clone(&v.is_muted),
-            Arc::clone(&s.test_noise_floor),
-            Arc::clone(&v.noise_floor),
-        )
+        Arc::clone(&v.is_muted)
     };
     let (frame_tx, mut frame_rx) =
         tokio::sync::mpsc::unbounded_channel::<(Vec<i16>, u32)>();
@@ -373,7 +358,7 @@ pub async fn record_and_play_back(
     let (mic_stream, mic_rate) = tokio::task::spawn_blocking(move || {
         let host = cpal::default_host();
         let dev = get_device(&host, Some(&input_id), true)?;
-        start_mic_stream(&dev, frame_tx, is_muted, test_gate)
+        start_mic_stream(&dev, frame_tx, is_muted)
     })
     .await
     .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
@@ -435,13 +420,7 @@ pub async fn record_and_play_back(
                         } else {
                             0.0
                         };
-                        let gate = f32::from_bits(real_noise_floor.load(Ordering::Relaxed));
-                        let gated = gate > 0.0 && peak_norm < gate;
-                        let ev = VoiceTestEvent::Frame {
-                            peak: peak_norm,
-                            rms: rms_norm,
-                            gated,
-                        };
+                        let ev = VoiceTestEvent::Frame { peak: peak_norm, rms: rms_norm };
                         {
                             let s = state_task.lock().await;
                             if let Some(ch_) = &s.channel {

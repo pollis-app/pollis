@@ -5,13 +5,18 @@ import { PageShell } from "../components/Layout/PageShell";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
-import { usePreferences } from "../hooks/queries/usePreferences";
+import {
+  preferencesToApmConfig,
+  usePreferences,
+  type ApmConfig,
+  type NoiseSuppressionLevel,
+  type PreferencesData,
+} from "../hooks/queries/usePreferences";
 import { switchVoiceDevice } from "../hooks/useVoiceChannel";
 import { useVoiceTest } from "../hooks/useVoiceTest";
 import type { AudioDevice } from "../types";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
-const NOISE_FLOOR_KEY = "pollis:noise-floor";
 
 interface DeviceSelectProps {
   label: string;
@@ -28,20 +33,7 @@ const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onCh
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        style={{
-          appearance: "none",
-          WebkitAppearance: "none",
-          background: "var(--c-surface)",
-          color: "var(--c-text)",
-          border: "2px solid var(--c-border)",
-          padding: "6px 28px 6px 8px",
-          fontFamily: "inherit",
-          fontSize: "inherit",
-          outline: "none",
-          cursor: "pointer",
-          borderRadius: "0.5rem",
-          width: "100%",
-        }}
+        style={selectStyle}
         onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
         onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
       >
@@ -64,6 +56,70 @@ const DeviceSelect: React.FC<DeviceSelectProps> = ({ label, devices, value, onCh
   </div>
 );
 
+interface NoiseSuppressionSelectProps {
+  value: NoiseSuppressionLevel;
+  onChange: (level: NoiseSuppressionLevel) => void;
+}
+
+const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, onChange }) => (
+  <div className="flex flex-col gap-1" style={{ maxWidth: 320 }}>
+    <span style={{ color: "var(--c-text-muted)" }}>Noise Suppression</span>
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value as NoiseSuppressionLevel)}
+        style={selectStyle}
+        onFocus={(e) => { e.currentTarget.style.borderColor = "var(--c-border-active)"; }}
+        onBlur={(e) => { e.currentTarget.style.borderColor = "var(--c-border)"; }}
+      >
+        <option value="off">Off</option>
+        <option value="low">Low</option>
+        <option value="moderate">Moderate</option>
+        <option value="high">High</option>
+      </select>
+      <ChevronDown
+        size={14}
+        className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"
+        style={{ color: "var(--c-text-muted)" }}
+      />
+    </div>
+    <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+      Suppresses ambient hum, fans, keyboard clicks. Higher levels also chew through quieter
+      speech, so leave at Moderate unless background noise is bad.
+    </span>
+  </div>
+);
+
+const selectStyle: React.CSSProperties = {
+  appearance: "none",
+  WebkitAppearance: "none",
+  background: "var(--c-surface)",
+  color: "var(--c-text)",
+  border: "2px solid var(--c-border)",
+  padding: "6px 28px 6px 8px",
+  fontFamily: "inherit",
+  fontSize: "inherit",
+  outline: "none",
+  cursor: "pointer",
+  borderRadius: "0.5rem",
+  width: "100%",
+};
+
+/**
+ * Push the live APM config to the backend if the user is currently in a
+ * voice channel. No-op otherwise (the backend command is itself a no-op
+ * when no session is active).
+ */
+async function pushApmConfig(config: ApmConfig): Promise<void> {
+  try {
+    await invoke("set_voice_audio_processing", { config });
+  } catch (e) {
+    // Best-effort — the next join_voice_channel will pass the full config
+    // anyway, so a transient IPC failure here is harmless.
+    console.warn("[VoiceSettings] set_voice_audio_processing failed:", e);
+  }
+}
+
 export const VoiceSettingsPage: React.FC = () => {
   const preferences = usePreferences();
   const test = useVoiceTest();
@@ -77,11 +133,6 @@ export const VoiceSettingsPage: React.FC = () => {
     try { return JSON.parse(localStorage.getItem(VOICE_DEVICES_KEY) || "{}").output || "default"; } catch { return "default"; }
   });
 
-  const [noiseFloor, setNoiseFloorState] = useState<number>(() => {
-    const saved = localStorage.getItem(NOISE_FLOOR_KEY);
-    return saved ? parseInt(saved, 10) : 0;
-  });
-
   useEffect(() => {
     invoke<AudioDevice[]>("list_audio_devices").then((devices) => {
       setInputs(devices.filter((d) => d.kind === "input"));
@@ -89,15 +140,9 @@ export const VoiceSettingsPage: React.FC = () => {
     }).catch(() => { });
   }, []);
 
-  // Sync saved noise floor to Rust on mount so it's applied from the start.
-  useEffect(() => {
-    invoke("set_noise_floor", { threshold: noiseFloor / 1000 }).catch(() => { });
-  }, []);
-
   const setInput = (id: string) => {
     setSelectedInputState(id);
     switchVoiceDevice("audioinput", id);
-    // Stop any running test so it doesn't keep hitting the stale device.
     if (test.phase !== "idle") {
       test.stopMicTest();
       test.stopPlayback();
@@ -113,16 +158,22 @@ export const VoiceSettingsPage: React.FC = () => {
     }
   };
 
-  const handleNoiseFloor = (val: number) => {
-    setNoiseFloorState(val);
-    localStorage.setItem(NOISE_FLOOR_KEY, val.toString());
-    invoke("set_noise_floor", { threshold: val / 1000 }).catch(() => { });
+  /**
+   * Persist a partial preference change and push the resulting APM config to
+   * the backend so mid-call changes take effect immediately.
+   */
+  const savePrefsAndPushApm = (patch: Partial<PreferencesData>) => {
+    const next: PreferencesData = { ...preferences.query.data, ...patch };
+    preferences.mutation.mutate(next);
+    void pushApmConfig(preferencesToApmConfig(next));
   };
 
+  const micBoost = preferences.query.data?.mic_boost_db ?? 0;
   const autoGain = preferences.query.data?.auto_gain_control ?? true;
-  const handleAutoGain = (enabled: boolean) => {
-    preferences.mutation.mutate({ ...preferences.query.data, auto_gain_control: enabled });
-  };
+  const agcTarget = preferences.query.data?.agc_target_dbfs ?? 6;
+  const nsLevel: NoiseSuppressionLevel = preferences.query.data?.noise_suppression_level ?? "high";
+  const aecEnabled = preferences.query.data?.echo_cancellation ?? true;
+  const clickSuppression = preferences.query.data?.click_suppression ?? false;
 
   const autoJoinVoice = preferences.query.data?.auto_join_voice ?? false;
   const handleAutoJoinVoice = (enabled: boolean) => {
@@ -186,23 +237,11 @@ export const VoiceSettingsPage: React.FC = () => {
                 style={{
                   width: `${Math.max(test.peak, test.rms) * 100}%`,
                   height: "100%",
-                  background: test.gated ? "var(--c-text-muted)" : "var(--c-accent)",
+                  background: "var(--c-accent)",
                   transition: "width 60ms linear",
                 }}
               />
             </div>
-            {/* Always rendered so toggling visibility doesn't shift the rest of
-                the section as gating ticks on/off mid-speech. */}
-            <span
-              className="text-xs font-mono"
-              aria-hidden={!(test.phase === "mic_listening" && test.gated)}
-              style={{
-                color: "var(--c-text-muted)",
-                opacity: test.phase === "mic_listening" && test.gated ? 1 : 0,
-              }}
-            >
-              below noise gate — raise your voice or lower the gate
-            </span>
 
             <div className="flex flex-col gap-2 mt-4">
               <div className="flex">
@@ -313,21 +352,54 @@ export const VoiceSettingsPage: React.FC = () => {
           >
             Audio Processing
           </h2>
+
           <RangeSlider
-            label="Noise Gate (level)"
-            value={noiseFloor}
-            onChange={handleNoiseFloor}
+            label="Microphone Boost"
+            value={micBoost}
+            onChange={(v) => savePrefsAndPushApm({ mic_boost_db: v })}
             min={0}
-            max={100}
+            max={20}
             step={1}
-            sublabel="Filters ambient noise before it's transmitted. Raise if background sounds are triggering your speaking indicator."
-            description="0 = off"
+            sublabel="Linear pre-AGC gain. If you're naturally quiet and AGC isn't pulling you up enough, raise this. +6 dB doubles amplitude; +20 dB is 10×. Pair with a low AGC headroom (3–4) for maximum loudness."
+            description={micBoost === 0 ? "off" : `+${micBoost} dB`}
           />
+
           <Switch
             label="Auto Gain Control"
             checked={autoGain}
-            onChange={handleAutoGain}
-            description="Automatically adjusts microphone volume for consistent output levels. Disable if you experience &quot;pumping&quot; effects or prefer manual gain control."
+            onChange={(enabled) => savePrefsAndPushApm({ auto_gain_control: enabled })}
+            description="Software AGC raises quiet voice and reins in shouts. Disable if you'd rather control mic level manually at the OS."
+          />
+
+          <RangeSlider
+            label="AGC Target Loudness"
+            value={agcTarget}
+            onChange={(v) => savePrefsAndPushApm({ agc_target_dbfs: v })}
+            min={3}
+            max={15}
+            step={1}
+            disabled={!autoGain}
+            sublabel="Lower = louder. Slider value is dB of headroom below full scale: 3 is very loud (clips on hot mics), 15 is quiet. Most setups land at 6."
+            description={`${agcTarget} dB headroom`}
+          />
+
+          <NoiseSuppressionSelect
+            value={nsLevel}
+            onChange={(level) => savePrefsAndPushApm({ noise_suppression_level: level })}
+          />
+
+          <Switch
+            label="Echo Cancellation"
+            checked={aecEnabled}
+            onChange={(enabled) => savePrefsAndPushApm({ echo_cancellation: enabled })}
+            description="Stops the speaker output from being picked up by the mic and bouncing back to the other side. Leave this on unless you're always on headphones."
+          />
+
+          <Switch
+            label="Click Suppression (RNNoise)"
+            checked={clickSuppression}
+            onChange={(enabled) => savePrefsAndPushApm({ click_suppression: enabled })}
+            description="ML-based denoiser that catches keyboard typing, mouse clicks, and other transients the standard noise suppression misses. Adds about 5% of one CPU core; only runs at 48 kHz mics. Recommended: drop Noise Suppression to Low or Off when this is on, otherwise both stages chew on the same signal."
           />
         </section>
 
