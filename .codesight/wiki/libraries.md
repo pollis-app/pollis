@@ -13,7 +13,7 @@
 - `frontend/src/utils/colorUtils.ts` — hexToHsl, hslToHex, applyAccentColor, applyBackgroundColor, applyFontSize, readAccentHex, …
 - `frontend/src/hooks/queries/useUserProfile.ts` — useUserProfile, useUpdateProfile, useUserAvatar, useUpdateAvatar, ServiceUserData, userQueryKeys
 - `frontend/src/utils/imageProcessing.ts` — resizeImage, blurhashFromUrl, validateImageFile, generateThumbnail, ResizeOptions
-- `frontend/src/hooks/queries/usePreferences.ts` — getPreference, usePreferences, applyPreferences, PreferencesData
+- `frontend/src/hooks/queries/usePreferences.ts` — getPreference, usePreferences, applyPreferences, preferencesToApmConfig, PreferencesData, ApmConfig, NoiseSuppressionLevel, APM_DEFAULTS
 - `frontend/src/hooks/queries/useReactions.ts` — useReactions, useAddReaction, useRemoveReaction, reactionQueryKeys
 - `frontend/src/services/grpc-web-client.ts` — ServiceClient, grpcClient _(legacy, may be unused)_
 - `frontend/src/services/r2-upload.ts` — uploadAvatar, uploadGroupIcon, getFileDownloadUrl, downloadAndDecryptMedia
