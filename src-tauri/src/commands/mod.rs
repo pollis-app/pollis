@@ -7,6 +7,7 @@ pub mod user;
 pub mod groups;
 pub mod messages;
 pub mod dm;
+pub mod install_kind;
 pub mod livekit;
 pub mod mls;
 pub mod r2;

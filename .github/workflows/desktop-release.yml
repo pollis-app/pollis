@@ -375,7 +375,13 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
           AWS_DEFAULT_REGION: auto
 
-      - name: Publish update.json to R2
+      # Tauri's updater resolves the configured endpoint URL with the
+      # current binary's bundle_type before fetching, so each bundle type
+      # gets its own manifest (URL + signature must match the bytes the
+      # client will actually try to install). The legacy `update.json` is
+      # kept as a fallback for clients shipped before the templated
+      # endpoint was added (it points to the AppImage).
+      - name: Publish per-bundle update manifests to R2
         run: |
           VERSION="${GITHUB_REF_NAME}"
           VERSION_NUM="${VERSION#v}"
@@ -393,26 +399,54 @@ jobs:
           WIN_EXE=$(find artifacts/pollis-windows -name "*.exe" -exec basename {} \; | head -1)
           LINUX_APPIMAGE=$(find artifacts/pollis-linux -name "*.AppImage" -exec basename {} \; | head -1)
 
-          jq -n \
-            --arg version "$VERSION_NUM" \
-            --arg pub_date "$PUB_DATE" \
-            --arg mac_url "${CDN}/${MAC_TAR}" \
-            --arg mac_sig "$MAC_SIG" \
-            --arg win_url "${CDN}/${WIN_EXE}" \
-            --arg win_sig "$WIN_SIG" \
-            --arg linux_url "${CDN}/${LINUX_APPIMAGE}" \
-            --arg linux_sig "$LINUX_SIG" \
-            '{
-              version: $version,
-              pub_date: $pub_date,
-              platforms: {
-                "darwin-aarch64": { url: $mac_url, signature: $mac_sig },
-                "windows-x86_64": { url: $win_url, signature: $win_sig },
-                "linux-x86_64": { url: $linux_url, signature: $linux_sig }
-              }
-            }' > update.json
+          # Helper: emit a single-platform manifest. Tauri only reads the
+          # platform key matching the client's target/arch; the others are
+          # ignored, but we keep them so the file can also be read by
+          # tooling that's looking for cross-platform info.
+          emit_manifest() {
+            local out="$1"
+            jq -n \
+              --arg version "$VERSION_NUM" \
+              --arg pub_date "$PUB_DATE" \
+              --arg mac_url "${CDN}/${MAC_TAR}" \
+              --arg mac_sig "$MAC_SIG" \
+              --arg win_url "${CDN}/${WIN_EXE}" \
+              --arg win_sig "$WIN_SIG" \
+              --arg linux_url "${CDN}/${LINUX_APPIMAGE}" \
+              --arg linux_sig "$LINUX_SIG" \
+              '{
+                version: $version,
+                pub_date: $pub_date,
+                platforms: {
+                  "darwin-aarch64": { url: $mac_url, signature: $mac_sig },
+                  "windows-x86_64": { url: $win_url, signature: $win_sig },
+                  "linux-x86_64": { url: $linux_url, signature: $linux_sig }
+                }
+              }' > "$out"
+          }
 
-          aws s3 cp update.json "s3://pollis/releases/update.json" --endpoint-url "${ENDPOINT}" --content-type "application/json" --cache-control "no-cache"
+          # Per-bundle manifests. Today the Linux entry in every Linux
+          # variant points to the AppImage — we don't yet sign .deb/.rpm
+          # bundles, so deb/rpm clients get the same payload (which fails
+          # in the updater for non-AppImage bundles, but that's caught
+          # client-side by the install-kind guard for known package
+          # managers like AUR). Once we sign deb/rpm we can swap their
+          # URLs to the right artifact here.
+          emit_manifest update-appimage.json
+          emit_manifest update-deb.json
+          emit_manifest update-rpm.json
+          emit_manifest update-app.json
+          emit_manifest update-nsis.json
+          # Legacy single-manifest endpoint, still hit by clients shipped
+          # before the templated `update-{{bundle_type}}.json` endpoint.
+          emit_manifest update.json
+
+          for f in update-appimage.json update-deb.json update-rpm.json update-app.json update-nsis.json update.json; do
+            aws s3 cp "$f" "s3://pollis/releases/$f" \
+              --endpoint-url "${ENDPOINT}" \
+              --content-type "application/json" \
+              --cache-control "no-cache"
+          done
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
