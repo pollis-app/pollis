@@ -207,8 +207,11 @@ jobs:
           echo "signCommand injected:"
           jq '.bundle.windows.signCommand' src-tauri/tauri.conf.json
 
+      # Use pwsh (not bash) so rustc's link.exe lookup hits MSVC's link.exe,
+      # not the GNU coreutils `link` shipped under C:\Program Files\Git\usr\bin
+      # which Git Bash prepends to PATH at startup and which fails as a linker.
       - name: Build Windows
-        shell: bash
+        shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
