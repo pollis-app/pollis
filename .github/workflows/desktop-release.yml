@@ -107,6 +107,16 @@ jobs:
         with:
           arch: x64
 
+      # The windows-latest image ships Git for Windows with C:\Program Files\
+      # Git\usr\bin on the system PATH, and that dir contains GNU coreutils'
+      # `link` (a unix hard-link tool) named link.exe. rustc's PATH lookup
+      # for link.exe finds it before MSVC's, so the build dies on the first
+      # crate. Standard windows-latest fix: delete the GNU link.exe — Git
+      # itself doesn't use it.
+      - name: Remove conflicting GNU link.exe
+        shell: pwsh
+        run: Remove-Item "C:\Program Files\Git\usr\bin\link.exe" -Force -ErrorAction SilentlyContinue
+
       - name: Stamp version from git tag
         shell: bash
         run: |
