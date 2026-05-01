@@ -893,6 +893,93 @@ pub async fn list_user_devices(
     Ok(devices)
 }
 
+/// Revoke one of the calling user's devices. Deletes the `user_device` row
+/// and any unclaimed key packages, then drives an MLS reconcile across
+/// every group + DM the user is in so the revoked device's leaf is
+/// removed from each tree. The current device cannot revoke itself —
+/// `logout(delete_data: true)` is the path for that.
+#[tauri::command]
+pub async fn revoke_device(
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+    device_id: String,
+) -> Result<()> {
+    let current_device_id = state.device_id.lock().await.clone();
+    if current_device_id.as_deref() == Some(device_id.as_str()) {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "cannot revoke the current device — log out instead"
+        )));
+    }
+
+    let conn = state.remote_db.conn().await?;
+
+    // Confirm the device belongs to this user before touching anything.
+    let mut owner_rows = conn
+        .query(
+            "SELECT 1 FROM user_device WHERE device_id = ?1 AND user_id = ?2",
+            libsql::params![device_id.clone(), user_id.clone()],
+        )
+        .await?;
+    if owner_rows.next().await?.is_none() {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "device not found for this user"
+        )));
+    }
+
+    // Drop the device row and its unclaimed key packages. Reconcile
+    // detects the missing row and prunes the leaf from each tree.
+    conn.execute(
+        "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
+        libsql::params![user_id.clone(), device_id.clone()],
+    )
+    .await?;
+    conn.execute(
+        "DELETE FROM user_device WHERE device_id = ?1 AND user_id = ?2",
+        libsql::params![device_id.clone(), user_id.clone()],
+    )
+    .await?;
+
+    // Collect every conversation the user belongs to (groups + DMs) so
+    // we can reconcile each one as the calling device.
+    let mut conversation_ids: Vec<String> = Vec::new();
+    {
+        let mut rows = conn
+            .query(
+                "SELECT group_id FROM group_member WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            conversation_ids.push(row.get::<String>(0)?);
+        }
+    }
+    {
+        let mut rows = conn
+            .query(
+                "SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            conversation_ids.push(row.get::<String>(0)?);
+        }
+    }
+
+    for cid in &conversation_ids {
+        if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
+            state.inner(),
+            cid,
+            &user_id,
+        )
+        .await
+        {
+            eprintln!("[revoke_device] reconcile {cid} failed: {e}");
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;

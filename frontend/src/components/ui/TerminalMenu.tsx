@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { ChevronRight, ArrowUp, ArrowDown, MoreVertical } from "lucide-react";
+import { ChevronRight, ArrowUp, ArrowDown, Settings } from "lucide-react";
 import { Button } from "./Button";
 
 export interface TerminalMenuItem {
@@ -253,7 +253,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                 <Button
                   data-testid={item.testId ? `${item.testId}-secondary` : undefined}
                   aria-label={item.secondaryActionLabel ?? "More options"}
-                  variant="secondary"
+                  variant="ghost"
                   className="flex-shrink-0 !px-1 !py-0.5"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -267,7 +267,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                     }
                   }}
                 >
-                  <MoreVertical size={14} aria-hidden="true" />
+                  <Settings size={14} aria-hidden="true" />
                 </Button>
               )}
             </div>

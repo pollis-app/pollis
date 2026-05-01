@@ -406,7 +406,7 @@ export const MainContent: React.FC = () => {
         ) : (
           <MessageList
             messages={allMessages}
-            adminUserIds={selectedGroupId ? adminUserIds : undefined}
+            adminUserIds={selectedChannelId ? adminUserIds : undefined}
             onReply={(id) => {
               setEditingMessage(null);
               setPendingDeleteId(null);

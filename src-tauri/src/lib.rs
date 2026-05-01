@@ -326,6 +326,7 @@ pub fn run() {
             commands::pin::lock,
             commands::pin::get_unlock_state,
             commands::auth::list_user_devices,
+            commands::auth::revoke_device,
             commands::device_enrollment::start_device_enrollment,
             commands::device_enrollment::poll_enrollment_status,
             commands::device_enrollment::list_pending_enrollment_requests,

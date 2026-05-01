@@ -1508,6 +1508,7 @@ pub fn reconcile_group_mls_core_staged(
     available_kps: &[(String, String, KeyPackage)],
     actor_user_id: &str,
     actor_device_id: &str,
+    valid_devices: Option<&std::collections::HashSet<(String, String)>>,
 ) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
     use std::collections::{HashMap, HashSet};
 
@@ -1527,14 +1528,22 @@ pub fn reconcile_group_mls_core_staged(
         .iter()
         .map(|(uid, did, _)| (uid.clone(), did.clone()))
         .collect();
-    //    …UNION with existing tree members whose user is still in the roster.
+    //    …UNION with existing tree members whose user is still in the roster
+    //    AND whose device row still exists (when `valid_devices` is provided).
     //    This prevents removing the committer's own device (which consumed its
     //    KP on creation and has none left) or other devices that are already
-    //    correctly in the tree.
+    //    correctly in the tree, while still letting a `user_device` deletion
+    //    drive a leaf removal (used by device revocation).
     for (uid, did) in actual.keys() {
-        if roster_user_ids.contains(uid) {
-            desired.insert((uid.clone(), did.clone()));
+        if !roster_user_ids.contains(uid) {
+            continue;
         }
+        if let Some(valid) = valid_devices {
+            if !valid.contains(&(uid.clone(), did.clone())) {
+                continue;
+            }
+        }
+        desired.insert((uid.clone(), did.clone()));
     }
 
     // 3. Diff.
@@ -1673,6 +1682,7 @@ pub fn reconcile_group_mls_core(
     available_kps: &[(String, String, KeyPackage)],
     actor_user_id: &str,
     actor_device_id: &str,
+    valid_devices: Option<&std::collections::HashSet<(String, String)>>,
 ) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
     let (mut outcome, commit_data_opt) = reconcile_group_mls_core_staged(
         provider,
@@ -1682,6 +1692,7 @@ pub fn reconcile_group_mls_core(
         available_kps,
         actor_user_id,
         actor_device_id,
+        valid_devices,
     )?;
 
     // If a commit was staged, merge it locally. No-op runs leave the group
@@ -1768,6 +1779,29 @@ pub async fn reconcile_group_mls_impl(
             let mut rows = conn.query(&query, ()).await?;
             while let Some(row) = rows.next().await? {
                 device_pairs.push((row.get::<String>(0)?, row.get::<String>(1)?));
+            }
+        }
+    }
+
+    // 2b. Snapshot of every (user_id, device_id) pair still registered in
+    //     `user_device` for the current roster. Used by reconcile to drop
+    //     leaves whose device row was revoked even though the user is still
+    //     a roster member (single-device revoke flow).
+    let mut valid_devices: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
+    {
+        let safe_ids: Vec<String> = roster_user_ids
+            .iter()
+            .map(|id| id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>())
+            .collect();
+        if !safe_ids.is_empty() {
+            let in_clause = safe_ids.iter().map(|id| format!("'{id}'")).collect::<Vec<_>>().join(",");
+            let query = format!(
+                "SELECT user_id, device_id FROM user_device WHERE user_id IN ({in_clause})"
+            );
+            let mut rows = conn.query(&query, ()).await?;
+            while let Some(row) = rows.next().await? {
+                valid_devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
             }
         }
     }
@@ -1914,6 +1948,7 @@ pub async fn reconcile_group_mls_impl(
             &available_kps,
             &actor_user_id,
             &actor_device_id,
+            Some(&valid_devices),
         )?
     };
 
@@ -3241,6 +3276,7 @@ mod tests {
             &available_kps,
             actor_user_id,
             actor_device_id,
+            None,
         )
         .unwrap()
     }

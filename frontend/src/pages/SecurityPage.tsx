@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
+import { TextInput } from "../components/ui/TextInput";
+import { NavigableList } from "../components/ui/NavigableList";
 import { useAppStore } from "../stores/appStore";
 import * as api from "../services/api";
 
@@ -59,11 +61,37 @@ function formatTimestamp(iso: string): string {
   }
 }
 
+const sectionHeaderClass =
+  "text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b";
+const sectionHeaderStyle: React.CSSProperties = {
+  color: "var(--c-text)",
+  borderColor: "var(--c-border)",
+};
+
 export const SecurityPage: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAppStore();
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [devices, setDevices] = useState<api.DeviceInfo[] | null>(null);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [confirmingDevice, setConfirmingDevice] = useState<api.DeviceInfo | null>(null);
+  const [confirmInput, setConfirmInput] = useState("");
+  const [revoking, setRevoking] = useState(false);
+
+  const loadDevices = React.useCallback(() => {
+    if (!currentUser) {
+      return;
+    }
+    api
+      .listUserDevices(currentUser.id)
+      .then(setDevices)
+      .catch((err) => {
+        setDevicesError(err instanceof Error ? err.message : "Failed to load devices");
+        setDevices([]);
+      });
+  }, [currentUser?.id]);
 
   useEffect(() => {
     if (!currentUser) {
@@ -83,117 +111,215 @@ export const SecurityPage: React.FC = () => {
           setEvents([]);
         }
       });
+    loadDevices();
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, loadDevices]);
+
+  const cancelConfirm = () => {
+    setConfirmingDevice(null);
+    setConfirmInput("");
+  };
+
+  const revoke = async () => {
+    if (!currentUser || !confirmingDevice) {
+      return;
+    }
+    setRevoking(true);
+    setDevicesError(null);
+    try {
+      await api.revokeDevice(currentUser.id, confirmingDevice.device_id);
+      cancelConfirm();
+      loadDevices();
+    } catch (err) {
+      setDevicesError(err instanceof Error ? err.message : "Failed to revoke device");
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  const deviceDisplayName = (device: api.DeviceInfo): string =>
+    device.device_name ?? shortId(device.device_id);
 
   return (
     <PageShell title="Security" scrollable>
-      <div
-        className="flex flex-col gap-4 p-4 font-mono"
-        data-testid="security-page"
-        style={{ color: "var(--c-text)" }}
-      >
-        <div>
-          <h2 className="text-sm font-bold" style={{ color: "var(--c-accent)" }}>
-            PIN
-          </h2>
-          <p
-            className="text-xs mt-1"
-            style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
-          >
-            The local PIN unlocks Pollis on this device. It never leaves
-            the device and can't be recovered — use your Secret Key if
-            you forget it.
-          </p>
-          <Button
-            data-testid="change-pin-button"
-            className="mt-3"
-            onClick={() => navigate({ to: "/security/change-pin" })}
-          >
-            Change PIN
-          </Button>
+      <div className="flex justify-center px-6 py-8">
+        <div
+          className="flex flex-col gap-8 w-full max-w-md font-mono"
+          data-testid="security-page"
+        >
+          {/* PIN */}
+          <section className="flex flex-col gap-4 mb-12">
+            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+              PIN
+            </h2>
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              The local PIN unlocks Pollis on this device. It never leaves the
+              device and can't be recovered — use your Secret Key if you forget it.
+            </p>
+            <div className="self-start">
+              <Button
+                data-testid="change-pin-button"
+                onClick={() => navigate({ to: "/security/change-pin" })}
+              >
+                Change PIN
+              </Button>
+            </div>
+          </section>
+
+          {/* Devices */}
+          <section className="flex flex-col gap-4 mb-12">
+            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+              Devices
+            </h2>
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              Every device signed in to your account. Revoke any you don't
+              recognise — the device loses access to all groups and DMs on its
+              next sync.
+            </p>
+
+            {devicesError && (
+              <p
+                data-testid="devices-error"
+                className="text-xs"
+                style={{ color: "#ff6b6b" }}
+              >
+                {devicesError}
+              </p>
+            )}
+
+            {confirmingDevice ? (
+              <div
+                className="flex flex-col gap-3"
+                data-testid="revoke-confirm"
+                style={{
+                  background: "var(--c-surface)",
+                  border: "2px solid var(--c-border)",
+                  borderRadius: "0.5rem",
+                  padding: "0.75rem",
+                }}
+              >
+                <p className="text-xs" style={{ color: "var(--c-text)" }}>
+                  Revoke <strong>{deviceDisplayName(confirmingDevice)}</strong>? This
+                  cannot be undone.
+                </p>
+                <TextInput
+                  label={`Type "${deviceDisplayName(confirmingDevice)}" to confirm`}
+                  value={confirmInput}
+                  onChange={setConfirmInput}
+                  autoFocus
+                  data-testid="revoke-confirm-input"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    data-testid="revoke-confirm-submit"
+                    size="sm"
+                    disabled={
+                      confirmInput !== deviceDisplayName(confirmingDevice) || revoking
+                    }
+                    onClick={revoke}
+                  >
+                    {revoking ? "Revoking…" : "Revoke device"}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={revoking}
+                    onClick={cancelConfirm}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <NavigableList<api.DeviceInfo>
+                testId="devices-list"
+                items={devices ?? []}
+                isLoading={devices === null}
+                loadingLabel="Loading devices…"
+                emptyLabel="No devices registered."
+                getKey={(d) => d.device_id}
+                rowTestId={(d) => `device-${d.device_id}`}
+                renderRow={(d) => (
+                  <div className="min-w-0 flex flex-col">
+                    <span className="truncate" style={{ color: "var(--c-text)" }}>
+                      {deviceDisplayName(d)}
+                    </span>
+                    <span style={{ color: "var(--c-text-dim)" }}>
+                      Last seen {formatTimestamp(d.last_seen)}
+                    </span>
+                  </div>
+                )}
+                controls={(d) =>
+                  d.is_current
+                    ? []
+                    : [
+                        <Button
+                          key="revoke"
+                          data-testid={`revoke-${d.device_id}`}
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setConfirmingDevice(d);
+                            setConfirmInput("");
+                            setDevicesError(null);
+                          }}
+                        >
+                          Revoke
+                        </Button>,
+                      ]
+                }
+              />
+            )}
+          </section>
+
+          {/* Security events */}
+          <section className="flex flex-col gap-4 mb-12">
+            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+              Security events
+            </h2>
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              Every time a device is added to your account, an enrollment is
+              rejected, or your identity is reset, it shows up here. Check it if
+              you ever suspect someone has accessed your account.
+            </p>
+
+            {error && (
+              <p
+                data-testid="security-events-error"
+                className="text-xs"
+                style={{ color: "#ff6b6b" }}
+              >
+                {error}
+              </p>
+            )}
+
+            <NavigableList<api.SecurityEvent>
+              testId="security-events-list"
+              items={events ?? []}
+              isLoading={events === null}
+              loadingLabel="Loading…"
+              emptyLabel="No security events recorded yet."
+              getKey={(e) => e.id}
+              rowTestId={(e) => `security-event-${e.id}`}
+              renderRow={(event) => {
+                const { heading, detail } = describe(event);
+                return (
+                  <div className="min-w-0 flex flex-col">
+                    <span style={{ color: "var(--c-text)" }}>{heading}</span>
+                    {detail && (
+                      <span style={{ color: "var(--c-text-muted)" }}>{detail}</span>
+                    )}
+                    <span style={{ color: "var(--c-text-dim)" }}>
+                      {formatTimestamp(event.created_at)}
+                    </span>
+                  </div>
+                );
+              }}
+            />
+          </section>
         </div>
-
-        <div>
-          <h2 className="text-sm font-bold" style={{ color: "var(--c-accent)" }}>
-            Security events
-          </h2>
-          <p
-            className="text-xs mt-1"
-            style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
-          >
-            Every time a device is added to your account, an enrollment is
-            rejected, or your identity is reset, it shows up here. Check it
-            if you ever suspect someone has accessed your account.
-          </p>
-        </div>
-
-        {error && (
-          <p
-            data-testid="security-events-error"
-            className="text-xs"
-            style={{ color: "#ff6b6b" }}
-          >
-            {error}
-          </p>
-        )}
-
-        {events === null && (
-          <p className="text-xs" style={{ color: "var(--c-text-muted)" }}>
-            Loading…
-          </p>
-        )}
-
-        {events !== null && events.length === 0 && (
-          <p
-            data-testid="security-events-empty"
-            className="text-xs"
-            style={{ color: "var(--c-text-muted)" }}
-          >
-            No security events recorded yet.
-          </p>
-        )}
-
-        {events !== null && events.length > 0 && (
-          <ul className="flex flex-col gap-3" data-testid="security-events-list">
-            {events.map((event) => {
-              const { heading, detail } = describe(event);
-              return (
-                <li
-                  key={event.id}
-                  data-testid={`security-event-${event.id}`}
-                  style={{
-                    background: "var(--c-surface)",
-                    border: "2px solid var(--c-border)",
-                    borderRadius: "0.5rem",
-                    padding: "0.75rem",
-                  }}
-                >
-                  <div
-                    className="text-xs font-bold"
-                    style={{ color: "var(--c-text)" }}
-                  >
-                    {heading}
-                  </div>
-                  <div
-                    className="text-xs mt-1"
-                    style={{ color: "var(--c-text-muted)" }}
-                  >
-                    {detail}
-                  </div>
-                  <div
-                    className="text-xs mt-2"
-                    style={{ color: "var(--c-text-dim)" }}
-                  >
-                    {formatTimestamp(event.created_at)}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
       </div>
     </PageShell>
   );

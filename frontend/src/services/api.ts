@@ -202,6 +202,10 @@ export async function listUserDevices(userId: string): Promise<DeviceInfo[]> {
   return invoke('list_user_devices', { userId });
 }
 
+export async function revokeDevice(userId: string, deviceId: string): Promise<void> {
+  await invoke('revoke_device', { userId, deviceId });
+}
+
 // ── User ───────────────────────────────────────────────────────────────────
 
 export interface UserProfileData {
