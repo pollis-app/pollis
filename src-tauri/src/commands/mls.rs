@@ -298,6 +298,108 @@ pub async fn ensure_device_cert(
     Ok(true)
 }
 
+/// Re-sign every `user_device` row for `user_id` with the user's current
+/// account identity key, stamping each row's `device_cert`,
+/// `cert_issued_at`, and `cert_identity_version` to match
+/// `users.identity_version`.
+///
+/// Called from `reset_identity` after the new account key has been
+/// installed into `AppState.unlock`. Without this, every device that
+/// existed before a rotation would carry a cert that no longer chains
+/// to the freshly published `account_id_pub`, and every other client
+/// would log a cross-signing-verification WARN against those devices
+/// for the rest of their life (advisory verification in
+/// `process_pending_commits` keeps things working but the defense is
+/// effectively off).
+///
+/// Skips rows whose `mls_signature_pub` is NULL — those are devices
+/// that were registered but never finished `ensure_device_cert`, and
+/// will get their cert when they next come online.
+///
+/// Returns the number of rows re-signed.
+pub async fn resign_all_device_certs(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> crate::error::Result<usize> {
+    let conn = state.remote_db.conn().await?;
+
+    let identity_version: u32 = {
+        let mut rows = conn
+            .query(
+                "SELECT identity_version FROM users WHERE id = ?1",
+                libsql::params![user_id],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => row.get::<i64>(0).unwrap_or(1) as u32,
+            None => {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "user {user_id} not found while re-signing device certs"
+                )))
+            }
+        }
+    };
+
+    let devices: Vec<(String, Vec<u8>)> = {
+        let mut rows = conn
+            .query(
+                "SELECT device_id, mls_signature_pub FROM user_device \
+                 WHERE user_id = ?1 AND mls_signature_pub IS NOT NULL",
+                libsql::params![user_id],
+            )
+            .await?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().await? {
+            let did: String = row.get(0)?;
+            let pub_bytes: Vec<u8> = row.get(1)?;
+            out.push((did, pub_bytes));
+        }
+        out
+    };
+
+    let mut count = 0;
+    for (device_id, sig_pub_bytes) in devices {
+        let issued_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let cert = crate::commands::account_identity::sign_device_cert(
+            state.as_ref(),
+            user_id,
+            &device_id,
+            &sig_pub_bytes,
+            identity_version,
+            issued_at,
+        )
+        .await?;
+
+        let issued_at_str = issued_at.to_string();
+        conn.execute(
+            "UPDATE user_device \
+             SET device_cert = ?1, \
+                 cert_issued_at = ?2, \
+                 cert_identity_version = ?3 \
+             WHERE device_id = ?4 AND user_id = ?5",
+            libsql::params![
+                cert,
+                issued_at_str,
+                identity_version as i64,
+                device_id.clone(),
+                user_id
+            ],
+        )
+        .await?;
+        count += 1;
+    }
+
+    eprintln!(
+        "[mls] re-signed {count} device cert(s) for {user_id} at identity_version={identity_version}"
+    );
+
+    Ok(count)
+}
+
 // ── GroupInfo publishing ─────────────────────────────────────────────────────
 
 /// Export a fresh `GroupInfo` for the given conversation and upsert it

@@ -2738,3 +2738,167 @@ async fn wrong_pin_keeps_db_locked() {
 
     drop(alice);
 }
+
+/// Reset the account identity and confirm every existing `user_device`
+/// row's cross-signing cert is re-signed against the new
+/// `account_id_pub` in lock-step with the rotation. Without the
+/// re-sign, the old cert lingers and fails verification on every other
+/// client (advisory `process_pending_commits` then logs a warning per
+/// commit forever, and the cross-signing defense is effectively off).
+///
+/// Drives the pure rotation path (`account_identity::reset_identity`)
+/// rather than the full `reset_identity_and_recover` Tauri command so
+/// the assertion is focused on the cert-resign behavior and not on the
+/// downstream group / DM / device-row cleanup.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn reset_identity_resigns_device_cert() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+
+    let w = world().await;
+    let conn = w.remote.conn().await.expect("remote conn");
+
+    let (old_pub, old_version): (Vec<u8>, i64) = {
+        let mut rows = conn
+            .query(
+                "SELECT account_id_pub, identity_version FROM users WHERE id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await
+            .expect("users select");
+        let row = rows.next().await.expect("rows").expect("user row");
+        (
+            row.get::<Option<Vec<u8>>>(0).unwrap().expect("account_id_pub"),
+            row.get(1).expect("identity_version"),
+        )
+    };
+
+    let (device_id, old_cert, old_cert_version, old_issued_at_str, mls_sig_pub): (
+        String,
+        Vec<u8>,
+        i64,
+        String,
+        Vec<u8>,
+    ) = {
+        let mut rows = conn
+            .query(
+                "SELECT device_id, device_cert, cert_identity_version, cert_issued_at, mls_signature_pub \
+                 FROM user_device WHERE user_id = ?1 AND device_cert IS NOT NULL",
+                libsql::params![user_id.clone()],
+            )
+            .await
+            .expect("user_device select");
+        let row = rows.next().await.expect("rows").expect("device with cert");
+        (
+            row.get::<String>(0).expect("device_id"),
+            row.get::<Option<Vec<u8>>>(1).unwrap().expect("device_cert"),
+            row.get::<i64>(2).expect("cert_identity_version"),
+            row.get::<Option<String>>(3).unwrap().expect("cert_issued_at"),
+            row.get::<Option<Vec<u8>>>(4).unwrap().expect("mls_signature_pub"),
+        )
+    };
+    let old_issued_at: u64 = old_issued_at_str.parse().expect("parse issued_at");
+
+    pollis_lib::commands::account_identity::verify_device_cert(
+        &old_pub,
+        &device_id,
+        &mls_sig_pub,
+        old_cert_version as u32,
+        old_issued_at,
+        &old_cert,
+    )
+    .expect("pre-rotation cert must verify against pre-rotation account_id_pub");
+
+    let _new_secret_key = pollis_lib::commands::account_identity::reset_identity(
+        &alice.state,
+        &user_id,
+    )
+    .await
+    .expect("reset_identity");
+
+    let (new_pub, new_version): (Vec<u8>, i64) = {
+        let mut rows = conn
+            .query(
+                "SELECT account_id_pub, identity_version FROM users WHERE id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await
+            .expect("users re-select");
+        let row = rows.next().await.expect("rows").expect("user row");
+        (
+            row.get::<Option<Vec<u8>>>(0).unwrap().expect("new account_id_pub"),
+            row.get(1).expect("new identity_version"),
+        )
+    };
+
+    assert_ne!(old_pub, new_pub, "account_id_pub must change");
+    assert_eq!(
+        new_version,
+        old_version + 1,
+        "identity_version must bump by exactly 1"
+    );
+
+    let (new_cert, new_cert_version, new_issued_at_str): (Vec<u8>, i64, String) = {
+        let mut rows = conn
+            .query(
+                "SELECT device_cert, cert_identity_version, cert_issued_at \
+                 FROM user_device WHERE user_id = ?1 AND device_id = ?2",
+                libsql::params![user_id.clone(), device_id.clone()],
+            )
+            .await
+            .expect("user_device re-select");
+        let row = rows
+            .next()
+            .await
+            .expect("rows")
+            .expect("device row still present after reset_identity");
+        (
+            row.get::<Option<Vec<u8>>>(0)
+                .unwrap()
+                .expect("device_cert re-signed"),
+            row.get::<i64>(1).expect("cert_identity_version"),
+            row.get::<Option<String>>(2)
+                .unwrap()
+                .expect("cert_issued_at"),
+        )
+    };
+    let new_issued_at: u64 = new_issued_at_str.parse().expect("parse new issued_at");
+
+    assert_eq!(
+        new_cert_version, new_version,
+        "cert_identity_version must match users.identity_version after rotation"
+    );
+    assert_ne!(
+        new_cert, old_cert,
+        "device_cert bytes must change after re-sign"
+    );
+
+    pollis_lib::commands::account_identity::verify_device_cert(
+        &new_pub,
+        &device_id,
+        &mls_sig_pub,
+        new_cert_version as u32,
+        new_issued_at,
+        &new_cert,
+    )
+    .expect("post-rotation cert must verify against new account_id_pub");
+
+    let stale = pollis_lib::commands::account_identity::verify_device_cert(
+        &new_pub,
+        &device_id,
+        &mls_sig_pub,
+        old_cert_version as u32,
+        old_issued_at,
+        &old_cert,
+    );
+    assert!(
+        stale.is_err(),
+        "old cert must NOT verify against new account_id_pub"
+    );
+
+    drop(alice);
+}
