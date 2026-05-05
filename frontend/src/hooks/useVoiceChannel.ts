@@ -5,13 +5,20 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { usePreferences, preferencesToApmConfig } from './queries/usePreferences';
+import { useUserProfile } from './queries/useUserProfile';
 import { notify } from '../utils/notify';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
 // Mirrors VoiceEvent enum in src-tauri/src/commands/voice.rs
 type VoiceEvent =
-  | { type: 'participant_joined'; identity: string; name: string; is_muted: boolean }
+  | {
+      type: 'participant_joined';
+      identity: string;
+      name: string;
+      is_muted: boolean;
+      avatar_url?: string | null;
+    }
   | { type: 'participant_left'; identity: string }
   | { type: 'muted'; identity: string }
   | { type: 'unmuted'; identity: string }
@@ -83,10 +90,11 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
   } = useAppStore();
 
   const preferences = usePreferences();
+  const { data: userProfile } = useUserProfile();
   const queryClient = useQueryClient();
 
   // Track participants as a map so we can update mute state in-place
-  const participantsRef = useRef<Map<string, { identity: string; name: string; isMuted: boolean; isLocal: boolean }>>(new Map());
+  const participantsRef = useRef<Map<string, { identity: string; name: string; isMuted: boolean; isLocal: boolean; avatarKey?: string | null }>>(new Map());
   const localIdentityRef = useRef<string>('');
   const joinedRef = useRef<boolean>(false);
 
@@ -121,12 +129,25 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
             name: event.name,
             isMuted: event.is_muted,
             isLocal: event.identity === localIdentityRef.current,
+            avatarKey: event.avatar_url ?? null,
           });
           flushParticipants();
         } else if (event.type === 'participant_left') {
           participantsRef.current.delete(event.identity);
-          flushParticipants();
-          setVoiceActiveSpeakerIds(useAppStore.getState().voiceActiveSpeakerIds.filter((id) => id !== event.identity));
+          // Single store update so subscribers re-render once instead of
+          // twice. Skip touching voiceActiveSpeakerIds when the leaving
+          // participant wasn't a speaker — otherwise we mint a new
+          // (content-equal) array that still triggers ref-equality renders.
+          const prevSpeakers = useAppStore.getState().voiceActiveSpeakerIds;
+          const nextParticipants = Array.from(participantsRef.current.values());
+          if (prevSpeakers.includes(event.identity)) {
+            useAppStore.setState({
+              voiceParticipants: nextParticipants,
+              voiceActiveSpeakerIds: prevSpeakers.filter((id) => id !== event.identity),
+            });
+          } else {
+            useAppStore.setState({ voiceParticipants: nextParticipants });
+          }
         } else if (event.type === 'muted') {
           const p = participantsRef.current.get(event.identity);
           if (p) {
@@ -185,6 +206,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         name: currentUser.username ?? currentUser.id,
         isMuted: false,
         isLocal: true,
+        avatarKey: userProfile?.avatar_url ?? null,
       });
       flushParticipants();
 
@@ -337,6 +359,7 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
     isTauriReady,
     currentUser?.id,
     currentUser?.username,
+    userProfile?.avatar_url,
     networkStatus,
     flushParticipants,
     setVoiceParticipants,
