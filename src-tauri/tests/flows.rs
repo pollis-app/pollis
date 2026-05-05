@@ -295,6 +295,9 @@ impl TestClient {
     }
 
     async fn create_group(&self, name: &str) -> String {
+        // Tests expect the auto-created #General text channel; opt in
+        // explicitly because the production frontend now defaults both
+        // toggles to off.
         let g: serde_json::Value = self
             .invoke_json(
                 "create_group",
@@ -302,6 +305,8 @@ impl TestClient {
                     "name": name,
                     "description": null,
                     "ownerId": self.user_id(),
+                    "createDefaultTextChannel": true,
+                    "createDefaultVoiceChannel": true,
                 }),
             )
             .await;
