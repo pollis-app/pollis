@@ -1,14 +1,19 @@
 use libsql::{Builder, Database, Connection};
 use tokio::sync::RwLock;
+use std::path::PathBuf;
 use crate::error::Result;
 
 #[cfg(test)]
 const BASELINE: &str = include_str!("migrations/000000_baseline.sql");
 
+enum Backend {
+    Remote { url: String, token: String },
+    Local { path: PathBuf },
+}
+
 pub struct RemoteDb {
     db: RwLock<Database>,
-    url: String,
-    token: String,
+    backend: Backend,
 }
 
 impl RemoteDb {
@@ -20,14 +25,48 @@ impl RemoteDb {
             .await?;
         Ok(Self {
             db: RwLock::new(db),
-            url: url.to_string(),
-            token: token.to_string(),
+            backend: Backend::Remote {
+                url: url.to_string(),
+                token: token.to_string(),
+            },
+        })
+    }
+
+    /// Connect to a local libsql file. Integration-test harness only — avoids
+    /// the network round-trip against the shared test Turso, dropping the
+    /// flows suite from minutes to seconds.
+    ///
+    /// WAL + busy_timeout are required: a single test exercises many
+    /// concurrent clients writing to the same file, and SQLite's default
+    /// rollback journal serializes writers with no wait, producing
+    /// `database is locked` mid-flow.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub async fn connect_local<P: Into<PathBuf>>(path: P) -> Result<Self> {
+        let path = path.into();
+        let db = Builder::new_local(&path).build().await?;
+        let conn = db.connect()?;
+        // WAL + synchronous=NORMAL must run via `query`: both PRAGMAs return
+        // the resulting mode as a row, which `execute` rejects.
+        conn.query("PRAGMA journal_mode=WAL", ()).await?;
+        conn.query("PRAGMA synchronous=NORMAL", ()).await?;
+        Ok(Self {
+            db: RwLock::new(db),
+            backend: Backend::Local { path },
         })
     }
 
     pub async fn conn(&self) -> Result<Connection> {
         let db = self.db.read().await;
-        Ok(db.connect()?)
+        let conn = db.connect()?;
+        // `busy_timeout` is per-connection — set it on every new connection
+        // for the local test backend so concurrent clients in a single test
+        // wait for each other instead of failing with `database is locked`.
+        if matches!(self.backend, Backend::Local { .. }) {
+            // `query` (not `execute`) — PRAGMA busy_timeout returns the
+            // resulting value as a row.
+            conn.query("PRAGMA busy_timeout=10000", ()).await?;
+        }
+        Ok(conn)
     }
 
     /// Rebuild the underlying libsql `Database`. Long-lived handles can be
@@ -35,9 +74,14 @@ impl RemoteDb {
     /// ("stream not found"); neither is recoverable from the existing handle.
     /// Callers that hit a transient Hrana error should `reconnect()` and retry.
     pub async fn reconnect(&self) -> Result<()> {
-        let new_db = Builder::new_remote(self.url.clone(), self.token.clone())
-            .build()
-            .await?;
+        let new_db = match &self.backend {
+            Backend::Remote { url, token } => {
+                Builder::new_remote(url.clone(), token.clone())
+                    .build()
+                    .await?
+            }
+            Backend::Local { path } => Builder::new_local(path).build().await?,
+        };
         let mut db = self.db.write().await;
         *db = new_db;
         Ok(())

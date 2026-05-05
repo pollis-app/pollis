@@ -3,8 +3,8 @@
 //! Drives the real `#[tauri::command]` functions through the tauri IPC
 //! pipeline — no `_inner` shims, no mocked DB layer. Each [`TestClient`]
 //! owns its own `App<MockRuntime>` backed by its own `InMemoryKeystore`,
-//! while all clients share a single [`TestWorld`] pointed at a disposable
-//! test Turso instance (`.env.test`).
+//! while all clients share a single [`TestWorld`] pointed at a process-local
+//! libsql file (no network round-trip — see `RemoteDb::connect_local`).
 //!
 //! Run with:
 //! ```
@@ -36,11 +36,12 @@ const TEST_PIN: &str = "0000";
 
 // ─── World ──────────────────────────────────────────────────────────────────
 
-/// Shared across all clients in a single test. Owns the connection to the
-/// disposable test Turso and a temp dir that backs per-user SQLCipher files.
+/// Shared across all clients in a single test. Owns the libsql file that
+/// stands in for "remote Turso" plus a temp dir that backs per-user
+/// SQLCipher files.
 ///
 /// Construction is lazy + process-wide so integration tests share one
-/// connection pool but still run serially (the wipe would race otherwise).
+/// backend file but still run serially (the wipe would race otherwise).
 struct TestWorld {
     remote: Arc<RemoteDb>,
     config: Config,
@@ -69,10 +70,13 @@ async fn world() -> &'static TestWorld {
             // integration tests.
             std::env::set_var("DEV_OTP", DEV_OTP);
 
+            // Stand-in for "remote Turso" — a libsql file in the same temp
+            // dir as the per-user SQLCipher DBs. No network round-trip.
+            let remote_db_path = path.join("test_turso.db");
             let remote = Arc::new(
-                RemoteDb::connect(&config.turso_url, &config.turso_token)
+                RemoteDb::connect_local(&remote_db_path)
                     .await
-                    .expect("connect test turso"),
+                    .expect("connect local libsql"),
             );
 
             bootstrap_schema(&remote)
