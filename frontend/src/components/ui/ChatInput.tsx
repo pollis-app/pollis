@@ -318,13 +318,20 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   // ── File picker via Tauri dialog ──────────────────────────────────────────
   const handlePickFiles = useCallback(async () => {
     if (attachments.length >= maxAttachments) { return; }
-    const result = await open({
-      multiple: true,
-      directory: false,
-      title: "Add files",
-    }).catch((err) => { console.error("[ChatInput] open dialog failed:", err); return null; });
-    if (!result) { return; }
-    await handlePaths(Array.isArray(result) ? result : [result]);
+    try {
+      const result = await open({
+        multiple: true,
+        directory: false,
+        title: "Add files",
+      }).catch((err) => { console.error("[ChatInput] open dialog failed:", err); return null; });
+      if (!result) { return; }
+      await handlePaths(Array.isArray(result) ? result : [result]);
+    } finally {
+      // Native file dialog steals focus and the webview doesn't restore
+      // it — pull focus back to the chat input on every exit path
+      // (success, cancel, or error) so the user can keep typing.
+      textareaRef.current?.focus();
+    }
   }, [attachments.length, maxAttachments, handlePaths]);
 
   // ── Paste (File objects, written to temp first) ───────────────────────────
