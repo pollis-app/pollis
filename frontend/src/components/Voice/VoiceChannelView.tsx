@@ -3,6 +3,7 @@ import { Circle, VolumeX } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { NavigableList } from "../ui/NavigableList";
 import type { VoiceParticipant } from "../../types";
+import { RemoteUserVolumeSlider } from "./RemoteUserVolumeSlider";
 
 export const VoiceChannelView: React.FC = () => {
   const { voiceParticipants, voiceActiveSpeakerIds } = useAppStore();
@@ -21,6 +22,21 @@ export const VoiceChannelView: React.FC = () => {
         emptyLabel="Connecting…"
         testId="voice-channel-view"
         rowTestId={(p) => `voice-participant-${p.identity}`}
+        controls={(p) => {
+          // Only remote participants get a per-user volume slider — the
+          // mixer applies it before tracks are summed, and the local
+          // participant doesn't have an output track on this device.
+          if (p.isLocal) {
+            return [];
+          }
+          return [
+            <RemoteUserVolumeSlider
+              key="volume"
+              identity={p.identity}
+              participantName={p.name}
+            />,
+          ];
+        }}
         renderRow={(p) => {
           const isSpeaking =
             voiceActiveSpeakerIds.includes(p.identity) && !p.isMuted;
