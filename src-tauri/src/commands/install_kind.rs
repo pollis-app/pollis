@@ -32,9 +32,13 @@ impl ManagedInstallKind {
         }
     }
 
+    /// Single-package update command. Deliberately *not* `-Syu` /
+    /// `-Syyu` — those are full-system upgrades and would update the
+    /// user's kernel and every other package. The user came here to
+    /// update Pollis, nothing else.
     pub fn update_command(self) -> &'static str {
         match self {
-            ManagedInstallKind::Aur => "yay -Syu pollis",
+            ManagedInstallKind::Aur => "yay -S pollis",
         }
     }
 }
