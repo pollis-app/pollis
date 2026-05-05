@@ -1,5 +1,6 @@
 import React, { useRef, useMemo, useState, useEffect } from "react";
 import { X } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
@@ -11,7 +12,7 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage } from "../../hooks/queries";
 import { transformChannelMessage } from "../../hooks/queries/useMessages";
-import { useGroupMembers } from "../../hooks/queries/useGroups";
+import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
 import { blurhashFromUrl } from "../../utils/imageProcessing";
 
@@ -47,7 +48,13 @@ export const MainContent: React.FC = () => {
     replyToMessageId,
     setReplyToMessageId,
     currentUser,
+    pendingDeleteChannelId,
+    setPendingDeleteChannelId,
   } = useAppStore();
+  const navigate = useNavigate();
+  const deleteChannelMutation = useDeleteChannel();
+  const isDeletingThisChannel =
+    !!selectedChannelId && pendingDeleteChannelId === selectedChannelId;
 
   const { data: groupMembers = [] } = useGroupMembers(selectedGroupId ?? null);
   const adminUserIds = useMemo(
@@ -101,7 +108,7 @@ export const MainContent: React.FC = () => {
 
   // Escape cancels edit/delete/reply bar — capture phase so AppShell's navigation handler doesn't fire first.
   useEffect(() => {
-    if (!editingMessage && !pendingDeleteId && !replyToMessageId) {
+    if (!editingMessage && !pendingDeleteId && !replyToMessageId && !isDeletingThisChannel) {
       return;
     }
     const handler = (e: KeyboardEvent) => {
@@ -111,6 +118,8 @@ export const MainContent: React.FC = () => {
           handleCancelEdit();
         } else if (pendingDeleteId) {
           setPendingDeleteId(null);
+        } else if (isDeletingThisChannel) {
+          setPendingDeleteChannelId(null);
         } else {
           setReplyToMessageId(null);
         }
@@ -118,7 +127,7 @@ export const MainContent: React.FC = () => {
     };
     window.addEventListener('keydown', handler, { capture: true });
     return () => window.removeEventListener('keydown', handler, { capture: true });
-  }, [editingMessage, pendingDeleteId, replyToMessageId]);
+  }, [editingMessage, pendingDeleteId, replyToMessageId, isDeletingThisChannel]);
 
   // Initialise the cursor from the initial page load (only if no older pages
   // have been fetched yet — don't overwrite cursor mid-pagination).
@@ -200,6 +209,22 @@ export const MainContent: React.FC = () => {
       console.error("Failed to delete message:", error);
     } finally {
       setPendingDeleteId(null);
+    }
+  };
+
+  const handleConfirmDeleteChannel = async () => {
+    if (!selectedChannelId || !selectedGroupId) {
+      return;
+    }
+    try {
+      await deleteChannelMutation.mutateAsync({
+        groupId: selectedGroupId,
+        channelId: selectedChannelId,
+      });
+      setPendingDeleteChannelId(null);
+      navigate({ to: "/groups/$groupId", params: { groupId: selectedGroupId } });
+    } catch (error) {
+      console.error("Failed to delete channel:", error);
     }
   };
 
@@ -485,6 +510,42 @@ export const MainContent: React.FC = () => {
             <p className="text-2xs font-mono mt-1" style={{ color: 'var(--c-text-muted)' }}>
               Enter to save · Shift+Enter for newline · Esc to cancel
             </p>
+          </div>
+        </div>
+      ) : isDeletingThisChannel ? (
+        <div data-testid="delete-channel-bar">
+          <div
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
+            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+          >
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+              delete channel
+            </span>
+            <button
+              data-testid="delete-channel-cancel"
+              onClick={() => setPendingDeleteChannelId(null)}
+              aria-label="Cancel delete"
+              className="icon-btn-sm flex-shrink-0"
+            >
+              <X size={20} aria-hidden="true" />
+            </button>
+          </div>
+          <div
+            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
+            style={{ background: 'var(--c-surface)' }}
+          >
+            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+              This channel and all of its messages will be permanently deleted. This cannot be undone.
+            </p>
+            <Button
+              data-testid="delete-channel-confirm"
+              variant="danger"
+              onClick={handleConfirmDeleteChannel}
+              isLoading={deleteChannelMutation.isPending}
+              loadingText="Deleting…"
+            >
+              Delete Channel
+            </Button>
           </div>
         </div>
       ) : pendingDeleteId ? (

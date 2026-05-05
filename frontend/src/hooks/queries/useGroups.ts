@@ -230,6 +230,28 @@ export function useCreateChannel() {
   });
 }
 
+export function useDeleteChannel() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async ({ channelId }: { groupId: string; channelId: string }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke('delete_channel', { channelId, requesterId: currentUser.id });
+    },
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.channels(variables.groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
 export function useLeaveGroup() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);

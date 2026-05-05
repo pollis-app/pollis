@@ -70,6 +70,11 @@ interface AppStore extends AppState {
   ) => void;
   updateRequired: boolean;
   setUpdateRequired: (v: boolean) => void;
+  // Channel id pending admin delete confirmation. When non-null and equal to
+  // selectedChannelId, MainContent replaces the chat input with the
+  // delete-channel confirm bar.
+  pendingDeleteChannelId: string | null;
+  setPendingDeleteChannelId: (channelId: string | null) => void;
   logout: () => void;
 }
 
@@ -184,6 +189,9 @@ export const useAppStore = create<AppStore>((set) => ({
   updateRequired: false,
   setUpdateRequired: (v) => set({ updateRequired: v }),
 
+  pendingDeleteChannelId: null,
+  setPendingDeleteChannelId: (channelId) => set({ pendingDeleteChannelId: channelId }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -209,6 +217,7 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
     pendingEnrollmentApproval: null,
+    pendingDeleteChannelId: null,
   }),
 }));
 
