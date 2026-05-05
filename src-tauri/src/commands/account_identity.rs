@@ -481,9 +481,9 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     //    `process_pending_commits`) is effectively off until each
     //    device next runs `ensure_device_cert` on its own. Best-effort
     //    — failure here doesn't block the reset, but is logged.
-    if let Err(e) = crate::commands::mls::resign_all_device_certs(state, user_id).await {
+    if let Err(e) = crate::commands::mls::resign_stale_device_certs(state, user_id).await {
         eprintln!(
-            "[reset] resign_all_device_certs failed (non-fatal): {e}"
+            "[reset] resign_stale_device_certs failed (non-fatal): {e}"
         );
     }
 

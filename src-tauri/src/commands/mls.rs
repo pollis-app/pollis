@@ -298,26 +298,33 @@ pub async fn ensure_device_cert(
     Ok(true)
 }
 
-/// Re-sign every `user_device` row for `user_id` with the user's current
-/// account identity key, stamping each row's `device_cert`,
+/// Re-sign every stale `user_device` row for `user_id` with the user's
+/// current account identity key, stamping each row's `device_cert`,
 /// `cert_issued_at`, and `cert_identity_version` to match
 /// `users.identity_version`.
 ///
-/// Called from `reset_identity` after the new account key has been
-/// installed into `AppState.unlock`. Without this, every device that
-/// existed before a rotation would carry a cert that no longer chains
-/// to the freshly published `account_id_pub`, and every other client
-/// would log a cross-signing-verification WARN against those devices
-/// for the rest of their life (advisory verification in
-/// `process_pending_commits` keeps things working but the defense is
-/// effectively off).
+/// "Stale" means `cert_identity_version IS NULL` or
+/// `cert_identity_version < users.identity_version` — i.e. the cert
+/// was signed under a previous account key and no longer chains to the
+/// currently-published `account_id_pub`.
+///
+/// Called in two places:
+///   1. `account_identity::reset_identity`, immediately after a
+///      rotation — every existing row becomes stale by definition,
+///      so this catches them all.
+///   2. `pin::unlock`, opportunistically — if a sibling device
+///      rotated identity while this device was offline, this
+///      device's row is stale on the server and will continue to
+///      fail cross-signing verification on every other client until
+///      it logs in. Re-signing on unlock means existing fleets
+///      self-heal as users come online, without a separate sweep.
 ///
 /// Skips rows whose `mls_signature_pub` is NULL — those are devices
 /// that were registered but never finished `ensure_device_cert`, and
 /// will get their cert when they next come online.
 ///
 /// Returns the number of rows re-signed.
-pub async fn resign_all_device_certs(
+pub async fn resign_stale_device_certs(
     state: &Arc<AppState>,
     user_id: &str,
 ) -> crate::error::Result<usize> {
@@ -344,8 +351,11 @@ pub async fn resign_all_device_certs(
         let mut rows = conn
             .query(
                 "SELECT device_id, mls_signature_pub FROM user_device \
-                 WHERE user_id = ?1 AND mls_signature_pub IS NOT NULL",
-                libsql::params![user_id],
+                 WHERE user_id = ?1 \
+                   AND mls_signature_pub IS NOT NULL \
+                   AND (cert_identity_version IS NULL \
+                        OR cert_identity_version < ?2)",
+                libsql::params![user_id, identity_version as i64],
             )
             .await?;
         let mut out = Vec::new();
