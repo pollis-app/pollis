@@ -1,0 +1,82 @@
+app-id: com.pollis.app
+runtime: org.gnome.Platform
+runtime-version: '46'
+sdk: org.gnome.Sdk
+command: pollis
+
+finish-args:
+  # GUI
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+
+  # Network for Turso, R2, LiveKit, OTP delivery
+  - --share=network
+
+  # Voice: cpal -> PulseAudio (also works against pipewire-pulse).
+  # We deliberately do NOT request --device=all; PulseAudio is enough
+  # for capture + playback and is what `pulse_simple_server` exposes.
+  - --socket=pulseaudio
+
+  # Keyring (identity key + session token via the `keyring` crate ->
+  # libsecret -> org.freedesktop.secrets DBus service).
+  - --talk-name=org.freedesktop.secrets
+
+  # Notifications
+  - --talk-name=org.freedesktop.Notifications
+
+  # File picker / drag-drop go through xdg-desktop-portal automatically;
+  # no broad --filesystem=home grant required.
+
+modules:
+  - name: pollis
+    buildsystem: simple
+    # The .deb produced by `pnpm build:linux` is the source of truth for
+    # the binary, the .desktop file, and the icons. The Flatpak just
+    # repackages it. Mirrors what `aur/PKGBUILD` does.
+    #
+    # For Flathub submission we'll need to either (a) get an exception
+    # for the prebuilt-binary policy (common for proprietary apps), or
+    # (b) replace this with a from-source build that pins all cargo +
+    # npm deps via `flatpak-cargo-generator` and `flatpak-node-generator`.
+    # Tracked in the parent issue.
+    sources:
+      - type: archive
+        # CI overrides this URL per-tag; this default is fine for local
+        # `flatpak-builder` runs against the latest release.
+        url: https://cdn.pollis.com/releases/v1.0.43/pollis-v1.0.43-linux.deb
+        sha256: 0000000000000000000000000000000000000000000000000000000000000000
+        # `archive` knows how to unpack a .deb's data.tar.* automatically
+        # via libarchive, but the inner layout is FHS (`/usr/bin/Pollis`,
+        # `/usr/share/...`). We rewrite into the Flatpak's /app prefix
+        # in `build-commands` below.
+        strip-components: 0
+
+      # AppStream metainfo lives in the repo, not the .deb.
+      - type: file
+        path: com.pollis.app.metainfo.xml
+    build-commands:
+      # Binary
+      - install -Dm755 usr/bin/Pollis /app/bin/pollis
+
+      # .desktop file — patch Exec= and Icon= to the Flatpak app-id and
+      # rename so the launcher matches `app-id`.
+      - |
+        install -d /app/share/applications
+        sed -e 's|^Exec=.*|Exec=pollis %U|' \
+            -e 's|^Icon=.*|Icon=com.pollis.app|' \
+            usr/share/applications/Pollis.desktop \
+            > /app/share/applications/com.pollis.app.desktop
+
+      # Icons — copy each size, renaming to the app-id.
+      - |
+        for size in 32 64 128 256 512; do
+          src="usr/share/icons/hicolor/${size}x${size}/apps/Pollis.png"
+          if [ -f "$src" ]; then
+            install -Dm644 "$src" "/app/share/icons/hicolor/${size}x${size}/apps/com.pollis.app.png"
+          fi
+        done
+
+      # AppStream metadata (required by Flathub).
+      - install -Dm644 com.pollis.app.metainfo.xml /app/share/metainfo/com.pollis.app.metainfo.xml

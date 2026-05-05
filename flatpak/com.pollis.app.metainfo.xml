@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.pollis.app</id>
+  <name>Pollis</name>
+  <summary>End-to-end encrypted messaging</summary>
+
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+
+  <description>
+    <p>
+      Pollis is a privacy-first desktop messaging app with end-to-end encryption
+      using MLS (Message Layer Security). It combines strong group encryption
+      with familiar group-chat features. The server never sees message plaintext.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">com.pollis.app.desktop</launchable>
+
+  <url type="homepage">https://pollis.com</url>
+  <url type="bugtracker">https://github.com/actuallydan/pollis/issues</url>
+
+  <developer id="com.pollis">
+    <name>Pollis</name>
+  </developer>
+
+  <content_rating type="oars-1.1" />
+
+  <categories>
+    <category>Network</category>
+    <category>InstantMessaging</category>
+  </categories>
+
+  <releases>
+    <release version="1.0.43" date="2026-05-05" />
+  </releases>
+</component>
