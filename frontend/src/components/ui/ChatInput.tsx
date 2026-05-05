@@ -232,6 +232,22 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     prevExpandedPreviewRef.current = expandedPreview;
   }, [expandedPreview]);
 
+  // Refocus the textarea whenever the attachment count changes — covers
+  // drag-drop into the app while the native picker is still open (the
+  // picker's own pending `await open()` blocks `handlePickFiles`'
+  // finally-block from running until the user dismisses the dialog),
+  // remove-attachment, paste, and any other path that mutates the
+  // attachment list. Compares against a prev-value ref so the initial
+  // mount with `[]` doesn't steal focus from whatever the parent put it
+  // on.
+  const prevAttachmentLengthRef = useRef(attachments.length);
+  useEffect(() => {
+    if (prevAttachmentLengthRef.current !== attachments.length) {
+      textareaRef.current?.focus();
+    }
+    prevAttachmentLengthRef.current = attachments.length;
+  }, [attachments.length]);
+
   // ── Shared path-based attachment builder (picker + OS drag-drop) ─────────
   const handlePaths = useCallback(async (paths: string[]) => {
     // De-dupe against already-queued paths.
