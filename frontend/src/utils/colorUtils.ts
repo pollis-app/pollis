@@ -75,3 +75,43 @@ export function readFontSizePx(): number {
   const v = getComputedStyle(document.documentElement).getPropertyValue("--font-size-base").trim();
   return v ? parseInt(v, 10) : 15;
 }
+
+/**
+ * Device-local font-size storage.
+ *
+ * Font size is per-device, not synced across the user's account — see
+ * `usePreferences.ts` for the wider preferences mechanism. We key the
+ * localStorage entry by user id so a shared OS account with multiple
+ * Pollis users keeps each user's chosen size separate.
+ */
+const FONT_SIZE_KEY_PREFIX = "pollis-font-size:";
+
+function fontSizeKey(userId: string | null | undefined): string {
+  return `${FONT_SIZE_KEY_PREFIX}${userId ?? "anon"}`;
+}
+
+/** Returns the device-local font size (px) for this user, or null if unset. */
+export function loadDeviceFontSize(userId: string | null | undefined): number | null {
+  try {
+    const raw = localStorage.getItem(fontSizeKey(userId));
+    if (!raw) {
+      return null;
+    }
+    const px = parseInt(raw, 10);
+    if (!Number.isFinite(px) || px < 10 || px > 28) {
+      return null;
+    }
+    return px;
+  } catch {
+    return null;
+  }
+}
+
+/** Persists the device-local font size (px) for this user. */
+export function saveDeviceFontSize(userId: string | null | undefined, px: number): void {
+  try {
+    localStorage.setItem(fontSizeKey(userId), String(px));
+  } catch {
+    // localStorage unavailable / quota exceeded — fall through silently
+  }
+}

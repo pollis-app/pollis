@@ -2,7 +2,13 @@ import { useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
-import { applyAccentColor, applyBackgroundColor, applyFontSize } from "../../utils/colorUtils";
+import {
+  applyAccentColor,
+  applyBackgroundColor,
+  applyFontSize,
+  loadDeviceFontSize,
+  saveDeviceFontSize,
+} from "../../utils/colorUtils";
 
 /**
  * Mirrors `voice_apm::NsLevel` in src-tauri.
@@ -12,6 +18,13 @@ export type NoiseSuppressionLevel = "off" | "low" | "moderate" | "high";
 export interface PreferencesData {
   accent_color?: string;
   background_color?: string;
+  /**
+   * Legacy: font size used to be synced via the remote preferences blob.
+   * It is now device-local (see `loadDeviceFontSize` / `saveDeviceFontSize`
+   * in `colorUtils.ts`). This field is kept on the read path solely so
+   * existing remote rows can seed the device-local value once on first
+   * boot — it is never written back.
+   */
   font_size?: string;
   allow_desktop_notifications?: boolean;
   allow_sound_effects?: boolean;
@@ -200,8 +213,12 @@ export function usePreferences() {
 }
 
 /**
- * Apply loaded preferences (accent_color, font_size) to CSS vars.
+ * Apply loaded preferences (accent_color, background_color) to CSS vars.
  * Call this once after the preferences query resolves.
+ *
+ * Font size is device-local — it is NOT applied from `prefs` here. The
+ * device-local value (or one-time seed from the legacy remote field) is
+ * applied separately via `applyDeviceFontSize`.
  */
 export function applyPreferences(prefs: PreferencesData): void {
   if (prefs.accent_color) {
@@ -210,9 +227,28 @@ export function applyPreferences(prefs: PreferencesData): void {
   if (prefs.background_color) {
     applyBackgroundColor(prefs.background_color);
   }
-  if (prefs.font_size) {
+}
+
+/**
+ * Apply the device-local font size for `userId`. If localStorage has no
+ * value yet but the legacy remote `prefs.font_size` is present, seed
+ * localStorage from it once and apply it — this preserves the user's
+ * existing setting through the migration to per-device storage. After
+ * the seed, the remote field is ignored.
+ */
+export function applyDeviceFontSize(
+  userId: string | null | undefined,
+  prefs?: PreferencesData,
+): void {
+  const local = loadDeviceFontSize(userId);
+  if (local !== null) {
+    applyFontSize(local);
+    return;
+  }
+  if (prefs?.font_size) {
     const px = parseInt(prefs.font_size, 10);
     if (!isNaN(px) && px >= 10 && px <= 28) {
+      saveDeviceFontSize(userId, px);
       applyFontSize(px);
     }
   }
@@ -224,13 +260,18 @@ export function applyPreferences(prefs: PreferencesData): void {
  * both the login path and the app-reopen path (stored session) end up
  * applying CSS via the same mechanism, without a one-shot invoke in the
  * signed-in flow that could silently fail.
+ *
+ * Also handles the one-time seed of device-local font size from a legacy
+ * remote `font_size` field — see `applyDeviceFontSize`.
  */
 export function useApplyPreferences(): void {
   const { query } = usePreferences();
+  const currentUser = useAppStore((state) => state.currentUser);
   const data = query.data;
   useEffect(() => {
     if (data) {
       applyPreferences(data);
+      applyDeviceFontSize(currentUser?.id, data);
     }
-  }, [data?.accent_color, data?.background_color, data?.font_size]);
+  }, [data?.accent_color, data?.background_color, data?.font_size, currentUser?.id]);
 }
