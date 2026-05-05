@@ -345,7 +345,7 @@ export const VoiceSettingsPage: React.FC = () => {
           )}
         </section>
 
-        <section className="flex flex-col gap-4 mb-12">
+        <section className="flex flex-col gap-7 mb-12">
           <h2
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
