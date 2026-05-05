@@ -7,7 +7,15 @@ import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { useVoiceParticipants } from "../hooks/queries/useVoiceParticipants";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import { Button } from "../components/ui/Button";
+import { NavigableList } from "../components/ui/NavigableList";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
+
+interface ObserverParticipant {
+  identity: string;
+  name: string;
+}
+
+
 
 export const VoiceChannelPage: React.FC = () => {
   const navigate = useNavigate();
@@ -23,12 +31,6 @@ export const VoiceChannelPage: React.FC = () => {
 
   const isInCall = activeVoiceChannelId === channelId;
   const { data: observerParticipants = [] } = useVoiceParticipants(isInCall ? null : channelId);
-
-  // Autofocus the Join/Leave button on page entry.
-  const joinLeaveRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    joinLeaveRef.current?.focus();
-  }, []);
 
   // Issue #176: arriving on this page is intent to maybe join. Warm DNS/TLS
   // + token now so clicking Join is one round trip instead of cold-start.
@@ -75,25 +77,14 @@ export const VoiceChannelPage: React.FC = () => {
 
       {/* Join / Leave button */}
       <div className="px-4 pt-4 pb-4 flex-shrink-0">
-        <button
-          ref={joinLeaveRef}
+        <Button
           data-testid="voice-join-leave-button"
+          variant={isInCall ? "danger" : "primary"}
+          autoFocus
           onClick={() => isInCall ? setActiveVoiceChannelId(null) : setActiveVoiceChannelId(channelId)}
-          style={{
-            background: isInCall ? "transparent" : "var(--c-accent)",
-            color: isInCall ? "#ff6b6b" : "black",
-            border: isInCall ? "2px solid #ff6b6b" : "2px solid transparent",
-            padding: "8px 20px",
-            fontFamily: "inherit",
-            fontSize: "inherit",
-            fontWeight: "bold",
-            cursor: "pointer",
-            letterSpacing: "0.05em",
-            borderRadius: "0.25rem",
-          }}
         >
           {isInCall ? "Leave" : "Join"}
-        </button>
+        </Button>
       </div>
 
       {/* Participant list */}
@@ -101,28 +92,35 @@ export const VoiceChannelPage: React.FC = () => {
         <VoiceChannelView />
       ) : (
         <div
-          className="flex-1 overflow-auto px-4 py-2 flex flex-col gap-1 font-mono text-xs"
-          style={{ borderTop: "1px solid var(--c-border)", borderBottom: "1px solid var(--c-border)" }}
+          className="flex-1 flex flex-col font-mono text-xs"
+          style={{
+            borderTop: "1px solid var(--c-border)",
+            borderBottom: "1px solid var(--c-border)",
+          }}
         >
-          {observerParticipants.length === 0 ? (
-            <span style={{ color: "var(--c-text-dim)" }}>No one in this channel</span>
-          ) : (
-            observerParticipants.map((p) => (
-              <div
-                key={p.identity}
-                className="flex items-center gap-2"
-                style={{ color: "var(--c-text)", borderLeft: "2px solid transparent", paddingLeft: "6px" }}
-              >
+          <NavigableList<ObserverParticipant>
+            items={observerParticipants}
+            getKey={(p) => p.identity}
+            autoFocus={false}
+            emptyLabel="No one in this channel"
+            renderRow={(p) => (
+              <>
                 <span
                   className="text-lg"
-                  style={{ color: "var(--c-border)", lineHeight: 1.25, flexShrink: 0, display: "flex", alignItems: "center" }}
+                  style={{
+                    color: "var(--c-border)",
+                    lineHeight: 1.25,
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                  }}
                 >
                   <Circle size={12} fill="var(--c-border)" />
                 </span>
                 <span className="flex-1 truncate">{p.name}</span>
-              </div>
-            ))
-          )}
+              </>
+            )}
+          />
         </div>
       )}
 

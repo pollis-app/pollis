@@ -18,6 +18,7 @@ interface ButtonProps {
   size?: "sm" | "md";
   type?: "button" | "submit" | "reset";
   onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+  autoFocus?: boolean;
   "aria-label"?: string;
   "data-testid"?: string;
 }
@@ -33,6 +34,7 @@ export const Button: React.FC<ButtonProps> = ({
   size = "md",
   type = "button",
   onKeyDown,
+  autoFocus,
   "aria-label": ariaLabel,
   "data-testid": testId,
 }) => {
@@ -75,6 +77,7 @@ export const Button: React.FC<ButtonProps> = ({
       onClick={isLoading ? undefined : (e) => { onClick?.(e); }}
       disabled={disabled || isLoading}
       onKeyDown={onKeyDown}
+      autoFocus={autoFocus}
       aria-label={ariaLabel}
       data-testid={testId}
       className={`inline-flex items-center justify-center gap-2 font-mono font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}

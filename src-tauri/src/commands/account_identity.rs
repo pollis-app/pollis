@@ -473,7 +473,21 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     //    touch the keystore unwrapped — set_pin will wrap them.
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
 
-    // 5. Record the reset in the security log. Best-effort only.
+    // 5. Re-sign every existing `user_device` row for this user against
+    //    the freshly rotated account identity. Without this, every
+    //    device-cert that was signed under the previous account key
+    //    becomes unverifiable for every other client, and the
+    //    cross-signing defense (advisory in
+    //    `process_pending_commits`) is effectively off until each
+    //    device next runs `ensure_device_cert` on its own. Best-effort
+    //    — failure here doesn't block the reset, but is logged.
+    if let Err(e) = crate::commands::mls::resign_stale_device_certs(state, user_id).await {
+        eprintln!(
+            "[reset] resign_stale_device_certs failed (non-fatal): {e}"
+        );
+    }
+
+    // 6. Record the reset in the security log. Best-effort only.
     let event_id = ulid::Ulid::new().to_string();
     let _ = conn
         .execute(

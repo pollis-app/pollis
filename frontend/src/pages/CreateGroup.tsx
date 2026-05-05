@@ -7,6 +7,7 @@ import { groupQueryKeys } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
+import { Switch } from "../components/ui/Switch";
 
 interface CreateGroupProps {
   onSuccess?: (groupId: string) => void;
@@ -19,6 +20,8 @@ export const CreateGroup: React.FC<CreateGroupProps> = ({ onSuccess }) => {
   const [slug, setSlug] = useState("");
   const [slugEdited, setSlugEdited] = useState(false);
   const [description, setDescription] = useState("");
+  const [createTextChannel, setCreateTextChannel] = useState(false);
+  const [createVoiceChannel, setCreateVoiceChannel] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +45,13 @@ export const CreateGroup: React.FC<CreateGroupProps> = ({ onSuccess }) => {
     try {
       const group = await invoke<{ id: string; name: string; description?: string; owner_id: string; created_at: string }>(
         'create_group',
-        { name: name.trim(), description: description.trim() || null, ownerId: currentUser.id },
+        {
+          name: name.trim(),
+          description: description.trim() || null,
+          ownerId: currentUser.id,
+          createDefaultTextChannel: createTextChannel,
+          createDefaultVoiceChannel: createVoiceChannel,
+        },
       );
       const groupData: any = {
         id: group.id,
@@ -121,6 +130,22 @@ export const CreateGroup: React.FC<CreateGroupProps> = ({ onSuccess }) => {
             id="create-group-description"
           />
           <input data-testid="create-group-description-input" type="hidden" value={description} readOnly />
+
+          <Switch
+            label="Create a default text channel"
+            checked={createTextChannel}
+            onChange={setCreateTextChannel}
+            disabled={isLoading}
+            description="Adds a #General text channel to the new group. You can always add channels later."
+          />
+
+          <Switch
+            label="Create a default voice channel"
+            checked={createVoiceChannel}
+            onChange={setCreateVoiceChannel}
+            disabled={isLoading}
+            description="Adds a Voice Chat channel to the new group. You can always add channels later."
+          />
 
           {error && (
             <p data-testid="create-group-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>

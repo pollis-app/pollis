@@ -171,6 +171,12 @@ pub async fn create_group(
     name: String,
     description: Option<String>,
     owner_id: String,
+    // Opt-in to auto-creating a #General text channel. Defaults to false
+    // — the user is expected to set these toggles in the create-group
+    // form. Tauri elides the param entirely when omitted by the caller.
+    create_default_text_channel: Option<bool>,
+    // Opt-in to auto-creating a Voice Chat voice channel.
+    create_default_voice_channel: Option<bool>,
     state: State<'_, Arc<AppState>>,
 ) -> Result<Group> {
     let conn = state.remote_db.conn().await?;
@@ -187,13 +193,21 @@ pub async fn create_group(
         libsql::params![id.clone(), owner_id.clone()],
     ).await.map_err(|e| db_err(e.into(), "Group member"))?;
 
-    // Create default channels: a #General text channel and a Voice Chat.
-    conn.execute(
-        "INSERT INTO channels (id, group_id, name, description, channel_type) VALUES \
-            (?1, ?2, 'General', NULL, 'text'), \
-            (?3, ?2, 'Voice Chat', NULL, 'voice')",
-        libsql::params![Ulid::new().to_string(), id.clone(), Ulid::new().to_string()],
-    ).await.map_err(|e| db_err(e.into(), "Channel"))?;
+    if create_default_text_channel.unwrap_or(false) {
+        conn.execute(
+            "INSERT INTO channels (id, group_id, name, description, channel_type) \
+             VALUES (?1, ?2, 'General', NULL, 'text')",
+            libsql::params![Ulid::new().to_string(), id.clone()],
+        ).await.map_err(|e| db_err(e.into(), "Channel"))?;
+    }
+
+    if create_default_voice_channel.unwrap_or(false) {
+        conn.execute(
+            "INSERT INTO channels (id, group_id, name, description, channel_type) \
+             VALUES (?1, ?2, 'Voice Chat', NULL, 'voice')",
+            libsql::params![Ulid::new().to_string(), id.clone()],
+        ).await.map_err(|e| db_err(e.into(), "Channel"))?;
+    }
 
     // Create the per-group MLS group — all channels in this group share it.
     match crate::commands::mls::init_mls_group(state.inner(), &id, &owner_id).await {

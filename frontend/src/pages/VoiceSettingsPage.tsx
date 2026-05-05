@@ -84,8 +84,8 @@ const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, 
       />
     </div>
     <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-      Suppresses ambient hum, fans, keyboard clicks. Higher levels also chew through quieter
-      speech, so leave at Moderate unless background noise is bad.
+      Filters out background hum, fans, and traffic. Higher settings also strip away quieter speech,
+      so leave at Moderate unless your room is noisy.
     </span>
   </div>
 );
@@ -345,7 +345,7 @@ export const VoiceSettingsPage: React.FC = () => {
           )}
         </section>
 
-        <section className="flex flex-col gap-4 mb-12">
+        <section className="flex flex-col gap-7 mb-12">
           <h2
             className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
             style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
@@ -360,27 +360,27 @@ export const VoiceSettingsPage: React.FC = () => {
             min={0}
             max={20}
             step={1}
-            sublabel="Linear pre-AGC gain. If you're naturally quiet and AGC isn't pulling you up enough, raise this. +6 dB doubles amplitude; +20 dB is 10×. Pair with a low AGC headroom (3–4) for maximum loudness."
+            sublabel="Adds extra volume to your mic before anything else processes it. Use this if you're still too quiet even at full system volume."
             description={micBoost === 0 ? "off" : `+${micBoost} dB`}
           />
 
           <Switch
-            label="Auto Gain Control"
+            label="Auto Volume Leveling"
             checked={autoGain}
             onChange={(enabled) => savePrefsAndPushApm({ auto_gain_control: enabled })}
-            description="Software AGC raises quiet voice and reins in shouts. Disable if you'd rather control mic level manually at the OS."
+            description="Keeps your voice at a consistent level — quiet speech is brought up, loud bursts are reined in. Turn off if you'd rather set mic volume yourself."
           />
 
           <RangeSlider
-            label="AGC Target Loudness"
+            label="Auto Volume Target"
             value={agcTarget}
             onChange={(v) => savePrefsAndPushApm({ agc_target_dbfs: v })}
             min={3}
             max={15}
             step={1}
             disabled={!autoGain}
-            sublabel="Lower = louder. Slider value is dB of headroom below full scale: 3 is very loud (clips on hot mics), 15 is quiet. Most setups land at 6."
-            description={`${agcTarget} dB headroom`}
+            sublabel="How loud Auto Volume Leveling tries to make you. Lower = louder (3 may clip on a hot mic), higher = quieter. Most people are happy at 6."
+            description={`level ${agcTarget}`}
           />
 
           <NoiseSuppressionSelect
@@ -392,14 +392,14 @@ export const VoiceSettingsPage: React.FC = () => {
             label="Echo Cancellation"
             checked={aecEnabled}
             onChange={(enabled) => savePrefsAndPushApm({ echo_cancellation: enabled })}
-            description="Stops the speaker output from being picked up by the mic and bouncing back to the other side. Leave this on unless you're always on headphones."
+            description="Stops your speaker audio from being picked up by your mic and sent back to others. Leave on unless you're always on headphones."
           />
 
           <Switch
-            label="Click Suppression (RNNoise)"
+            label="Click Suppression"
             checked={clickSuppression}
             onChange={(enabled) => savePrefsAndPushApm({ click_suppression: enabled })}
-            description="ML-based denoiser that catches keyboard typing, mouse clicks, and other transients the standard noise suppression misses. Adds about 5% of one CPU core; only runs at 48 kHz mics. Recommended: drop Noise Suppression to Low or Off when this is on, otherwise both stages chew on the same signal."
+            description="A smarter noise filter that catches keyboard typing and mouse clicks the regular Noise Suppression misses. Uses about 5% of one CPU core. Tip: turn Noise Suppression down to Low or Off when this is on so they don't fight each other."
           />
         </section>
 

@@ -513,6 +513,19 @@ pub async fn unlock(
         }
     }
 
+    // Opportunistic self-heal: if a sibling device rotated the account
+    // identity while this device was offline, every other device's row
+    // (including this one's, before `ensure_device_cert` above) is
+    // stale on the server and would fail cross-signing verification on
+    // every commit until that device next logs in. Re-sign any rows
+    // whose `cert_identity_version` is behind `users.identity_version`
+    // so the fleet self-heals as users come online. Best-effort.
+    if let Err(e) =
+        crate::commands::mls::resign_stale_device_certs(state.inner(), &user_id).await
+    {
+        eprintln!("[pin] unlock: resign_stale_device_certs failed (non-fatal): {e}");
+    }
+
     Ok(UnlockOutcome {
         user_id: unlocked.user_id,
         attempts_remaining: None,
