@@ -9,6 +9,8 @@ import { usePreferences } from "../hooks/queries/usePreferences";
 import { Button } from "../components/ui/Button";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 
+
+
 export const VoiceChannelPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/voice/$channelId" });
@@ -23,12 +25,6 @@ export const VoiceChannelPage: React.FC = () => {
 
   const isInCall = activeVoiceChannelId === channelId;
   const { data: observerParticipants = [] } = useVoiceParticipants(isInCall ? null : channelId);
-
-  // Autofocus the Join/Leave button on page entry.
-  const joinLeaveRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    joinLeaveRef.current?.focus();
-  }, []);
 
   // Issue #176: arriving on this page is intent to maybe join. Warm DNS/TLS
   // + token now so clicking Join is one round trip instead of cold-start.
@@ -75,25 +71,14 @@ export const VoiceChannelPage: React.FC = () => {
 
       {/* Join / Leave button */}
       <div className="px-4 pt-4 pb-4 flex-shrink-0">
-        <button
-          ref={joinLeaveRef}
+        <Button
           data-testid="voice-join-leave-button"
+          variant={isInCall ? "danger" : "primary"}
+          autoFocus
           onClick={() => isInCall ? setActiveVoiceChannelId(null) : setActiveVoiceChannelId(channelId)}
-          style={{
-            background: isInCall ? "transparent" : "var(--c-accent)",
-            color: isInCall ? "#ff6b6b" : "black",
-            border: isInCall ? "2px solid #ff6b6b" : "2px solid transparent",
-            padding: "8px 20px",
-            fontFamily: "inherit",
-            fontSize: "inherit",
-            fontWeight: "bold",
-            cursor: "pointer",
-            letterSpacing: "0.05em",
-            borderRadius: "0.25rem",
-          }}
         >
           {isInCall ? "Leave" : "Join"}
-        </button>
+        </Button>
       </div>
 
       {/* Participant list */}
