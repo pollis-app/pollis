@@ -36,6 +36,14 @@ export interface NavigableListProps<T> {
 
   rowTestId?: (item: T) => string;
   testId?: string;
+
+  // Whether the list should grab focus on mount / when items first
+  // appear. Default `true` — keeps the existing keyboard-first list
+  // pages (Members, Requests, Blocked, Invites, …) working with no
+  // changes. Pass `false` when the list is rendered alongside another
+  // element that wants initial focus (e.g. the Join button on the
+  // voice-channel page).
+  autoFocus?: boolean;
 }
 
 type NavState = { rowIndex: number; colIndex: number };
@@ -52,9 +60,15 @@ export function NavigableList<T>({
   emptyLabel = "No items.",
   rowTestId,
   testId,
+  autoFocus = true,
 }: NavigableListProps<T>) {
   const [nav, setNav] = useState<NavState>({ rowIndex: 0, colIndex: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
+  // Tracks whether the user has actually navigated yet. Until they do,
+  // the nav-following effect below should not grab focus to the
+  // container — it would clobber whatever the parent placed focus on
+  // (e.g. an autoFocus button rendered alongside the list).
+  const hasNavigatedRef = useRef(false);
 
   // Reset navigation when the item set changes shape.
   useEffect(() => {
@@ -71,7 +85,12 @@ export function NavigableList<T>({
       return;
     }
     if (nav.colIndex === 0) {
-      containerRef.current?.focus();
+      // Only grab the container's focus on the row itself if either
+      // the dedicated initial autofocus is enabled, or the user has
+      // already started navigating with arrow keys.
+      if (autoFocus || hasNavigatedRef.current) {
+        containerRef.current?.focus();
+      }
       return;
     }
     const rowEl = containerRef.current?.querySelector<HTMLElement>(
@@ -90,14 +109,17 @@ export function NavigableList<T>({
       'button, [role="switch"], input, [tabindex]:not([tabindex="-1"])',
     );
     focusable?.focus();
-  }, [nav, items, getKey]);
+  }, [nav, items, getKey, autoFocus]);
 
   // Take initial focus when there's something to navigate.
   useEffect(() => {
+    if (!autoFocus) {
+      return;
+    }
     if (!isLoading && items.length > 0) {
       containerRef.current?.focus();
     }
-  }, [isLoading, items.length]);
+  }, [isLoading, items.length, autoFocus]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -107,6 +129,18 @@ export function NavigableList<T>({
       const item = items[nav.rowIndex];
       const rowControlCount = item && controls ? controls(item).length : 0;
       const maxCol = rowControlCount;
+
+      // Mark the list as actively navigated so the focus-following
+      // effect is allowed to grab focus from here on (relevant when
+      // `autoFocus={false}` suppressed the initial grab).
+      if (
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown" ||
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight"
+      ) {
+        hasNavigatedRef.current = true;
+      }
 
       switch (e.key) {
         case "ArrowUp": {
