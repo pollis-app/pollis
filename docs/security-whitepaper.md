@@ -46,7 +46,7 @@ A long-lived Ed25519 keypair (RFC 8032), generated on the device that completes 
 1. On the user's enrolled devices, on disk only as ciphertext in the OS keystore slot `account_id_key_wrapped_{user_id}` (see §3 for wrapping).
 2. On the server, on disk only as ciphertext in the `account_recovery` table, wrapped under a key derived from a user-held *Secret Key* the server has never seen.
 
-When `users.account_id_pub` rotates (`reset_identity`), `users.identity_version` increments. Every device whose locally-held private key does not derive a public key matching the current `account_id_pub` is treated as orphaned and wiped on next sign-in (`auth.rs:213-228`, `account_identity.rs::has_matching_local_account_identity`).
+When `users.account_id_pub` rotates (`reset_identity`), `users.identity_version` increments. Every device whose locally-held private key does not derive a public key matching the current `account_id_pub` is treated as orphaned and wiped on next sign-in (`auth.rs::verify_otp` orphan-wipe branch, `account_identity.rs::has_matching_local_account_identity`).
 
 ### 2.2 Device identity (per device per user)
 
@@ -177,9 +177,9 @@ Length prefixes prevent payload-extension and concatenation ambiguity; the trail
 Inbound verification fires before MLS commit processing in two places:
 
 1. **Outbound** — `reconcile_group_mls_impl` records `added_user_id` and `added_device_ids` in `mls_commit_log` alongside the commit. (The inbound side reads this metadata to know which devices to verify.)
-2. **Inbound** — `process_pending_commits_inner` calls `verify_added_devices` on every commit that adds devices (`mls.rs:1290-1311`). Verification fetches `account_id_pub` for the target user, then for each added `device_id` looks up `device_cert`, `cert_issued_at`, `cert_identity_version`, `mls_signature_pub` in `user_device` and runs `verify_device_cert`.
+2. **Inbound** — `process_pending_commits_inner` calls `verify_added_devices` on every commit that adds devices (see the "Inbound cert verification (advisory)" block inside `process_pending_commits_inner`). Verification fetches `account_id_pub` for the target user, then for each added `device_id` looks up `device_cert`, `cert_issued_at`, `cert_identity_version`, `mls_signature_pub` in `user_device` and runs `verify_device_cert`.
 
-Verification failures currently log a warning and proceed (the comment block at `mls.rs:1287-1312` makes this explicit). The reasoning: blocking would strand the local epoch behind the rest of the group, since the sender already merged the commit. The honest description for an audit is: *Pollis detects and logs a missing or invalid cross-signing cert but does not refuse to apply the commit.* Closing this gap requires moving from "warn and proceed" to a quarantine-and-resync protocol; this is on the roadmap but not yet implemented. The corresponding invariant in adversarial models is: **a server that creates a fake device cannot mount a passive eavesdropping attack — the rogue device's leaf will appear in the MLS tree, and the warning is loud — but a sufficiently silent operator could attempt this and rely on users not reading logs.**
+Verification failures currently log a warning and proceed (the comment block at the top of that branch in `mls.rs::process_pending_commits` makes this explicit). The reasoning: blocking would strand the local epoch behind the rest of the group, since the sender already merged the commit. The honest description for an audit is: *Pollis detects and logs a missing or invalid cross-signing cert but does not refuse to apply the commit.* Closing this gap requires moving from "warn and proceed" to a quarantine-and-resync protocol; this is on the roadmap but not yet implemented. The corresponding invariant in adversarial models is: **a server that creates a fake device cannot mount a passive eavesdropping attack — the rogue device's leaf will appear in the MLS tree, and the warning is loud — but a sufficiently silent operator could attempt this and rely on users not reading logs.**
 
 ---
 
@@ -189,7 +189,7 @@ Verification failures currently log a warning and proceed (the comment block at 
 
 - **Specification:** RFC 9420 — The Messaging Layer Security (MLS) Protocol.
 - **Implementation:** `openmls` 0.8 (https://github.com/openmls/openmls), with `openmls_rust_crypto` 0.5 providing the crypto provider over the `RustCrypto` AEAD/HKDF/HPKE primitives, and a Pollis-defined `MlsStore` (`src-tauri/src/signal/mls_storage.rs`) implementing the `openmls_traits::storage::StorageProvider` trait against the local SQLCipher `mls_kv` table.
-- **Cipher suite:** `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`mls.rs:76`). This is suite 1 in RFC 9420 §17.1, MTI for MLS 1.0:
+- **Cipher suite:** `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (single `const CS` at the top of `mls.rs`). This is suite 1 in RFC 9420 §17.1, MTI for MLS 1.0:
   - HPKE (RFC 9180): DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-128-GCM
   - Hash: SHA-256
   - Signature: Ed25519 (RFC 8032)
@@ -198,15 +198,15 @@ This is the same cipher-suite tier as Wire's OpenMLS deployment and the Cisco ML
 
 ### 6.2 Group lifecycle
 
-- **One MLS group per Pollis Group.** Every channel in the same Group shares the Group's MLS group; the channel ID is metadata on the application message. (Source: `messages.rs::send_message:172-186`.)
+- **One MLS group per Pollis Group.** Every channel in the same Group shares the Group's MLS group; the channel ID is metadata on the application message. (Source: `messages.rs::send_message`, ~lines 173-186.)
 - **One MLS group per DM channel.**
 - **Group ID:** the Pollis conversation ID (a ULID for groups, a ULID for DM channels).
 - **Group creator** seeds the tree (epoch 0) at `init_mls_group`; `MlsGroupCreateConfig::use_ratchet_tree_extension(true)` is set so every Welcome carries the full ratchet tree inline (no separate tree-fetch).
-- **Membership changes** flow through one function: `reconcile_group_mls_impl` (`mls.rs:1701`). It builds the *desired* roster from `group_member` ∪ `group_invite` (for groups) or `dm_channel_member` (for DMs), peeks at the actual MLS tree, claims unclaimed `KeyPackage`s for devices not yet in the tree, and emits a single combined commit with both `Add` and `Remove` proposals. Pending invitees are pre-added so that accepting an invite is a no-MLS-roundtrip operation — the Welcome is already in `mls_welcome` at invite time.
+- **Membership changes** flow through one function: `reconcile_group_mls_impl` (`mls.rs::reconcile_group_mls_impl`). It builds the *desired* roster from `group_member` ∪ `group_invite` (for groups) or `dm_channel_member` (for DMs), peeks at the actual MLS tree, claims unclaimed `KeyPackage`s for devices not yet in the tree, and emits a single combined commit with both `Add` and `Remove` proposals. Pending invitees are pre-added so that accepting an invite is a no-MLS-roundtrip operation — the Welcome is already in `mls_welcome` at invite time.
 
 ### 6.3 Commit/Welcome ordering
 
-The remote DB is the source of truth for MLS state. The reconcile staging order (`mls.rs:1909-2050`) is:
+The remote DB is the source of truth for MLS state. The reconcile staging order (inside `reconcile_group_mls_impl`) is:
 
 1. Build and **stage** the commit locally (persisted to MLS storage as a *pending* commit, no local epoch advance).
 2. Open a **fresh** libsql connection (the original may have had its Hrana stream evicted during the slow MLS crypto work — the wiki explicitly calls this out as the cause of the "9-user churn flake," commit 83df6ef).
@@ -224,7 +224,7 @@ Source: `mls.rs::external_join_group`. New devices joining an existing group pos
 2. Build a `MlsGroup::external_commit_builder` with the `GroupInfo` and the new device's `BasicCredential`. The ratchet tree extension carried in the GroupInfo is sufficient for the joining device to reconstruct enough state to issue a commit.
 3. Post the resulting commit to `mls_commit_log` at the GroupInfo's epoch. Existing members merge it on their next `process_pending_commits` pass. The new device immediately sees itself as a member at the new epoch.
 
-The path **does not currently** route through outbound cross-signing cert verification (`external_join_group` issues the commit but does not surface metadata for `verify_added_devices`). Existing members will detect the new device's cert through the same "added_user_id / added_device_ids" metadata path used by `reconcile_group_mls_impl`'s commits — but only when *those members* run `verify_added_devices`, which currently warns rather than rejects (§5.3). The same hardening item applies here.
+The path **does** populate `added_user_id` (the joining user) and `added_device_ids` (the single joining device) on the `mls_commit_log` row it writes, so existing members run `verify_added_devices` against the new device's `device_cert` on inbound just as they would for a normal `reconcile_group_mls_impl` add. The same advisory-rather-than-blocking caveat from §5.3 applies: a verification failure here logs a warning and proceeds.
 
 ### 6.5 KeyPackage lifecycle
 
@@ -234,7 +234,7 @@ KeyPackages are validated by the consumer at claim time — `KeyPackageIn::valid
 
 ### 6.6 Application message encryption
 
-`send_message` (`messages.rs:161`) is the single entry point. The path is:
+`send_message` (in `messages.rs`) is the single entry point. The path is:
 
 1. Poll Welcomes for this device (`poll_mls_welcomes_inner`).
 2. Process pending commits (`process_pending_commits_inner`) — falls through to external-join if no local group.
@@ -379,7 +379,7 @@ Local, per-user, capped at 10 then nuke. No backoff. See §3.3.
 
 ### 11.4 Block enforcement
 
-`user_block` is a directional table (A blocking B does not imply B blocks A) but enforcement is symmetric — both directions are checked at DM creation and at message send (`messages.rs::send_message:188-244`, `dm.rs::is_blocked_either_way`).
+`user_block` is a directional table (A blocking B does not imply B blocks A) but enforcement is symmetric — both directions are checked at DM creation and at message send (`messages.rs::send_message`'s `suppress_delivery` branch; `blocks::is_blocked_either_way`).
 
 DM block mechanics (deliberately asymmetric in observability):
 - The *blocker* sees the conversation disappear from their list (`list_dm_channels` filters by `user_block.blocker_id = me`).
@@ -391,7 +391,7 @@ Group-channel blocks are render-side only — the blocker filters out blocked se
 
 ### 11.5 Identity reset (destructive)
 
-`reset_identity_and_recover` (`device_enrollment.rs:663`) is the destructive recovery path. It requires:
+`reset_identity_and_recover` (in `device_enrollment.rs`) is the destructive recovery path. It requires:
 
 - A valid OTP for the `users.email` (proven via prior `verify_otp`).
 - A constant-time match between user-typed `confirm_email` and stored `users.email`.
@@ -439,15 +439,14 @@ The audit-relevant property is: an attacker who compromises only the user's emai
 Items below are ordered by adversary cost — easiest first.
 
 1. **Voice is not E2EE.** LiveKit operators see plaintext audio at the SFU. Section 10.2. The remedy is enabling LiveKit's insertable-streams E2EE with an MLS-derived key provider; this is feasible but not implemented.
-2. **Cross-signing verification is advisory on inbound MLS commits.** Section 5.3, `mls.rs:1287-1311`. A server able to write `user_device` and `mls_commit_log` rows can attempt to insert a rogue device and rely on the warning being unread. The fix requires a quarantine-and-resync state machine for commits with failed cert verification.
-3. **External-join commits do not surface their own cross-signing metadata.** Section 6.4. Receivers will still verify via the `user_device` row, but the outbound side could populate `added_user_id` / `added_device_ids` for symmetry.
-4. **Single shared Turso/R2/LiveKit/Resend tokens baked into the binary.** Section 8.1. Reverse-engineering the binary yields a database connection equivalent to any client. Mitigated by application-layer enforcement, MLS-layer cryptographic floors, and cross-signing — but the operator could mint a new client at will, and a leaked binary reveals the same secret. Per-user / per-device tokens with a small auth service is the standard fix.
-5. **No server-side rate limiting on `request_otp`.** Section 11.1. Resend is the de-facto throttle.
-6. **Avatars and group icons are public R2 objects.** Section 9.4. Anyone who guesses or scrapes `avatar_url` / `icon_url` from Turso (not directly exposed but available to any client with the bearer token) can read them.
-7. **No periodic MLS self-update.** Section 6.7. PCS healing depends on natural group churn; idle groups do not self-heal.
-8. **No Megolm-style key backup is by design.** Section 6.8. New devices and historical messages from before a member's join are not recoverable. Auditors should *not* report this as a gap unless the requirement statement they're auditing against asks for it; the product principle (`CLAUDE.md`) explicitly accepts it.
-9. **Soft-recovery via OTP + email match alone (`reset_identity_and_recover`).** Section 11.5. Compromise of email account ⇒ ability to nuke the user's identity. Visible in the security event log; not preventable with the current factor set.
-10. **OTP comparison uses non-constant-time string equality.** Section 4. The compared values are SHA-256 hex digests of a single-use, low-entropy code on a single-shot path; this is a best-practice item rather than a live attack.
+2. **Cross-signing verification is advisory on inbound MLS commits.** Section 5.3 / 6.4 (search for "Inbound cert verification (advisory)" in `mls.rs::process_pending_commits`). A server able to write `user_device` and `mls_commit_log` rows can attempt to insert a rogue device and rely on the warning being unread. The fix requires a quarantine-and-resync state machine for commits with failed cert verification.
+3. **Single shared Turso/R2/LiveKit/Resend tokens baked into the binary.** Section 8.1. Reverse-engineering the binary yields a database connection equivalent to any client. Mitigated by application-layer enforcement, MLS-layer cryptographic floors, and cross-signing — but the operator could mint a new client at will, and a leaked binary reveals the same secret. Per-user / per-device tokens with a small auth service is the standard fix.
+4. **No server-side rate limiting on `request_otp`.** Section 11.1. Resend is the de-facto throttle.
+5. **Avatars and group icons are public R2 objects.** Section 9.4. Anyone who guesses or scrapes `avatar_url` / `icon_url` from Turso (not directly exposed but available to any client with the bearer token) can read them.
+6. **No periodic MLS self-update.** Section 6.7. PCS healing depends on natural group churn; idle groups do not self-heal.
+7. **No Megolm-style key backup is by design.** Section 6.8. New devices and historical messages from before a member's join are not recoverable. Auditors should *not* report this as a gap unless the requirement statement they're auditing against asks for it; the product principle (`CLAUDE.md`) explicitly accepts it.
+8. **Soft-recovery via OTP + email match alone (`reset_identity_and_recover`).** Section 11.5. Compromise of email account ⇒ ability to nuke the user's identity. Visible in the security event log; not preventable with the current factor set.
+9. **OTP comparison uses non-constant-time string equality.** Section 4. The compared values are SHA-256 hex digests of a single-use, low-entropy code on a single-shot path; this is a best-practice item rather than a live attack.
 
 ---
 

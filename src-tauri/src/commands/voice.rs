@@ -139,6 +139,11 @@ pub struct PlaybackState {
     /// Identity per `track_key`, used by `set_voice_output_device` to
     /// re-emit speaking events on the new pipeline if needed.
     pub identities: HashMap<String, String>,
+    /// Per-remote-user output gain multiplier, keyed by `user_id` (NOT the
+    /// LiveKit identity — see `user_id_from_voice_identity` for the
+    /// conversion). Read on the mixer hot path; absence means unity (1.0).
+    /// Shared with the mixer task via `Arc::clone`.
+    pub user_volumes: Arc<Mutex<HashMap<String, f32>>>,
     /// Single mixer task running at 10 ms cadence.
     pub mixer_task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -155,6 +160,7 @@ impl PlaybackState {
             drain_tasks: HashMap::new(),
             rtc_tracks: HashMap::new(),
             identities: HashMap::new(),
+            user_volumes: Arc::new(Mutex::new(HashMap::new())),
             mixer_task: None,
         }
     }
@@ -560,6 +566,7 @@ async fn run_drain_task(
 /// session; aborted on `leave_voice_channel` or output-device switch.
 async fn run_mixer_task(
     track_buffers: TrackBuffers,
+    user_volumes: Arc<Mutex<HashMap<String, f32>>>,
     output_ring: Arc<Mutex<VecDeque<f32>>>,
     output_channels: u32,
     output_capacity_samples: usize,
@@ -581,17 +588,42 @@ async fn run_mixer_task(
             *s = 0.0;
         }
 
-        // Sum available samples from each track. Tracks that don't have
-        // a full 10 ms ready contribute partial silence — that's a tiny
-        // glitch but fixing it would require waiting, which would
-        // back-pressure the mixer.
+        // Snapshot per-user volumes once per tick so the mixer doesn't
+        // hold the volumes lock across the buffer drain. Map is small
+        // (one entry per remote participant the user has adjusted) so
+        // cloning it is cheap compared to the per-sample work below.
+        let volumes_snapshot: HashMap<String, f32> = {
+            let guard = user_volumes.lock().unwrap();
+            guard.clone()
+        };
+
+        // Sum available samples from each track, scaling by the
+        // per-user gain. Tracks that don't have a full 10 ms ready
+        // contribute partial silence — that's a tiny glitch but fixing
+        // it would require waiting, which would back-pressure the mixer.
         {
             let mut buffers = track_buffers.lock().unwrap();
-            for buf in buffers.values_mut() {
+            for (track_key, buf) in buffers.iter_mut() {
+                // Track key format is `"{identity}-{sid}"`. LiveKit SIDs
+                // are dash-free alphanumerics (e.g. `TR_AVxN6oCmK4hDk7`),
+                // so the last `-` always sits between identity and sid.
+                let gain = track_key
+                    .rsplit_once('-')
+                    .map(|(id, _)| user_id_from_voice_identity(id))
+                    .and_then(|uid| volumes_snapshot.get(uid).copied())
+                    .unwrap_or(1.0);
                 let take = buf.len().min(apm_frame_samples);
-                for slot in mix.iter_mut().take(take) {
-                    if let Some(s) = buf.pop_front() {
-                        *slot += s;
+                if gain == 1.0 {
+                    for slot in mix.iter_mut().take(take) {
+                        if let Some(s) = buf.pop_front() {
+                            *slot += s;
+                        }
+                    }
+                } else {
+                    for slot in mix.iter_mut().take(take) {
+                        if let Some(s) = buf.pop_front() {
+                            *slot += s * gain;
+                        }
                     }
                 }
             }
@@ -677,15 +709,20 @@ async fn ensure_playback(
         None
     };
 
-    let (track_buffers, output_capacity_samples) = {
+    let (track_buffers, user_volumes, output_capacity_samples) = {
         let voice = voice_arc.lock().await;
         let pb = voice.playback.lock().unwrap();
         let cap = (sample_rate as usize) * (channels as usize) / 5; // 200 ms
-        (Arc::clone(&pb.track_buffers), cap)
+        (
+            Arc::clone(&pb.track_buffers),
+            Arc::clone(&pb.user_volumes),
+            cap,
+        )
     };
 
     let mixer_task = tokio::spawn(run_mixer_task(
         track_buffers,
+        user_volumes,
         Arc::clone(&output_ring),
         channels,
         output_capacity_samples,
@@ -1456,6 +1493,62 @@ pub async fn toggle_voice_mute(state: State<'_, Arc<AppState>>) -> Result<bool> 
     }
 
     Ok(new_muted)
+}
+
+/// Extract the bare `user_id` from a voice-channel LiveKit identity.
+///
+/// Identity formats produced by this module:
+///   - `voice-{user_id}` (today)
+///   - `voice-{user_id}:{device_id}` (reserved for #140; not emitted yet)
+///
+/// Anything that doesn't match the `voice-` prefix is returned unchanged so
+/// the helper degrades to a no-op if some other identity scheme leaks in.
+///
+/// NOTE (#140 — multi-device voice): if/when a single user can be present
+/// in a voice channel from multiple devices, decide whether `user_volumes`
+/// should remain user-scoped (current behavior — simpler, "Bob is Bob") or
+/// shift to per-device (`{user_id}:{device_id}`). If you change the key
+/// shape, update both this helper and the frontend writers in
+/// `RemoteUserVolumeSlider.tsx` / `useVoiceChannel.ts`.
+pub fn user_id_from_voice_identity(identity: &str) -> &str {
+    let stripped = identity.strip_prefix("voice-").unwrap_or(identity);
+    match stripped.split_once(':') {
+        Some((uid, _device)) => uid,
+        None => stripped,
+    }
+}
+
+/// Set the per-user output gain multiplier for a remote participant.
+///
+/// `user_id` is the bare user id (no `voice-` prefix, no `:device_id`
+/// suffix — see `user_id_from_voice_identity`). `volume` is clamped to
+/// 0.0..=2.0; 1.0 is unity, values <1 attenuate, values >1 boost.
+///
+/// Persistence is handled by the frontend via the existing
+/// `save_preferences` command — this only updates the live mixer state.
+/// Setting volume == 1.0 removes the entry so unity-gain tracks take the
+/// fast path in the mixer.
+#[tauri::command]
+pub async fn set_remote_user_volume(
+    user_id: String,
+    volume: f32,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    let clamped = if volume.is_finite() {
+        volume.clamp(0.0, 2.0)
+    } else {
+        1.0
+    };
+
+    let voice = state.voice.lock().await;
+    let pb = voice.playback.lock().unwrap();
+    let mut volumes = pb.user_volumes.lock().unwrap();
+    if (clamped - 1.0).abs() < f32::EPSILON {
+        volumes.remove(&user_id);
+    } else {
+        volumes.insert(user_id, clamped);
+    }
+    Ok(())
 }
 
 /// Switch the microphone device mid-call. Stops the current input stream and

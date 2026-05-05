@@ -204,6 +204,21 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       });
       const intentToInvokeMs = Math.round(performance.now() - intentTs);
 
+      // Push any saved per-remote-user volume preferences into the live
+      // mixer. Done after join_voice_channel returns so the playback
+      // pipeline is up. Best-effort — a failure here just leaves a track
+      // at unity gain.
+      const savedUserVolumes = preferences.query.data?.user_volumes;
+      if (savedUserVolumes) {
+        for (const [userId, volume] of Object.entries(savedUserVolumes)) {
+          if (typeof volume === 'number') {
+            invoke('set_remote_user_volume', { userId, volume }).catch((e) => {
+              console.warn('[VoiceChannel] set_remote_user_volume failed:', e);
+            });
+          }
+        }
+      }
+
       if (cancelled) {
         await invoke('leave_voice_channel');
         if (groupId) {

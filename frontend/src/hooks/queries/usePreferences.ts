@@ -26,6 +26,42 @@ export interface PreferencesData {
   /** RNNoise click/keystroke suppression (separate from APM's spectral NS). */
   click_suppression?: boolean;
   auto_join_voice?: boolean;
+  /**
+   * Per-remote-user output volume multipliers, keyed by `user_id`.
+   * Range 0.0..=2.0; 1.0 is unity. Absent users default to unity.
+   *
+   * NOTE (#140 — multi-device voice): when the same user can join a
+   * voice channel from multiple devices, decide whether to keep this
+   * user-scoped or shift to per-device. See `user_id_from_voice_identity`
+   * in `src-tauri/src/commands/voice.rs`.
+   */
+  user_volumes?: { [userId: string]: number };
+}
+
+/**
+ * Strip the LiveKit voice-channel identity wrapper down to the bare
+ * `user_id`. Mirrors `user_id_from_voice_identity` in the Rust voice
+ * module — keep the two in sync.
+ */
+export function userIdFromVoiceIdentity(identity: string): string {
+  const stripped = identity.startsWith("voice-")
+    ? identity.slice("voice-".length)
+    : identity;
+  const colon = stripped.indexOf(":");
+  return colon >= 0 ? stripped.slice(0, colon) : stripped;
+}
+
+/** Volume slider range used by the per-remote-user output volume control. */
+export const REMOTE_USER_VOLUME_MIN = 0.0;
+export const REMOTE_USER_VOLUME_MAX = 2.0;
+export const REMOTE_USER_VOLUME_DEFAULT = 1.0;
+
+/** Clamp a remote-user volume to the supported range. NaN → unity. */
+export function clampRemoteUserVolume(v: number): number {
+  if (!Number.isFinite(v)) {
+    return REMOTE_USER_VOLUME_DEFAULT;
+  }
+  return Math.max(REMOTE_USER_VOLUME_MIN, Math.min(REMOTE_USER_VOLUME_MAX, v));
 }
 
 /** Defaults must match `voice_apm::ApmConfig::default` in src-tauri. */
@@ -133,6 +169,11 @@ export function usePreferences() {
         echo_cancellation: getPreference<boolean>(json, "echo_cancellation", APM_DEFAULTS.echo_cancellation),
         click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
+        user_volumes: getPreference<{ [userId: string]: number } | undefined>(
+          json,
+          "user_volumes",
+          undefined,
+        ),
       };
     },
     enabled: !!currentUser,
