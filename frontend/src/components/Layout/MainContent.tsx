@@ -548,8 +548,9 @@ export const MainContent: React.FC = () => {
               onClick={handleConfirmDeleteChannel}
               isLoading={deleteChannelMutation.isPending}
               loadingText="Deleting…"
+              autoFocus
             >
-              Delete Channel
+              Delete
             </Button>
           </div>
         </div>
@@ -591,6 +592,7 @@ export const MainContent: React.FC = () => {
                 onClick={handleConfirmDelete}
                 isLoading={deleteMessageMutation.isPending}
                 loadingText="Deleting…"
+                autoFocus
               >
                 {isModerating ? "Remove" : "Delete"}
               </Button>
