@@ -36,6 +36,7 @@ import { SearchPage } from "./pages/Search";
 import { RequestsPage } from "./pages/RequestsPage";
 import { BlockedPage } from "./pages/BlockedPage";
 import { CallPage } from "./pages/Call";
+import { RenameChannelPage } from "./pages/RenameChannelPage";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -91,6 +92,12 @@ const createChannelRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/channels/new",
   component: CreateChannelPage,
+});
+
+const renameChannelRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/channels/$channelId/rename",
+  component: RenameChannelPage,
 });
 
 const membersRoute = createRoute({
@@ -242,6 +249,7 @@ const routeTree = rootRoute.addChildren([
   groupRoute,
   channelRoute,
   createChannelRoute,
+  renameChannelRoute,
   membersRoute,
   kickMemberRoute,
   joinRequestsRoute,

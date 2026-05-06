@@ -1,11 +1,12 @@
 import React, { useEffect } from "react";
-import { useParams } from "@tanstack/react-router";
-import { Trash2 } from "lucide-react";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { Pencil, Trash2 } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { useAppStore } from "../stores/appStore";
 
 export const ChannelPage: React.FC = () => {
+  const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
   const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
   const pendingDeleteChannelId = useAppStore((s) => s.pendingDeleteChannelId);
@@ -38,14 +39,24 @@ export const ChannelPage: React.FC = () => {
       >
         <span className="flex-1">{title}</span>
         {isAdmin && channel && pendingDeleteChannelId !== channelId && (
-          <button
-            data-testid="delete-channel-trigger"
-            onClick={() => setPendingDeleteChannelId(channelId)}
-            aria-label="Delete channel"
-            className="icon-btn-sm flex-shrink-0"
-          >
-            <Trash2 size={14} aria-hidden="true" />
-          </button>
+          <>
+            <button
+              data-testid="rename-channel-trigger"
+              onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
+              aria-label="Rename channel"
+              className="icon-btn-sm flex-shrink-0"
+            >
+              <Pencil size={14} aria-hidden="true" />
+            </button>
+            <button
+              data-testid="delete-channel-trigger"
+              onClick={() => setPendingDeleteChannelId(channelId)}
+              aria-label="Delete channel"
+              className="icon-btn-sm flex-shrink-0"
+            >
+              <Trash2 size={14} aria-hidden="true" />
+            </button>
+          </>
         )}
       </div>
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
