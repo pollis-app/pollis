@@ -128,6 +128,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
                 }}
                 disabled={isLoading}
                 autoFocus
+                mask
               />
               <input
                 data-testid="pin-create-input"
