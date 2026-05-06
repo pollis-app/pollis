@@ -1272,7 +1272,7 @@ pub async fn reject_join_request(
 mod tests {
     use rusqlite::Connection;
 
-    const BASELINE: &str = include_str!("../db/migrations/000000_baseline.sql");
+    use pollis_core::db::BASELINE_SQL as BASELINE;
 
     /// Extra tables from numbered migrations that the base schema doesn't include.
     const EXTRA_TABLES: &str = "

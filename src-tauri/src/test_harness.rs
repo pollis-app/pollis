@@ -182,7 +182,7 @@ pub async fn invoke_unit(
 // captures the full current schema) on first run, and stamp
 // `schema_migrations` so the DB looks adopted.
 
-const BASELINE: &str = include_str!("db/migrations/000000_baseline.sql");
+use pollis_core::db::BASELINE_SQL as BASELINE;
 
 /// Apply the baseline schema to the shared test DB if it hasn't been applied
 /// yet. Idempotent: safe to call on every test run.

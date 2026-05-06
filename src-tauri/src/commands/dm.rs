@@ -438,7 +438,7 @@ pub async fn leave_dm_channel(
 mod tests {
     use rusqlite::Connection;
 
-    const BASELINE: &str = include_str!("../db/migrations/000000_baseline.sql");
+    use pollis_core::db::BASELINE_SQL as BASELINE;
 
     const EXTRA_TABLES: &str = "
         CREATE TABLE IF NOT EXISTS conversation_watermark (

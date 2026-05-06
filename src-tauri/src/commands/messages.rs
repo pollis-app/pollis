@@ -7,8 +7,8 @@ use ulid::Ulid;
 use crate::error::Result;
 use crate::state::AppState;
 
-const QUERY_MESSAGES_BY_SENDER: &str = include_str!("../db/queries/messages_by_sender.sql");
-const QUERY_CHANNEL_PREVIEWS: &str = include_str!("../db/queries/channel_previews.sql");
+use pollis_core::db::queries::MESSAGES_BY_SENDER as QUERY_MESSAGES_BY_SENDER;
+use pollis_core::db::queries::CHANNEL_PREVIEWS as QUERY_CHANNEL_PREVIEWS;
 
 // Envelope cleanup: TTL gate OR watermark gate. Watermark gate is keyed on
 // (user, device) — a multi-device user whose other device hasn't synced keeps
@@ -1523,7 +1523,7 @@ pub async fn get_reactions(
 mod tests {
     use rusqlite::Connection;
 
-    const BASELINE: &str = include_str!("../db/migrations/000000_baseline.sql");
+    use pollis_core::db::BASELINE_SQL as BASELINE;
 
     // Both queries operate on the remote schema. Tests use rusqlite in-memory
     // (same SQLite dialect, no libsql threading conflict in test binaries).
