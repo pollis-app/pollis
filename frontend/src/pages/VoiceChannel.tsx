@@ -8,11 +8,13 @@ import { useVoiceParticipants } from "../hooks/queries/useVoiceParticipants";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
+import { Avatar } from "../components/ui/Avatar";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 interface ObserverParticipant {
   identity: string;
   name: string;
+  avatar_url?: string | null;
 }
 
 
@@ -117,6 +119,12 @@ export const VoiceChannelPage: React.FC = () => {
                 >
                   <Circle size={12} fill="var(--c-border)" />
                 </span>
+                <Avatar
+                  avatarKey={p.avatar_url ?? null}
+                  size={20}
+                  alt={p.name}
+                  testId={`voice-observer-avatar-${p.identity}`}
+                />
                 <span className="flex-1 truncate">{p.name}</span>
               </>
             )}

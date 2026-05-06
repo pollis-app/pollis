@@ -165,6 +165,7 @@ export interface VoiceParticipant {
   name: string;
   isMuted: boolean;
   isLocal: boolean;
+  avatarKey?: string | null;
 }
 
 export interface AudioDevice {

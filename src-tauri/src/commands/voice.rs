@@ -24,7 +24,12 @@ use tauri::State;
 use tokio::time::MissedTickBehavior;
 
 use crate::{
-    commands::{livekit::make_token, voice_apm, voice_apm::Processor as ApmProcessor, voice_denoiser},
+    commands::{
+        livekit::{lookup_avatar_url, lookup_avatar_url_for_identity, make_token},
+        voice_apm,
+        voice_apm::Processor as ApmProcessor,
+        voice_denoiser,
+    },
     error::Result,
     state::AppState,
 };
@@ -73,7 +78,13 @@ unsafe impl Sync for SendableStream {}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum VoiceEvent {
-    ParticipantJoined { identity: String, name: String, is_muted: bool },
+    ParticipantJoined {
+        identity: String,
+        name: String,
+        is_muted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        avatar_url: Option<String>,
+    },
     ParticipantLeft { identity: String },
     Muted { identity: String },
     Unmuted { identity: String },
@@ -1276,6 +1287,18 @@ pub async fn join_voice_channel(
     // Do NOT attach tracks here — TrackSubscribed fires for pre-existing
     // subscribed tracks once the event loop drains buffered events, and
     // attaching twice creates competing draining tasks.
+    let local_avatar_url = lookup_avatar_url(&state, &user_id).await;
+    let existing_remote: Vec<(String, String)> = room
+        .remote_participants()
+        .into_iter()
+        .map(|(_id, p)| (p.identity().to_string(), p.name()))
+        .collect();
+    let mut existing_with_avatars: Vec<(String, String, Option<String>)> =
+        Vec::with_capacity(existing_remote.len());
+    for (identity, name) in existing_remote {
+        let avatar = lookup_avatar_url_for_identity(&state, &identity).await;
+        existing_with_avatars.push((identity, name, avatar));
+    }
     {
         let voice = state.voice.lock().await;
         if let Some(ch) = &voice.channel {
@@ -1283,31 +1306,38 @@ pub async fn join_voice_channel(
                 identity: format!("voice-{user_id}"),
                 name: display_name.clone(),
                 is_muted: false,
+                avatar_url: local_avatar_url,
             });
-            for (_identity, participant) in room.remote_participants() {
-                eprintln!("[voice] existing participant: {}", participant.identity());
+            for (identity, name, avatar_url) in existing_with_avatars {
+                eprintln!("[voice] existing participant: {}", identity);
                 let _ = ch.send(VoiceEvent::ParticipantJoined {
-                    identity: participant.identity().to_string(),
-                    name: participant.name(),
+                    identity,
+                    name,
                     is_muted: false,
+                    avatar_url,
                 });
             }
         }
     }
 
     let voice_arc = Arc::clone(&state.voice);
+    let state_for_room = Arc::clone(state.inner());
     let apm_rate_for_room = mic_rate;
     let room_task = tokio::spawn(async move {
         while let Some(event) = events.recv().await {
             match event {
                 RoomEvent::ParticipantConnected(p) => {
                     eprintln!("[voice] participant joined: {}", p.identity());
+                    let identity = p.identity().to_string();
+                    let avatar_url =
+                        lookup_avatar_url_for_identity(&state_for_room, &identity).await;
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::ParticipantJoined {
-                            identity: p.identity().to_string(),
+                            identity,
                             name: p.name(),
                             is_muted: false,
+                            avatar_url,
                         });
                     }
                 }
