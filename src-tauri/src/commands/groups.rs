@@ -631,7 +631,7 @@ pub async fn delete_channel(
 
     let mut role_rows = conn.query(
         "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id, requester_id],
+        libsql::params![group_id.clone(), requester_id],
     ).await?;
 
     let role: String = if let Some(row) = role_rows.next().await? {
@@ -645,9 +645,26 @@ pub async fn delete_channel(
     }
 
     conn.execute(
+        "DELETE FROM message_envelope WHERE conversation_id = ?1",
+        libsql::params![channel_id.clone()],
+    ).await?;
+
+    conn.execute(
+        "DELETE FROM conversation_watermark WHERE conversation_id = ?1",
+        libsql::params![channel_id.clone()],
+    ).await?;
+
+    conn.execute(
         "DELETE FROM channels WHERE id = ?1",
         libsql::params![channel_id],
     ).await?;
+
+    if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
+        &state.livekit,
+        &group_id,
+    ).await {
+        eprintln!("[realtime] delete_channel: notify group {group_id}: {e}");
+    }
 
     Ok(())
 }

@@ -6,6 +6,9 @@ import type { Message } from "../../types";
 interface MessageListProps {
   messages: Message[];
   adminUserIds?: Set<string>;
+  /** True when the viewer is an admin in this list's group — enables
+   * deleting other members' messages for moderation. */
+  viewerIsAdmin?: boolean;
   onReply?: (messageId: string) => void;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
@@ -20,6 +23,7 @@ interface MessageListProps {
 export const MessageList: React.FC<MessageListProps> = ({
   messages,
   adminUserIds,
+  viewerIsAdmin = false,
   onReply,
   onEdit,
   onDelete,
@@ -185,6 +189,7 @@ export const MessageList: React.FC<MessageListProps> = ({
             allMessages={sortedMessages}
             authorUsername={authorUsername}
             isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
+            canModerate={viewerIsAdmin}
             onReply={onReply}
             onEdit={onEdit}
             onDelete={onDelete}

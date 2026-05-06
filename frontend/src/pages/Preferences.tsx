@@ -1,11 +1,21 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "@tauri-apps/api/core";
-import { usePreferences, applyPreferences } from "../hooks/queries/usePreferences";
-import { hslToHex, hexToHsl, applyAccentColor, applyBackgroundColor } from "../utils/colorUtils";
+import { usePreferences, applyPreferences, applyDeviceFontSize } from "../hooks/queries/usePreferences";
+import {
+  hslToHex,
+  hexToHsl,
+  applyAccentColor,
+  applyBackgroundColor,
+  applyFontSize,
+  loadDeviceFontSize,
+  saveDeviceFontSize,
+} from "../utils/colorUtils";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
+import { useAppStore } from "../stores/appStore";
+import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -17,6 +27,7 @@ function isValidHex(val: string): boolean {
 
 export const Preferences: React.FC = () => {
   const navigate = useNavigate();
+  const currentUser = useAppStore((state) => state.currentUser);
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
   const [bgHue, setBgHue] = useState<number>(38);
@@ -25,6 +36,7 @@ export const Preferences: React.FC = () => {
   const [fontSize, setFontSize] = useState<number>(15);
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
+  const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
@@ -34,6 +46,8 @@ export const Preferences: React.FC = () => {
   useEffect(() => {
     if (query.data) {
       applyPreferences(query.data);
+      // Font size is device-local; seed once from any legacy remote value.
+      applyDeviceFontSize(currentUser?.id, query.data);
       if (query.data.allow_desktop_notifications !== undefined) {
         setAllowDesktopNotifications(query.data.allow_desktop_notifications);
       }
@@ -41,7 +55,7 @@ export const Preferences: React.FC = () => {
         setAllowSoundEffects(query.data.allow_sound_effects);
       }
     }
-  }, [query.data]);
+  }, [query.data, currentUser?.id]);
 
   // Read current CSS var values on mount and sync all state + hex inputs
   useEffect(() => {
@@ -50,7 +64,6 @@ export const Preferences: React.FC = () => {
     const bh = parseInt(getRootVar("--bg-h"));
     const bs = parseInt(getRootVar("--bg-s"));
     const bl = parseInt(getRootVar("--bg-l"));
-    const fs = parseInt(getRootVar("--font-size-base"));
     if (!isNaN(h)) { setHue(h); }
     if (!isNaN(s)) { setSaturation(s); }
     if (!isNaN(h) && !isNaN(s)) { setAccentHexInput(hslToHex(h, s, 62)); }
@@ -58,33 +71,47 @@ export const Preferences: React.FC = () => {
     if (!isNaN(bs)) { setBgSaturation(bs); }
     if (!isNaN(bl)) { setBgLightness(bl); }
     if (!isNaN(bh) && !isNaN(bs) && !isNaN(bl)) { setBgHexInput(hslToHex(bh, bs, bl)); }
-    if (!isNaN(fs)) { setFontSize(fs); }
-  }, []);
+    // Font size: prefer the device-local store; fall back to whatever the
+    // CSS var currently resolves to (default 15px) so a fresh device
+    // shows the slider in a sane position before the user touches it.
+    const localFs = loadDeviceFontSize(currentUser?.id);
+    if (localFs !== null) {
+      setFontSize(localFs);
+    } else {
+      const fs = parseInt(getRootVar("--font-size-base"));
+      if (!isNaN(fs)) { setFontSize(fs); }
+    }
+    setAllowCallRingtone(loadDeviceCallRingtone(currentUser?.id));
+  }, [currentUser?.id]);
 
   const save = useCallback((opts: {
     accentH?: number; accentS?: number;
     bgH?: number; bgS?: number; bgL?: number;
-    fs?: number; notifications?: boolean; soundEffects?: boolean;
+    notifications?: boolean; soundEffects?: boolean;
   }) => {
     const ah = opts.accentH ?? hue;
     const as_ = opts.accentS ?? saturation;
     const bh = opts.bgH ?? bgHue;
     const bs = opts.bgS ?? bgSaturation;
     const bl = opts.bgL ?? bgLightness;
-    const fs = opts.fs ?? fontSize;
     const notif = opts.notifications ?? allowDesktopNotifications;
     const sfx = opts.soundEffects ?? allowSoundEffects;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
+    // font_size is intentionally NOT included — it's device-local now,
+    // persisted via saveDeviceFontSize. We also strip any legacy
+    // `font_size` field from query.data so we stop overwriting our own
+    // local value back to the remote on every save.
+    const { font_size: _legacyFontSize, ...rest } = query.data ?? {};
+    void _legacyFontSize;
     mutation.mutate({
-      ...query.data,
+      ...rest,
       accent_color: accentHex,
       background_color: bgHex,
-      font_size: String(fs),
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
     });
-  }, [mutation, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, fontSize, allowDesktopNotifications, allowSoundEffects]);
+  }, [mutation, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects]);
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
@@ -108,13 +135,18 @@ export const Preferences: React.FC = () => {
 
   const handleFontSize = (val: number) => {
     setFontSize(val);
-    document.documentElement.style.setProperty("--font-size-base", `${val}px`);
-    save({ fs: val });
+    applyFontSize(val);
+    saveDeviceFontSize(currentUser?.id, val);
   };
 
   const handleAllowSoundEffects = (val: boolean) => {
     setAllowSoundEffects(val);
     save({ soundEffects: val });
+  };
+
+  const handleAllowCallRingtone = (val: boolean) => {
+    setAllowCallRingtone(val);
+    saveDeviceCallRingtone(currentUser?.id, val);
   };
 
   const handleAllowDesktopNotifications = async (val: boolean) => {
@@ -312,18 +344,20 @@ export const Preferences: React.FC = () => {
           </section>
 
 
-          {/* Font size */}
+          {/* Display (this device) — settings here are stored on this device only,
+              not synced across the user's account. Future device-specific items
+              should slot in here. */}
           <section className="flex flex-col gap-4 mb-12">
             <h2
               className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
               style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
             >
-              Font Size
+              Display (this device)
             </h2>
             <div className="flex flex-col gap-1.5">
               <RangeSlider
                 id="pref-font-size"
-                label="Base size — px"
+                label="Font size — px"
                 value={fontSize}
                 min={12}
                 max={20}
@@ -335,6 +369,9 @@ export const Preferences: React.FC = () => {
                 <span>16px normal</span>
                 <span>20px large</span>
               </div>
+              <p className="text-xs font-mono mt-1" style={{ color: "var(--c-text-muted)" }}>
+                Font size is per-device — it won't sync to your other devices.
+              </p>
             </div>
             <p
               className="font-mono"
@@ -342,6 +379,17 @@ export const Preferences: React.FC = () => {
             >
               The quick brown fox jumps over the lazy dog.
             </p>
+            <div className="flex flex-col gap-1.5">
+              <Switch
+                id="pref-call-ringtone"
+                label="Incoming call ringtone"
+                checked={allowCallRingtone}
+                onChange={handleAllowCallRingtone}
+              />
+              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                Plays a looping ring on this device when someone calls. Off here doesn't mute the alert badge or your other devices.
+              </p>
+            </div>
           </section>
 
           {/* Notifications */}

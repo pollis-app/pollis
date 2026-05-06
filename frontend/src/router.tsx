@@ -35,6 +35,8 @@ import { KickMemberPage } from "./pages/KickMemberPage";
 import { SearchPage } from "./pages/Search";
 import { RequestsPage } from "./pages/RequestsPage";
 import { BlockedPage } from "./pages/BlockedPage";
+import { CallPage } from "./pages/Call";
+import { RenameChannelPage } from "./pages/RenameChannelPage";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -90,6 +92,12 @@ const createChannelRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups/$groupId/channels/new",
   component: CreateChannelPage,
+});
+
+const renameChannelRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/channels/$channelId/rename",
+  component: RenameChannelPage,
 });
 
 const membersRoute = createRoute({
@@ -225,6 +233,12 @@ const searchRoute = createRoute({
   component: SearchPage,
 });
 
+const callRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/call/$callId",
+  component: CallPage,
+});
+
 // ─── Route tree ────────────────────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -235,6 +249,7 @@ const routeTree = rootRoute.addChildren([
   groupRoute,
   channelRoute,
   createChannelRoute,
+  renameChannelRoute,
   membersRoute,
   kickMemberRoute,
   joinRequestsRoute,
@@ -257,6 +272,7 @@ const routeTree = rootRoute.addChildren([
   invitesRoute,
   allJoinRequestsRoute,
   searchRoute,
+  callRoute,
 ]);
 
 // ─── Router factory ────────────────────────────────────────────────────────────

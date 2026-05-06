@@ -4,6 +4,7 @@ import { useAppStore } from "../../stores/appStore";
 import { NavigableList } from "../ui/NavigableList";
 import type { VoiceParticipant } from "../../types";
 import { RemoteUserVolumeSlider } from "./RemoteUserVolumeSlider";
+import { Avatar } from "../ui/Avatar";
 
 export const VoiceChannelView: React.FC = () => {
   const { voiceParticipants, voiceActiveSpeakerIds } = useAppStore();
@@ -71,6 +72,12 @@ export const VoiceChannelView: React.FC = () => {
                   />
                 )}
               </span>
+              <Avatar
+                avatarKey={p.avatarKey ?? null}
+                size={20}
+                alt={p.name}
+                testId={`voice-participant-avatar-${p.identity}`}
+              />
               <span
                 className="flex-1 truncate"
                 style={{

@@ -3,7 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { Volume2 } from "lucide-react";
+import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal } from "lucide-react";
+import { PillButton } from "../ui/PillButton";
 
 interface VoiceBarProps {
   channelId: string;
@@ -30,7 +31,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
   return (
     <div
       data-testid="voice-bar"
-      className="flex items-center px-3 gap-2 font-mono text-xs flex-shrink-0"
+      className="flex items-center pl-1 pr-3 gap-2 font-mono text-xs flex-shrink-0"
       style={{
         height: 28,
         borderTop: "1px solid var(--c-border)",
@@ -39,58 +40,50 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
       }}
     >
       {/* Channel name */}
-      <button
+      <PillButton
         data-testid="voice-bar-channel-name"
+        accent="var(--c-accent)"
         onClick={() => {
-          if (groupId) {
+          if (channelId.startsWith("call-")) {
+            const callId = channelId.slice("call-".length);
+            navigate({ to: "/call/$callId", params: { callId } });
+          } else if (groupId) {
             navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId } });
           }
         }}
-        // style={{ color: "var(--c-text)" }}
-        // onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-        // onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text)"; }}
-        className="flex items-center gap-1.5 text-[var(--c-accent)] hover:text-[var(--c-text)] transition-colors"
-        title={`Go to ${channelName} voice channel`}
+        title={
+          channelId.startsWith("call-")
+            ? "Return to call"
+            : `Go to ${channelName} voice channel`
+        }
       >
         <Volume2 size={12} />
         {channelName}
-      </button>
-
-      <span style={{ color: "var(--c-border)" }}>|</span>
+      </PillButton>
 
       {/* Mute toggle */}
-      <button
+      <PillButton
         data-testid="voice-bar-mute-button"
+        accent={voiceIsMuted ? "#ff6b6b" : "var(--c-accent)"}
         onClick={toggleMute}
-        className="transition-colors"
-        style={{ color: voiceIsMuted ? "#ff6b6b" : "var(--c-accent)" }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.opacity = "0.7";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.opacity = "1";
-        }}
         title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
+        aria-label={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
+        square
       >
-        {voiceIsMuted ? "[mic off]" : "[mic on]"}
-      </button>
+        {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
+      </PillButton>
 
       {/* Leave button */}
-      <button
+      <PillButton
         data-testid="voice-bar-leave-button"
+        accent="#ff6b6b"
         onClick={leave}
-        className="transition-colors"
-        style={{ color: "var(--c-text-dim)" }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.color = "#ff6b6b";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.color = "var(--c-text-dim)";
-        }}
         title="Leave voice channel"
+        aria-label="Leave voice channel"
+        square
       >
-        [leave]
-      </button>
+        <PhoneOff size={12} />
+      </PillButton>
 
       <span style={{ color: "var(--c-border)" }}>|</span>
 
@@ -112,6 +105,32 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
           </>
           : null}
       </span>
+
+      {/* Voice settings shortcut */}
+      <button
+        data-testid="voice-bar-settings-button"
+        onClick={() => navigate({ to: "/voice-settings" })}
+        aria-label="Voice settings"
+        title="Voice settings"
+        className="flex items-center justify-center transition-colors flex-shrink-0"
+        style={{
+          width: 20,
+          height: 20,
+          background: "none",
+          border: "none",
+          padding: 0,
+          color: "var(--c-text-muted)",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
+        }}
+      >
+        <SlidersHorizontal size={14} />
+      </button>
     </div>
   );
 };

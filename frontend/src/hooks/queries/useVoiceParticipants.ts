@@ -1,9 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 
-interface VoiceParticipantInfo {
+export interface VoiceParticipantInfo {
   identity: string;
   name: string;
+  avatar_url?: string | null;
 }
 
 interface VoiceRoomCount {

@@ -57,6 +57,16 @@ pub enum RealtimeEvent {
         message_id: String,
         sender_id: String,
     },
+    /// Sent to a group room when an admin deletes another member's message,
+    /// so connected clients soft-delete it from their cache immediately.
+    /// Durable propagation still flows through the `type='delete'` envelope —
+    /// this event is just an immediate nudge for online recipients.
+    DeletedMessage {
+        channel_id: Option<String>,
+        conversation_id: Option<String>,
+        message_id: String,
+        deleted_by: String,
+    },
     /// Sent to a user's personal inbox room when one of their OTHER devices
     /// has just posted a `device_enrollment_request` row and is waiting for
     /// approval. Interrupts the UI on every receiving device so the user can
@@ -72,6 +82,20 @@ pub enum RealtimeEvent {
     /// missed events.
     RealtimeReconnected {
         room_id: String,
+    },
+    /// Sent to the callee's personal inbox room when someone is calling them.
+    /// `room_name` is the LiveKit room both sides will join on accept.
+    CallInvite {
+        call_id: String,
+        room_name: String,
+        caller_id: String,
+        caller_username: String,
+    },
+    /// Sent to the callee's personal inbox room when the caller hangs up
+    /// before pickup, or to either side when the other side declines.
+    /// Frontends use this to clear the incoming-call slot.
+    CallCanceled {
+        call_id: String,
     },
 }
 

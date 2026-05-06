@@ -19,7 +19,7 @@ import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
 import { ManagedInstallScreen, type ManagedInstallInfo } from "./components/ManagedInstallScreen";
 import * as api from "./services/api";
-import { getPreference, applyPreferences, useApplyPreferences } from "./hooks/queries/usePreferences";
+import { getPreference, applyPreferences, applyDeviceFontSize, useApplyPreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
 import type { User, AccountInfo } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
@@ -99,6 +99,8 @@ function MainApp() {
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
       };
       applyPreferences(prefs);
+      // Font size is device-local; the legacy remote field (if any) seeds it once.
+      applyDeviceFontSize(user.id, prefs);
     } catch {
       // Preferences are optional
     }
