@@ -49,7 +49,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
             navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId } });
           }
         }}
-        className="flex items-center gap-1.5 text-[var(--c-accent)] hover:text-[var(--c-text)] transition-colors"
+        className="flex items-center gap-1.5 text-[var(--c-accent)] cursor-pointer underline-offset-2 hover:underline hover:text-[var(--c-text)] transition-colors"
         title={
           channelId.startsWith("call-")
             ? "Return to call"
