@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { Volume2, Mic, MicOff, PhoneOff } from "lucide-react";
+import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 
 interface VoiceBarProps {
@@ -31,7 +31,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
   return (
     <div
       data-testid="voice-bar"
-      className="flex items-center px-3 gap-2 font-mono text-xs flex-shrink-0"
+      className="flex items-center pl-1 pr-3 gap-2 font-mono text-xs flex-shrink-0"
       style={{
         height: 28,
         borderTop: "1px solid var(--c-border)",
@@ -105,6 +105,32 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
           </>
           : null}
       </span>
+
+      {/* Voice settings shortcut */}
+      <button
+        data-testid="voice-bar-settings-button"
+        onClick={() => navigate({ to: "/voice-settings" })}
+        aria-label="Voice settings"
+        title="Voice settings"
+        className="flex items-center justify-center transition-colors flex-shrink-0"
+        style={{
+          width: 20,
+          height: 20,
+          background: "none",
+          border: "none",
+          padding: 0,
+          color: "var(--c-text-muted)",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
+        }}
+      >
+        <SlidersHorizontal size={14} />
+      </button>
     </div>
   );
 };
