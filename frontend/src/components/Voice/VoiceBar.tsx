@@ -4,6 +4,7 @@ import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { Volume2 } from "lucide-react";
+import { PillButton } from "../ui/PillButton";
 
 interface VoiceBarProps {
   channelId: string;
@@ -39,8 +40,9 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
       }}
     >
       {/* Channel name */}
-      <button
+      <PillButton
         data-testid="voice-bar-channel-name"
+        accent="var(--c-accent)"
         onClick={() => {
           if (channelId.startsWith("call-")) {
             const callId = channelId.slice("call-".length);
@@ -49,7 +51,6 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
             navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId } });
           }
         }}
-        className="flex items-center gap-1.5 text-[var(--c-accent)] cursor-pointer underline-offset-2 hover:underline hover:text-[var(--c-text)] transition-colors"
         title={
           channelId.startsWith("call-")
             ? "Return to call"
@@ -58,43 +59,27 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
       >
         <Volume2 size={12} />
         {channelName}
-      </button>
-
-      <span style={{ color: "var(--c-border)" }}>|</span>
+      </PillButton>
 
       {/* Mute toggle */}
-      <button
+      <PillButton
         data-testid="voice-bar-mute-button"
+        accent={voiceIsMuted ? "#ff6b6b" : "var(--c-accent)"}
         onClick={toggleMute}
-        className="transition-colors"
-        style={{ color: voiceIsMuted ? "#ff6b6b" : "var(--c-accent)" }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.opacity = "0.7";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.opacity = "1";
-        }}
         title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
       >
-        {voiceIsMuted ? "[mic off]" : "[mic on]"}
-      </button>
+        {voiceIsMuted ? "mic off" : "mic on"}
+      </PillButton>
 
       {/* Leave button */}
-      <button
+      <PillButton
         data-testid="voice-bar-leave-button"
+        accent="#ff6b6b"
         onClick={leave}
-        className="transition-colors"
-        style={{ color: "var(--c-text-dim)" }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.color = "#ff6b6b";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.color = "var(--c-text-dim)";
-        }}
         title="Leave voice channel"
       >
-        [leave]
-      </button>
+        leave
+      </PillButton>
 
       <span style={{ color: "var(--c-border)" }}>|</span>
 
