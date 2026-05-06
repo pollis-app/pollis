@@ -806,6 +806,49 @@ pub async fn publish_edited_message_to_room(
     Ok(())
 }
 
+/// Broadcasts a `deleted_message` event to a LiveKit room so other clients
+/// soft-delete the message from their cache without polling. Non-fatal —
+/// callers should log errors. The durable propagation path is the
+/// `type='delete'` envelope written to Turso.
+pub async fn publish_deleted_message_to_room(
+    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    room_id: &str,
+    channel_id: Option<&str>,
+    conversation_id: Option<&str>,
+    deleted_by: &str,
+    message_id: &str,
+) -> Result<()> {
+    let room = {
+        let lk = livekit.lock().await;
+        lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    let room = match room {
+        None => return Ok(()),
+        Some(r) => r,
+    };
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "type": "deleted_message",
+        "channel_id": channel_id,
+        "conversation_id": conversation_id,
+        "message_id": message_id,
+        "deleted_by": deleted_by,
+    }))
+    .map_err(Error::Serde)?;
+
+    room.local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: true,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("publish_deleted_message: {e}")))?;
+
+    Ok(())
+}
+
 /// Broadcasts a `membership_changed` event to a group's LiveKit room so
 /// existing members refetch the member list (e.g. after a join-request approval).
 pub async fn publish_membership_changed_to_room(

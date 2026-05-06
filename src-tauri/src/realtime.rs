@@ -57,6 +57,16 @@ pub enum RealtimeEvent {
         message_id: String,
         sender_id: String,
     },
+    /// Sent to a group room when an admin deletes another member's message,
+    /// so connected clients soft-delete it from their cache immediately.
+    /// Durable propagation still flows through the `type='delete'` envelope —
+    /// this event is just an immediate nudge for online recipients.
+    DeletedMessage {
+        channel_id: Option<String>,
+        conversation_id: Option<String>,
+        message_id: String,
+        deleted_by: String,
+    },
     /// Sent to a user's personal inbox room when one of their OTHER devices
     /// has just posted a `device_enrollment_request` row and is waiting for
     /// approval. Interrupts the UI on every receiving device so the user can

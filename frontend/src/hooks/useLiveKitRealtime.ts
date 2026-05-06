@@ -53,6 +53,13 @@ type RealtimeEvent =
     sender_id: string;
   }
   | {
+    type: 'deleted_message';
+    channel_id: string | null;
+    conversation_id: string | null;
+    message_id: string;
+    deleted_by: string;
+  }
+  | {
     type: 'enrollment_requested';
     request_id: string;
     new_device_id: string;
@@ -273,6 +280,21 @@ export function useLiveKitRealtime() {
         } else if (conversationId) {
           queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
         }
+        return;
+      }
+
+      if (event.type === 'deleted_message') {
+        // Refetching the channel triggers ingest, which applies the
+        // type='delete' tombstone envelope as a soft-delete on the local
+        // row. The MessageList then renders it as "[deleted]".
+        const channelId = event.channel_id;
+        const conversationId = event.conversation_id;
+        if (channelId) {
+          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
+        } else if (conversationId) {
+          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
+        }
+        queryClientRef.current.invalidateQueries({ queryKey: ['last-message'] });
         return;
       }
 

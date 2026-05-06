@@ -548,6 +548,21 @@ async fn persist_envelopes_locally(
                     }
                 }
             }
+            "delete" => {
+                // Admin-issued tombstone for someone else's message. The
+                // ciphertext is empty (no plaintext to decrypt) — the only
+                // payload is target_message_id. Soft-delete the local row so
+                // the read path masks content as "[deleted]".
+                if let Some(tid) = target_id.as_ref() {
+                    let now = chrono::Utc::now().to_rfc3339();
+                    let _ = db.conn().execute(
+                        "UPDATE message SET content = NULL, deleted_at = ?1
+                         WHERE id = ?2 AND deleted_at IS NULL",
+                        rusqlite::params![now, tid],
+                    );
+                    advance(sent_at);
+                }
+            }
             _ => {
                 advance(sent_at);
             }
@@ -944,23 +959,30 @@ pub async fn search_messages(
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
-/// Delete a message: removes the envelope from Turso (preventing future delivery)
-/// and removes it from the sender's local message cache. Recipients who already
-/// have the message keep it — there is intentionally no retroactive deletion from
-/// other devices. Any pending edit envelope for this message is also removed.
+/// Delete a message.
 ///
-/// Best-effort on Turso: if the envelope was already cleaned up by the watermark
-/// mechanism the remote delete is a no-op, but the local delete still proceeds.
+/// Two paths, selected automatically by comparing `user_id` (the caller) to the
+/// stored sender of the target message:
+///
+/// **Self-delete** (caller is the original sender): removes the envelope from
+/// Turso (preventing future delivery to anyone who hasn't fetched it yet) and
+/// removes the row from the sender's local message cache. Recipients who
+/// already received the message keep it — no retroactive broadcast.
+///
+/// **Admin-delete** (caller is a different user, must be a group admin in the
+/// channel's group): writes a `type='delete'` tombstone envelope to Turso so
+/// every other member soft-deletes the message on their next ingest, also
+/// removes the original message envelope and any pending edit, soft-deletes
+/// the admin's own local row, and broadcasts a `deleted_message` realtime
+/// event so currently-connected clients invalidate their cache immediately.
+/// Admin-delete is rejected for DM messages (no admin concept in 1:1 DMs).
 ///
 /// Attachment cleanup: if the message had one or more attachments, each
-/// content_hash is reference-counted against the sender's other non-deleted
+/// content_hash is reference-counted against the caller's other non-deleted
 /// local messages. When no other local message references the same hash, the
 /// `attachment_object` row is removed from Turso and the R2 object is deleted.
-/// Cross-user references are invisible here (attachment metadata lives only
-/// inside the MLS-encrypted payload), so another member re-uploading the same
-/// bytes simply re-registers the dedup row — convergent encryption guarantees
-/// the R2 key is identical. R2 deletion is best-effort and must not fail the
-/// overall delete; orphaned R2 objects can be reclaimed by a future sweep.
+/// R2 deletion is best-effort and must not fail the overall delete; orphaned
+/// R2 objects can be reclaimed by a future sweep.
 #[tauri::command]
 pub async fn delete_message(
     message_id: String,
@@ -969,6 +991,155 @@ pub async fn delete_message(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
+    // Resolve the message's original sender + conversation. Prefer the remote
+    // envelope (authoritative across devices) but fall back to the local row
+    // if Turso has already cleaned up the envelope by watermark/TTL.
+    let (msg_sender_id, conversation_id): (String, String) = {
+        let mut rows = conn.query(
+            "SELECT sender_id, conversation_id FROM message_envelope
+             WHERE id = ?1 AND type = 'message'",
+            libsql::params![message_id.clone()],
+        ).await?;
+        if let Some(row) = rows.next().await? {
+            (row.get::<String>(0)?, row.get::<String>(1)?)
+        } else {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+            let local: Option<(String, String)> = db.conn()
+                .query_row(
+                    "SELECT sender_id, conversation_id FROM message WHERE id = ?1",
+                    rusqlite::params![message_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                )
+                .optional()?;
+            match local {
+                Some(t) => t,
+                None => {
+                    return Err(crate::error::Error::Other(anyhow::anyhow!(
+                        "Message not found"
+                    )));
+                }
+            }
+        }
+    };
+
+    let is_admin_delete = msg_sender_id != user_id;
+
+    if is_admin_delete {
+        // Admin path: caller must be an admin in the group that owns this
+        // channel. DMs (no `channels` row) are not moderatable.
+        let group_id: String = {
+            let mut rows = conn.query(
+                "SELECT group_id FROM channels WHERE id = ?1",
+                libsql::params![conversation_id.clone()],
+            ).await?;
+            match rows.next().await? {
+                Some(row) => row.get(0)?,
+                None => {
+                    return Err(crate::error::Error::Other(anyhow::anyhow!(
+                        "only the sender can delete this message"
+                    )));
+                }
+            }
+        };
+
+        let mut role_rows = conn.query(
+            "SELECT role FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+            libsql::params![group_id.clone(), user_id.clone()],
+        ).await?;
+        let role: String = if let Some(row) = role_rows.next().await? {
+            row.get(0)?
+        } else {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "only the sender can delete this message"
+            )));
+        };
+        if role != "admin" {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "only group admins can delete other members' messages"
+            )));
+        }
+
+        // Remove the original message envelope and any pending edit so
+        // late-joiners or unsynced devices never receive the now-deleted
+        // content. Then write the tombstone envelope so every existing
+        // member soft-deletes on next ingest.
+        conn.execute(
+            "DELETE FROM message_envelope WHERE id = ?1",
+            libsql::params![message_id.clone()],
+        ).await?;
+        conn.execute(
+            "DELETE FROM message_envelope WHERE target_message_id = ?1 AND type = 'edit'",
+            libsql::params![message_id.clone()],
+        ).await?;
+
+        let tombstone_id = Ulid::new().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        conn.execute(
+            "INSERT INTO message_envelope
+                 (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id)
+             VALUES (?1, ?2, ?3, '', ?4, 'delete', ?5)",
+            libsql::params![tombstone_id, conversation_id.clone(), user_id.clone(), now.clone(), message_id.clone()],
+        ).await?;
+
+        // Soft-delete locally and collect orphaned attachments. The admin
+        // may not have a local row (joined after the message was sent and
+        // it's already aged out) — that's fine, the tombstone in Turso is
+        // what propagates the delete.
+        let orphaned: Vec<AttachmentRef> = {
+            let guard = state.local_db.lock().await;
+            let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+
+            let content: Option<String> = db.conn()
+                .query_row(
+                    "SELECT content FROM message WHERE id = ?1",
+                    rusqlite::params![message_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            db.conn().execute(
+                "UPDATE message SET content = NULL, deleted_at = ?1
+                 WHERE id = ?2 AND deleted_at IS NULL",
+                rusqlite::params![now, message_id],
+            )?;
+
+            let raw = content.unwrap_or_default();
+            let attachments = parse_attachment_refs(&raw);
+            if attachments.is_empty() {
+                Vec::new()
+            } else {
+                // Reference-count against every non-deleted local message,
+                // not just the admin's own — if any local copy still
+                // references the hash (e.g. another member also attached
+                // the same file in a separate message they sent), keep R2.
+                filter_orphaned_locally_all(db.conn(), &attachments)?
+            }
+        };
+
+        for att in orphaned {
+            cleanup_attachment(&state, &att).await;
+        }
+
+        // Broadcast so currently-connected clients invalidate their message
+        // cache without waiting for a refetch. Non-fatal — ingest of the
+        // tombstone envelope is the durable path.
+        if let Err(e) = crate::commands::livekit::publish_deleted_message_to_room(
+            &state.livekit,
+            &group_id,
+            Some(&conversation_id),
+            None,
+            &user_id,
+            &message_id,
+        ).await {
+            eprintln!("[realtime] delete_message: publish to group {group_id}: {e}");
+        }
+
+        return Ok(());
+    }
+
+    // Self-delete path (caller is the original sender).
+    //
     // Remove the message envelope. Best-effort — may already be gone.
     conn.execute(
         "DELETE FROM message_envelope WHERE id = ?1 AND sender_id = ?2",
@@ -1074,6 +1245,37 @@ fn filter_orphaned_locally(
          WHERE sender_id = ?1 AND deleted_at IS NULL AND content IS NOT NULL",
     )?;
     let rows = stmt.query_map(rusqlite::params![user_id], |row| row.get::<_, String>(0))?;
+
+    let mut still_referenced = std::collections::HashSet::<String>::new();
+    for row in rows {
+        let content = row?;
+        for att in parse_attachment_refs(&content) {
+            still_referenced.insert(att.content_hash);
+        }
+    }
+
+    Ok(candidates
+        .iter()
+        .filter(|a| !still_referenced.contains(&a.content_hash))
+        .cloned()
+        .collect())
+}
+
+/// Same as `filter_orphaned_locally` but scans every non-deleted local
+/// message regardless of sender. Used by admin-delete: the admin may
+/// themselves have re-sent the same attachment, or someone else's message
+/// in the admin's local cache may still reference the same hash. Cross-user
+/// references on remote devices remain invisible (convergent encryption
+/// re-creates the dedup row on re-upload, so a future re-share is safe).
+fn filter_orphaned_locally_all(
+    conn: &rusqlite::Connection,
+    candidates: &[AttachmentRef],
+) -> Result<Vec<AttachmentRef>> {
+    let mut stmt = conn.prepare(
+        "SELECT content FROM message
+         WHERE deleted_at IS NULL AND content IS NOT NULL",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
 
     let mut still_referenced = std::collections::HashSet::<String>::new();
     for row in rows {

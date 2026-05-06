@@ -61,6 +61,10 @@ export const MainContent: React.FC = () => {
     () => new Set(groupMembers.filter((m) => m.role === "admin").map((m) => m.user_id)),
     [groupMembers],
   );
+  // Viewer is an admin in this channel's group — gates the moderator
+  // delete affordance on other members' messages.
+  const viewerIsAdmin =
+    !!selectedGroupId && !!currentUser && adminUserIds.has(currentUser.id);
 
   const chatInputRef = useRef<ChatInputHandle>(null);
 
@@ -431,7 +435,8 @@ export const MainContent: React.FC = () => {
         ) : (
           <MessageList
             messages={allMessages}
-            adminUserIds={selectedChannelId ? adminUserIds : undefined}
+            adminUserIds={selectedGroupId ? adminUserIds : undefined}
+            viewerIsAdmin={viewerIsAdmin}
             onReply={(id) => {
               setEditingMessage(null);
               setPendingDeleteId(null);
@@ -548,43 +553,51 @@ export const MainContent: React.FC = () => {
             </Button>
           </div>
         </div>
-      ) : pendingDeleteId ? (
-        <div data-testid="delete-message-bar">
-          <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
-          >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
-              delete message
-            </span>
-            <button
-              data-testid="delete-message-cancel"
-              onClick={() => setPendingDeleteId(null)}
-              aria-label="Cancel delete"
-              className="icon-btn-sm flex-shrink-0"
+      ) : pendingDeleteId ? (() => {
+        const target = allMessages.find((m) => m.id === pendingDeleteId);
+        const isModerating = !!target && !!currentUser && target.sender_id !== currentUser.id;
+        const heading = isModerating ? "remove message (admin)" : "delete message";
+        const body = isModerating
+          ? "This message and its attachments will be removed for everyone in the channel."
+          : "This message will be deleted from the channel. Others who already received it may still see it.";
+        return (
+          <div data-testid="delete-message-bar">
+            <div
+              className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
+              style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
             >
-              <X size={20} aria-hidden="true" />
-            </button>
-          </div>
-          <div
-            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-            style={{ background: 'var(--c-surface)' }}
-          >
-            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
-              This message will be deleted from the channel. Others who already received it may still see it.
-            </p>
-            <Button
-              data-testid="delete-message-confirm"
-              variant="danger"
-              onClick={handleConfirmDelete}
-              isLoading={deleteMessageMutation.isPending}
-              loadingText="Deleting…"
+              <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+                {heading}
+              </span>
+              <button
+                data-testid="delete-message-cancel"
+                onClick={() => setPendingDeleteId(null)}
+                aria-label="Cancel delete"
+                className="icon-btn-sm flex-shrink-0"
+              >
+                <X size={20} aria-hidden="true" />
+              </button>
+            </div>
+            <div
+              className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
+              style={{ background: 'var(--c-surface)' }}
             >
-              Delete
-            </Button>
+              <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+                {body}
+              </p>
+              <Button
+                data-testid="delete-message-confirm"
+                variant="danger"
+                onClick={handleConfirmDelete}
+                isLoading={deleteMessageMutation.isPending}
+                loadingText="Deleting…"
+              >
+                {isModerating ? "Remove" : "Delete"}
+              </Button>
+            </div>
           </div>
-        </div>
-      ) : (
+        );
+      })() : (
         <div data-testid="message-form">
           <ChatInput ref={chatInputRef} onSend={handleSend} autoFocus />
         </div>

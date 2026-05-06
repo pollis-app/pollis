@@ -17,6 +17,9 @@ interface MessageItemProps {
   allMessages?: Message[];
   authorUsername?: string;
   isAuthorAdmin?: boolean;
+  /** True when the viewer is an admin in this message's group — enables
+   * deleting other members' messages for moderation. */
+  canModerate?: boolean;
   onReply?: (messageId: string) => void;
   onEdit?: (messageId: string) => void;
   onDelete?: (messageId: string) => void;
@@ -37,6 +40,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   allMessages = [],
   authorUsername = "unknown",
   isAuthorAdmin = false,
+  canModerate = false,
   onReply,
   onEdit,
   onDelete,
@@ -198,6 +202,16 @@ export const MessageItem: React.FC<MessageItemProps> = ({
                 data-testid="delete-button"
                 onClick={() => onDelete(message.id)}
                 aria-label="Delete message"
+                className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
+              >
+                <Trash2 size={18} />
+              </button>
+            )}
+            {!isOwn && canModerate && onDelete && (
+              <button
+                data-testid="admin-delete-button"
+                onClick={() => onDelete(message.id)}
+                aria-label="Delete message (admin)"
                 className="opacity-0 group-hover:opacity-100 text-[var(--c-text-muted)] hover:text-[var(--c-text-accent)]"
               >
                 <Trash2 size={18} />
