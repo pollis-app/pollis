@@ -6,6 +6,7 @@ interface InputOtpProps {
   onChange: (value: string) => void;
   disabled?: boolean;
   autoFocus?: boolean;
+  mask?: boolean;
 }
 
 export const InputOtp: React.FC<InputOtpProps> = ({
@@ -14,6 +15,7 @@ export const InputOtp: React.FC<InputOtpProps> = ({
   onChange,
   disabled = false,
   autoFocus = false,
+  mask = false,
 }) => {
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const inputsRef = useRef<(HTMLInputElement | null)[]>([]);
@@ -82,7 +84,7 @@ export const InputOtp: React.FC<InputOtpProps> = ({
           <input
             key={index}
             ref={(el) => { inputsRef.current[index] = el; }}
-            type="text"
+            type={mask ? "password" : "text"}
             inputMode="numeric"
             maxLength={1}
             value={digit}

@@ -110,6 +110,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
                 }}
                 disabled={isLoading}
                 autoFocus
+                mask
               />
               <input
                 data-testid="pin-entry-input"

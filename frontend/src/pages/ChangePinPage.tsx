@@ -72,8 +72,9 @@ export const ChangePinPage: React.FC = () => {
 
   return (
     <PageShell title="Change PIN" scrollable>
+      <div className="flex justify-center px-6 py-8">
       <div
-        className="flex flex-col gap-4 p-4 font-mono"
+        className="flex flex-col gap-4 w-full max-w-md font-mono"
         data-testid="change-pin-page"
         style={{ color: "var(--c-text)" }}
       >
@@ -127,6 +128,7 @@ export const ChangePinPage: React.FC = () => {
                 }}
                 disabled={isLoading}
                 autoFocus
+                mask
               />
               <input
                 data-testid="change-pin-input"
@@ -145,6 +147,7 @@ export const ChangePinPage: React.FC = () => {
             </Button>
           </div>
         )}
+      </div>
       </div>
     </PageShell>
   );
