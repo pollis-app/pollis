@@ -278,6 +278,125 @@ pub async fn verify_otp(
     Ok(profile)
 }
 
+/// Send an OTP to a new email address as part of the email-change flow.
+/// Reuses the regular `request_otp` machinery — the OTP is stored keyed on
+/// the *new* email, and `verify_email_change` consumes it on success.
+///
+/// Pre-checks uniqueness so the user gets an immediate "already in use"
+/// error instead of waiting until verify time. A second uniqueness check
+/// runs at verify time to close the race.
+#[tauri::command]
+pub async fn request_email_change_otp(
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+    new_email: String,
+) -> Result<()> {
+    let trimmed = new_email.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(anyhow::anyhow!("Email is required.").into());
+    }
+
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn
+        .query(
+            "SELECT id FROM users WHERE email = ?1",
+            libsql::params![trimmed.clone()],
+        )
+        .await?;
+    if let Some(row) = rows.next().await? {
+        let owner: String = row.get(0)?;
+        if owner == user_id {
+            return Err(anyhow::anyhow!("That's already your email address.").into());
+        }
+        return Err(anyhow::anyhow!("That email is already in use.").into());
+    }
+
+    request_otp(state, trimmed).await
+}
+
+/// Verify the OTP sent to a new email address and atomically swap
+/// `users.email` for the calling user. The OTP proves the caller controls
+/// the new mailbox; the device's keystore identity proves they're the one
+/// asking. We re-check uniqueness right before the UPDATE to close the
+/// window between request and verify.
+#[tauri::command]
+pub async fn verify_email_change(
+    state: State<'_, Arc<AppState>>,
+    user_id: String,
+    new_email: String,
+    code: String,
+) -> Result<()> {
+    use sha2::{Digest, Sha256};
+
+    let trimmed = new_email.trim().to_string();
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let entry = {
+        let store = state.otp_store.lock().await;
+        store.get(&trimmed).cloned()
+    }
+    .ok_or_else(|| {
+        anyhow::anyhow!("No verification request for that email. Request a new code.")
+    })?;
+
+    if now > entry.expires_at {
+        return Err(anyhow::anyhow!("This code has expired. Request a new one.").into());
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(code.trim().as_bytes());
+    let provided = format!("{:x}", hasher.finalize());
+    if provided != entry.hash {
+        return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into());
+    }
+
+    {
+        let mut store = state.otp_store.lock().await;
+        store.remove(&trimmed);
+    }
+
+    let conn = state.remote_db.conn().await?;
+
+    // Race-close: between request and verify, someone else could have
+    // claimed this email. Reject if so — the user gets a clear error.
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM users WHERE email = ?1 AND id != ?2",
+            libsql::params![trimmed.clone(), user_id.clone()],
+        )
+        .await?;
+    if rows.next().await?.is_some() {
+        return Err(anyhow::anyhow!("That email was just claimed by another account.").into());
+    }
+
+    conn.execute(
+        "UPDATE users SET email = ?1 WHERE id = ?2",
+        libsql::params![trimmed.clone(), user_id.clone()],
+    )
+    .await?;
+
+    // Mirror the new email into the local accounts index so the login
+    // screen's "continue as" picker shows the new address.
+    let mut name_rows = conn
+        .query(
+            "SELECT username FROM users WHERE id = ?1",
+            libsql::params![user_id.clone()],
+        )
+        .await?;
+    if let Some(row) = name_rows.next().await? {
+        let username: String = row.get(0)?;
+        if let Err(e) = crate::accounts::upsert_account(&user_id, &username, Some(&trimmed), None) {
+            eprintln!("[auth] email-change accounts.json mirror failed: {e}");
+        }
+    }
+
+    Ok(())
+}
+
 /// Dev-only: bypass OTP and log in directly with an email address.
 /// Returns an error in release builds so this can never be used in production.
 #[tauri::command]

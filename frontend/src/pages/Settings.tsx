@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Upload, User } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "../stores/appStore";
 import { uploadAvatar } from "../services/r2-upload";
 import { resizeImage } from "../utils/imageProcessing";
-import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar } from "../hooks/queries";
+import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar, userQueryKeys } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { getVersion } from "@tauri-apps/api/app";
@@ -34,6 +35,18 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+
+  // Email-change flow lives entirely in this component:
+  //   'idle'    → display current email + "Change" button
+  //   'request' → input new address, send OTP
+  //   'verify'  → input the OTP, swap email
+  // Distinct mutations would obscure the linear UX, so we hold state locally.
+  const [emailChangeStep, setEmailChangeStep] = useState<"idle" | "request" | "verify">("idle");
+  const [pendingNewEmail, setPendingNewEmail] = useState("");
+  const [emailOtpCode, setEmailOtpCode] = useState("");
+  const [emailChangeError, setEmailChangeError] = useState<string | null>(null);
+  const [emailChangePending, setEmailChangePending] = useState(false);
+  const queryClient = useQueryClient();
   const [fileInputKey, setFileInputKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -145,6 +158,56 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
     }
   };
 
+  const cancelEmailChange = () => {
+    setEmailChangeStep("idle");
+    setPendingNewEmail("");
+    setEmailOtpCode("");
+    setEmailChangeError(null);
+  };
+
+  const handleSendEmailChangeOtp = async () => {
+    if (!currentUser) { return; }
+    const target = pendingNewEmail.trim();
+    if (!target) {
+      setEmailChangeError("Enter a new email address.");
+      return;
+    }
+    setEmailChangePending(true);
+    setEmailChangeError(null);
+    try {
+      await invoke("request_email_change_otp", { userId: currentUser.id, newEmail: target });
+      setEmailChangeStep("verify");
+    } catch (err) {
+      setEmailChangeError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEmailChangePending(false);
+    }
+  };
+
+  const handleVerifyEmailChange = async () => {
+    if (!currentUser) { return; }
+    if (!emailOtpCode.trim()) {
+      setEmailChangeError("Enter the code from your email.");
+      return;
+    }
+    setEmailChangePending(true);
+    setEmailChangeError(null);
+    try {
+      await invoke("verify_email_change", {
+        userId: currentUser.id,
+        newEmail: pendingNewEmail.trim(),
+        code: emailOtpCode.trim(),
+      });
+      // Refetch the profile so the displayed email updates without a reload.
+      await queryClient.invalidateQueries({ queryKey: userQueryKeys.profile(currentUser.id) });
+      cancelEmailChange();
+    } catch (err) {
+      setEmailChangeError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setEmailChangePending(false);
+    }
+  };
+
   const handleDeleteAccount = useCallback(async () => {
     if (!currentUser) {
       return;
@@ -238,16 +301,120 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
                 />
                 <input data-testid="settings-username-input" type="hidden" value={username} readOnly />
 
-                <TextInput
-                  label="Email"
-                  value={email}
-                  onChange={setEmail}
-                  type="email"
-                  placeholder="you@example.com"
-                  id="settings-email"
-                />
-                <input data-testid="settings-email-input" type="hidden" value={email} readOnly />
+                {emailChangeStep === "idle" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <TextInput
+                      label="Email"
+                      value={email}
+                      onChange={() => { /* read-only — change via the button below */ }}
+                      type="email"
+                      placeholder="you@example.com"
+                      id="settings-email"
+                      disabled
+                    />
+                    <input data-testid="settings-email-input" type="hidden" value={email} readOnly />
+                    <Button
+                      data-testid="settings-email-change-button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => {
+                        setPendingNewEmail("");
+                        setEmailOtpCode("");
+                        setEmailChangeError(null);
+                        setEmailChangeStep("request");
+                      }}
+                      className="self-start"
+                    >
+                      Change Email
+                    </Button>
+                  </div>
+                ) : emailChangeStep === "request" ? (
+                  <div className="flex flex-col gap-2">
+                    <TextInput
+                      label="New email"
+                      value={pendingNewEmail}
+                      onChange={setPendingNewEmail}
+                      type="email"
+                      placeholder="you@example.com"
+                      id="settings-email-new"
+                      disabled={emailChangePending}
+                    />
+                    <input data-testid="settings-email-new-input" type="hidden" value={pendingNewEmail} readOnly />
+                    {emailChangeError && (
+                      <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+                        {emailChangeError}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        data-testid="settings-email-send-code"
+                        size="sm"
+                        onClick={handleSendEmailChangeOtp}
+                        isLoading={emailChangePending}
+                        loadingText="Sending…"
+                      >
+                        Send Code
+                      </Button>
+                      <Button
+                        data-testid="settings-email-cancel"
+                        variant="ghost"
+                        size="sm"
+                        onClick={cancelEmailChange}
+                        disabled={emailChangePending}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                      Code sent to <span style={{ color: "var(--c-text)" }}>{pendingNewEmail}</span>.
+                    </p>
+                    <TextInput
+                      label="Verification code"
+                      value={emailOtpCode}
+                      onChange={setEmailOtpCode}
+                      placeholder="000000"
+                      id="settings-email-otp"
+                      disabled={emailChangePending}
+                    />
+                    <input data-testid="settings-email-otp-input" type="hidden" value={emailOtpCode} readOnly />
+                    {emailChangeError && (
+                      <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+                        {emailChangeError}
+                      </p>
+                    )}
+                    <div className="flex gap-2">
+                      <Button
+                        data-testid="settings-email-verify"
+                        size="sm"
+                        onClick={handleVerifyEmailChange}
+                        isLoading={emailChangePending}
+                        loadingText="Verifying…"
+                      >
+                        Verify
+                      </Button>
+                      <Button
+                        data-testid="settings-email-back"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setEmailOtpCode("");
+                          setEmailChangeError(null);
+                          setEmailChangeStep("request");
+                        }}
+                        disabled={emailChangePending}
+                      >
+                        Back
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
+                {/* Phone field hidden — not currently surfaced as a feature.
+                    State and backend wiring are intentionally left in place
+                    so re-enabling is a one-uncomment change.
                 <TextInput
                   label="Phone"
                   value={phone}
@@ -256,6 +423,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
                   id="settings-phone"
                 />
                 <input data-testid="settings-phone-input" type="hidden" value={phone} readOnly />
+                */}
               </div>
             )}
 
