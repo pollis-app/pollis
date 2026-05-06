@@ -261,6 +261,9 @@ export const AppShell: React.FC = () => {
     if (!activeVoiceChannelId) {
       return "voice";
     }
+    if (activeVoiceChannelId.startsWith("call-")) {
+      return "call";
+    }
     for (const g of groupsWithChannels ?? []) {
       const ch = g.channels.find((c) => c.id === activeVoiceChannelId);
       if (ch) {

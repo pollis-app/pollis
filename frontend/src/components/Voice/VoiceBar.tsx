@@ -42,15 +42,19 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
       <button
         data-testid="voice-bar-channel-name"
         onClick={() => {
-          if (groupId) {
+          if (channelId.startsWith("call-")) {
+            const callId = channelId.slice("call-".length);
+            navigate({ to: "/call/$callId", params: { callId } });
+          } else if (groupId) {
             navigate({ to: "/groups/$groupId/voice/$channelId", params: { groupId, channelId } });
           }
         }}
-        // style={{ color: "var(--c-text)" }}
-        // onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-        // onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text)"; }}
         className="flex items-center gap-1.5 text-[var(--c-accent)] hover:text-[var(--c-text)] transition-colors"
-        title={`Go to ${channelName} voice channel`}
+        title={
+          channelId.startsWith("call-")
+            ? "Return to call"
+            : `Go to ${channelName} voice channel`
+        }
       >
         <Volume2 size={12} />
         {channelName}
