@@ -240,6 +240,10 @@ pub struct VoiceState {
     pub room_task: Option<tokio::task::JoinHandle<()>>,
     pub playback: Arc<Mutex<PlaybackState>>,
     pub is_muted: Arc<AtomicBool>,
+    /// Set while a `join_voice_channel` call is in flight. Blocks a second
+    /// concurrent invocation from racing the first and tripping LiveKit's
+    /// DuplicateIdentity eviction (which would disconnect both attempts).
+    pub joining: Arc<AtomicBool>,
     pub current_input_device: Option<String>,
     /// APM stage for the current voice session. Owns the WebRTC AudioProcessing
     /// `Processor` and its config. `None` outside a call.
@@ -270,6 +274,7 @@ impl VoiceState {
             room_task: None,
             playback: Arc::new(Mutex::new(PlaybackState::new())),
             is_muted: Arc::new(AtomicBool::new(false)),
+            joining: Arc::new(AtomicBool::new(false)),
             current_input_device: None,
             apm: None,
             denoiser: Arc::new(Mutex::new(None)),
@@ -1033,6 +1038,28 @@ pub async fn join_voice_channel(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
+
+    // Refuse re-entry if a join is already in flight or a room is already
+    // connected. Two concurrent joins with the same identity (`voice-{user_id}`)
+    // race LiveKit's session bookkeeping and trigger DuplicateIdentity, which
+    // disconnects the surviving session shortly after Connected. Holds the
+    // voice lock just long enough to swap the flag, then releases.
+    let _join_guard = {
+        let voice = state.voice.lock().await;
+        if voice.room.is_some() {
+            return Err(anyhow::anyhow!("already connected to a voice channel").into());
+        }
+        if voice.joining.swap(true, Ordering::AcqRel) {
+            return Err(anyhow::anyhow!("voice channel join already in progress").into());
+        }
+        struct JoinGuard(Arc<AtomicBool>);
+        impl Drop for JoinGuard {
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
+        }
+        JoinGuard(Arc::clone(&voice.joining))
+    };
 
     let url = state.config.livekit_url.clone();
     if url.is_empty() {
