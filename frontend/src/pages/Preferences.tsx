@@ -15,6 +15,7 @@ import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
+import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -35,6 +36,7 @@ export const Preferences: React.FC = () => {
   const [fontSize, setFontSize] = useState<number>(15);
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
+  const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
@@ -79,6 +81,7 @@ export const Preferences: React.FC = () => {
       const fs = parseInt(getRootVar("--font-size-base"));
       if (!isNaN(fs)) { setFontSize(fs); }
     }
+    setAllowCallRingtone(loadDeviceCallRingtone(currentUser?.id));
   }, [currentUser?.id]);
 
   const save = useCallback((opts: {
@@ -139,6 +142,11 @@ export const Preferences: React.FC = () => {
   const handleAllowSoundEffects = (val: boolean) => {
     setAllowSoundEffects(val);
     save({ soundEffects: val });
+  };
+
+  const handleAllowCallRingtone = (val: boolean) => {
+    setAllowCallRingtone(val);
+    saveDeviceCallRingtone(currentUser?.id, val);
   };
 
   const handleAllowDesktopNotifications = async (val: boolean) => {
@@ -371,6 +379,17 @@ export const Preferences: React.FC = () => {
             >
               The quick brown fox jumps over the lazy dog.
             </p>
+            <div className="flex flex-col gap-1.5">
+              <Switch
+                id="pref-call-ringtone"
+                label="Incoming call ringtone"
+                checked={allowCallRingtone}
+                onChange={handleAllowCallRingtone}
+              />
+              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                Plays a looping ring on this device when someone calls. Off here doesn't mute the alert badge or your other devices.
+              </p>
+            </div>
           </section>
 
           {/* Notifications */}

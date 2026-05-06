@@ -11,7 +11,8 @@ export type Category =
   | 'voice_self_leave'
   | 'dm_request'
   | 'group_invite'
-  | 'enrollment';
+  | 'enrollment'
+  | 'incoming_call';
 
 type CategoryConfig = {
   sound?: 'ping' | 'join' | 'leave';
@@ -19,6 +20,12 @@ type CategoryConfig = {
   badge?: boolean;
   alert?: boolean;
   overlay?: boolean;
+  // Honors the device-local ringtone preference when set. Used for the
+  // incoming-call category — if the user has muted ringtone on this device,
+  // the OS notification is suppressed even when allow_desktop_notifications
+  // is on globally. The looping ringtone itself is driven separately from
+  // `AppShell`'s incomingCall effect via `start_ring` / `stop_ring`.
+  honorsRingtonePref?: boolean;
   cooldownMs?: number;
 };
 
@@ -42,6 +49,7 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   dm_request:        { sound: 'ping',  osNotif: true,               alert: true                   },
   group_invite:      { sound: 'ping',  osNotif: true                                              },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
+  incoming_call:     {                  osNotif: true,               alert: true, honorsRingtonePref: true },
 };
 
 export type NotifyPayload = {
@@ -56,9 +64,47 @@ type NotifyPrefs = {
   allowSound: boolean;
   allowOsNotif: boolean;
   osPermissionGranted: boolean;
+  // Device-local toggle for the incoming-call ringtone. Independent of the
+  // account-level allow_sound_effects so a user can mute ringing on a single
+  // device without silencing all in-app sounds globally.
+  allowCallRingtone: boolean;
 };
 
-let prefs: NotifyPrefs = { allowSound: true, allowOsNotif: false, osPermissionGranted: false };
+let prefs: NotifyPrefs = {
+  allowSound: true,
+  allowOsNotif: false,
+  osPermissionGranted: false,
+  allowCallRingtone: true,
+};
+
+// Device-local call-ringtone toggle. Mirrors the per-device font-size storage
+// pattern in `colorUtils.ts` — keyed by user id so a shared OS account with
+// multiple Pollis users keeps each user's choice separate.
+const CALL_RINGTONE_KEY_PREFIX = 'pollis-call-ringtone:';
+
+function callRingtoneKey(userId: string | null | undefined): string {
+  return `${CALL_RINGTONE_KEY_PREFIX}${userId ?? 'anon'}`;
+}
+
+export function loadDeviceCallRingtone(userId: string | null | undefined): boolean {
+  try {
+    const raw = localStorage.getItem(callRingtoneKey(userId));
+    if (raw === null) {
+      return true;
+    }
+    return raw !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function saveDeviceCallRingtone(userId: string | null | undefined, enabled: boolean): void {
+  try {
+    localStorage.setItem(callRingtoneKey(userId), enabled ? '1' : '0');
+  } catch {
+    // localStorage unavailable / quota exceeded — fall through silently
+  }
+}
 
 const cooldowns = new Map<string, number>();
 
@@ -79,12 +125,17 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
 
   let fired = false;
 
-  if (config.sound && prefs.allowSound && !cooled) {
+  // Ringtone-honoring categories (currently just incoming_call) gate sound
+  // AND OS notification on the device-local ringtone toggle. Everything else
+  // continues to read the account-level allow_sound_effects only.
+  const ringtoneAllowed = !config.honorsRingtonePref || prefs.allowCallRingtone;
+
+  if (config.sound && prefs.allowSound && ringtoneAllowed && !cooled) {
     playSfx(config.sound);
     fired = true;
   }
 
-  if (config.osNotif && prefs.allowOsNotif && prefs.osPermissionGranted && !cooled) {
+  if (config.osNotif && prefs.allowOsNotif && prefs.osPermissionGranted && ringtoneAllowed && !cooled) {
     const title = payload.title ?? 'New message';
     const body = payload.body ?? (payload.senderUsername ? `${payload.senderUsername}: New message` : '');
     invoke('plugin:notification|notify', { options: { title, body } }).catch(() => {});

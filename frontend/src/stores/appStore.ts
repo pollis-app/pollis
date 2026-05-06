@@ -75,6 +75,20 @@ interface AppStore extends AppState {
   // delete-channel confirm bar.
   pendingDeleteChannelId: string | null;
   setPendingDeleteChannelId: (channelId: string | null) => void;
+  // Incoming 1:1 call ringing this device. Set when a `call_invite` arrives
+  // on the personal inbox; cleared on accept, decline, cancel, or logout.
+  // Renders in the bottom status bar with priority over `statusBarAlert`.
+  incomingCall: {
+    callId: string;
+    roomName: string;
+    callerId: string;
+    callerUsername: string;
+  } | null;
+  setIncomingCall: (
+    call:
+      | { callId: string; roomName: string; callerId: string; callerUsername: string }
+      | null,
+  ) => void;
   logout: () => void;
 }
 
@@ -192,6 +206,9 @@ export const useAppStore = create<AppStore>((set) => ({
   pendingDeleteChannelId: null,
   setPendingDeleteChannelId: (channelId) => set({ pendingDeleteChannelId: channelId }),
 
+  incomingCall: null,
+  setIncomingCall: (call) => set({ incomingCall: call }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -218,6 +235,7 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceIsMuted: false,
     pendingEnrollmentApproval: null,
     pendingDeleteChannelId: null,
+    incomingCall: null,
   }),
 }));
 

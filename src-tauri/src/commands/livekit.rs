@@ -1099,8 +1099,99 @@ fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) -
                 });
             }
         }
+        Some("call_invite") => {
+            if let (Some(call_id), Some(room_name), Some(caller_id)) = (
+                data.get("call_id").and_then(|v| v.as_str()),
+                data.get("room_name").and_then(|v| v.as_str()),
+                data.get("caller_id").and_then(|v| v.as_str()),
+            ) {
+                let caller_username = data
+                    .get("caller_username")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(caller_id)
+                    .to_owned();
+                let _ = channel.send(RealtimeEvent::CallInvite {
+                    call_id: call_id.to_owned(),
+                    room_name: room_name.to_owned(),
+                    caller_id: caller_id.to_owned(),
+                    caller_username,
+                });
+            }
+        }
+        Some("call_canceled") => {
+            if let Some(call_id) = data.get("call_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::CallCanceled {
+                    call_id: call_id.to_owned(),
+                });
+            }
+        }
         _ => {}
     }
     None
+}
+
+// ── Calls (1:1 voice ringing) ──────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize)]
+pub struct StartCallResult {
+    pub call_id: String,
+    pub room_name: String,
+}
+
+/// Initiates a 1:1 call by minting a fresh LiveKit room name and posting a
+/// `call_invite` data packet to the callee's personal inbox room. Recipients
+/// who are connected to their inbox receive it instantly via `dispatch_data`;
+/// recipients who are offline simply miss the ring (treated as unanswered).
+///
+/// This does NOT join the caller to the room — the caller's frontend handles
+/// that via `join_voice_channel` once `start_call` returns.
+#[tauri::command]
+pub async fn start_call(
+    callee_id: String,
+    caller_id: String,
+    caller_username: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<StartCallResult> {
+    if state.config.livekit_url.is_empty() {
+        return Err(Error::Other(anyhow::anyhow!("LiveKit is not configured")));
+    }
+
+    let call_id = ulid::Ulid::new().to_string();
+    let room_name = format!("call-{call_id}");
+
+    let payload = serde_json::json!({
+        "type": "call_invite",
+        "call_id": call_id,
+        "room_name": room_name,
+        "caller_id": caller_id,
+        "caller_username": caller_username,
+    });
+
+    publish_to_user_inbox(&state.config, &callee_id, payload).await?;
+
+    Ok(StartCallResult { call_id, room_name })
+}
+
+/// Tells the callee that a pending call is no longer active — caller hung up
+/// before answer, or callee declined. Either side can invoke it; the payload
+/// is posted to the OTHER side's inbox.
+#[tauri::command]
+pub async fn cancel_call(
+    other_user_id: String,
+    call_id: String,
+    state: State<'_, Arc<AppState>>,
+) -> Result<()> {
+    if state.config.livekit_url.is_empty() {
+        return Ok(());
+    }
+
+    let payload = serde_json::json!({
+        "type": "call_canceled",
+        "call_id": call_id,
+    });
+
+    publish_to_user_inbox(&state.config, &other_user_id, payload).await?;
+
+    Ok(())
 }
 

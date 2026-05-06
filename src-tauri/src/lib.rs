@@ -405,6 +405,8 @@ commands::livekit::get_livekit_token,
             commands::livekit::publish_voice_presence,
             commands::livekit::list_voice_participants,
             commands::livekit::list_voice_room_counts,
+            commands::livekit::start_call,
+            commands::livekit::cancel_call,
             commands::r2::upload_file,
             commands::r2::upload_media,
             commands::r2::download_file,
@@ -431,6 +433,8 @@ commands::livekit::get_livekit_token,
             commands::voice_test::play_test_tone,
             commands::voice_test::stop_test_playback,
             commands::sfx::play_sfx,
+            commands::sfx::start_ring,
+            commands::sfx::stop_ring,
         ])
         // On macOS, hide the window on close instead of quitting.
         .on_window_event(|_window, _event| {

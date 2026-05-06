@@ -1,0 +1,89 @@
+import React, { useEffect } from "react";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { PhoneOff } from "lucide-react";
+import { useAppStore } from "../stores/appStore";
+import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
+
+/**
+ * 1:1 call screen. Reuses the voice stack — a call is just a private LiveKit
+ * room named `call-<call_id>`. Setting `activeVoiceChannelId` to the room name
+ * causes `AppShell` to mount `VoiceBar`, which is what actually invokes
+ * `join_voice_channel`. This page just renders the participant view and a
+ * hang-up button on top.
+ *
+ * Reachable via two paths:
+ * - Caller clicks the phone in a DM header → DM page invokes `start_call`,
+ *   sets activeVoiceChannelId to `call-<id>`, and navigates here.
+ * - Callee accepts an incoming-call alert in the bottom status bar → AppShell
+ *   does the same.
+ */
+export const CallPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { callId } = useParams({ from: "/call/$callId" });
+  const roomName = `call-${callId}`;
+  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const setActiveVoiceChannelId = useAppStore((s) => s.setActiveVoiceChannelId);
+
+  // Direct navigation to /call/<id> with no active voice → bounce back. Joining
+  // is initiated by the caller's DM page or the callee's accept button; we
+  // don't auto-join here because we have no caller/callee context for the
+  // backend handshake.
+  useEffect(() => {
+    if (!activeVoiceChannelId) {
+      navigate({ to: "/dms" });
+    }
+  }, [activeVoiceChannelId, navigate]);
+
+  // Triggered by either the local hang-up button OR a `call_canceled` event
+  // arriving on the inbox (the realtime handler clears activeVoiceChannelId
+  // when it matches this call). Either way, leave the page.
+  useEffect(() => {
+    if (activeVoiceChannelId !== null && activeVoiceChannelId !== roomName) {
+      // User joined a different voice channel while this call page was open —
+      // step out so we don't sit on a stale call screen.
+      navigate({ to: "/dms" });
+    }
+  }, [activeVoiceChannelId, roomName, navigate]);
+
+  const hangUp = () => {
+    setActiveVoiceChannelId(null);
+  };
+
+  return (
+    <div className="flex flex-col h-full font-mono text-xs">
+      <div
+        className="flex items-center px-4 py-2 flex-shrink-0"
+        style={{ borderBottom: "1px solid var(--c-border)", color: "var(--c-text-muted)" }}
+      >
+        <span style={{ flex: 1, color: "var(--c-accent)" }}>call</span>
+      </div>
+
+      <VoiceChannelView />
+
+      <div
+        className="px-4 py-3 flex items-center justify-end flex-shrink-0"
+        style={{ borderTop: "1px solid var(--c-border)" }}
+      >
+        <button
+          data-testid="call-hang-up"
+          onClick={hangUp}
+          className="inline-flex items-center gap-2"
+          style={{
+            background: "transparent",
+            color: "#ff6b6b",
+            border: "2px solid #ff6b6b",
+            padding: "6px 14px",
+            borderRadius: "0.25rem",
+            cursor: "pointer",
+            fontFamily: "inherit",
+            fontSize: "inherit",
+            fontWeight: "bold",
+            letterSpacing: "0.05em",
+          }}
+        >
+          <PhoneOff size={12} /> Hang up
+        </button>
+      </div>
+    </div>
+  );
+};

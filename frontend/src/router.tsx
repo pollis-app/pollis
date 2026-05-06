@@ -35,6 +35,7 @@ import { KickMemberPage } from "./pages/KickMemberPage";
 import { SearchPage } from "./pages/Search";
 import { RequestsPage } from "./pages/RequestsPage";
 import { BlockedPage } from "./pages/BlockedPage";
+import { CallPage } from "./pages/Call";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -225,6 +226,12 @@ const searchRoute = createRoute({
   component: SearchPage,
 });
 
+const callRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/call/$callId",
+  component: CallPage,
+});
+
 // ─── Route tree ────────────────────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -257,6 +264,7 @@ const routeTree = rootRoute.addChildren([
   invitesRoute,
   allJoinRequestsRoute,
   searchRoute,
+  callRoute,
 ]);
 
 // ─── Router factory ────────────────────────────────────────────────────────────

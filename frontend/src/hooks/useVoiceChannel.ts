@@ -77,6 +77,16 @@ function formatJoinTimings(t: JoinTimings, intentToInvokeMs: number): string {
   ].join('\n');
 }
 
+// Cross-render suppression for the leave/join sfx pair when the user switches
+// from one voice room straight into another (e.g. accepting an incoming call
+// while in a group voice channel). The cleanup of the old room schedules its
+// `voice_self_leave` ping on a macrotask; the new room's effect runs before
+// that macrotask fires and, if it sees one queued, cancels it and tells the
+// upcoming join to stay silent. Result: switching plays neither cue, while a
+// real unmount (navigate away with no follow-up join) plays leave normally.
+let pendingLeaveSfxTimeout: ReturnType<typeof setTimeout> | null = null;
+let suppressNextJoinSfx = false;
+
 export function useVoiceChannel(channelId: string | null, groupId: string | null = null): UseVoiceChannelResult {
   const { isReady: isTauriReady } = useTauriReady();
   const {
@@ -105,6 +115,16 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
   useEffect(() => {
     if (!channelId || !isTauriReady || !currentUser || networkStatus === 'kill-switch') {
       return;
+    }
+
+    // If the cleanup of a previous voice-room mount queued its leave sfx
+    // (channelId switched to another non-null id), drop it on the floor and
+    // suppress the join cue we'd otherwise fire below — the user perceives
+    // the switch as a single transition, not two events back-to-back.
+    if (pendingLeaveSfxTimeout !== null) {
+      clearTimeout(pendingLeaveSfxTimeout);
+      pendingLeaveSfxTimeout = null;
+      suppressNextJoinSfx = true;
     }
 
     let cancelled = false;
@@ -254,7 +274,11 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
         }
       } else {
         joinedRef.current = true;
-        notify('voice_self_join');
+        if (suppressNextJoinSfx) {
+          suppressNextJoinSfx = false;
+        } else {
+          notify('voice_self_join');
+        }
         if (groupId) {
           invoke('publish_voice_presence', {
             groupId,
@@ -305,7 +329,15 @@ export function useVoiceChannel(channelId: string | null, groupId: string | null
       const didJoin = joinedRef.current;
       joinedRef.current = false;
       if (didJoin) {
-        notify('voice_self_leave');
+        // Defer one macrotask so a follow-up mount with a new channelId can
+        // cancel this and silence the cue — see the suppression note up top.
+        if (pendingLeaveSfxTimeout !== null) {
+          clearTimeout(pendingLeaveSfxTimeout);
+        }
+        pendingLeaveSfxTimeout = setTimeout(() => {
+          notify('voice_self_leave');
+          pendingLeaveSfxTimeout = null;
+        }, 0);
       }
       // Optimistically remove self from the voice-participants cache so the
       // observer list in the UI drops us immediately instead of waiting for

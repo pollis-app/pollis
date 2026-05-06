@@ -13,7 +13,9 @@ import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
-import { Mail } from "lucide-react";
+import { Mail, Phone, X } from "lucide-react";
+import { loadDeviceCallRingtone } from "../../utils/notify";
+import { usePreferences } from "../../hooks/queries/usePreferences";
 
 /**
  * AppShell is the root route component rendered by RouterProvider.
@@ -34,11 +36,35 @@ export const AppShell: React.FC = () => {
     statusBarAlert,
     setStatusBarAlert,
     isLocalSpeaking,
+    incomingCall,
+    setIncomingCall,
+    setActiveVoiceChannelId,
   } = useAppStore();
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
+  const { query: prefsQuery } = usePreferences();
 
   const currentUser = useAppStore((s) => s.currentUser);
+
+  // Drive the looping ringtone off the incomingCall slot. Rust owns the
+  // playback thread (`start_ring` / `stop_ring`) so the loop survives any
+  // re-render churn here. Both the device-local ringtone toggle and the
+  // account-level allow_sound_effects must be on for the ring to play; OS
+  // notification (a single ping on arrival) is still fired from notify.ts.
+  useEffect(() => {
+    if (!incomingCall) {
+      invoke("stop_ring").catch(() => {});
+      return;
+    }
+    const allowGlobal = prefsQuery.data?.allow_sound_effects ?? true;
+    const allowDevice = loadDeviceCallRingtone(currentUser?.id ?? null);
+    if (allowGlobal && allowDevice) {
+      invoke("start_ring").catch(() => {});
+    }
+    return () => {
+      invoke("stop_ring").catch(() => {});
+    };
+  }, [incomingCall, currentUser?.id, prefsQuery.data?.allow_sound_effects]);
 
   // ─── Current route pathname — needed by keyboard handlers below ─────────────
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -333,7 +359,45 @@ export const AppShell: React.FC = () => {
         }}
       >
         <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />
-        {statusBarAlert ? (
+        {incomingCall ? (
+          <div
+            data-testid="status-bar-incoming-call"
+            className="flex items-center gap-2"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          >
+            <button
+              data-testid="status-bar-incoming-call-accept"
+              className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
+              style={{ color: "inherit", background: "none", border: "none", padding: 0 }}
+              onClick={() => {
+                // Order matters: route first (so the old voice page unmounts
+                // before activeVoiceChannelId flips and any in-flight Call
+                // page useEffect tries to bounce off a transient mismatch),
+                // then swap the voice room, then clear the alert.
+                router.navigate({ to: "/call/$callId", params: { callId: incomingCall.callId } });
+                setActiveVoiceChannelId(incomingCall.roomName);
+                setIncomingCall(null);
+              }}
+              aria-label={`Answer call from @${incomingCall.callerUsername}`}
+            >
+              <Phone className="w-4 h-4" />: @{incomingCall.callerUsername}
+            </button>
+            <button
+              data-testid="status-bar-incoming-call-decline"
+              className="cursor-pointer"
+              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              onClick={() => {
+                const callerId = incomingCall.callerId;
+                const callId = incomingCall.callId;
+                setIncomingCall(null);
+                invoke("cancel_call", { otherUserId: callerId, callId }).catch(() => {});
+              }}
+              aria-label="Decline call"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : statusBarAlert ? (
           <button
             className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
             style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)", background: "none", border: "none", padding: 0 }}

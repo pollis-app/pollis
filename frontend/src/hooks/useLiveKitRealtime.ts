@@ -6,7 +6,7 @@ import { useTauriReady } from './useTauriReady';
 import { messageQueryKeys, useDMConversations } from './queries/useMessages';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
-import { notify, setNotifyPrefs } from '../utils/notify';
+import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -68,6 +68,17 @@ type RealtimeEvent =
   | {
     type: 'realtime_reconnected';
     room_id: string;
+  }
+  | {
+    type: 'call_invite';
+    call_id: string;
+    room_name: string;
+    caller_id: string;
+    caller_username: string;
+  }
+  | {
+    type: 'call_canceled';
+    call_id: string;
   };
 
 export function useLiveKitRealtime() {
@@ -162,6 +173,7 @@ export function useLiveKitRealtime() {
     }
     const allowSound = prefsQuery.data?.allow_sound_effects ?? true;
     const allowOsNotif = prefsQuery.data?.allow_desktop_notifications ?? false;
+    const allowCallRingtone = loadDeviceCallRingtone(currentUser?.id ?? null);
 
     const sync = async () => {
       const result: boolean | null = await invoke('plugin:notification|is_permission_granted');
@@ -170,13 +182,13 @@ export function useLiveKitRealtime() {
         const state: string = await invoke('plugin:notification|request_permission');
         granted = state === 'granted';
       }
-      setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: granted });
+      setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: granted, allowCallRingtone });
     };
     sync().catch((err) => {
       console.error('[realtime] notification permission sync failed:', err);
-      setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: false });
+      setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: false, allowCallRingtone });
     });
-  }, [isTauriReady, prefsQuery.data?.allow_sound_effects, prefsQuery.data?.allow_desktop_notifications]);
+  }, [isTauriReady, prefsQuery.data?.allow_sound_effects, prefsQuery.data?.allow_desktop_notifications, currentUser?.id]);
 
   // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
   // Recreated if the user identity changes (e.g. logout → login as someone else).
@@ -320,6 +332,30 @@ export function useLiveKitRealtime() {
             verificationCode: event.verification_code,
           },
         });
+        return;
+      }
+
+      if (event.type === 'call_invite') {
+        useAppStore.getState().setIncomingCall({
+          callId: event.call_id,
+          roomName: event.room_name,
+          callerId: event.caller_id,
+          callerUsername: event.caller_username,
+        });
+        notify('incoming_call', {
+          title: 'Incoming call',
+          body: `@${event.caller_username} is calling`,
+          senderUsername: event.caller_username,
+          roomId: event.call_id,
+        });
+        return;
+      }
+
+      if (event.type === 'call_canceled') {
+        const current = useAppStore.getState().incomingCall;
+        if (current && current.callId === event.call_id) {
+          useAppStore.getState().setIncomingCall(null);
+        }
         return;
       }
 

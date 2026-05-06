@@ -83,6 +83,20 @@ pub enum RealtimeEvent {
     RealtimeReconnected {
         room_id: String,
     },
+    /// Sent to the callee's personal inbox room when someone is calling them.
+    /// `room_name` is the LiveKit room both sides will join on accept.
+    CallInvite {
+        call_id: String,
+        room_name: String,
+        caller_id: String,
+        caller_username: String,
+    },
+    /// Sent to the callee's personal inbox room when the caller hangs up
+    /// before pickup, or to either side when the other side declines.
+    /// Frontends use this to clear the incoming-call slot.
+    CallCanceled {
+        call_id: String,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.
