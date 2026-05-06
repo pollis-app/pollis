@@ -116,7 +116,7 @@ export const VoiceChannelPage: React.FC = () => {
           {channelName}
         </span>
         {isAdmin && channel && !isPendingDelete && (
-          <>
+          <div className="flex items-center gap-2">
             <button
               data-testid="rename-channel-trigger"
               onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
@@ -133,7 +133,7 @@ export const VoiceChannelPage: React.FC = () => {
             >
               <Trash2 size={14} aria-hidden="true" />
             </button>
-          </>
+          </div>
         )}
       </div>
 

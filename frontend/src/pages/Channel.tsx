@@ -39,7 +39,7 @@ export const ChannelPage: React.FC = () => {
       >
         <span className="flex-1">{title}</span>
         {isAdmin && channel && pendingDeleteChannelId !== channelId && (
-          <>
+          <div className="flex items-center gap-2">
             <button
               data-testid="rename-channel-trigger"
               onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
@@ -56,7 +56,7 @@ export const ChannelPage: React.FC = () => {
             >
               <Trash2 size={14} aria-hidden="true" />
             </button>
-          </>
+          </div>
         )}
       </div>
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
