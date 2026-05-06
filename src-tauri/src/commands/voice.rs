@@ -73,6 +73,17 @@ pub(crate) struct SendableStream(pub(crate) cpal::Stream);
 unsafe impl Send for SendableStream {}
 unsafe impl Sync for SendableStream {}
 
+impl Drop for SendableStream {
+    fn drop(&mut self) {
+        // cpal::Stream::Drop alone doesn't reliably stop the backend audio
+        // thread — on ALSA the I/O thread can be parked in snd_pcm_readi and
+        // miss the drop signal, leaving the OS mic-in-use indicator on until
+        // the process exits. Explicit pause() wakes the backend and releases
+        // the device promptly.
+        let _ = self.0.pause();
+    }
+}
+
 // ── Events pushed to the frontend ─────────────────────────────────────────
 
 #[derive(Clone, Serialize, Deserialize)]
