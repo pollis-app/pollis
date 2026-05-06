@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { Volume2 } from "lucide-react";
+import { Volume2, Mic, MicOff, PhoneOff } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 
 interface VoiceBarProps {
@@ -67,8 +67,10 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         accent={voiceIsMuted ? "#ff6b6b" : "var(--c-accent)"}
         onClick={toggleMute}
         title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
+        aria-label={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
+        square
       >
-        {voiceIsMuted ? "mic off" : "mic on"}
+        {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
       </PillButton>
 
       {/* Leave button */}
@@ -77,8 +79,10 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         accent="#ff6b6b"
         onClick={leave}
         title="Leave voice channel"
+        aria-label="Leave voice channel"
+        square
       >
-        leave
+        <PhoneOff size={12} />
       </PillButton>
 
       <span style={{ color: "var(--c-border)" }}>|</span>

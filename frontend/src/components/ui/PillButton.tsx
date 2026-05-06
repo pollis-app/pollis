@@ -4,6 +4,8 @@ interface PillButtonProps {
   accent: string;
   onClick?: () => void;
   title?: string;
+  /** Icon-only square variant — equal padding on all sides, no inner gap. */
+  square?: boolean;
   children: React.ReactNode;
   "data-testid"?: string;
   "aria-label"?: string;
@@ -13,12 +15,14 @@ interface PillButtonProps {
  * Filled accent-colored pill that inverts to outlined on hover. Used in
  * tight inline contexts (e.g. the bottom voice bar) where the affordance
  * needs to read as clickable at a glance and color itself carries meaning
- * (orange = active, red = destructive, etc.).
+ * (orange = active, red = destructive, etc.). Pass `square` for an
+ * icon-only variant.
  */
 export const PillButton: React.FC<PillButtonProps> = ({
   accent,
   onClick,
   title,
+  square = false,
   children,
   "data-testid": testId,
   "aria-label": ariaLabel,
@@ -29,12 +33,13 @@ export const PillButton: React.FC<PillButtonProps> = ({
       aria-label={ariaLabel}
       title={title}
       onClick={onClick}
-      className="flex items-center gap-1.5 font-mono transition-colors"
+      className="flex items-center justify-center font-mono transition-colors"
       style={{
         background: accent,
         color: "var(--c-bg)",
         border: `1px solid ${accent}`,
-        padding: "1px 8px",
+        padding: square ? "3px" : "1px 8px",
+        gap: square ? 0 : "0.375rem",
         borderRadius: 3,
         cursor: "pointer",
         lineHeight: 1.4,
