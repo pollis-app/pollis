@@ -69,7 +69,7 @@ const VOICE_WARMUP_TTL: Duration = Duration::from_secs(300);
 
 // ── cpal::Stream is Send on Linux and macOS. On Windows WASAPI it is not,
 // so we wrap it with an explicit unsafe impl to allow storage in AppState.
-pub(crate) struct SendableStream(pub(crate) cpal::Stream);
+pub struct SendableStream(pub cpal::Stream);
 unsafe impl Send for SendableStream {}
 unsafe impl Sync for SendableStream {}
 
