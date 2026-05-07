@@ -72,6 +72,13 @@ tokio = { version = "1", features = ["full", "test-util"] }
 dotenvy = "0.15"
 serial_test = "3"
 tempfile = "3"
+# Used directly by tests/multi_device_messaging.rs for in-process MLS
+# state simulation. Production lib code reaches MLS through pollis-core.
+openmls = "0.8"
+openmls_traits = "0.5"
+openmls_basic_credential = "0.5"
+tls_codec = "0.4"
+rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_38"] }
