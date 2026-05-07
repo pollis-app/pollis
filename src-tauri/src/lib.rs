@@ -6,8 +6,8 @@ pub use pollis_core::keystore;
 pub use pollis_core::realtime;
 pub use pollis_core::signal;
 pub use pollis_core::sink as core_sink;
+pub use pollis_core::state;
 pub mod sink;
-pub mod state;
 pub mod commands;
 
 #[cfg(feature = "test-harness")]
