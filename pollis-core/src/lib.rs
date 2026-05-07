@@ -5,7 +5,9 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod keystore;
+pub mod realtime;
 pub mod signal;
+pub mod sink;
 
 #[uniffi::export]
 pub fn version() -> String {

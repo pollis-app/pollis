@@ -25,7 +25,7 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use ulid::Ulid;
 
 use crate::error::Result;
-use crate::signal::mls_storage::{MlsStore, MlsStorageError};
+use crate::signal::mls_storage::MlsStore;
 use crate::state::AppState;
 
 // ── Provider ─────────────────────────────────────────────────────────────────
@@ -74,14 +74,6 @@ impl<'a> OpenMlsProvider for PollisProvider<'a> {
 // ── Ciphersuite ───────────────────────────────────────────────────────────────
 
 const CS: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
-
-// ── Error conversions ─────────────────────────────────────────────────────────
-
-impl From<MlsStorageError> for crate::error::Error {
-    fn from(e: MlsStorageError) -> Self {
-        crate::error::Error::Other(anyhow::anyhow!("MLS storage: {e}"))
-    }
-}
 
 // ── Credential helpers ───────────────────────────────────────────────────────
 

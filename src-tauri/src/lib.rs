@@ -3,8 +3,10 @@ pub use pollis_core::config;
 pub use pollis_core::db;
 pub use pollis_core::error;
 pub use pollis_core::keystore;
+pub use pollis_core::realtime;
 pub use pollis_core::signal;
-pub mod realtime;
+pub use pollis_core::sink as core_sink;
+pub mod sink;
 pub mod state;
 pub mod commands;
 

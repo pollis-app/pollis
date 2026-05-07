@@ -490,7 +490,7 @@ pub async fn subscribe_realtime(
     state: State<'_, Arc<AppState>>,
 ) -> Result<()> {
     let mut lk = state.livekit.lock().await;
-    lk.channel = Some(on_event);
+    lk.channel = Some(Arc::new(crate::sink::ChannelSink(on_event)));
     Ok(())
 }
 
@@ -604,7 +604,7 @@ pub async fn connect_rooms(
                                             lk.channel.clone()
                                         };
                                         if let Some(ch) = channel {
-                                            let reconcile_id = dispatch_data(payload.as_slice(), &ch);
+                                            let reconcile_id = dispatch_data(payload.as_slice(), ch.as_ref());
                                             // On membership changes: process inbound commits
                                             // so this device advances to the current epoch,
                                             // and poll Welcomes in case this device was just
@@ -990,7 +990,7 @@ pub async fn publish_ping(
 /// Parses a raw DataReceived payload and forwards it to the frontend channel.
 /// Returns a conversation_id when a `membership_changed` event indicates
 /// MLS reconcile should be triggered by the caller.
-fn dispatch_data(payload: &[u8], channel: &tauri::ipc::Channel<RealtimeEvent>) -> Option<String> {
+fn dispatch_data(payload: &[u8], channel: &dyn pollis_core::sink::EventSink<RealtimeEvent>) -> Option<String> {
     let text = match std::str::from_utf8(payload) {
         Ok(s) => s,
         Err(_) => return None,
