@@ -19,11 +19,13 @@ import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
 import { ManagedInstallScreen, type ManagedInstallInfo } from "./components/ManagedInstallScreen";
 import * as api from "./services/api";
-import { getPreference, applyPreferences, applyDeviceFontSize, useApplyPreferences } from "./hooks/queries/usePreferences";
+import { getPreference, applyPreferences, applyDeviceFontSize, useApplyPreferences, usePreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
 import type { User, AccountInfo } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
 import { Button } from "./components/ui/Button";
+import { useQueryClient } from "@tanstack/react-query";
+import { installVoiceBridge } from "./voice";
 
 type AppState =
   | "initializing"
@@ -214,6 +216,21 @@ function MainApp() {
   // this, prefs only applied via completeSignIn's one-shot fetch, which
   // could silently miss on reopen if the request raced the UI.
   useApplyPreferences();
+
+  // Wire the voice session manager's lifecycle events to side effects (SFX,
+  // query invalidation, presence broadcasts). Done once per app lifetime; the
+  // bridge holds a stable reference to queryClient and the prefs query.
+  const queryClient = useQueryClient();
+  const prefsQuery = usePreferences().query;
+  const prefsRef = useRef(prefsQuery.data);
+  prefsRef.current = prefsQuery.data;
+  useEffect(() => {
+    const handle = installVoiceBridge({
+      queryClient,
+      preferencesProvider: () => prefsRef.current,
+    });
+    return () => handle.dispose();
+  }, [queryClient]);
 
   // Safety net: if currentUser is cleared (e.g. account deletion) but appState
   // is still "ready", redirect to auth so the user isn't stuck on a blank screen.

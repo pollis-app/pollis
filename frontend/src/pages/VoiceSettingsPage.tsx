@@ -12,8 +12,8 @@ import {
   type NoiseSuppressionLevel,
   type PreferencesData,
 } from "../hooks/queries/usePreferences";
-import { switchVoiceDevice } from "../hooks/useVoiceChannel";
 import { useVoiceTest } from "../hooks/useVoiceTest";
+import { voiceSession } from "../voice";
 import type { AudioDevice } from "../types";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
@@ -142,7 +142,7 @@ export const VoiceSettingsPage: React.FC = () => {
 
   const setInput = (id: string) => {
     setSelectedInputState(id);
-    switchVoiceDevice("audioinput", id);
+    void voiceSession.setInputDevice(id);
     if (test.phase !== "idle") {
       test.stopMicTest();
       test.stopPlayback();
@@ -151,7 +151,7 @@ export const VoiceSettingsPage: React.FC = () => {
 
   const setOutput = (id: string) => {
     setSelectedOutputState(id);
-    switchVoiceDevice("audiooutput", id);
+    void voiceSession.setOutputDevice(id);
     if (test.phase !== "idle") {
       test.stopMicTest();
       test.stopPlayback();

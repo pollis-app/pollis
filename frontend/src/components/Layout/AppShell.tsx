@@ -16,6 +16,7 @@ import { useBadge } from "../../hooks/useBadge";
 import { Mail, Phone, X } from "lucide-react";
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { usePreferences } from "../../hooks/queries/usePreferences";
+import { voiceSession } from "../../voice";
 
 /**
  * AppShell is the root route component rendered by RouterProvider.
@@ -38,7 +39,6 @@ export const AppShell: React.FC = () => {
     isLocalSpeaking,
     incomingCall,
     setIncomingCall,
-    setActiveVoiceChannelId,
   } = useAppStore();
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -378,7 +378,7 @@ export const AppShell: React.FC = () => {
                 // page useEffect tries to bounce off a transient mismatch),
                 // then swap the voice room, then clear the alert.
                 router.navigate({ to: "/call/$callId", params: { callId: incomingCall.callId } });
-                setActiveVoiceChannelId(incomingCall.roomName);
+                voiceSession.setIntent({ channelId: incomingCall.roomName, groupId: null });
                 setIncomingCall(null);
               }}
               aria-label={`Answer call from @${incomingCall.callerUsername}`}

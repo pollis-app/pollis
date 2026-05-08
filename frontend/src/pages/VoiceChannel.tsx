@@ -10,6 +10,7 @@ import { Button } from "../components/ui/Button";
 import { NavigableList } from "../components/ui/NavigableList";
 import { Avatar } from "../components/ui/Avatar";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
+import { voiceSession } from "../voice";
 
 interface ObserverParticipant {
   identity: string;
@@ -24,7 +25,6 @@ export const VoiceChannelPage: React.FC = () => {
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/voice/$channelId" });
   const {
     activeVoiceChannelId,
-    setActiveVoiceChannelId,
     pendingDeleteChannelId,
     setPendingDeleteChannelId,
   } = useAppStore();
@@ -90,7 +90,7 @@ export const VoiceChannelPage: React.FC = () => {
     }
     if (preferences.query.data.auto_join_voice === true) {
       hasAutoJoined.current = true;
-      setActiveVoiceChannelId(channelId);
+      voiceSession.setIntent({ channelId, groupId });
     }
   }, [preferences.query.data]);
 
@@ -143,7 +143,7 @@ export const VoiceChannelPage: React.FC = () => {
           data-testid="voice-join-leave-button"
           variant={isInCall ? "danger" : "primary"}
           autoFocus
-          onClick={() => isInCall ? setActiveVoiceChannelId(null) : setActiveVoiceChannelId(channelId)}
+          onClick={() => isInCall ? voiceSession.leave() : voiceSession.setIntent({ channelId, groupId })}
         >
           {isInCall ? "Leave" : "Join"}
         </Button>

@@ -46,7 +46,10 @@ interface AppStore extends AppState {
   // True when local participant's mic is actively picking up audio
   isLocalSpeaking: boolean;
   setIsLocalSpeaking: (speaking: boolean) => void;
-  // Live voice channel state — written by useVoiceChannel, read by VoiceBar/VoiceChannelView/VoiceChannelPage
+  // Live voice channel state — mirrored from `voiceSession` in src/voice/.
+  // The manager is the source of truth; these fields are a write-through
+  // projection so existing readers (VoiceBar/VoiceChannelView/AppShell/etc.)
+  // keep working without subscribing to the manager directly.
   voiceParticipants: VoiceParticipant[];
   voiceActiveSpeakerIds: string[];
   voiceIsMuted: boolean;
