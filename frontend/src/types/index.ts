@@ -161,12 +161,17 @@ export interface AccountsIndex {
   last_active_user?: string;
 }
 
+export type VoiceConnectionQuality = "excellent" | "good" | "poor" | "lost";
+
 export interface VoiceParticipant {
   identity: string;
   name: string;
   isMuted: boolean;
   isLocal: boolean;
   avatarKey?: string | null;
+  // LiveKit's categorical link health for this participant. Undefined until
+  // we receive the first `connection_quality_changed` event for them.
+  connectionQuality?: VoiceConnectionQuality;
 }
 
 export interface AudioDevice {
