@@ -118,7 +118,7 @@ Result: toggling notifications "on" in Preferences → granting the OS prompt �
 | `remove_member_from_group` (`groups.rs:444`) | Group room | none | silent (refetch) |
 | `leave_group` (`groups.rs:515`) | Group room | none | silent (refetch) |
 
-The Rust enum (`src-tauri/src/realtime.rs`):
+The Rust enum (`pollis-core/src/realtime.rs`):
 
 ```rust
 MembershipChanged {
@@ -128,7 +128,7 @@ MembershipChanged {
 },
 ```
 
-Wire dispatch (`src-tauri/src/commands/livekit.rs`) reads the `kind` field from the JSON payload. Publishers set it via `serde_json::json!({"type": "membership_changed", ..., "kind": "invite"})`.
+Wire dispatch (`pollis-core/src/commands/livekit.rs`) reads the `kind` field from the JSON payload. Publishers set it via `serde_json::json!({"type": "membership_changed", ..., "kind": "invite"})`.
 
 The frontend type narrows it:
 
@@ -166,10 +166,10 @@ Cooldown is keyed by `${category}:${roomId ?? '_global'}`. It applies only to so
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/hooks/useVoiceChannel.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions |
 | `frontend/src/hooks/useBadge.ts` | Reads `unreadCounts` from Zustand, applies dock/taskbar badge |
-| `src-tauri/src/realtime.rs` | `RealtimeEvent` enum (Rust → JS wire format) |
-| `src-tauri/src/commands/livekit.rs` | `dispatch_data()` parses payloads, sends typed events to JS |
-| `src-tauri/src/commands/sfx.rs` | `play_sfx` rodio implementation |
-| `src-tauri/src/commands/groups.rs` | Membership-change publishers (set `kind` here) |
+| `pollis-core/src/realtime.rs` | `RealtimeEvent` enum (Rust → JS wire format) |
+| `pollis-core/src/commands/livekit.rs` | `dispatch_data()` parses payloads, sends typed events to JS |
+| `pollis-core/src/commands/sfx.rs` | `play_sfx` rodio implementation |
+| `pollis-core/src/commands/groups.rs` | Membership-change publishers (set `kind` here) |
 
 ## Related issues
 

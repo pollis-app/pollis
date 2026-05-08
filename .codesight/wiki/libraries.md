@@ -30,6 +30,6 @@
 - `frontend/src/utils/fileIcon.ts` — getFileIcon
 
 ---
-**Note:** This only covers frontend libraries. The Rust backend (`src-tauri/src/commands/`) is documented in [commands.md](./commands.md).
+**Note:** This only covers frontend libraries. The Rust backend lives in `pollis-core/src/commands/` (with `#[tauri::command]` shims in `src-tauri/src/commands/`); see [commands.md](./commands.md).
 
 _Back to [index.md](./index.md)_

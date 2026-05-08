@@ -116,7 +116,8 @@ The integration harness (`src-tauri/tests/flows.rs`) is gated behind the `test-h
 ## Project layout
 
 ```
-src-tauri/   # Rust backend — Tauri commands, DB, MLS encryption, auth
+pollis-core/ # Reusable Rust backend — commands, DB, MLS encryption, auth (no Tauri runtime)
+src-tauri/   # Tauri desktop binary — #[tauri::command] shims, plugins, lifecycle
 frontend/    # React app — Vite, TypeScript, TailwindCSS
 website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
 ```

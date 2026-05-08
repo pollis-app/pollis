@@ -102,28 +102,41 @@ useSendMessage()                    // invoke("send_message", ...)
 
 ### Tauri Commands
 
-Implemented in `src-tauri/src/commands/`, registered in `src-tauri/src/lib.rs`:
+Backend logic lives in `pollis-core/src/commands/` (a workspace crate with **no Tauri-runtime dependency** — reusable from a future CLI / TUI / mobile binary). The Tauri binary in `src-tauri/src/commands/` holds thin `#[tauri::command]` shims that forward to `pollis_core::commands::*`. Commands are registered in `src-tauri/src/lib.rs`.
+
+**Edit `pollis-core`, not the shims.** When adding a command: implement it in `pollis-core/src/commands/<module>.rs`, add a forwarding shim in `src-tauri/src/commands/<module>.rs`, and register it in `src-tauri/src/lib.rs` (and `src-tauri/src/test_harness.rs` if it's covered by integration tests).
 
 - **auth**: `initialize_identity`, `get_identity`, `request_otp`, `verify_otp`, `get_session`, `logout`
 - **user**: `get_user_profile`, `update_user_profile`, `search_user_by_username`
 - **groups**: `list_user_groups`, `list_group_channels`, `create_group`, `create_channel`, `invite_to_group`
 - **messages**: `list_messages`, `send_message`, `poll_pending_messages`
-- **mls**: MLS group key operations (legacy `signal/` directory is being removed)
+- **mls**: MLS group key operations (the `signal/` directory only retains the MLS storage backend)
 - **livekit**: `get_livekit_token`
 - **r2**: `upload_file`, `download_file`
 
 ### Project Structure
 
 ```
-src-tauri/              # Rust backend (Tauri)
+pollis-core/            # Reusable Rust backend (no Tauri runtime)
   src/
-    commands/           # Tauri command handlers
+    commands/           # Command implementations (auth, groups, messages, mls, voice, …)
     config.rs           # Config from env vars
-    db.rs               # Turso + local SQLite
+    db/                 # Turso (libSQL) + local SQLite + migrations
     keystore.rs         # OS keystore (keyring)
-    signal/             # Legacy Signal protocol (being replaced by MLS)
+    signal/             # MLS storage backend
     state.rs            # AppState
-    lib.rs              # App setup, command registration
+    realtime.rs         # LiveKit room manager + event dispatch
+    sink.rs             # EventSink trait (frontend-channel abstraction)
+    accounts.rs         # accounts.json (atomic, crash-safe)
+    error.rs            # Error / Result types
+    lib.rs              # uniffi exports for mobile bindings
+src-tauri/              # Tauri desktop binary
+  src/
+    commands/           # Thin #[tauri::command] shims forwarding to pollis_core
+    sink.rs             # ChannelSink adapter (Tauri's ipc::Channel → EventSink)
+    test_harness.rs     # Integration-test harness (gated on feature = "test-harness")
+    lib.rs              # tauri::Builder, plugins, invoke_handler!, lifecycle
+    main.rs             # Binary entry
 frontend/               # React app (Vite, TypeScript, TailwindCSS)
   src/
     hooks/queries/      # React Query hooks
@@ -135,7 +148,7 @@ website/                # Static HTML marketing site (Cloudflare Pages)
 
 ## Media (voice / video)
 
-**All real-time media is handled in Rust, end to end.** Voice is implemented in `src-tauri/src/commands/voice.rs` using the `livekit` + `libwebrtc` crates (capture via `cpal`, publish via `NativeAudioSource` / `LocalAudioTrack`, playback via `NativeAudioStream` → cpal output).
+**All real-time media is handled in Rust, end to end.** Voice is implemented in `pollis-core/src/commands/voice.rs` using the `livekit` + `libwebrtc` crates (capture via `cpal`, publish via `NativeAudioSource` / `LocalAudioTrack`, playback via `NativeAudioStream` → cpal output).
 
 **Why Rust and not the webview**: Tauri's webview on Linux (WebKitGTK) does not support WebRTC. `getUserMedia`, `RTCPeerConnection`, etc. are unavailable. This means the "use livekit-client JS SDK in the webview" approach is NOT an option on our target platforms — do not suggest it. Any media feature (voice, video, screen share) must be implemented in Rust using the `livekit` crate directly and wired to Tauri commands. Frames are pushed to the frontend via `tauri::ipc::Channel` for UI purposes only (speaking indicators, participant events), never for rendering media itself.
 
@@ -174,9 +187,11 @@ Concrete implications:
 
 ## Key Files
 
-- `src-tauri/src/lib.rs` — Tauri app entry point, command registration
-- `src-tauri/src/commands/` — All Tauri command implementations
-- `src-tauri/src/state.rs` — AppState shared across commands
+- `src-tauri/src/lib.rs` — Tauri app entry point, plugin setup, command registration
+- `src-tauri/src/commands/` — Thin `#[tauri::command]` shims (forward to `pollis_core::commands::*`)
+- `pollis-core/src/commands/` — Real command implementations (edit here)
+- `pollis-core/src/state.rs` — AppState shared across commands
+- `pollis-core/src/db/` — Turso + local SQLite + migrations
 - `frontend/src/main.tsx` — React app entry point
 - `frontend/src/hooks/queries/` — React Query hooks
 - `ARCHITECTURE.md` — Detailed architecture documentation
@@ -188,7 +203,7 @@ Concrete implications:
 - **React Query is the source of truth** for remote data — don't duplicate in Zustand
 - **Local DB should NOT have users/groups/channels tables** — those come from remote Turso
 - **TypeScript types should match Rust structs** — keep them synchronized
-- **Remote schema changes go in numbered migration files** in `src-tauri/src/db/migrations/` (e.g. `000019_my_change.sql`). `000000_baseline.sql` is the frozen canonical snapshot — never edit it. Dev: run new migrations by hand against your dev Turso. Prod: `.github/workflows/desktop-release.yml` runs `scripts/db-apply.sh` after all builds succeed; migration failure aborts the release. Nobody applies to prod by hand. The runner records the `schema_migrations` row automatically — do **not** put an `INSERT INTO schema_migrations` in the migration file.
+- **Remote schema changes go in numbered migration files** in `pollis-core/src/db/migrations/` (e.g. `000019_my_change.sql`). `000000_baseline.sql` is the frozen canonical snapshot — never edit it. Dev: run new migrations by hand against your dev Turso. Prod: `.github/workflows/desktop-release.yml` runs `scripts/db-apply.sh` after all builds succeed; migration failure aborts the release. Nobody applies to prod by hand. The runner records the `schema_migrations` row automatically — do **not** put an `INSERT INTO schema_migrations` in the migration file.
 - **Migrations must be additive and backward-compatible with the currently-shipped desktop app.** Desktop users update on their own schedule, so after any release there will be old + new app versions hitting prod for days or weeks. Safe: `CREATE TABLE`, `ADD COLUMN` (nullable or with DEFAULT), `CREATE INDEX`, CHECK constraints already satisfied by every existing row. Unsafe — require a multi-release dance (first ship an app that stops using the thing, wait for uptake, then drop): `DROP TABLE`, `DROP COLUMN`, `RENAME`, tightening nullability or CHECKs, or any change that would make the previous app's SQL fail.
 - **Prefer editing existing files** over creating new ones
 - **Always use `pnpm`** not `npm`

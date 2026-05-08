@@ -1,6 +1,8 @@
 # Tauri Commands
 
-All backend calls from the frontend use `invoke("command_name", { args })`. Commands are registered in `src-tauri/src/lib.rs` and implemented in `src-tauri/src/commands/`.
+All backend calls from the frontend use `invoke("command_name", { args })`. Commands are registered in `src-tauri/src/lib.rs`. The `#[tauri::command]` shims under `src-tauri/src/commands/` are thin forwarders — the real implementations live in `pollis-core/src/commands/` so a future CLI / TUI / mobile binary can call them without the Tauri runtime. Edit `pollis-core`, not the shims.
+
+The path in each section header below points at the implementation in `pollis-core`. The shim with the same module name in `src-tauri/src/commands/` re-exports the types and forwards each command verbatim.
 
 ## auth (`commands/auth.rs`)
 - `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes. Requires the local DB to be open (post-`set_pin` / `unlock`).

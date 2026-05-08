@@ -110,7 +110,7 @@ Either path ends with the new device populating `AppState.unlock`, the user sett
 - **Library:** `openmls` 0.8 + `openmls_rust_crypto` 0.5, with a Pollis-defined `StorageProvider` backed by the local SQLCipher `mls_kv` table.
 - **Cipher suite:** `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (suite 1, MTI for MLS 1.0). HPKE per RFC 9180.
 - **Group topology:** one MLS group per Pollis Group (shared by all its channels); one MLS group per DM channel.
-- **Membership changes** flow through `reconcile_group_mls_impl` in `src-tauri/src/commands/mls.rs`. It diffs the desired roster vs. the actual MLS tree and emits a single combined commit with `Add` + `Remove` proposals. The commit is *staged* locally, persisted to Turso (`mls_commit_log` + per-recipient `mls_welcome` rows) on a fresh libSQL connection, and only then merged locally — this ordering is the invariant that prevents "local epoch ahead of remote" split-brain.
+- **Membership changes** flow through `reconcile_group_mls_impl` in `pollis-core/src/commands/mls.rs`. It diffs the desired roster vs. the actual MLS tree and emits a single combined commit with `Add` + `Remove` proposals. The commit is *staged* locally, persisted to Turso (`mls_commit_log` + per-recipient `mls_welcome` rows) on a fresh libSQL connection, and only then merged locally — this ordering is the invariant that prevents "local epoch ahead of remote" split-brain.
 - **External commits** (RFC 9420 §11.2.1) handle new-device joins without requiring a sibling Welcome: the device fetches the latest `GroupInfo` from `mls_group_info` and externally commits into the group.
 - **Cross-signing verification** runs on inbound commits that add devices: receivers fetch the added device's `device_cert` from `user_device` and verify against the user's `account_id_pub`. Verification is currently advisory (warn-and-proceed) — the security whitepaper documents this gap.
 
@@ -123,12 +123,16 @@ For the full key-material taxonomy, KDF/AEAD parameters, and attack-surface anal
 ```
 React component
   → invoke("command_name", { args })
-    → Rust Tauri command (src-tauri/src/commands/*.rs)
-      → Turso (remote, metadata + ciphertext) and/or
-        SQLCipher local (secrets, MLS state)
+    → #[tauri::command] shim (src-tauri/src/commands/*.rs)
+      → pollis_core::commands::* (pollis-core/src/commands/*.rs)
+        → Turso (remote, metadata + ciphertext) and/or
+          SQLCipher local (secrets, MLS state)
+      ← Result<T>
     ← Result<T>
   ← TanStack Query cache
 ```
+
+The shim layer exists only to bridge `tauri::State` into a plain `&AppState` reference. Real business logic lives in `pollis-core`, which has no `tauri` runtime dependency and is also consumed by uniffi-generated mobile bindings.
 
 **TanStack Query is the source of truth** for remote data. Components read through hooks in `frontend/src/hooks/queries/`. **Zustand** holds only UI state — selected group/channel, transient session data, current user reference. There is no parallel client-side store for remote data.
 
@@ -138,7 +142,7 @@ Routing uses TanStack Router with **memory history** (no browser URL bar in a de
 
 ## Tauri commands (selected)
 
-Registered in `src-tauri/src/lib.rs`, implemented under `src-tauri/src/commands/`.
+Registered in `src-tauri/src/lib.rs`. The `#[tauri::command]` shims live under `src-tauri/src/commands/`; the real implementations are in `pollis-core/src/commands/` (one module per row in the table below).
 
 | Module | Commands |
 |---|---|
@@ -162,18 +166,30 @@ For the full reference see `.codesight/wiki/commands.md`.
 
 ## Project structure
 
+The Rust workspace has two crates: `pollis-core` (reusable backend, no Tauri runtime) and `pollis` (the Tauri desktop binary). The split lets future front-ends — a CLI, a TUI, mobile via uniffi — consume the same command/state/db/MLS code without dragging in the Tauri runtime, plugins, and lifecycle.
+
 ```
-src-tauri/                # Rust backend
+pollis-core/              # Reusable Rust backend (no tauri::* types)
   src/
-    commands/             # Tauri command handlers
+    commands/             # Real command implementations (auth, groups, messages, mls, voice, …)
     db/                   # libSQL (remote) + SQLCipher (local) + migrations
     config.rs             # Env-var config (Turso, R2, LiveKit, Resend)
     accounts.rs           # accounts.json (atomic, crash-safe)
     keystore.rs           # OS keystore abstraction (+ in-memory impl for tests)
     state.rs              # AppState shared across commands
     realtime.rs           # LiveKit room manager + event dispatch
+    sink.rs               # EventSink trait (frontend-channel abstraction)
     signal/               # Legacy Signal-protocol vestige (mls_storage backend; the rest is removed)
-    lib.rs                # App setup, command registration
+    error.rs              # Error / Result types
+    lib.rs                # uniffi exports for mobile bindings
+
+src-tauri/                # Tauri desktop binary
+  src/
+    commands/             # Thin #[tauri::command] shims forwarding to pollis_core
+    sink.rs               # ChannelSink adapter — wraps tauri::ipc::Channel into EventSink
+    test_harness.rs       # Multi-client integration harness (feature = "test-harness")
+    lib.rs                # tauri::Builder, plugin setup, invoke_handler!, lifecycle hooks
+    main.rs               # Binary entry
 
 frontend/                 # React app
   src/

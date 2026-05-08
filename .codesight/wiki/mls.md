@@ -2,7 +2,7 @@
 
 All group encryption uses MLS (RFC 9420) via the `openmls` crate. One MLS group per Pollis group (all channels in a group share it). DM channels each have their own MLS group.
 
-Source: `src-tauri/src/commands/mls.rs`
+Source: `pollis-core/src/commands/mls.rs`
 
 ## Core Concepts
 

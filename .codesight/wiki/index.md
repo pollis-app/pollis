@@ -21,11 +21,12 @@ Start here. Navigate to the article you need.
 | Layer | Tech | Location |
 |-------|------|----------|
 | Frontend | React, TypeScript, Vite, TailwindCSS | `frontend/src/` |
-| Backend | Rust, Tauri 2 | `src-tauri/src/` |
-| Remote DB | Turso (libSQL) | `src-tauri/src/db/migrations/000000_baseline.sql` + `000*.sql` |
-| Local DB | SQLite (rusqlite) | `src-tauri/src/db/local_schema.sql` |
-| Encryption | OpenMLS (RFC 9420) | `src-tauri/src/commands/mls.rs` |
-| Media | LiveKit (Rust crate) | `src-tauri/src/commands/voice.rs`, `livekit.rs` |
-| Storage | Cloudflare R2 | `src-tauri/src/commands/r2.rs` |
-| Auth | Email OTP + OS keystore | `src-tauri/src/commands/auth.rs` |
+| Backend (logic) | Rust workspace crate `pollis-core` | `pollis-core/src/` |
+| Backend (Tauri shell) | Rust, Tauri 2 — `#[tauri::command]` shims, plugins, lifecycle | `src-tauri/src/` |
+| Remote DB | Turso (libSQL) | `pollis-core/src/db/migrations/000000_baseline.sql` + `000*.sql` |
+| Local DB | SQLite (rusqlite) | `pollis-core/src/db/local_schema.sql` |
+| Encryption | OpenMLS (RFC 9420) | `pollis-core/src/commands/mls.rs` |
+| Media | LiveKit (Rust crate) | `pollis-core/src/commands/voice.rs`, `livekit.rs` |
+| Storage | Cloudflare R2 | `pollis-core/src/commands/r2.rs` |
+| Auth | Email OTP + OS keystore | `pollis-core/src/commands/auth.rs` |
 | Secrets | Doppler → GitHub Actions | `.env.development` for local dev |
