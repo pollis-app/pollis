@@ -5,6 +5,7 @@ import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
+import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { InlineAudioPlayer } from "../ui/InlineAudioPlayer";
 import { AudioPlayer } from "../ui/AudioPlayer";
@@ -220,6 +221,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           </div>
         )}
       </div>
+
+      {/* Inline previews for media URLs typed in the message body */}
+      {!isDeleted && <MediaLinkUnfurl text={content} />}
 
       {/* Attachments — each on its own row */}
       {sortedAttachments && (
