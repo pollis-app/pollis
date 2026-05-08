@@ -156,6 +156,14 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
+  // The search button in BreadcrumbNav fires this custom event so it can
+  // open the panel without lifting AppShell's local state into a store.
+  useEffect(() => {
+    const handle = () => setIsSearchOpen(true);
+    window.addEventListener("pollis:open-search", handle);
+    return () => window.removeEventListener("pollis:open-search", handle);
+  }, []);
+
   // Cmd/Ctrl+L — lock the app behind the PIN screen without logging out.
   // Routes through the router context's onLock so App.tsx can flip the
   // top-level appState to "pin-entry" (AppShell unmounts in the process).

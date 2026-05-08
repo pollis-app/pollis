@@ -1,6 +1,11 @@
 import React, { useMemo } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
-import { ChevronLeft, Settings as SettingsIcon } from "lucide-react";
+import { ChevronLeft, Search as SearchIcon, Settings as SettingsIcon } from "lucide-react";
+
+const isMac =
+  typeof navigator !== "undefined" &&
+  navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+const SEARCH_SHORTCUT_LABEL = isMac ? "⌘K" : "Ctrl+K";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -222,6 +227,43 @@ export const BreadcrumbNav: React.FC = () => {
           </React.Fragment>
         ))}
       </span>
+      <button
+        data-testid="breadcrumb-search-button"
+        onClick={() => window.dispatchEvent(new CustomEvent("pollis:open-search"))}
+        aria-label={`Search (${SEARCH_SHORTCUT_LABEL})`}
+        title={`Search (${SEARCH_SHORTCUT_LABEL})`}
+        className="flex items-center gap-1.5 transition-colors"
+        style={{
+          height: 20,
+          background: "none",
+          border: "none",
+          padding: "0 6px",
+          color: "var(--c-text-muted)",
+          cursor: "pointer",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
+        }}
+      >
+        <SearchIcon size={14} />
+        <kbd
+          aria-hidden="true"
+          className="font-mono text-xs"
+          style={{
+            color: "inherit",
+            background: "var(--c-bg)",
+            padding: "1px 5px",
+            borderRadius: 3,
+            border: "1px solid var(--c-border)",
+            lineHeight: 1.2,
+          }}
+        >
+          {SEARCH_SHORTCUT_LABEL}
+        </kbd>
+      </button>
       <button
         data-testid="breadcrumb-settings-button"
         onClick={() => router.navigate({ to: "/settings" })}
