@@ -22,7 +22,7 @@ export const UpdateScreen: React.FC = () => {
       try {
         // Gracefully tear down voice / realtime before the install.
         // TerminalApp has already unmounted (appState flipped to
-        // update-required), which triggers useVoiceChannel / realtime
+        // update-required), which triggers VoiceSessionManager / realtime
         // cleanup, but we also invoke leave_voice_channel directly to
         // guarantee LiveKit is disconnected with its 5s timeout before
         // the updater overwrites the binary.

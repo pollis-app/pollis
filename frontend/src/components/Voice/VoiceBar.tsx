@@ -1,10 +1,10 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useVoiceChannel } from "../../hooks/useVoiceChannel";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
+import { voiceSession } from "../../voice";
 
 interface VoiceBarProps {
   channelId: string;
@@ -20,10 +20,11 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
     g.channels.some((c) => c.id === channelId)
   )?.id ?? null;
 
-  const { toggleMute, leave } = useVoiceChannel(channelId, groupId);
+  const toggleMute = () => voiceSession.toggleMute();
+  const leave = () => voiceSession.leave();
 
-  // Local participant identity is `voice-${userId}` (see useVoiceChannel.ts).
   // The voice bar is feedback about *other* speakers, so always exclude self.
+  // Local participant identity is `voice-${userId}` (see VoiceSessionManager).
   const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
   const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter((id) => id !== localIdentity);
   const lastRemoteSpeakerId = remoteActiveSpeakerIds.at(-1);

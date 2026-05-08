@@ -1,0 +1,683 @@
+import { Channel, invoke } from '@tauri-apps/api/core';
+
+import { useAppStore } from '../stores/appStore';
+import type { VoiceParticipant } from '../types';
+import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
+import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
+
+const VOICE_DEVICES_KEY = 'pollis:voice-devices';
+
+// ── Public types ─────────────────────────────────────────────────────────────
+
+/** Mirrors the `VoiceEvent` enum in `pollis-core/src/commands/voice.rs`. */
+export type VoiceEvent =
+  | {
+      type: 'participant_joined';
+      identity: string;
+      name: string;
+      is_muted: boolean;
+      avatar_url?: string | null;
+    }
+  | { type: 'participant_left'; identity: string }
+  | { type: 'muted'; identity: string }
+  | { type: 'unmuted'; identity: string }
+  | { type: 'speaking_started'; identity: string }
+  | { type: 'speaking_stopped'; identity: string }
+  | { type: 'disconnected' };
+
+/** Mirrors `JoinTimings` in `pollis-core/src/commands/voice.rs`. */
+export interface JoinTimings {
+  channel_id: string;
+  jwt_mint_ms: number;
+  room_connect_ms: number;
+  mic_init_ms: number;
+  first_publish_ms: number;
+  total_join_ms: number;
+  join_started_at_ms: number;
+}
+
+/** What the user wants the session to be. `null` means "no voice session". */
+export interface VoiceIntent {
+  channelId: string;
+  groupId: string | null;
+}
+
+export type VoicePhase = 'idle' | 'joining' | 'joined' | 'leaving';
+
+export interface VoiceSessionState {
+  phase: VoicePhase;
+  channelId: string | null;
+  groupId: string | null;
+  participants: VoiceParticipant[];
+  activeSpeakerIds: string[];
+  isMuted: boolean;
+  isLocalSpeaking: boolean;
+  /** Last error from a failed join. Cleared on the next intent change. */
+  error: string | null;
+}
+
+export interface JoinedEvent {
+  channelId: string;
+  groupId: string | null;
+  userId: string;
+  displayName: string;
+  /** Wall-clock ms between `setIntent` and `invoke('join_voice_channel')`. */
+  intentToInvokeMs: number;
+}
+
+export interface LeftEvent {
+  channelId: string;
+  groupId: string | null;
+  userId: string;
+  displayName: string;
+}
+
+type ManagerEventMap = {
+  joined: JoinedEvent;
+  left: LeftEvent;
+};
+
+type Listener = () => void;
+type EventListener<E extends keyof ManagerEventMap> = (payload: ManagerEventMap[E]) => void;
+
+const INITIAL_STATE: VoiceSessionState = {
+  phase: 'idle',
+  channelId: null,
+  groupId: null,
+  participants: [],
+  activeSpeakerIds: [],
+  isMuted: false,
+  isLocalSpeaking: false,
+  error: null,
+};
+
+// ── The manager ──────────────────────────────────────────────────────────────
+
+/**
+ * Owns the voice session lifecycle outside React.
+ *
+ * Components call `setIntent(target | null)` to express what they want; the
+ * manager reconciles current state to match. Rapid intent changes coalesce —
+ * if intent flips A → B while a join to A is in flight, the manager finishes
+ * A's transition (or aborts cleanly) and then reconciles to B without ever
+ * exposing the inconsistency to other code.
+ *
+ * The race that motivated extracting this module: when a React effect re-runs
+ * because of an unstable dep (e.g. React Query data resolving), the cleanup
+ * fires `leave_voice_channel` and the new mount fires `join_voice_channel`
+ * concurrently. The Rust join-guard (`voice.room.is_some()`) then rejects the
+ * second join with "already connected". Owning intent here removes the
+ * effect-driven cleanup/mount cycle entirely.
+ */
+class VoiceSessionManager {
+  private state: VoiceSessionState = INITIAL_STATE;
+  private listeners = new Set<Listener>();
+  private eventListeners = new Map<keyof ManagerEventMap, Set<EventListener<keyof ManagerEventMap>>>();
+
+  /** What the user wants. Updated by `setIntent`. */
+  private intent: VoiceIntent | null = null;
+  /** What's actually established. Mutated only by the reconciliation loop. */
+  private current: { intent: VoiceIntent; userId: string; displayName: string } | null = null;
+  /** Guards against multiple reconciliation loops running concurrently. */
+  private reconciling = false;
+  /** Wall-clock anchor captured at `setIntent` time, consumed at next join. */
+  private intentTs: number | null = null;
+
+  /** True after we've called `subscribe_voice_events` for this process. */
+  private eventsAttached = false;
+  /** Optional preferences source; lets the manager read APM config + user volumes. */
+  private preferencesProvider: (() => PreferencesData | undefined) | null = null;
+
+  // ── Subscription API ──────────────────────────────────────────────────────
+
+  /** Subscribe to state changes. Returns an unsubscribe function. */
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** Read the current state (immutable snapshot). Stable identity until a state mutation. */
+  getSnapshot(): VoiceSessionState {
+    return this.state;
+  }
+
+  /** Subscribe to lifecycle events (`joined`, `left`). Returns an unsubscribe function. */
+  on<E extends keyof ManagerEventMap>(event: E, listener: EventListener<E>): () => void {
+    let set = this.eventListeners.get(event);
+    if (!set) {
+      set = new Set();
+      this.eventListeners.set(event, set);
+    }
+    set.add(listener as EventListener<keyof ManagerEventMap>);
+    return () => {
+      this.eventListeners.get(event)?.delete(listener as EventListener<keyof ManagerEventMap>);
+    };
+  }
+
+  /**
+   * Inject a provider for user preferences. Called once at app boot from
+   * `voiceBridge`, which has access to React Query. Optional — without it the
+   * manager joins with default APM config.
+   */
+  configure(opts: { preferencesProvider?: () => PreferencesData | undefined }): void {
+    if (opts.preferencesProvider) {
+      this.preferencesProvider = opts.preferencesProvider;
+    }
+  }
+
+  // ── Imperative API ────────────────────────────────────────────────────────
+
+  /**
+   * Set the desired voice channel. Pass `null` to leave any active session.
+   *
+   * Idempotent — calling with the current intent is a no-op. Concurrent or
+   * rapid changes coalesce: only the latest intent is honored.
+   */
+  setIntent(target: VoiceIntent | null): void {
+    if (sameIntent(target, this.intent)) {
+      return;
+    }
+    this.intent = target;
+    this.intentTs = target ? performance.now() : null;
+    void this.reconcile();
+  }
+
+  /** Convenience: clear intent. Equivalent to `setIntent(null)`. */
+  leave(): void {
+    this.setIntent(null);
+  }
+
+  /**
+   * Re-run the reconciliation loop without changing intent. Used when an
+   * external guard input (e.g. `currentUser`, `networkStatus`) changes and
+   * the session needs to tear down even though the intent itself is still set.
+   */
+  refresh(): void {
+    void this.reconcile();
+  }
+
+  /** Toggle the local mic mute. No-op if not currently joined. */
+  async toggleMute(): Promise<void> {
+    if (this.state.phase !== 'joined') {
+      return;
+    }
+    try {
+      const muted = await invoke<boolean>('toggle_voice_mute');
+      const localIdentity = this.current ? `voice-${this.current.userId}` : null;
+      const participants = localIdentity
+        ? this.state.participants.map((p) =>
+            p.identity === localIdentity ? { ...p, isMuted: muted } : p,
+          )
+        : this.state.participants;
+      this.setState({ isMuted: muted, participants });
+    } catch (e) {
+      console.warn('[voice] toggle_voice_mute failed:', e);
+    }
+  }
+
+  /** Persist a device pref and live-switch the input device. Safe to call outside a session. */
+  async setInputDevice(deviceName: string): Promise<void> {
+    persistDevicePref('input', deviceName);
+    try {
+      await invoke('set_voice_input_device', { deviceName });
+    } catch (e) {
+      console.warn('[voice] set_voice_input_device failed:', e);
+    }
+  }
+
+  /** Persist a device pref and live-switch the output device. Safe to call outside a session. */
+  async setOutputDevice(deviceName: string): Promise<void> {
+    persistDevicePref('output', deviceName);
+    try {
+      await invoke('set_voice_output_device', { deviceName });
+    } catch (e) {
+      console.warn('[voice] set_voice_output_device failed:', e);
+    }
+  }
+
+  // ── Reconciliation ────────────────────────────────────────────────────────
+
+  private async reconcile(): Promise<void> {
+    if (this.reconciling) {
+      // The running loop will pick up the new intent on its next iteration.
+      return;
+    }
+    this.reconciling = true;
+    try {
+      // Each iteration drives one transition (leave or join). The loop exits
+      // when intent matches current.
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const target = this.intent;
+        const current = this.current?.intent ?? null;
+
+        if (sameIntent(target, current) && this.guardsPass()) {
+          return;
+        }
+
+        // Need to leave first if (a) we have a current session and (b) the
+        // target differs OR guards are failing.
+        if (this.current && (!sameIntent(target, current) || !this.guardsPass())) {
+          await this.executeLeave();
+          continue;
+        }
+
+        // No current session. If guards fail or intent is null, we're done.
+        if (!this.guardsPass() || target === null) {
+          return;
+        }
+
+        const ok = await this.executeJoin(target);
+        if (!ok) {
+          // Drop the intent so we don't spin retrying a failing join. If the
+          // user clicked a different channel during the failure window, keep
+          // that newer intent instead of clobbering it.
+          if (sameIntent(this.intent, target)) {
+            this.intent = null;
+            return;
+          }
+          continue;
+        }
+      }
+    } finally {
+      this.reconciling = false;
+    }
+  }
+
+  private guardsPass(): boolean {
+    const store = useAppStore.getState();
+    if (!store.currentUser) {
+      return false;
+    }
+    if (store.networkStatus === 'kill-switch') {
+      return false;
+    }
+    return true;
+  }
+
+  private async executeJoin(target: VoiceIntent): Promise<boolean> {
+    const store = useAppStore.getState();
+    const user = store.currentUser;
+    if (!user) {
+      return false;
+    }
+    const userId = user.id;
+    const displayName = user.username ?? user.id;
+    const localIdentity = `voice-${userId}`;
+    const avatarKey = store.userAvatarUrl ?? null;
+
+    await this.ensureEventsChannel();
+
+    const intentTs = this.intentTs ?? performance.now();
+    this.intentTs = null;
+
+    this.setState({
+      phase: 'joining',
+      channelId: target.channelId,
+      groupId: target.groupId,
+      isMuted: false,
+      isLocalSpeaking: false,
+      participants: [
+        {
+          identity: localIdentity,
+          name: displayName,
+          isMuted: false,
+          isLocal: true,
+          avatarKey,
+        },
+      ],
+      activeSpeakerIds: [],
+      error: null,
+    });
+
+    const { input, output } = readDevicePrefs();
+    const audioProcessing = this.resolveApmConfig();
+
+    try {
+      await invoke('join_voice_channel', {
+        channelId: target.channelId,
+        userId,
+        displayName,
+        inputDevice: input,
+        outputDevice: output,
+        audioProcessing,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      console.error('[voice] join_voice_channel failed:', msg);
+      // Best-effort cleanup in case the Rust side partially set up state
+      // before failing.
+      invoke('leave_voice_channel').catch(() => {});
+      this.setState({
+        phase: 'idle',
+        channelId: null,
+        groupId: null,
+        participants: [],
+        activeSpeakerIds: [],
+        isMuted: false,
+        isLocalSpeaking: false,
+        error: msg,
+      });
+      return false;
+    }
+
+    // Intent may have changed (or guards failed) during the join. Bail out so
+    // the loop can reconcile to the new target — `current` stays unset so the
+    // loop treats us as needing to leave the partial session.
+    if (!sameIntent(this.intent, target) || !this.guardsPass()) {
+      try {
+        await invoke('leave_voice_channel');
+      } catch {
+        // Swallow — we're already on a transition path.
+      }
+      this.setState({
+        phase: 'idle',
+        channelId: null,
+        groupId: null,
+        participants: [],
+        activeSpeakerIds: [],
+        isMuted: false,
+        isLocalSpeaking: false,
+      });
+      return true;
+    }
+
+    // Push saved per-remote-user volume preferences into the live mixer.
+    // Best-effort — a failure here just leaves a track at unity gain.
+    const userVolumes = this.preferencesProvider?.()?.user_volumes;
+    if (userVolumes) {
+      for (const [remoteUserId, volume] of Object.entries(userVolumes)) {
+        if (typeof volume === 'number') {
+          invoke('set_remote_user_volume', { userId: remoteUserId, volume }).catch((e) => {
+            console.warn('[voice] set_remote_user_volume failed:', e);
+          });
+        }
+      }
+    }
+
+    this.current = { intent: target, userId, displayName };
+    this.setState({ phase: 'joined' });
+
+    const intentToInvokeMs = Math.round(performance.now() - intentTs);
+    this.emit('joined', {
+      channelId: target.channelId,
+      groupId: target.groupId,
+      userId,
+      displayName,
+      intentToInvokeMs,
+    });
+
+    // Dump the per-phase timings to the dev console so they can be
+    // copy-pasted into issue threads. Best-effort — a missing record is
+    // not fatal.
+    invoke<JoinTimings | null>('get_last_join_timings')
+      .then((timings) => {
+        if (timings) {
+          // eslint-disable-next-line no-console
+          console.log(formatJoinTimings(timings, intentToInvokeMs));
+        }
+      })
+      .catch(() => {});
+
+    return true;
+  }
+
+  private async executeLeave(): Promise<void> {
+    const left = this.current;
+    this.setState({ phase: 'leaving' });
+
+    try {
+      await invoke('leave_voice_channel');
+    } catch (e) {
+      console.warn('[voice] leave_voice_channel failed:', e);
+    }
+
+    this.current = null;
+    this.setState({
+      phase: 'idle',
+      channelId: null,
+      groupId: null,
+      participants: [],
+      activeSpeakerIds: [],
+      isMuted: false,
+      isLocalSpeaking: false,
+    });
+
+    if (left) {
+      this.emit('left', {
+        channelId: left.intent.channelId,
+        groupId: left.intent.groupId,
+        userId: left.userId,
+        displayName: left.displayName,
+      });
+    }
+  }
+
+  // ── Voice-event channel ───────────────────────────────────────────────────
+
+  private async ensureEventsChannel(): Promise<void> {
+    if (this.eventsAttached) {
+      return;
+    }
+    const channel = new Channel<VoiceEvent>();
+    channel.onmessage = (event) => this.handleEvent(event);
+    await invoke('subscribe_voice_events', { onEvent: channel });
+    this.eventsAttached = true;
+  }
+
+  private handleEvent(event: VoiceEvent): void {
+    const localIdentity = this.current ? `voice-${this.current.userId}` : null;
+
+    switch (event.type) {
+      case 'participant_joined': {
+        const next: VoiceParticipant = {
+          identity: event.identity,
+          name: event.name,
+          isMuted: event.is_muted,
+          isLocal: event.identity === localIdentity,
+          avatarKey: event.avatar_url ?? null,
+        };
+        this.setState({ participants: upsertParticipant(this.state.participants, next) });
+        break;
+      }
+      case 'participant_left': {
+        const participants = this.state.participants.filter((p) => p.identity !== event.identity);
+        const wasSpeaker = this.state.activeSpeakerIds.includes(event.identity);
+        const activeSpeakerIds = wasSpeaker
+          ? this.state.activeSpeakerIds.filter((id) => id !== event.identity)
+          : this.state.activeSpeakerIds;
+        this.setState({ participants, activeSpeakerIds });
+        break;
+      }
+      case 'muted':
+      case 'unmuted': {
+        const isMuted = event.type === 'muted';
+        const participants = this.state.participants.map((p) =>
+          p.identity === event.identity ? { ...p, isMuted } : p,
+        );
+        const patch: Partial<VoiceSessionState> = { participants };
+        if (event.identity === localIdentity) {
+          patch.isMuted = isMuted;
+        }
+        this.setState(patch);
+        break;
+      }
+      case 'speaking_started': {
+        if (this.state.activeSpeakerIds.includes(event.identity)) {
+          break;
+        }
+        this.setState({
+          activeSpeakerIds: [...this.state.activeSpeakerIds, event.identity],
+          isLocalSpeaking:
+            event.identity === localIdentity ? true : this.state.isLocalSpeaking,
+        });
+        break;
+      }
+      case 'speaking_stopped': {
+        if (!this.state.activeSpeakerIds.includes(event.identity)) {
+          break;
+        }
+        this.setState({
+          activeSpeakerIds: this.state.activeSpeakerIds.filter((id) => id !== event.identity),
+          isLocalSpeaking:
+            event.identity === localIdentity ? false : this.state.isLocalSpeaking,
+        });
+        break;
+      }
+      case 'disconnected': {
+        // Server-initiated drop. Push through the reconciler so any in-flight
+        // join completes/cleans up cleanly first. The redundant
+        // `leave_voice_channel` is harmless on the Rust side.
+        this.intent = null;
+        void this.reconcile();
+        break;
+      }
+    }
+  }
+
+  // ── State plumbing ────────────────────────────────────────────────────────
+
+  private setState(patch: Partial<VoiceSessionState>): void {
+    this.state = { ...this.state, ...patch };
+    for (const listener of this.listeners) {
+      listener();
+    }
+  }
+
+  private emit<E extends keyof ManagerEventMap>(event: E, payload: ManagerEventMap[E]): void {
+    const set = this.eventListeners.get(event);
+    if (!set) {
+      return;
+    }
+    for (const listener of set) {
+      (listener as EventListener<E>)(payload);
+    }
+  }
+
+  private resolveApmConfig(): ApmConfig {
+    const prefs = this.preferencesProvider?.();
+    return preferencesToApmConfig(prefs);
+  }
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function sameIntent(a: VoiceIntent | null, b: VoiceIntent | null): boolean {
+  if (a === b) {
+    return true;
+  }
+  if (!a || !b) {
+    return false;
+  }
+  return a.channelId === b.channelId && a.groupId === b.groupId;
+}
+
+function readDevicePrefs(): { input: string | null; output: string | null } {
+  try {
+    const prefs: Record<string, string> = JSON.parse(
+      localStorage.getItem(VOICE_DEVICES_KEY) || '{}',
+    );
+    return {
+      input: prefs.input && prefs.input !== 'default' ? prefs.input : null,
+      output: prefs.output && prefs.output !== 'default' ? prefs.output : null,
+    };
+  } catch {
+    return { input: null, output: null };
+  }
+}
+
+function persistDevicePref(kind: 'input' | 'output', deviceName: string): void {
+  try {
+    const prefs: Record<string, string> = JSON.parse(
+      localStorage.getItem(VOICE_DEVICES_KEY) || '{}',
+    );
+    prefs[kind] = deviceName;
+    localStorage.setItem(VOICE_DEVICES_KEY, JSON.stringify(prefs));
+  } catch {
+    // localStorage unavailable; the preference won't survive a relaunch but
+    // the live switch (via the Tauri command above) still applies for this
+    // session.
+  }
+}
+
+function upsertParticipant(
+  list: VoiceParticipant[],
+  next: VoiceParticipant,
+): VoiceParticipant[] {
+  const idx = list.findIndex((p) => p.identity === next.identity);
+  if (idx === -1) {
+    return [...list, next];
+  }
+  const copy = list.slice();
+  copy[idx] = next;
+  return copy;
+}
+
+function pad(label: string): string {
+  return (label + ':').padEnd(16, ' ');
+}
+
+function formatJoinTimings(t: JoinTimings, intentToInvokeMs: number): string {
+  return [
+    `[voice/join] timings (channel=${t.channel_id}):`,
+    `  intent_to_invoke: ${intentToInvokeMs}ms (setIntent → invoke('join_voice_channel'))`,
+    `  ${pad('jwt_mint')}${t.jwt_mint_ms}ms`,
+    `  ${pad('room_connect')}${t.room_connect_ms}ms`,
+    `  ${pad('mic_init')}${t.mic_init_ms}ms`,
+    `  ${pad('first_publish')}${t.first_publish_ms}ms`,
+    `  ${pad('total_join')}${t.total_join_ms}ms`,
+  ].join('\n');
+}
+
+// ── Singleton + Zustand mirror ───────────────────────────────────────────────
+
+export const voiceSession = new VoiceSessionManager();
+
+/**
+ * Mirror the manager's state slice onto the Zustand store so existing readers
+ * (`VoiceBar`, `VoiceChannelView`, `AppShell`, `useLiveKitRealtime`, etc.)
+ * keep working without changes. The manager is the source of truth; Zustand
+ * is a write-through projection for the rendering layer.
+ */
+voiceSession.subscribe(() => {
+  const s = voiceSession.getSnapshot();
+  // Map manager state → store state. Avoid setting fields that didn't change
+  // so subscribers don't churn on equal-value writes.
+  const store = useAppStore.getState();
+  const patch: Partial<{
+    activeVoiceChannelId: string | null;
+    voiceParticipants: VoiceParticipant[];
+    voiceActiveSpeakerIds: string[];
+    voiceIsMuted: boolean;
+    isLocalSpeaking: boolean;
+  }> = {};
+  if (store.activeVoiceChannelId !== s.channelId) {
+    patch.activeVoiceChannelId = s.channelId;
+  }
+  if (store.voiceParticipants !== s.participants) {
+    patch.voiceParticipants = s.participants;
+  }
+  if (store.voiceActiveSpeakerIds !== s.activeSpeakerIds) {
+    patch.voiceActiveSpeakerIds = s.activeSpeakerIds;
+  }
+  if (store.voiceIsMuted !== s.isMuted) {
+    patch.voiceIsMuted = s.isMuted;
+  }
+  if (store.isLocalSpeaking !== s.isLocalSpeaking) {
+    patch.isLocalSpeaking = s.isLocalSpeaking;
+  }
+  if (Object.keys(patch).length > 0) {
+    useAppStore.setState(patch);
+  }
+});
+
+// React to currentUser / kill-switch changes by re-running reconciliation.
+// Logging out, getting kicked offline, etc. should tear down any active
+// voice session without each caller having to remember to.
+useAppStore.subscribe((state, prev) => {
+  if (state.currentUser !== prev.currentUser || state.networkStatus !== prev.networkStatus) {
+    voiceSession.refresh();
+  }
+});

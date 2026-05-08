@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { PhoneOff } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
+import { voiceSession } from "../voice";
 
 /**
  * 1:1 call screen. Reuses the voice stack — a call is just a private LiveKit
@@ -22,7 +23,6 @@ export const CallPage: React.FC = () => {
   const { callId } = useParams({ from: "/call/$callId" });
   const roomName = `call-${callId}`;
   const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
-  const setActiveVoiceChannelId = useAppStore((s) => s.setActiveVoiceChannelId);
 
   // Direct navigation to /call/<id> with no active voice → bounce back. Joining
   // is initiated by the caller's DM page or the callee's accept button; we
@@ -46,7 +46,7 @@ export const CallPage: React.FC = () => {
   }, [activeVoiceChannelId, roomName, navigate]);
 
   const hangUp = () => {
-    setActiveVoiceChannelId(null);
+    voiceSession.leave();
   };
 
   return (

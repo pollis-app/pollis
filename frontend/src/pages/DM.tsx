@@ -5,6 +5,7 @@ import { MainContent } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
 import { invoke } from "@tauri-apps/api/core";
+import { voiceSession } from "../voice";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
@@ -13,7 +14,6 @@ export const DMPage: React.FC = () => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
-  const setActiveVoiceChannelId = useAppStore((s) => s.setActiveVoiceChannelId);
   const currentUser = useAppStore((s) => s.currentUser);
 
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
@@ -73,7 +73,7 @@ export const DMPage: React.FC = () => {
         callerId: currentUser.id,
         callerUsername: currentUser.username ?? currentUser.id,
       });
-      setActiveVoiceChannelId(result.room_name);
+      voiceSession.setIntent({ channelId: result.room_name, groupId: null });
       navigate({ to: "/call/$callId", params: { callId: result.call_id } });
     } catch (err) {
       console.error("[call] start_call failed:", err);

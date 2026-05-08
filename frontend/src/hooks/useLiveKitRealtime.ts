@@ -272,7 +272,7 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants', event.channel_id] });
         // LiveKit's data channel doesn't echo packets back to the sender,
-        // so own-user join/leave is handled locally in useVoiceChannel.ts.
+        // so own-user join/leave is handled locally in voice/voiceBridge.ts.
         // Here we only fire for OTHER participants, and only when the user
         // is in the same room — otherwise it's noise from unrelated rooms.
         if (
