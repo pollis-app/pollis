@@ -385,6 +385,22 @@ function MainApp() {
     setAppState("logout-confirm");
   }, []);
 
+  // Cmd/Ctrl+L "screen lock": clear the in-memory unlock state and route
+  // back to the PIN entry screen without dropping the session. AppShell
+  // unmounts as a side effect, which closes LiveKit rooms cleanly.
+  const handleLock = useCallback(async () => {
+    if (!currentUser) {
+      return;
+    }
+    try {
+      await api.lockUnlock();
+    } catch (err) {
+      console.error("[App] lock failed:", err);
+    }
+    setPendingPinUser(currentUser);
+    setAppState("pin-entry");
+  }, [currentUser]);
+
   // After delete_account succeeds in Settings, transition to auth screen.
   // Zustand logout() is called in Settings.tsx before this fires.
   const handleDeleteAccount = useCallback(() => {
@@ -602,7 +618,7 @@ function MainApp() {
         style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}
       >
         <div style={{ flex: 1, overflow: "hidden" }}>
-          <TerminalApp onLogout={handleLogout} onDeleteAccount={handleDeleteAccount} />
+          <TerminalApp onLogout={handleLogout} onLock={handleLock} onDeleteAccount={handleDeleteAccount} />
         </div>
         {/* Global enrollment-approval takeover. Layered above the main app
             UI so the user MUST act on it before continuing. The overlay

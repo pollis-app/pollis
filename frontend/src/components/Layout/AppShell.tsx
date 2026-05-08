@@ -17,6 +17,7 @@ import { Mail, Phone, X } from "lucide-react";
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { usePreferences } from "../../hooks/queries/usePreferences";
 import { voiceSession } from "../../voice";
+import type { RouterContext } from "../../types/router";
 
 /**
  * AppShell is the root route component rendered by RouterProvider.
@@ -154,6 +155,29 @@ export const AppShell: React.FC = () => {
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
   }, []);
+
+  // The search button in BreadcrumbNav fires this custom event so it can
+  // open the panel without lifting AppShell's local state into a store.
+  useEffect(() => {
+    const handle = () => setIsSearchOpen(true);
+    window.addEventListener("pollis:open-search", handle);
+    return () => window.removeEventListener("pollis:open-search", handle);
+  }, []);
+
+  // Cmd/Ctrl+L — lock the app behind the PIN screen without logging out.
+  // Routes through the router context's onLock so App.tsx can flip the
+  // top-level appState to "pin-entry" (AppShell unmounts in the process).
+  const { onLock } = router.options.context as RouterContext;
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if (e.key === "l" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        onLock();
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [onLock]);
 
   // Cmd+W / Ctrl+W — hide the window on macOS, close it on Windows/Linux.
   useEffect(() => {

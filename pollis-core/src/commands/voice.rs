@@ -101,6 +101,14 @@ pub enum VoiceEvent {
     Unmuted { identity: String },
     SpeakingStarted { identity: String },
     SpeakingStopped { identity: String },
+    /// LiveKit's per-participant categorical connection quality. The Rust
+    /// SDK doesn't expose RTT in ms here — this is the only signal it
+    /// surfaces — so the UI shows a lagging-dot rather than a number.
+    /// `quality` is one of "excellent" | "good" | "poor" | "lost".
+    ConnectionQualityChanged {
+        identity: String,
+        quality: String,
+    },
     Disconnected,
 }
 
@@ -1424,6 +1432,21 @@ pub async fn join_voice_channel(
                 }
                 RoomEvent::ConnectionStateChanged(conn_state) => {
                     eprintln!("[voice] connection state: {conn_state:?}");
+                }
+                RoomEvent::ConnectionQualityChanged { quality, participant } => {
+                    let quality_str = match quality {
+                        ConnectionQuality::Excellent => "excellent",
+                        ConnectionQuality::Good => "good",
+                        ConnectionQuality::Poor => "poor",
+                        ConnectionQuality::Lost => "lost",
+                    };
+                    let voice = voice_arc.lock().await;
+                    if let Some(ch) = &voice.channel {
+                        let _ = ch.send(VoiceEvent::ConnectionQualityChanged {
+                            identity: participant.identity().to_string(),
+                            quality: quality_str.to_string(),
+                        });
+                    }
                 }
                 _ => {}
             }

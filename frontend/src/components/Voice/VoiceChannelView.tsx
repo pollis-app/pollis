@@ -2,9 +2,28 @@ import React from "react";
 import { Circle, VolumeX } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { NavigableList } from "../ui/NavigableList";
-import type { VoiceParticipant } from "../../types";
+import type { VoiceParticipant, VoiceConnectionQuality } from "../../types";
 import { RemoteUserVolumeSlider } from "./RemoteUserVolumeSlider";
 import { Avatar } from "../ui/Avatar";
+
+// Excellent quality is the common case — surfacing it would just be noise on
+// every row, so we only show a degraded indicator. Poor and Lost are the
+// signals that actually mean "this person is lagging."
+function qualityIndicator(quality: VoiceConnectionQuality | undefined): {
+  color: string;
+  label: string;
+} | null {
+  switch (quality) {
+    case "good":
+      return { color: "#facc15", label: "Connection: good" };
+    case "poor":
+      return { color: "#f97316", label: "Connection: poor" };
+    case "lost":
+      return { color: "#ef4444", label: "Connection: lost" };
+    default:
+      return null;
+  }
+}
 
 export const VoiceChannelView: React.FC = () => {
   const { voiceParticipants, voiceActiveSpeakerIds } = useAppStore();
@@ -88,6 +107,22 @@ export const VoiceChannelView: React.FC = () => {
               >
                 {p.name}
               </span>
+              {(() => {
+                const ind = qualityIndicator(p.connectionQuality);
+                if (!ind) {
+                  return null;
+                }
+                return (
+                  <span
+                    data-testid={`voice-quality-${p.identity}`}
+                    title={ind.label}
+                    aria-label={ind.label}
+                    className="flex-shrink-0 flex items-center"
+                  >
+                    <Circle size={8} fill={ind.color} color={ind.color} />
+                  </span>
+                );
+              })()}
             </>
           );
         }}

@@ -38,6 +38,7 @@ interface MockMessage {
 interface MockProfile {
   id: string;
   username?: string;
+  preferred_name?: string;
   phone?: string;
   avatar_url?: string;
 }
@@ -117,8 +118,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
     }
 
     case 'update_user_profile': {
-      const { username, phone, avatarUrl } = args as {
+      const { username, preferredName, phone, avatarUrl } = args as {
         username?: string | null;
+        preferredName?: string | null;
         phone?: string | null;
         avatarUrl?: string | null;
       };
@@ -127,6 +129,9 @@ function handleCommand(command: string, args: Record<string, unknown>): unknown 
       }
       if (username != null) {
         store.profile.username = username;
+      }
+      if (preferredName != null) {
+        store.profile.preferred_name = preferredName;
       }
       if (phone != null) {
         store.profile.phone = phone;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Hash, AtSign, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon } from "lucide-react";
-import { Avatar } from "./ui/Avatar";
+import { Hash, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon } from "lucide-react";
+import { PresenceAvatar } from "./ui/PresenceAvatar";
 import { useUserGroupsWithChannels, useAllGroupMembers, type GroupMemberWithGroup } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
@@ -28,19 +28,18 @@ type SearchResultItem =
       channelId: string;
     }
   | {
-      type: "dm";
-      id: string;
-      name: string;
-      breadcrumb: string;
-      conversationId: string;
-    }
-  | {
-      type: "user";
+      // A "person" entry: clicking opens the existing DM if one exists,
+      // otherwise the user's profile page (where they can request a new DM).
+      // Replaces the previous separate user / dm entry types so the same
+      // person never appears twice in the menu.
+      type: "person";
       id: string;
       name: string;
       breadcrumb: string;
       userId: string;
       avatarKey?: string | null;
+      // Set when the current user already has an accepted DM with this person.
+      conversationId?: string;
     }
   | {
       type: "page";
@@ -114,26 +113,33 @@ function buildVoiceResults(
   return results;
 }
 
-function buildDMResults(
-  conversations: Array<{ id: string; user2_identifier: string }> | undefined
-): SearchResultItem[] {
-  if (!conversations) {
-    return [];
-  }
-  return conversations.map((conv) => ({
-    type: "dm" as const,
-    id: `dm-${conv.id}`,
-    name: conv.user2_identifier,
-    breadcrumb: `/dm/${conv.user2_identifier}`,
-    conversationId: conv.id,
-  }));
-}
-
-function buildUserResults(
+/**
+ * Build the unified "person" list: every reachable user (group members
+ * the current user shares a group with, plus existing DM partners) gets
+ * one entry. If a DM already exists, `conversationId` is filled in so
+ * clicking jumps straight there; otherwise clicking goes to the profile
+ * page, which is where new DMs are initiated.
+ */
+function buildPersonResults(
   groupMembers: GroupMemberWithGroup[],
-  dmConversations: Array<{ user2_id?: string; user2_identifier: string; user2_avatar_url?: string }> | undefined,
+  dmConversations: Array<{ id: string; user2_id?: string; user2_identifier: string; user2_avatar_url?: string }> | undefined,
   currentUserId: string | null,
 ): SearchResultItem[] {
+  // user_id → existing DM conversation_id, so we can attach it to any
+  // matching group-member row and avoid emitting a duplicate person.
+  const dmByUserId = new Map<string, { conversationId: string; identifier: string; avatarKey?: string | null }>();
+  if (dmConversations) {
+    for (const c of dmConversations) {
+      if (c.user2_id) {
+        dmByUserId.set(c.user2_id, {
+          conversationId: c.id,
+          identifier: c.user2_identifier,
+          avatarKey: c.user2_avatar_url ?? null,
+        });
+      }
+    }
+  }
+
   const seen = new Set<string>();
   const out: SearchResultItem[] = [];
 
@@ -142,33 +148,34 @@ function buildUserResults(
       continue;
     }
     seen.add(m.user_id);
-    const username = m.username || m.display_name || m.user_id;
+    const dm = dmByUserId.get(m.user_id);
+    const username = m.username || m.display_name || dm?.identifier || m.user_id;
     out.push({
-      type: "user",
-      id: `user-${m.user_id}`,
+      type: "person",
+      id: `person-${m.user_id}`,
       name: `@${username}`,
-      breadcrumb: `/user/${username}`,
+      breadcrumb: dm ? `/dm/${username}` : `/user/${username}`,
       userId: m.user_id,
-      avatarKey: m.avatar_url ?? null,
+      avatarKey: m.avatar_url ?? dm?.avatarKey ?? null,
+      conversationId: dm?.conversationId,
     });
   }
 
-  if (dmConversations) {
-    for (const c of dmConversations) {
-      const userId = c.user2_id;
-      if (!userId || userId === currentUserId || seen.has(userId)) {
-        continue;
-      }
-      seen.add(userId);
-      out.push({
-        type: "user",
-        id: `user-${userId}`,
-        name: `@${c.user2_identifier}`,
-        breadcrumb: `/user/${c.user2_identifier}`,
-        userId,
-        avatarKey: c.user2_avatar_url ?? null,
-      });
+  // DM partners with no shared group still need to surface — add them now.
+  for (const [userId, dm] of dmByUserId) {
+    if (userId === currentUserId || seen.has(userId)) {
+      continue;
     }
+    seen.add(userId);
+    out.push({
+      type: "person",
+      id: `person-${userId}`,
+      name: `@${dm.identifier}`,
+      breadcrumb: `/dm/${dm.identifier}`,
+      userId,
+      avatarKey: dm.avatarKey,
+      conversationId: dm.conversationId,
+    });
   }
 
   return out;
@@ -226,9 +233,8 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
   const allItems = useMemo(() => {
     const channels = buildChannelResults(groupsWithChannels);
     const voiceChannels = buildVoiceResults(groupsWithChannels);
-    const dms = buildDMResults(dmConversations);
-    const users = buildUserResults(allGroupMembers, dmConversations, currentUserId);
-    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...dms, ...users, ...PAGE_RESULTS];
+    const people = buildPersonResults(allGroupMembers, dmConversations, currentUserId);
+    const combined: SearchResultItem[] = [...channels, ...voiceChannels, ...people, ...PAGE_RESULTS];
     if (activeVoiceChannelId) {
       const activeIdx = combined.findIndex(
         (i) => i.type === "voice" && i.channelId === activeVoiceChannelId
@@ -294,16 +300,18 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
           to: "/groups/$groupId/voice/$channelId",
           params: { groupId: item.groupId, channelId: item.channelId },
         });
-      } else if (item.type === "dm") {
-        navigate({
-          to: "/dms/$conversationId",
-          params: { conversationId: item.conversationId },
-        });
-      } else if (item.type === "user") {
-        navigate({
-          to: "/user/$userId",
-          params: { userId: item.userId },
-        });
+      } else if (item.type === "person") {
+        if (item.conversationId) {
+          navigate({
+            to: "/dms/$conversationId",
+            params: { conversationId: item.conversationId },
+          });
+        } else {
+          navigate({
+            to: "/user/$userId",
+            params: { userId: item.userId },
+          });
+        }
       } else {
         navigate({ to: item.path });
       }
@@ -517,10 +525,13 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
                       <Hash size={14} />
                     ) : item.type === "voice" ? (
                       <Volume2 size={14} />
-                    ) : item.type === "dm" ? (
-                      <AtSign size={14} />
-                    ) : item.type === "user" ? (
-                      <Avatar avatarKey={item.avatarKey ?? null} size={20} alt={item.name} />
+                    ) : item.type === "person" ? (
+                      <PresenceAvatar
+                        userId={item.userId}
+                        avatarKey={item.avatarKey ?? null}
+                        size={20}
+                        alt={item.name}
+                      />
                     ) : (
                       <SettingsIcon size={14} />
                     )}

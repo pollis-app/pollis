@@ -7,6 +7,7 @@ import { groupQueryKeys } from "./useGroups";
 
 export interface ServiceUserData {
   username: string;
+  preferred_name?: string;
   email: string;
   phone: string;
   avatar_url?: string;
@@ -19,11 +20,11 @@ export const userQueryKeys = {
 export function useOtherUserProfile(userId: string | null | undefined) {
   return useQuery({
     queryKey: userQueryKeys.profile(userId ?? null),
-    queryFn: async (): Promise<{ id: string; username: string; avatar_url?: string } | null> => {
+    queryFn: async (): Promise<{ id: string; username: string; preferred_name?: string; avatar_url?: string } | null> => {
       if (!userId) {
         return null;
       }
-      const profile = await invoke<{ id: string; username?: string; avatar_url?: string } | null>(
+      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; avatar_url?: string } | null>(
         'get_user_profile',
         { userId },
       );
@@ -33,6 +34,7 @@ export function useOtherUserProfile(userId: string | null | undefined) {
       return {
         id: profile.id,
         username: profile.username ?? '',
+        preferred_name: profile.preferred_name,
         avatar_url: profile.avatar_url,
       };
     },
@@ -52,13 +54,14 @@ export function useUserProfile() {
         throw new Error("No current user");
       }
 
-      const profile = await invoke<{ id: string; username?: string; phone?: string; avatar_url?: string } | null>(
+      const profile = await invoke<{ id: string; username?: string; preferred_name?: string; phone?: string; avatar_url?: string } | null>(
         'get_user_profile',
         { userId: currentUser.id },
       );
 
       return {
         username: profile?.username || currentUser.username || '',
+        preferred_name: profile?.preferred_name,
         email: currentUser.email || '',
         phone: profile?.phone || '',
         avatar_url: profile?.avatar_url,
@@ -78,12 +81,12 @@ export function useUpdateProfile() {
   const setUsername = useAppStore((state) => state.setUsername);
 
   return useMutation({
-    mutationFn: async ({ username, phone }: { username: string; phone?: string }) => {
+    mutationFn: async ({ username, preferredName, phone }: { username: string; preferredName?: string; phone?: string }) => {
       if (!currentUser) {
         throw new Error("No current user");
       }
 
-      await api.updateUserProfile(currentUser.id, username, phone);
+      await api.updateUserProfile(currentUser.id, username, preferredName, phone);
       return { username };
     },
     onSuccess: (data) => {
@@ -154,7 +157,7 @@ export function useUpdateAvatar() {
         throw new Error("No current user");
       }
 
-      await api.updateUserProfile(currentUser.id, undefined, undefined, avatarUrl);
+      await api.updateUserProfile(currentUser.id, undefined, undefined, undefined, avatarUrl);
       return avatarUrl;
     },
     onSuccess: (avatarUrl) => {

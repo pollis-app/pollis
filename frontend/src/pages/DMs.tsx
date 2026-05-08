@@ -6,7 +6,7 @@ import { useAppStore } from "../stores/appStore";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
-import { Avatar } from "../components/ui/Avatar";
+import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 
 export const DMsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -53,7 +53,15 @@ export const DMsPage: React.FC = () => {
       conversations.map((c) => ({
         id: c.id,
         label: c.user2_identifier,
-        icon: <Avatar avatarKey={c.user2_avatar_url} size={24} alt={`${c.user2_identifier} avatar`} testId={`dm-avatar-${c.id}`} />,
+        icon: (
+          <PresenceAvatar
+            userId={c.user2_id ?? null}
+            avatarKey={c.user2_avatar_url}
+            size={24}
+            alt={`${c.user2_identifier} avatar`}
+            testId={`dm-avatar-${c.id}`}
+          />
+        ),
         description: <LastMessagePreview conversationId={c.id} />,
         action: () => {
           setSelectedConversationId(c.id);

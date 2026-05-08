@@ -580,6 +580,17 @@ pub async fn connect_rooms(
                     let app_state_task = Arc::clone(&app_state_connect);
                     let user_id_task = user_id_owned.clone();
 
+                    // Snapshot whoever was already in the room when we joined so the
+                    // frontend doesn't have to wait for the next ParticipantConnected
+                    // to learn about existing members.
+                    emit_room_initial_presence(
+                        &room,
+                        &room_id_owned,
+                        &lk_arc_task,
+                        &user_id_task,
+                    )
+                    .await;
+
                     let handle = tokio::spawn(async move {
                         /// Process events until the stream closes. Returns how long
                         /// the connection stayed alive (used to calibrate backoff).
@@ -588,10 +599,31 @@ pub async fn connect_rooms(
                             lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
                             app_state: &Arc<AppState>,
                             user_id: &str,
+                            room_id: &str,
                         ) -> std::time::Duration {
                             let started = std::time::Instant::now();
                             while let Some(event) = events.recv().await {
                                 match event {
+                                    RoomEvent::ParticipantConnected(p) => {
+                                        emit_presence(
+                                            lk_arc,
+                                            &p.identity().to_string(),
+                                            room_id,
+                                            user_id,
+                                            true,
+                                        )
+                                        .await;
+                                    }
+                                    RoomEvent::ParticipantDisconnected(p) => {
+                                        emit_presence(
+                                            lk_arc,
+                                            &p.identity().to_string(),
+                                            room_id,
+                                            user_id,
+                                            false,
+                                        )
+                                        .await;
+                                    }
                                     RoomEvent::DataReceived { payload, .. } => {
                                         let channel = {
                                             let lk = lk_arc.lock().await;
@@ -632,7 +664,7 @@ pub async fn connect_rooms(
                             started.elapsed()
                         }
 
-                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &app_state_task, &user_id_task).await;
+                        let alive_dur = run_event_loop(&mut events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned).await;
                         eprintln!(
                             "[realtime] event stream closed for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                             alive_dur.as_secs_f64()
@@ -685,7 +717,17 @@ pub async fn connect_rooms(
                                         }
                                     }
 
-                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &app_state_task, &user_id_task).await;
+                                    // Re-snapshot remote_participants on reconnect so
+                                    // anyone who was already there gets re-emitted.
+                                    emit_room_initial_presence(
+                                        &new_room,
+                                        &room_id_owned,
+                                        &lk_arc_task,
+                                        &user_id_task,
+                                    )
+                                    .await;
+
+                                    let alive_dur = run_event_loop(&mut new_events, &lk_arc_task, &app_state_task, &user_id_task, &room_id_owned).await;
                                     eprintln!(
                                         "[realtime] event stream closed again for room {room_id_owned} (was alive {:.0}s), reconnecting…",
                                         alive_dur.as_secs_f64()
@@ -925,6 +967,97 @@ pub async fn publish_voice_presence(
     Ok(())
 }
 
+/// Send a single PresenceChanged event to the frontend, given a participant's
+/// raw LiveKit identity. No-ops if the identity isn't a real user (server
+/// pseudo-participants, the local user themselves) — those would just be noise.
+async fn emit_presence(
+    lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    identity: &str,
+    room_id: &str,
+    self_user_id: &str,
+    present: bool,
+) {
+    let user_id = match user_id_from_identity(identity) {
+        Some(uid) => uid,
+        None => return,
+    };
+    if user_id == self_user_id {
+        return;
+    }
+    let channel = {
+        let lk = lk_arc.lock().await;
+        lk.channel.clone()
+    };
+    if let Some(ch) = channel {
+        let _ = ch.send(RealtimeEvent::PresenceChanged {
+            user_id: user_id.to_string(),
+            room_id: room_id.to_string(),
+            present,
+        });
+    }
+}
+
+/// On (re)connect, replay the room's current remote_participants list as a
+/// burst of PresenceChanged{present:true} events so the frontend doesn't
+/// have to wait for the next room transition to learn about existing members.
+async fn emit_room_initial_presence(
+    room: &Arc<livekit::Room>,
+    room_id: &str,
+    lk_arc: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    self_user_id: &str,
+) {
+    let participants = room.remote_participants();
+    for (identity, _) in participants.iter() {
+        emit_presence(lk_arc, identity.as_str(), room_id, self_user_id, true).await;
+    }
+}
+
+/// Publishes a typing indicator into a LiveKit room. Cheap fire-and-forget;
+/// silently no-ops if the caller isn't connected to `room_id` yet (e.g. they
+/// switched away mid-keystroke). Marked `reliable: false` so a single dropped
+/// packet doesn't cost anything — the sender re-emits every few seconds while
+/// still typing and the receiver TTLs stale entries anyway.
+pub async fn publish_typing(
+    room_id: String,
+    channel_id: Option<String>,
+    conversation_id: Option<String>,
+    user_id: String,
+    username: Option<String>,
+    is_typing: bool,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let room = {
+        let lk = state.livekit.lock().await;
+        lk.rooms.get(&room_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    let room = match room {
+        None => return Ok(()),
+        Some(r) => r,
+    };
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "type": "typing",
+        "channel_id": channel_id,
+        "conversation_id": conversation_id,
+        "user_id": user_id,
+        "username": username,
+        "is_typing": is_typing,
+    }))
+    .map_err(Error::Serde)?;
+
+    let _ = room
+        .local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: false,
+            ..Default::default()
+        })
+        .await;
+
+    Ok(())
+}
+
 /// Publishes a data ping to a LiveKit room.
 /// Called by the frontend after a message is successfully sent.
 pub async fn publish_ping(
@@ -1114,6 +1247,17 @@ fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink<RealtimeEv
             if let Some(call_id) = data.get("call_id").and_then(|v| v.as_str()) {
                 let _ = channel.send(RealtimeEvent::CallCanceled {
                     call_id: call_id.to_owned(),
+                });
+            }
+        }
+        Some("typing") => {
+            if let Some(user_id) = data.get("user_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::Typing {
+                    channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    conversation_id: data.get("conversation_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    user_id: user_id.to_owned(),
+                    username: data.get("username").and_then(|v| v.as_str()).map(str::to_owned),
+                    is_typing: data.get("is_typing").and_then(|v| v.as_bool()).unwrap_or(false),
                 });
             }
         }

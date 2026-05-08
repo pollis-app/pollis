@@ -7,6 +7,8 @@ import { messageQueryKeys, useDMConversations } from './queries/useMessages';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
 import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
+import { useTypingStore, typingRoomKey } from '../stores/typingStore';
+import { usePresenceStore } from '../stores/presenceStore';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -79,6 +81,20 @@ type RealtimeEvent =
   | {
     type: 'call_canceled';
     call_id: string;
+  }
+  | {
+    type: 'typing';
+    channel_id: string | null;
+    conversation_id: string | null;
+    user_id: string;
+    username: string | null;
+    is_typing: boolean;
+  }
+  | {
+    type: 'presence_changed';
+    user_id: string;
+    room_id: string;
+    present: boolean;
   };
 
 export function useLiveKitRealtime() {
@@ -315,6 +331,9 @@ export function useLiveKitRealtime() {
         // that may have drifted during the outage.
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants'] });
+        // Wipe stale presence for the reconnected room — Rust will re-emit
+        // a fresh participant snapshot right after.
+        usePresenceStore.getState().resetRoom(event.room_id);
         return;
       }
 
@@ -355,6 +374,33 @@ export function useLiveKitRealtime() {
         const current = useAppStore.getState().incomingCall;
         if (current && current.callId === event.call_id) {
           useAppStore.getState().setIncomingCall(null);
+        }
+        return;
+      }
+
+      if (event.type === 'presence_changed') {
+        usePresenceStore
+          .getState()
+          .setPresent(event.user_id, event.room_id, event.present);
+        return;
+      }
+
+      if (event.type === 'typing') {
+        // Self-echoes from another device of the current user are noise —
+        // skip them so we never render "you are typing" to ourselves.
+        if (event.user_id === currentUserIdRef.current) {
+          return;
+        }
+        const roomKey = typingRoomKey(event.channel_id, event.conversation_id);
+        if (!roomKey) {
+          return;
+        }
+        if (event.is_typing) {
+          useTypingStore
+            .getState()
+            .setTyping(roomKey, event.user_id, event.username ?? event.user_id);
+        } else {
+          useTypingStore.getState().clearTyping(roomKey, event.user_id);
         }
         return;
       }

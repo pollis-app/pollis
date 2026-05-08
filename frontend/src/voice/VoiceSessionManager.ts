@@ -1,7 +1,7 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 
 import { useAppStore } from '../stores/appStore';
-import type { VoiceParticipant } from '../types';
+import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
 
@@ -23,6 +23,7 @@ export type VoiceEvent =
   | { type: 'unmuted'; identity: string }
   | { type: 'speaking_started'; identity: string }
   | { type: 'speaking_stopped'; identity: string }
+  | { type: 'connection_quality_changed'; identity: string; quality: VoiceConnectionQuality }
   | { type: 'disconnected' };
 
 /** Mirrors `JoinTimings` in `pollis-core/src/commands/voice.rs`. */
@@ -524,6 +525,21 @@ class VoiceSessionManager {
           isLocalSpeaking:
             event.identity === localIdentity ? false : this.state.isLocalSpeaking,
         });
+        break;
+      }
+      case 'connection_quality_changed': {
+        const idx = this.state.participants.findIndex((p) => p.identity === event.identity);
+        if (idx === -1) {
+          // Quality update for someone we don't know about yet — drop it;
+          // the join event lands first in practice.
+          break;
+        }
+        if (this.state.participants[idx]?.connectionQuality === event.quality) {
+          break;
+        }
+        const participants = this.state.participants.slice();
+        participants[idx] = { ...participants[idx], connectionQuality: event.quality };
+        this.setState({ participants });
         break;
       }
       case 'disconnected': {

@@ -22,9 +22,10 @@ export const TitleBar: React.FC = () => {
     win().startDragging().catch(console.error);
   };
 
-  // macOS traffic lights (left side, standard order: close / minimize / zoom)
+  // macOS traffic lights (left side, standard order: close / minimize / zoom).
+  // Sizing matches Apple's NSWindow defaults: 12px buttons, 8px gap edge-to-edge.
   const macControls = (
-    <div className="flex items-center gap-1.5 flex-shrink-0">
+    <div className="flex items-center gap-2 flex-shrink-0">
       <button
         data-testid="title-bar-close"
         onClick={handleClose}
@@ -116,7 +117,9 @@ export const TitleBar: React.FC = () => {
         height: 36,
         background: "var(--c-surface)",
         borderBottom: "1px solid var(--c-border)",
-        paddingLeft: isMac ? 8 : 12,
+        // 12px left inset matches Finder/Safari/native NSWindow placement;
+        // the previous 8px sat the dots noticeably tighter to the corner.
+        paddingLeft: isMac ? 12 : 12,
         paddingRight: isMac ? 12 : 0,
       } as React.CSSProperties}
     >

@@ -182,7 +182,7 @@ pub async fn invoke_unit(
 // captures the full current schema) on first run, and stamp
 // `schema_migrations` so the DB looks adopted.
 
-use pollis_core::db::BASELINE_SQL as BASELINE;
+use pollis_core::db::{BASELINE_SQL as BASELINE, POST_BASELINE_MIGRATIONS};
 
 /// Apply the baseline schema to the shared test DB if it hasn't been applied
 /// yet. Idempotent: safe to call on every test run.
@@ -224,6 +224,32 @@ pub async fn bootstrap_schema(remote: &crate::db::remote::RemoteDb) -> Result<()
     )
     .await
     .map_err(|e| Error::Other(anyhow::anyhow!("stamp baseline: {e}")))?;
+
+    // Apply post-baseline migrations the harness knows about. Each migration
+    // is gated on schema_migrations so reruns are no-ops.
+    for (version, description, sql) in POST_BASELINE_MIGRATIONS {
+        let already = conn
+            .query(
+                "SELECT 1 FROM schema_migrations WHERE version = ?1",
+                libsql::params![*version],
+            )
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("probe schema_migrations v{version}: {e}")))?
+            .next()
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("probe schema_migrations row v{version}: {e}")))?
+            .is_some();
+        if already {
+            continue;
+        }
+        run_sql_script(&conn, sql, &format!("migration {version}_{description}")).await?;
+        conn.execute(
+            "INSERT INTO schema_migrations (version, description) VALUES (?1, ?2)",
+            libsql::params![*version, *description],
+        )
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("stamp v{version}: {e}")))?;
+    }
 
     Ok(())
 }

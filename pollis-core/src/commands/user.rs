@@ -9,6 +9,7 @@ use crate::state::AppState;
 pub struct UserProfile {
     pub id: String,
     pub username: Option<String>,
+    pub preferred_name: Option<String>,
     pub phone: Option<String>,
     pub avatar_url: Option<String>,
 }
@@ -20,7 +21,7 @@ pub async fn get_user_profile(
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
-        "SELECT id, username, phone, avatar_url FROM users WHERE id = ?1",
+        "SELECT id, username, preferred_name, phone, avatar_url FROM users WHERE id = ?1",
         libsql::params![user_id],
     ).await?;
 
@@ -28,8 +29,9 @@ pub async fn get_user_profile(
         Ok(Some(UserProfile {
             id: row.get(0)?,
             username: row.get(1)?,
-            phone: row.get(2)?,
-            avatar_url: row.get(3)?,
+            preferred_name: row.get(2)?,
+            phone: row.get(3)?,
+            avatar_url: row.get(4)?,
         }))
     } else {
         Ok(None)
@@ -39,6 +41,7 @@ pub async fn get_user_profile(
 pub async fn update_user_profile(
     user_id: String,
     username: Option<String>,
+    preferred_name: Option<String>,
     phone: Option<String>,
     avatar_url: Option<String>,
     state: &Arc<AppState>,
@@ -46,8 +49,13 @@ pub async fn update_user_profile(
     let conn = state.remote_db.conn().await?;
 
     conn.execute(
-        "UPDATE users SET username = COALESCE(?2, username), phone = COALESCE(?3, phone), avatar_url = COALESCE(?4, avatar_url) WHERE id = ?1",
-        libsql::params![user_id, username, phone, avatar_url],
+        "UPDATE users SET
+            username = COALESCE(?2, username),
+            preferred_name = COALESCE(?3, preferred_name),
+            phone = COALESCE(?4, phone),
+            avatar_url = COALESCE(?5, avatar_url)
+         WHERE id = ?1",
+        libsql::params![user_id, username, preferred_name, phone, avatar_url],
     ).await?;
 
     Ok(())
@@ -143,7 +151,7 @@ pub async fn search_user_by_username(
     let conn = state.remote_db.conn().await?;
 
     let mut rows = conn.query(
-        "SELECT id, username, phone, avatar_url FROM users WHERE username = ?1 OR email = ?1",
+        "SELECT id, username, preferred_name, phone, avatar_url FROM users WHERE username = ?1 OR email = ?1",
         libsql::params![username],
     ).await?;
 
@@ -151,8 +159,9 @@ pub async fn search_user_by_username(
         Ok(Some(UserProfile {
             id: row.get(0)?,
             username: row.get(1)?,
-            phone: row.get(2)?,
-            avatar_url: row.get(3)?,
+            preferred_name: row.get(2)?,
+            phone: row.get(3)?,
+            avatar_url: row.get(4)?,
         }))
     } else {
         Ok(None)

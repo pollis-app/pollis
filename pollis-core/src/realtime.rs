@@ -99,6 +99,30 @@ pub enum RealtimeEvent {
     CallCanceled {
         call_id: String,
     },
+    /// Ephemeral signal that a user is composing a message in the named
+    /// channel/conversation. Senders re-emit `is_typing: true` every few
+    /// seconds while still typing (and `false` on send/blur); receivers
+    /// also age out stale entries on a TTL since this event is never
+    /// persisted and a user dropping offline must clear naturally.
+    Typing {
+        channel_id: Option<String>,
+        conversation_id: Option<String>,
+        user_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        username: Option<String>,
+        is_typing: bool,
+    },
+    /// Inferred online/offline derived from LiveKit room participation:
+    /// emitted when a participant joins or leaves a room the local user is
+    /// already subscribed to (groups / DMs / inbox). The frontend tracks
+    /// per-user → set-of-rooms; the user is "online" while at least one
+    /// room shows them as present. No heartbeats or explicit publishes —
+    /// LiveKit's keep-alive does the work.
+    PresenceChanged {
+        user_id: String,
+        room_id: String,
+        present: bool,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

@@ -3,5 +3,6 @@
 
 export interface RouterContext {
   onLogout: () => void;
+  onLock: () => void;
   onDeleteAccount?: () => void;
 }

@@ -33,6 +33,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [username, setUsername] = useState("");
+  const [preferredName, setPreferredName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
 
@@ -63,6 +64,7 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   useEffect(() => {
     if (userData) {
       setUsername(userData.username || "");
+      setPreferredName(userData.preferred_name || "");
       setEmail(userData.email || "");
       setPhone(userData.phone || "");
     }
@@ -150,7 +152,11 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   const handleSave = async () => {
     if (!currentUser) { return; }
     try {
-      await updateProfileMutation.mutateAsync({ username: username.trim(), phone: phone.trim() || undefined });
+      await updateProfileMutation.mutateAsync({
+        username: username.trim(),
+        preferredName: preferredName.trim() || undefined,
+        phone: phone.trim() || undefined,
+      });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch (error) {
@@ -300,6 +306,15 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
                   id="settings-username"
                 />
                 <input data-testid="settings-username-input" type="hidden" value={username} readOnly />
+
+                <TextInput
+                  label="Preferred name"
+                  value={preferredName}
+                  onChange={setPreferredName}
+                  placeholder="What people call you"
+                  id="settings-preferred-name"
+                />
+                <input data-testid="settings-preferred-name-input" type="hidden" value={preferredName} readOnly />
 
                 {/* Phone field hidden — not currently surfaced as a feature.
                     State and backend wiring are intentionally left in place
