@@ -211,6 +211,7 @@ export async function revokeDevice(userId: string, deviceId: string): Promise<vo
 export interface UserProfileData {
   id: string;
   username?: string;
+  preferred_name?: string;
   phone?: string;
   avatar_url?: string;
 }
@@ -222,12 +223,14 @@ export async function getUserProfile(userId: string): Promise<UserProfileData | 
 export async function updateUserProfile(
   userId: string,
   username?: string,
+  preferredName?: string,
   phone?: string,
   avatarUrl?: string,
 ): Promise<void> {
   await invoke('update_user_profile', {
     userId,
     username: username ?? null,
+    preferredName: preferredName ?? null,
     phone: phone ?? null,
     avatarUrl: avatarUrl ?? null,
   });
@@ -447,5 +450,5 @@ export async function updateServiceUserAvatar(avatarUrl: string): Promise<void> 
   if (!session) {
     throw new Error('No session');
   }
-  await updateUserProfile(session.user.id, undefined, undefined, avatarUrl);
+  await updateUserProfile(session.user.id, undefined, undefined, undefined, avatarUrl);
 }

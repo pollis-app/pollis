@@ -12,6 +12,7 @@ export interface User {
   clerk_id: string; // Legacy Clerk field, unused — kept for compatibility
   email?: string;
   username?: string;
+  preferred_name?: string;
   created_at: number;
   updated_at: number;
 }
