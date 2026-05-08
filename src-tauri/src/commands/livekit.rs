@@ -34,6 +34,11 @@ pub async fn publish_ping(room_id: String, channel_id: Option<String>, conversat
 }
 
 #[tauri::command]
+pub async fn publish_typing(room_id: String, channel_id: Option<String>, conversation_id: Option<String>, user_id: String, username: Option<String>, is_typing: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::livekit::publish_typing(room_id, channel_id, conversation_id, user_id, username, is_typing, &state).await
+}
+
+#[tauri::command]
 pub async fn publish_voice_presence(group_id: String, channel_id: String, user_id: String, display_name: String, joined: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::livekit::publish_voice_presence(group_id, channel_id, user_id, display_name, joined, &state).await
 }

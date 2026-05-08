@@ -99,6 +99,19 @@ pub enum RealtimeEvent {
     CallCanceled {
         call_id: String,
     },
+    /// Ephemeral signal that a user is composing a message in the named
+    /// channel/conversation. Senders re-emit `is_typing: true` every few
+    /// seconds while still typing (and `false` on send/blur); receivers
+    /// also age out stale entries on a TTL since this event is never
+    /// persisted and a user dropping offline must clear naturally.
+    Typing {
+        channel_id: Option<String>,
+        conversation_id: Option<String>,
+        user_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        username: Option<String>,
+        is_typing: bool,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

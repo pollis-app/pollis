@@ -31,6 +31,10 @@ interface ChatInputProps {
   autoFocus?: boolean;
   className?: string;
   maxAttachments?: number;
+  // Fires on every keystroke (and after send/clear). The parent uses this
+  // to drive the typing indicator publisher; it stays optional so simpler
+  // call sites that don't need it can ignore it entirely.
+  onValueChange?: (value: string) => void;
 }
 
 const formatFileSize = (bytes: number): string => {
@@ -201,6 +205,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   autoFocus = false,
   className = "",
   maxAttachments = 10,
+  onValueChange,
 }, ref) => {
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -436,6 +441,10 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     if (hasLoadingAttachments) { return; }
     onSend(message.trim(), attachments);
     setMessage("");
+    // Reset signals to "no longer typing" — covers the typing indicator
+    // publisher in the parent so the receiver doesn't keep us in the
+    // "still typing" state until TTL.
+    onValueChange?.("");
     // Do NOT revoke preview blob URLs here — they may still be referenced by
     // optimistic message stubs in React Query cache. Let them be GC'd naturally.
     setAttachments([]);
@@ -534,7 +543,11 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           ref={textareaRef}
           data-testid="message-input"
           value={message}
-          onChange={(e) => setMessage(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setMessage(next);
+            onValueChange?.(next);
+          }}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           onKeyDown={handleKeyDown}

@@ -925,6 +925,52 @@ pub async fn publish_voice_presence(
     Ok(())
 }
 
+/// Publishes a typing indicator into a LiveKit room. Cheap fire-and-forget;
+/// silently no-ops if the caller isn't connected to `room_id` yet (e.g. they
+/// switched away mid-keystroke). Marked `reliable: false` so a single dropped
+/// packet doesn't cost anything — the sender re-emits every few seconds while
+/// still typing and the receiver TTLs stale entries anyway.
+pub async fn publish_typing(
+    room_id: String,
+    channel_id: Option<String>,
+    conversation_id: Option<String>,
+    user_id: String,
+    username: Option<String>,
+    is_typing: bool,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    let room = {
+        let lk = state.livekit.lock().await;
+        lk.rooms.get(&room_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    let room = match room {
+        None => return Ok(()),
+        Some(r) => r,
+    };
+
+    let payload = serde_json::to_vec(&serde_json::json!({
+        "type": "typing",
+        "channel_id": channel_id,
+        "conversation_id": conversation_id,
+        "user_id": user_id,
+        "username": username,
+        "is_typing": is_typing,
+    }))
+    .map_err(Error::Serde)?;
+
+    let _ = room
+        .local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: false,
+            ..Default::default()
+        })
+        .await;
+
+    Ok(())
+}
+
 /// Publishes a data ping to a LiveKit room.
 /// Called by the frontend after a message is successfully sent.
 pub async fn publish_ping(
@@ -1114,6 +1160,17 @@ fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink<RealtimeEv
             if let Some(call_id) = data.get("call_id").and_then(|v| v.as_str()) {
                 let _ = channel.send(RealtimeEvent::CallCanceled {
                     call_id: call_id.to_owned(),
+                });
+            }
+        }
+        Some("typing") => {
+            if let Some(user_id) = data.get("user_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::Typing {
+                    channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    conversation_id: data.get("conversation_id").and_then(|v| v.as_str()).map(str::to_owned),
+                    user_id: user_id.to_owned(),
+                    username: data.get("username").and_then(|v| v.as_str()).map(str::to_owned),
+                    is_typing: data.get("is_typing").and_then(|v| v.as_bool()).unwrap_or(false),
                 });
             }
         }

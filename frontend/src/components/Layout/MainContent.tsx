@@ -15,6 +15,8 @@ import { transformChannelMessage } from "../../hooks/queries/useMessages";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
 import { blurhashFromUrl } from "../../utils/imageProcessing";
+import { useTypingPublisher } from "../../hooks/useTypingPublisher";
+import { TypingIndicator } from "../TypingIndicator";
 
 type MediaUploadResult = {
   key: string;
@@ -67,6 +69,19 @@ export const MainContent: React.FC = () => {
     !!selectedGroupId && !!currentUser && adminUserIds.has(currentUser.id);
 
   const chatInputRef = useRef<ChatInputHandle>(null);
+
+  // For channels the LiveKit room is the parent group's MLS group id; for
+  // DMs it's the conversation id directly. `useTypingPublisher` no-ops when
+  // the room id is null (e.g. nothing selected) so we don't need to gate
+  // the hook call.
+  const typingRoomId = selectedChannelId
+    ? selectedGroupId ?? null
+    : selectedConversationId ?? null;
+  const typing = useTypingPublisher({
+    roomId: typingRoomId,
+    channelId: selectedChannelId ?? null,
+    conversationId: selectedChannelId ? null : selectedConversationId ?? null,
+  });
 
   const queryClient = useQueryClient();
   const { messages, nextCursor, isLoading: messagesLoading } = useMessages(
@@ -601,7 +616,16 @@ export const MainContent: React.FC = () => {
         );
       })() : (
         <div data-testid="message-form">
-          <ChatInput ref={chatInputRef} onSend={handleSend} autoFocus />
+          <TypingIndicator
+            channelId={selectedChannelId ?? null}
+            conversationId={selectedChannelId ? null : selectedConversationId ?? null}
+          />
+          <ChatInput
+            ref={chatInputRef}
+            onSend={handleSend}
+            onValueChange={typing.notify}
+            autoFocus
+          />
         </div>
       )}
     </div>
