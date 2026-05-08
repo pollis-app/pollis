@@ -1,6 +1,6 @@
 import React, { useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut } from "lucide-react";
+import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
@@ -106,6 +106,14 @@ export const GroupPage: React.FC = () => {
       testId: "menu-item-members",
     },
     ...(isAdmin ? [
+      {
+        id: "rename-group",
+        label: "Rename Group",
+        icon: <Pencil size={14} />,
+        action: () => navigate({ to: "/groups/$groupId/rename", params: { groupId } }),
+        type: "system" as const,
+        testId: "menu-item-rename-group",
+      },
       {
         id: "create-channel",
         label: "New Channel",

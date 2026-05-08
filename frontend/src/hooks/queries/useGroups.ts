@@ -140,6 +140,42 @@ export function useJoinGroup() {
   });
 }
 
+export function useUpdateGroup() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((state) => state.currentUser);
+
+  return useMutation({
+    mutationFn: async ({
+      groupId,
+      name,
+      description,
+    }: {
+      groupId: string;
+      name?: string;
+      description?: string | null;
+    }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("update_group", {
+        groupId,
+        requesterId: currentUser.id,
+        name: name ?? null,
+        description: description ?? null,
+        iconUrl: null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
 export function useUpdateGroupIcon() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);
