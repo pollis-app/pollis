@@ -18,11 +18,14 @@ import { voiceSession } from "../voice";
  * - Callee accepts an incoming-call alert in the bottom status bar → AppShell
  *   does the same.
  */
+const RINGING_TIMEOUT_MS = 30_000;
+
 export const CallPage: React.FC = () => {
   const navigate = useNavigate();
   const { callId } = useParams({ from: "/call/$callId" });
   const roomName = `call-${callId}`;
   const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const voiceParticipants = useAppStore((s) => s.voiceParticipants);
 
   // Direct navigation to /call/<id> with no active voice → bounce back. Joining
   // is initiated by the caller's DM page or the callee's accept button; we
@@ -44,6 +47,21 @@ export const CallPage: React.FC = () => {
       navigate({ to: "/dms" });
     }
   }, [activeVoiceChannelId, roomName, navigate]);
+
+  // Ringing timeout: if nobody else is in the room after 30s, auto-hang-up so
+  // we stop publishing mic audio (and burning per-participant minutes) into
+  // an empty room. Applies to both sides — caller waiting for an unanswered
+  // ring, callee whose peer dropped before their join completed.
+  const hasRemoteParticipant = voiceParticipants.some((p) => !p.isLocal);
+  useEffect(() => {
+    if (hasRemoteParticipant || activeVoiceChannelId !== roomName) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      voiceSession.leave();
+    }, RINGING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [hasRemoteParticipant, activeVoiceChannelId, roomName]);
 
   const hangUp = () => {
     voiceSession.leave();
