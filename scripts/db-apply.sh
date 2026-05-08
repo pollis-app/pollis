@@ -13,7 +13,7 @@ set -euo pipefail
 : "${TURSO_TOKEN:?must be set}"
 
 HTTP_URL="${TURSO_URL/libsql:\/\//https:\/\/}"
-MIGRATIONS_DIR="${MIGRATIONS_DIR:-src-tauri/src/db/migrations}"
+MIGRATIONS_DIR="${MIGRATIONS_DIR:-pollis-core/src/db/migrations}"
 
 post() {
   curl -sS --fail-with-body -X POST "$HTTP_URL/v2/pipeline" \
