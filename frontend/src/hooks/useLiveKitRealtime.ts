@@ -8,6 +8,7 @@ import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
 import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
 import { useTypingStore, typingRoomKey } from '../stores/typingStore';
+import { usePresenceStore } from '../stores/presenceStore';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -88,6 +89,12 @@ type RealtimeEvent =
     user_id: string;
     username: string | null;
     is_typing: boolean;
+  }
+  | {
+    type: 'presence_changed';
+    user_id: string;
+    room_id: string;
+    present: boolean;
   };
 
 export function useLiveKitRealtime() {
@@ -324,6 +331,9 @@ export function useLiveKitRealtime() {
         // that may have drifted during the outage.
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-room-counts'] });
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants'] });
+        // Wipe stale presence for the reconnected room — Rust will re-emit
+        // a fresh participant snapshot right after.
+        usePresenceStore.getState().resetRoom(event.room_id);
         return;
       }
 
@@ -365,6 +375,13 @@ export function useLiveKitRealtime() {
         if (current && current.callId === event.call_id) {
           useAppStore.getState().setIncomingCall(null);
         }
+        return;
+      }
+
+      if (event.type === 'presence_changed') {
+        usePresenceStore
+          .getState()
+          .setPresent(event.user_id, event.room_id, event.present);
         return;
       }
 

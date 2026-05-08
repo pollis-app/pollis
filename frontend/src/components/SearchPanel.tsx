@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Hash, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon } from "lucide-react";
-import { Avatar } from "./ui/Avatar";
+import { PresenceAvatar } from "./ui/PresenceAvatar";
 import { useUserGroupsWithChannels, useAllGroupMembers, type GroupMemberWithGroup } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
@@ -526,7 +526,12 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
                     ) : item.type === "voice" ? (
                       <Volume2 size={14} />
                     ) : item.type === "person" ? (
-                      <Avatar avatarKey={item.avatarKey ?? null} size={20} alt={item.name} />
+                      <PresenceAvatar
+                        userId={item.userId}
+                        avatarKey={item.avatarKey ?? null}
+                        size={20}
+                        alt={item.name}
+                      />
                     ) : (
                       <SettingsIcon size={14} />
                     )}

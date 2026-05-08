@@ -2,7 +2,7 @@ import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, MessageCircle, Ban } from "lucide-react";
 import { PageShell } from "../components/Layout/PageShell";
-import { Avatar } from "../components/ui/Avatar";
+import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useOtherUserProfile } from "../hooks/queries/useUserProfile";
 import { useBlockUser } from "../hooks/queries";
@@ -122,7 +122,8 @@ export const UserProfilePage: React.FC = () => {
                     </div>
                   )}
                 </div>
-                <Avatar
+                <PresenceAvatar
+                  userId={profile.id}
                   avatarKey={profile.avatar_url}
                   size={72}
                   alt={`${headlineName} avatar`}

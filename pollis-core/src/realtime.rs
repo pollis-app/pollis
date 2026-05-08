@@ -112,6 +112,17 @@ pub enum RealtimeEvent {
         username: Option<String>,
         is_typing: bool,
     },
+    /// Inferred online/offline derived from LiveKit room participation:
+    /// emitted when a participant joins or leaves a room the local user is
+    /// already subscribed to (groups / DMs / inbox). The frontend tracks
+    /// per-user → set-of-rooms; the user is "online" while at least one
+    /// room shows them as present. No heartbeats or explicit publishes —
+    /// LiveKit's keep-alive does the work.
+    PresenceChanged {
+        user_id: String,
+        room_id: String,
+        present: bool,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

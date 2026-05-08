@@ -1,6 +1,7 @@
 import React from "react";
 import { User } from "lucide-react";
 import { useAvatarBlobUrl } from "../../hooks/queries/useUserProfile";
+import type { PresenceStatus } from "../../stores/presenceStore";
 
 interface AvatarProps {
   avatarKey?: string | null;
@@ -8,7 +9,16 @@ interface AvatarProps {
   alt?: string;
   testId?: string;
   variant?: "list" | "profile";
+  // Optional presence dot rendered in the bottom-right corner. Pass undefined
+  // to omit (the default) — only the avatars that surface in DM-call paths
+  // should render it, per #132's framing.
+  presence?: PresenceStatus;
 }
+
+const PRESENCE_COLORS: Record<PresenceStatus, string> = {
+  online: "#22c55e",
+  offline: "#6b7280",
+};
 
 export const Avatar: React.FC<AvatarProps> = ({
   avatarKey,
@@ -16,6 +26,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   alt = "Avatar",
   testId,
   variant = "list",
+  presence,
 }) => {
   const { data: blobUrl } = useAvatarBlobUrl(avatarKey ?? null);
 
@@ -35,24 +46,58 @@ export const Avatar: React.FC<AvatarProps> = ({
     flexShrink: 0,
   };
 
-  if (blobUrl) {
-    return (
-      <span style={containerStyle} data-testid={testId}>
-        <img
-          src={blobUrl}
-          alt={alt}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
-      </span>
-    );
-  }
+  // Wrap the avatar in a positioned span so the dot can sit at the corner
+  // without disturbing the parent's layout. Sizing the dot relative to the
+  // avatar keeps it visible at every avatar size we use.
+  const dotSize = Math.max(6, Math.round(size * 0.28));
+  const wrapperStyle: React.CSSProperties = {
+    position: "relative",
+    display: "inline-flex",
+    width: dim,
+    height: dim,
+    flexShrink: 0,
+  };
+  const dotStyle: React.CSSProperties = {
+    position: "absolute",
+    right: 0,
+    bottom: 0,
+    width: dotSize,
+    height: dotSize,
+    borderRadius: "50%",
+    background: presence ? PRESENCE_COLORS[presence] : "transparent",
+    border: "2px solid var(--c-surface, var(--c-bg))",
+    boxSizing: "content-box",
+  };
 
-  return (
+  const inner = blobUrl ? (
+    <span style={containerStyle} data-testid={testId}>
+      <img
+        src={blobUrl}
+        alt={alt}
+        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      />
+    </span>
+  ) : (
     <span style={containerStyle} data-testid={testId} aria-label={alt}>
       <User
         size={Math.round(size * 0.6)}
         aria-hidden="true"
         style={{ color: "var(--c-text-muted)" }}
+      />
+    </span>
+  );
+
+  if (!presence) {
+    return inner;
+  }
+
+  return (
+    <span style={wrapperStyle}>
+      {inner}
+      <span
+        data-testid={testId ? `${testId}-presence` : undefined}
+        aria-label={`Presence: ${presence}`}
+        style={dotStyle}
       />
     </span>
   );
