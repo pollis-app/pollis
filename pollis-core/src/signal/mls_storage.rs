@@ -43,6 +43,12 @@ pub enum MlsStorageError {
     Serde(#[from] serde_json::Error),
 }
 
+impl From<MlsStorageError> for crate::error::Error {
+    fn from(e: MlsStorageError) -> Self {
+        crate::error::Error::Other(anyhow::anyhow!("MLS storage: {e}"))
+    }
+}
+
 // ── key helpers ──────────────────────────────────────────────────────────────
 
 /// Builds the composite storage key: label || serialised_key || VERSION (2 bytes BE).

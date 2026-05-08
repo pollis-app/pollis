@@ -5651,6 +5651,43 @@ dependencies = [
 name = "pollis"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
+ "chrono",
+ "cocoa",
+ "dotenvy",
+ "image",
+ "libsql",
+ "objc",
+ "openmls",
+ "openmls_basic_credential",
+ "openmls_traits",
+ "pollis-core",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-clipboard-manager",
+ "tauri-plugin-dialog",
+ "tauri-plugin-fs",
+ "tauri-plugin-notification",
+ "tauri-plugin-os",
+ "tauri-plugin-process",
+ "tauri-plugin-shell",
+ "tauri-plugin-updater",
+ "tempfile",
+ "tls_codec",
+ "tokio",
+ "url",
+ "webkit2gtk",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "pollis-core"
+version = "1.0.0"
+dependencies = [
  "aes-gcm",
  "anyhow",
  "argon2",
@@ -5660,7 +5697,6 @@ dependencies = [
  "bytes",
  "chacha20poly1305",
  "chrono",
- "cocoa",
  "cpal",
  "curve25519-dalek",
  "dotenvy",
@@ -5677,13 +5713,11 @@ dependencies = [
  "libwebrtc",
  "livekit",
  "nnnoiseless",
- "objc",
  "once_cell",
  "openmls",
  "openmls_basic_credential",
  "openmls_rust_crypto",
  "openmls_traits",
- "pollis-core",
  "rand 0.8.6",
  "rand_core 0.6.4",
  "reqwest 0.12.28",
@@ -5691,35 +5725,14 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
- "serial_test",
  "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-clipboard-manager",
- "tauri-plugin-dialog",
- "tauri-plugin-fs",
- "tauri-plugin-notification",
- "tauri-plugin-os",
- "tauri-plugin-process",
- "tauri-plugin-shell",
- "tauri-plugin-updater",
- "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "ulid",
- "url",
- "webkit2gtk",
+ "uniffi",
  "webrtc-audio-processing",
- "windows-sys 0.59.0",
  "x25519-dalek",
  "zeroize",
-]
-
-[[package]]
-name = "pollis-core"
-version = "1.0.0"
-dependencies = [
- "uniffi",
 ]
 
 [[package]]

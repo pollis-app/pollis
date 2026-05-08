@@ -23,7 +23,7 @@ Working design note. Not for commit. Iterate freely.
 The current login/session model has three overlapping failure modes that all feed the "user gets bounced back to email + OTP for no good reason" bug class (issue #184).
 
 1. **Duplicate source of truth for "who was signed in."**
-   - `accounts.json` (`src-tauri/src/accounts.rs`) holds `last_active_user` plus an entry per user.
+   - `accounts.json` (`pollis-core/src/accounts.rs`) holds `last_active_user` plus an entry per user.
    - The OS keystore slot `session_{user_id}` holds a serialized `UserProfile` (id, email, username, plus two derived flags).
    - Every successful auth writes to both (auth.rs:275-280, auth.rs:549-554).
    - `get_session` (auth.rs:310-468) reads *both*, and if either one is missing or unparseable it returns `Ok(None)` or `Err(...)`, either of which kicks the frontend back to the OTP screen. Issue #184 is exactly this: keystore read can transiently fail (macOS keychain hiccup, Linux secret-service race, POLLIS_DATA_DIR namespace drift in dev) while `accounts.json` is fine, and the user sees a login prompt despite having perfectly good local keys.
@@ -231,7 +231,7 @@ Critically: the Turso-side account is untouched. Other devices for the same user
 
 ## New and changed commands
 
-Registered in `src-tauri/src/lib.rs`, implemented in `src-tauri/src/commands/auth.rs` (or a new `pin.rs` — prefer keeping auth-adjacent things in `auth.rs`).
+Registered in `src-tauri/src/lib.rs`. The shim layer lives in `src-tauri/src/commands/pin.rs`; the real implementation is in `pollis-core/src/commands/pin.rs` (alongside `auth.rs` and `account_identity.rs` in the same crate).
 
 - `set_pin(old_pin: Option<String>, new_pin: String) -> Result<()>`
   - Initial set and change. See lifecycle above.
@@ -250,7 +250,7 @@ Registered in `src-tauri/src/lib.rs`, implemented in `src-tauri/src/commands/aut
 
 ## `accounts.json` changes
 
-All in `src-tauri/src/accounts.rs`.
+All in `pollis-core/src/accounts.rs`.
 
 1. **Atomic write.** `write_accounts_index`:
    ```

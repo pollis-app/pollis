@@ -12,11 +12,14 @@
 ```
 React component
   → invoke("command_name", { args })
-    → Rust Tauri command (src-tauri/src/commands/*.rs)
-      → Turso (remote, metadata) or SQLite (local, secrets)
+    → #[tauri::command] shim (src-tauri/src/commands/*.rs)
+      → pollis_core::commands::* (pollis-core/src/commands/*.rs)
+        → Turso (remote, metadata) or SQLite (local, secrets)
     ← Result<T>
   ← React Query cache
 ```
+
+The shim layer is mechanical — each `#[tauri::command]` unwraps `tauri::State<AppState>` to `&AppState` and forwards to the corresponding `pollis_core::commands::…` function. Real logic lives in the `pollis-core` workspace crate so future CLI / TUI / mobile binaries can consume it without dragging in the Tauri runtime.
 
 **React Query** is the source of truth for remote data. **Zustand** holds only UI state (current user ref, transient session data).
 
@@ -40,14 +43,23 @@ Navigation uses `useNavigate()` from TanStack Router. Pages use `useParams()` fo
 ## Project Structure
 
 ```
-src-tauri/src/
-  commands/          # Tauri command handlers (auth, groups, messages, mls, ...)
-  db.rs              # Turso + local SQLite connections
-  db/migrations/     # remote_schema.sql (frozen) + numbered migrations
+pollis-core/src/
+  commands/          # Real command implementations (auth, groups, messages, mls, voice, ...)
+  db/                # Turso + local SQLite connections + numbered migrations
   config.rs          # Env var config
   keystore.rs        # OS keystore (keyring crate)
   state.rs           # AppState shared across commands
-  lib.rs             # App setup, command registration
+  realtime.rs        # LiveKit room manager + event dispatch
+  sink.rs            # EventSink trait (frontend-channel abstraction)
+  signal/            # MLS storage backend
+  lib.rs             # uniffi exports for mobile bindings
+
+src-tauri/src/
+  commands/          # Thin #[tauri::command] shims forwarding to pollis_core
+  sink.rs            # ChannelSink adapter (Tauri's ipc::Channel → EventSink)
+  test_harness.rs    # Multi-client integration harness (feature = "test-harness")
+  lib.rs             # tauri::Builder, plugin setup, invoke_handler!, lifecycle
+  main.rs            # Binary entry
 
 frontend/src/
   components/        # React components (Auth/, Layout/, Message/, ui/, Voice/, ...)

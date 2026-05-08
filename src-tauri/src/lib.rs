@@ -1,11 +1,13 @@
-mod accounts;
-pub mod config;
-pub mod db;
-pub mod error;
-pub mod keystore;
-pub mod realtime;
-mod signal;
-pub mod state;
+pub use pollis_core::accounts;
+pub use pollis_core::config;
+pub use pollis_core::db;
+pub use pollis_core::error;
+pub use pollis_core::keystore;
+pub use pollis_core::realtime;
+pub use pollis_core::signal;
+pub use pollis_core::sink as core_sink;
+pub use pollis_core::state;
+pub mod sink;
 pub mod commands;
 
 #[cfg(feature = "test-harness")]

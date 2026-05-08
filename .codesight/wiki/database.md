@@ -4,7 +4,7 @@ Two databases. Remote schema starts from `000000_baseline.sql` (a full canonical
 
 ## How schema changes ship
 
-1. Write a new migration file: `src-tauri/src/db/migrations/000NNN_description.sql`. Version number must be the next integer.
+1. Write a new migration file: `pollis-core/src/db/migrations/000NNN_description.sql`. Version number must be the next integer.
 2. Run it by hand against your dev Turso DB to test.
 3. Merge to main. When a release tag is pushed, `.github/workflows/desktop-release.yml` runs `scripts/db-apply.sh` against **production** after all builds succeed and before the release job uploads artifacts. A migration failure aborts the release.
 
@@ -34,7 +34,7 @@ If you genuinely need to remove something, the pattern is: (1) ship an app versi
 
 ## Remote Database (Turso)
 
-Source: `src-tauri/src/db/migrations/remote_schema.sql` + migrations `000001` through `000015`.
+Source: `pollis-core/src/db/migrations/000000_baseline.sql` + numbered migrations `000001`+.
 
 ### users
 - `id` TEXT PK
@@ -235,7 +235,7 @@ that class of bug.
 
 ## Local Database (SQLite, per-user, encrypted)
 
-Source: `src-tauri/src/db/local_schema.sql`
+Source: `pollis-core/src/db/local_schema.sql`
 
 File path: `pollis_{user_id}.db`, encrypted with a key from the OS keystore.
 
