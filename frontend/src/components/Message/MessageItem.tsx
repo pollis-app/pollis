@@ -130,7 +130,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           data-testid="message-timestamp"
           title={formatFullTimestamp(message.created_at)}
           className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-16 mr-2"
-          style={{ color: "var(--c-text-muted)" }}
+          style={{ color: "var(--c-text-muted)", lineHeight: "1.5rem" }}
         >
           {formatTimestamp(message.created_at)}
         </span>
