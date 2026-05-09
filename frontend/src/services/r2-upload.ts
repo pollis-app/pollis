@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type { PresignedUploadResponse } from '../types';
 
 function sanitizeFilename(name: string): string {
@@ -95,4 +95,42 @@ export async function downloadAndDecryptMedia(
   const bytes = await invoke<number[]>('download_media', { r2Key, contentHash });
   const blob = new Blob([new Uint8Array(bytes)], mimeType ? { type: mimeType } : undefined);
   return URL.createObjectURL(blob);
+}
+
+// In-flight de-dup: while one caller is fetching+decrypting bytes for a hash,
+// any other caller for the same hash awaits the same promise. Prevents a render
+// storm during scroll where 30 mounted MessageItems each kick off identical
+// invokes. Resolved promises stay cached for the life of the app — content_hash
+// is content-addressed, so the path is permanently correct.
+const inFlight = new Map<string, Promise<string>>();
+
+/// Resolve an attachment to a local file URL the webview can render directly.
+///
+/// The Rust side decrypts to an on-disk content-addressed cache and returns
+/// the path; we wrap it with `convertFileSrc()` so it becomes an asset:// URL
+/// (or http://asset.localhost on Linux) that <img> / <video> can load without
+/// the JSON IPC ever touching the bytes.
+export async function getMediaPath(
+  r2Key: string,
+  contentHash: string,
+  contentType: string,
+): Promise<string> {
+  const cached = inFlight.get(contentHash);
+  if (cached) {
+    return cached;
+  }
+  const promise = (async () => {
+    const path = await invoke<string>('get_media_path', {
+      r2Key,
+      contentHash,
+      contentType,
+    });
+    return convertFileSrc(path);
+  })();
+  inFlight.set(contentHash, promise);
+  promise.catch(() => {
+    // On error, drop the cached rejection so the next caller retries.
+    inFlight.delete(contentHash);
+  });
+  return promise;
 }

@@ -3,7 +3,7 @@ import { decode } from "blurhash";
 import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
-import { downloadAndDecryptMedia } from "../../services/r2-upload";
+import { downloadAndDecryptMedia, getMediaPath } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -449,6 +449,8 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   }, [isVideo, attachment.localPreviewUrl, downloadUrl]);
 
   // Auto-load images and audio from R2 once confirmed (object_key populated, no local URL).
+  // Uses the disk-cache path API so decrypted bytes never cross the JSON IPC —
+  // <img>/<audio> load directly from a converted file URL.
   useEffect(() => {
     if ((!isImage && !isAudio) || isPending || downloadUrl) {
       return;
@@ -456,7 +458,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
 
     let mounted = true;
     setIsLoading(true);
-    downloadAndDecryptMedia(
+    getMediaPath(
       attachment.object_key,
       attachment.content_hash,
       attachment.content_type,
@@ -531,7 +533,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     }
     setIsLoading(true);
     try {
-      const url = await downloadAndDecryptMedia(
+      const url = await getMediaPath(
         attachment.object_key,
         attachment.content_hash,
         attachment.content_type,
