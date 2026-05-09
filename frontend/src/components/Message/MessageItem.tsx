@@ -470,6 +470,26 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     return () => { mounted = false; };
   }, [attachment.object_key]);
 
+  // Revoke decrypted blob URLs we created when they're replaced or on unmount.
+  // Skip non-blob URLs (e.g. tauri convertFileSrc paths) and skip the
+  // sender-owned localPreviewUrl, which is freed by the optimistic-send code.
+  const ownedBlobRef = useRef<string | null>(null);
+  useEffect(() => {
+    const isBlob = !!downloadUrl && downloadUrl.startsWith("blob:");
+    const isOwnedByUs = isBlob && downloadUrl !== attachment.localPreviewUrl;
+    const prev = ownedBlobRef.current;
+    if (prev && prev !== downloadUrl) {
+      URL.revokeObjectURL(prev);
+    }
+    ownedBlobRef.current = isOwnedByUs ? downloadUrl : null;
+    return () => {
+      if (ownedBlobRef.current) {
+        URL.revokeObjectURL(ownedBlobRef.current);
+        ownedBlobRef.current = null;
+      }
+    };
+  }, [downloadUrl, attachment.localPreviewUrl]);
+
   const triggerSave = (url: string) => {
     const a = document.createElement("a");
     a.href = url;
