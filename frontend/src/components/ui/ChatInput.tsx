@@ -531,7 +531,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           onClick={handlePickFiles}
           disabled={disabled || attachments.length >= maxAttachments}
           aria-label="Add attachment"
-          className="p-1.5 flex-shrink-0 transition-colors"
+          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors"
           style={{ color: "var(--c-text-muted)", opacity: disabled ? 0.4 : 1 }}
           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
@@ -579,7 +579,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           disabled={disabled || (!message.trim() && attachments.length === 0) || hasLoadingAttachments}
           data-testid="message-send-button"
           aria-label="Send message"
-          className="p-1.5 flex-shrink-0 transition-colors"
+          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors"
           style={{
             color: "var(--c-text-muted)",
             opacity: disabled || (!message.trim() && !attachments.length) ? 0.3 : 1,
