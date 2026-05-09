@@ -270,19 +270,22 @@ export const BreadcrumbNav: React.FC = () => {
         aria-label="Settings"
         className="flex items-center justify-center transition-colors"
         style={{
-          width: 20,
-          height: 20,
+          width: 24,
+          height: 24,
           background: "none",
           border: "none",
           padding: 0,
+          borderRadius: 4,
           color: isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)",
           cursor: "pointer",
         }}
         onMouseEnter={(e) => {
           (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
+          (e.currentTarget as HTMLButtonElement).style.background = "var(--c-hover)";
         }}
         onMouseLeave={(e) => {
           (e.currentTarget as HTMLButtonElement).style.color = isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)";
+          (e.currentTarget as HTMLButtonElement).style.background = "none";
         }}
       >
         <SettingsIcon size={16} />
