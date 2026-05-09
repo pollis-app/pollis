@@ -120,6 +120,26 @@ fn enforce_cache_cap(dir: &Path) {
     }
 }
 
+/// Wipe every file in the media cache directory. Called on logout so
+/// decrypted images and other media don't sit on disk past a session end —
+/// the cache itself is plaintext at rest, so it must follow the same
+/// lifecycle as the keystore unlock. The directory itself stays so a
+/// subsequent re-login doesn't have to re-create it.
+pub fn clear_media_cache() {
+    let dir = match MEDIA_CACHE_DIR.get() {
+        Some(d) => d,
+        None => return,
+    };
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
 // ── Existing commands (avatars, group icons) ───────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]

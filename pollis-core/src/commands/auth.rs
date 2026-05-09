@@ -699,6 +699,12 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     state.unload_user_db().await;
     *state.unlock.lock().await = None;
 
+    // Wipe the on-disk media cache. The cache holds decrypted plaintext
+    // (image/video/audio bytes) and is not encrypted at rest, so it must
+    // not survive a session end regardless of whether the user opts to
+    // keep their account on this device.
+    crate::commands::r2::clear_media_cache();
+
     if delete_data {
         if let Some(ref uid) = user_id {
             // Remove this device from the remote registry.
