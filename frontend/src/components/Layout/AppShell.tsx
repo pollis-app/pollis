@@ -319,23 +319,6 @@ export const AppShell: React.FC = () => {
       {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
 
-      {/* Sync indicator — floats top-right below title bar, left of the persistent cog */}
-      {isSyncing && (
-        <div
-          className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
-          style={{
-            position: "absolute",
-            top: 36 + 7,
-            right: 40,
-            zIndex: 50,
-            color: "var(--c-accent-dim)",
-          }}
-        >
-          <span>syncing…</span>
-          <LoadingSpinner size="sm" />
-        </div>
-      )}
-
       {/* Main content — matched child route renders here */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         <Outlet />
@@ -435,6 +418,15 @@ export const AppShell: React.FC = () => {
           >
             <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
           </button>
+        ) : isSyncing ? (
+          <div
+            data-testid="status-bar-syncing"
+            className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          >
+            <span>syncing…</span>
+            <LoadingSpinner size="sm" />
+          </div>
         ) : null}
       </div>
     </div>
