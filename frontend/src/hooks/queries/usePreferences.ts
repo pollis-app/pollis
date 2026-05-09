@@ -39,6 +39,8 @@ export interface PreferencesData {
   /** RNNoise click/keystroke suppression (separate from APM's spectral NS). */
   click_suppression?: boolean;
   auto_join_voice?: boolean;
+  /** Whether the left sidebar is open by default at app start. */
+  sidebar_open_by_default?: boolean;
   /**
    * Per-remote-user output volume multipliers, keyed by `user_id`.
    * Range 0.0..=2.0; 1.0 is unity. Absent users default to unity.
@@ -182,6 +184,7 @@ export function usePreferences() {
         echo_cancellation: getPreference<boolean>(json, "echo_cancellation", APM_DEFAULTS.echo_cancellation),
         click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
+        sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
         user_volumes: getPreference<{ [userId: string]: number } | undefined>(
           json,
           "user_volumes",

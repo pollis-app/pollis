@@ -29,21 +29,13 @@ export const AppShell: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
-    try {
-      const raw = localStorage.getItem("pollis.sidebar.open");
-      return raw === null ? true : raw === "true";
-    } catch {
-      return true;
-    }
-  });
-  useEffect(() => {
-    try {
-      localStorage.setItem("pollis.sidebar.open", String(isSidebarOpen));
-    } catch {
-      /* localStorage unavailable */
-    }
-  }, [isSidebarOpen]);
+  // Sidebar visibility is driven by the user preference
+  // `sidebar_open_by_default`. Cmd/Ctrl+B toggles for the current session
+  // only — flipping it does NOT write back to the preference, so users
+  // who keep it closed by default can still pop it open ad-hoc without
+  // losing their default. Changing the preference updates the live UI
+  // via the sync effect below.
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
@@ -70,6 +62,17 @@ export const AppShell: React.FC = () => {
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { query: prefsQuery } = usePreferences();
+
+  // Apply the sidebar default whenever the preference first loads or the
+  // user changes it. Cmd/Ctrl+B presses don't fight this since they only
+  // mutate session state — when the preference value is unchanged, the
+  // dependency stays stable and this effect won't re-fire.
+  const sidebarDefault = prefsQuery.data?.sidebar_open_by_default;
+  useEffect(() => {
+    if (sidebarDefault !== undefined) {
+      setIsSidebarOpen(sidebarDefault);
+    }
+  }, [sidebarDefault]);
 
   const currentUser = useAppStore((s) => s.currentUser);
 

@@ -25,6 +25,11 @@ function isValidHex(val: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(val);
 }
 
+function isMac(): boolean {
+  return typeof navigator !== "undefined" &&
+    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+}
+
 export const Preferences: React.FC = () => {
   const navigate = useNavigate();
   const currentUser = useAppStore((state) => state.currentUser);
@@ -37,6 +42,7 @@ export const Preferences: React.FC = () => {
   const [allowDesktopNotifications, setAllowDesktopNotifications] = useState<boolean>(true);
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
+  const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
@@ -53,6 +59,9 @@ export const Preferences: React.FC = () => {
       }
       if (query.data.allow_sound_effects !== undefined) {
         setAllowSoundEffects(query.data.allow_sound_effects);
+      }
+      if (query.data.sidebar_open_by_default !== undefined) {
+        setSidebarOpenByDefault(query.data.sidebar_open_by_default);
       }
     }
   }, [query.data, currentUser?.id]);
@@ -88,6 +97,7 @@ export const Preferences: React.FC = () => {
     accentH?: number; accentS?: number;
     bgH?: number; bgS?: number; bgL?: number;
     notifications?: boolean; soundEffects?: boolean;
+    sidebarOpenByDefault?: boolean;
   }) => {
     const ah = opts.accentH ?? hue;
     const as_ = opts.accentS ?? saturation;
@@ -96,6 +106,7 @@ export const Preferences: React.FC = () => {
     const bl = opts.bgL ?? bgLightness;
     const notif = opts.notifications ?? allowDesktopNotifications;
     const sfx = opts.soundEffects ?? allowSoundEffects;
+    const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
     // font_size is intentionally NOT included — it's device-local now,
@@ -110,8 +121,9 @@ export const Preferences: React.FC = () => {
       background_color: bgHex,
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
+      sidebar_open_by_default: sidebar,
     });
-  }, [mutation, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects]);
+  }, [mutation, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault]);
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
@@ -142,6 +154,11 @@ export const Preferences: React.FC = () => {
   const handleAllowSoundEffects = (val: boolean) => {
     setAllowSoundEffects(val);
     save({ soundEffects: val });
+  };
+
+  const handleSidebarOpenByDefault = (val: boolean) => {
+    setSidebarOpenByDefault(val);
+    save({ sidebarOpenByDefault: val });
   };
 
   const handleAllowCallRingtone = (val: boolean) => {
@@ -379,7 +396,7 @@ export const Preferences: React.FC = () => {
             >
               The quick brown fox jumps over the lazy dog.
             </p>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5 mt-4">
               <Switch
                 id="pref-call-ringtone"
                 label="Incoming call ringtone"
@@ -388,6 +405,27 @@ export const Preferences: React.FC = () => {
               />
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
                 Plays a looping ring on this device when someone calls. Off here doesn't mute the alert badge or your other devices.
+              </p>
+            </div>
+          </section>
+
+          {/* Layout */}
+          <section className="flex flex-col gap-4 mb-12">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            >
+              Layout
+            </h2>
+            <div className="flex flex-col gap-1.5">
+              <Switch
+                id="pref-sidebar-default"
+                label="Show sidebar by default"
+                checked={sidebarOpenByDefault}
+                onChange={handleSidebarOpenByDefault}
+              />
+              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {isMac() ? "⌘B" : "Ctrl+B"}.
               </p>
             </div>
           </section>
