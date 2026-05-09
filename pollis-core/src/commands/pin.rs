@@ -412,6 +412,11 @@ pub async fn set_pin(
         account_id_key,
     });
 
+    // Wipe the media cache on unlock. If a different user previously cached
+    // media on this device, their files were encrypted under their db_key
+    // and are unreadable to us — purge them so they don't consume cap space.
+    crate::commands::r2::clear_media_cache();
+
     state.load_user_db_with_key(&user_id, &db_key).await?;
 
     if let Some(device_id) = state.device_id.lock().await.clone() {
@@ -490,6 +495,9 @@ pub async fn unlock(
         db_key: unlocked.db_key,
         account_id_key: unlocked.account_id_key,
     });
+
+    // Wipe the media cache on unlock — see equivalent comment in `set_pin`.
+    crate::commands::r2::clear_media_cache();
 
     // Migrate away from #195-vintage residue — the wrapped blobs are
     // already in place; the legacy plaintext slots sitting next to
