@@ -125,6 +125,12 @@ export async function getMediaPath(
       contentHash,
       contentType,
     });
+    // Empty-string sentinel: file exceeds the per-file cap, so the
+    // Rust side declined to cache it. Fall back to the byte path which
+    // produces an in-memory blob URL just for this render.
+    if (!path) {
+      return downloadAndDecryptMedia(r2Key, contentHash, contentType);
+    }
     return convertFileSrc(path);
   })();
   inFlight.set(contentHash, promise);

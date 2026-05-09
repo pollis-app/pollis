@@ -19,6 +19,12 @@ use crate::state::AppState;
 /// Hard cap on total cache size before LRU eviction kicks in.
 const MEDIA_CACHE_MAX_BYTES: u64 = 500 * 1024 * 1024;
 
+/// Per-file cap. Files larger than this skip the cache entirely — the
+/// caller falls back to the byte path for that one render. Bounds the
+/// worst-case eviction storm where a single huge file would push every
+/// other entry out.
+pub const MEDIA_CACHE_MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
+
 /// Set once at app startup from the Tauri shim (`app_data_dir()`).
 static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
@@ -78,6 +84,13 @@ fn cache_file_path(content_hash: &str, content_type: &str) -> Result<PathBuf> {
 /// oldest mtime first until we're under. No in-memory index — directory is
 /// small enough that stat'ing it on each insert is fine.
 fn enforce_cache_cap(dir: &Path) {
+    enforce_cache_cap_to(dir, MEDIA_CACHE_MAX_BYTES);
+}
+
+/// Lower-bound variant: shrink the cache to at most `target_bytes` by
+/// evicting oldest entries first. Used both by the regular cap-enforcer
+/// and by the pre-write headroom check in `get_media_path`.
+fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
     let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
         Err(_) => return,
@@ -104,20 +117,50 @@ fn enforce_cache_cap(dir: &Path) {
         files.push((path, size, mtime));
     }
 
-    if total <= MEDIA_CACHE_MAX_BYTES {
+    if total <= target_bytes {
         return;
     }
 
     // Oldest first.
     files.sort_by_key(|(_, _, mtime)| *mtime);
     for (path, size, _) in files {
-        if total <= MEDIA_CACHE_MAX_BYTES {
+        if total <= target_bytes {
             break;
         }
         if std::fs::remove_file(&path).is_ok() {
             total = total.saturating_sub(size);
         }
     }
+}
+
+/// Public re-evaluation entry point — call from app focus to defend
+/// against external file copies / mtime tampering / cap-config changes.
+pub fn enforce_cache_cap_now() {
+    if let Some(dir) = MEDIA_CACHE_DIR.get() {
+        enforce_cache_cap(dir);
+    }
+}
+
+/// Sum of all cached file sizes. Used to gate downloads against the cap
+/// *before* writing new bytes, so the cache never peaks above the cap.
+pub fn cache_total_bytes() -> u64 {
+    let dir = match MEDIA_CACHE_DIR.get() {
+        Some(d) => d,
+        None => return 0,
+    };
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return 0,
+    };
+    let mut total: u64 = 0;
+    for entry in entries.flatten() {
+        if let Ok(meta) = entry.metadata() {
+            if meta.is_file() {
+                total += meta.len();
+            }
+        }
+    }
+    total
 }
 
 /// Wipe every file in the media cache directory. Called on logout so
@@ -456,12 +499,31 @@ pub async fn get_media_path(
 
     let bytes = download_media(r2_key, content_hash.clone(), state).await?;
 
+    // Per-file cap. Files larger than MEDIA_CACHE_MAX_FILE_BYTES skip the
+    // cache entirely so a single huge upload can't push everything else
+    // out. The frontend falls back to the byte path on the empty sentinel.
+    if bytes.len() as u64 > MEDIA_CACHE_MAX_FILE_BYTES {
+        in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+        return Ok(String::new());
+    }
+
     // Atomic write: <hash>.<ext>.tmp → rename → <hash>.<ext>.
     let dir = media_cache_dir()?;
     if let Err(e) = std::fs::create_dir_all(dir) {
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Err(Error::Other(anyhow::anyhow!("create cache dir: {e}")));
     }
+
+    // Pre-emptive eviction: if the new file would push us over the cap,
+    // evict oldest entries down to (cap - new_file_size) *before* writing.
+    // Without this the cache temporarily peaks above the cap during a
+    // large download.
+    let new_size = bytes.len() as u64;
+    let total = cache_total_bytes();
+    if total.saturating_add(new_size) > MEDIA_CACHE_MAX_BYTES {
+        enforce_cache_cap_to(dir, MEDIA_CACHE_MAX_BYTES.saturating_sub(new_size));
+    }
+
     let mut tmp = target.clone();
     tmp.set_extension(format!(
         "{}.tmp",
@@ -478,7 +540,8 @@ pub async fn get_media_path(
         return Err(Error::Other(anyhow::anyhow!("rename cache tmp: {e}")));
     }
 
-    // Best-effort LRU eviction. Run after rename so the new file participates.
+    // Belt-and-braces post-write enforcement in case the pre-emptive
+    // estimate was off (concurrent inserts, mtime races).
     enforce_cache_cap(dir);
 
     in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);

@@ -452,9 +452,15 @@ commands::livekit::get_livekit_token,
             commands::sfx::stop_ring,
         ])
         // On macOS, hide the window on close instead of quitting.
+        // On window focus, re-evaluate the media-cache cap so files
+        // copied into the dir externally / mtime-tampered / etc. don't
+        // let it grow past the limit.
         .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
             hide_on_close(_window, _event);
+            if let tauri::WindowEvent::Focused(true) = _event {
+                pollis_core::commands::r2::enforce_cache_cap_now();
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building Pollis")
@@ -463,6 +469,14 @@ commands::livekit::get_livekit_token,
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 show_on_reopen(_app);
+            }
+            // Wipe the plaintext media cache on app exit. The cache holds
+            // decrypted bytes (image / video / audio) and is not encrypted
+            // at rest, so it must not survive a graceful shutdown — the
+            // next attacker with file-system access would otherwise be
+            // able to read every media file the user viewed.
+            if let tauri::RunEvent::ExitRequested { .. } = _event {
+                pollis_core::commands::r2::clear_media_cache();
             }
         });
 }
