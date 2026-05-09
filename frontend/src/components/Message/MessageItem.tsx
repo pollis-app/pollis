@@ -76,13 +76,13 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   // null). Show [encrypted] in that case rather than an empty row.
   const content = isDeleted ? "[deleted]" : (message.content_decrypted ?? "[encrypted]");
 
-  // Sort attachments: images and videos first, then everything else.
-  const sortedAttachments = message.attachments && message.attachments.length > 0
-    ? [...message.attachments].sort((a, b) => {
-      const rank = (ct: string) => ct.startsWith("image/") || ct.startsWith("video/") ? 0 : 1;
-      return rank(a.content_type) - rank(b.content_type);
-    })
-    : null;
+  // Split attachments into a visual media strip (images + videos rendered as
+  // uniform 96×96 thumbs) and everything else (audio, files) which render as
+  // text-aligned rows below the strip.
+  const isVisualMedia = (ct: string) =>
+    ct.startsWith("image/") || ct.startsWith("video/");
+  const mediaThumbs = message.attachments?.filter((a) => isVisualMedia(a.content_type)) ?? [];
+  const otherAttachments = message.attachments?.filter((a) => !isVisualMedia(a.content_type)) ?? [];
 
   return (
     <div
@@ -228,10 +228,19 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       {/* Inline previews for media URLs typed in the message body */}
       {!isDeleted && <MediaLinkUnfurl text={content} />}
 
-      {/* Attachments — each on its own row */}
-      {sortedAttachments && (
+      {/* Visual media: horizontal strip of uniform 96×96 thumbs */}
+      {mediaThumbs.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {mediaThumbs.map((a) => (
+            <AttachmentDisplay key={a.id} attachment={a} />
+          ))}
+        </div>
+      )}
+
+      {/* Audio / files — each on its own row */}
+      {otherAttachments.length > 0 && (
         <div className="mt-2 flex flex-col gap-2">
-          {sortedAttachments.map((a) => (
+          {otherAttachments.map((a) => (
             <AttachmentDisplay key={a.id} attachment={a} />
           ))}
         </div>
@@ -609,85 +618,57 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     </div>
   );
 
-  // Pre-compute image container height from recorded dimensions (prevents layout shift).
-  const imageContainerH = (isImage && attachment.width && attachment.height)
-    ? Math.min(Math.round(280 * (attachment.height / attachment.width)), 200)
-    : null;
-
-  // ── Image card ─────────────────────────────────────────────────────────────
+  // ── Image card — uniform 96×96 thumb, click to open lightbox ──────────────
   if (isImage) {
     return (
       <>
-        <div
+        <button
           data-testid={`attachment-${attachment.id}`}
-          style={{ maxWidth: 280 }}
+          onClick={() => { if (downloadUrl) { setViewerOpen(true); } }}
+          disabled={!downloadUrl}
+          aria-label={`View ${attachment.filename}`}
+          title={attachment.filename}
+          style={{
+            width: 96,
+            height: 96,
+            padding: 0,
+            background: "var(--c-surface-high)",
+            border: "1px solid var(--c-border)",
+            borderRadius: 4,
+            overflow: "hidden",
+            cursor: downloadUrl ? "zoom-in" : "default",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+          }}
         >
-          {/* Preview area — click to open lightbox */}
-          <button
-            onClick={() => { if (downloadUrl) { setViewerOpen(true); } }}
-            disabled={!downloadUrl}
-            aria-label={`View ${attachment.filename}`}
-            style={{
-              display: "block",
-              padding: 0,
-              background: "none",
-              border: 0,
-              cursor: downloadUrl ? "zoom-in" : "default",
-              marginLeft: -16,
-              width: "calc(100% + 16px)",
-            }}
-          >
-            <div
+          {downloadUrl ? (
+            <img
+              src={downloadUrl}
+              alt={attachment.filename}
+              onError={() => setDownloadUrl(null)}
               style={{
                 width: "100%",
-                height: imageContainerH ?? undefined,
-                minHeight: imageContainerH ? undefined : (downloadUrl ? undefined : 80),
-                overflow: "hidden",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
+                height: "100%",
+                objectFit: "cover",
+                display: "block",
               }}
-            >
-              {downloadUrl ? (
-                <img
-                  src={downloadUrl}
-                  alt={attachment.filename}
-                  onError={() => setDownloadUrl(null)}
-                  style={{
-                    width: "100%",
-                    height: imageContainerH ? "100%" : undefined,
-                    maxHeight: imageContainerH ? undefined : 200,
-                    objectFit: "contain",
-                    display: "block",
-                  }}
-                />
-              ) : attachment.blurhash && attachment.width && attachment.height ? (
-                <BlurhashCanvas
-                  hash={attachment.blurhash}
-                  width={attachment.width}
-                  height={attachment.height}
-                />
-              ) : (
-                <div style={{ height: imageContainerH ?? 80, width: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                    {error ? "err" : "…"}
-                  </span>
-                </div>
-              )}
+            />
+          ) : attachment.blurhash && attachment.width && attachment.height ? (
+            <div style={{ width: "100%", height: "100%", overflow: "hidden" }}>
+              <BlurhashCanvas
+                hash={attachment.blurhash}
+                width={attachment.width}
+                height={attachment.height}
+              />
             </div>
-          </button>
-
-          <div
-            style={{
-              border: "2px solid var(--c-border)",
-              background: "var(--c-surface-high)",
-              borderRadius: 8,
-              marginTop: 4,
-            }}
-          >
-            {renderCaptionBar()}
-          </div>
-        </div>
+          ) : (
+            <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+              {error ? "err" : "…"}
+            </span>
+          )}
+        </button>
 
         {/* Full-screen lightbox */}
         {viewerOpen && downloadUrl && (
@@ -796,88 +777,87 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     );
   }
 
-  // ── Video card ─────────────────────────────────────────────────────────────
+  // ── Video card — uniform 96×96 thumb with play overlay ────────────────────
   if (isVideo) {
     return (
       <>
-        <div
+        <button
           data-testid={`attachment-${attachment.id}`}
-          style={{ width: 200 }}
+          onClick={!isPending && !isLoading ? handleVideoOpen : undefined}
+          disabled={isPending || isLoading}
+          aria-label={`Open ${attachment.filename}`}
+          title={attachment.filename}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 96,
+            height: 96,
+            padding: 0,
+            background: "var(--c-surface-high)",
+            border: "1px solid var(--c-border)",
+            cursor: isPending || isLoading ? "default" : "pointer",
+            position: "relative",
+            overflow: "hidden",
+            borderRadius: 4,
+            flexShrink: 0,
+          }}
         >
-          {/* Preview area — click to open lightbox */}
-          <button
-            onClick={!isPending && !isLoading ? handleVideoOpen : undefined}
-            disabled={isPending || isLoading}
-            aria-label={`Open ${attachment.filename}`}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "100%",
-              height: 112,
-              padding: 0,
-              background: "var(--c-bg)",
-              border: 0,
-              cursor: isPending || isLoading ? "default" : "pointer",
-              position: "relative",
-              overflow: "hidden",
-              borderRadius: 8,
-            }}
-          >
-            {(poster || (attachment.blurhash && attachment.width && attachment.height)) && (
-              <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 8 }}>
-                {poster ? (
-                  <img
-                    src={poster}
-                    alt=""
-                    aria-hidden="true"
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : (
-                  <BlurhashCanvas
-                    hash={attachment.blurhash!}
-                    width={attachment.width!}
-                    height={attachment.height!}
-                  />
-                )}
-              </div>
-            )}
-            <div style={{
-              position: "relative",
-              zIndex: 1,
-              width: 36,
-              height: 36,
-              borderRadius: "50%",
-              background: "rgba(0,0,0,0.55)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}>
-              {isLoading ? (
-                <LoadingSpinner size="sm" />
+          {(poster || (attachment.blurhash && attachment.width && attachment.height)) && (
+            <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+              {poster ? (
+                <img
+                  src={poster}
+                  alt=""
+                  aria-hidden="true"
+                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                />
               ) : (
-                <Film size={18} aria-hidden="true" style={{ color: "white" }} />
+                <BlurhashCanvas
+                  hash={attachment.blurhash!}
+                  width={attachment.width!}
+                  height={attachment.height!}
+                />
               )}
             </div>
-          </button>
-
-          <div
-            style={{
-              border: "2px solid var(--c-border)",
-              background: "var(--c-surface-high)",
-              borderRadius: 8,
-              marginTop: 4,
-            }}
-          >
-            {renderCaptionBar(
-              duration != null ? (
-                <span className="text-xs font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>
-                  {formatDuration(duration)}
-                </span>
-              ) : undefined
+          )}
+          <div style={{
+            position: "relative",
+            zIndex: 1,
+            width: 28,
+            height: 28,
+            borderRadius: "50%",
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}>
+            {isLoading ? (
+              <LoadingSpinner size="sm" />
+            ) : (
+              <Film size={14} aria-hidden="true" style={{ color: "white" }} />
             )}
           </div>
-        </div>
+          {duration != null && (
+            <span
+              className="font-mono"
+              style={{
+                position: "absolute",
+                bottom: 4,
+                right: 4,
+                zIndex: 2,
+                fontSize: 10,
+                lineHeight: 1,
+                padding: "2px 4px",
+                borderRadius: 2,
+                background: "rgba(0,0,0,0.65)",
+                color: "white",
+              }}
+            >
+              {formatDuration(duration)}
+            </span>
+          )}
+        </button>
 
         {/* Video lightbox */}
         {viewerOpen && downloadUrl && (
