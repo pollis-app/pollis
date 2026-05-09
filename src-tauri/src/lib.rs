@@ -288,6 +288,15 @@ pub fn run() {
                 apply_windows_rounded_corners(&window);
             }
 
+            // Initialise the on-disk media cache. The frontend renders
+            // attachments by file path (via convertFileSrc) instead of
+            // pumping decrypted bytes through the JSON IPC.
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                let cache_dir = data_dir.join("media-cache");
+                let _ = std::fs::create_dir_all(&cache_dir);
+                pollis_core::commands::r2::set_media_cache_dir(cache_dir);
+            }
+
             tauri::async_runtime::block_on(async move {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;
                 app.manage(Arc::new(state));
@@ -416,6 +425,7 @@ commands::livekit::get_livekit_token,
             commands::r2::upload_media,
             commands::r2::download_file,
             commands::r2::download_media,
+            commands::r2::get_media_path,
             commands::update::mark_update_required,
             commands::update::is_update_required,
             commands::install_kind::detect_managed_install,

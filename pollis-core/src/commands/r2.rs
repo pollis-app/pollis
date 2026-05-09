@@ -1,9 +1,124 @@
 use serde::{Deserialize, Serialize};
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 
 use crate::error::{Error, Result};
 use crate::state::AppState;
+
+// ── On-disk media cache ───────────────────────────────────────────────────
+//
+// Decrypted media is materialised under a content-addressed cache so the
+// frontend can render directly from a file path (via `convertFileSrc`) instead
+// of pumping multi-megabyte byte arrays through the JSON IPC. Keyed by
+// `content_hash`, which uniquely identifies the bytes (it's also the seed for
+// the AES-GCM key derivation), so there's no invalidation problem — if the
+// file exists, the bytes are correct.
+
+/// Hard cap on total cache size before LRU eviction kicks in.
+const MEDIA_CACHE_MAX_BYTES: u64 = 500 * 1024 * 1024;
+
+/// Set once at app startup from the Tauri shim (`app_data_dir()`).
+static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Per-hash locks so concurrent callers for the same content_hash share one
+/// download instead of racing to write the same file. The outer mutex guards
+/// the map; the inner `Arc<TokioMutex>` is the actual gate.
+static IN_FLIGHT: OnceLock<StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+
+fn in_flight() -> &'static StdMutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> {
+    IN_FLIGHT.get_or_init(|| StdMutex::new(HashMap::new()))
+}
+
+/// Initialise the on-disk media cache directory. Must be called once during
+/// app setup (the Tauri shim plumbs in `app_data_dir().join("media-cache")`).
+/// Idempotent: subsequent calls are ignored.
+pub fn set_media_cache_dir(path: PathBuf) {
+    let _ = MEDIA_CACHE_DIR.set(path);
+}
+
+fn media_cache_dir() -> Result<&'static Path> {
+    MEDIA_CACHE_DIR
+        .get()
+        .map(|p| p.as_path())
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("media cache dir not initialised")))
+}
+
+/// Map a MIME type to a file extension. Falls back to `bin`. Kept small —
+/// we only need extensions for the media types Pollis actually renders.
+fn ext_for_content_type(ct: &str) -> &'static str {
+    match ct {
+        "image/png" => "png",
+        "image/jpeg" => "jpg",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        "image/avif" => "avif",
+        "image/svg+xml" => "svg",
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        "video/quicktime" => "mov",
+        "audio/mpeg" => "mp3",
+        "audio/mp4" | "audio/x-m4a" | "audio/m4a" => "m4a",
+        "audio/webm" => "weba",
+        "audio/ogg" => "ogg",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/flac" => "flac",
+        _ => "bin",
+    }
+}
+
+fn cache_file_path(content_hash: &str, content_type: &str) -> Result<PathBuf> {
+    let dir = media_cache_dir()?;
+    let ext = ext_for_content_type(content_type);
+    Ok(dir.join(format!("{content_hash}.{ext}")))
+}
+
+/// Stat every file in the cache; if total size exceeds the cap, delete by
+/// oldest mtime first until we're under. No in-memory index — directory is
+/// small enough that stat'ing it on each insert is fine.
+fn enforce_cache_cap(dir: &Path) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(rd) => rd,
+        Err(_) => return,
+    };
+
+    let mut files: Vec<(PathBuf, u64, std::time::SystemTime)> = Vec::new();
+    let mut total: u64 = 0;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // Ignore in-progress writes.
+        if path.extension().is_some_and(|e| e == "tmp") {
+            continue;
+        }
+        let meta = match entry.metadata() {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        if !meta.is_file() {
+            continue;
+        }
+        let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+        let size = meta.len();
+        total += size;
+        files.push((path, size, mtime));
+    }
+
+    if total <= MEDIA_CACHE_MAX_BYTES {
+        return;
+    }
+
+    // Oldest first.
+    files.sort_by_key(|(_, _, mtime)| *mtime);
+    for (path, size, _) in files {
+        if total <= MEDIA_CACHE_MAX_BYTES {
+            break;
+        }
+        if std::fs::remove_file(&path).is_ok() {
+            total = total.saturating_sub(size);
+        }
+    }
+}
 
 // ── Existing commands (avatars, group icons) ───────────────────────────────
 
@@ -273,6 +388,81 @@ pub async fn download_media(
 
     let ciphertext = resp.bytes().await?.to_vec();
     decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)
+}
+
+/// Return a filesystem path to the decrypted media bytes.
+///
+/// The frontend converts the path with `convertFileSrc()` and uses the result
+/// directly as `<img src>` / `<video src>`. This avoids serialising the raw
+/// bytes over the JSON IPC, which dominates render time for image-heavy
+/// channels.
+///
+/// Cached by `content_hash`. If a file already exists for this hash we return
+/// it immediately. Otherwise we download + decrypt, write atomically, then
+/// return the path. Concurrent calls for the same hash share one download
+/// via a per-hash tokio mutex.
+pub async fn get_media_path(
+    r2_key: String,
+    content_hash: String,
+    content_type: String,
+    state: &Arc<AppState>,
+) -> Result<String> {
+    let target = cache_file_path(&content_hash, &content_type)?;
+
+    // Fast path: already cached. Touch mtime so the LRU sees it as fresh.
+    if target.exists() {
+        if let Ok(f) = std::fs::OpenOptions::new().write(true).open(&target) {
+            let _ = f.set_modified(std::time::SystemTime::now());
+        }
+        return Ok(target.to_string_lossy().into_owned());
+    }
+
+    // Acquire a per-hash lock so the second waiter sees the file on disk
+    // instead of starting a redundant download.
+    let lock = {
+        let mut map = in_flight().lock().expect("in-flight map poisoned");
+        map.entry(content_hash.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
+    };
+    let _guard = lock.lock().await;
+
+    // Recheck under the lock — another caller may have just finished.
+    if target.exists() {
+        // Drop our entry from the in-flight map.
+        in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+        return Ok(target.to_string_lossy().into_owned());
+    }
+
+    let bytes = download_media(r2_key, content_hash.clone(), state).await?;
+
+    // Atomic write: <hash>.<ext>.tmp → rename → <hash>.<ext>.
+    let dir = media_cache_dir()?;
+    if let Err(e) = std::fs::create_dir_all(dir) {
+        in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+        return Err(Error::Other(anyhow::anyhow!("create cache dir: {e}")));
+    }
+    let mut tmp = target.clone();
+    tmp.set_extension(format!(
+        "{}.tmp",
+        target.extension().and_then(|s| s.to_str()).unwrap_or("bin")
+    ));
+    if let Err(e) = tokio::fs::write(&tmp, &bytes).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+        return Err(Error::Other(anyhow::anyhow!("write cache tmp: {e}")));
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, &target).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+        return Err(Error::Other(anyhow::anyhow!("rename cache tmp: {e}")));
+    }
+
+    // Best-effort LRU eviction. Run after rename so the new file participates.
+    enforce_cache_cap(dir);
+
+    in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+    Ok(target.to_string_lossy().into_owned())
 }
 
 // ── Deletion ──────────────────────────────────────────────────────────────
