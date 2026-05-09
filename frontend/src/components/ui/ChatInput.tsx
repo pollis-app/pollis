@@ -560,7 +560,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           autoCapitalize="off"
           spellCheck={false}
           rows={1}
-          className="chat-input-textarea flex-1 min-w-0 px-2 py-1 resize-none font-mono text-sm transition-colors"
+          className={`chat-input-textarea flex-1 min-w-0 px-2 py-1 resize-none font-mono text-sm transition-colors${isFocused ? " is-focused" : ""}`}
           style={{
             lineHeight: "1.5rem",
             minHeight: "1.5rem",

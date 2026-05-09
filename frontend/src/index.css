@@ -201,12 +201,15 @@ input[type="range"]::-moz-range-thumb {
     border-color: var(--c-border-active);
   }
 
-  /* Chat input placeholder: muted when unfocused, dark when focused (on accent bg) */
+  /* Chat input placeholder: muted when unfocused, dark when focused (on accent bg).
+     Driven by an explicit `is-focused` class rather than `:focus` so it stays in
+     sync with the React-controlled background when the OS window loses focus
+     (Webkit drops `:focus`-based ::placeholder styling on window blur). */
   .chat-input-textarea::placeholder {
     color: var(--c-text-muted);
   }
 
-  .chat-input-textarea:focus::placeholder {
+  .chat-input-textarea.is-focused::placeholder {
     color: color-mix(in srgb, var(--c-bg) 65%, transparent);
   }
 
