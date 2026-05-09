@@ -30,10 +30,12 @@ interface MessageItemProps {
 
 const formatTimestamp = (timestamp: number): string => {
   const tsMs = timestamp < 1e12 ? timestamp * 1000 : timestamp;
-  const d = new Date(tsMs);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
-  return `${hh}:${mm}`;
+  return new Date(tsMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+};
+
+const formatFullTimestamp = (timestamp: number): string => {
+  const tsMs = timestamp < 1e12 ? timestamp * 1000 : timestamp;
+  return new Date(tsMs).toLocaleString([], { dateStyle: "full", timeStyle: "short" });
 };
 
 export const MessageItem: React.FC<MessageItemProps> = ({
@@ -126,6 +128,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       <div className="flex items-start gap-0 min-w-0">
         <span
           data-testid="message-timestamp"
+          title={formatFullTimestamp(message.created_at)}
           className="flex-shrink-0 text-sm font-mono tabular-nums select-none w-12 mr-2"
           style={{ color: "var(--c-text-muted)" }}
         >
