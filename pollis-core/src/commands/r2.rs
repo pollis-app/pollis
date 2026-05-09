@@ -608,10 +608,13 @@ pub async fn get_media_path(
 
     let target = cache_file_path(&content_hash, &content_type)?;
     let ext = ext_for_content_type(&content_type);
-    // Linux WebKitGTK rewrites custom schemes to `http://<scheme>.localhost/`,
-    // every other platform uses the native `<scheme>://localhost/` form.
-    // Match Tauri's own convention so `<img>` / `<audio>` resolve correctly.
-    let media_uri = if cfg!(target_os = "linux") || cfg!(target_os = "windows") {
+    // Tauri rewrites custom URI schemes to `http://<scheme>.localhost/` on
+    // Windows / Android (WebView2 / system WebView don't support arbitrary
+    // schemes). macOS and Linux/WebKitGTK use the native `<scheme>://`
+    // form — registering the handler creates a real custom protocol there.
+    // Hitting the http://...localhost form on Linux just makes WebKit try
+    // a real TCP connection and refuse, which is exactly the bug we hit.
+    let media_uri = if cfg!(target_os = "windows") || cfg!(target_os = "android") {
         format!("http://pollis-media.localhost/{content_hash}.{ext}")
     } else {
         format!("pollis-media://localhost/{content_hash}.{ext}")
