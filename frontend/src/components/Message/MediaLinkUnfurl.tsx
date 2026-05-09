@@ -87,8 +87,8 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
     height: 96,
     objectFit: "cover",
     display: "block",
-    border: "1px solid var(--c-border)",
-    borderRadius: 4,
+    border: "none",
+    borderRadius: "0.5rem",
     background: "var(--c-surface-high)",
   };
 

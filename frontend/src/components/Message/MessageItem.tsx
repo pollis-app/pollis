@@ -129,7 +129,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
         <span
           data-testid="message-timestamp"
           title={formatFullTimestamp(message.created_at)}
-          className="flex-shrink-0 text-sm font-mono tabular-nums select-none w-12 mr-2"
+          className="flex-shrink-0 text-sm font-mono tabular-nums select-none w-20 mr-2"
           style={{ color: "var(--c-text-muted)" }}
         >
           {formatTimestamp(message.created_at)}
@@ -633,8 +633,8 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             height: 96,
             padding: 0,
             background: "var(--c-surface-high)",
-            border: "1px solid var(--c-border)",
-            borderRadius: 4,
+            border: "none",
+            borderRadius: "0.5rem",
             overflow: "hidden",
             cursor: downloadUrl ? "zoom-in" : "default",
             display: "flex",
@@ -795,11 +795,11 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             height: 96,
             padding: 0,
             background: "var(--c-surface-high)",
-            border: "1px solid var(--c-border)",
+            border: "none",
             cursor: isPending || isLoading ? "default" : "pointer",
             position: "relative",
             overflow: "hidden",
-            borderRadius: 4,
+            borderRadius: "0.5rem",
             flexShrink: 0,
           }}
         >
