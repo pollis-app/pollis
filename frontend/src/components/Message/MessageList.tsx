@@ -34,7 +34,7 @@ const formatDayDividerLabel = (timestamp: number): string => {
 const DayDivider: React.FC<{ label: string }> = ({ label }) => (
   <div
     data-testid="day-divider"
-    className="flex items-center gap-3 px-4 py-2 select-none"
+    className="flex items-center gap-3 py-2 select-none"
   >
     <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
     <span
