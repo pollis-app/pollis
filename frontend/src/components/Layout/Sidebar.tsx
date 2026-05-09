@@ -138,28 +138,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                   indent={1}
                   isActive={isGroupActive && !activeChannelId && !activeVoiceId}
                   onClick={() => router.navigate({ to: "/groups/$groupId", params: { groupId: group.id } })}
-                  leading={
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleGroup(group.id);
-                      }}
-                      aria-label={isCollapsed ? `Expand ${group.name}` : `Collapse ${group.name}`}
-                      style={{
-                        background: "none",
-                        border: "none",
-                        padding: 0,
-                        margin: 0,
-                        display: "inline-flex",
-                        alignItems: "center",
-                        color: "inherit",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                    </button>
-                  }
+                  chevron={{
+                    isCollapsed,
+                    onToggle: () => toggleGroup(group.id),
+                    ariaLabel: isCollapsed ? `Expand ${group.name}` : `Collapse ${group.name}`,
+                  }}
                   label={group.name}
                   badge={isCollapsed && groupUnread > 0 ? groupUnread : null}
                 />
@@ -335,62 +318,108 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
   </button>
 );
 
+interface RowChevron {
+  isCollapsed: boolean;
+  onToggle: () => void;
+  ariaLabel: string;
+}
+
 interface RowProps {
   indent: number;
   isActive: boolean;
   onClick: () => void;
   leading?: React.ReactNode;
+  /** When provided, renders an expand/collapse chevron as a sibling button outside the navigating button. */
+  chevron?: RowChevron;
   label: string;
   badge?: number | null;
 }
 
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, label, badge }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    data-active={isActive ? "true" : "false"}
-    style={{
-      width: "100%",
-      display: "flex",
-      alignItems: "center",
-      gap: 6,
-      paddingTop: 2,
-      paddingBottom: 2,
-      paddingLeft: 10 + indent * 12,
-      paddingRight: 10,
-      background: isActive ? "var(--c-hover)" : "none",
-      borderLeft: isActive ? "2px solid var(--c-accent)" : "2px solid transparent",
-      color: isActive ? "var(--c-accent)" : "var(--c-text)",
-      fontSize: 15,
-      cursor: "pointer",
-      textAlign: "left",
-      lineHeight: "24px",
-    }}
-    onMouseEnter={(e) => {
-      if (!isActive) {
-        (e.currentTarget as HTMLButtonElement).style.background = "var(--c-hover)";
-      }
-    }}
-    onMouseLeave={(e) => {
-      if (!isActive) {
-        (e.currentTarget as HTMLButtonElement).style.background = "none";
-      }
-    }}
-  >
-    {leading}
-    <span
+const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge }) => {
+  const setHover = (el: HTMLElement, on: boolean) => {
+    if (isActive) {
+      return;
+    }
+    el.style.background = on ? "var(--c-hover)" : "none";
+  };
+  return (
+    <div
+      data-active={isActive ? "true" : "false"}
       style={{
-        flex: 1,
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
+        display: "flex",
+        alignItems: "stretch",
+        width: "100%",
+        background: isActive ? "var(--c-hover)" : "none",
+        borderLeft: isActive ? "2px solid var(--c-accent)" : "2px solid transparent",
+        color: isActive ? "var(--c-accent)" : "var(--c-text)",
       }}
+      onMouseEnter={(e) => setHover(e.currentTarget, true)}
+      onMouseLeave={(e) => setHover(e.currentTarget, false)}
     >
-      {label}
-    </span>
-    {badge != null && <UnreadBadge count={badge} />}
-  </button>
-);
+      {chevron && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={(e) => {
+            e.stopPropagation();
+            chevron.onToggle();
+          }}
+          aria-label={chevron.ariaLabel}
+          style={{
+            background: "none",
+            border: "none",
+            padding: 0,
+            margin: 0,
+            paddingLeft: 10 + indent * 12,
+            paddingRight: 0,
+            display: "inline-flex",
+            alignItems: "center",
+            color: "inherit",
+            cursor: "pointer",
+          }}
+        >
+          {chevron.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={onClick}
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          paddingTop: 2,
+          paddingBottom: 2,
+          paddingLeft: chevron ? 6 : 10 + indent * 12,
+          paddingRight: 10,
+          background: "none",
+          border: "none",
+          color: "inherit",
+          fontSize: 15,
+          fontFamily: "inherit",
+          cursor: "pointer",
+          textAlign: "left",
+          lineHeight: "24px",
+        }}
+      >
+        {leading}
+        <span
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {label}
+        </span>
+        {badge != null && <UnreadBadge count={badge} />}
+      </button>
+    </div>
+  );
+};
 
 const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
   <span
