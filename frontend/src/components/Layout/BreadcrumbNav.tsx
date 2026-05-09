@@ -238,17 +238,17 @@ export const BreadcrumbNav: React.FC = () => {
           background: "none",
           border: "none",
           padding: "0 6px",
-          color: "var(--c-text-muted)",
+          color: "var(--c-text)",
           cursor: "pointer",
         }}
         onMouseEnter={(e) => {
           (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
+          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
         }}
       >
-        <SearchIcon size={14} />
+        <SearchIcon size={16} />
         <kbd
           aria-hidden="true"
           className="font-mono text-xs"
@@ -275,17 +275,17 @@ export const BreadcrumbNav: React.FC = () => {
           background: "none",
           border: "none",
           padding: 0,
-          color: isOnSettingsHub ? "var(--c-accent)" : "var(--c-text-muted)",
+          color: isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)",
           cursor: "pointer",
         }}
         onMouseEnter={(e) => {
           (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = isOnSettingsHub ? "var(--c-accent)" : "var(--c-text-muted)";
+          (e.currentTarget as HTMLButtonElement).style.color = isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)";
         }}
       >
-        <SettingsIcon size={14} />
+        <SettingsIcon size={16} />
       </button>
     </div>
   );
