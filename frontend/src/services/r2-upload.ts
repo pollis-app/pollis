@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, convertFileSrc } from '@tauri-apps/api/core';
 import type { PresignedUploadResponse } from '../types';
 
 function sanitizeFilename(name: string): string {
@@ -104,16 +104,12 @@ export async function downloadAndDecryptMedia(
 // is content-addressed, so the path is permanently correct.
 const inFlight = new Map<string, Promise<string>>();
 
-/// Resolve an attachment to a URL the webview can render directly.
+/// Resolve an attachment to a local file URL the webview can render directly.
 ///
-/// The Rust side downloads + decrypts the attachment, then writes an
-/// AES-256-GCM ciphertext to the on-disk content-addressed cache. The
-/// returned URL uses the custom `pollis-media://` scheme; its protocol
-/// handler decrypts on demand so plaintext bytes never touch disk.
-///
-/// If the file is too large to cache (>100 MB) or the user is locked,
-/// `get_media_path` returns an empty string and we fall back to the byte
-/// path via `downloadAndDecryptMedia`, returning a blob: URL instead.
+/// The Rust side decrypts to an on-disk content-addressed cache and returns
+/// the path; we wrap it with `convertFileSrc()` so it becomes an asset:// URL
+/// (or http://asset.localhost on Linux) that <img> / <video> can load without
+/// the JSON IPC ever touching the bytes.
 export async function getMediaPath(
   r2Key: string,
   contentHash: string,
@@ -124,17 +120,12 @@ export async function getMediaPath(
     return cached;
   }
   const promise = (async () => {
-    const url = await invoke<string>('get_media_path', {
+    const path = await invoke<string>('get_media_path', {
       r2Key,
       contentHash,
       contentType,
     });
-    if (url) {
-      return url;
-    }
-    // Fallback: cache bypassed (oversize file or locked state). Pull the
-    // bytes through IPC for this one render.
-    return downloadAndDecryptMedia(r2Key, contentHash, contentType);
+    return convertFileSrc(path);
   })();
   inFlight.set(contentHash, promise);
   promise.catch(() => {

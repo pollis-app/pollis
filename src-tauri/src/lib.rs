@@ -219,141 +219,6 @@ async fn read_clipboard_image_to_temp(app: tauri::AppHandle) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// `pollis-media://` URI scheme handler.
-///
-/// Reads the encrypted cache file for `<content_hash>.<ext>.enc`, decrypts
-/// it in-memory using the user's `db_key`, and returns the plaintext bytes
-/// with a content-type derived from the extension. Supports HTTP Range
-/// requests so `<video>` seeking and `<audio>` partial loads behave.
-///
-/// Fail-closed: if the user is locked (no `db_key` in `AppState.unlock`),
-/// returns 403. The frontend `<img>`/`<audio>` simply fails the load.
-async fn handle_pollis_media(
-    app: &tauri::AppHandle,
-    request: tauri::http::Request<Vec<u8>>,
-) -> tauri::http::Response<std::borrow::Cow<'static, [u8]>> {
-    use tauri::http::{header, Response, StatusCode};
-    use std::borrow::Cow;
-
-    fn err(status: StatusCode) -> Response<Cow<'static, [u8]>> {
-        Response::builder()
-            .status(status)
-            .body(Cow::Borrowed(&[][..]))
-            .expect("static error response builds")
-    }
-
-    // URI shape: pollis-media://localhost/<content_hash>.<ext>
-    // Tauri 2 normalises custom schemes through an `http://` form internally,
-    // so we work off `request.uri().path()`.
-    let path = request.uri().path().trim_start_matches('/');
-    // Split off the extension; everything before the last '.' is the hash.
-    let (hash, ext) = match path.rsplit_once('.') {
-        Some((h, e)) if !h.is_empty() && !e.is_empty() => (h.to_string(), e.to_string()),
-        _ => return err(StatusCode::BAD_REQUEST),
-    };
-    // Sanity: content_hash is hex SHA-256 = 64 chars. Reject anything else
-    // so we can't be tricked into reading arbitrary paths.
-    if hash.len() != 64 || !hash.chars().all(|c| c.is_ascii_hexdigit()) {
-        return err(StatusCode::BAD_REQUEST);
-    }
-    let _ = ext;
-
-    let state = match app.try_state::<Arc<AppState>>() {
-        Some(s) => s,
-        None => return err(StatusCode::SERVICE_UNAVAILABLE),
-    };
-
-    let db_key: Vec<u8> = match state.unlock.lock().await.as_ref() {
-        Some(u) => u.db_key.to_vec(),
-        None => return err(StatusCode::FORBIDDEN),
-    };
-
-    let (plaintext, content_type) = match pollis_core::commands::r2::decrypt_cached_file(&hash, &db_key) {
-        Ok(Some(x)) => x,
-        Ok(None) => return err(StatusCode::NOT_FOUND),
-        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR),
-    };
-
-    let total_len = plaintext.len() as u64;
-
-    // Parse `Range: bytes=START-END` if present. Single-range only — that's
-    // all `<video>`/`<audio>` ever issue. Bytes are inclusive on both ends.
-    let range_header = request
-        .headers()
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-
-    if let Some(range) = range_header {
-        if let Some((start, end)) = parse_range(&range, total_len) {
-            let slice = plaintext[start as usize..=end as usize].to_vec();
-            let body_len = slice.len() as u64;
-            return Response::builder()
-                .status(StatusCode::PARTIAL_CONTENT)
-                .header(header::CONTENT_TYPE, content_type)
-                .header(header::ACCEPT_RANGES, "bytes")
-                .header(header::CONTENT_LENGTH, body_len.to_string())
-                .header(
-                    header::CONTENT_RANGE,
-                    format!("bytes {start}-{end}/{total_len}"),
-                )
-                .body(Cow::Owned(slice))
-                .unwrap_or_else(|_| err(StatusCode::INTERNAL_SERVER_ERROR));
-        } else {
-            // Unsatisfiable range.
-            return Response::builder()
-                .status(StatusCode::RANGE_NOT_SATISFIABLE)
-                .header(header::CONTENT_RANGE, format!("bytes */{total_len}"))
-                .body(Cow::Borrowed(&[][..]))
-                .unwrap_or_else(|_| err(StatusCode::INTERNAL_SERVER_ERROR));
-        }
-    }
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::ACCEPT_RANGES, "bytes")
-        .header(header::CONTENT_LENGTH, total_len.to_string())
-        .body(Cow::Owned(plaintext))
-        .unwrap_or_else(|_| err(StatusCode::INTERNAL_SERVER_ERROR))
-}
-
-/// Parse a single-range `Range: bytes=START-END` header. Returns `(start, end)`
-/// inclusive, clamped to the file length. Rejects multi-range requests.
-fn parse_range(header: &str, total_len: u64) -> Option<(u64, u64)> {
-    if total_len == 0 {
-        return None;
-    }
-    let value = header.strip_prefix("bytes=")?.trim();
-    if value.contains(',') {
-        // Multi-range — not supported.
-        return None;
-    }
-    let (start_s, end_s) = value.split_once('-')?;
-    let start_s = start_s.trim();
-    let end_s = end_s.trim();
-
-    let last = total_len - 1;
-    let (start, end) = if start_s.is_empty() {
-        // Suffix range: bytes=-N → last N bytes.
-        let n: u64 = end_s.parse().ok()?;
-        if n == 0 {
-            return None;
-        }
-        let n = n.min(total_len);
-        (total_len - n, last)
-    } else {
-        let s: u64 = start_s.parse().ok()?;
-        let e: u64 = if end_s.is_empty() { last } else { end_s.parse().ok()? };
-        (s, e.min(last))
-    };
-
-    if start > end || start > last {
-        return None;
-    }
-    Some((start, end))
-}
-
 /// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)
 /// or close it on Windows/Linux.
 #[tauri::command]
@@ -386,12 +251,6 @@ pub fn run() {
     }
 
     tauri::Builder::default()
-        .register_asynchronous_uri_scheme_protocol("pollis-media", |ctx, request, responder| {
-            let app = ctx.app_handle().clone();
-            tauri::async_runtime::spawn(async move {
-                responder.respond(handle_pollis_media(&app, request).await);
-            });
-        })
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -593,15 +452,9 @@ commands::livekit::get_livekit_token,
             commands::sfx::stop_ring,
         ])
         // On macOS, hide the window on close instead of quitting.
-        // On focus, re-evaluate the media-cache cap so external tampering
-        // / files copied into the dir / config changes don't let the cache
-        // drift above the ceiling.
         .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
             hide_on_close(_window, _event);
-            if let tauri::WindowEvent::Focused(true) = _event {
-                pollis_core::commands::r2::enforce_cache_cap_now();
-            }
         })
         .build(tauri::generate_context!())
         .expect("error while building Pollis")
