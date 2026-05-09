@@ -32,7 +32,10 @@ const queryClient = new QueryClient({
     queries: {
       staleTime: 1000 * 60, // 1 minute
       gcTime: 1000 * 60 * 5, // 5 minutes (formerly cacheTime)
-      refetchOnWindowFocus: true,
+      // Refocus refetch causes a full ingest + page-read + remote-username
+      // lookup churn for already-decrypted plaintext that won't get more
+      // accurate. Realtime push and explicit invalidations handle freshness.
+      refetchOnWindowFocus: false,
       refetchOnReconnect: true,
       retry: 1,
     },
