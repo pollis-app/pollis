@@ -550,7 +550,7 @@ function MainApp() {
               </span>
               <p className="text-xs font-mono flex items-center gap-2" style={{ color: "var(--c-text)" }}>
                 <span>
-                  Setting up your encrypted identity
+                  Getting things ready
                 </span>
                 <LoadingSpinner size="sm" />
               </p>
