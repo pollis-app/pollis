@@ -89,7 +89,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
     display: "block",
     border: "none",
     borderRadius: "0.5rem",
-    background: "var(--c-surface-high)",
+    background: "transparent",
   };
 
   return (

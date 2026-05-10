@@ -660,7 +660,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             width: 96,
             height: 96,
             padding: 0,
-            background: "var(--c-surface-high)",
+            background: "transparent",
             border: "none",
             borderRadius: "0.5rem",
             overflow: "hidden",
@@ -822,7 +822,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
             width: 96,
             height: 96,
             padding: 0,
-            background: "var(--c-surface-high)",
+            background: "transparent",
             border: "none",
             cursor: isPending || isLoading ? "default" : "pointer",
             position: "relative",
@@ -930,40 +930,52 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   return (
     <div
       data-testid={`attachment-${attachment.id}`}
-      className="flex items-center gap-2 px-2.5 py-1.5"
+      className="flex items-center gap-2 px-2.5 py-1.5 min-w-0"
       style={{
         border: "2px solid var(--c-border)",
         background: "var(--c-surface-high)",
-        minWidth: 160,
-        maxWidth: 240,
+        maxWidth: 360,
         borderRadius: 8,
       }}
     >
-      <FileTypeIcon size={16} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
-      <div className="flex-1 min-w-0">
-        <div className="text-xs font-mono truncate" style={{ color: "var(--c-accent-dim)" }}>
-          {attachment.filename}
-        </div>
-        {attachment.file_size > 0 && (
-          <div className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-            {formatFileSize(attachment.file_size)}
-          </div>
-        )}
-      </div>
+      <FileTypeIcon size={14} aria-hidden="true" style={{ color: "var(--c-text-dim)", flexShrink: 0 }} />
+      {(() => {
+        const lastDot = attachment.filename.lastIndexOf(".");
+        const hasExt = lastDot > 0 && lastDot < attachment.filename.length - 1;
+        const head = hasExt ? attachment.filename.slice(0, lastDot) : attachment.filename;
+        const tail = hasExt ? attachment.filename.slice(lastDot) : "";
+        return (
+          <span
+            className="text-sm font-mono flex-1 min-w-0 flex"
+            title={attachment.filename}
+            style={{ color: "var(--c-accent-dim)" }}
+          >
+            <span className="truncate">{head}</span>
+            {tail && <span className="flex-shrink-0">{tail}</span>}
+          </span>
+        );
+      })()}
+      {attachment.file_size > 0 && (
+        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>
+          {formatFileSize(attachment.file_size)}
+        </span>
+      )}
       {error ? (
-        <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>err</span>
+        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>err</span>
       ) : isPending ? (
-        <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>…</span>
+        <span className="text-sm font-mono flex-shrink-0" style={{ color: "var(--c-text-muted)" }}>…</span>
       ) : (
         <button
           onClick={handleDownload}
           disabled={downloadStatus !== "idle"}
           aria-label={`Download ${attachment.filename}`}
-          className="p-1"
+          className="flex-shrink-0"
           style={{
             color: downloadStatus === "done" ? "var(--c-accent)" : "var(--c-text-dim)",
-            flexShrink: 0,
             lineHeight: 0,
+            background: "none",
+            border: "none",
+            padding: 0,
           }}
         >
           {downloadStatus === "downloading" ? (
