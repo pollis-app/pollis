@@ -3,7 +3,7 @@ import { decode } from "blurhash";
 import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
-import { downloadAndDecryptMedia, getMediaPath } from "../../services/r2-upload";
+import { downloadAndDecryptMedia, getMediaUrl } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -449,8 +449,10 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   }, [isVideo, attachment.localPreviewUrl, downloadUrl]);
 
   // Auto-load images and audio from R2 once confirmed (object_key populated, no local URL).
-  // Uses the disk-cache path API so decrypted bytes never cross the JSON IPC —
-  // <img>/<audio> load directly from a converted file URL.
+  // One URL pattern across image and audio: the loopback media server
+  // returns `http://127.0.0.1:<port>/<token>/<hash>`. Bytes never cross
+  // the JSON IPC; disk cache is encrypted at rest under the session
+  // db_key; HTTP Range works for `<audio>` / `<video>` natively.
   useEffect(() => {
     if ((!isImage && !isAudio) || isPending || downloadUrl) {
       return;
@@ -458,11 +460,12 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
 
     let mounted = true;
     setIsLoading(true);
-    getMediaPath(
+    const fetchUrl = getMediaUrl(
       attachment.object_key,
       attachment.content_hash,
       attachment.content_type,
-    ).then((url) => {
+    );
+    fetchUrl.then((url) => {
       if (mounted) { setDownloadUrl(url); }
     }).catch((err) => {
       if (mounted) { setError(err instanceof Error ? err.message : "Failed to load"); }
@@ -533,7 +536,10 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     }
     setIsLoading(true);
     try {
-      const url = await getMediaPath(
+      // Video uses the same loopback URL pattern as image/audio. The
+      // server honours HTTP Range so seeking works without buffering
+      // the whole file.
+      const url = await getMediaUrl(
         attachment.object_key,
         attachment.content_hash,
         attachment.content_type,

@@ -1,4 +1,4 @@
-import { invoke, convertFileSrc } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
 import type { PresignedUploadResponse } from '../types';
 
 function sanitizeFilename(name: string): string {
@@ -97,20 +97,31 @@ export async function downloadAndDecryptMedia(
   return URL.createObjectURL(blob);
 }
 
-// In-flight de-dup: while one caller is fetching+decrypting bytes for a hash,
-// any other caller for the same hash awaits the same promise. Prevents a render
-// storm during scroll where 30 mounted MessageItems each kick off identical
-// invokes. Resolved promises stay cached for the life of the app — content_hash
-// is content-addressed, so the path is permanently correct.
+// In-flight de-dup: while one caller is resolving a URL for a hash, any
+// other caller for the same hash awaits the same promise. Prevents a
+// render storm during scroll where 30 mounted MessageItems each kick
+// off identical invokes. Resolved promises stay cached for the life of
+// the document — content_hash is content-addressed, so the URL is
+// permanently correct (the loopback server's port + token live for the
+// process; an unlock event would invalidate cached blob URLs from the
+// over-cap fallback path, but that's a fresh document anyway).
 const inFlight = new Map<string, Promise<string>>();
 
-/// Resolve an attachment to a local file URL the webview can render directly.
+/// Resolve an attachment to a URL the webview can render directly via
+/// `<img src>` / `<audio src>` / `<video src>`.
 ///
-/// The Rust side decrypts to an on-disk content-addressed cache and returns
-/// the path; we wrap it with `convertFileSrc()` so it becomes an asset:// URL
-/// (or http://asset.localhost on Linux) that <img> / <video> can load without
-/// the JSON IPC ever touching the bytes.
-export async function getMediaPath(
+/// Default path: the Rust side downloads, decrypts, re-encrypts under
+/// the per-session cache key, writes to disk, and returns
+/// `http://127.0.0.1:<port>/<token>/<hash>`. Subsequent calls for the
+/// same hash return the URL straight from the cached path. The local
+/// HTTP server (see `pollis-core::media_server`) decrypts and streams
+/// bytes — never through the JSON IPC, never via `Blob`/`asset://`.
+///
+/// Fallback: files larger than the per-file cap (100 MiB) skip the
+/// disk cache; Rust returns an empty string, and we fall back to
+/// `downloadAndDecryptMedia` which produces an in-memory Blob URL just
+/// for this render.
+export async function getMediaUrl(
   r2Key: string,
   contentHash: string,
   contentType: string,
@@ -120,18 +131,15 @@ export async function getMediaPath(
     return cached;
   }
   const promise = (async () => {
-    const path = await invoke<string>('get_media_path', {
+    const url = await invoke<string>('get_media_url', {
       r2Key,
       contentHash,
       contentType,
     });
-    // Empty-string sentinel: file exceeds the per-file cap, so the
-    // Rust side declined to cache it. Fall back to the byte path which
-    // produces an in-memory blob URL just for this render.
-    if (!path) {
+    if (!url) {
       return downloadAndDecryptMedia(r2Key, contentHash, contentType);
     }
-    return convertFileSrc(path);
+    return url;
   })();
   inFlight.set(contentHash, promise);
   promise.catch(() => {
