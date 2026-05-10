@@ -140,10 +140,9 @@ export function useMessages(channelId: string | null, conversationId: string | n
     queryKey,
     queryFn: async (): Promise<MessagesQueryResult> => {
       if (isChannel && channelId && currentUser) {
-        // Advance the local MLS epoch before decrypting so any pending
-        // member-add or member-remove commits are applied first.
-        await invoke('process_pending_commits', { conversationId: channelId, userId: currentUser.id }).catch(() => {});
-
+        // get_channel_messages internally calls poll_mls_welcomes_inner +
+        // process_pending_commits_inner via ingest_channel_envelopes_inner,
+        // so no frontend pre-flight is needed.
         const page = await invoke<MessagePage>('get_channel_messages', {
           userId: currentUser.id,
           channelId,
@@ -156,11 +155,9 @@ export function useMessages(channelId: string | null, conversationId: string | n
       }
 
       if (conversationId && currentUser) {
-        // Drain any pending MLS Welcome messages first — the DM creator may have
-        // added us to the MLS group while we were already online.
-        await invoke('poll_mls_welcomes', { userId: currentUser.id }).catch(() => {});
-        await invoke('process_pending_commits', { conversationId, userId: currentUser.id }).catch(() => {});
-
+        // get_dm_messages internally calls poll_mls_welcomes_inner +
+        // process_pending_commits_inner via ingest_dm_envelopes_inner,
+        // so no frontend pre-flight is needed.
         const page = await invoke<MessagePage>('get_dm_messages', {
           userId: currentUser.id,
           dmChannelId: conversationId,

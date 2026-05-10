@@ -3,6 +3,50 @@ import { MessageItem } from "./MessageItem";
 import { useBlockedUsers } from "../../hooks/queries";
 import type { Message } from "../../types";
 
+const toMs = (timestamp: number): number =>
+  timestamp < 1e12 ? timestamp * 1000 : timestamp;
+
+const startOfLocalDay = (d: Date): number =>
+  new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+
+const formatDayDividerLabel = (timestamp: number): string => {
+  const d = new Date(toMs(timestamp));
+  const now = new Date();
+  const dayStart = startOfLocalDay(d);
+  const todayStart = startOfLocalDay(now);
+  const dayDiff = Math.round((todayStart - dayStart) / 86_400_000);
+
+  if (dayDiff === 0) {
+    return "Today";
+  }
+  if (dayDiff === 1) {
+    return "Yesterday";
+  }
+  if (dayDiff > 1 && dayDiff <= 6) {
+    return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
+  }
+  if (d.getFullYear() === now.getFullYear()) {
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  }
+  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+};
+
+const DayDivider: React.FC<{ label: string }> = ({ label }) => (
+  <div
+    data-testid="day-divider"
+    className="flex items-center gap-3 py-2 select-none"
+  >
+    <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+    <span
+      className="text-xs font-mono"
+      style={{ color: "var(--c-text-muted)" }}
+    >
+      {label}
+    </span>
+    <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+  </div>
+);
+
 interface MessageListProps {
   messages: Message[];
   adminUserIds?: Set<string>;
@@ -154,40 +198,45 @@ export const MessageList: React.FC<MessageListProps> = ({
           Loading…
         </p>
       )}
-      {sortedMessages.map((message) => {
-        if (blockedIds.has(message.sender_id)) {
-          return (
-            <div
-              key={message.id}
-              data-testid={`message-blocked-${message.id}`}
-              className="px-4 py-1"
-            >
-              <div className="flex items-start gap-2 min-w-0">
-                <span
-                  className="flex-shrink-0 font-mono text-sm italic"
-                  style={{ color: "var(--c-text-dim)" }}
-                >
-                  blocked user
-                </span>
-                <span
-                  className="font-mono text-sm italic"
-                  style={{ color: "var(--c-text-muted)" }}
-                >
-                  [blocked]
-                </span>
-              </div>
+      {sortedMessages.map((message, idx) => {
+        const prev = idx > 0 ? sortedMessages[idx - 1] : null;
+        const currentDay = startOfLocalDay(new Date(toMs(message.created_at)));
+        const prevDay = prev
+          ? startOfLocalDay(new Date(toMs(prev.created_at)))
+          : null;
+        const showDivider = prevDay === null || prevDay !== currentDay;
+
+        const rendered = blockedIds.has(message.sender_id) ? (
+          <div
+            key={message.id}
+            data-testid={`message-blocked-${message.id}`}
+            className="px-4 py-1"
+          >
+            <div className="flex items-start gap-2 min-w-0">
+              <span
+                className="flex-shrink-0 font-mono text-sm italic"
+                style={{ color: "var(--c-text-dim)" }}
+              >
+                blocked user
+              </span>
+              <span
+                className="font-mono text-sm italic"
+                style={{ color: "var(--c-text-muted)" }}
+              >
+                [blocked]
+              </span>
             </div>
-          );
-        }
-        const authorUsername = getAuthorUsername
-          ? getAuthorUsername(message.sender_id, message)
-          : "Unknown";
-        return (
+          </div>
+        ) : (
           <MessageItem
             key={message.id}
             message={message}
             allMessages={sortedMessages}
-            authorUsername={authorUsername}
+            authorUsername={
+              getAuthorUsername
+                ? getAuthorUsername(message.sender_id, message)
+                : "Unknown"
+            }
             isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
             canModerate={viewerIsAdmin}
             onReply={onReply}
@@ -195,6 +244,15 @@ export const MessageList: React.FC<MessageListProps> = ({
             onDelete={onDelete}
             onScrollToReply={scrollToMessage}
           />
+        );
+
+        return (
+          <React.Fragment key={`frag-${message.id}`}>
+            {showDivider && (
+              <DayDivider label={formatDayDividerLabel(message.created_at)} />
+            )}
+            {rendered}
+          </React.Fragment>
         );
       })}
       <div ref={bottomRef} />

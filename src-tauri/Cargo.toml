@@ -41,7 +41,7 @@ tauri-build = { version = "2", features = [] }
 # binaries can consume it without dragging in the Tauri runtime.
 pollis-core = { path = "../pollis-core" }
 
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

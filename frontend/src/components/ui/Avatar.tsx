@@ -49,7 +49,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   // Wrap the avatar in a positioned span so the dot can sit at the corner
   // without disturbing the parent's layout. Sizing the dot relative to the
   // avatar keeps it visible at every avatar size we use.
-  const dotSize = Math.max(6, Math.round(size * 0.28));
+  const dotSize = Math.max(5, Math.round(size * 0.24));
   const wrapperStyle: React.CSSProperties = {
     position: "relative",
     display: "inline-flex",
@@ -59,8 +59,8 @@ export const Avatar: React.FC<AvatarProps> = ({
   };
   const dotStyle: React.CSSProperties = {
     position: "absolute",
-    right: 0,
-    bottom: 0,
+    right: -2,
+    bottom: -2,
     width: dotSize,
     height: dotSize,
     borderRadius: "50%",

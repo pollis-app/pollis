@@ -47,7 +47,7 @@ export const DMPage: React.FC = () => {
         setOtherUserId(other?.user_id ?? null);
         setOtherAcceptedAt(other?.accepted_at ?? null);
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => { cancelled = true; };
   }, [currentUser, conversationId]);
 
@@ -125,6 +125,10 @@ export const DMPage: React.FC = () => {
             onClick={startCall}
             aria-label={`Call @${username}`}
             className="icon-btn-sm flex-shrink-0"
+            style={{
+              position: 'absolute',
+              right: '0.75rem'
+            }}
           >
             <Phone size={14} aria-hidden="true" />
           </button>

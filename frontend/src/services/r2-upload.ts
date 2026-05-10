@@ -96,3 +96,55 @@ export async function downloadAndDecryptMedia(
   const blob = new Blob([new Uint8Array(bytes)], mimeType ? { type: mimeType } : undefined);
   return URL.createObjectURL(blob);
 }
+
+// In-flight de-dup: while one caller is resolving a URL for a hash, any
+// other caller for the same hash awaits the same promise. Prevents a
+// render storm during scroll where 30 mounted MessageItems each kick
+// off identical invokes. Resolved promises stay cached for the life of
+// the document — content_hash is content-addressed, so the URL is
+// permanently correct (the loopback server's port + token live for the
+// process; an unlock event would invalidate cached blob URLs from the
+// over-cap fallback path, but that's a fresh document anyway).
+const inFlight = new Map<string, Promise<string>>();
+
+/// Resolve an attachment to a URL the webview can render directly via
+/// `<img src>` / `<audio src>` / `<video src>`.
+///
+/// Default path: the Rust side downloads, decrypts, re-encrypts under
+/// the per-session cache key, writes to disk, and returns
+/// `http://127.0.0.1:<port>/<token>/<hash>`. Subsequent calls for the
+/// same hash return the URL straight from the cached path. The local
+/// HTTP server (see `pollis-core::media_server`) decrypts and streams
+/// bytes — never through the JSON IPC, never via `Blob`/`asset://`.
+///
+/// Fallback: files larger than the per-file cap (100 MiB) skip the
+/// disk cache; Rust returns an empty string, and we fall back to
+/// `downloadAndDecryptMedia` which produces an in-memory Blob URL just
+/// for this render.
+export async function getMediaUrl(
+  r2Key: string,
+  contentHash: string,
+  contentType: string,
+): Promise<string> {
+  const cached = inFlight.get(contentHash);
+  if (cached) {
+    return cached;
+  }
+  const promise = (async () => {
+    const url = await invoke<string>('get_media_url', {
+      r2Key,
+      contentHash,
+      contentType,
+    });
+    if (!url) {
+      return downloadAndDecryptMedia(r2Key, contentHash, contentType);
+    }
+    return url;
+  })();
+  inFlight.set(contentHash, promise);
+  promise.catch(() => {
+    // On error, drop the cached rejection so the next caller retries.
+    inFlight.delete(contentHash);
+  });
+  return promise;
+}

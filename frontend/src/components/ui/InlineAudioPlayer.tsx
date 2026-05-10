@@ -25,7 +25,6 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [isLoading, setIsLoading] = useState(true);
   const audioRef = useRef<HTMLAudioElement>(null);
 
   useEffect(() => {
@@ -35,26 +34,26 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
     }
 
     const updateTime = () => setCurrentTime(audio.currentTime);
-    const updateDuration = () => setDuration(audio.duration);
+    const updateDuration = () => {
+      if (isFinite(audio.duration)) {
+        setDuration(audio.duration);
+      }
+    };
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
-    const handleLoadStart = () => setIsLoading(true);
-    const handleCanPlay = () => setIsLoading(false);
 
     audio.addEventListener("timeupdate", updateTime);
     audio.addEventListener("loadedmetadata", updateDuration);
+    audio.addEventListener("durationchange", updateDuration);
     audio.addEventListener("play", handlePlay);
     audio.addEventListener("pause", handlePause);
-    audio.addEventListener("loadstart", handleLoadStart);
-    audio.addEventListener("canplay", handleCanPlay);
 
     return () => {
       audio.removeEventListener("timeupdate", updateTime);
       audio.removeEventListener("loadedmetadata", updateDuration);
+      audio.removeEventListener("durationchange", updateDuration);
       audio.removeEventListener("play", handlePlay);
       audio.removeEventListener("pause", handlePause);
-      audio.removeEventListener("loadstart", handleLoadStart);
-      audio.removeEventListener("canplay", handleCanPlay);
     };
   }, []);
 
@@ -90,12 +89,11 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
       }}
       onClick={onClick}
     >
-      <audio ref={audioRef} src={src} autoPlay={autoPlay} />
+      <audio ref={audioRef} src={src} autoPlay={autoPlay} preload="metadata" />
 
       <button
         onClick={togglePlay}
-        disabled={isLoading}
-        className="p-1 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black disabled:opacity-50 disabled:cursor-not-allowed"
+        className="p-1 rounded transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
         style={{ color: "var(--c-accent)" }}
         aria-label={isPlaying ? "Pause" : "Play"}
       >
@@ -119,7 +117,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         onChange={handleSeek}
         onClick={(e) => e.stopPropagation()}
         className="flex-1 h-1 rounded appearance-none cursor-pointer accent-slider focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
-        disabled={isLoading}
+        disabled={!duration}
         aria-label="Seek audio"
       />
 

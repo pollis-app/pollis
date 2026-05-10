@@ -27,3 +27,8 @@ pub async fn download_file(key: String, state: State<'_, Arc<AppState>>) -> Resu
 pub async fn download_media(r2_key: String, content_hash: String, state: State<'_, Arc<AppState>>) -> Result<Vec<u8>> {
     pollis_core::commands::r2::download_media(r2_key, content_hash, &state).await
 }
+
+#[tauri::command]
+pub async fn get_media_url(r2_key: String, content_hash: String, content_type: String, state: State<'_, Arc<AppState>>) -> Result<String> {
+    pollis_core::commands::r2::get_media_url(r2_key, content_hash, content_type, &state).await
+}

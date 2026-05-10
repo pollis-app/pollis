@@ -516,7 +516,7 @@ export const MainContent: React.FC = () => {
               }}
               disabled={editMessageMutation.isPending}
               rows={2}
-              className="chat-input-textarea w-full font-mono text-sm resize-none transition-colors"
+              className={`chat-input-textarea w-full font-mono text-sm resize-none transition-colors${editBarFocused ? " is-focused" : ""}`}
               style={{
                 borderRadius: '4px',
                 border: 'none',

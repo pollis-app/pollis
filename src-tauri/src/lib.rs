@@ -288,9 +288,34 @@ pub fn run() {
                 apply_windows_rounded_corners(&window);
             }
 
+            // Initialise the on-disk media cache. The frontend renders
+            // attachments by file path (via convertFileSrc) instead of
+            // pumping decrypted bytes through the JSON IPC.
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                let cache_dir = data_dir.join("media-cache");
+                let _ = std::fs::create_dir_all(&cache_dir);
+                pollis_core::commands::r2::set_media_cache_dir(cache_dir);
+            }
+
             tauri::async_runtime::block_on(async move {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;
-                app.manage(Arc::new(state));
+                let state = Arc::new(state);
+
+                // Loopback HTTP server for cached media. The webview
+                // embeds `http://127.0.0.1:<port>/<token>/<hash>` URLs
+                // for every `<img>/<audio>/<video>` element. Spawned
+                // before `manage` so the port is on `AppState` by the
+                // time any frontend code runs.
+                match pollis_core::media_server::spawn(state.clone()).await {
+                    Ok(port) => {
+                        *state.media_server_port.lock().await = Some(port);
+                    }
+                    Err(e) => {
+                        eprintln!("[setup] failed to spawn media server: {e}");
+                    }
+                }
+
+                app.manage(state);
                 Ok::<(), String>(())
             })?;
 
@@ -416,6 +441,7 @@ commands::livekit::get_livekit_token,
             commands::r2::upload_media,
             commands::r2::download_file,
             commands::r2::download_media,
+            commands::r2::get_media_url,
             commands::update::mark_update_required,
             commands::update::is_update_required,
             commands::install_kind::detect_managed_install,
@@ -442,9 +468,15 @@ commands::livekit::get_livekit_token,
             commands::sfx::stop_ring,
         ])
         // On macOS, hide the window on close instead of quitting.
+        // On window focus, re-evaluate the media-cache cap so files
+        // copied into the dir externally / mtime-tampered / etc. don't
+        // let it grow past the limit.
         .on_window_event(|_window, _event| {
             #[cfg(target_os = "macos")]
             hide_on_close(_window, _event);
+            if let tauri::WindowEvent::Focused(true) = _event {
+                pollis_core::commands::r2::enforce_cache_cap_now();
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building Pollis")
@@ -453,6 +485,14 @@ commands::livekit::get_livekit_token,
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = _event {
                 show_on_reopen(_app);
+            }
+            // Wipe the plaintext media cache on app exit. The cache holds
+            // decrypted bytes (image / video / audio) and is not encrypted
+            // at rest, so it must not survive a graceful shutdown — the
+            // next attacker with file-system access would otherwise be
+            // able to read every media file the user viewed.
+            if let tauri::RunEvent::ExitRequested { .. } = _event {
+                pollis_core::commands::r2::clear_media_cache();
             }
         });
 }

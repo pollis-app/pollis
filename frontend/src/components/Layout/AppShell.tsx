@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TitleBar } from "./TitleBar";
 import { BreadcrumbNav } from "./BreadcrumbNav";
+import { Sidebar } from "./Sidebar";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -28,6 +29,23 @@ export const AppShell: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  // Sidebar visibility is driven by the user preference
+  // `sidebar_open_by_default`. Cmd/Ctrl+B toggles for the current session
+  // only — flipping it does NOT write back to the preference, so users
+  // who keep it closed by default can still pop it open ad-hoc without
+  // losing their default. Changing the preference updates the live UI
+  // via the sync effect below.
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        setIsSidebarOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -44,6 +62,17 @@ export const AppShell: React.FC = () => {
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { query: prefsQuery } = usePreferences();
+
+  // Apply the sidebar default whenever the preference first loads or the
+  // user changes it. Cmd/Ctrl+B presses don't fight this since they only
+  // mutate session state — when the preference value is unchanged, the
+  // dependency stays stable and this effect won't re-fire.
+  const sidebarDefault = prefsQuery.data?.sidebar_open_by_default;
+  useEffect(() => {
+    if (sidebarDefault !== undefined) {
+      setIsSidebarOpen(sidebarDefault);
+    }
+  }, [sidebarDefault]);
 
   const currentUser = useAppStore((s) => s.currentUser);
 
@@ -319,26 +348,12 @@ export const AppShell: React.FC = () => {
       {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
 
-      {/* Sync indicator — floats top-right below title bar, left of the persistent cog */}
-      {isSyncing && (
-        <div
-          className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
-          style={{
-            position: "absolute",
-            top: 36 + 7,
-            right: 40,
-            zIndex: 50,
-            color: "var(--c-accent-dim)",
-          }}
-        >
-          <span>syncing…</span>
-          <LoadingSpinner size="sm" />
+      {/* Main content — sidebar + matched child route */}
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row" }}>
+        <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen((v) => !v)} />
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <Outlet />
         </div>
-      )}
-
-      {/* Main content — matched child route renders here */}
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-        <Outlet />
       </div>
 
       {/* VoiceBar — shown above bottom bar while user is in a voice channel */}
@@ -435,6 +450,15 @@ export const AppShell: React.FC = () => {
           >
             <Mail className="w-4 h-4" />: @{statusBarAlert.senderUsername}
           </button>
+        ) : isSyncing ? (
+          <div
+            data-testid="status-bar-syncing"
+            className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          >
+            <span>syncing…</span>
+            <LoadingSpinner size="sm" />
+          </div>
         ) : null}
       </div>
     </div>

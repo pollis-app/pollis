@@ -154,6 +154,16 @@ website/                # Static HTML marketing site (Cloudflare Pages)
 
 **Implication for future video**: video capture, publish, subscribe, and render must all run in Rust. Remote video frames cannot be handed to a `<video>` element via `srcObject` because there is no `MediaStream` in the webview. Rendering requires either a native OS surface layered behind the webview or pushing decoded frames to the frontend via IPC (latter is fine for small previews, not for real video).
 
+## Performance Architecture
+
+**Lean Rust for performance-critical paths.** The reason Pollis is on Tauri (not Electron, not Wails) is to leverage Rust's perf for I/O, crypto, media pipelines, and concurrency without GC pauses. When a feature is performance-sensitive, IPC-bandwidth-sensitive, or benefits from no-GC predictability — media decoding, encryption, file serving, real-time pipelines, large-buffer manipulation — put it in Rust. Use the webview as a thin presentation layer.
+
+Don't reach for JS-side equivalents (Web Crypto, IndexedDB, browser-side caching, JS-heap byte buffers) when an equivalent Rust path exists. If you do, you're giving up the main reason the stack was picked. V8's GC pressure on multi-MB byte arrays produces visible UI stutter; Rust's predictable allocation does not.
+
+**Pattern for serving cached/encrypted media to the webview**: a Rust-side local-loopback HTTP server (`127.0.0.1:<auto-port>`). The webview embeds `<img>/<audio>/<video>` with `src="http://127.0.0.1:NNNN/<hash>"`. Rust handles disk cache (encrypted at rest), AES-GCM decrypt, HTTP Range requests, and any future on-the-fly transforms (thumbnails, transcoding, prefetch). One URL pattern across image/audio/video — no platform-branching, no custom URI schemes, no JSON IPC for bytes. CRUD continues to go through `invoke()`; the local HTTP server is for media transport, not data plane.
+
+**Implication when adding new perf-sensitive features**: default to a Rust implementation that exposes either an `invoke()` command (for CRUD-shaped calls) or an HTTP endpoint on the local server (for byte-stream-shaped data). Reach for JS only after confirming the Rust path won't work.
+
 ## Security Model
 
 **Trusted**: User's device, local database (encrypted at rest), Tauri app code, OS keystore

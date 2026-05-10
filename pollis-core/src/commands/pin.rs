@@ -412,6 +412,18 @@ pub async fn set_pin(
         account_id_key,
     });
 
+    // Wipe the media cache on unlock. If a different user previously cached
+    // media on this device, their files were encrypted under their db_key
+    // and are unreadable to us — purge them so they don't consume cap space.
+    crate::commands::r2::clear_media_cache();
+
+    // Rotate the loopback media server token. Any URL the previous
+    // session handed out becomes invalid the moment the new token is
+    // installed, which is the behaviour we want when the active user
+    // changes.
+    *state.media_server_token.lock().await =
+        Some(crate::media_server::fresh_token());
+
     state.load_user_db_with_key(&user_id, &db_key).await?;
 
     if let Some(device_id) = state.device_id.lock().await.clone() {
@@ -490,6 +502,15 @@ pub async fn unlock(
         db_key: unlocked.db_key,
         account_id_key: unlocked.account_id_key,
     });
+
+    // Wipe the media cache on unlock — see equivalent comment in `set_pin`.
+    crate::commands::r2::clear_media_cache();
+
+    // Rotate the loopback media server token so URLs minted under the
+    // pre-unlock (or previous-session) token stop working. See the
+    // matching site in `set_pin`.
+    *state.media_server_token.lock().await =
+        Some(crate::media_server::fresh_token());
 
     // Migrate away from #195-vintage residue — the wrapped blobs are
     // already in place; the legacy plaintext slots sitting next to
@@ -615,6 +636,10 @@ async fn unlock_inner(
 /// lock" primitive, not the "log out" one.
 pub async fn lock(state: &Arc<AppState>) -> Result<()> {
     *state.unlock.lock().await = None;
+    // Clear the media-server token so URLs the locked session minted
+    // stop resolving. The cache files stay (encrypted at rest) — a
+    // subsequent unlock under the same `db_key` can still read them.
+    *state.media_server_token.lock().await = None;
     state.unload_user_db().await;
     Ok(())
 }
