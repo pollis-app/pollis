@@ -6,6 +6,7 @@ pub mod config;
 pub mod db;
 pub mod error;
 pub mod keystore;
+pub mod media_server;
 pub mod realtime;
 pub mod signal;
 pub mod sink;

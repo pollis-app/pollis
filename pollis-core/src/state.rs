@@ -48,6 +48,17 @@ pub struct AppState {
     /// Not yet load-bearing — stage 6 flips the app over to reading the
     /// unwrapped keys from here instead of the legacy keystore slots.
     pub unlock: Arc<Mutex<Option<UnlockState>>>,
+    /// Bound port of the loopback media HTTP server, set once during
+    /// startup. `None` in test/headless contexts that don't spin up the
+    /// server. The port plus `media_server_token` produce the URLs the
+    /// frontend embeds in `<img>/<audio>/<video>` `src` attributes.
+    pub media_server_port: Arc<Mutex<Option<u16>>>,
+    /// Per-session 32-byte hex token for the loopback media server.
+    /// Rotated on `unlock` / `set_pin`, cleared on `logout`. Without
+    /// this token the server returns 403 — even loopback access is
+    /// gated since other local users could otherwise read decrypted
+    /// media in flight.
+    pub media_server_token: Arc<Mutex<Option<String>>>,
 }
 
 impl AppState {
@@ -81,6 +92,8 @@ impl AppState {
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
             unlock: Arc::new(Mutex::new(None)),
+            media_server_port: Arc::new(Mutex::new(None)),
+            media_server_token: Arc::new(Mutex::new(None)),
         }
     }
 

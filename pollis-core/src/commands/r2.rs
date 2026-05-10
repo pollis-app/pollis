@@ -9,12 +9,18 @@ use crate::state::AppState;
 
 // ── On-disk media cache ───────────────────────────────────────────────────
 //
-// Decrypted media is materialised under a content-addressed cache so the
-// frontend can render directly from a file path (via `convertFileSrc`) instead
-// of pumping multi-megabyte byte arrays through the JSON IPC. Keyed by
-// `content_hash`, which uniquely identifies the bytes (it's also the seed for
-// the AES-GCM key derivation), so there's no invalidation problem — if the
-// file exists, the bytes are correct.
+// Media is materialised on disk **encrypted at rest** under a content-
+// addressed cache (`<hash>.<ext>.enc`). The frontend never reads these
+// files directly — instead it embeds `http://127.0.0.1:<port>/<token>/<hash>`
+// URLs and the loopback media server (`crate::media_server`) decrypts on
+// demand. One URL pattern across `<img>/<audio>/<video>` and bytes never
+// touch the JSON IPC.
+//
+// Per-file key derivation: HKDF-SHA256(salt = `pollis-media-cache-v1`,
+// ikm = `db_key`, info = content_hash bytes). Different salt from the
+// upload-side convergent key (`pollis-att-key`) so the two domains are
+// cryptographically separated even though both are seeded from the same
+// content hash.
 
 /// Hard cap on total cache size before LRU eviction kicks in.
 const MEDIA_CACHE_MAX_BYTES: u64 = 500 * 1024 * 1024;
@@ -77,7 +83,57 @@ fn ext_for_content_type(ct: &str) -> &'static str {
 fn cache_file_path(content_hash: &str, content_type: &str) -> Result<PathBuf> {
     let dir = media_cache_dir()?;
     let ext = ext_for_content_type(content_type);
-    Ok(dir.join(format!("{content_hash}.{ext}")))
+    Ok(dir.join(format!("{content_hash}.{ext}.enc")))
+}
+
+/// Map a file extension back to a Content-Type for the HTTP server's
+/// response headers. Inverse of `ext_for_content_type`. Mismatches (e.g.
+/// the cache was populated under one MIME and the request supplies
+/// another) fall back to `application/octet-stream`; the browser
+/// usually sniffs anyway.
+pub fn content_type_for_ext(ext: &str) -> &'static str {
+    match ext {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "avif" => "image/avif",
+        "svg" => "image/svg+xml",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mp3" => "audio/mpeg",
+        "m4a" => "audio/mp4",
+        "weba" => "audio/webm",
+        "ogg" => "audio/ogg",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Locate the encrypted cache file for a given content hash. Returns the
+/// path and the inner extension (between `<hash>.` and `.enc`) so the
+/// caller can derive a Content-Type. `None` if no file with this hash
+/// exists in the cache.
+pub fn find_cached_file(content_hash: &str) -> Option<(PathBuf, String)> {
+    let dir = MEDIA_CACHE_DIR.get()?;
+    let entries = std::fs::read_dir(dir).ok()?;
+    let prefix = format!("{content_hash}.");
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = match path.file_name().and_then(|s| s.to_str()).map(str::to_string) {
+            Some(n) => n,
+            None => continue,
+        };
+        if !name.starts_with(&prefix) || !name.ends_with(".enc") {
+            continue;
+        }
+        // Strip prefix + trailing `.enc` to get the inner extension.
+        let inner = name[prefix.len()..name.len() - ".enc".len()].to_string();
+        return Some((path, inner));
+    }
+    None
 }
 
 /// Stat every file in the cache; if total size exceeds the cap, delete by
@@ -89,7 +145,7 @@ fn enforce_cache_cap(dir: &Path) {
 
 /// Lower-bound variant: shrink the cache to at most `target_bytes` by
 /// evicting oldest entries first. Used both by the regular cap-enforcer
-/// and by the pre-write headroom check in `get_media_path`.
+/// and by the pre-write headroom check in `get_media_url`.
 fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
     let entries = match std::fs::read_dir(dir) {
         Ok(rd) => rd,
@@ -453,23 +509,39 @@ pub async fn download_media(
     decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)
 }
 
-/// Return a filesystem path to the decrypted media bytes.
+/// Resolve a media attachment to a loopback HTTP URL the webview can use
+/// directly as `<img src>` / `<audio src>` / `<video src>`.
 ///
-/// The frontend converts the path with `convertFileSrc()` and uses the result
-/// directly as `<img src>` / `<video src>`. This avoids serialising the raw
-/// bytes over the JSON IPC, which dominates render time for image-heavy
-/// channels.
+/// Caches the decrypted-then-cache-encrypted bytes on disk under a
+/// content-addressed name so subsequent calls hit the local server
+/// without touching R2 again. Bytes never cross the JSON IPC.
 ///
-/// Cached by `content_hash`. If a file already exists for this hash we return
-/// it immediately. Otherwise we download + decrypt, write atomically, then
-/// return the path. Concurrent calls for the same hash share one download
-/// via a per-hash tokio mutex.
-pub async fn get_media_path(
+/// Returns `""` (empty string sentinel) for files larger than
+/// `MEDIA_CACHE_MAX_FILE_BYTES`. The frontend falls back to the byte
+/// path (`download_media` → in-memory Blob URL) for that one render so
+/// a single huge upload can't push everything else out of the cache.
+pub async fn get_media_url(
     r2_key: String,
     content_hash: String,
     content_type: String,
     state: &Arc<AppState>,
 ) -> Result<String> {
+    // Build the URL from the server port + token. Both must be present
+    // — without an active unlock the server returns 403 anyway, so
+    // there's no point handing out a URL the caller can't use.
+    let port = state
+        .media_server_port
+        .lock()
+        .await
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server not started")))?;
+    let token = state
+        .media_server_token
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("media server token not set; not unlocked")))?;
+    let url = format!("http://127.0.0.1:{port}/{token}/{content_hash}");
+
     let target = cache_file_path(&content_hash, &content_type)?;
 
     // Fast path: already cached. Touch mtime so the LRU sees it as fresh.
@@ -477,11 +549,11 @@ pub async fn get_media_path(
         if let Ok(f) = std::fs::OpenOptions::new().write(true).open(&target) {
             let _ = f.set_modified(std::time::SystemTime::now());
         }
-        return Ok(target.to_string_lossy().into_owned());
+        return Ok(url);
     }
 
-    // Acquire a per-hash lock so the second waiter sees the file on disk
-    // instead of starting a redundant download.
+    // Per-hash lock so the second waiter sees the file on disk instead
+    // of starting a redundant download.
     let lock = {
         let mut map = in_flight().lock().expect("in-flight map poisoned");
         map.entry(content_hash.clone())
@@ -490,46 +562,65 @@ pub async fn get_media_path(
     };
     let _guard = lock.lock().await;
 
-    // Recheck under the lock — another caller may have just finished.
     if target.exists() {
-        // Drop our entry from the in-flight map.
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
-        return Ok(target.to_string_lossy().into_owned());
+        return Ok(url);
     }
 
     let bytes = download_media(r2_key, content_hash.clone(), state).await?;
 
-    // Per-file cap. Files larger than MEDIA_CACHE_MAX_FILE_BYTES skip the
-    // cache entirely so a single huge upload can't push everything else
-    // out. The frontend falls back to the byte path on the empty sentinel.
+    // Per-file cap. Files larger than MEDIA_CACHE_MAX_FILE_BYTES skip
+    // the cache entirely. Empty-string sentinel tells the frontend to
+    // fall back to the byte path which produces an in-memory blob URL.
     if bytes.len() as u64 > MEDIA_CACHE_MAX_FILE_BYTES {
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Ok(String::new());
     }
 
-    // Atomic write: <hash>.<ext>.tmp → rename → <hash>.<ext>.
     let dir = media_cache_dir()?;
     if let Err(e) = std::fs::create_dir_all(dir) {
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Err(Error::Other(anyhow::anyhow!("create cache dir: {e}")));
     }
 
-    // Pre-emptive eviction: if the new file would push us over the cap,
-    // evict oldest entries down to (cap - new_file_size) *before* writing.
-    // Without this the cache temporarily peaks above the cap during a
-    // large download.
-    let new_size = bytes.len() as u64;
+    // Encrypt before writing. Per-file random nonce + AES-256-GCM under
+    // a key derived from `db_key` and the content hash.
+    let db_key = {
+        let guard = state.unlock.lock().await;
+        match guard.as_ref() {
+            Some(u) => u.db_key.to_vec(),
+            None => {
+                in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+                return Err(Error::Other(anyhow::anyhow!(
+                    "cannot cache media without an active unlock"
+                )));
+            }
+        }
+    };
+    let encrypted = match cache_encrypt(&bytes, &db_key, content_hash.as_bytes()) {
+        Ok(c) => c,
+        Err(e) => {
+            in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
+            return Err(e);
+        }
+    };
+
+    // Pre-emptive eviction: shrink the cache to (cap - new_file_size)
+    // before writing so we never temporarily peak above the cap.
+    let new_size = encrypted.len() as u64;
     let total = cache_total_bytes();
     if total.saturating_add(new_size) > MEDIA_CACHE_MAX_BYTES {
         enforce_cache_cap_to(dir, MEDIA_CACHE_MAX_BYTES.saturating_sub(new_size));
     }
 
+    // Atomic write: <hash>.<ext>.enc.tmp → rename → <hash>.<ext>.enc.
     let mut tmp = target.clone();
-    tmp.set_extension(format!(
-        "{}.tmp",
-        target.extension().and_then(|s| s.to_str()).unwrap_or("bin")
-    ));
-    if let Err(e) = tokio::fs::write(&tmp, &bytes).await {
+    let final_ext = target
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("enc");
+    tmp.set_extension(format!("{final_ext}.tmp"));
+    if let Err(e) = tokio::fs::write(&tmp, &encrypted).await {
         let _ = tokio::fs::remove_file(&tmp).await;
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Err(Error::Other(anyhow::anyhow!("write cache tmp: {e}")));
@@ -540,12 +631,73 @@ pub async fn get_media_path(
         return Err(Error::Other(anyhow::anyhow!("rename cache tmp: {e}")));
     }
 
-    // Belt-and-braces post-write enforcement in case the pre-emptive
-    // estimate was off (concurrent inserts, mtime races).
     enforce_cache_cap(dir);
 
     in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
-    Ok(target.to_string_lossy().into_owned())
+    Ok(url)
+}
+
+// ── Cache-at-rest crypto ──────────────────────────────────────────────────
+//
+// Files in `media-cache/` are AES-256-GCM-encrypted under a key derived
+// from the active session's `db_key` plus the content hash. Layout:
+//
+//   [12-byte random nonce][AES-256-GCM(plaintext)][16-byte tag]
+//
+// Per-file random nonce — the server reads the whole file and decrypts
+// in one shot before serving (no streaming AEAD). Total file size is
+// bounded by `MEDIA_CACHE_MAX_FILE_BYTES` (100 MiB), well below the
+// AES-GCM 64-GiB-per-key safety bound.
+//
+// Salt domain (`pollis-media-cache-v1`) separates this from the
+// upload-side convergent key derivation so a server compromise that
+// leaks one key class can't be replayed against the other.
+
+const CACHE_HKDF_SALT: &[u8] = b"pollis-media-cache-v1";
+const CACHE_NONCE_LEN: usize = 12;
+
+/// Derive the per-file AES-256-GCM key for cache encryption.
+fn derive_cache_key(db_key: &[u8], info: &[u8]) -> [u8; 32] {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+    let hk = Hkdf::<Sha256>::new(Some(CACHE_HKDF_SALT), db_key);
+    let mut key = [0u8; 32];
+    hk.expand(info, &mut key)
+        .expect("HKDF expand for cache key should never fail");
+    key
+}
+
+/// Encrypt cache bytes. Output layout: `[12-byte nonce][ciphertext+tag]`.
+pub fn cache_encrypt(plaintext: &[u8], db_key: &[u8], info: &[u8]) -> Result<Vec<u8>> {
+    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
+    use rand::RngCore;
+
+    let key = derive_cache_key(db_key, info);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    let mut nonce_bytes = [0u8; CACHE_NONCE_LEN];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let ct = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext)
+        .map_err(|_| Error::Other(anyhow::anyhow!("media cache encrypt failed")))?;
+    let mut out = Vec::with_capacity(CACHE_NONCE_LEN + ct.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ct);
+    Ok(out)
+}
+
+/// Decrypt a cache file produced by `cache_encrypt`.
+pub fn cache_decrypt(file_bytes: &[u8], db_key: &[u8], info: &[u8]) -> Result<Vec<u8>> {
+    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Key, Nonce};
+
+    if file_bytes.len() < CACHE_NONCE_LEN + 16 {
+        return Err(Error::Other(anyhow::anyhow!("media cache file too short")));
+    }
+    let (nonce_bytes, ct) = file_bytes.split_at(CACHE_NONCE_LEN);
+    let key = derive_cache_key(db_key, info);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&key));
+    cipher
+        .decrypt(Nonce::from_slice(nonce_bytes), ct)
+        .map_err(|_| Error::Other(anyhow::anyhow!("media cache decrypt failed")))
 }
 
 // ── Deletion ──────────────────────────────────────────────────────────────

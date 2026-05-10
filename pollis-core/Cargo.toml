@@ -63,6 +63,12 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 blurhash = "0.2"
 futures-util = "0.3"
 bytes = "1"
+# Local-loopback HTTP server for serving cached media to the webview.
+# One URL pattern (`http://127.0.0.1:<port>/<token>/<hash>`) drives every
+# `<img>/<audio>/<video>` element — replaces the bifurcated asset:// (images)
+# / IPC-bytes-to-Blob-URL (audio/video) pair. Keeps decryption in Rust and
+# gives `<video>` real Range support without pumping bytes through JSON IPC.
+axum = "0.7"
 openmls = "0.8"
 openmls_traits = "0.5"
 openmls_rust_crypto = "0.5"

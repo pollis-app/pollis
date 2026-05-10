@@ -699,11 +699,15 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     state.unload_user_db().await;
     *state.unlock.lock().await = None;
 
-    // Wipe the on-disk media cache. The cache holds decrypted plaintext
-    // (image/video/audio bytes) and is not encrypted at rest, so it must
-    // not survive a session end regardless of whether the user opts to
-    // keep their account on this device.
+    // Wipe the on-disk media cache. Files are AES-GCM-encrypted under
+    // the active session's db_key, so they would already be opaque to
+    // any future user — but logout is the natural lifecycle boundary
+    // and an empty cache costs nothing.
     crate::commands::r2::clear_media_cache();
+
+    // Clear the media-server token. Any URL handed to the webview
+    // during this session 403s from here on.
+    *state.media_server_token.lock().await = None;
 
     if delete_data {
         if let Some(ref uid) = user_id {

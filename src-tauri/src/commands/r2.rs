@@ -29,6 +29,6 @@ pub async fn download_media(r2_key: String, content_hash: String, state: State<'
 }
 
 #[tauri::command]
-pub async fn get_media_path(r2_key: String, content_hash: String, content_type: String, state: State<'_, Arc<AppState>>) -> Result<String> {
-    pollis_core::commands::r2::get_media_path(r2_key, content_hash, content_type, &state).await
+pub async fn get_media_url(r2_key: String, content_hash: String, content_type: String, state: State<'_, Arc<AppState>>) -> Result<String> {
+    pollis_core::commands::r2::get_media_url(r2_key, content_hash, content_type, &state).await
 }

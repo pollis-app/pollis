@@ -31,10 +31,7 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$APPDATA/media-cache/**",
-          "$APPDATA/media-cache/*"
-        ]
+        "scope": []
       }
     }
   },

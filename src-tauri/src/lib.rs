@@ -299,7 +299,23 @@ pub fn run() {
 
             tauri::async_runtime::block_on(async move {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;
-                app.manage(Arc::new(state));
+                let state = Arc::new(state);
+
+                // Loopback HTTP server for cached media. The webview
+                // embeds `http://127.0.0.1:<port>/<token>/<hash>` URLs
+                // for every `<img>/<audio>/<video>` element. Spawned
+                // before `manage` so the port is on `AppState` by the
+                // time any frontend code runs.
+                match pollis_core::media_server::spawn(state.clone()).await {
+                    Ok(port) => {
+                        *state.media_server_port.lock().await = Some(port);
+                    }
+                    Err(e) => {
+                        eprintln!("[setup] failed to spawn media server: {e}");
+                    }
+                }
+
+                app.manage(state);
                 Ok::<(), String>(())
             })?;
 
@@ -425,7 +441,7 @@ commands::livekit::get_livekit_token,
             commands::r2::upload_media,
             commands::r2::download_file,
             commands::r2::download_media,
-            commands::r2::get_media_path,
+            commands::r2::get_media_url,
             commands::update::mark_update_required,
             commands::update::is_update_required,
             commands::install_kind::detect_managed_install,
