@@ -9,13 +9,20 @@ export const ChannelPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
   const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
+  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
   const pendingDeleteChannelId = useAppStore((s) => s.pendingDeleteChannelId);
   const setPendingDeleteChannelId = useAppStore((s) => s.setPendingDeleteChannelId);
 
   useEffect(() => {
+    // selectedGroupId drives the LiveKit room id used by the typing
+    // publisher; without it, this client's typing events never go out.
+    // setSelectedGroupId also nulls channelId, so set the group first.
+    if (useAppStore.getState().selectedGroupId !== groupId) {
+      setSelectedGroupId(groupId);
+    }
     setSelectedChannelId(channelId);
     return () => { setSelectedChannelId(null); };
-  }, [channelId, setSelectedChannelId]);
+  }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId]);
 
   useEffect(() => {
     return () => { setPendingDeleteChannelId(null); };
