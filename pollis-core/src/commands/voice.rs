@@ -1330,16 +1330,22 @@ pub async fn join_voice_channel(
     // subscribed tracks once the event loop drains buffered events, and
     // attaching twice creates competing draining tasks.
     let local_avatar_url = lookup_avatar_url(&state, &user_id).await;
-    let existing_remote: Vec<(String, String)> = room
+    let existing_remote: Vec<(String, String, bool)> = room
         .remote_participants()
         .into_iter()
-        .map(|(_id, p)| (p.identity().to_string(), p.name()))
+        .map(|(_id, p)| {
+            // Seed mute state from current publications — TrackMuted only
+            // fires on transitions, so a participant who muted before we
+            // joined would otherwise render as unmuted indefinitely.
+            let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
+            (p.identity().to_string(), p.name(), is_muted)
+        })
         .collect();
-    let mut existing_with_avatars: Vec<(String, String, Option<String>)> =
+    let mut existing_with_avatars: Vec<(String, String, bool, Option<String>)> =
         Vec::with_capacity(existing_remote.len());
-    for (identity, name) in existing_remote {
+    for (identity, name, is_muted) in existing_remote {
         let avatar = lookup_avatar_url_for_identity(&state, &identity).await;
-        existing_with_avatars.push((identity, name, avatar));
+        existing_with_avatars.push((identity, name, is_muted, avatar));
     }
     {
         let voice = state.voice.lock().await;
@@ -1350,12 +1356,12 @@ pub async fn join_voice_channel(
                 is_muted: false,
                 avatar_url: local_avatar_url,
             });
-            for (identity, name, avatar_url) in existing_with_avatars {
-                eprintln!("[voice] existing participant: {}", identity);
+            for (identity, name, is_muted, avatar_url) in existing_with_avatars {
+                eprintln!("[voice] existing participant: {} muted={}", identity, is_muted);
                 let _ = ch.send(VoiceEvent::ParticipantJoined {
                     identity,
                     name,
-                    is_muted: false,
+                    is_muted,
                     avatar_url,
                 });
             }
@@ -1371,6 +1377,7 @@ pub async fn join_voice_channel(
                 RoomEvent::ParticipantConnected(p) => {
                     eprintln!("[voice] participant joined: {}", p.identity());
                     let identity = p.identity().to_string();
+                    let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
                     let avatar_url =
                         lookup_avatar_url_for_identity(&state_for_room, &identity).await;
                     let voice = voice_arc.lock().await;
@@ -1378,7 +1385,7 @@ pub async fn join_voice_channel(
                         let _ = ch.send(VoiceEvent::ParticipantJoined {
                             identity,
                             name: p.name(),
-                            is_muted: false,
+                            is_muted,
                             avatar_url,
                         });
                     }
@@ -1419,6 +1426,21 @@ pub async fn join_voice_channel(
                         drop(pb);
                         drop(voice);
                         buffers_arc.lock().unwrap().remove(&track_key);
+                    }
+                }
+
+                RoomEvent::TrackMuted { participant, publication: _ } => {
+                    let identity = participant.identity().to_string();
+                    let voice = voice_arc.lock().await;
+                    if let Some(ch) = &voice.channel {
+                        let _ = ch.send(VoiceEvent::Muted { identity });
+                    }
+                }
+                RoomEvent::TrackUnmuted { participant, publication: _ } => {
+                    let identity = participant.identity().to_string();
+                    let voice = voice_arc.lock().await;
+                    if let Some(ch) = &voice.channel {
+                        let _ = ch.send(VoiceEvent::Unmuted { identity });
                     }
                 }
 

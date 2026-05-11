@@ -51,7 +51,7 @@ export const ChannelPage: React.FC = () => {
               data-testid="rename-channel-trigger"
               onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
               aria-label="Rename channel"
-              className="icon-btn-sm flex-shrink-0"
+              className="icon-btn-sm flex-shrink-0 padding-0"
             >
               <Pencil size={14} aria-hidden="true" />
             </button>
@@ -59,7 +59,7 @@ export const ChannelPage: React.FC = () => {
               data-testid="delete-channel-trigger"
               onClick={() => setPendingDeleteChannelId(channelId)}
               aria-label="Delete channel"
-              className="icon-btn-sm flex-shrink-0"
+              className="icon-btn-sm flex-shrink-0 padding-0"
             >
               <Trash2 size={14} aria-hidden="true" />
             </button>

@@ -141,8 +141,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={isAuthorAdmin ? {
             background: "var(--c-accent)",
             color: "var(--c-bg)",
-            paddingLeft: "0.5rem",
-            paddingRight: "0.5rem",
+            paddingLeft: "0.25rem",
+            paddingRight: "0.25rem",
+            borderRadius: "0.125rem",
           } : {
             color: isOwn ? "var(--c-accent)" : authorColor,
           }}
@@ -164,7 +165,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={{
             color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
             whiteSpace: "pre-wrap",
-            fontStyle: isDeleted ? "italic" : undefined,
           }}
         >
           <LinkifiedText text={content} />
