@@ -1,7 +1,24 @@
+import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
 import type { Message, DMConversation } from "../../types";
+
+// Per-conversation timestamp of the last background ingest. Used to debounce
+// rapid channel-switching so we don't fire one ingest per click. Realtime
+// hints also write here when they trigger an ingest, so a focus immediately
+// after a realtime-driven ingest skips the redundant call.
+const lastIngestAt = new Map<string, number>();
+const INGEST_DEBOUNCE_MS = 5_000;
+
+export function shouldIngest(conversationId: string): boolean {
+  const last = lastIngestAt.get(conversationId) ?? 0;
+  return performance.now() - last >= INGEST_DEBOUNCE_MS;
+}
+
+export function markIngested(conversationId: string): void {
+  lastIngestAt.set(conversationId, performance.now());
+}
 
 export const messageQueryKeys = {
   all: ["messages"] as const,
@@ -131,20 +148,18 @@ type MessagesQueryResult = {
 
 export function useMessages(channelId: string | null, conversationId: string | null) {
   const currentUser = useAppStore((state) => state.currentUser);
+  const queryClient = useQueryClient();
   const isChannel = !!channelId;
   const queryKey = isChannel
     ? messageQueryKeys.channel(channelId)
     : messageQueryKeys.conversation(conversationId);
+  const targetId = channelId ?? conversationId;
 
   const query = useQuery({
     queryKey,
     queryFn: async (): Promise<MessagesQueryResult> => {
-      if (isChannel && channelId && currentUser) {
-        // get_channel_messages internally calls poll_mls_welcomes_inner +
-        // process_pending_commits_inner via ingest_channel_envelopes_inner,
-        // so no frontend pre-flight is needed.
-        const page = await invoke<MessagePage>('get_channel_messages', {
-          userId: currentUser.id,
+      if (isChannel && channelId) {
+        const page = await invoke<MessagePage>('read_channel_messages', {
           channelId,
           limit: 50,
         });
@@ -154,12 +169,8 @@ export function useMessages(channelId: string | null, conversationId: string | n
         };
       }
 
-      if (conversationId && currentUser) {
-        // get_dm_messages internally calls poll_mls_welcomes_inner +
-        // process_pending_commits_inner via ingest_dm_envelopes_inner,
-        // so no frontend pre-flight is needed.
-        const page = await invoke<MessagePage>('get_dm_messages', {
-          userId: currentUser.id,
+      if (conversationId) {
+        const page = await invoke<MessagePage>('read_dm_messages', {
           dmChannelId: conversationId,
           limit: 50,
         });
@@ -175,6 +186,39 @@ export function useMessages(channelId: string | null, conversationId: string | n
     staleTime: 1000 * 30,
     refetchOnWindowFocus: true,
   });
+
+  // Fire ingest in the background after the local read mounts. Skipped if a
+  // recent ingest (incl. one driven by a realtime hint) already covered this
+  // conversation. Invalidates the query on completion so newly-decrypted
+  // messages and freshly-cached usernames show up.
+  const ingestInflight = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentUser || !targetId) {
+      return;
+    }
+    if (ingestInflight.current === targetId) {
+      return;
+    }
+    if (!shouldIngest(targetId)) {
+      return;
+    }
+    ingestInflight.current = targetId;
+    markIngested(targetId);
+    const command = isChannel ? 'ingest_channel_envelopes' : 'ingest_dm_envelopes';
+    const args = isChannel
+      ? { userId: currentUser.id, channelId: targetId }
+      : { userId: currentUser.id, dmChannelId: targetId };
+    invoke(command, args)
+      .catch((e) => {
+        console.warn(`[useMessages] ${command} failed:`, e);
+      })
+      .finally(() => {
+        if (ingestInflight.current === targetId) {
+          ingestInflight.current = null;
+        }
+        queryClient.invalidateQueries({ queryKey });
+      });
+  }, [targetId, isChannel, currentUser?.id]);
 
   return {
     messages: query.data?.messages ?? [],
@@ -297,18 +341,16 @@ export function useLastMessage(channelId: string | null, conversationId: string 
   return useQuery({
     queryKey,
     queryFn: async (): Promise<Message | null> => {
-      if (isChannel && channelId && currentUser) {
-        const page = await invoke<MessagePage>('get_channel_messages', {
-          userId: currentUser.id,
+      if (isChannel && channelId) {
+        const page = await invoke<MessagePage>('read_channel_messages', {
           channelId,
           limit: 1,
         });
         const msgs = (page.messages || []).map(transformChannelMessage);
         return msgs[msgs.length - 1] ?? null;
       }
-      if (conversationId && currentUser) {
-        const page = await invoke<MessagePage>('get_dm_messages', {
-          userId: currentUser.id,
+      if (conversationId) {
+        const page = await invoke<MessagePage>('read_dm_messages', {
           dmChannelId: conversationId,
           limit: 1,
         });

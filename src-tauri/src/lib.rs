@@ -408,6 +408,8 @@ pub fn run() {
             commands::messages::send_message,
             commands::messages::get_channel_messages,
             commands::messages::get_dm_messages,
+            commands::messages::read_channel_messages,
+            commands::messages::read_dm_messages,
             commands::messages::ingest_channel_envelopes,
             commands::messages::ingest_dm_envelopes,
             commands::messages::list_messages_by_sender,

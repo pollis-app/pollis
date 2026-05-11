@@ -708,6 +708,142 @@ async fn attach_sender_usernames(
     Ok(())
 }
 
+/// Attach sender usernames from the local `user_cache` table; for any
+/// sender_ids missing from the cache, do one batched remote fetch and
+/// write the results back. After the first read of a channel/DM, the
+/// cache is warm and subsequent reads are zero-remote.
+async fn attach_sender_usernames_local(
+    state: &Arc<AppState>,
+    messages: &mut [ChannelMessage],
+) -> Result<()> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+
+    let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in messages.iter() {
+        ids.insert(m.sender_id.clone());
+    }
+    let ids_vec: Vec<String> = ids.into_iter().collect();
+
+    let mut found: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let missing: Vec<String> = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let placeholders = (1..=ids_vec.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT id, username FROM user_cache WHERE id IN ({placeholders})");
+        let mut stmt = db.conn().prepare(&sql)?;
+        let mapped = stmt.query_map(rusqlite::params_from_iter(ids_vec.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for r in mapped {
+            if let Ok((id, name)) = r {
+                found.insert(id, name);
+            }
+        }
+        ids_vec.iter().filter(|i| !found.contains_key(*i)).cloned().collect()
+    };
+
+    if !missing.is_empty() {
+        let placeholders = (1..=missing.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT id, username FROM users WHERE id IN ({placeholders})");
+        let params: Vec<libsql::Value> = missing
+            .iter()
+            .map(|s| libsql::Value::Text(s.clone()))
+            .collect();
+        let conn = state.remote_db.conn().await?;
+        match conn.query(&sql, libsql::params_from_iter(params)).await {
+            Ok(mut rows) => {
+                let mut fetched: Vec<(String, String)> = Vec::new();
+                while let Some(row) = rows.next().await? {
+                    let id: String = row.get(0)?;
+                    let name: String = row.get(1)?;
+                    fetched.push((id.clone(), name.clone()));
+                    found.insert(id, name);
+                }
+                drop(rows);
+                if !fetched.is_empty() {
+                    let guard = state.local_db.lock().await;
+                    if let Some(db) = guard.as_ref() {
+                        for (id, name) in &fetched {
+                            let _ = db.conn().execute(
+                                "INSERT INTO user_cache (id, username, updated_at) VALUES (?1, ?2, datetime('now'))
+                                 ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
+                                rusqlite::params![id, name],
+                            );
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                // Offline or transient — leave the missing names as None.
+                // Next ingest / read while online will fill them in.
+                eprintln!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
+            }
+        }
+    }
+
+    for m in messages.iter_mut() {
+        m.sender_username = found.get(&m.sender_id).cloned();
+    }
+    Ok(())
+}
+
+/// Local-only read of a channel page. Does NOT trigger ingest — callers
+/// fire `ingest_channel_envelopes` separately, off the critical render
+/// path. Usernames come from the local `user_cache` (with a one-shot
+/// remote fallback for cache misses, see `attach_sender_usernames_local`).
+pub async fn read_channel_messages(
+    channel_id: String,
+    limit: Option<i64>,
+    cursor: Option<MessageCursor>,
+    state: &Arc<AppState>,
+) -> Result<MessagePage> {
+    let limit = limit.unwrap_or(50);
+    let mut messages = read_local_channel_page(state, &channel_id, &cursor, limit).await?;
+    attach_sender_usernames_local(state, &mut messages).await?;
+
+    let next_cursor = if messages.len() == limit as usize {
+        messages.last().map(|m| MessageCursor {
+            sent_at: m.sent_at.clone(),
+            id: m.id.clone(),
+        })
+    } else {
+        None
+    };
+
+    Ok(MessagePage { messages, next_cursor })
+}
+
+/// Local-only read of a DM page. Mirrors `read_channel_messages`.
+pub async fn read_dm_messages(
+    dm_channel_id: String,
+    limit: Option<i64>,
+    cursor: Option<MessageCursor>,
+    state: &Arc<AppState>,
+) -> Result<MessagePage> {
+    let limit = limit.unwrap_or(50);
+    let mut messages = read_local_channel_page(state, &dm_channel_id, &cursor, limit).await?;
+    attach_sender_usernames_local(state, &mut messages).await?;
+
+    let next_cursor = if messages.len() == limit as usize {
+        messages.last().map(|m| MessageCursor {
+            sent_at: m.sent_at.clone(),
+            id: m.id.clone(),
+        })
+    } else {
+        None
+    };
+
+    Ok(MessagePage { messages, next_cursor })
+}
+
 /// Frontend-triggerable ingest for a channel. Used by LiveKit real-time hints
 /// and channel-focus pre-warm paths that want to persist new envelopes without
 /// reading a page.
