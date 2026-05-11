@@ -1,0 +1,162 @@
+// Screen-share session glue. Subscribes to backend event + frame Channels
+// once per process, mirrors lifecycle into the Zustand store, and exposes a
+// pub/sub dispatcher for raw I420 frame buffers keyed by trackKey.
+
+import { Channel, invoke } from "@tauri-apps/api/core";
+
+import { useAppStore } from "../stores/appStore";
+
+/** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`. */
+export type ScreenShareEvent =
+  | { type: "local_started"; width: number; height: number }
+  | { type: "local_stopped" }
+  | {
+      type: "remote_started";
+      track_key: string;
+      identity: string;
+      width: number;
+      height: number;
+    }
+  | { type: "remote_stopped"; track_key: string };
+
+export interface DecodedFrame {
+  trackKey: string;
+  width: number;
+  height: number;
+  yStride: number;
+  uStride: number;
+  vStride: number;
+  timestampUs: bigint;
+  /** Slices into the original ArrayBuffer — do NOT keep references past the
+   *  callback, the buffer may be reused. */
+  y: Uint8Array;
+  u: Uint8Array;
+  v: Uint8Array;
+}
+
+type FrameListener = (frame: DecodedFrame) => void;
+
+class ScreenShareSession {
+  private subscribed = false;
+  private listeners = new Map<string, Set<FrameListener>>();
+
+  /** Idempotent. Call once after auth so the backend Channels are wired. */
+  async ensureSubscribed(): Promise<void> {
+    if (this.subscribed) {
+      return;
+    }
+    this.subscribed = true;
+
+    const events = new Channel<ScreenShareEvent>();
+    events.onmessage = (ev) => this.handleEvent(ev);
+    await invoke("subscribe_screen_share_events", { onEvent: events });
+
+    // Frames Channel arrives as ArrayBuffer when the backend sends
+    // InvokeResponseBody::Raw. The TS type isn't ideal — `Channel<ArrayBuffer>`
+    // works at runtime but the type binding still says T = void.
+    const frames = new Channel<ArrayBuffer>();
+    frames.onmessage = (buf) => this.handleFrame(buf);
+    await invoke("subscribe_screen_share_frames", { onFrame: frames });
+  }
+
+  /** Subscribe a tile to its track's frame stream. Returns an unsubscribe fn. */
+  onFrame(trackKey: string, fn: FrameListener): () => void {
+    let set = this.listeners.get(trackKey);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(trackKey, set);
+    }
+    set.add(fn);
+    return () => {
+      set?.delete(fn);
+      if (set && set.size === 0) {
+        this.listeners.delete(trackKey);
+      }
+    };
+  }
+
+  async start(): Promise<void> {
+    await invoke("start_screen_share");
+  }
+
+  async stop(): Promise<void> {
+    await invoke("stop_screen_share");
+  }
+
+  private handleEvent(ev: ScreenShareEvent) {
+    const store = useAppStore.getState();
+    switch (ev.type) {
+      case "local_started":
+        store.setScreenShareLocalActive(true);
+        break;
+      case "local_stopped":
+        store.setScreenShareLocalActive(false);
+        break;
+      case "remote_started":
+        store.upsertScreenShareRemote(ev.identity, {
+          trackKey: ev.track_key,
+          width: ev.width,
+          height: ev.height,
+        });
+        break;
+      case "remote_stopped":
+        store.removeScreenShareRemote(ev.track_key);
+        break;
+    }
+  }
+
+  // Wire format (matches pack_frame_bytes in screenshare.rs):
+  //   u32 LE track_key_len
+  //   utf-8 bytes
+  //   u32 LE width, height
+  //   u32 LE y_stride, u_stride, v_stride
+  //   i64 LE timestamp_us
+  //   y plane, u plane, v plane
+  private handleFrame(buf: ArrayBuffer) {
+    if (!(buf instanceof ArrayBuffer) || buf.byteLength < 32) {
+      return;
+    }
+    const dv = new DataView(buf);
+    let off = 0;
+    const keyLen = dv.getUint32(off, true);
+    off += 4;
+    if (off + keyLen > buf.byteLength) {
+      return;
+    }
+    const trackKey = new TextDecoder().decode(new Uint8Array(buf, off, keyLen));
+    off += keyLen;
+    const width = dv.getUint32(off, true); off += 4;
+    const height = dv.getUint32(off, true); off += 4;
+    const yStride = dv.getUint32(off, true); off += 4;
+    const uStride = dv.getUint32(off, true); off += 4;
+    const vStride = dv.getUint32(off, true); off += 4;
+    const timestampUs = dv.getBigInt64(off, true); off += 8;
+    const yLen = yStride * height;
+    const chromaH = (height + 1) >> 1;
+    const uLen = uStride * chromaH;
+    const vLen = vStride * chromaH;
+    if (off + yLen + uLen + vLen > buf.byteLength) {
+      return;
+    }
+    const y = new Uint8Array(buf, off, yLen); off += yLen;
+    const u = new Uint8Array(buf, off, uLen); off += uLen;
+    const v = new Uint8Array(buf, off, vLen);
+
+    const listeners = this.listeners.get(trackKey);
+    if (!listeners || listeners.size === 0) {
+      return;
+    }
+    const frame: DecodedFrame = {
+      trackKey, width, height, yStride, uStride, vStride, timestampUs, y, u, v,
+    };
+    for (const fn of listeners) {
+      try {
+        fn(frame);
+      } catch (e) {
+        console.error("[screenshare] frame listener", e);
+      }
+    }
+  }
+}
+
+export const screenShareSession = new ScreenShareSession();

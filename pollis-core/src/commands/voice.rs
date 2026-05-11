@@ -550,7 +550,9 @@ async fn run_drain_task(
 
     eprintln!("[voice] remote drain task started for {track_key}");
     while let Some(frame) = audio_stream.next().await {
-        let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
+        // unsigned_abs: i16::MIN.abs() overflows; we only care about
+        // magnitude so map straight to u16.
+        let peak = frame.data.iter().map(|&s| s.unsigned_abs()).max().unwrap_or(0);
 
         if peak > 1000 {
             onset_frames += 1;
@@ -1268,7 +1270,7 @@ pub async fn join_voice_channel(
                     }
                 }
 
-                let peak = chunk.iter().map(|&s| s.abs()).max().unwrap_or(0);
+                let peak = chunk.iter().map(|&s| s.unsigned_abs()).max().unwrap_or(0);
 
                 // Speaking detection: require 2 consecutive above-threshold frames to trigger,
                 // preventing single trailing spikes from resetting the hold counter.
@@ -1393,41 +1395,66 @@ pub async fn join_voice_channel(
                     }
                 }
                 RoomEvent::TrackSubscribed { track, publication: _, participant } => {
-                    if let RemoteTrack::Audio(audio_track) = track {
-                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
-                        eprintln!("[voice] track subscribed: {track_key}");
-                        register_remote_track(
-                            audio_track.rtc_track(),
-                            track_key,
-                            Arc::clone(&voice_arc),
-                            participant.identity().to_string(),
-                            apm_rate_for_room,
-                        )
-                        .await;
+                    match track {
+                        RemoteTrack::Audio(audio_track) => {
+                            let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                            eprintln!("[voice] track subscribed: {track_key}");
+                            register_remote_track(
+                                audio_track.rtc_track(),
+                                track_key,
+                                Arc::clone(&voice_arc),
+                                participant.identity().to_string(),
+                                apm_rate_for_room,
+                            )
+                            .await;
+                        }
+                        RemoteTrack::Video(video_track) => {
+                            let track_key = format!("{}-{}", participant.identity(), video_track.sid());
+                            eprintln!("[voice] video track subscribed: {track_key}");
+                            crate::commands::screenshare::on_remote_video_subscribed(
+                                video_track,
+                                participant.identity().to_string(),
+                                &state_for_room,
+                            )
+                            .await;
+                        }
                     }
                 }
                 RoomEvent::TrackUnsubscribed { track, publication: _, participant } => {
-                    if let RemoteTrack::Audio(audio_track) = track {
-                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
-                        eprintln!("[voice] track unsubscribed: {track_key}");
-                        let voice = voice_arc.lock().await;
-                        let mut pb = voice.playback.lock().unwrap();
-                        if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
-                        pb.rtc_tracks.remove(&track_key);
-                        pb.identities.remove(&track_key);
-                        let buffers_arc = Arc::clone(&pb.track_buffers);
-                        drop(pb);
-                        drop(voice);
-                        buffers_arc.lock().unwrap().remove(&track_key);
+                    match track {
+                        RemoteTrack::Audio(audio_track) => {
+                            let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                            eprintln!("[voice] track unsubscribed: {track_key}");
+                            let voice = voice_arc.lock().await;
+                            let mut pb = voice.playback.lock().unwrap();
+                            if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
+                            pb.rtc_tracks.remove(&track_key);
+                            pb.identities.remove(&track_key);
+                            let buffers_arc = Arc::clone(&pb.track_buffers);
+                            drop(pb);
+                            drop(voice);
+                            buffers_arc.lock().unwrap().remove(&track_key);
+                        }
+                        RemoteTrack::Video(video_track) => {
+                            crate::commands::screenshare::on_remote_video_unsubscribed(
+                                video_track,
+                                participant.identity().to_string(),
+                                &state_for_room,
+                            )
+                            .await;
+                        }
                     }
                 }
 
                 RoomEvent::Disconnected { reason } => {
                     eprintln!("[voice] disconnected: {reason:?}");
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::Disconnected);
+                    {
+                        let voice = voice_arc.lock().await;
+                        if let Some(ch) = &voice.channel {
+                            let _ = ch.send(VoiceEvent::Disconnected);
+                        }
                     }
+                    crate::commands::screenshare::on_room_disconnected(&state_for_room).await;
                     break;
                 }
                 RoomEvent::ConnectionStateChanged(conn_state) => {

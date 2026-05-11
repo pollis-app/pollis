@@ -56,6 +56,16 @@ interface AppStore extends AppState {
   setVoiceParticipants: (participants: VoiceParticipant[]) => void;
   setVoiceActiveSpeakerIds: (ids: string[]) => void;
   setVoiceIsMuted: (muted: boolean) => void;
+  /** True if the local user is broadcasting their screen. */
+  screenShareLocalActive: boolean;
+  setScreenShareLocalActive: (v: boolean) => void;
+  /** Active remote screenshares keyed by participant identity. */
+  screenShareRemotes: Record<string, { trackKey: string; width: number; height: number }>;
+  upsertScreenShareRemote: (identity: string, info: { trackKey: string; width: number; height: number }) => void;
+  removeScreenShareRemote: (trackKey: string) => void;
+  /** Track key currently being viewed in the inline stream pane, if any. */
+  viewingScreenShareTrackKey: string | null;
+  setViewingScreenShareTrackKey: (k: string | null) => void;
   // Pending enrollment approval prompt — set by `useLiveKitRealtime`
   // when an `EnrollmentRequested` event arrives from the user's inbox
   // room. Causes the UI to immediately take over with the approval
@@ -120,6 +130,9 @@ export const useAppStore = create<AppStore>((set) => ({
   voiceParticipants: [],
   voiceActiveSpeakerIds: [],
   voiceIsMuted: false,
+  screenShareLocalActive: false,
+  screenShareRemotes: {},
+  viewingScreenShareTrackKey: null,
 
   // Actions
   setCurrentUser: (user) => set({ currentUser: user }),
@@ -200,6 +213,25 @@ export const useAppStore = create<AppStore>((set) => ({
   setVoiceActiveSpeakerIds: (ids) => set({ voiceActiveSpeakerIds: ids }),
   setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
 
+  setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
+  upsertScreenShareRemote: (identity, info) => set((state) => ({
+    screenShareRemotes: { ...state.screenShareRemotes, [identity]: info },
+  })),
+  removeScreenShareRemote: (trackKey) => set((state) => {
+    const next: typeof state.screenShareRemotes = {};
+    let viewing = state.viewingScreenShareTrackKey;
+    for (const [id, info] of Object.entries(state.screenShareRemotes)) {
+      if (info.trackKey !== trackKey) {
+        next[id] = info;
+      }
+    }
+    if (viewing === trackKey) {
+      viewing = null;
+    }
+    return { screenShareRemotes: next, viewingScreenShareTrackKey: viewing };
+  }),
+  setViewingScreenShareTrackKey: (k) => set({ viewingScreenShareTrackKey: k }),
+
   pendingEnrollmentApproval: null,
   setPendingEnrollmentApproval: (p) => set({ pendingEnrollmentApproval: p }),
 
@@ -236,6 +268,9 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceParticipants: [],
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
+    screenShareLocalActive: false,
+    screenShareRemotes: {},
+    viewingScreenShareTrackKey: null,
     pendingEnrollmentApproval: null,
     pendingDeleteChannelId: null,
     incomingCall: null,

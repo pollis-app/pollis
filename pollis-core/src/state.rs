@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore::{self, Keystore};
 use crate::commands::pin::UnlockState;
+use crate::commands::screenshare::ScreenShareState;
 use crate::commands::voice::VoiceState;
 use crate::commands::voice_test::VoiceTestState;
 use crate::realtime::LiveKitState;
@@ -31,6 +32,7 @@ pub struct AppState {
     pub livekit: Arc<Mutex<LiveKitState>>,
     pub voice: Arc<Mutex<VoiceState>>,
     pub voice_test: Arc<Mutex<VoiceTestState>>,
+    pub screenshare: Arc<Mutex<ScreenShareState>>,
     pub update_required: Arc<AtomicBool>,
     /// Per-device ULID, set during login. Each physical device gets a stable ID
     /// stored in the OS keystore so it survives local DB wipes.
@@ -88,6 +90,7 @@ impl AppState {
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
             voice: Arc::new(Mutex::new(VoiceState::new())),
             voice_test: Arc::new(Mutex::new(VoiceTestState::new())),
+            screenshare: Arc::new(Mutex::new(ScreenShareState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),

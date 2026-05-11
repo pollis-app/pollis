@@ -8,6 +8,8 @@ import { BreadcrumbNav } from "./BreadcrumbNav";
 import { Sidebar } from "./Sidebar";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
+import { ScreenShareViewer } from "../Voice/ScreenShareViewer";
+import { screenShareSession } from "../../screenshare/screenShareSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
 import { useAppStore } from "../../stores/appStore";
@@ -134,6 +136,17 @@ export const AppShell: React.FC = () => {
     }
     invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
       console.warn('[mls] poll_mls_welcomes failed:', err);
+    });
+  }, [currentUser?.id]);
+
+  // Once authenticated, hook up the screen-share event + frame Channels.
+  // Idempotent — only the first call actually invokes the backend.
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    screenShareSession.ensureSubscribed().catch((err) => {
+      console.warn('[screenshare] ensureSubscribed failed:', err);
     });
   }, [currentUser?.id]);
 
@@ -355,6 +368,10 @@ export const AppShell: React.FC = () => {
           <Outlet />
         </div>
       </div>
+
+      {/* Inline screenshare viewer — covers the route view but stays
+          inside the chrome. */}
+      <ScreenShareViewer />
 
       {/* VoiceBar — shown above bottom bar while user is in a voice channel */}
       {activeVoiceChannelId !== null && (

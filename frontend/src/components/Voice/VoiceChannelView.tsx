@@ -1,5 +1,5 @@
 import React from "react";
-import { Circle, VolumeX } from "lucide-react";
+import { Circle, Monitor, VolumeX } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { NavigableList } from "../ui/NavigableList";
 import type { VoiceParticipant, VoiceConnectionQuality } from "../../types";
@@ -26,7 +26,15 @@ function qualityIndicator(quality: VoiceConnectionQuality | undefined): {
 }
 
 export const VoiceChannelView: React.FC = () => {
-  const { voiceParticipants, voiceActiveSpeakerIds } = useAppStore();
+  const {
+    voiceParticipants,
+    voiceActiveSpeakerIds,
+    screenShareRemotes,
+    screenShareLocalActive,
+    currentUser,
+    setViewingScreenShareTrackKey,
+  } = useAppStore();
+  const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
 
   return (
     <div
@@ -107,6 +115,36 @@ export const VoiceChannelView: React.FC = () => {
               >
                 {p.name}
               </span>
+              {(() => {
+                const isLocalShare = p.identity === localIdentity && screenShareLocalActive;
+                const remoteShare = screenShareRemotes[p.identity];
+                if (!isLocalShare && !remoteShare) {
+                  return null;
+                }
+                const trackKey = remoteShare?.trackKey;
+                return (
+                  <button
+                    data-testid={`voice-screenshare-${p.identity}`}
+                    title={isLocalShare ? "You are sharing your screen" : "View screen share"}
+                    onClick={() => {
+                      if (trackKey) {
+                        setViewingScreenShareTrackKey(trackKey);
+                      }
+                    }}
+                    disabled={!trackKey}
+                    className="flex-shrink-0 flex items-center"
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      cursor: trackKey ? "pointer" : "default",
+                      color: "var(--c-accent)",
+                    }}
+                  >
+                    <Monitor size={12} />
+                  </button>
+                );
+              })()}
               {(() => {
                 const ind = qualityIndicator(p.connectionQuality);
                 if (!ind) {

@@ -11,6 +11,7 @@ pub mod messages;
 pub mod mls;
 pub mod pin;
 pub mod r2;
+pub mod screenshare;
 pub mod sfx;
 pub mod update;
 pub mod user;

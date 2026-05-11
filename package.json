@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 pnpm tauri dev",
+    "dev": "cargo build -p pollis-capture-linux && WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 pnpm tauri dev",
     "dev:frontend": "pnpm --filter frontend dev",
     "build": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build'",
     "build:linux": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-unknown-linux-gnu'",
