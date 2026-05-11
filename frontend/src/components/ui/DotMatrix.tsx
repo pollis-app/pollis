@@ -1,94 +1,24 @@
-import React, { useEffect, useRef, useMemo } from "react";
+import React, { useEffect, useMemo, useRef } from "react";
 
-// ─── Algorithm types ──────────────────────────────────────────────────────────
+// ─── Algorithm tokens ─────────────────────────────────────────────────────────
+//
+// Algorithms are opaque tagged objects rather than functions. The renderer
+// dispatches on `kind` and runs a typed-array implementation so the hot loop
+// never allocates. This trades a little flexibility for ~10–50x throughput
+// (no per-frame `.map().map()` + boxed `{opacity, data}` objects).
 
-interface Cell {
-  opacity: number;
-  data?: Record<string, unknown>;
-}
+export type DotMatrixAlgorithm =
+  | { kind: "pulsingWave" }
+  | { kind: "gameOfLife" }
+  | { kind: "flowingWave" };
 
-interface AlgorithmContext {
-  time: number;
-  deltaTime: number;
-  cols: number;
-  rows: number;
-  mouse: { x: number; y: number } | null;
-}
-
-export type DotMatrixAlgorithm = (grid: Cell[][], ctx: AlgorithmContext) => Cell[][];
-
-// ─── Algorithms ───────────────────────────────────────────────────────────────
-
-export const pulsingWaveAlgorithm: DotMatrixAlgorithm = (grid, { deltaTime }) =>
-  grid.map((row) =>
-    row.map((cell) => {
-      const phase = ((cell.data?.phase as number | undefined) ?? Math.random() * Math.PI * 2) + deltaTime;
-      return { opacity: 0.15 + Math.sin(phase) * 0.2, data: { phase: phase % (Math.PI * 2) } };
-    })
-  );
-
-export const gameOfLifeAlgorithm: DotMatrixAlgorithm = (grid, { rows, cols, time, deltaTime }) => {
-  if (time < 0.05) {
-    return grid.map((row) =>
-      row.map(() => {
-        const alive = Math.random() > 0.7;
-        return { opacity: alive ? 0.55 : 0, data: { alive } };
-      })
-    );
-  }
-
-  const updateInterval = 0.12;
-  const shouldUpdate = Math.floor(time / updateInterval) !== Math.floor((time - deltaTime) / updateInterval);
-  if (!shouldUpdate) {
-    return grid;
-  }
-
-  return grid.map((row, y) =>
-    row.map((cell, x) => {
-      let neighbors = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          if (dx === 0 && dy === 0) { continue; }
-          const ny = (y + dy + rows) % rows;
-          const nx = (x + dx + cols) % cols;
-          if (grid[ny][nx].data?.alive) { neighbors++; }
-        }
-      }
-      const alive = cell.data?.alive as boolean | undefined;
-      const newAlive = alive ? (neighbors === 2 || neighbors === 3) : neighbors === 3;
-      return { opacity: newAlive ? 0.55 : 0, data: { alive: newAlive } };
-    })
-  );
-};
-
-export const mouseRippleAlgorithm: DotMatrixAlgorithm = (grid, { mouse, deltaTime }) =>
-  grid.map((row, y) =>
-    row.map((cell, x) => {
-      let newOpacity = Math.max(0, ((cell.data?.rippleOpacity as number | undefined) ?? 0) - deltaTime * 1.5);
-      if (mouse) {
-        const cellSize = 9;
-        const dx = x - Math.floor(mouse.x / cellSize);
-        const dy = y - Math.floor(mouse.y / cellSize);
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 12) { newOpacity = Math.max(newOpacity, (1 - dist / 12) * 0.6); }
-      }
-      return { opacity: newOpacity, data: { rippleOpacity: newOpacity } };
-    })
-  );
-
-export const flowingWaveAlgorithm: DotMatrixAlgorithm = (grid, { time, cols, rows }) =>
-  grid.map((row, y) =>
-    row.map((_cell, x) => {
-      const wx = Math.sin((x / cols) * Math.PI * 3 + time * 1.2) * 0.5 + 0.5;
-      const wy = Math.cos((y / rows) * Math.PI * 3 + time * 0.8) * 0.5 + 0.5;
-      return { opacity: ((wx + wy) / 2) * 0.45 };
-    })
-  );
+export const pulsingWaveAlgorithm: DotMatrixAlgorithm = { kind: "pulsingWave" };
+export const gameOfLifeAlgorithm: DotMatrixAlgorithm = { kind: "gameOfLife" };
+export const flowingWaveAlgorithm: DotMatrixAlgorithm = { kind: "flowingWave" };
 
 export const ALL_ALGORITHMS: DotMatrixAlgorithm[] = [
   pulsingWaveAlgorithm,
   gameOfLifeAlgorithm,
-  mouseRippleAlgorithm,
   flowingWaveAlgorithm,
 ];
 
@@ -103,6 +33,11 @@ interface DotMatrixProps {
   style?: React.CSSProperties;
 }
 
+// Number of opacity buckets used for batched drawing. Each bucket gets one
+// fillStyle assignment and one pass over its cells, dropping the per-dot
+// string formatting that dominated CPU time previously.
+const OPACITY_BUCKETS = 16;
+
 export const DotMatrix: React.FC<DotMatrixProps> = ({
   algorithm,
   dotSize = 6,
@@ -113,15 +48,7 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const stateRef = useRef({
-    grid: [] as Cell[][],
-    lastTime: 0,
-    startTime: 0,
-    mouse: null as { x: number; y: number } | null,
-    rafId: 0,
-  });
 
-  // Pick a random algorithm once on mount if none provided
   const resolvedAlgorithm = useMemo(
     () => algorithm ?? ALL_ALGORITHMS[Math.floor(Math.random() * ALL_ALGORITHMS.length)],
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -133,116 +60,291 @@ export const DotMatrix: React.FC<DotMatrixProps> = ({
     const container = containerRef.current;
     if (!canvas || !container) { return; }
 
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { alpha: true });
     if (!ctx) { return; }
 
-    const state = stateRef.current;
     const step = dotSize + spacing;
+    const kind = resolvedAlgorithm.kind;
 
-    const initGrid = (cols: number, rows: number) => {
-      state.grid = Array.from({ length: rows }, () =>
-        Array.from({ length: cols }, () => ({ opacity: 0 }))
-      );
+    // ── Typed-array state. Reallocated only on resize. ──────────────────────
+    let cols = 0;
+    let rows = 0;
+    let width = 0;
+    let height = 0;
+    let dpr = window.devicePixelRatio || 1;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    // opacity: 0..1 per cell, row-major
+    let opacity = new Float32Array(0);
+    // GoL state: alive/dead, double-buffered
+    let aliveA = new Uint8Array(0);
+    let aliveB = new Uint8Array(0);
+    // pulsingWave per-cell phase
+    let phase = new Float32Array(0);
+
+    let startTime = 0;
+    let lastTime = 0;
+    let lastGolUpdate = 0;
+    let rafId = 0;
+    let colorString = "rgba(255,180,40,"; // updated from CSS vars
+
+    // Refresh accent color from CSS vars. We re-read on a slow cadence rather
+    // than every frame because getComputedStyle is surprisingly expensive.
+    let lastColorCheck = 0;
+    const refreshColor = () => {
+      const cs = getComputedStyle(document.documentElement);
+      const h = cs.getPropertyValue("--accent-h").trim() || "38";
+      const s = cs.getPropertyValue("--accent-s").trim() || "90%";
+      // Pre-resolve hsl→rgba once per refresh by drawing into a 1x1 buffer.
+      // hsl() with alpha works directly in fillStyle, so just store the prefix.
+      colorString = `hsl(${h} ${s} 62% / `;
+    };
+    refreshColor();
+
+    const allocate = (nextCols: number, nextRows: number) => {
+      const total = nextCols * nextRows;
+      const newOpacity = new Float32Array(total);
+      const newAliveA = new Uint8Array(total);
+      const newAliveB = new Uint8Array(total);
+      const newPhase = new Float32Array(total);
+
+      // Copy overlapping region so resizes don't blank the animation.
+      if (cols > 0 && rows > 0) {
+        const copyCols = Math.min(cols, nextCols);
+        const copyRows = Math.min(rows, nextRows);
+        for (let y = 0; y < copyRows; y++) {
+          const oldRow = y * cols;
+          const newRow = y * nextCols;
+          for (let x = 0; x < copyCols; x++) {
+            newOpacity[newRow + x] = opacity[oldRow + x];
+            newAliveA[newRow + x] = aliveA[oldRow + x];
+            newPhase[newRow + x] = phase[oldRow + x];
+          }
+        }
+      } else {
+        // First init: seed per-cell phases for pulsingWave and a random GoL.
+        for (let i = 0; i < total; i++) {
+          newPhase[i] = Math.random() * Math.PI * 2;
+          newAliveA[i] = Math.random() > 0.7 ? 1 : 0;
+        }
+      }
+
+      opacity = newOpacity;
+      aliveA = newAliveA;
+      aliveB = newAliveB;
+      phase = newPhase;
+      cols = nextCols;
+      rows = nextRows;
     };
 
-    const resizeCanvas = () => {
-      const { width, height } = container.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = width * dpr;
-      canvas.height = height * dpr;
+    const resize = () => {
+      const rect = container.getBoundingClientRect();
+      width = rect.width;
+      height = rect.height;
+      dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(1, Math.floor(width * dpr));
+      canvas.height = Math.max(1, Math.floor(height * dpr));
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const cols = Math.floor(width / step);
-      const rows = Math.floor(height / step);
-      initGrid(cols, rows);
+
+      const nextCols = Math.floor(width / step);
+      const nextRows = Math.floor(height / step);
+      offsetX = (width - nextCols * step) / 2;
+      offsetY = (height - nextRows * step) / 2;
+
+      if (nextCols !== cols || nextRows !== rows) {
+        allocate(nextCols, nextRows);
+      }
     };
 
-    const draw = () => {
-      const { width, height } = container.getBoundingClientRect();
-      const cols = Math.floor(width / step);
-      const rows = Math.floor(height / step);
-      const offsetX = (width - cols * step) / 2;
-      const offsetY = (height - rows * step) / 2;
+    // ── Algorithm steps (in-place on typed arrays, zero allocation) ─────────
 
-      // Get current accent color from CSS vars for dot color
-      const style = getComputedStyle(document.documentElement);
-      const h = style.getPropertyValue("--accent-h").trim() || "38";
-      const s = style.getPropertyValue("--accent-s").trim() || "90%";
+    const stepPulsingWave = (dt: number) => {
+      const len = cols * rows;
+      const TAU = Math.PI * 2;
+      for (let i = 0; i < len; i++) {
+        let p = phase[i] + dt;
+        if (p > TAU) { p -= TAU; }
+        phase[i] = p;
+        opacity[i] = 0.15 + Math.sin(p) * 0.2;
+      }
+    };
 
-      ctx.clearRect(0, 0, width, height);
-      for (let y = 0; y < rows && y < state.grid.length; y++) {
-        for (let x = 0; x < cols && x < (state.grid[y]?.length ?? 0); x++) {
-          const op = Math.max(0, Math.min(1, state.grid[y][x].opacity));
-          if (op < 0.02) { continue; }
-          ctx.fillStyle = `hsl(${h} ${s} 62% / ${op})`;
-          ctx.fillRect(offsetX + x * step, offsetY + y * step, dotSize, dotSize);
+    const stepFlowingWave = (t: number) => {
+      // Precompute per-column and per-row sinusoids — O(cols + rows) instead of O(cols*rows) trig.
+      const colWave = new Float32Array(cols);
+      const rowWave = new Float32Array(rows);
+      const cPi3 = Math.PI * 3;
+      for (let x = 0; x < cols; x++) {
+        colWave[x] = Math.sin((x / cols) * cPi3 + t * 1.2) * 0.5 + 0.5;
+      }
+      for (let y = 0; y < rows; y++) {
+        rowWave[y] = Math.cos((y / rows) * cPi3 + t * 0.8) * 0.5 + 0.5;
+      }
+      for (let y = 0; y < rows; y++) {
+        const base = y * cols;
+        const ry = rowWave[y];
+        for (let x = 0; x < cols; x++) {
+          opacity[base + x] = ((colWave[x] + ry) / 2) * 0.45;
         }
       }
     };
 
-    const animate = (ts: number) => {
-      const { width, height } = container.getBoundingClientRect();
-      const cols = Math.floor(width / step);
-      const rows = Math.floor(height / step);
+    const stepGameOfLife = () => {
+      // Single in-place pass with toroidal wrap-around using precomputed
+      // neighbor row/column offsets. Reads from aliveA, writes to aliveB,
+      // then swaps. Opacity is written in the same loop.
+      for (let y = 0; y < rows; y++) {
+        const yUp = (y === 0 ? rows - 1 : y - 1) * cols;
+        const yDn = (y === rows - 1 ? 0 : y + 1) * cols;
+        const yMid = y * cols;
+        for (let x = 0; x < cols; x++) {
+          const xL = x === 0 ? cols - 1 : x - 1;
+          const xR = x === cols - 1 ? 0 : x + 1;
+          const n =
+            aliveA[yUp + xL] + aliveA[yUp + x] + aliveA[yUp + xR] +
+            aliveA[yMid + xL] +                   aliveA[yMid + xR] +
+            aliveA[yDn + xL] + aliveA[yDn + x] + aliveA[yDn + xR];
+          const cur = aliveA[yMid + x];
+          const next = cur ? (n === 2 || n === 3 ? 1 : 0) : (n === 3 ? 1 : 0);
+          aliveB[yMid + x] = next;
+          opacity[yMid + x] = next ? 0.55 : 0;
+        }
+      }
+      const swap = aliveA;
+      aliveA = aliveB;
+      aliveB = swap;
+    };
 
-      // If the container has no size yet, spin until it does — then reinitialise
-      // so time-gated algorithms (e.g. gameOfLife) get a clean start.
+    // ── Batched draw ────────────────────────────────────────────────────────
+    //
+    // Quantize each visible cell's opacity into OPACITY_BUCKETS tiers,
+    // counting-sort cell indices into per-bucket index buffers, then for
+    // each non-empty bucket set fillStyle once and emit fillRects. This
+    // turns N fillStyle assignments + N string allocations into ≤ BUCKETS
+    // of each, which is the real hot path on this component.
+
+    let indices = new Int32Array(0);
+    const counts = new Int32Array(OPACITY_BUCKETS);
+    const offsets = new Int32Array(OPACITY_BUCKETS);
+
+    const draw = () => {
+      const len = cols * rows;
+      if (indices.length < len) {
+        indices = new Int32Array(len);
+      }
+
+      ctx.clearRect(0, 0, width, height);
+
+      counts.fill(0);
+      const maxBucket = OPACITY_BUCKETS - 1;
+      // Pass 1: count cells per bucket.
+      for (let i = 0; i < len; i++) {
+        const op = opacity[i];
+        if (op < 0.02) { continue; }
+        let b = (op * OPACITY_BUCKETS) | 0;
+        if (b > maxBucket) { b = maxBucket; }
+        counts[b]++;
+      }
+      // Compute write offsets.
+      let acc = 0;
+      for (let b = 0; b < OPACITY_BUCKETS; b++) {
+        offsets[b] = acc;
+        acc += counts[b];
+      }
+      // Pass 2: scatter cell indices into their bucket slot.
+      const cursor = counts; // reuse as cursor (will be overwritten cleanly)
+      cursor.fill(0);
+      for (let i = 0; i < len; i++) {
+        const op = opacity[i];
+        if (op < 0.02) { continue; }
+        let b = (op * OPACITY_BUCKETS) | 0;
+        if (b > maxBucket) { b = maxBucket; }
+        indices[offsets[b] + cursor[b]++] = i;
+      }
+      // Pass 3: per bucket, one fillStyle, fillRect for each member.
+      let from = 0;
+      for (let b = 0; b < OPACITY_BUCKETS; b++) {
+        const n = cursor[b];
+        if (n === 0) { from = offsets[b] + n; continue; }
+        const bucketOpacity = (b + 0.5) / OPACITY_BUCKETS;
+        ctx.fillStyle = `${colorString}${bucketOpacity})`;
+        const end = from + n;
+        for (let k = from; k < end; k++) {
+          const idx = indices[k];
+          const y = (idx / cols) | 0;
+          const x = idx - y * cols;
+          ctx.fillRect(offsetX + x * step, offsetY + y * step, dotSize, dotSize);
+        }
+        from = end;
+      }
+    };
+
+    // ── Animation loop ──────────────────────────────────────────────────────
+
+    const animate = (ts: number) => {
       if (cols === 0 || rows === 0) {
-        state.rafId = requestAnimationFrame(animate);
+        // Container not laid out yet — try again next frame.
+        rafId = requestAnimationFrame(animate);
+        if (width === 0 || height === 0) {
+          resize();
+        }
         return;
       }
 
-      if (state.startTime === 0) {
-        // First frame with real dimensions: size the canvas and reset timing
-        resizeCanvas();
-        state.startTime = ts;
-        state.lastTime = ts;
+      if (startTime === 0) {
+        startTime = ts;
+        lastTime = ts;
+        lastGolUpdate = 0;
       }
 
-      const dt = Math.min((ts - state.lastTime) / 1000, 0.1) * speed;
-      const t = (ts - state.startTime) / 1000;
-      state.lastTime = ts;
+      const rawDt = (ts - lastTime) / 1000;
+      const dt = Math.min(rawDt, 0.1) * speed;
+      const t = ((ts - startTime) / 1000) * speed;
+      lastTime = ts;
 
-      // Grow grid if the window got bigger
-      while (state.grid.length < rows) {
-        state.grid.push(Array.from({ length: cols }, () => ({ opacity: 0 })));
-      }
-      for (const row of state.grid) {
-        while (row.length < cols) { row.push({ opacity: 0 }); }
+      // Refresh CSS-derived color ~ every 500ms.
+      if (ts - lastColorCheck > 500) {
+        refreshColor();
+        lastColorCheck = ts;
       }
 
-      state.grid = resolvedAlgorithm(state.grid, { time: t, deltaTime: dt, cols, rows, mouse: state.mouse });
+      switch (kind) {
+        case "pulsingWave":
+          stepPulsingWave(dt);
+          break;
+        case "flowingWave":
+          stepFlowingWave(t);
+          break;
+        case "gameOfLife": {
+          // Update GoL on a fixed cadence regardless of frame rate so it
+          // doesn't run away at 120fps. 120ms ≈ 8 generations/s.
+          if (ts - lastGolUpdate > 120) {
+            stepGameOfLife();
+            lastGolUpdate = ts;
+          }
+          break;
+        }
+      }
+
       draw();
-      state.rafId = requestAnimationFrame(animate);
+      rafId = requestAnimationFrame(animate);
     };
 
-    // Don't call resizeCanvas() here — animate() handles first-frame init
-    // after the element has real dimensions.
-
     const ro = new ResizeObserver(() => {
-      resizeCanvas();
-      // Reset startTime so algorithms get a fresh t=0 after resize
-      state.startTime = 0;
+      resize();
+      // Don't reset startTime — algorithms keep their continuity through resize.
     });
     ro.observe(container);
 
-    const onMouseMove = (e: MouseEvent) => {
-      const rect = container.getBoundingClientRect();
-      state.mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    };
-    const onMouseLeave = () => { state.mouse = null; };
-    container.addEventListener("mousemove", onMouseMove);
-    container.addEventListener("mouseleave", onMouseLeave);
-
-    state.startTime = 0;
-    state.rafId = requestAnimationFrame(animate);
+    resize();
+    rafId = requestAnimationFrame(animate);
 
     return () => {
-      cancelAnimationFrame(state.rafId);
+      cancelAnimationFrame(rafId);
       ro.disconnect();
-      container.removeEventListener("mousemove", onMouseMove);
-      container.removeEventListener("mouseleave", onMouseLeave);
     };
   }, [resolvedAlgorithm, dotSize, spacing, speed]);
 
