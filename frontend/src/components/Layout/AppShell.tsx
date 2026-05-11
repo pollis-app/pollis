@@ -361,17 +361,17 @@ export const AppShell: React.FC = () => {
       {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
 
-      {/* Main content — sidebar + matched child route */}
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row" }}>
+      {/* Main content — sidebar + matched child route. The screen-share
+          viewer mounts INSIDE this region so the TitleBar (drag handle),
+          BreadcrumbNav, VoiceBar, and bottom status bar all stay visible
+          and interactive while a stream is being viewed. */}
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row", position: "relative" }}>
         <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen((v) => !v)} />
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
           <Outlet />
+          <ScreenShareViewer />
         </div>
       </div>
-
-      {/* Inline screenshare viewer — covers the route view but stays
-          inside the chrome. */}
-      <ScreenShareViewer />
 
       {/* VoiceBar — shown above bottom bar while user is in a voice channel */}
       {activeVoiceChannelId !== null && (

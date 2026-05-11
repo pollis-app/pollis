@@ -481,6 +481,22 @@ commands::livekit::get_livekit_token,
             if let tauri::WindowEvent::Focused(true) = _event {
                 pollis_core::commands::r2::enforce_cache_cap_now();
             }
+            // On Linux/Windows the user closing the window terminates
+            // the app — but Tauri runs CloseRequested before the
+            // ExitRequested cleanup above gets a chance, and the helper
+            // child can briefly outlive the parent (PR_SET_PDEATHSIG
+            // catches it eventually but the portal screencast indicator
+            // / red dot lingers). Stop the share synchronously here so
+            // the user sees an immediate clean shutdown.
+            #[cfg(not(target_os = "macos"))]
+            if let tauri::WindowEvent::CloseRequested { .. } = _event {
+                if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
+                    let state = state.inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                    });
+                }
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building Pollis")
@@ -497,6 +513,19 @@ commands::livekit::get_livekit_token,
             // able to read every media file the user viewed.
             if let tauri::RunEvent::ExitRequested { .. } = _event {
                 pollis_core::commands::r2::clear_media_cache();
+                // Also kill any active screen-share helper subprocess.
+                // kill_on_drop on the Child handle would normally take
+                // care of this when AppState is dropped, but Tauri does
+                // not guarantee state drop ordering before _exit, so we
+                // explicitly nuke it here. Belt-and-suspenders: the
+                // helper also installs PR_SET_PDEATHSIG=SIGTERM so a
+                // hard parent crash still cleans it up.
+                if let Some(state) = _app.try_state::<Arc<AppState>>() {
+                    let state = state.inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                    });
+                }
             }
         });
 }

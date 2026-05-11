@@ -21,6 +21,11 @@
 //!   type 0xFF  Error
 //!     payload := utf-8 message
 //!
+//! Audio is intentionally absent. See issue #175 — proper per-window
+//! audio routing requires the portal's `accept_audio` option which
+//! ashpd doesn't expose, so it needs raw zbus calls to SelectSources
+//! to land safely (system-monitor capture loops back through the call).
+//!
 //! No reverse channel. The parent stops capture by closing the socket;
 //! we observe EPIPE on next write or EOF on read and exit cleanly.
 

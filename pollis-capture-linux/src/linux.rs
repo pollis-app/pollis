@@ -68,7 +68,12 @@ async fn run_async(socket_path: &str) -> Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
 
-    eprintln!("[capture] spawning pipewire thread");
+    // Video only — see issue #175 for the audio plan. The portal's
+    // accept_audio option (per-window, no loopback) needs raw zbus
+    // calls because ashpd doesn't expose it. Capturing the system
+    // sink monitor as a fallback was tried and produces a feedback
+    // loop in any voice room.
+    eprintln!("[capture] spawning pipewire video thread");
     let pw_thread = std::thread::Builder::new()
         .name("pollis-capture-pw".into())
         .spawn(move || {
@@ -225,6 +230,9 @@ mod pw {
         pw::init();
         let mainloop = pw::main_loop::MainLoopRc::new(None)?;
         let context = pw::context::ContextRc::new(&mainloop, None)?;
+        // Same fd serves both video (from the portal pipewire node) and
+        // the audio sink monitor capture. The portal-issued fd is a
+        // fully-fledged pipewire core fd, not a per-stream descriptor.
         let core = context.connect_fd_rc(fd, None)?;
 
         struct Data {
@@ -249,6 +257,7 @@ mod pw {
         let mainloop_for_quit = mainloop.clone();
         let stop_for_proc = Arc::clone(&stop);
         let tx_for_proc = tx.clone();
+        let tx_for_format = tx;
 
         let _listener = stream
             .add_local_listener_with_user_data::<Data>(data)
@@ -282,7 +291,7 @@ mod pw {
                         w,
                         h
                     );
-                    let _ = tx.try_send(Msg::Format { width: w, height: h });
+                    let _ = tx_for_format.try_send(Msg::Format { width: w, height: h });
                 }
             })
             .process(move |stream, ud| {
@@ -396,8 +405,9 @@ mod pw {
             pw::stream::StreamFlags::AUTOCONNECT | pw::stream::StreamFlags::MAP_BUFFERS,
             &mut params,
         )?;
-        eprintln!("[capture/pw] stream connected; entering mainloop");
+        eprintln!("[capture/pw] video stream connected");
 
+        eprintln!("[capture/pw] entering mainloop");
         mainloop.run();
         eprintln!("[capture/pw] mainloop exited");
         Ok(())
@@ -410,4 +420,10 @@ mod pw {
             .map(|d| d.as_micros() as i64)
             .unwrap_or(0)
     }
+
+    // Audio thread removed — see issue #175. The system sink monitor
+    // capture worked end-to-end but loops voice back through the
+    // call. Per-window audio needs the portal's `accept_audio` option
+    // (no loopback by construction) which requires raw zbus calls
+    // because ashpd doesn't expose it. Re-add when that lands.
 }

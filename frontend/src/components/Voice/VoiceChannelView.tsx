@@ -1,10 +1,11 @@
 import React from "react";
-import { Circle, Monitor, VolumeX } from "lucide-react";
+import { Circle, VolumeX } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { NavigableList } from "../ui/NavigableList";
 import type { VoiceParticipant, VoiceConnectionQuality } from "../../types";
 import { RemoteUserVolumeSlider } from "./RemoteUserVolumeSlider";
 import { Avatar } from "../ui/Avatar";
+import { ScreenShareIndicator } from "./ScreenShareIndicator";
 
 // Excellent quality is the common case — surfacing it would just be noise on
 // every row, so we only show a degraded indicator. Poor and Lost are the
@@ -115,36 +116,12 @@ export const VoiceChannelView: React.FC = () => {
               >
                 {p.name}
               </span>
-              {(() => {
-                const isLocalShare = p.identity === localIdentity && screenShareLocalActive;
-                const remoteShare = screenShareRemotes[p.identity];
-                if (!isLocalShare && !remoteShare) {
-                  return null;
-                }
-                const trackKey = remoteShare?.trackKey;
-                return (
-                  <button
-                    data-testid={`voice-screenshare-${p.identity}`}
-                    title={isLocalShare ? "You are sharing your screen" : "View screen share"}
-                    onClick={() => {
-                      if (trackKey) {
-                        setViewingScreenShareTrackKey(trackKey);
-                      }
-                    }}
-                    disabled={!trackKey}
-                    className="flex-shrink-0 flex items-center"
-                    style={{
-                      background: "none",
-                      border: "none",
-                      padding: 0,
-                      cursor: trackKey ? "pointer" : "default",
-                      color: "var(--c-accent)",
-                    }}
-                  >
-                    <Monitor size={12} />
-                  </button>
-                );
-              })()}
+              <ScreenShareIndicator
+                identity={p.identity}
+                isLocal={p.identity === localIdentity && screenShareLocalActive}
+                remote={screenShareRemotes[p.identity]}
+                onView={(trackKey) => setViewingScreenShareTrackKey(trackKey)}
+              />
               {(() => {
                 const ind = qualityIndicator(p.connectionQuality);
                 if (!ind) {

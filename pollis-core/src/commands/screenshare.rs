@@ -102,10 +102,6 @@ pub trait RawSink: Send + Sync {
     fn send(&self, bytes: Vec<u8>) -> Result<()>;
 }
 
-// Unused on non-Linux right now; kept as a no-op so the lib.rs setup
-// hook can call it unconditionally without cfg gates.
-pub fn pre_init_pipewire() {}
-
 // ── Tauri-facing commands ─────────────────────────────────────────────────
 
 pub async fn subscribe_screen_share_events(
@@ -205,12 +201,11 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         ss.local_helper = Some(helper);
     }
 
-    // 4. Read the first protocol message; expect Format. Anything else
-    //    (or EOF) is a hard failure. Timeout generously — the user can
-    //    take a while to click in the picker, but the format negotiates
-    //    immediately after that, so 5 minutes total is enough.
+    // 4. Read the first protocol message; expect Format. Anything
+    //    else (or EOF) is a hard failure. Generous 5-min timeout
+    //    covers the user staring at the picker.
     let mut reader = SocketReader::new(stream);
-    eprintln!("[screenshare] awaiting first message from helper (format)");
+    eprintln!("[screenshare] awaiting video format from helper");
     let read_result = tokio::time::timeout(
         std::time::Duration::from_secs(300),
         reader.read_message(),
@@ -221,7 +216,7 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         Err(_) => {
             stop_screen_share(state).await.ok();
             return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper: timed out waiting for format negotiation"
+                "capture helper: timed out waiting for video format"
             )));
         }
     };
@@ -230,22 +225,22 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
             eprintln!("[screenshare] helper announced {}x{}", width, height);
             (width & !1, height & !1)
         }
+        Ok(Some(HelperMsg::Frame { .. })) => {
+            stop_screen_share(state).await.ok();
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "capture helper sent video frame before format"
+            )));
+        }
         Ok(Some(HelperMsg::Error { message })) => {
             stop_screen_share(state).await.ok();
             return Err(crate::error::Error::Other(anyhow::anyhow!(
                 "capture helper: {message}"
             )));
         }
-        Ok(Some(HelperMsg::Frame { .. })) => {
-            stop_screen_share(state).await.ok();
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper sent frame before format"
-            )));
-        }
         Ok(None) => {
             stop_screen_share(state).await.ok();
             return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper closed socket before sending format"
+                "capture helper closed socket before sending video format"
             )));
         }
         Err(e) => {

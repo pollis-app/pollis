@@ -36,9 +36,27 @@ export interface DecodedFrame {
 
 type FrameListener = (frame: DecodedFrame) => void;
 
+export interface FrameStats {
+  /** Frames received in the last sliding window. */
+  fps: number;
+  /** Last observed frame dimensions, or null if no frame yet. */
+  dimensions: { width: number; height: number } | null;
+  /** Total bytes for the last frame's three planes (Y+U+V). */
+  lastFrameBytes: number;
+}
+
+type StatsListener = (stats: FrameStats) => void;
+
+const FPS_WINDOW_MS = 1000;
+
 class ScreenShareSession {
   private subscribed = false;
   private listeners = new Map<string, Set<FrameListener>>();
+  // Per-track frame arrival timestamps (ms) for sliding-window FPS.
+  private fpsHistory = new Map<string, number[]>();
+  private lastDims = new Map<string, { width: number; height: number }>();
+  private lastBytes = new Map<string, number>();
+  private statsListeners = new Map<string, Set<StatsListener>>();
 
   /** Idempotent. Call once after auth so the backend Channels are wired. */
   async ensureSubscribed(): Promise<void> {
@@ -73,6 +91,44 @@ class ScreenShareSession {
         this.listeners.delete(trackKey);
       }
     };
+  }
+
+  /** Subscribe to FPS / dimensions / bytes stats for a track. Fired
+   *  whenever a new frame arrives — at most one update per actual frame,
+   *  no internal timer. Cheap to consume; stats are computed once per
+   *  frame regardless of how many listeners. */
+  onStats(trackKey: string, fn: StatsListener): () => void {
+    let set = this.statsListeners.get(trackKey);
+    if (!set) {
+      set = new Set();
+      this.statsListeners.set(trackKey, set);
+    }
+    set.add(fn);
+    // Replay the last known stats immediately so fresh consumers don't
+    // wait for the next frame just to render their first non-empty
+    // value.
+    const dims = this.lastDims.get(trackKey) ?? null;
+    const bytes = this.lastBytes.get(trackKey) ?? 0;
+    const fps = this.computeFps(trackKey);
+    fn({ fps, dimensions: dims, lastFrameBytes: bytes });
+    return () => {
+      set?.delete(fn);
+      if (set && set.size === 0) {
+        this.statsListeners.delete(trackKey);
+      }
+    };
+  }
+
+  private computeFps(trackKey: string): number {
+    const hist = this.fpsHistory.get(trackKey);
+    if (!hist || hist.length < 2) {
+      return 0;
+    }
+    const span = hist[hist.length - 1] - hist[0];
+    if (span <= 0) {
+      return 0;
+    }
+    return Math.round(((hist.length - 1) / span) * 1000);
   }
 
   async start(): Promise<void> {
@@ -141,6 +197,36 @@ class ScreenShareSession {
     const y = new Uint8Array(buf, off, yLen); off += yLen;
     const u = new Uint8Array(buf, off, uLen); off += uLen;
     const v = new Uint8Array(buf, off, vLen);
+
+    // Update stats — done before tile dispatch so the stats listener
+    // sees the same frame the tile is about to render.
+    const now = performance.now();
+    let hist = this.fpsHistory.get(trackKey);
+    if (!hist) {
+      hist = [];
+      this.fpsHistory.set(trackKey, hist);
+    }
+    hist.push(now);
+    while (hist.length > 0 && now - hist[0] > FPS_WINDOW_MS) {
+      hist.shift();
+    }
+    this.lastDims.set(trackKey, { width, height });
+    this.lastBytes.set(trackKey, yLen + uLen + vLen);
+    const statsListeners = this.statsListeners.get(trackKey);
+    if (statsListeners && statsListeners.size > 0) {
+      const stats: FrameStats = {
+        fps: this.computeFps(trackKey),
+        dimensions: { width, height },
+        lastFrameBytes: yLen + uLen + vLen,
+      };
+      for (const fn of statsListeners) {
+        try {
+          fn(stats);
+        } catch (e) {
+          console.error("[screenshare] stats listener", e);
+        }
+      }
+    }
 
     const listeners = this.listeners.get(trackKey);
     if (!listeners || listeners.size === 0) {
