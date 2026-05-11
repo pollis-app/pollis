@@ -345,7 +345,26 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
                         .find(|d| d.name().ok().map(|n| is_useful_device(&n)).unwrap_or(false))
                 }
             }
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(target_os = "macos")]
+            {
+                // CoreAudio occasionally reports no default device (e.g. mid
+                // Bluetooth handover, or a stale default after a device went
+                // away). Fall back to the first enumerated device so a missing
+                // default doesn't break voice.
+                let default_dev = if is_input {
+                    host.default_input_device()
+                } else {
+                    host.default_output_device()
+                };
+                if default_dev.is_none() {
+                    eprintln!(
+                        "[voice] macOS default {} device is None — falling back to first enumerated",
+                        if is_input { "input" } else { "output" }
+                    );
+                }
+                default_dev.or_else(|| macos_first_device(host, is_input))
+            }
+            #[cfg(all(not(target_os = "linux"), not(target_os = "macos")))]
             {
                 if is_input { host.default_input_device() } else { host.default_output_device() }
             }
@@ -366,10 +385,93 @@ pub(crate) fn get_device(host: &cpal::Host, name: Option<&str>, is_input: bool) 
             } else {
                 host.output_devices().map_err(|e| anyhow::anyhow!("enumerate devices: {e}"))?
             };
-            iter.filter(|d| d.name().ok().as_deref() == Some(n)).next()
+            let found = iter.filter(|d| d.name().ok().as_deref() == Some(n)).next();
+            // macOS-only fallback: AirPods (and other Bluetooth duplex devices)
+            // in HFP/SCO mode sometimes drop out of host.output_devices() while
+            // their mic is captured, even though the device DOES support output.
+            // Try host.devices() (all scopes) and validate via supported_output_configs.
+            #[cfg(target_os = "macos")]
+            let found = found.or_else(|| macos_lookup_any_scope(host, n, is_input));
+            found
         }
     };
+    if device.is_none() {
+        #[cfg(target_os = "macos")]
+        macos_log_enumeration(host, name, is_input);
+    }
     device.ok_or_else(|| anyhow::anyhow!("audio device not found").into())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_first_device(host: &cpal::Host, is_input: bool) -> Option<cpal::Device> {
+    let iter = if is_input { host.input_devices().ok() } else { host.output_devices().ok() };
+    iter.and_then(|mut it| it.next())
+        .or_else(|| {
+            // Last-resort: scan all devices and pick the first that supports
+            // the requested scope. Required when a duplex device (AirPods in
+            // HFP mode) is missing from the scoped list but present in devices().
+            host.devices().ok().and_then(|all| {
+                all.filter(|d| {
+                    if is_input {
+                        d.supported_input_configs().map(|mut c| c.next().is_some()).unwrap_or(false)
+                    } else {
+                        d.supported_output_configs().map(|mut c| c.next().is_some()).unwrap_or(false)
+                    }
+                })
+                .next()
+            })
+        })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_lookup_any_scope(host: &cpal::Host, name: &str, is_input: bool) -> Option<cpal::Device> {
+    // Scope-agnostic scan first. cpal's scoped enumeration filters by
+    // supported_*_configs() — that's exactly the filter that already
+    // excluded the device, so don't re-apply it here. Return the device
+    // by name and let the stream-build attempt produce a real error if
+    // the device truly can't service this direction.
+    if let Ok(all) = host.devices() {
+        for d in all {
+            if d.name().ok().as_deref() == Some(name) {
+                eprintln!(
+                    "[voice] macOS: found '{name}' via host.devices() fallback ({} requested)",
+                    if is_input { "input" } else { "output" }
+                );
+                return Some(d);
+            }
+        }
+    }
+    // Opposite scope as last resort: AirPods in HFP can appear only in the
+    // input list while still capable of output (or vice versa).
+    let opposite = if is_input { host.output_devices().ok() } else { host.input_devices().ok() };
+    if let Some(it) = opposite {
+        for d in it {
+            if d.name().ok().as_deref() == Some(name) {
+                eprintln!(
+                    "[voice] macOS: found '{name}' via opposite-scope enumeration ({} requested)",
+                    if is_input { "input" } else { "output" }
+                );
+                return Some(d);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn macos_log_enumeration(host: &cpal::Host, wanted: Option<&str>, is_input: bool) {
+    let kind = if is_input { "input" } else { "output" };
+    let scoped: Vec<String> = if is_input {
+        host.input_devices().ok().map(|it| it.filter_map(|d| d.name().ok()).collect()).unwrap_or_default()
+    } else {
+        host.output_devices().ok().map(|it| it.filter_map(|d| d.name().ok()).collect()).unwrap_or_default()
+    };
+    let all: Vec<String> = host.devices().ok()
+        .map(|it| it.filter_map(|d| d.name().ok()).collect())
+        .unwrap_or_default();
+    eprintln!(
+        "[voice] macOS get_device failed — wanted={wanted:?} kind={kind} scoped={scoped:?} all={all:?}"
+    );
 }
 
 /// Build a cpal input stream that converts mic audio to i16 mono and sends
@@ -722,14 +824,40 @@ async fn ensure_playback(
     }
 
     // Open the new cpal output stream on a blocking thread (ALSA syscalls).
+    // If the requested device fails (e.g. stale pref, or a duplex Bluetooth
+    // device that cpal can't query in its current state), fall back to the
+    // OS default output so the user at least hears remote audio.
     let output_device_name_for_open = output_device_name.clone();
-    let (stream, sample_rate, channels, output_ring) = tokio::task::spawn_blocking(move || {
-        let host = cpal::default_host();
-        let dev = get_device(&host, output_device_name_for_open.as_deref(), false)?;
-        start_speaker_stream(&dev, apm_rate)
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
+    let (stream, sample_rate, channels, output_ring, opened_device_name) =
+        tokio::task::spawn_blocking(move || -> Result<_> {
+            let host = cpal::default_host();
+            let try_open = |name: Option<&str>| -> Result<_> {
+                let dev = get_device(&host, name, false)?;
+                let (stream, sr, ch, ring) = start_speaker_stream(&dev, apm_rate)?;
+                Ok((stream, sr, ch, ring))
+            };
+            match try_open(output_device_name_for_open.as_deref()) {
+                Ok((s, sr, ch, ring)) => Ok((s, sr, ch, ring, output_device_name_for_open)),
+                Err(e) => {
+                    let was_explicit = output_device_name_for_open
+                        .as_deref()
+                        .map(|n| !n.is_empty() && n != "default")
+                        .unwrap_or(false);
+                    if !was_explicit {
+                        return Err(e);
+                    }
+                    eprintln!(
+                        "[voice] speaker open failed for '{:?}': {e} — falling back to OS default output",
+                        output_device_name_for_open
+                    );
+                    let (s, sr, ch, ring) = try_open(None)?;
+                    Ok((s, sr, ch, ring, None))
+                }
+            }
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
+    let output_device_name = opened_device_name;
 
     // If the speaker can't run at the APM rate (very rare; e.g. forced
     // device override), the AEC render reference would be at the wrong
@@ -872,23 +1000,58 @@ pub async fn list_audio_devices() -> Result<Vec<AudioDevice>> {
         let host = cpal::default_host();
         let mut devices = Vec::new();
 
-        if let Ok(inputs) = host.input_devices() {
-            for d in inputs {
-                if let Ok(name) = d.name() {
-                    if is_useful_device(&name) {
-                        devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "input".into() });
+        match host.input_devices() {
+            Ok(inputs) => {
+                for d in inputs {
+                    if let Ok(name) = d.name() {
+                        if is_useful_device(&name) {
+                            devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "input".into() });
+                        }
                     }
+                }
+            }
+            Err(e) => eprintln!("[voice] list_audio_devices: input enumeration failed: {e}"),
+        }
+        match host.output_devices() {
+            Ok(outputs) => {
+                for d in outputs {
+                    if let Ok(name) = d.name() {
+                        if is_useful_device(&name) {
+                            devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "output".into() });
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("[voice] list_audio_devices: output enumeration failed: {e}"),
+        }
+        // On macOS, a duplex device (AirPods, USB headset) in HFP mode can
+        // get dropped from output_devices() while still listed by devices().
+        // Surface those as output options so the user can still pick them.
+        #[cfg(target_os = "macos")]
+        if let Ok(all) = host.devices() {
+            let seen_output: std::collections::HashSet<String> = devices
+                .iter()
+                .filter(|d| d.kind == "output")
+                .map(|d| d.id.clone())
+                .collect();
+            for d in all {
+                let Ok(name) = d.name() else { continue };
+                if seen_output.contains(&name) { continue; }
+                let supports_output = d
+                    .supported_output_configs()
+                    .map(|mut c| c.next().is_some())
+                    .unwrap_or(false);
+                if supports_output {
+                    eprintln!("[voice] macOS: '{name}' missing from output_devices() — adding via devices() fallback");
+                    devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "output".into() });
                 }
             }
         }
-        if let Ok(outputs) = host.output_devices() {
-            for d in outputs {
-                if let Ok(name) = d.name() {
-                    if is_useful_device(&name) {
-                        devices.push(AudioDevice { id: name.clone(), name: display_name(&name), kind: "output".into() });
-                    }
-                }
-            }
+        #[cfg(target_os = "macos")]
+        {
+            let inputs: Vec<&str> = devices.iter().filter(|d| d.kind == "input").map(|d| d.id.as_str()).collect();
+            let outputs: Vec<&str> = devices.iter().filter(|d| d.kind == "output").map(|d| d.id.as_str()).collect();
+            eprintln!("[voice] macOS list_audio_devices — inputs={inputs:?} outputs={outputs:?}");
         }
         devices
     })
@@ -1532,23 +1695,31 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
     // the lock before awaiting room.close(). If the network is broken (e.g. VPN
     // dropped), room.close() hangs sending a disconnect signal — holding the lock
     // during that await deadlocks every subsequent command that needs voice state.
-    let room = {
+    let (room, input_stream, output_stream) = {
         let mut voice = state.voice.lock().await;
 
-        if let Some(t) = voice.room_task.take() { t.abort(); }
+        // Kill the frame feed first so no more frames are pushed into the
+        // audio source / room while we tear them down.
         if let Some(t) = voice.frame_task.take() { t.abort(); }
+        if let Some(t) = voice.room_task.take() { t.abort(); }
 
-        {
+        // Take the cpal output stream out of playback state so we can drop
+        // it on a blocking thread (CoreAudio dispose isn't safe to run on a
+        // tokio worker — on macOS the mic-in-use indicator can otherwise
+        // stay on until the process exits).
+        let output_stream = {
             let mut pb = voice.playback.lock().unwrap();
+            let s = pb.output_stream.take();
             pb.stop_all();
             pb.rtc_tracks.clear();
             pb.identities.clear();
             pb.output_device_name = None;
-        }
+            s
+        };
 
         voice.local_track = None;
         voice.audio_source = None;
-        voice.input_stream = None;
+        let input_stream = voice.input_stream.take();
         voice.apm = None;
         if let Ok(mut slot) = voice.denoiser.lock() {
             *slot = None;
@@ -1556,8 +1727,21 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
         voice.is_muted.store(false, Ordering::Relaxed);
         voice.current_input_device = None;
 
-        voice.room.take()
+        (voice.room.take(), input_stream, output_stream)
     }; // voice lock released here
+
+    // Drop cpal streams on a blocking thread. cpal's macOS Drop calls
+    // AudioOutputUnitStop + AudioUnitUninitialize + AudioComponentInstanceDispose;
+    // when run from a tokio worker those calls can leave the OS "microphone
+    // in use" indicator on until process exit. Running drop on the blocking
+    // pool lets CoreAudio fully tear down the AudioUnit synchronously.
+    if input_stream.is_some() || output_stream.is_some() {
+        let _ = tokio::task::spawn_blocking(move || {
+            drop(input_stream);
+            drop(output_stream);
+        })
+        .await;
+    }
 
     // Close outside the lock with a timeout so a broken connection (dropped VPN,
     // network change) can't stall a reconnect attempt indefinitely.
