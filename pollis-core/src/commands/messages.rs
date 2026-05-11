@@ -371,11 +371,16 @@ pub async fn ingest_channel_envelopes_inner(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Resolve mls_group_id — all channels in a group share one MLS group.
+    // Single round-trip: resolve mls_group_id AND confirm membership. Returns
+    // a row only when the channel exists and the user is a member; otherwise
+    // short-circuit so the read path falls back to whatever is local.
     let mls_group_id: String = {
         let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![channel_id.to_string()],
+            "SELECT c.group_id FROM channels c
+             JOIN group_member gm ON gm.group_id = c.group_id
+             WHERE c.id = ?1 AND gm.user_id = ?2
+             LIMIT 1",
+            libsql::params![channel_id.to_string(), user_id.to_string()],
         ).await?;
         match rows.next().await? {
             Some(row) => row.get::<String>(0)?,
@@ -383,46 +388,37 @@ pub async fn ingest_channel_envelopes_inner(
         }
     };
 
-    // Non-members have no MLS key material, no business creating a watermark
-    // row, and would just block cleanup. Short-circuit here so the read path
-    // falls back to whatever is already in local.
-    let is_member: bool = {
-        let mut rows = conn.query(
-            "SELECT 1 FROM group_member
-             WHERE group_id = ?1 AND user_id = ?2
-             LIMIT 1",
-            libsql::params![mls_group_id.clone(), user_id.to_string()],
-        ).await?;
-        rows.next().await?.is_some()
-    };
-    if !is_member {
-        return Ok(());
-    }
+    let device_id = state.device_id.lock().await.clone();
 
     // Advance MLS epoch before decryption so pre-ingest-window commits apply.
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, &did).await {
-                eprintln!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
-            }
+    if let Some(ref did) = device_id {
+        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
+            eprintln!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
         }
     }
     if let Err(e) = crate::commands::mls::process_pending_commits_inner(state, &mls_group_id, user_id).await {
         eprintln!("[ingest] process_pending_commits for {mls_group_id}: {e}");
     }
 
-    // Pull every envelope for this conversation (message + edit), oldest-first.
-    // Ordering is critical so MLS decryption sees epochs in the order they were
-    // committed and the watermark stops at the first decrypt failure.
+    // Pull only envelopes past this device's watermark. Steady state returns
+    // zero rows. Empty-string COALESCE handles the no-watermark-yet case
+    // (first ingest for this conversation on this device). Ordering by
+    // sent_at ASC is critical so MLS decryption sees epochs in commit order
+    // and the watermark stops at the first decrypt failure.
     let envelopes: Vec<(String, String, String, Option<String>, Option<String>, String, String)> = {
         let mut out = Vec::new();
+        let did_param = device_id.clone().unwrap_or_default();
         let mut rows = conn.query(
             "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
              FROM message_envelope
              WHERE conversation_id = ?1
+               AND sent_at > COALESCE(
+                   (SELECT last_fetched_at FROM conversation_watermark
+                    WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3),
+                   ''
+               )
              ORDER BY sent_at ASC, id ASC",
-            libsql::params![channel_id.to_string()],
+            libsql::params![channel_id.to_string(), user_id.to_string(), did_param],
         ).await?;
         while let Some(row) = rows.next().await? {
             out.push((
@@ -445,18 +441,15 @@ pub async fn ingest_channel_envelopes_inner(
         &envelopes,
     ).await?;
 
-    if let Some(ts) = watermark_ts {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = conn.execute(
-                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-                libsql::params![channel_id.to_string(), user_id.to_string(), did, ts],
-            ).await {
-                eprintln!("[watermark] ingest_channel: upsert failed: {e}");
-            }
+    if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![channel_id.to_string(), user_id.to_string(), did.clone(), ts],
+        ).await {
+            eprintln!("[watermark] ingest_channel: upsert failed: {e}");
         }
     }
 
@@ -931,26 +924,32 @@ pub async fn ingest_dm_envelopes_inner(
         return Ok(());
     }
 
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, &did).await {
-                eprintln!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
-            }
+    let device_id = state.device_id.lock().await.clone();
+
+    if let Some(ref did) = device_id {
+        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
+            eprintln!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
         }
     }
     if let Err(e) = crate::commands::mls::process_pending_commits_inner(state, dm_channel_id, user_id).await {
         eprintln!("[ingest] process_pending_commits for DM {dm_channel_id}: {e}");
     }
 
+    // Watermark-filtered envelope read — see ingest_channel_envelopes_inner.
     let envelopes: Vec<(String, String, String, Option<String>, Option<String>, String, String)> = {
         let mut out = Vec::new();
+        let did_param = device_id.clone().unwrap_or_default();
         let mut rows = conn.query(
             "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
              FROM message_envelope
              WHERE conversation_id = ?1
+               AND sent_at > COALESCE(
+                   (SELECT last_fetched_at FROM conversation_watermark
+                    WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3),
+                   ''
+               )
              ORDER BY sent_at ASC, id ASC",
-            libsql::params![dm_channel_id.to_string()],
+            libsql::params![dm_channel_id.to_string(), user_id.to_string(), did_param],
         ).await?;
         while let Some(row) = rows.next().await? {
             out.push((
@@ -973,18 +972,15 @@ pub async fn ingest_dm_envelopes_inner(
         &envelopes,
     ).await?;
 
-    if let Some(ts) = watermark_ts {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = conn.execute(
-                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-                libsql::params![dm_channel_id.to_string(), user_id.to_string(), did, ts],
-            ).await {
-                eprintln!("[watermark] ingest_dm: upsert failed: {e}");
-            }
+    if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string(), did.clone(), ts],
+        ).await {
+            eprintln!("[watermark] ingest_dm: upsert failed: {e}");
         }
     }
 
