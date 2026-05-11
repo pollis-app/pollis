@@ -49,7 +49,6 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
           minWidth: "2ch",
           textAlign: "left",
           fontVariantNumeric: "tabular-nums",
-          lineHeight: "1.5rem"
         }}
       >
         {display}
