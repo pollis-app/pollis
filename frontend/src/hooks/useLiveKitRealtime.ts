@@ -352,6 +352,12 @@ export function useLiveKitRealtime() {
         // Wipe stale presence for the reconnected room — Rust will re-emit
         // a fresh participant snapshot right after.
         usePresenceStore.getState().resetRoom(event.room_id);
+        // Catch up on welcomes that may have arrived during the outage so
+        // new-group invites apply without waiting for the user to open a
+        // channel from one of those groups.
+        invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+          console.warn('[realtime] reconnect: poll_mls_welcomes failed:', err);
+        });
         return;
       }
 
@@ -487,4 +493,16 @@ export function useLiveKitRealtime() {
       console.error('[realtime] connect_rooms failed:', err);
     });
   }, [isTauriReady, allRoomIds, currentUser?.id, currentUser?.username, networkStatus]);
+
+  // One-time welcome poll on sign-in / app-ready. Catches welcomes for
+  // groups the user was invited to while offline so new-group invites
+  // apply without requiring them to open a channel from each group first.
+  useEffect(() => {
+    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
+      return;
+    }
+    invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+      console.warn('[realtime] startup poll_mls_welcomes failed:', err);
+    });
+  }, [isTauriReady, currentUser?.id, networkStatus]);
 }
