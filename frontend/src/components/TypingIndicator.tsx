@@ -39,6 +39,7 @@ export const TypingIndicator: React.FC<TypingIndicatorProps> = ({
         minHeight: 16,
         color: "var(--c-text-muted)",
         lineHeight: "16px",
+        margin: "0.25rem 0.125rem"
       }}
     >
       {text}

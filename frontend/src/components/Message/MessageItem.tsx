@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { useAppStore } from "../../stores/appStore";
@@ -141,8 +143,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={isAuthorAdmin ? {
             background: "var(--c-accent)",
             color: "var(--c-bg)",
-            paddingLeft: "0.5rem",
-            paddingRight: "0.5rem",
+            paddingLeft: "0.25rem",
+            paddingRight: "0.25rem",
+            borderRadius: "0.125rem",
           } : {
             color: isOwn ? "var(--c-accent)" : authorColor,
           }}
@@ -164,7 +167,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={{
             color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
             whiteSpace: "pre-wrap",
-            fontStyle: isDeleted ? "italic" : undefined,
           }}
         >
           <LinkifiedText text={content} />
@@ -495,34 +497,40 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     };
   }, [downloadUrl, attachment.localPreviewUrl]);
 
-  const triggerSave = (url: string) => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = attachment.filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  // Save to a user-chosen path via the native Tauri dialog. The `<a download>`
+  // trick doesn't work on WebKitGTK: `download` is ignored across origins
+  // (loopback media URL vs the app's tauri:// origin), so the webview just
+  // navigates to the URL and shows the browser's built-in audio/video player
+  // instead of triggering a download.
+  const triggerSave = async (url: string): Promise<boolean> => {
+    const target = await saveDialog({ defaultPath: attachment.filename });
+    if (!target) {
+      return false;
+    }
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`fetch failed: ${res.status}`);
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    await writeFile(target, bytes);
+    return true;
   };
 
   const handleDownload = async () => {
     if (downloadStatus !== "idle") { return; }
-    if (downloadUrl) {
-      // Already decrypted — save immediately, show brief confirmation.
-      triggerSave(downloadUrl);
-      setDownloadStatus("done");
-      setTimeout(() => setDownloadStatus("idle"), 2000);
-      return;
-    }
     setDownloadStatus("downloading");
     try {
-      const url = await downloadAndDecryptMedia(
-        attachment.object_key,
-        attachment.content_hash,
-        attachment.content_type,
-      );
-      triggerSave(url);
-      setDownloadStatus("done");
-      setTimeout(() => setDownloadStatus("idle"), 2000);
+      const url = downloadUrl
+        ?? await downloadAndDecryptMedia(
+          attachment.object_key,
+          attachment.content_hash,
+          attachment.content_type,
+        );
+      const saved = await triggerSave(url);
+      setDownloadStatus(saved ? "done" : "idle");
+      if (saved) {
+        setTimeout(() => setDownloadStatus("idle"), 2000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to download");
       setDownloadStatus("idle");

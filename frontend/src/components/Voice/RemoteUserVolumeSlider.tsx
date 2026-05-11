@@ -1,6 +1,5 @@
 import React, { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useQueryClient } from "@tanstack/react-query";
 import { Volume2 } from "lucide-react";
 import {
   usePreferences,
@@ -11,7 +10,6 @@ import {
   REMOTE_USER_VOLUME_DEFAULT,
   type PreferencesData,
 } from "../../hooks/queries/usePreferences";
-import { useAppStore } from "../../stores/appStore";
 
 interface RemoteUserVolumeSliderProps {
   identity: string;
@@ -32,9 +30,7 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
   identity,
   participantName,
 }) => {
-  const { mutation, query } = usePreferences();
-  const currentUser = useAppStore((s) => s.currentUser);
-  const queryClient = useQueryClient();
+  const { save, query } = usePreferences();
 
   const userId = userIdFromVoiceIdentity(identity);
   const stored = query.data?.user_volumes?.[userId];
@@ -45,8 +41,8 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
       const clamped = clampRemoteUserVolume(next);
 
       // Push the live value into the mixer immediately so the change is
-      // audible while the user drags — no debounce, no waiting on the
-      // remote prefs save.
+      // audible while the user drags. The prefs save below is throttled,
+      // but the mixer update is not.
       invoke("set_remote_user_volume", { userId, volume: clamped }).catch(
         (e) => {
           console.warn(
@@ -56,9 +52,6 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
         },
       );
 
-      // Persist via the existing preferences blob. Optimistically update
-      // the React Query cache so other reads see the new value before the
-      // round-trip resolves.
       const prev: PreferencesData = query.data ?? {};
       const prevVolumes = prev.user_volumes ?? {};
       const nextVolumes: { [userId: string]: number } = { ...prevVolumes };
@@ -72,15 +65,9 @@ export const RemoteUserVolumeSlider: React.FC<RemoteUserVolumeSliderProps> = ({
         user_volumes:
           Object.keys(nextVolumes).length > 0 ? nextVolumes : undefined,
       };
-      if (currentUser) {
-        queryClient.setQueryData(
-          ["user", "preferences", currentUser.id],
-          nextPrefs,
-        );
-      }
-      mutation.mutate(nextPrefs);
+      save(nextPrefs);
     },
-    [userId, mutation, query.data, queryClient, currentUser],
+    [userId, save, query.data],
   );
 
   const pct =

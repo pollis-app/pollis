@@ -389,15 +389,13 @@ export const AppShell: React.FC = () => {
       {/* On chat screens, invert: dark bg with accent text. Otherwise: accent bg with dark text. */}
       <div
         style={{
-          height: 28,
           flexShrink: 0,
           borderTop: "1px solid var(--c-border)",
           background: isChatScreen ? "var(--c-bg)" : "var(--c-accent)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingLeft: 12,
-          paddingRight: 12,
+          padding: "8px 10px",
         }}
       >
         <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />

@@ -371,11 +371,16 @@ pub async fn ingest_channel_envelopes_inner(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Resolve mls_group_id — all channels in a group share one MLS group.
+    // Single round-trip: resolve mls_group_id AND confirm membership. Returns
+    // a row only when the channel exists and the user is a member; otherwise
+    // short-circuit so the read path falls back to whatever is local.
     let mls_group_id: String = {
         let mut rows = conn.query(
-            "SELECT group_id FROM channels WHERE id = ?1",
-            libsql::params![channel_id.to_string()],
+            "SELECT c.group_id FROM channels c
+             JOIN group_member gm ON gm.group_id = c.group_id
+             WHERE c.id = ?1 AND gm.user_id = ?2
+             LIMIT 1",
+            libsql::params![channel_id.to_string(), user_id.to_string()],
         ).await?;
         match rows.next().await? {
             Some(row) => row.get::<String>(0)?,
@@ -383,46 +388,37 @@ pub async fn ingest_channel_envelopes_inner(
         }
     };
 
-    // Non-members have no MLS key material, no business creating a watermark
-    // row, and would just block cleanup. Short-circuit here so the read path
-    // falls back to whatever is already in local.
-    let is_member: bool = {
-        let mut rows = conn.query(
-            "SELECT 1 FROM group_member
-             WHERE group_id = ?1 AND user_id = ?2
-             LIMIT 1",
-            libsql::params![mls_group_id.clone(), user_id.to_string()],
-        ).await?;
-        rows.next().await?.is_some()
-    };
-    if !is_member {
-        return Ok(());
-    }
+    let device_id = state.device_id.lock().await.clone();
 
     // Advance MLS epoch before decryption so pre-ingest-window commits apply.
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, &did).await {
-                eprintln!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
-            }
+    if let Some(ref did) = device_id {
+        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
+            eprintln!("[ingest] poll_mls_welcomes for {mls_group_id}: {e}");
         }
     }
     if let Err(e) = crate::commands::mls::process_pending_commits_inner(state, &mls_group_id, user_id).await {
         eprintln!("[ingest] process_pending_commits for {mls_group_id}: {e}");
     }
 
-    // Pull every envelope for this conversation (message + edit), oldest-first.
-    // Ordering is critical so MLS decryption sees epochs in the order they were
-    // committed and the watermark stops at the first decrypt failure.
+    // Pull only envelopes past this device's watermark. Steady state returns
+    // zero rows. Empty-string COALESCE handles the no-watermark-yet case
+    // (first ingest for this conversation on this device). Ordering by
+    // sent_at ASC is critical so MLS decryption sees epochs in commit order
+    // and the watermark stops at the first decrypt failure.
     let envelopes: Vec<(String, String, String, Option<String>, Option<String>, String, String)> = {
         let mut out = Vec::new();
+        let did_param = device_id.clone().unwrap_or_default();
         let mut rows = conn.query(
             "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
              FROM message_envelope
              WHERE conversation_id = ?1
+               AND sent_at > COALESCE(
+                   (SELECT last_fetched_at FROM conversation_watermark
+                    WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3),
+                   ''
+               )
              ORDER BY sent_at ASC, id ASC",
-            libsql::params![channel_id.to_string()],
+            libsql::params![channel_id.to_string(), user_id.to_string(), did_param],
         ).await?;
         while let Some(row) = rows.next().await? {
             out.push((
@@ -445,18 +441,15 @@ pub async fn ingest_channel_envelopes_inner(
         &envelopes,
     ).await?;
 
-    if let Some(ts) = watermark_ts {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = conn.execute(
-                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-                libsql::params![channel_id.to_string(), user_id.to_string(), did, ts],
-            ).await {
-                eprintln!("[watermark] ingest_channel: upsert failed: {e}");
-            }
+    if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![channel_id.to_string(), user_id.to_string(), did.clone(), ts],
+        ).await {
+            eprintln!("[watermark] ingest_channel: upsert failed: {e}");
         }
     }
 
@@ -708,6 +701,142 @@ async fn attach_sender_usernames(
     Ok(())
 }
 
+/// Attach sender usernames from the local `user_cache` table; for any
+/// sender_ids missing from the cache, do one batched remote fetch and
+/// write the results back. After the first read of a channel/DM, the
+/// cache is warm and subsequent reads are zero-remote.
+async fn attach_sender_usernames_local(
+    state: &Arc<AppState>,
+    messages: &mut [ChannelMessage],
+) -> Result<()> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+
+    let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for m in messages.iter() {
+        ids.insert(m.sender_id.clone());
+    }
+    let ids_vec: Vec<String> = ids.into_iter().collect();
+
+    let mut found: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let missing: Vec<String> = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let placeholders = (1..=ids_vec.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT id, username FROM user_cache WHERE id IN ({placeholders})");
+        let mut stmt = db.conn().prepare(&sql)?;
+        let mapped = stmt.query_map(rusqlite::params_from_iter(ids_vec.iter()), |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for r in mapped {
+            if let Ok((id, name)) = r {
+                found.insert(id, name);
+            }
+        }
+        ids_vec.iter().filter(|i| !found.contains_key(*i)).cloned().collect()
+    };
+
+    if !missing.is_empty() {
+        let placeholders = (1..=missing.len())
+            .map(|i| format!("?{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!("SELECT id, username FROM users WHERE id IN ({placeholders})");
+        let params: Vec<libsql::Value> = missing
+            .iter()
+            .map(|s| libsql::Value::Text(s.clone()))
+            .collect();
+        let conn = state.remote_db.conn().await?;
+        match conn.query(&sql, libsql::params_from_iter(params)).await {
+            Ok(mut rows) => {
+                let mut fetched: Vec<(String, String)> = Vec::new();
+                while let Some(row) = rows.next().await? {
+                    let id: String = row.get(0)?;
+                    let name: String = row.get(1)?;
+                    fetched.push((id.clone(), name.clone()));
+                    found.insert(id, name);
+                }
+                drop(rows);
+                if !fetched.is_empty() {
+                    let guard = state.local_db.lock().await;
+                    if let Some(db) = guard.as_ref() {
+                        for (id, name) in &fetched {
+                            let _ = db.conn().execute(
+                                "INSERT INTO user_cache (id, username, updated_at) VALUES (?1, ?2, datetime('now'))
+                                 ON CONFLICT(id) DO UPDATE SET username = ?2, updated_at = datetime('now')",
+                                rusqlite::params![id, name],
+                            );
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                // Offline or transient — leave the missing names as None.
+                // Next ingest / read while online will fill them in.
+                eprintln!("[messages] attach_sender_usernames_local: remote fallback failed: {e}");
+            }
+        }
+    }
+
+    for m in messages.iter_mut() {
+        m.sender_username = found.get(&m.sender_id).cloned();
+    }
+    Ok(())
+}
+
+/// Local-only read of a channel page. Does NOT trigger ingest — callers
+/// fire `ingest_channel_envelopes` separately, off the critical render
+/// path. Usernames come from the local `user_cache` (with a one-shot
+/// remote fallback for cache misses, see `attach_sender_usernames_local`).
+pub async fn read_channel_messages(
+    channel_id: String,
+    limit: Option<i64>,
+    cursor: Option<MessageCursor>,
+    state: &Arc<AppState>,
+) -> Result<MessagePage> {
+    let limit = limit.unwrap_or(50);
+    let mut messages = read_local_channel_page(state, &channel_id, &cursor, limit).await?;
+    attach_sender_usernames_local(state, &mut messages).await?;
+
+    let next_cursor = if messages.len() == limit as usize {
+        messages.last().map(|m| MessageCursor {
+            sent_at: m.sent_at.clone(),
+            id: m.id.clone(),
+        })
+    } else {
+        None
+    };
+
+    Ok(MessagePage { messages, next_cursor })
+}
+
+/// Local-only read of a DM page. Mirrors `read_channel_messages`.
+pub async fn read_dm_messages(
+    dm_channel_id: String,
+    limit: Option<i64>,
+    cursor: Option<MessageCursor>,
+    state: &Arc<AppState>,
+) -> Result<MessagePage> {
+    let limit = limit.unwrap_or(50);
+    let mut messages = read_local_channel_page(state, &dm_channel_id, &cursor, limit).await?;
+    attach_sender_usernames_local(state, &mut messages).await?;
+
+    let next_cursor = if messages.len() == limit as usize {
+        messages.last().map(|m| MessageCursor {
+            sent_at: m.sent_at.clone(),
+            id: m.id.clone(),
+        })
+    } else {
+        None
+    };
+
+    Ok(MessagePage { messages, next_cursor })
+}
+
 /// Frontend-triggerable ingest for a channel. Used by LiveKit real-time hints
 /// and channel-focus pre-warm paths that want to persist new envelopes without
 /// reading a page.
@@ -795,26 +924,32 @@ pub async fn ingest_dm_envelopes_inner(
         return Ok(());
     }
 
-    {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, &did).await {
-                eprintln!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
-            }
+    let device_id = state.device_id.lock().await.clone();
+
+    if let Some(ref did) = device_id {
+        if let Err(e) = crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await {
+            eprintln!("[ingest] poll_mls_welcomes for DM {dm_channel_id}: {e}");
         }
     }
     if let Err(e) = crate::commands::mls::process_pending_commits_inner(state, dm_channel_id, user_id).await {
         eprintln!("[ingest] process_pending_commits for DM {dm_channel_id}: {e}");
     }
 
+    // Watermark-filtered envelope read — see ingest_channel_envelopes_inner.
     let envelopes: Vec<(String, String, String, Option<String>, Option<String>, String, String)> = {
         let mut out = Vec::new();
+        let did_param = device_id.clone().unwrap_or_default();
         let mut rows = conn.query(
             "SELECT id, sender_id, ciphertext, reply_to_id, target_message_id, sent_at, type
              FROM message_envelope
              WHERE conversation_id = ?1
+               AND sent_at > COALESCE(
+                   (SELECT last_fetched_at FROM conversation_watermark
+                    WHERE conversation_id = ?1 AND user_id = ?2 AND device_id = ?3),
+                   ''
+               )
              ORDER BY sent_at ASC, id ASC",
-            libsql::params![dm_channel_id.to_string()],
+            libsql::params![dm_channel_id.to_string(), user_id.to_string(), did_param],
         ).await?;
         while let Some(row) = rows.next().await? {
             out.push((
@@ -837,18 +972,15 @@ pub async fn ingest_dm_envelopes_inner(
         &envelopes,
     ).await?;
 
-    if let Some(ts) = watermark_ts {
-        let device_id = state.device_id.lock().await.clone();
-        if let Some(did) = device_id {
-            if let Err(e) = conn.execute(
-                "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-                   last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-                libsql::params![dm_channel_id.to_string(), user_id.to_string(), did, ts],
-            ).await {
-                eprintln!("[watermark] ingest_dm: upsert failed: {e}");
-            }
+    if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
+        if let Err(e) = conn.execute(
+            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string(), did.clone(), ts],
+        ).await {
+            eprintln!("[watermark] ingest_dm: upsert failed: {e}");
         }
     }
 
