@@ -154,12 +154,18 @@ impl AppState {
         }
 
         *self.local_db.lock().await = Some(db);
+        // Scope the media cache to this user. Two clients on the same machine
+        // (dev workflow) otherwise share `app_data_dir/media-cache` but each
+        // has its own db_key, so client B can't decrypt client A's cache
+        // entries and the media server returns 500.
+        crate::commands::r2::set_cache_user(Some(user_id));
         Ok(())
     }
 
     /// Close the current user's database (called on logout).
     pub async fn unload_user_db(&self) {
         *self.local_db.lock().await = None;
+        crate::commands::r2::set_cache_user(None);
     }
 
     pub fn check_not_outdated(&self) -> crate::error::Result<()> {

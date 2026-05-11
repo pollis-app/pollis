@@ -34,6 +34,20 @@ pub const MEDIA_CACHE_MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
 /// Set once at app startup from the Tauri shim (`app_data_dir()`).
 static MEDIA_CACHE_DIR: OnceLock<PathBuf> = OnceLock::new();
 
+/// Per-user scope for the cache. Two clients on the same machine each have
+/// their own `db_key`; without per-user scoping they'd share `MEDIA_CACHE_DIR`
+/// and try (and fail) to decrypt each other's entries — 500 from the media
+/// server. Set after sign-in via `set_cache_user(Some(user_id))`, cleared on
+/// logout via `set_cache_user(None)`. The pre-signin window falls back to a
+/// shared "_anon" bucket.
+static CURRENT_CACHE_USER: StdMutex<Option<String>> = StdMutex::new(None);
+
+pub fn set_cache_user(user_id: Option<&str>) {
+    if let Ok(mut guard) = CURRENT_CACHE_USER.lock() {
+        *guard = user_id.map(|s| s.to_string());
+    }
+}
+
 /// Per-hash locks so concurrent callers for the same content_hash share one
 /// download instead of racing to write the same file. The outer mutex guards
 /// the map; the inner `Arc<TokioMutex>` is the actual gate.
@@ -50,11 +64,18 @@ pub fn set_media_cache_dir(path: PathBuf) {
     let _ = MEDIA_CACHE_DIR.set(path);
 }
 
-fn media_cache_dir() -> Result<&'static Path> {
-    MEDIA_CACHE_DIR
+fn media_cache_dir() -> Result<PathBuf> {
+    let root = MEDIA_CACHE_DIR
         .get()
-        .map(|p| p.as_path())
-        .ok_or_else(|| Error::Other(anyhow::anyhow!("media cache dir not initialised")))
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("media cache dir not initialised")))?;
+    let user = CURRENT_CACHE_USER
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(|| "_anon".to_string());
+    let path = root.join(user);
+    let _ = std::fs::create_dir_all(&path);
+    Ok(path)
 }
 
 /// Map a MIME type to a file extension. Falls back to `bin`. Kept small —
@@ -117,8 +138,8 @@ pub fn content_type_for_ext(ext: &str) -> &'static str {
 /// caller can derive a Content-Type. `None` if no file with this hash
 /// exists in the cache.
 pub fn find_cached_file(content_hash: &str) -> Option<(PathBuf, String)> {
-    let dir = MEDIA_CACHE_DIR.get()?;
-    let entries = std::fs::read_dir(dir).ok()?;
+    let dir = media_cache_dir().ok()?;
+    let entries = std::fs::read_dir(&dir).ok()?;
     let prefix = format!("{content_hash}.");
     for entry in entries.flatten() {
         let path = entry.path();
@@ -192,19 +213,19 @@ fn enforce_cache_cap_to(dir: &Path, target_bytes: u64) {
 /// Public re-evaluation entry point — call from app focus to defend
 /// against external file copies / mtime tampering / cap-config changes.
 pub fn enforce_cache_cap_now() {
-    if let Some(dir) = MEDIA_CACHE_DIR.get() {
-        enforce_cache_cap(dir);
+    if let Ok(dir) = media_cache_dir() {
+        enforce_cache_cap(&dir);
     }
 }
 
 /// Sum of all cached file sizes. Used to gate downloads against the cap
 /// *before* writing new bytes, so the cache never peaks above the cap.
 pub fn cache_total_bytes() -> u64 {
-    let dir = match MEDIA_CACHE_DIR.get() {
-        Some(d) => d,
-        None => return 0,
+    let dir = match media_cache_dir() {
+        Ok(d) => d,
+        Err(_) => return 0,
     };
-    let entries = match std::fs::read_dir(dir) {
+    let entries = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(_) => return 0,
     };
@@ -225,11 +246,11 @@ pub fn cache_total_bytes() -> u64 {
 /// lifecycle as the keystore unlock. The directory itself stays so a
 /// subsequent re-login doesn't have to re-create it.
 pub fn clear_media_cache() {
-    let dir = match MEDIA_CACHE_DIR.get() {
-        Some(d) => d,
-        None => return,
+    let dir = match media_cache_dir() {
+        Ok(d) => d,
+        Err(_) => return,
     };
-    let entries = match std::fs::read_dir(dir) {
+    let entries = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(_) => return,
     };
@@ -578,7 +599,7 @@ pub async fn get_media_url(
     }
 
     let dir = media_cache_dir()?;
-    if let Err(e) = std::fs::create_dir_all(dir) {
+    if let Err(e) = std::fs::create_dir_all(&dir) {
         in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
         return Err(Error::Other(anyhow::anyhow!("create cache dir: {e}")));
     }
@@ -610,7 +631,7 @@ pub async fn get_media_url(
     let new_size = encrypted.len() as u64;
     let total = cache_total_bytes();
     if total.saturating_add(new_size) > MEDIA_CACHE_MAX_BYTES {
-        enforce_cache_cap_to(dir, MEDIA_CACHE_MAX_BYTES.saturating_sub(new_size));
+        enforce_cache_cap_to(&dir, MEDIA_CACHE_MAX_BYTES.saturating_sub(new_size));
     }
 
     // Atomic write: <hash>.<ext>.enc.tmp → rename → <hash>.<ext>.enc.
@@ -631,7 +652,7 @@ pub async fn get_media_url(
         return Err(Error::Other(anyhow::anyhow!("rename cache tmp: {e}")));
     }
 
-    enforce_cache_cap(dir);
+    enforce_cache_cap(&dir);
 
     in_flight().lock().expect("in-flight map poisoned").remove(&content_hash);
     Ok(url)
