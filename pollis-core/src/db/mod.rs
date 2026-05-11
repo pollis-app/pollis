@@ -15,6 +15,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "user_preferred_name",
         include_str!("migrations/000001_user_preferred_name.sql"),
     ),
+    (
+        2,
+        "index_gm_user_and_channels_group",
+        include_str!("migrations/000002_index_gm_user_and_channels_group.sql"),
+    ),
 ];
 
 pub mod queries {
