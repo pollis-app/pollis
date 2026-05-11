@@ -164,7 +164,7 @@ export const VoiceSettingsPage: React.FC = () => {
    */
   const savePrefsAndPushApm = (patch: Partial<PreferencesData>) => {
     const next: PreferencesData = { ...preferences.query.data, ...patch };
-    preferences.mutation.mutate(next);
+    preferences.save(next);
     void pushApmConfig(preferencesToApmConfig(next));
   };
 
@@ -177,7 +177,7 @@ export const VoiceSettingsPage: React.FC = () => {
 
   const autoJoinVoice = preferences.query.data?.auto_join_voice ?? false;
   const handleAutoJoinVoice = (enabled: boolean) => {
-    preferences.mutation.mutate({ ...preferences.query.data, auto_join_voice: enabled });
+    preferences.save({ ...preferences.query.data, auto_join_voice: enabled });
   };
 
   return (

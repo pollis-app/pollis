@@ -46,7 +46,7 @@ export const Preferences: React.FC = () => {
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
-  const { query, mutation } = usePreferences();
+  const { query, save: savePrefs } = usePreferences();
 
   // Apply saved preferences on first load
   useEffect(() => {
@@ -115,7 +115,7 @@ export const Preferences: React.FC = () => {
     // local value back to the remote on every save.
     const { font_size: _legacyFontSize, ...rest } = query.data ?? {};
     void _legacyFontSize;
-    mutation.mutate({
+    savePrefs({
       ...rest,
       accent_color: accentHex,
       background_color: bgHex,
@@ -123,7 +123,7 @@ export const Preferences: React.FC = () => {
       allow_sound_effects: sfx,
       sidebar_open_by_default: sidebar,
     });
-  }, [mutation, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault]);
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
