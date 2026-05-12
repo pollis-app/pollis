@@ -5718,6 +5718,7 @@ dependencies = [
  "cocoa",
  "dotenvy",
  "image",
+ "libc",
  "libsql",
  "objc",
  "openmls",

@@ -425,30 +425,39 @@ fn macos_first_device(host: &cpal::Host, is_input: bool) -> Option<cpal::Device>
 
 #[cfg(target_os = "macos")]
 fn macos_lookup_any_scope(host: &cpal::Host, name: &str, is_input: bool) -> Option<cpal::Device> {
-    // Scope-agnostic scan first. cpal's scoped enumeration filters by
-    // supported_*_configs() — that's exactly the filter that already
-    // excluded the device, so don't re-apply it here. Return the device
-    // by name and let the stream-build attempt produce a real error if
-    // the device truly can't service this direction.
+    // Multiple AudioObjects can share a name (system-level objects, aggregate
+    // devices, BlackHole virtual devices). Returning the first name-match
+    // unconditionally can hand back a stub Device that hangs inside
+    // default_input_config() / default_output_config(). Direction-validate
+    // each candidate via supported_*_configs() and skip anything that
+    // doesn't report a usable stream for the requested scope.
+    let supports = |d: &cpal::Device| -> bool {
+        if is_input {
+            d.supported_input_configs().map(|mut c| c.next().is_some()).unwrap_or(false)
+        } else {
+            d.supported_output_configs().map(|mut c| c.next().is_some()).unwrap_or(false)
+        }
+    };
     if let Ok(all) = host.devices() {
         for d in all {
-            if d.name().ok().as_deref() == Some(name) {
+            if d.name().ok().as_deref() == Some(name) && supports(&d) {
                 eprintln!(
-                    "[voice] macOS: found '{name}' via host.devices() fallback ({} requested)",
+                    "[voice] macOS: found '{name}' via host.devices() fallback ({} validated)",
                     if is_input { "input" } else { "output" }
                 );
                 return Some(d);
             }
         }
     }
-    // Opposite scope as last resort: AirPods in HFP can appear only in the
-    // input list while still capable of output (or vice versa).
+    // Opposite-scope last resort: AirPods in HFP can appear only in the input
+    // list while still capable of output (or vice versa). Still direction-
+    // validate so we don't hand back a stub.
     let opposite = if is_input { host.output_devices().ok() } else { host.input_devices().ok() };
     if let Some(it) = opposite {
         for d in it {
-            if d.name().ok().as_deref() == Some(name) {
+            if d.name().ok().as_deref() == Some(name) && supports(&d) {
                 eprintln!(
-                    "[voice] macOS: found '{name}' via opposite-scope enumeration ({} requested)",
+                    "[voice] macOS: found '{name}' via opposite-scope enumeration ({} validated)",
                     if is_input { "input" } else { "output" }
                 );
                 return Some(d);

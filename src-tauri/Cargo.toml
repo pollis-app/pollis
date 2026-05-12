@@ -80,6 +80,13 @@ openmls_basic_credential = "0.5"
 tls_codec = "0.4"
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
 
+[target.'cfg(unix)'.dependencies]
+# setrlimit(RLIMIT_NOFILE, ...) at startup so we don't hit the macOS default
+# soft FD cap (256) once realtime rooms + libsql + reqwest pools + CoreAudio
+# AudioUnits start consuming descriptors. Already a transitive dep; pinned
+# here so the import in lib.rs resolves.
+libc = "0.2"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_38"] }
 
