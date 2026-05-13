@@ -6,11 +6,10 @@
 	<string>alert</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Pollis needs microphone access for voice channels</string>
-	<!-- Required for screen sharing via ScreenCaptureKit on macOS 12.3+.
-	     Note: TCC permission for screen recording does not inherit from
-	     the parent process to subprocess helpers, so the actual capture
-	     helper binary will need its own bundle and Info.plist with the
-	     same key set when the macOS path lands. -->
+	<!-- Screen sharing on macOS uses ScreenCaptureKit in-process; TCC
+	     prompts the user on first capture attempt. macOS uses its own
+	     system message regardless of this key on most OS versions, but
+	     having it set is harmless and recommended by Apple's docs. -->
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Pollis needs screen recording access to share your screen in voice channels</string>
 </dict>
