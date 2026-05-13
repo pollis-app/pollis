@@ -13,7 +13,7 @@ For deeper, file-anchored documentation see `.codesight/wiki/index.md`. For the 
 | Desktop shell | Tauri 2 (Rust backend + WebKit-based webview frontend) |
 | Frontend | React + TypeScript, Vite, TailwindCSS, TanStack Router (memory history), TanStack Query, Zustand (UI state only) |
 | Backend | Rust, Tauri commands invoked via `invoke()` from the frontend |
-| End-to-end encryption | MLS (RFC 9420) via OpenMLS 0.8 |
+| End-to-end encryption | MLS (RFC 9420) via OpenMLS 0.8 for messages and files; AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` for voice, keyed by the MLS group's exporter secret |
 | Remote DB | Turso (libSQL) via `libsql` 0.6, native Hrana/HTTP2 protocol over TLS |
 | Local DB | SQLite via `rusqlite` 0.31 with bundled SQLCipher; per-user file `pollis_{user_id}.db` |
 | Auth | Email OTP (Resend) + 4-digit per-user local PIN unlocking PIN-wrapped key blobs in the OS keystore |
@@ -28,7 +28,7 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 
 ## Core Principles
 
-1. **End-to-end encrypted messaging.** All message content is MLS-encrypted on the device before it leaves; the server never sees plaintext.
+1. **End-to-end encrypted messaging, files, and voice.** All message content is MLS-encrypted on the device before it leaves; the server never sees plaintext. Files are convergent-encrypted with the key delivered inside the MLS-encrypted message. Voice frames are AES-128-GCM-encrypted by libwebrtc's `FrameCryptor`, keyed by the channel's MLS-exporter secret, so the LiveKit SFU forwards ciphertext only.
 2. **Zero-knowledge server.** Turso stores ciphertext envelopes, public MLS material, and metadata. It cannot read messages or recover any private key.
 3. **Direct to Turso.** The Tauri backend opens a libSQL connection directly to Turso — there is no intermediate API server. All business logic runs in the Tauri Rust process.
 4. **Local-first secrets.** Private keys, MLS group state, and decrypted plaintext only exist on the user's device. Disk copies are protected by SQLCipher (local DB) and Argon2id-derived AEAD wrapping (keystore).
@@ -49,11 +49,11 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
        ▼                                                    │ business logic runs inside
 ┌────────────────┐   ┌──────────────┐   ┌────────────────┐  │ the Tauri process
 │ Turso          │   │ Cloudflare R2│   │ LiveKit (SFU)  │  │
-│ (metadata,     │   │ (encrypted   │   │ (signalling +  │ ─┘
-│ ciphertext,    │   │ attachments, │   │ voice plaintext│
-│ MLS commit log,│   │ avatars)     │   │ at SFU)        │
-│ welcomes,      │   └──────────────┘   └────────────────┘
-│ GroupInfo)     │
+│ (metadata,     │   │ (encrypted   │   │ (signalling + │ ─┘
+│ ciphertext,    │   │ attachments, │   │ voice frames   │
+│ MLS commit log,│   │ avatars)     │   │ AES-GCM        │
+│ welcomes,      │   └──────────────┘   │ E2EE at SFU)   │
+│ GroupInfo)     │                      └────────────────┘
 └────────────────┘
 ```
 
@@ -218,7 +218,7 @@ What the server can see: user metadata, social graph, encrypted message envelope
 
 What the server cannot see: message plaintext, MLS application secrets, attachment plaintext, account-identity private keys, the PIN, the Secret Key, the SQLCipher key.
 
-Voice traffic is **not** end-to-end encrypted: LiveKit acts as an SFU and sees plaintext audio. This is consistent with Slack Huddles, Discord, Microsoft Teams, and Google Meet, and is the largest deviation between Pollis' messaging-side and media-side cryptographic guarantees. See `docs/security-whitepaper.md` § 10 for details and § 13 for the full list of known gaps.
+Voice traffic is end-to-end encrypted at the frame level: each audio frame is AES-128-GCM-encrypted by libwebrtc's `FrameCryptor` post-Opus / pre-SRTP, keyed by a 32-byte secret derived from the channel's MLS group via `MlsGroup::export_secret("pollis/voice/v1", epoch, 32)`. LiveKit acts as an SFU but forwards ciphertext only — it never sees plaintext audio. The same shape Discord ships in their 2024 DAVE protocol. See `docs/security-whitepaper.md` § 10.2 for the full design and `pollis-core/src/commands/voice_e2ee.rs` for the implementation.
 
 ---
 

@@ -1,5 +1,21 @@
 # Pollis Voice Channel — Minimal Viable Spec
 
+> **Status: historical.** This document is the pre-shipping design spec from
+> when voice channels were first being scoped. The feature has since shipped
+> and the implementation diverged from this spec in two material ways:
+>
+> 1. Section 6 below proposed shipping v1 *without* audio E2EE. We did not
+>    do that. Voice is end-to-end encrypted in production: per-frame
+>    AES-128-GCM via libwebrtc's `FrameCryptor`, keyed by
+>    `MlsGroup::export_secret("pollis/voice/v1", epoch, 32)` on the
+>    channel's MLS group. See `pollis-core/src/commands/voice_e2ee.rs` and
+>    the "End-to-end encryption" section of
+>    `.codesight/wiki/audio-processing.md`.
+> 2. Group encryption is MLS (RFC 9420) via `openmls`, not the Signal
+>    Protocol referenced throughout the doc.
+>
+> Kept for institutional context. For current behavior, read the wiki.
+
 ## 0. Context and starting point
 
 LiveKit is already wired in. Every channel already has a LiveKit room named after its `channel_id`. The frontend connects to that room when a channel is selected (`useLiveKitRealtime`), using a JWT minted by `get_livekit_token`. The JWT grants `canPublish`, `canSubscribe`, and `canPublishData`. Audio tracks are not yet published; only data channel pings flow today.
@@ -186,7 +202,14 @@ Same JWT works for both. Two connections to the same room is acceptable for v1 a
 
 ## 6. E2EE considerations for audio
 
-### Recommendation for v1: ship without audio E2EE
+> **Superseded.** The "v1 without E2EE" recommendation below was not what
+> shipped. Production wires `livekit::e2ee::E2eeOptions { Gcm, KeyProvider }`
+> into `RoomOptions` at `Room::connect` time, with the shared key derived
+> from `MlsGroup::export_secret("pollis/voice/v1", epoch, 32)` on the
+> channel's MLS group. The key rotates on every MLS epoch advance (both for
+> committers and receivers). Source: `pollis-core/src/commands/voice_e2ee.rs`.
+
+### Original recommendation (not shipped): v1 without audio E2EE
 
 LiveKit supports frame-level E2EE via `E2EEManager` (WebCrypto), but:
 
@@ -195,9 +218,7 @@ LiveKit supports frame-level E2EE via `E2EEManager` (WebCrypto), but:
 - Practical threat: Pollis's own LiveKit server would need to be actively recording streams — substantially different from the Turso text interception scenario
 - Transport is TLS-encrypted to LiveKit in transit
 
-**v1 position**: Audio is transport-encrypted (TLS) but not end-to-end encrypted. Document clearly with a small `[voice: server-encrypted]` indicator in `VoiceBar`.
-
-**v2 path**: Implement `ExternalE2EE` key provider backed by a HKDF-derived key from a Signal double-ratchet shared secret negotiated at call join time.
+**What actually shipped**: per-frame AES-128-GCM via libwebrtc's `FrameCryptor`, keyed by the MLS exporter secret on the channel's MLS group (the same group that protects the channel's text messages). For 1:1 calls, the key derives from the DM's MLS group between the two participants. There is no opt-out and no UI indicator — all communication is encrypted.
 
 ---
 
@@ -205,7 +226,7 @@ LiveKit supports frame-level E2EE via `E2EEManager` (WebCrypto), but:
 
 | Feature | Reason |
 |---|---|
-| Audio E2EE | Key distribution complexity; different threat model |
+| ~~Audio E2EE~~ | Shipped in v1, not deferred. See §6 above. |
 | Push-to-talk | Requires hotkey capture in Tauri |
 | Incoming call ring | Needs notification system not yet built |
 | Voice in DMs | DMs don't have `channel_type` today |
