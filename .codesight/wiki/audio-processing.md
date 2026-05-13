@@ -51,8 +51,39 @@ sync with what actually comes out of the speaker.
 - `pollis-core/src/commands/voice_apm.rs` — `ApmStage`, `ApmConfig`, helpers (`run_capture`, `analyze_render`).
 - `pollis-core/src/commands/voice_denoiser.rs` — `DenoiserStage` wrapping `nnnoiseless::DenoiseState`. 48 kHz only.
 - `pollis-core/src/commands/voice.rs` — pipeline wiring: `start_mic_stream`, `start_speaker_stream`, `run_drain_task`, `run_mixer_task`, `ensure_playback`, `register_remote_track`. Tauri commands `join_voice_channel` / `set_voice_audio_processing` / `set_voice_input_device` / `set_voice_output_device`.
+- `pollis-core/src/commands/voice_e2ee.rs` — derives the per-room shared symmetric key from the channel's MLS exporter secret (`MlsGroup::export_secret("pollis/voice/v1", epoch, 32)`), builds the `livekit::e2ee::E2eeOptions` passed into `Room::connect`, and rotates the live `KeyProvider` on MLS epoch advance.
 - `frontend/src/hooks/queries/usePreferences.ts` — `ApmConfig`, `preferencesToApmConfig`, `APM_DEFAULTS`.
 - `frontend/src/pages/VoiceSettingsPage.tsx` — UI surface (mic boost slider, AGC switch + target slider, NS dropdown, AEC switch, Click Suppression switch). Mid-call changes push via `set_voice_audio_processing`.
+
+## End-to-end encryption
+
+Voice frames are E2EE between current MLS members of the channel/DM. LiveKit's
+SFU forwards ciphertext; no server (LiveKit, Pollis, or otherwise) can decrypt.
+
+- Encryption is per-frame **post-Opus / pre-SRTP**, performed by libwebrtc's
+  native `FrameCryptor` (AES-GCM). Opus compresses normal PCM; the cryptor
+  acts on the encoded RTP payload, so audio quality and bandwidth are
+  unchanged. RTP headers stay readable so the SFU can still route.
+- Key derivation: `MlsGroup::export_secret("pollis/voice/v1", epoch.to_be_bytes(), 32)`
+  on the channel's MLS group (the same group its messages use). Both peers
+  derive the same 32-byte key because both have the same exporter secret at
+  the same epoch.
+- Channel → MLS-group resolution mirrors `messages::send_message`: a row in
+  `channels` means a group channel (use `channels.group_id`); no row means a
+  DM whose `conversation_id` IS the MLS group id.
+- Key index = `(epoch & 0x7FFFFFFF) as i32`. KeyProvider's 16-entry key ring
+  handles wrap; peers stay in sync because both compute the index from the
+  same epoch.
+- Rotation: when `mls::process_pending_commits_inner` applies a commit (the
+  epoch advances), `voice_e2ee::on_mls_epoch_changed` re-derives the key and
+  calls `KeyProvider::set_shared_key(new_key, new_index)`. No reconnect; the
+  key ring keeps the previous key briefly so in-flight frames decrypt during
+  the changeover. Event-driven (no polling).
+- Always on. There is no opt-out; the per-frame overhead is microseconds and
+  "sometimes-on" is a footgun.
+- Compatibility: defaults match `livekit-client` JS (`LKFrameEncryptionKey`
+  salt, PBKDF2, 16-key ring), so a future JS or mobile peer can interop if it
+  derives its key the same way.
 
 ## Sample-rate model
 

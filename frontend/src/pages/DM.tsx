@@ -73,7 +73,11 @@ export const DMPage: React.FC = () => {
         callerId: currentUser.id,
         callerUsername: currentUser.username ?? currentUser.id,
       });
-      voiceSession.setIntent({ channelId: result.room_name, groupId: null });
+      voiceSession.setIntent({
+        channelId: result.room_name,
+        groupId: null,
+        counterpartyUserId: otherUserId,
+      });
       navigate({ to: "/call/$callId", params: { callId: result.call_id } });
     } catch (err) {
       console.error("[call] start_call failed:", err);

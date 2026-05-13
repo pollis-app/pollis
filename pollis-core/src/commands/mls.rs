@@ -1479,6 +1479,10 @@ pub async fn process_pending_commits_inner(
         if let Err(e) = publish_group_info(state, mls_group_id).await {
             eprintln!("[mls] process_pending_commits: publish_group_info failed (non-fatal): {e}");
         }
+        // Voice E2EE: when the epoch advances for the MLS group currently
+        // backing the active voice room, re-derive the per-room key and
+        // rotate it on the live KeyProvider. No-op when voice is idle.
+        crate::commands::voice_e2ee::on_mls_epoch_changed(state, mls_group_id).await;
     }
 
     // If the group was deleted during processing (e.g. eviction),
@@ -2180,6 +2184,15 @@ pub async fn reconcile_group_mls_impl(
                 }
             }
         }
+    }
+
+    // Voice E2EE: the committer path also advances the local epoch (via
+    // `merge_pending_commit` inside `reconcile_group_mls_core`), so the
+    // rotation hook must fire here too — otherwise the user who invites or
+    // removes someone keeps publishing voice frames under the previous
+    // epoch's key while every other member has already rotated.
+    if outcome.epoch_after > outcome.epoch_before {
+        crate::commands::voice_e2ee::on_mls_epoch_changed(state, &conversation_id).await;
     }
 
     Ok(outcome)

@@ -15,6 +15,7 @@ use libwebrtc::{
     prelude::{AudioFrame, AudioSourceOptions, RtcAudioSource},
 };
 use livekit::{
+    e2ee::key_provider::KeyProvider,
     options::TrackPublishOptions,
     prelude::*,
     track::{LocalAudioTrack, LocalTrack, RemoteTrack},
@@ -29,6 +30,7 @@ use crate::{
         voice_apm,
         voice_apm::Processor as ApmProcessor,
         voice_denoiser,
+        voice_e2ee,
     },
     error::Result,
     state::AppState,
@@ -268,6 +270,15 @@ pub struct VoiceState {
     /// Most recent `join_voice_channel` timing record. Populated at the end
     /// of every successful join; read by `get_last_join_timings`.
     pub last_join_timings: Arc<Mutex<Option<JoinTimings>>>,
+    /// Live `KeyProvider` from `livekit::e2ee`, retained so MLS epoch
+    /// changes can rotate the shared key without rebuilding the room.
+    pub e2ee_key_provider: Option<KeyProvider>,
+    /// MLS group id whose exporter backs `e2ee_key_provider`. Used to match
+    /// epoch-change events for the currently-joined room.
+    pub e2ee_mls_group_id: Option<String>,
+    /// MLS epoch the current voice key was derived at. Suppresses duplicate
+    /// rotations and lets the rotation hook skip when nothing has changed.
+    pub e2ee_epoch: u64,
 }
 
 impl VoiceState {
@@ -288,6 +299,9 @@ impl VoiceState {
             denoiser: Arc::new(Mutex::new(None)),
             warmup: None,
             last_join_timings: Arc::new(Mutex::new(None)),
+            e2ee_key_provider: None,
+            e2ee_mls_group_id: None,
+            e2ee_epoch: 0,
         }
     }
 }
@@ -1034,6 +1048,10 @@ pub async fn join_voice_channel(
     input_device: Option<String>,
     output_device: Option<String>,
     audio_processing: voice_apm::ApmConfig,
+    // The other participant in a 1:1 call (`call-<ulid>` room). Required for
+    // those rooms because they have no DB row; ignored for group channels
+    // and DMs, which carry their MLS group id implicitly.
+    counterparty_user_id: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
     // Wall-clock anchor for `total_join_ms` and per-phase deltas.
@@ -1130,12 +1148,33 @@ pub async fn join_voice_channel(
 
     let input_device_clone = input_device.clone();
 
+    // Derive the per-room voice key from the channel's MLS exporter secret.
+    // Both peers compute the same key from the same (group, epoch) so the
+    // SFU never sees plaintext audio. Fails closed: if the local MLS group
+    // isn't ready, refuse to join rather than fall back to unencrypted.
+    let (voice_key, voice_key_index, voice_epoch, voice_mls_group_id) = voice_e2ee::derive_voice_key(
+        state,
+        &channel_id,
+        &user_id,
+        counterparty_user_id.as_deref(),
+    )
+    .await?;
+    let e2ee_options = voice_e2ee::build_e2ee_options(voice_key);
+    let key_provider_for_state = e2ee_options.key_provider.clone();
+    eprintln!(
+        "[voice] e2ee armed for {channel_id} (mls_group={voice_mls_group_id}, epoch={voice_epoch}, idx={voice_key_index})"
+    );
+
     let connect_started = Instant::now();
     let mic_started = Instant::now();
     eprintln!("[voice] connecting to room {channel_id} and opening mic in parallel…");
 
+    // `RoomOptions` is #[non_exhaustive] so build it via Default + field
+    // mutation rather than a struct literal.
+    let mut room_options = RoomOptions::default();
+    room_options.encryption = Some(e2ee_options);
     let connect_fut = async {
-        let r = Room::connect(&url, &token, RoomOptions::default()).await;
+        let r = Room::connect(&url, &token, room_options).await;
         let elapsed_ms = connect_started.elapsed().as_millis() as u64;
         (r, elapsed_ms)
     };
@@ -1509,6 +1548,9 @@ pub async fn join_voice_channel(
     voice.room_task = Some(room_task);
     voice.current_input_device = input_device;
     voice.apm = apm_stage;
+    voice.e2ee_key_provider = Some(key_provider_for_state);
+    voice.e2ee_mls_group_id = Some(voice_mls_group_id);
+    voice.e2ee_epoch = voice_epoch;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
 
     Ok(())
@@ -1555,6 +1597,9 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
         }
         voice.is_muted.store(false, Ordering::Relaxed);
         voice.current_input_device = None;
+        voice.e2ee_key_provider = None;
+        voice.e2ee_mls_group_id = None;
+        voice.e2ee_epoch = 0;
 
         voice.room.take()
     }; // voice lock released here

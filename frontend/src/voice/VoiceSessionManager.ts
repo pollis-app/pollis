@@ -41,6 +41,13 @@ export interface JoinTimings {
 export interface VoiceIntent {
   channelId: string;
   groupId: string | null;
+  /**
+   * The OTHER participant's user id when this is a 1:1 call (`call-<ulid>`
+   * room). Required for those rooms because their voice E2EE key is derived
+   * from the DM's MLS group between the two users, and the room itself has
+   * no DB row to look up. `null`/omitted for group channels and DMs.
+   */
+  counterpartyUserId?: string | null;
 }
 
 export type VoicePhase = 'idle' | 'joining' | 'joined' | 'leaving';
@@ -344,6 +351,7 @@ class VoiceSessionManager {
         inputDevice: input,
         outputDevice: output,
         audioProcessing,
+        counterpartyUserId: target.counterpartyUserId ?? null,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

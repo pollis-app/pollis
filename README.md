@@ -10,7 +10,7 @@ Messages are encrypted on your device using MLS (Messaging Layer Security) befor
 
 **Stack**
 - **Desktop**: Tauri 2 (Rust + React/TypeScript)
-- **Encryption**: MLS (Messaging Layer Security) for group channel encryption, AES-256-GCM
+- **Encryption**: MLS (Messaging Layer Security) for group channel encryption, AES-256-GCM. Voice channels are end-to-end encrypted too — per-frame AES-128-GCM via libwebrtc's `FrameCryptor`, keyed from the MLS group's exporter secret, so the LiveKit SFU forwards ciphertext only.
 - **Remote DB**: Turso (libSQL) — direct from the app, no middleman
 - **Local DB**: SQLite via rusqlite (encrypted at rest, key in OS keystore)
 - **Auth**: Email OTP, session stored in the OS keystore
@@ -19,7 +19,9 @@ Messages are encrypted on your device using MLS (Messaging Layer Security) befor
 
 ## Security model
 
-Message content and file attachments are encrypted on your device before they ever leave it. The server stores ciphertext it can never read — your messages and files are inaccessible to anyone operating the infrastructure. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
+Message content, file attachments, and voice audio are encrypted on your device before they ever leave it. The server stores ciphertext it can never read — your messages, files, and voice calls are inaccessible to anyone operating the infrastructure. Private keys never leave the device. Session tokens live in the OS keystore (macOS Keychain, Windows Credential Manager, Linux Secret Service), not on disk.
+
+Voice channels add a second layer of encryption on top of the standard DTLS-SRTP that protects the link to LiveKit. Each audio frame is AES-128-GCM encrypted by libwebrtc's `FrameCryptor` after Opus compression and before SRTP, keyed by a 32-byte secret derived from the channel's MLS group via `MlsGroup::export_secret`. The SFU routes RTP packets without being able to decode the payloads, the key rotates on every MLS epoch advance, and the design matches what `livekit-client` exposes as `setupE2EE` and what Discord ships as DAVE.
 
 Forward secrecy is provided by MLS's key schedule: each epoch advance rotates the group key material, and each message uses a unique derived key so compromising one doesn't expose past or future messages.
 

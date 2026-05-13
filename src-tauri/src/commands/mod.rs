@@ -20,4 +20,4 @@ pub mod voice_test;
 // Re-export pollis-core helper modules that have no #[tauri::command]
 // surface but are referenced by tests and by other shims under their
 // short paths (e.g. `crate::commands::voice_apm::ApmConfig`).
-pub use pollis_core::commands::{account_identity, voice_apm, voice_denoiser};
+pub use pollis_core::commands::{account_identity, voice_apm, voice_denoiser, voice_e2ee};
