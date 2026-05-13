@@ -27,7 +27,7 @@ Turso is the canonical store of *metadata*. It can observe, in plaintext: user r
 
 Turso cannot recover, by design: any message plaintext, any private key (the `account_id_key` is only present on the server in the form of a `account_recovery` blob whose key derivation input — the user's Secret Key — is never sent to the server), MLS group state, MLS application secrets, or attachment plaintext (R2 attachments are convergent-encrypted by the device before upload).
 
-LiveKit can see: real-time data-channel events (`new_message`, `membership_changed`, `enrollment_requested`, voice presence) — these payloads are JSON, not encrypted at the application layer; they are signalling, not message content. LiveKit also handles voice plaintext at the SFU (see §10).
+LiveKit can see: real-time data-channel events (`new_message`, `membership_changed`, `enrollment_requested`, voice presence) — these payloads are JSON, not encrypted at the application layer; they are signalling, not message content. Voice audio is forwarded by the SFU as ciphertext: every audio frame is encrypted with AES-128-GCM by libwebrtc's `FrameCryptor` before it leaves the device (see §10.2), so LiveKit operators see RTP routing metadata but not voice plaintext.
 
 R2 can see: opaque AEAD ciphertext at deterministic content-hash-derived keys. The plaintext, content-hash, and AEAD key are never on-wire to R2.
 
@@ -343,11 +343,29 @@ LiveKit uses room-scoped JWT tokens (`make_token`, `make_admin_token`):
 - HS256, 1-hour validity for participant tokens, 5-minute for admin tokens used by RoomService.
 - The signing secret (`LIVEKIT_API_SECRET`) is baked into the desktop binary. Same caveat as §8.1: any client can mint any token. Authorisation to join a particular room is therefore enforced at the *Pollis application* layer (`get_livekit_token` is only called for rooms the user has demonstrated membership of), not by LiveKit.
 
-### 10.2 Voice plaintext at the SFU
+### 10.2 Voice frame-level E2EE
 
-LiveKit is a Selective Forwarding Unit (SFU). Audio frames are encrypted on each peer-to-SFU hop using **DTLS-SRTP** (RFC 5763, RFC 5764) — the same primitive WebRTC uses everywhere — but the SFU sees plaintext audio frames in order to mix and forward. **Voice is not end-to-end encrypted in the sense of being unreadable to LiveKit operators.** This is the same architecture as Slack Huddles, Microsoft Teams, and Google Meet. **Discord voice differs:** since September 2024, Discord's DAVE protocol layers MLS-derived SFrame encryption on top of WebRTC so the SFU does *not* see plaintext audio or video. Pollis does not yet do this; the SFU sees plaintext.
+LiveKit is a Selective Forwarding Unit (SFU). The peer-to-SFU hop is encrypted with **DTLS-SRTP** (RFC 5763, RFC 5764) like every WebRTC application, but DTLS-SRTP terminates at the SFU — in a vanilla deployment that means the SFU sees plaintext audio, the same posture Slack Huddles, Microsoft Teams, and Google Meet ship.
 
-LiveKit Cloud / our self-hosted LiveKit do support insertable-streams-based E2EE (`livekit` crate exposes a key-provider hook), but Pollis does not currently enable it. Adding it is straightforward at the protocol level (one `EncryptionType::Custom` on the `RoomOptions` plus an MLS-keyed key provider) but is not done. This is the single largest deviation between Pollis' messaging-side and media-side cryptographic guarantees and is the most important audit-relevant gap to flag.
+Pollis adds a second layer of encryption applied per-frame, post-Opus and pre-SRTP. The cipher is **AES-128-GCM**; the implementation is libwebrtc's native `FrameCryptor` (the same machinery that backs the `livekit-client` JS SDK's `setupE2EE` and Discord's 2024 DAVE protocol). It is wired up via `livekit::e2ee::E2eeOptions { encryption_type: EncryptionType::Gcm, key_provider }` passed into `RoomOptions::encryption` at `Room::connect` time in `pollis-core/src/commands/voice.rs::join_voice_channel`. The SFU still routes the RTP packets — packet headers stay readable — but the payload is opaque ciphertext to anyone without the shared key.
+
+**Key derivation.** The shared 32-byte voice key is exported from the channel's MLS group at the current epoch:
+
+```text
+voice_key = MlsGroup::export_secret(
+    label = "pollis/voice/v1",
+    context = epoch.to_be_bytes(),
+    length = 32,
+)
+```
+
+The MLS group used is the same group that protects the channel's text messages (group channels share their parent group's MLS group; DMs use their `conversation_id` as the MLS group id). Because every current MLS member already holds the exporter secret, every member derives the same voice key without server involvement; non-members and the SFU cannot. The implementation is in `pollis-core/src/commands/voice_e2ee.rs::derive_voice_key`.
+
+**Key rotation.** Whenever the MLS epoch advances — i.e., on any add or remove commit that lands locally — `mls::process_pending_commits_inner` calls `voice_e2ee::on_mls_epoch_changed`, which re-derives the voice key for the new epoch and pushes it into the live `KeyProvider` via `set_shared_key(new_key, new_key_index)`. No reconnect. The `key_ring_size = 16` ring keeps the previous key briefly so in-flight frames decrypt during the changeover. Removed members lose the ability to decrypt subsequent frames because they no longer hold the new epoch's exporter secret; newly added members gain decryption from the moment the new epoch lands.
+
+**Defaults.** `KeyProviderOptions::default()` — PBKDF2 derivation, `LKFrameEncryptionKey` salt, 16-entry key ring, ratchet window 16. These match `livekit-client` JS so a future web or mobile peer that derives its key from the same MLS group can interoperate.
+
+**No opt-out.** Voice E2EE is unconditional. The per-frame AES-GCM overhead is on the order of microseconds in libwebrtc's native cryptor; "sometimes-on" was rejected as a footgun where users might misjudge their threat model.
 
 ### 10.3 Audio pipeline (defensive context)
 
@@ -438,7 +456,7 @@ The audit-relevant property is: an attacker who compromises only the user's emai
 
 Items below are ordered by adversary cost — easiest first.
 
-1. **Voice is not E2EE.** LiveKit operators see plaintext audio at the SFU. Section 10.2. The remedy is enabling LiveKit's insertable-streams E2EE with an MLS-derived key provider; this is feasible but not implemented.
+1. **Voice E2EE has no end-to-end integration test.** Section 10.2. The frame cryptor wiring (key derivation, key rotation on MLS epoch advance, KeyProvider lifecycle) is covered only by unit-level assertions and manual two-client testing. There is no automated test that spins up a real LiveKit server, sends audio between two harness clients, and asserts the SFU cannot decode the frames. Standing up that harness is the right next step before a third-party audit.
 2. **Cross-signing verification is advisory on inbound MLS commits.** Section 5.3 / 6.4 (search for "Inbound cert verification (advisory)" in `mls.rs::process_pending_commits`). A server able to write `user_device` and `mls_commit_log` rows can attempt to insert a rogue device and rely on the warning being unread. The fix requires a quarantine-and-resync state machine for commits with failed cert verification.
 3. **Single shared Turso/R2/LiveKit/Resend tokens baked into the binary.** Section 8.1. Reverse-engineering the binary yields a database connection equivalent to any client. Mitigated by application-layer enforcement, MLS-layer cryptographic floors, and cross-signing — but the operator could mint a new client at will, and a leaked binary reveals the same secret. Per-user / per-device tokens with a small auth service is the standard fix.
 4. **No server-side rate limiting on `request_otp`.** Section 11.1. Resend is the de-facto throttle.
@@ -468,7 +486,7 @@ Items below are ordered by adversary cost — easiest first.
 **Implementations relied upon**
 - OpenMLS — https://github.com/openmls/openmls. RustCrypto-backed reference implementation of RFC 9420.
 - SQLCipher — https://www.zetetic.net/sqlcipher/. AES-256-CBC + HMAC-SHA512, page-level.
-- LiveKit — https://livekit.io/. WebRTC-based SFU; insertable-streams E2EE supported but not enabled in this codebase.
+- LiveKit — https://livekit.io/. WebRTC-based SFU. The Rust `livekit` crate's `e2ee::FrameCryptor` (backed by libwebrtc's insertable streams) is enabled with AES-128-GCM and an MLS-exporter-derived shared key — see §10.2.
 - `keyring` (Rust) — https://crates.io/crates/keyring. Wraps macOS Keychain Services, freedesktop Secret Service, and Windows Credential Manager.
 - Cloudflare R2 — https://developers.cloudflare.com/r2/. S3-API-compatible object storage.
 
@@ -477,6 +495,6 @@ Items below are ordered by adversary cost — easiest first.
 - **Wire / Element X / Webex** — also MLS-based, all using OpenMLS or equivalent. Pollis is in the same cipher-suite tier (suite 1) as the public references for these deployments.
 - **Matrix / Element (legacy)** — Megolm + Olm. Adds key backup, which Pollis intentionally does not.
 - **Slack / Microsoft Teams** — TLS-in-transit, server-side at-rest encryption, no E2EE on messages or media. Pollis differs categorically: server operators can read Slack/Teams content; they cannot read Pollis messages.
-- **Discord** — TLS-in-transit, no E2EE on messages, **DAVE protocol** (MLS for key agreement, SFrame for media frame encryption) provides E2EE for audio and video in DMs, group DMs, voice channels, and Go Live streams as of September 2024. Pollis is *behind* Discord on voice (Discord's SFU does not see plaintext under DAVE; Pollis' LiveKit SFU does — see §10.2) and *ahead* on messages (Discord chat is plaintext at rest on the server; Pollis chat is MLS-encrypted).
+- **Discord** — TLS-in-transit, no E2EE on messages, **DAVE protocol** (MLS for key agreement, SFrame for media frame encryption) provides E2EE for audio and video in DMs, group DMs, voice channels, and Go Live streams as of September 2024. Pollis matches Discord on voice: §10.2 applies AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` keyed by an MLS-exporter-derived shared secret, so the LiveKit SFU does not see audio plaintext, the same shape as DAVE. Pollis is *ahead* on messages (Discord chat is plaintext at rest on the server; Pollis chat is MLS-encrypted) and matched on voice.
 - **iMessage** — pairwise E2EE per device; per-user multi-device fan-out at send time; iCloud Messages backup historically held by Apple (and therefore subject to Apple's key custody) and only end-to-end encrypted when the user has opted into Advanced Data Protection (iOS 16.2+, December 2022). Pollis differs by using MLS group state instead of pairwise fan-out, and by not implementing any backup mechanism — Pollis has no equivalent to either default-iCloud or ADP-iCloud Messages backup.
 - **1Password** — Secret Key + master password, with PBKDF2-HMAC-SHA256 (650k iterations as of 2023) stretching the master password and the Secret Key folded in as additional KDF input. Pollis' Secret Key + PIN combination is shaped similarly in spirit (a user-held high-entropy secret combined with a low-entropy local factor), with two implementation differences: Pollis uses Argon2id rather than PBKDF2 for the local-factor KDF, and Pollis' Secret Key wraps the *account identity key* on the server (HKDF-SHA256 + AES-256-GCM) rather than being mixed into the password KDF. The two roles 1Password merges into one master-password unlock, Pollis splits across the PIN (device unlock) and the Secret Key (server-side recovery wrap).

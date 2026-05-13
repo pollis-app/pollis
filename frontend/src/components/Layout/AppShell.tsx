@@ -415,7 +415,11 @@ export const AppShell: React.FC = () => {
                 // page useEffect tries to bounce off a transient mismatch),
                 // then swap the voice room, then clear the alert.
                 router.navigate({ to: "/call/$callId", params: { callId: incomingCall.callId } });
-                voiceSession.setIntent({ channelId: incomingCall.roomName, groupId: null });
+                voiceSession.setIntent({
+                  channelId: incomingCall.roomName,
+                  groupId: null,
+                  counterpartyUserId: incomingCall.callerId,
+                });
                 setIncomingCall(null);
               }}
               aria-label={`Answer call from @${incomingCall.callerUsername}`}
