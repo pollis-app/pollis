@@ -70,12 +70,35 @@ pub struct ScreenShareState {
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
-    /// Handle to the capture helper subprocess. Dropping/killing it
+    /// Linux: handle to the capture helper subprocess. Dropping/killing it
     /// terminates capture.
+    #[cfg(target_os = "linux")]
     pub local_helper: Option<tokio::process::Child>,
-    /// The supervising task that reads from the helper's socket and
+    /// Linux: the supervising task that reads from the helper's socket and
     /// pushes frames into the LiveKit source.
+    #[cfg(target_os = "linux")]
     pub local_reader_task: Option<tokio::task::JoinHandle<()>>,
+    /// macOS: the live ScreenCaptureKit stream. Dropping it stops capture;
+    /// we call stop_capture() explicitly on stop_screen_share so the
+    /// teardown is synchronous and ordered with track unpublish.
+    #[cfg(target_os = "macos")]
+    pub macos_stream: Option<screencapturekit::stream::SCStream>,
+    /// macOS: handler id returned by `add_output_handler`. Used to call
+    /// `remove_output_handler` explicitly on stop, which tells Swift to
+    /// detach the output via `sc_stream_remove_stream_output` rather than
+    /// relying on Drop. The crate recommends this; in practice it lets
+    /// SCK release its retain on our handler (and our source clone)
+    /// before the stream itself is released.
+    #[cfg(target_os = "macos")]
+    pub macos_handler_id: Option<usize>,
+    /// macOS: shared flag that the SCK output handler checks before
+    /// dereferencing the LiveKit source. SCK's output dispatch queue can
+    /// still fire frames after stop_capture() returns, and the source's
+    /// backing may be freed by the unpublish path by then. Flipping this
+    /// to false in stop_screen_share is the synchronization point that
+    /// stops the handler from touching the source.
+    #[cfg(target_os = "macos")]
+    pub macos_active: std::sync::Arc<std::sync::atomic::AtomicBool>,
 
     /// Per-remote-track drain task. Key = "{identity}-{sid}".
     pub remote_drain_tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
@@ -88,8 +111,16 @@ impl ScreenShareState {
             frames: None,
             local_track: None,
             local_source: None,
+            #[cfg(target_os = "linux")]
             local_helper: None,
+            #[cfg(target_os = "linux")]
             local_reader_task: None,
+            #[cfg(target_os = "macos")]
+            macos_stream: None,
+            #[cfg(target_os = "macos")]
+            macos_handler_id: None,
+            #[cfg(target_os = "macos")]
+            macos_active: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             remote_drain_tasks: std::collections::HashMap::new(),
         }
     }
@@ -122,11 +153,280 @@ pub async fn subscribe_screen_share_frames(
     Ok(())
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 pub async fn start_screen_share(_state: &Arc<AppState>) -> Result<()> {
     Err(crate::error::Error::Other(anyhow::anyhow!(
-        "screen share is only implemented on Linux right now"
+        "screen share is not implemented on this OS yet"
     )))
+}
+
+// ── macOS path ────────────────────────────────────────────────────────────
+//
+// In-process via the `screencapturekit` crate. No subprocess needed — Apple's
+// framework is a clean linkage on macOS and doesn't fight libwebrtc/cpal/Tauri
+// the way Linux's libpipewire does.
+//
+// Capture flow:
+//   1. Enumerate displays via SCShareableContent.
+//   2. Build a filter for display[0] (no window exclusions).
+//   3. Configure the stream at the display's native dimensions, BGRA pixel
+//      format, cursor visible.
+//   4. Create the LiveKit NativeVideoSource + LocalVideoTrack, publish to the
+//      current voice room as Screenshare/VP8 (matching Linux).
+//   5. Build an SCStreamOutputTrait handler that owns a clone of the source
+//      and converts each BGRA sample to I420 inline.
+//   6. start_capture() and stash the SCStream in state so it isn't dropped.
+//
+// TCC: the system shows the standard "X wants to record your screen" prompt
+// on the first capture attempt; no Info.plist key is needed (Apple doesn't
+// support customizing the message for screen recording). If the user denies
+// or hasn't granted yet, start_capture() returns an error which we surface
+// up as a normal failure.
+#[cfg(target_os = "macos")]
+pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
+    use screencapturekit::content_sharing_picker::{
+        SCContentSharingPicker, SCContentSharingPickerConfiguration,
+        SCContentSharingPickerMode, SCPickerOutcome,
+    };
+    use screencapturekit::prelude::*;
+
+    let room = {
+        let voice = state.voice.lock().await;
+        voice.room.clone()
+    };
+    let room = room.ok_or_else(|| {
+        crate::error::Error::Other(anyhow::anyhow!("not in a voice channel — join voice first"))
+    })?;
+
+    // 1. Show the macOS system content-sharing picker. Equivalent to Linux's
+    //    xdg-desktop-portal picker — system-modal, lets the user choose a
+    //    display, a window, or an app. The picker is non-blocking: show()
+    //    returns immediately and Swift fires the callback on the main run
+    //    loop when the user makes a selection. Bridge it to async via a
+    //    oneshot channel.
+    let mut picker_config = SCContentSharingPickerConfiguration::new();
+    picker_config.set_allowed_picker_modes(&[
+        SCContentSharingPickerMode::SingleDisplay,
+        SCContentSharingPickerMode::SingleWindow,
+        SCContentSharingPickerMode::SingleApplication,
+    ]);
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<SCPickerOutcome>();
+    SCContentSharingPicker::show(&picker_config, move |outcome| {
+        let _ = tx.send(outcome);
+    });
+    let outcome = rx
+        .await
+        .map_err(|_| anyhow::anyhow!("screen share picker callback dropped before responding"))?;
+    let picked = match outcome {
+        SCPickerOutcome::Picked(p) => p,
+        SCPickerOutcome::Cancelled => {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "screen share cancelled"
+            )));
+        }
+        SCPickerOutcome::Error(msg) => {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "screen share picker error: {msg}"
+            )));
+        }
+    };
+
+    // 2. Build the stream around the picked filter. SCStream::new is a
+    //    Swift bridge call so we keep it on a blocking thread.
+    let (display_w, display_h, stream) = tokio::task::spawn_blocking(move || -> Result<_> {
+        let filter = picked.filter();
+        let (px_w, px_h) = picked.pixel_size();
+        // Force even dims for VP8 + I420 chroma alignment.
+        let width = px_w & !1;
+        let height = px_h & !1;
+        if width == 0 || height == 0 {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "picker reported zero-size selection"
+            )));
+        }
+        eprintln!("[screenshare] macOS picked {}x{}", width, height);
+
+        let config = SCStreamConfiguration::new()
+            .with_width(width)
+            .with_height(height)
+            .with_pixel_format(PixelFormat::BGRA)
+            .with_shows_cursor(true);
+
+        let stream = SCStream::new(&filter, &config);
+        Ok((width, height, stream))
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("screencapturekit init panicked: {e}"))??;
+
+    // 2. Create LiveKit source + track and publish.
+    let source = NativeVideoSource::new(
+        VideoResolution {
+            width: display_w,
+            height: display_h,
+        },
+        true, /* is_screencast */
+    );
+    let track = LocalVideoTrack::create_video_track(
+        "screenshare",
+        RtcVideoSource::Native(source.clone()),
+    );
+    eprintln!("[screenshare] publishing track {}x{}", display_w, display_h);
+    if let Err(e) = room
+        .local_participant()
+        .publish_track(
+            LocalTrack::Video(track.clone()),
+            TrackPublishOptions {
+                source: TrackSource::Screenshare,
+                video_codec: VideoCodec::VP8,
+                ..Default::default()
+            },
+        )
+        .await
+    {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "publish screenshare: {e}"
+        )));
+    }
+    eprintln!("[screenshare] track published");
+
+    // 3. Hook the SCStream output to push every BGRA sample into the source.
+    //    The handler runs on ScreenCaptureKit's own dispatch queue (not a
+    //    tokio worker), so the BGRA→I420 conversion happens off the runtime.
+    //    The active flag lets stop_screen_share fence the handler from
+    //    touching the source after teardown begins.
+    let active_flag = {
+        let ss = state.screenshare.lock().await;
+        std::sync::Arc::clone(&ss.macos_active)
+    };
+    active_flag.store(true, std::sync::atomic::Ordering::Release);
+    let handler = MacOsFrameHandler {
+        source: source.clone(),
+        active: std::sync::Arc::clone(&active_flag),
+    };
+
+    // 4. start_capture is blocking + may take a moment if TCC is prompting,
+    //    so push it off the runtime and surface errors as LocalError.
+    let started = tokio::task::spawn_blocking(move || -> Result<(SCStream, Option<usize>)> {
+        let mut stream = stream;
+        let handler_id = stream.add_output_handler(handler, SCStreamOutputType::Screen);
+        stream
+            .start_capture()
+            .map_err(|e| anyhow::anyhow!("SCStream::start_capture: {e}"))?;
+        Ok((stream, handler_id))
+    })
+    .await
+    .map_err(|e| anyhow::anyhow!("screencapturekit start panicked: {e}"))?;
+
+    let (stream, handler_id) = match started {
+        Ok(s) => s,
+        Err(e) => {
+            // Roll back the publish so the track doesn't dangle in the room.
+            let sid = track.sid();
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            return Err(e);
+        }
+    };
+
+    // 5. Stash everything for stop_screen_share + Drop.
+    {
+        let mut ss = state.screenshare.lock().await;
+        ss.local_source = Some(source);
+        ss.local_track = Some(track);
+        ss.macos_stream = Some(stream);
+        ss.macos_handler_id = handler_id;
+        if let Some(ev) = &ss.events {
+            let _ = ev.send(ScreenShareEvent::LocalStarted {
+                width: display_w,
+                height: display_h,
+            });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+struct MacOsFrameHandler {
+    source: NativeVideoSource,
+    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(target_os = "macos")]
+impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
+    fn did_output_sample_buffer(
+        &self,
+        sample: screencapturekit::prelude::CMSampleBuffer,
+        output_type: screencapturekit::prelude::SCStreamOutputType,
+    ) {
+        use screencapturekit::cv::CVPixelBufferLockFlags;
+        use screencapturekit::prelude::SCStreamOutputType;
+
+        if !matches!(output_type, SCStreamOutputType::Screen) {
+            return;
+        }
+        // Bail before touching the source if a stop is in progress. SCK's
+        // output queue keeps draining for a moment after stop_capture(),
+        // and the source's backing may already be freed by the unpublish
+        // path. Acquire ordering pairs with the Release store in stop.
+        if !self.active.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
+        let Some(pixel_buffer) = sample.image_buffer() else {
+            return;
+        };
+        let Ok(guard) = pixel_buffer.lock(CVPixelBufferLockFlags::READ_ONLY) else {
+            return;
+        };
+        let width = guard.width() as u32;
+        let height = guard.height() as u32;
+        let stride = guard.bytes_per_row() as u32;
+        let bgra = guard.as_slice();
+        // CMSampleBuffer presentation timestamps are in CMTime; for now we
+        // use a wall-clock μs since this matches what LiveKit downstream
+        // surfaces in to_i420 path and is sufficient for screencast.
+        let timestamp_us = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros() as i64)
+            .unwrap_or(0);
+        push_frame_macos(&self.source, width, height, stride, timestamp_us, bgra);
+        // Explicitly drop the lock guard before returning so the
+        // CVPixelBuffer is unlocked promptly for ScreenCaptureKit.
+        drop(guard);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn push_frame_macos(
+    source: &NativeVideoSource,
+    width: u32,
+    height: u32,
+    stride: u32,
+    timestamp_us: i64,
+    bgra: &[u8],
+) {
+    // Same constraint as Linux: VP8 + I420 require even dimensions.
+    let w = (width & !1) as i32;
+    let h = (height & !1) as i32;
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let mut buffer = I420Buffer::new(w as u32, h as u32);
+    {
+        let (sy, su, sv) = buffer.strides();
+        let (dy, du, dv) = buffer.data_mut();
+        // libwebrtc::yuv_helper::argb_to_i420 treats input as little-endian
+        // 32-bit ARGB, which in memory is B,G,R,A byte order — identical to
+        // BGRA from ScreenCaptureKit. Same call as the Linux BGRx path.
+        libwebrtc::native::yuv_helper::argb_to_i420(
+            bgra, stride, dy, sy, du, su, dv, sv, w, h,
+        );
+    }
+    let frame = VideoFrame {
+        rotation: VideoRotation::VideoRotation0,
+        timestamp_us,
+        buffer,
+    };
+    source.capture_frame(&frame);
 }
 
 #[cfg(target_os = "linux")]
@@ -346,34 +646,98 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
 }
 
 pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
-    let (room, track, mut helper, reader, ev_opt) = {
+    let room;
+    let track;
+    let source_to_drop;
+    let ev_opt;
+    #[cfg(target_os = "linux")]
+    let mut helper;
+    #[cfg(target_os = "linux")]
+    let reader;
+    #[cfg(target_os = "macos")]
+    let macos_stream;
+    #[cfg(target_os = "macos")]
+    let macos_handler_id;
+    #[cfg(target_os = "macos")]
+    let macos_active;
+    {
         let mut ss = state.screenshare.lock().await;
-        let track = ss.local_track.take();
-        let helper = ss.local_helper.take();
-        let reader = ss.local_reader_task.take();
-        ss.local_source = None;
+        track = ss.local_track.take();
+        // Keep the source alive locally until after the SCK stream is fully
+        // torn down + the track is unpublished. Releasing it from state now
+        // would otherwise let the next reference drop free its backing
+        // while in-flight handler calls are still firing.
+        source_to_drop = ss.local_source.take();
+        #[cfg(target_os = "linux")]
+        {
+            helper = ss.local_helper.take();
+            reader = ss.local_reader_task.take();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            macos_stream = ss.macos_stream.take();
+            macos_handler_id = ss.macos_handler_id.take();
+            macos_active = std::sync::Arc::clone(&ss.macos_active);
+        }
+        ev_opt = ss.events.clone();
         let voice = state.voice.lock().await;
-        (
-            voice.room.clone(),
-            track,
-            helper,
-            reader,
-            ss.events.clone(),
-        )
-    };
+        room = voice.room.clone();
+    }
 
-    if let Some(t) = reader {
-        t.abort();
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(t) = reader {
+            t.abort();
+        }
+        if let Some(h) = helper.as_mut() {
+            let _ = h.kill().await;
+        }
     }
-    if let Some(h) = helper.as_mut() {
-        let _ = h.kill().await;
+    #[cfg(target_os = "macos")]
+    {
+        use screencapturekit::content_sharing_picker::SCContentSharingPicker;
+        use screencapturekit::prelude::SCStreamOutputType;
+
+        // 1. Fence the handler from touching the source. Release pairs with
+        //    Acquire load in did_output_sample_buffer.
+        macos_active.store(false, std::sync::atomic::Ordering::Release);
+        // 2. Explicitly detach the output handler, stop SCK, drop the
+        //    stream. All on a blocking thread — these are Swift FFI calls
+        //    that block until SCK acks. remove_output_handler tells Swift
+        //    to call sc_stream_remove_stream_output, which releases SCK's
+        //    retain on the handler (and its clone of the source).
+        if let Some(mut stream) = macos_stream {
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Some(id) = macos_handler_id {
+                    let removed = stream.remove_output_handler(id, SCStreamOutputType::Screen);
+                    if !removed {
+                        eprintln!("[screenshare] remove_output_handler returned false (id={id})");
+                    }
+                }
+                if let Err(e) = stream.stop_capture() {
+                    eprintln!("[screenshare] SCStream::stop_capture: {e}");
+                }
+                drop(stream);
+            })
+            .await;
+        }
+        // 3. Deactivate the system-level content-sharing picker. show()
+        //    flipped it to active; without flipping it back, the Control
+        //    Center menubar entry stays in "ready to share" state long
+        //    after our SCStream is gone — looks like we're still capturing.
+        SCContentSharingPicker::set_active(false);
     }
+    // 3. Unpublish the track before dropping the source. LiveKit's track
+    //    teardown can free the source's webrtc backing; doing it in this
+    //    order avoids the "unpublish frees backing, handler crashes" race.
     if let (Some(room), Some(track)) = (room, track) {
         let sid = track.sid();
         if let Err(e) = room.local_participant().unpublish_track(&sid).await {
             eprintln!("[screenshare] unpublish error: {e}");
         }
     }
+    // 4. Now the source can be dropped safely.
+    drop(source_to_drop);
     if let Some(ev) = ev_opt {
         let _ = ev.send(ScreenShareEvent::LocalStopped);
     }
