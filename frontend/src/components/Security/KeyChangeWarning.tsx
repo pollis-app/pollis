@@ -1,5 +1,6 @@
 import React from "react";
 import { ShieldAlert, ShieldCheck, XCircle } from "lucide-react";
+import { Button } from "../ui/Button";
 
 interface KeyChangeWarningProps {
   contactName: string;
@@ -53,13 +54,13 @@ export const KeyChangeWarning: React.FC<KeyChangeWarningProps> = ({
       </div>
 
       <div className="flex items-center gap-2 pl-7">
-        <button data-testid="reverify-button" onClick={onReverify} className="btn-primary flex items-center gap-1.5">
+        <Button data-testid="reverify-button" onClick={onReverify} variant="primary">
           <ShieldCheck size={17} aria-hidden="true" />
           Re-verify
-        </button>
-        <button data-testid="continue-anyway-button" onClick={onContinue} className="btn-ghost">
+        </Button>
+        <Button data-testid="continue-anyway-button" onClick={onContinue} variant="ghost">
           Continue anyway
-        </button>
+        </Button>
         <button data-testid="cancel-key-warning-button" onClick={onCancel} className="icon-btn-sm ml-auto">
           <XCircle size={19} aria-hidden="true" />
         </button>

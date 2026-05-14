@@ -8,6 +8,7 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
+import { Button } from "../ui/Button";
 
 export interface VerifiedContact {
   id: string;
@@ -144,15 +145,16 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
                 </span>
               )}
             </div>
-            <button
+            <Button
               data-testid="export-backup-button"
               onClick={() => onExportBackup?.(exportPassword)}
               disabled={exportStrength.score < 3}
-              className="btn-primary self-start flex items-center gap-1.5"
+              variant="primary"
+              className="self-start"
             >
               <Download size={17} aria-hidden="true" />
               Export
-            </button>
+            </Button>
             <p className="text-2xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Store in a safe place — losing it means losing access.</p>
           </div>
 
@@ -195,15 +197,16 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
               className="text-xs font-mono"
               style={{ color: 'var(--c-text-dim)' }}
             />
-            <button
+            <Button
               data-testid="import-backup-button"
               onClick={() => onImportBackup?.(importPassword, importFile)}
               disabled={!importFile || importStrength.score < 2}
-              className="btn-primary self-start flex items-center gap-1.5"
+              variant="primary"
+              className="self-start"
             >
               <Upload size={17} aria-hidden="true" />
               Import
-            </button>
+            </Button>
             <p className="text-2xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Replaces current identity keys. Use cautiously.</p>
           </div>
         </div>
@@ -268,13 +271,14 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
             })}
           </div>
         )}
-        <button
+        <Button
           data-testid="clear-all-sessions-button"
           onClick={onClearSessions}
-          className="btn-ghost self-start"
+          variant="ghost"
+          className="self-start"
         >
           Clear all sessions
-        </button>
+        </Button>
       </section>
     </div>
   );
