@@ -289,7 +289,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       gap: 6,
       padding: "8px 10px 9px",
       marginTop: bordered ? 4 : 0,
-      background: "none",
+      background: "var(--c-surface)",
       border: "none",
       borderTop: bordered ? "1px solid var(--c-border)" : "none",
       borderBottom: bordered || borderedBottom ? "1px solid var(--c-border)" : "none",
@@ -300,12 +300,15 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       cursor: "pointer",
       textAlign: "left",
       transition: "background 75ms",
+      position: "sticky",
+      top: 0,
+      zIndex: 1,
     }}
     onMouseEnter={(e) => {
       (e.currentTarget as HTMLButtonElement).style.background = "var(--c-hover)";
     }}
     onMouseLeave={(e) => {
-      (e.currentTarget as HTMLButtonElement).style.background = "none";
+      (e.currentTarget as HTMLButtonElement).style.background = "var(--c-surface)";
     }}
   >
     {icon}
