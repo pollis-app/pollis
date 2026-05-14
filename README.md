@@ -111,7 +111,6 @@ pnpm build:windows    # amd64 NSIS installer
 | `cargo test --features test-harness` | Unit tests + multi-client integration harness |
 | `cargo test --all-features` | Same as above — `--all-features` turns on `test-harness` |
 | `cargo test --features test-harness --test flows` | Integration harness only |
-| `pnpm test:e2e` | Playwright browser tests for the frontend |
 
 The integration harness (`src-tauri/tests/flows.rs`) is gated behind the `test-harness` Cargo feature because it takes ~3–4 minutes, serializes on a process-wide mutex, and requires a disposable Turso database configured in `.env.test` at the repo root. See [`.codesight/wiki/testing.md`](./.codesight/wiki/testing.md) for the full architecture.
 

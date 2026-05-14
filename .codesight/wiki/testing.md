@@ -1,10 +1,9 @@
 # Testing
 
-Pollis has three tiers of automated tests:
+Pollis has two tiers of automated tests:
 
 1. **Unit tests** (in-crate `#[cfg(test)]` modules) — pure logic, in-memory rusqlite schemas, no I/O.
 2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives real Tauri commands end-to-end against a disposable test Turso database. This document covers the harness.
-3. **Playwright E2E** (`pnpm test:e2e`) — browser-level tests of the frontend.
 
 ## Integration harness — goals
 
