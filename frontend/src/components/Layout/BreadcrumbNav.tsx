@@ -1,11 +1,7 @@
 import React, { useMemo } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, Search as SearchIcon, Settings as SettingsIcon } from "lucide-react";
-
-const isMac =
-  typeof navigator !== "undefined" &&
-  navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-const SEARCH_SHORTCUT_LABEL = isMac ? "⌘K" : "Ctrl+K";
+import { shortcutLabel } from "../../utils/platform";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -230,8 +226,8 @@ export const BreadcrumbNav: React.FC = () => {
       <button
         data-testid="breadcrumb-search-button"
         onClick={() => window.dispatchEvent(new CustomEvent("pollis:open-search"))}
-        aria-label={`Search (${SEARCH_SHORTCUT_LABEL})`}
-        title={`Search (${SEARCH_SHORTCUT_LABEL})`}
+        aria-label={`Search (${shortcutLabel("K")})`}
+        title={`Search (${shortcutLabel("K")})`}
         className="flex items-center gap-1.5 transition-colors"
         style={{
           height: 20,
@@ -261,7 +257,7 @@ export const BreadcrumbNav: React.FC = () => {
             lineHeight: 1.2,
           }}
         >
-          {SEARCH_SHORTCUT_LABEL}
+          {shortcutLabel("K")}
         </kbd>
       </button>
       <button

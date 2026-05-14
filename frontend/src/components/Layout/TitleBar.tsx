@@ -2,9 +2,7 @@ import React, { useState } from "react";
 import { Minus, Square, X, Maximize2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PollisLogo } from "../ui/PollisLogo";
-
-const isMac = typeof navigator !== "undefined" &&
-  navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+import { isMac } from "../../utils/platform";
 
 const win = () => getCurrentWindow();
 

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { formatDuration } from "../../utils/format";
 import {
   Play,
   Pause,
@@ -16,12 +17,6 @@ interface AudioPlayerProps {
   loop?: boolean;
   preload?: "none" | "metadata" | "auto";
 }
-
-const formatTime = (time: number) => {
-  const minutes = Math.floor(time / 60);
-  const seconds = Math.floor(time % 60);
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-};
 
 export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   src,
@@ -167,8 +162,8 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
           aria-label="Seek audio"
         />
         <div className="flex justify-between text-xs font-mono mt-1" style={{ color: "var(--c-text-dim)" }}>
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration)}</span>
+          <span>{formatDuration(currentTime)}</span>
+          <span>{formatDuration(duration)}</span>
         </div>
       </div>
 
