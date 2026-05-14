@@ -302,7 +302,7 @@ jobs:
       - name: Apply pending DB migrations to production
         env:
           TURSO_URL: ${{ secrets.TURSO_URL }}
-          TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+          TURSO_TOKEN: ${{ secrets.TURSO_ADMIN_TOKEN }}
         run: ./scripts/db-apply.sh
 
   release:
