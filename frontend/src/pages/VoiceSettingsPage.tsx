@@ -97,7 +97,7 @@ const selectStyle: React.CSSProperties = {
   color: "var(--c-text)",
   border: "2px solid var(--c-border)",
   padding: "6px 28px 6px 8px",
-  fontFamily: "inherit",
+  fontFamily: "var(--font-mono)",
   fontSize: "inherit",
   outline: "none",
   cursor: "pointer",

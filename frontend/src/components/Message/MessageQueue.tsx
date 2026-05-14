@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, Clock, Send, AlertCircle } from 'lucide-react';
 import { useAppStore } from '../../stores/appStore';
+import { Button } from '../ui/Button';
 
 export const MessageQueue: React.FC = () => {
   const {
@@ -97,13 +98,14 @@ export const MessageQueue: React.FC = () => {
               </span>
               <p className="text-xs font-mono flex-1 truncate" style={{ color: 'var(--c-text-dim)' }}>{snippet}</p>
               <div className="flex items-center gap-1">
-                <button
+                <Button
                   data-testid={`retry-queue-item-${item.id}`}
                   onClick={() => handleRetry(item.id)}
-                  className="btn-ghost py-0 px-1 text-2xs"
+                  variant="ghost"
+                  size="xs"
                 >
                   retry
-                </button>
+                </Button>
                 <button
                   data-testid={`cancel-queue-item-${item.id}`}
                   onClick={() => handleCancel(item.id, item.message_id)}

@@ -67,10 +67,7 @@ export const TitleBar: React.FC = () => {
         data-testid="title-bar-minimize"
         onClick={handleMinimize}
         aria-label="Minimize"
-        className="flex items-center justify-center w-8 h-8 transition-colors"
-        style={{ color: "var(--c-text-muted)" }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--c-hover)"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+        className="icon-btn"
       >
         <Minus size={12} aria-hidden="true" />
       </button>
@@ -78,10 +75,7 @@ export const TitleBar: React.FC = () => {
         data-testid="title-bar-maximize"
         onClick={handleMaximize}
         aria-label="Maximize"
-        className="flex items-center justify-center w-8 h-8 transition-colors"
-        style={{ color: "var(--c-text-muted)" }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--c-hover)"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+        className="icon-btn"
       >
         <Square size={11} aria-hidden="true" />
       </button>

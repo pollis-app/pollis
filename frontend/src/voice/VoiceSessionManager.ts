@@ -199,8 +199,8 @@ class VoiceSessionManager {
 
   /**
    * Re-run the reconciliation loop without changing intent. Used when an
-   * external guard input (e.g. `currentUser`, `networkStatus`) changes and
-   * the session needs to tear down even though the intent itself is still set.
+   * external guard input (e.g. `currentUser`) changes and the session needs
+   * to tear down even though the intent itself is still set.
    */
   refresh(): void {
     void this.reconcile();
@@ -297,9 +297,6 @@ class VoiceSessionManager {
   private guardsPass(): boolean {
     const store = useAppStore.getState();
     if (!store.currentUser) {
-      return false;
-    }
-    if (store.networkStatus === 'kill-switch') {
       return false;
     }
     return true;
@@ -697,11 +694,11 @@ voiceSession.subscribe(() => {
   }
 });
 
-// React to currentUser / kill-switch changes by re-running reconciliation.
-// Logging out, getting kicked offline, etc. should tear down any active
-// voice session without each caller having to remember to.
+// React to currentUser changes by re-running reconciliation.
+// Logging out should tear down any active voice session without each caller
+// having to remember to.
 useAppStore.subscribe((state, prev) => {
-  if (state.currentUser !== prev.currentUser || state.networkStatus !== prev.networkStatus) {
+  if (state.currentUser !== prev.currentUser) {
     voiceSession.refresh();
   }
 });

@@ -104,7 +104,6 @@ export function useLiveKitRealtime() {
     selectedChannelId,
     selectedConversationId,
     currentUser,
-    networkStatus,
   } = useAppStore();
 
   const { query: prefsQuery } = usePreferences();
@@ -210,7 +209,7 @@ export function useLiveKitRealtime() {
   // Recreated if the user identity changes (e.g. logout → login as someone else).
 
   useEffect(() => {
-    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
+    if (!isTauriReady || !currentUser) {
       return;
     }
 
@@ -468,20 +467,20 @@ export function useLiveKitRealtime() {
     });
 
     return () => {
-      // Disconnect all rooms when the user logs out or kill-switch activates.
+      // Disconnect all rooms when the user logs out.
       invoke('connect_rooms', {
         roomIds: [],
         userId: currentUser.id,
         username: currentUser.username ?? currentUser.id,
       }).catch(() => { });
     };
-  }, [isTauriReady, currentUser?.id, networkStatus]);
+  }, [isTauriReady, currentUser?.id]);
 
   // ── Connect rooms whenever the room list changes ───────────────────────────
   // Rust handles the diff — only connects new rooms, disconnects removed ones.
 
   useEffect(() => {
-    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
+    if (!isTauriReady || !currentUser) {
       return;
     }
 
@@ -492,17 +491,17 @@ export function useLiveKitRealtime() {
     }).catch((err) => {
       console.error('[realtime] connect_rooms failed:', err);
     });
-  }, [isTauriReady, allRoomIds, currentUser?.id, currentUser?.username, networkStatus]);
+  }, [isTauriReady, allRoomIds, currentUser?.id, currentUser?.username]);
 
   // One-time welcome poll on sign-in / app-ready. Catches welcomes for
   // groups the user was invited to while offline so new-group invites
   // apply without requiring them to open a channel from each group first.
   useEffect(() => {
-    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
+    if (!isTauriReady || !currentUser) {
       return;
     }
     invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
       console.warn('[realtime] startup poll_mls_welcomes failed:', err);
     });
-  }, [isTauriReady, currentUser?.id, networkStatus]);
+  }, [isTauriReady, currentUser?.id]);
 }

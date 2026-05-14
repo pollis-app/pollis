@@ -8,6 +8,7 @@ interface SwitchProps {
   className?: string;
   id?: string;
   description?: string;
+  "data-testid"?: string;
 }
 
 export const Switch: React.FC<SwitchProps> = ({
@@ -18,6 +19,7 @@ export const Switch: React.FC<SwitchProps> = ({
   className = "",
   id,
   description,
+  "data-testid": testId,
 }) => {
   const inputId = id || `switch-${label.toLowerCase().replace(/\s+/g, "-")}`;
   const descriptionId = description ? `${inputId}-description` : undefined;
@@ -27,6 +29,7 @@ export const Switch: React.FC<SwitchProps> = ({
       <div className="flex items-center gap-3">
         <button
           id={inputId}
+          data-testid={testId}
           type="button"
           role="switch"
           aria-checked={checked}
