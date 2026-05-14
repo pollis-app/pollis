@@ -16,6 +16,7 @@ import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
 import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
+import { shortcutLabel } from "../utils/platform";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -23,11 +24,6 @@ function getRootVar(name: string): string {
 
 function isValidHex(val: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(val);
-}
-
-function isMac(): boolean {
-  return typeof navigator !== "undefined" &&
-    navigator.platform.toUpperCase().indexOf("MAC") >= 0;
 }
 
 export const Preferences: React.FC = () => {
@@ -425,7 +421,7 @@ export const Preferences: React.FC = () => {
                 onChange={handleSidebarOpenByDefault}
               />
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {isMac() ? "⌘B" : "Ctrl+B"}.
+                Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {shortcutLabel("B")}.
               </p>
             </div>
           </section>

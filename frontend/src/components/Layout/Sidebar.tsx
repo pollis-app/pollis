@@ -15,14 +15,10 @@ import {
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useAppStore } from "../../stores/appStore";
+import { shortcutLabel } from "../../utils/platform";
 
 const SIDEBAR_WIDTH = 220;
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
-
-const isMac =
-  typeof navigator !== "undefined" &&
-  navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-const TOGGLE_SHORTCUT_LABEL = isMac ? "⌘B" : "Ctrl+B";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -226,8 +222,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         type="button"
         data-testid="sidebar-close"
         onClick={onToggle}
-        aria-label={`Close sidebar (${TOGGLE_SHORTCUT_LABEL})`}
-        title={`Close sidebar (${TOGGLE_SHORTCUT_LABEL})`}
+        aria-label={`Close sidebar (${shortcutLabel("B")})`}
+        title={`Close sidebar (${shortcutLabel("B")})`}
         style={{
           flexShrink: 0,
           display: "flex",
@@ -263,7 +259,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             lineHeight: 1.2,
           }}
         >
-          {TOGGLE_SHORTCUT_LABEL}
+          {shortcutLabel("B")}
         </kbd>
       </button>
     </aside>
@@ -370,7 +366,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
             border: "none",
             padding: 0,
             margin: 0,
-            paddingLeft: 10 + indent * 12,
+            paddingLeft: 10 + indent * 16,
             paddingRight: 0,
             display: "inline-flex",
             alignItems: "center",
@@ -392,7 +388,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
           gap: 6,
           paddingTop: 2,
           paddingBottom: 2,
-          paddingLeft: chevron ? 6 : 10 + indent * 12,
+          paddingLeft: chevron ? 6 : 10 + indent * 16,
           paddingRight: 10,
           background: "none",
           border: "none",

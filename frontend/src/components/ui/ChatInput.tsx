@@ -5,6 +5,7 @@ import { tempDir } from "@tauri-apps/api/path";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
+import { formatFileSize } from "../../utils/format";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
 // no bytes-over-IPC bottleneck, no size limit.
@@ -36,14 +37,6 @@ interface ChatInputProps {
   // call sites that don't need it can ignore it entirely.
   onValueChange?: (value: string) => void;
 }
-
-const formatFileSize = (bytes: number): string => {
-  if (bytes === 0) { return ""; }
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
-};
 
 function mimeFromName(name: string): string {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";

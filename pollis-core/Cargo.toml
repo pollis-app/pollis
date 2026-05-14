@@ -23,7 +23,7 @@ test-harness = []
 uniffi = { version = "0.31", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
 libsql = { version = "0.6", features = ["remote"] }
@@ -48,7 +48,6 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 anyhow = "1"
 dotenvy = "0.15"
 thiserror = "1"
-once_cell = "1"
 zeroize = { version = "1", features = ["derive"] }
 livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
 libwebrtc = "0.3"
@@ -62,7 +61,6 @@ rodio = { version = "0.19", default-features = false, features = ["wav"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 blurhash = "0.2"
 futures-util = "0.3"
-bytes = "1"
 # Local-loopback HTTP server for serving cached media to the webview.
 # One URL pattern (`http://127.0.0.1:<port>/<token>/<hash>`) drives every
 # `<img>/<audio>/<video>` element — replaces the bifurcated asset:// (images)

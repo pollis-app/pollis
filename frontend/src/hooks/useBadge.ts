@@ -3,10 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Image } from '@tauri-apps/api/image';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
-
-// Detect Windows once at module load — navigator.userAgent reflects the host OS in Tauri.
-const IS_WINDOWS = typeof navigator !== 'undefined' &&
-  navigator.userAgent.toLowerCase().includes('windows');
+import { isWindows } from '../utils/platform';
 
 // Lazy-loaded icon images for Windows taskbar swap.
 // Cached after the first fetch so repeated badge changes don't re-fetch.
@@ -56,7 +53,7 @@ export function useBadge() {
 
     const win = getCurrentWindow();
 
-    if (IS_WINDOWS) {
+    if (isWindows) {
       const iconPromise = total > 0 ? getWindowsNotifIcon() : getWindowsDefaultIcon();
       iconPromise
         .then((img) => win.setIcon(img))
@@ -76,7 +73,7 @@ export function useBadge() {
     }
     return () => {
       const win = getCurrentWindow();
-      if (IS_WINDOWS) {
+      if (isWindows) {
         getWindowsDefaultIcon()
           .then((img) => win.setIcon(img))
           .catch(() => {});
