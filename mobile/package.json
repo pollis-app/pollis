@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@expo-google-fonts/geist": "^0.4.1",
+    "@expo-google-fonts/sora": "^0.4.2",
     "@gorhom/bottom-sheet": "^5.2.10",
     "expo": "~55.0.17",
     "expo-camera": "^55.0.16",
@@ -33,6 +34,7 @@
     "react-native-reanimated": "^4.2.1",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
+    "react-native-svg": "15.15.4",
     "uniffi-bindgen-react-native": "0.31.0-2"
   },
   "devDependencies": {
