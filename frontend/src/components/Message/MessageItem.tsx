@@ -303,17 +303,10 @@ const BlurhashCanvas: React.FC<{ hash: string; width: number; height: number }> 
 
 // Shared styles for lightbox action buttons (download / esc).
 const lightboxBtnStyle: React.CSSProperties = {
-  color: "var(--c-accent)",
-  background: "none",
   border: "2px solid transparent",
   borderRadius: 4,
   cursor: "pointer",
   padding: "2px 8px",
-};
-
-const lightboxEscStyle: React.CSSProperties = {
-  ...lightboxBtnStyle,
-  color: "var(--c-text-dim)",
 };
 
 const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
@@ -567,17 +560,8 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       <button
         onClick={handleDownload}
         disabled={downloadStatus !== "idle"}
-        className="text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
+        className="text-xs font-mono transition-colors text-[var(--c-accent)] bg-transparent enabled:hover:bg-[var(--c-accent)] enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
         style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
-        onMouseEnter={(e) => {
-          if (downloadStatus !== "idle") { return; }
-          (e.currentTarget as HTMLElement).style.background = "var(--c-accent)";
-          (e.currentTarget as HTMLElement).style.color = "black";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "none";
-          (e.currentTarget as HTMLElement).style.color = "var(--c-accent)";
-        }}
       >
         {downloadStatus === "downloading" ? (
           <>[ fetch <LoadingSpinner size="sm" /> ]</>
@@ -589,16 +573,8 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       </button>
       <button
         onClick={() => setViewerOpen(false)}
-        className="text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black"
-        style={lightboxEscStyle}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "var(--c-accent)";
-          (e.currentTarget as HTMLElement).style.color = "black";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "none";
-          (e.currentTarget as HTMLElement).style.color = "var(--c-text-dim)";
-        }}
+        className="text-xs font-mono transition-colors text-[var(--c-text-dim)] bg-transparent hover:bg-[var(--c-accent)] hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black"
+        style={lightboxBtnStyle}
       >
         [esc]
       </button>

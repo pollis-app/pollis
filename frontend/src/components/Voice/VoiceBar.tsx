@@ -113,21 +113,14 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         onClick={() => navigate({ to: "/voice-settings" })}
         aria-label="Voice settings"
         title="Voice settings"
-        className="flex items-center justify-center transition-colors flex-shrink-0"
+        className="flex items-center justify-center transition-colors flex-shrink-0 text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
         style={{
           width: 20,
           height: 20,
           background: "none",
           border: "none",
           padding: 0,
-          color: "var(--c-text-muted)",
           cursor: "pointer",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
         }}
       >
         <SlidersHorizontal size={14} />

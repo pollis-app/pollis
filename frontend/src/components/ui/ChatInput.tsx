@@ -524,10 +524,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           onClick={handlePickFiles}
           disabled={disabled || attachments.length >= maxAttachments}
           aria-label="Add attachment"
-          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors"
-          style={{ color: "var(--c-text-muted)", opacity: disabled ? 0.4 : 1 }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
+          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-[var(--c-text-muted)] enabled:hover:text-[var(--c-accent)]"
+          style={{ opacity: disabled ? 0.4 : 1 }}
         >
           <Plus className="w-4 h-4" />
         </button>
@@ -572,13 +570,10 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           disabled={disabled || (!message.trim() && attachments.length === 0) || hasLoadingAttachments}
           data-testid="message-send-button"
           aria-label="Send message"
-          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors"
+          className="pt-2 pb-1.5 px-1.5 flex-shrink-0 transition-colors text-[var(--c-text-muted)] enabled:hover:text-[var(--c-accent)]"
           style={{
-            color: "var(--c-text-muted)",
             opacity: disabled || (!message.trim() && !attachments.length) ? 0.3 : 1,
           }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
         >
           <ChevronRight className="w-4 h-4" />
         </button>
@@ -618,16 +613,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           )}
           <button
             onClick={() => setExpandedPreview(null)}
-            className="mt-3 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
-            style={{ color: "var(--c-text-dim)", background: "none", border: "1px solid transparent", borderRadius: 4, cursor: "pointer" }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "var(--c-accent)";
-              (e.currentTarget as HTMLElement).style.color = "black";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLElement).style.background = "none";
-              (e.currentTarget as HTMLElement).style.color = "var(--c-text-dim)";
-            }}
+            className="mt-3 text-xs font-mono transition-colors text-[var(--c-text-dim)] bg-transparent hover:bg-[var(--c-accent)] hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black px-2 py-0.5"
+            style={{ border: "1px solid transparent", borderRadius: 4, cursor: "pointer" }}
           >
             [esc]
           </button>

@@ -24,8 +24,8 @@ The `mobile/` directory is **NOT** a pnpm workspace member. It is a standalone E
 - `@gorhom/bottom-sheet` 5 for sheets
 - `expo-camera`, `expo-secure-store`, `expo-notifications`
 - `expo-image` (cached + blurhash), `react-native-blurhash`
-- `lucide-react-native` for icons
-- Geist font via `@expo-google-fonts/geist`
+- `lucide-react-native` icons, wrapped in `components/icons.tsx` (stable `Icon.*` API, strokeWidth pinned to 1.2 to match the design's monoline spec). `react-native-svg` is still used directly for the Initializing dot-field.
+- Sora (UI) via `@expo-google-fonts/sora`. Monospace (crypto keys, e.g. the Security public-key line) uses the **system** mono face — `fonts.mono*` = `Platform.select({ ios: 'Menlo', android: 'monospace' })`, no bundled font.
 - Rust core via `pollis-native` Turbo Module (uniffi-bindgen-react-native)
 
 ## Rust bridge (`modules/pollis-native`)
@@ -150,34 +150,65 @@ cd mobile && rm -rf node_modules pnpm-lock.yaml && pnpm install --ignore-workspa
 
 ---
 
-## Rough edges — UX (known, not yet fixed)
+## App structure (expo-router)
 
-Tracked here so they don't get lost between sessions.
+The whole UI was rebuilt from the `design_handoff_pollis_mobile` spec — sci-fi
+monochrome-amber, dark. Old light/Geist card-stack UI is gone.
 
-1. **Sign-out drawer is one-way.** Once pulled down, you can't swipe the card stack back up to dismiss the drawer — you have to start a horizontal swipe instead. Needs bidirectional gesture handling on the pull.
-2. **No reply-focus gesture on the current card.** Double-tap and swipe-up should both focus the current card and open an inline textarea for reply. Currently reply only triggers on swipe-right (which also dismisses the card). Focus + inline reply is a distinct UX from swipe-to-reply.
-3. **"Sign out" → "Disconnect" with confirmation.** Rename label. Show a confirmation informing the user: *this device will stop receiving messages AND cannot reconnect without re-pairing from a desktop*. Use whichever native mobile pattern reads cleanest — a `@gorhom/bottom-sheet` confirmation sheet is the expected default here.
-4. **Empty-state "pull down to sign out" hint is dead.** The pull-down gesture only works on the card stack, not the `<EmptyState>` screen. Either wire the gesture on empty state too, or drop the hint text.
+```
+app/
+  _layout.tsx          root Stack, font loading, splash gate
+  index.tsx            redirect → /(auth)/email
+  (auth)/              email → otp → pin → initializing (gestureEnabled: false)
+  (tabs)/              groups · direct · search · self (custom <TabBar>)
+  group/[id].tsx       GroupDetail   (pushed; <Ctx> back bar, no tab bar)
+  chat/[id].tsx        TextChat      (pushed; <Ctx> + composer)
+  self/{preferences,user-settings,security}.tsx
+components/
+  ui.tsx               primitives: Screen, Crumb, SectionTitle, ListRow, Field,
+                       Avatar, Chip, Button, Toggle, Card, Ctx, Diamond, Body…
+  icons.tsx            monoline SVG icon set (Icon.*)
+  TabBar.tsx           custom bottom tab bar (amber active indicator)
+  PollisMark.tsx       auth-screen wordmark
+theme/tokens.ts        palette / t(alpha) / semantic / type / r / space / layout
+```
 
-## Rough edges — out-of-scope stubs (by design, not bugs)
+Navigation rules from the handoff: no header (every screen draws its own
+`<Crumb>` at top); back lives at the **bottom** in the `<Ctx>` strip, not a
+header button; sub-screens are stack pushes (pushed routes live outside
+`(tabs)` so the tab bar is replaced by `<Ctx>`/composer).
 
-- QR scan payload is ignored — any scanned code (or tapping Skip) routes to `/stack`.
-- Reply sheet send button closes the sheet; does not actually send anything.
-- Sign-out just routes to `/`; does not clear secure-store or any credentials.
-- Notification permission is requested on first card-stack entry; no handlers are wired.
-- No real MLS, auth, or Pollis backend integration. The only Rust call live is `version()` (shown below Skip button on the QR screen as a smoke-test readout).
+## Out-of-scope stubs (by design, not bugs)
 
-## Design tokens (for consistency across new screens)
+- **No voice.** VoiceChat / VoiceSettings screens and voice channels were
+  intentionally dropped — mobile does not need voice.
+- Auth is navigation-only: email/OTP/PIN don't validate; Initializing
+  auto-advances after ~2.6s. Sign-out just routes back to `/(auth)/email` —
+  no secure-store clearing.
+- All list/message/search data is hardcoded mock data.
+- The `pollis-native` Rust bridge is wired in the build but no commands are
+  called from the new UI yet (the old `version()` smoke-test screen is gone).
+- No real MLS, auth, or Pollis backend integration.
 
-Defined in `theme/tokens.ts`. Summary:
+## Design tokens
 
-- Background: `#f9f9f9`
-- Surface container low (secondary): `#f2f4f4`
-- Surface container lowest (floating): `#ffffff`
-- Tertiary accent (electric indigo): `#4a4bd7` — use sparingly, only for critical focus / notifications
-- On-surface text: `#2d3435`
-- Card radius: 24px (`radius.xl`)
-- **No borders or divider lines** — separate via tonal shifts or whitespace
-- Font: Geist (all text goes through `components/Text.tsx`)
+Defined in `theme/tokens.ts`. One bg + one accent; everything else is a
+translucent amber tier via `t(alpha)`.
 
-Aesthetic target: "The Expanse hand terminal" — minimalist, bottom-anchored, one-handed. All interactive elements in the bottom ~40% of the screen. No top nav, no back buttons in corners.
+- `palette.bg` `#0a0907` (just-above-black), `bg2`/`bg3` raised tiers
+- Accent default `#fabf5a` — the same brand amber as the desktop app + website.
+  It is **runtime-configurable** (Self → Preferences → Accent), mirroring
+  desktop's accent picker. `t()`, `palette.accent`, `semantic.*`, and the
+  `type.*` colors are getters that re-derive from the live accent; the
+  `<ThemeProvider>` (in `components/theme.tsx`) holds the chosen hex and
+  `<Screen>` + `<TabBar>` subscribe via `useTheme()`, so a change re-renders
+  the whole tree. `palette.danger` `#c46a2e`.
+- `semantic.*` — ink/ink2/mute/mute2/hair*/accentSoft/fieldBg/cardBg (all `t()` tiers)
+- `r` = { sm: 3, lg: 4 }; `space` = irregular 6/8/10/12/14/18/22 (do NOT
+  normalize to an 8px grid — the rhythm is part of the look)
+- `type.*` — Sora UI scale + JetBrains Mono for keys. Letter-spacing is
+  pre-converted from em (RN has no em). Uppercase labels/crumbs are tracked.
+
+Aesthetic: "The Expanse readouts / Nier Automata menus" — one-handed, all
+controls in the bottom command zone, top of every screen is a passive crumb.
+Corner brackets appear **only** on the Initializing screen.

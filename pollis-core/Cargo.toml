@@ -49,15 +49,12 @@ anyhow = "1"
 dotenvy = "0.15"
 thiserror = "1"
 zeroize = { version = "1", features = ["derive"] }
-livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
-libwebrtc = "0.3"
-cpal = "0.15"
 # RNNoise (Rust port) — runs as a pre-APM NS stage when the user enables
 # Click Suppression. Handles transients (keyboard clicks, mouse clicks)
 # that APM's spectral NS misses. Default features pull in clap/dasp/hound
-# for the bundled CLI; we only need the library.
+# for the bundled CLI; we only need the library. Pure Rust — cross-compiles
+# fine; only the gated voice modules use it, so it's harmless on mobile.
 nnnoiseless = { version = "0.5", default-features = false }
-rodio = { version = "0.19", default-features = false, features = ["wav"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 blurhash = "0.2"
 futures-util = "0.3"
@@ -72,18 +69,30 @@ openmls_traits = "0.5"
 openmls_rust_crypto = "0.5"
 openmls_basic_credential = "0.5"
 gethostname = "1.1.0"
-# Cross-platform PTY for the in-app terminal pane. Spawns $SHELL and
-# exposes the master fd for read/write/resize.
-portable-pty = "0.8"
 
 # Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us
 # end-to-end and tunable from Rust. The system pkg-config build branch wants
 # webrtc-audio-processing-2 >= 2.1 which most distros don't ship yet.
 #
 # Windows is excluded: webrtc-audio-processing-sys 2.0.4 vendors a meson +
-# abseil-cpp build that has zero MSVC support upstream.
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+# abseil-cpp build that has zero MSVC support upstream. iOS/Android are
+# excluded for the same reason — the bundled C++ build hardcodes
+# -mmacos-version-min and has no NDK path; mobile does not do voice.
+[target.'cfg(not(any(target_os = "windows", target_os = "ios", target_os = "android")))'.dependencies]
 webrtc-audio-processing = { version = "2", features = ["bundled"] }
+
+# Desktop-only crates, excluded from the mobile (iOS/Android) build:
+# - portable-pty: in-app terminal pane; pulls termios 0.2.2 (no ios arm).
+# - livekit/libwebrtc: Rust LiveKit realtime/media engine. Mobile uses the
+#   native LiveKit SDK (@livekit/react-native) instead — see issue #185.
+# - cpal/rodio: host audio I/O for voice + sound effects; no mobile path
+#   and mobile drops voice.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+portable-pty = "0.8"
+livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
+libwebrtc = "0.3"
+cpal = "0.15"
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
 
 [[bin]]
 name = "uniffi-bindgen"

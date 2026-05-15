@@ -218,4 +218,11 @@ pub fn dirs_path() -> std::path::PathBuf {
         let appdata = std::env::var("APPDATA").unwrap_or_default();
         std::path::PathBuf::from(appdata).join("pollis")
     }
+    // Mobile passes POLLIS_DATA_DIR (app sandbox / Documents) once the bridge
+    // is wired (issue #185); temp_dir is a compile-complete fallback so the
+    // function is total on iOS/Android.
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    {
+        std::env::temp_dir().join("pollis")
+    }
 }

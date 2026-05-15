@@ -83,16 +83,7 @@ export const TitleBar: React.FC = () => {
         data-testid="title-bar-close"
         onClick={handleClose}
         aria-label="Close"
-        className="flex items-center justify-center w-8 h-8 transition-colors"
-        style={{ color: "var(--c-text-muted)" }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "#c42b1c";
-          (e.currentTarget as HTMLElement).style.color = "white";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "transparent";
-          (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)";
-        }}
+        className="flex items-center justify-center w-8 h-8 transition-colors text-[var(--c-text-muted)] hover:bg-[#c42b1c] hover:text-white"
       >
         <X size={12} aria-hidden="true" />
       </button>

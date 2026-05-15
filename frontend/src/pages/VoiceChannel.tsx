@@ -104,10 +104,7 @@ export const VoiceChannelPage: React.FC = () => {
       >
         <button
           onClick={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
-          className="mr-3 inline-flex items-center gap-1 leading-none transition-colors"
-          style={{ color: "var(--c-text-muted)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
+          className="mr-3 inline-flex items-center gap-1 leading-none transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
         >
           <ArrowLeft size={12} />
         </button>

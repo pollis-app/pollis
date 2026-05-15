@@ -236,28 +236,15 @@ pub async fn set_member_role(
     ).await?;
 
     // Notify other online group members so their members list refreshes.
+    // Best-effort realtime push; routed through the livekit boundary so this
+    // call site stays platform-agnostic (no-op on mobile, see issue #185).
+    if let Err(e) = crate::commands::livekit::publish_member_role_changed_to_room(
+        &state.livekit,
+        &group_id,
+    )
+    .await
     {
-        use livekit::DataPacket;
-        use crate::realtime::RealtimeEvent;
-        let payload = match serde_json::to_vec(&RealtimeEvent::MemberRoleChanged {
-            group_id: group_id.clone(),
-        }) {
-            Ok(b) => b,
-            Err(e) => {
-                eprintln!("[role] serialize MemberRoleChanged: {e}");
-                return Ok(());
-            }
-        };
-        let lk = state.livekit.lock().await;
-        if let Some((room, _)) = lk.rooms.get(&group_id) {
-            let room = Arc::clone(room);
-            drop(lk);
-            let _ = room.local_participant().publish_data(DataPacket {
-                payload,
-                reliable: true,
-                ..Default::default()
-            }).await;
-        }
+        eprintln!("[role] publish MemberRoleChanged: {e}");
     }
 
     Ok(())

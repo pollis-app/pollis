@@ -1,5 +1,5 @@
 @import "@fontsource/atkinson-hyperlegible-next";
-@import "@fontsource/geist-mono/500.css";
+@import "@fontsource/dm-mono/500.css";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -52,7 +52,7 @@
     /* ── Focus ring (used by all input components) ──────────────── */
     --c-focus-ring: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
 
-    --font-mono: 'Geist Mono', ui-monospace, monospace;
+    --font-mono: 'DM Mono', ui-monospace, monospace;
     --font-sans: 'Atkinson Hyperlegible Next', system-ui, sans-serif;
   }
 

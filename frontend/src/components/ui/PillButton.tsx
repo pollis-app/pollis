@@ -33,27 +33,13 @@ export const PillButton: React.FC<PillButtonProps> = ({
       aria-label={ariaLabel}
       title={title}
       onClick={onClick}
-      className="flex items-center justify-center font-mono transition-colors"
+      className="flex items-center justify-center font-mono transition-colors cursor-pointer rounded-[3px] border border-solid border-[var(--pill-accent)] bg-[var(--pill-accent)] text-[var(--c-bg)] hover:bg-[var(--c-bg)] hover:text-[var(--pill-accent)]"
       style={{
-        background: accent,
-        color: "var(--c-bg)",
-        border: `1px solid ${accent}`,
+        ["--pill-accent" as string]: accent,
         padding: square ? "3px" : "1px 8px",
         gap: square ? 0 : "0.375rem",
-        borderRadius: 3,
-        cursor: "pointer",
         lineHeight: 1.4,
-      }}
-      onMouseEnter={(e) => {
-        const el = e.currentTarget as HTMLButtonElement;
-        el.style.background = "var(--c-bg)";
-        el.style.color = accent;
-      }}
-      onMouseLeave={(e) => {
-        const el = e.currentTarget as HTMLButtonElement;
-        el.style.background = accent;
-        el.style.color = "var(--c-bg)";
-      }}
+      } as React.CSSProperties}
     >
       {children}
     </button>

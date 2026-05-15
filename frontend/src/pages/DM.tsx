@@ -104,20 +104,13 @@ export const DMPage: React.FC = () => {
             <button
               data-testid="dm-header-username"
               onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
-              className="font-mono"
+              className="font-mono transition-colors text-inherit hover:text-[var(--c-accent)]"
               style={{
                 background: "none",
                 border: "none",
                 padding: 0,
-                color: "inherit",
                 cursor: "pointer",
                 fontSize: "inherit",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.color = "";
               }}
               aria-label={`View profile of @${username}`}
             >

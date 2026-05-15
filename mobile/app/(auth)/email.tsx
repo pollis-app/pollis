@@ -1,0 +1,74 @@
+import { useState } from "react";
+import { View, Text } from "react-native";
+import { useRouter } from "expo-router";
+import { Screen, Crumb, Field, Button, BottomAction } from "../../components/ui";
+import { PollisMark } from "../../components/PollisMark";
+import { Icon } from "../../components/icons";
+import { semantic, type as ty } from "../../theme/tokens";
+
+export default function AuthEmail() {
+  const router = useRouter();
+  const [email, setEmail] = useState("dan@example.io");
+  return (
+    <Screen>
+      <Crumb segs={[{ label: "AUTH" }, { label: "Identify", leaf: true }]} />
+      <View
+        style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 24 }}
+      >
+        <PollisMark />
+        <View style={{ marginTop: 14, gap: 8 }}>
+          <Text style={[ty.h1, { color: semantic.ink }]}>Sign in</Text>
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              lineHeight: 19,
+              color: semantic.mute,
+            }}
+          >
+            Enter your email. We'll send you a one-time code — no password.
+          </Text>
+        </View>
+        <View style={{ gap: 8 }}>
+          <Text style={ty.label}>EMAIL</Text>
+          <Field
+            amber
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            icon={<Icon.mail color={semantic.mute} />}
+          />
+        </View>
+        <View
+          style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
+        >
+          <Icon.shield color={semantic.mute} />
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 11,
+              letterSpacing: 0.6,
+              color: semantic.mute,
+              flex: 1,
+            }}
+          >
+            End-to-end encrypted. Your email is never sent in cleartext.
+          </Text>
+        </View>
+      </View>
+      <BottomAction>
+        <Button
+          variant="primary"
+          full
+          onPress={() => router.push("/(auth)/otp")}
+          iconRight={<Icon.arrowRight color="#0a0907" />}
+        >
+          CONTINUE
+        </Button>
+        <Button variant="subtle" full>
+          I have a recovery key
+        </Button>
+      </BottomAction>
+    </Screen>
+  );
+}
