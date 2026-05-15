@@ -919,6 +919,41 @@ pub async fn publish_membership_changed_to_room(
     Ok(())
 }
 
+/// Broadcasts a `member_role_changed` event to a group's LiveKit room so
+/// connected members refresh the member list when an admin/member role
+/// changes. Non-fatal — callers log errors. Silently no-ops if the process
+/// isn't connected to the group's room.
+pub async fn publish_member_role_changed_to_room(
+    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    group_id: &str,
+) -> Result<()> {
+    let room = {
+        let lk = livekit.lock().await;
+        lk.rooms.get(group_id).map(|(r, _)| Arc::clone(r))
+    };
+
+    let room = match room {
+        None => return Ok(()),
+        Some(r) => r,
+    };
+
+    let payload = serde_json::to_vec(&crate::realtime::RealtimeEvent::MemberRoleChanged {
+        group_id: group_id.to_owned(),
+    })
+    .map_err(Error::Serde)?;
+
+    room.local_participant()
+        .publish_data(DataPacket {
+            payload,
+            reliable: true,
+            ..Default::default()
+        })
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("publish_member_role_changed: {e}")))?;
+
+    Ok(())
+}
+
 /// Broadcasts a voice join/leave event into the group's data channel so other
 /// online members refetch the participant list. LiveKit is the source of
 /// truth for who is actually in a voice room — this command does not write

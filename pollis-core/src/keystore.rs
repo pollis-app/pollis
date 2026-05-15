@@ -60,6 +60,17 @@ mod backend {
                 PathBuf::from(appdata).join("pollis")
             }
         };
+        // Mobile uses the OS secure store for real (iOS Keychain / Android
+        // Keystore — issue #185). This file-backed path is a compile-complete
+        // fallback; the bridge passes POLLIS_DATA_DIR (app sandbox) when wired.
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        let base = {
+            if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
+                PathBuf::from(dir)
+            } else {
+                std::env::temp_dir().join("pollis")
+            }
+        };
         base.join("dev-keystore.json")
     }
 
