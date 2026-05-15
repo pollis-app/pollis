@@ -20,6 +20,20 @@ import { shortcutLabel } from "../../utils/platform";
 const SIDEBAR_WIDTH = 220;
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
 
+// The sidebar chrome is sized in rem so it tracks the user's font-size
+// preference (`--font-size-base` on :root, which scales rem). Hardcoded px
+// would stay frozen while the rest of the app scales. Values are expressed
+// relative to the 15px default base; rem keeps them reactive to live
+// changes without needing a re-render.
+const BASE_FONT_PX = 15;
+const rem = (px: number): string => `${px / BASE_FONT_PX}rem`;
+// Shared lucide sizing: `size` seeds the SVG attribute, the rem width/height
+// override actually scales it with the font preference.
+const iconProps = {
+  size: 14,
+  style: { width: rem(14), height: rem(14), flexShrink: 0 },
+} as const;
+
 interface SidebarProps {
   isOpen: boolean;
   onToggle: () => void;
@@ -91,10 +105,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
   const isOnSettingsHub = pathname === "/settings";
   const settingsItems = [
-    { id: "preferences", label: "Preferences", icon: <Palette size={14} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
-    { id: "user", label: "User Settings", icon: <UserIcon size={14} />, to: "/user" as const, isActive: pathname === "/user" },
-    { id: "voice-settings", label: "Voice", icon: <Volume2 size={14} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
-    { id: "security", label: "Security", icon: <ShieldCheck size={14} />, to: "/security" as const, isActive: pathname === "/security" || pathname.startsWith("/security/") },
+    { id: "preferences", label: "Preferences", icon: <Palette {...iconProps} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
+    { id: "user", label: "User Settings", icon: <UserIcon {...iconProps} />, to: "/user" as const, isActive: pathname === "/user" },
+    { id: "voice-settings", label: "Voice", icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
+    { id: "security", label: "Security", icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || pathname.startsWith("/security/") },
   ];
   const isOnAnySettings = isOnSettingsHub || settingsItems.some((s) => s.isActive);
 
@@ -102,7 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     <aside
       data-testid="sidebar"
       style={{
-        width: SIDEBAR_WIDTH,
+        width: rem(SIDEBAR_WIDTH),
         flexShrink: 0,
         borderRight: "1px solid var(--c-border)",
         background: "var(--c-surface)",
@@ -114,7 +128,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
       <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
         <SectionHeader
           label="groups"
-          icon={<Users size={14} />}
+          icon={<Users {...iconProps} />}
           isActive={isOnGroups}
           onClick={() => router.navigate({ to: "/groups" })}
           borderedBottom
@@ -163,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                               params: { groupId: group.id, channelId: ch.id },
                             })
                         }
-                        leading={isVoice ? <Volume2 size={14} /> : <Hash size={14} />}
+                        leading={isVoice ? <Volume2 {...iconProps} /> : <Hash {...iconProps} />}
                         label={ch.name}
                         badge={unread > 0 ? unread : null}
                       />
@@ -176,7 +190,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
         <SectionHeader
           label="dms"
-          icon={<MessageCircle size={14} />}
+          icon={<MessageCircle {...iconProps} />}
           isActive={isOnDms}
           onClick={() => router.navigate({ to: "/dms" })}
           badge={totalDmUnread > 0 ? totalDmUnread : null}
@@ -201,7 +215,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
         <SectionHeader
           label="account"
-          icon={<SettingsIcon size={14} />}
+          icon={<SettingsIcon {...iconProps} />}
           isActive={isOnAnySettings}
           onClick={() => router.navigate({ to: "/settings" })}
           bordered
@@ -228,13 +242,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           flexShrink: 0,
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          padding: "8px 10px",
+          gap: rem(8),
+          padding: `${rem(8)} ${rem(10)}`,
           borderTop: "1px solid var(--c-border)",
           background: "none",
           color: "var(--c-text-muted)",
           fontFamily: "inherit",
-          fontSize: 13,
+          fontSize: rem(13),
           textAlign: "left",
           cursor: "pointer",
         }}
@@ -252,10 +266,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           style={{
             color: "inherit",
             background: "var(--c-bg)",
-            padding: "1px 5px",
+            padding: `${rem(1)} ${rem(5)}`,
             borderRadius: 3,
             border: "1px solid var(--c-border)",
-            fontSize: 11,
+            fontSize: rem(11),
             lineHeight: 1.2,
           }}
         >
@@ -286,15 +300,15 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       width: "100%",
       display: "flex",
       alignItems: "center",
-      gap: 6,
-      padding: "8px 10px 9px",
-      marginTop: bordered ? 4 : 0,
+      gap: rem(6),
+      padding: `${rem(8)} ${rem(10)} ${rem(9)}`,
+      marginTop: bordered ? rem(4) : 0,
       background: "var(--c-surface)",
       border: "none",
       borderTop: bordered ? "1px solid var(--c-border)" : "none",
       borderBottom: bordered || borderedBottom ? "1px solid var(--c-border)" : "none",
       color: isActive ? "var(--c-accent)" : "var(--c-text-muted)",
-      fontSize: 12,
+      fontSize: rem(12),
       letterSpacing: "0.08em",
       textTransform: "uppercase",
       cursor: "pointer",
@@ -369,7 +383,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
             border: "none",
             padding: 0,
             margin: 0,
-            paddingLeft: 10 + indent * 16,
+            paddingLeft: rem(10 + indent * 16),
             paddingRight: 0,
             display: "inline-flex",
             alignItems: "center",
@@ -377,7 +391,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
             cursor: "pointer",
           }}
         >
-          {chevron.isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+          {chevron.isCollapsed ? <ChevronRight {...iconProps} /> : <ChevronDown {...iconProps} />}
         </button>
       )}
       <button
@@ -388,19 +402,19 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
           minWidth: 0,
           display: "flex",
           alignItems: "center",
-          gap: 6,
-          paddingTop: 2,
-          paddingBottom: 2,
-          paddingLeft: chevron ? 6 : 10 + indent * 16,
-          paddingRight: 10,
+          gap: rem(6),
+          paddingTop: rem(2),
+          paddingBottom: rem(2),
+          paddingLeft: chevron ? rem(6) : rem(10 + indent * 16),
+          paddingRight: rem(10),
           background: "none",
           border: "none",
           color: "inherit",
-          fontSize: 15,
+          fontSize: rem(15),
           fontFamily: "inherit",
           cursor: "pointer",
           textAlign: "left",
-          lineHeight: "24px",
+          lineHeight: rem(24),
         }}
       >
         {leading}
@@ -423,9 +437,9 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
 const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
   <span
     style={{
-      fontSize: 11,
+      fontSize: rem(11),
       lineHeight: 1,
-      padding: "2px 6px",
+      padding: `${rem(2)} ${rem(6)}`,
       borderRadius: "0.25rem",
       background: muted ? "var(--c-text-muted)" : "var(--c-accent)",
       color: "var(--c-bg)",
