@@ -7,6 +7,7 @@ use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore::{self, Keystore};
 use crate::commands::pin::UnlockState;
+use crate::commands::terminal::PtySession;
 use crate::commands::voice::VoiceState;
 use crate::commands::voice_test::VoiceTestState;
 use crate::realtime::LiveKitState;
@@ -59,6 +60,10 @@ pub struct AppState {
     /// gated since other local users could otherwise read decrypted
     /// media in flight.
     pub media_server_token: Arc<Mutex<Option<String>>>,
+    /// Live in-app terminal sessions, keyed by the id returned from
+    /// `terminal_open`. Spawned on first activation, kept for the app's
+    /// lifetime; dropping an entry kills + reaps its child shell.
+    pub terminals: Arc<Mutex<HashMap<String, PtySession>>>,
 }
 
 impl AppState {
@@ -94,6 +99,7 @@ impl AppState {
             unlock: Arc::new(Mutex::new(None)),
             media_server_port: Arc::new(Mutex::new(None)),
             media_server_token: Arc::new(Mutex::new(None)),
+            terminals: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

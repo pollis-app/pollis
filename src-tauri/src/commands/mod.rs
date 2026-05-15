@@ -12,6 +12,7 @@ pub mod mls;
 pub mod pin;
 pub mod r2;
 pub mod sfx;
+pub mod terminal;
 pub mod update;
 pub mod user;
 pub mod voice;

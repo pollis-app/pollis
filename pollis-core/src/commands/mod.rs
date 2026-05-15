@@ -11,6 +11,7 @@ pub mod livekit;
 pub mod mls;
 pub mod r2;
 pub mod sfx;
+pub mod terminal;
 pub mod update;
 pub mod voice;
 pub mod voice_apm;
