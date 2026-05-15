@@ -92,7 +92,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const isOnSettingsHub = pathname === "/settings";
   const settingsItems = [
     { id: "preferences", label: "Preferences", icon: <Palette size={14} />, to: "/preferences" as const, isActive: pathname === "/preferences" },
-    { id: "user", label: "User", icon: <UserIcon size={14} />, to: "/user" as const, isActive: pathname === "/user" || pathname.startsWith("/user/") },
+    { id: "user", label: "User Settings", icon: <UserIcon size={14} />, to: "/user" as const, isActive: pathname === "/user" },
     { id: "voice-settings", label: "Voice", icon: <Volume2 size={14} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
     { id: "security", label: "Security", icon: <ShieldCheck size={14} />, to: "/security" as const, isActive: pathname === "/security" || pathname.startsWith("/security/") },
   ];
@@ -200,7 +200,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         </ul>
 
         <SectionHeader
-          label="settings"
+          label="account"
           icon={<SettingsIcon size={14} />}
           isActive={isOnAnySettings}
           onClick={() => router.navigate({ to: "/settings" })}

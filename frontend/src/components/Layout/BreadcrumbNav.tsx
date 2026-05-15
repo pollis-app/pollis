@@ -108,20 +108,20 @@ export const BreadcrumbNav: React.FC = () => {
         }
       }
     } else if (pathname === "/settings") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
     } else if (pathname === "/preferences") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
       out.push({ label: "Preferences", to: "/preferences" });
     } else if (pathname === "/user") {
-      out.push({ label: "Settings", to: "/settings" });
-      out.push({ label: "User", to: "/user" });
+      out.push({ label: "Account", to: "/settings" });
+      out.push({ label: "User Settings", to: "/user" });
     } else if (pathname.startsWith("/user/")) {
       out.push({ label: "Profile", to: pathname });
     } else if (pathname === "/security") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
       out.push({ label: "Security", to: "/security" });
     } else if (pathname === "/voice-settings") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
       out.push({ label: "Voice", to: "/voice-settings" });
     } else if (pathname === "/invites") {
       out.push({ label: "Invites", to: "/invites" });
