@@ -495,6 +495,10 @@ commands::livekit::get_livekit_token,
             commands::sfx::play_sfx,
             commands::sfx::start_ring,
             commands::sfx::stop_ring,
+            commands::terminal::terminal_open,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_close,
         ])
         // On macOS, hide the window on close instead of quitting.
         // On window focus, re-evaluate the media-cache cap so files

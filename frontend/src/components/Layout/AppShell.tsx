@@ -10,6 +10,7 @@ import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
+import { TerminalView } from "../TerminalView";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
@@ -98,6 +99,37 @@ export const AppShell: React.FC = () => {
 
   // ─── Current route pathname — needed by keyboard handlers below ─────────────
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // The terminal is a persistent component (mounted lazily on first
+  // visit, then kept mounted and display-toggled) so the PTY session +
+  // scrollback survive navigation. The URL only governs visibility:
+  // clicking a status-bar link / Cmd+K result / Back moves off
+  // /terminal like any other view, with zero terminal-specific wiring.
+  const isTerminal = pathname === "/terminal";
+  const [terminalActivated, setTerminalActivated] = useState(false);
+  useEffect(() => {
+    if (isTerminal) {
+      setTerminalActivated(true);
+    }
+  }, [isTerminal]);
+
+  // Ctrl+` (Linux/Windows) / Cmd+` (macOS) — flip chat ⇆ terminal.
+  // Leaving uses history.back() so the prior chat view (and its
+  // selected channel) is restored exactly.
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "`") {
+        e.preventDefault();
+        if (pathname === "/terminal") {
+          router.history.back();
+        } else {
+          router.navigate({ to: "/terminal" });
+        }
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [router, pathname]);
 
   // Global file drop — Tauri intercepts OS drag-drop before the browser sees it.
   useEffect(() => {
@@ -351,9 +383,30 @@ export const AppShell: React.FC = () => {
       {/* Main content — sidebar + matched child route */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row" }}>
         <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen((v) => !v)} />
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: isTerminal ? "none" : "flex",
+            flexDirection: "column",
+            minWidth: 0,
+          }}
+        >
           <Outlet />
         </div>
+        {terminalActivated && (
+          <div
+            style={{
+              flex: 1,
+              overflow: "hidden",
+              display: isTerminal ? "flex" : "none",
+              flexDirection: "column",
+              minWidth: 0,
+            }}
+          >
+            <TerminalView visible={isTerminal} />
+          </div>
+        )}
       </div>
 
       {/* VoiceBar — shown above bottom bar while user is in a voice channel */}
