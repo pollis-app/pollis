@@ -16,8 +16,8 @@ interface AvatarProps {
 }
 
 const PRESENCE_COLORS: Record<PresenceStatus, string> = {
-  online: "#22c55e",
-  offline: "#6b7280",
+  online: "var(--c-accent)",
+  offline: "var(--c-bg)",
 };
 
 export const Avatar: React.FC<AvatarProps> = ({
@@ -36,7 +36,7 @@ export const Avatar: React.FC<AvatarProps> = ({
   const containerStyle: React.CSSProperties = {
     width: dim,
     height: dim,
-    borderRadius: isProfile ? "0.5rem" : "50%",
+    borderRadius: isProfile ? "0.65rem" : "50%",
     overflow: "hidden",
     display: "inline-flex",
     alignItems: "center",
@@ -65,7 +65,10 @@ export const Avatar: React.FC<AvatarProps> = ({
     height: dotSize,
     borderRadius: "50%",
     background: presence ? PRESENCE_COLORS[presence] : "transparent",
-    border: "2px solid var(--c-surface, var(--c-bg))",
+    border:
+      presence === "offline"
+        ? "2px solid var(--c-accent-muted)"
+        : "2px solid var(--c-surface, var(--c-bg))",
     boxSizing: "content-box",
   };
 

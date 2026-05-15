@@ -426,7 +426,7 @@ const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, mute
       fontSize: 11,
       lineHeight: 1,
       padding: "2px 6px",
-      borderRadius: 8,
+      borderRadius: "0.25rem",
       background: muted ? "var(--c-text-muted)" : "var(--c-accent)",
       color: "var(--c-bg)",
       flexShrink: 0,
