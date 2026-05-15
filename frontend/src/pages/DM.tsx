@@ -4,6 +4,7 @@ import { Phone } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
+import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "@tauri-apps/api/core";
 import { voiceSession } from "../voice";
 
@@ -61,7 +62,12 @@ export const DMPage: React.FC = () => {
   const canShowProfile = isOneOnOne;
   // Calling is only offered once the other party has accepted the DM, so an
   // unwanted DM request can never be escalated to a phone call.
-  const canCall = isOneOnOne && otherAcceptedAt !== null;
+  const otherPresence = usePresenceStatus(otherUserId);
+  const isOtherOnline = otherPresence === "online";
+  // Calls to an offline user fail at the LiveKit handshake (nobody to
+  // create/answer the room), so only offer the call button when the peer
+  // is online.
+  const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
 
   const startCall = async () => {
     if (!currentUser || !otherUserId) {

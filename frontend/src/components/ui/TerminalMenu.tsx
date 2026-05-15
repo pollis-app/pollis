@@ -215,7 +215,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
 
               <div className="flex-1 min-w-0">
                 <div
-                  className="font-sans text-sm flex items-center gap-3"
+                  className="font-mono text-sm flex items-center gap-3"
                   style={{
                     color: isSelected
                       ? "var(--c-accent)"
@@ -232,7 +232,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                   <span>{item.label}</span>
                   {item.badge != null && item.badge > 0 && (
                     <span
-                      className="font-sans text-xs"
+                      className="font-mono text-xs"
                       style={{ color: "var(--c-accent)" }}
                     >
                       [{item.badge}]
@@ -241,7 +241,7 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                 </div>
                 {item.description && (
                   <div
-                    className="text-xs font-sans mt-0.5 truncate"
+                    className="text-xs font-mono mt-0.5 truncate"
                     style={{ color: "var(--c-text-muted)" }}
                   >
                     {item.description}
