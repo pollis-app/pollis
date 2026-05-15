@@ -103,10 +103,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
         <button
           data-testid="create-channel-go-home-button"
           onClick={() => onSuccess?.("", "text")}
-          className="text-xs font-mono transition-colors"
-          style={{ color: "var(--c-text-muted)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-accent)"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)"; }}
+          className="text-xs font-mono transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
         >
           Go Home
         </button>

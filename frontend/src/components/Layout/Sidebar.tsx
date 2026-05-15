@@ -238,6 +238,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         onClick={onToggle}
         aria-label={`Close sidebar (${shortcutLabel("B")})`}
         title={`Close sidebar (${shortcutLabel("B")})`}
+        className="transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-text)]"
         style={{
           flexShrink: 0,
           display: "flex",
@@ -246,17 +247,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
           padding: `${rem(8)} ${rem(10)}`,
           borderTop: "1px solid var(--c-border)",
           background: "none",
-          color: "var(--c-text-muted)",
           fontFamily: "inherit",
           fontSize: rem(13),
           textAlign: "left",
           cursor: "pointer",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
         }}
       >
         <span style={{ flex: 1 }}>Close</span>
@@ -296,6 +290,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
   <button
     type="button"
     onClick={onClick}
+    className="bg-[var(--c-surface)] hover:bg-[var(--c-hover)]"
     style={{
       width: "100%",
       display: "flex",
@@ -303,7 +298,6 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       gap: rem(6),
       padding: `${rem(8)} ${rem(10)} ${rem(9)}`,
       marginTop: bordered ? rem(4) : 0,
-      background: "var(--c-surface)",
       border: "none",
       borderTop: bordered ? "1px solid var(--c-border)" : "none",
       borderBottom: bordered || borderedBottom ? "1px solid var(--c-border)" : "none",
@@ -317,12 +311,6 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       position: "sticky",
       top: 0,
       zIndex: 1,
-    }}
-    onMouseEnter={(e) => {
-      (e.currentTarget as HTMLButtonElement).style.background = "var(--c-hover)";
-    }}
-    onMouseLeave={(e) => {
-      (e.currentTarget as HTMLButtonElement).style.background = "var(--c-surface)";
     }}
   >
     {icon}
@@ -349,25 +337,17 @@ interface RowProps {
 }
 
 const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge }) => {
-  const setHover = (el: HTMLElement, on: boolean) => {
-    if (isActive) {
-      return;
-    }
-    el.style.background = on ? "var(--c-hover)" : "none";
-  };
   return (
     <div
       data-active={isActive ? "true" : "false"}
+      className={`transition-colors ${isActive ? "bg-[var(--c-hover)]" : "bg-transparent hover:bg-[var(--c-hover)]"}`}
       style={{
         display: "flex",
         alignItems: "stretch",
         width: "100%",
-        background: isActive ? "var(--c-hover)" : "none",
         borderLeft: isActive ? "2px solid var(--c-accent)" : "2px solid transparent",
         color: isActive ? "var(--c-accent)" : "var(--c-text)",
       }}
-      onMouseEnter={(e) => setHover(e.currentTarget, true)}
-      onMouseLeave={(e) => setHover(e.currentTarget, false)}
     >
       {chevron && (
         <button

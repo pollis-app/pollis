@@ -166,21 +166,14 @@ export const BreadcrumbNav: React.FC = () => {
           data-testid="breadcrumb-back-button"
           onClick={handleBack}
           aria-label="Back"
-          className="flex items-center justify-center transition-colors"
+          className="flex items-center justify-center transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
           style={{
             width: 20,
             height: 20,
             background: "none",
             border: "none",
             padding: 0,
-            color: "var(--c-text-muted)",
             cursor: "pointer",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
           }}
         >
           <ChevronLeft size={14} />
@@ -201,20 +194,13 @@ export const BreadcrumbNav: React.FC = () => {
             ) : (
               <button
                 onClick={() => router.navigate({ to: seg.to })}
-                className="font-mono"
+                className="font-mono transition-colors text-inherit hover:text-[var(--c-accent)]"
                 style={{
                   background: "none",
                   border: "none",
                   padding: 0,
-                  color: "inherit",
                   cursor: "pointer",
                   fontSize: "inherit",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = "";
                 }}
               >
                 {seg.label}
@@ -228,20 +214,13 @@ export const BreadcrumbNav: React.FC = () => {
         onClick={() => window.dispatchEvent(new CustomEvent("pollis:open-search"))}
         aria-label={`Search (${shortcutLabel("K")})`}
         title={`Search (${shortcutLabel("K")})`}
-        className="flex items-center gap-1.5 transition-colors"
+        className="flex items-center gap-1.5 transition-colors text-[var(--c-text)] hover:text-[var(--c-accent)]"
         style={{
           height: 20,
           background: "none",
           border: "none",
           padding: "0 6px",
-          color: "var(--c-text)",
           cursor: "pointer",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
         }}
       >
         <SearchIcon size={16} />
@@ -264,24 +243,14 @@ export const BreadcrumbNav: React.FC = () => {
         data-testid="breadcrumb-settings-button"
         onClick={() => router.navigate({ to: "/settings" })}
         aria-label="Settings"
-        className="flex items-center justify-center transition-colors"
+        className={`flex items-center justify-center transition-colors bg-transparent hover:bg-[var(--c-hover)] hover:text-[var(--c-accent)] ${isOnSettingsHub ? "text-[var(--c-accent)]" : "text-[var(--c-text)]"}`}
         style={{
           width: 24,
           height: 24,
-          background: "none",
           border: "none",
           padding: 0,
           borderRadius: 4,
-          color: isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)",
           cursor: "pointer",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-          (e.currentTarget as HTMLButtonElement).style.background = "var(--c-hover)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)";
-          (e.currentTarget as HTMLButtonElement).style.background = "none";
         }}
       >
         <SettingsIcon size={16} />
