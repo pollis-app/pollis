@@ -6,12 +6,12 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#f9f9f9"
+      "backgroundColor": "#0a0907"
     },
     "ios": {
       "supportsTablet": true,
@@ -23,7 +23,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#f9f9f9"
+        "backgroundColor": "#0a0907"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
@@ -42,6 +42,14 @@
       "expo-image",
       "expo-font",
       [
+        "expo-build-properties",
+        {
+          "ios": {
+            "buildReactNativeFromSource": true
+          }
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Pollis needs your camera to scan the pairing QR code from your desktop."
@@ -50,7 +58,7 @@
       [
         "expo-notifications",
         {
-          "color": "#4a4bd7"
+          "color": "#e6b65a"
         }
       ]
     ]

@@ -2,9 +2,7 @@ import React, { useState } from "react";
 import { Minus, Square, X, Maximize2 } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { PollisLogo } from "../ui/PollisLogo";
-
-const isMac = typeof navigator !== "undefined" &&
-  navigator.platform.toUpperCase().indexOf("MAC") >= 0;
+import { isMac } from "../../utils/platform";
 
 const win = () => getCurrentWindow();
 
@@ -69,10 +67,7 @@ export const TitleBar: React.FC = () => {
         data-testid="title-bar-minimize"
         onClick={handleMinimize}
         aria-label="Minimize"
-        className="flex items-center justify-center w-8 h-8 transition-colors"
-        style={{ color: "var(--c-text-muted)" }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--c-hover)"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+        className="icon-btn"
       >
         <Minus size={12} aria-hidden="true" />
       </button>
@@ -80,10 +75,7 @@ export const TitleBar: React.FC = () => {
         data-testid="title-bar-maximize"
         onClick={handleMaximize}
         aria-label="Maximize"
-        className="flex items-center justify-center w-8 h-8 transition-colors"
-        style={{ color: "var(--c-text-muted)" }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = "var(--c-hover)"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+        className="icon-btn"
       >
         <Square size={11} aria-hidden="true" />
       </button>
@@ -91,16 +83,7 @@ export const TitleBar: React.FC = () => {
         data-testid="title-bar-close"
         onClick={handleClose}
         aria-label="Close"
-        className="flex items-center justify-center w-8 h-8 transition-colors"
-        style={{ color: "var(--c-text-muted)" }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "#c42b1c";
-          (e.currentTarget as HTMLElement).style.color = "white";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "transparent";
-          (e.currentTarget as HTMLElement).style.color = "var(--c-text-muted)";
-        }}
+        className="flex items-center justify-center w-8 h-8 transition-colors text-[var(--c-text-muted)] hover:bg-[#c42b1c] hover:text-white"
       >
         <X size={12} aria-hidden="true" />
       </button>

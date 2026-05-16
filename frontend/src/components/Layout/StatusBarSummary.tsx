@@ -27,19 +27,9 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
       data-testid={testId}
       aria-label={`${label}: ${count}`}
       onClick={() => router.navigate({ to })}
-      className="flex items-center gap-1 font-mono text-xs transition-colors"
+      className={`bg-transparent flex items-center gap-1 font-mono text-xs hover:opacity-50`}
       style={{
-        background: "none",
-        border: "none",
-        padding: 0,
         color,
-        cursor: "pointer",
-      }}
-      onMouseEnter={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.opacity = "0.7";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.opacity = "1";
       }}
     >
       {icon}
@@ -49,7 +39,6 @@ const SummaryItem: React.FC<SummaryItemProps> = ({ icon, count, to, label, color
           minWidth: "2ch",
           textAlign: "left",
           fontVariantNumeric: "tabular-nums",
-          lineHeight: "1.5rem"
         }}
       >
         {display}

@@ -187,15 +187,13 @@ export const MainContent: React.FC = () => {
     try {
       let page: RawMessagePage;
       if (selectedChannelId) {
-        page = await invoke<RawMessagePage>('get_channel_messages', {
-          userId: currentUser.id,
+        page = await invoke<RawMessagePage>('read_channel_messages', {
           channelId: selectedChannelId,
           limit: 50,
           cursor: pageCursor,
         });
       } else if (selectedConversationId) {
-        page = await invoke<RawMessagePage>('get_dm_messages', {
-          userId: currentUser.id,
+        page = await invoke<RawMessagePage>('read_dm_messages', {
           dmChannelId: selectedConversationId,
           limit: 50,
           cursor: pageCursor,

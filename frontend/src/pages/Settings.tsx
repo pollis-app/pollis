@@ -10,13 +10,8 @@ import { Button } from "../components/ui/Button";
 import { getVersion } from "@tauri-apps/api/app";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
-import * as api from "../services/api";
 
-interface SettingsProps {
-  onDeleteAccount?: () => void;
-}
-
-export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
+export const Settings: React.FC = () => {
   const { currentUser } = useAppStore();
   const setUpdateRequired = useAppStore((s) => s.setUpdateRequired);
 
@@ -25,9 +20,6 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
   const updateProfileMutation = useUpdateProfile();
   const updateAvatarMutation = useUpdateAvatar();
 
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [currentAvatarUrl, setCurrentAvatarUrl] = useState<string | null>(null);
@@ -213,31 +205,6 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
       setEmailChangePending(false);
     }
   };
-
-  const handleDeleteAccount = useCallback(async () => {
-    if (!currentUser) {
-      return;
-    }
-    if (deleteConfirmText !== "DELETE") {
-      return;
-    }
-    setIsDeleting(true);
-    setDeleteError(null);
-    try {
-      await api.deleteAccount(currentUser.id);
-      // Clear local state immediately so the user is logged out even if the
-      // callback chain from the router context is broken.
-      useAppStore.getState().logout();
-      if (onDeleteAccount) {
-        onDeleteAccount();
-      } else {
-        console.error("[Settings] onDeleteAccount callback is undefined — falling back to logout only");
-      }
-    } catch (error) {
-      setDeleteError(error instanceof Error ? error.message : "Failed to delete account");
-      setIsDeleting(false);
-    }
-  }, [currentUser, deleteConfirmText, onDeleteAccount]);
 
   const handleCheckForUpdates = useCallback(async () => {
     setUpdateStatus("checking");
@@ -613,43 +580,6 @@ export const Settings: React.FC<SettingsProps> = ({ onDeleteAccount }) => {
                 </Button>
               )}
             </div>
-          </section>
-
-          {/* Danger zone */}
-          <section className="flex flex-col gap-4 mb-12" data-testid="settings-danger-zone">
-            <h2
-              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
-              style={{ color: 'hsl(0 60% 55%)', borderColor: 'hsl(0 60% 30% / 40%)' }}
-            >
-              Danger Zone
-            </h2>
-
-            <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
-              Permanently delete your account and all associated data. This cannot be undone.
-            </p>
-
-            <TextInput
-              label="Type DELETE to confirm"
-              id="settings-delete-confirm"
-              data-testid="settings-delete-confirm-input"
-              value={deleteConfirmText}
-              onChange={setDeleteConfirmText}
-              placeholder="DELETE"
-              disabled={isDeleting}
-              error={deleteError || undefined}
-            />
-
-            <Button
-              data-testid="settings-delete-account-button"
-              onClick={handleDeleteAccount}
-              disabled={deleteConfirmText !== "DELETE" || isDeleting}
-              isLoading={isDeleting}
-              loadingText="Deleting account…"
-              variant="danger"
-              className="w-full"
-            >
-              Delete my account
-            </Button>
           </section>
 
         </div>

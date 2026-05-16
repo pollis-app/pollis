@@ -232,6 +232,33 @@ fn hide_window(window: tauri::Window) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // macOS launches GUI apps with a soft `RLIMIT_NOFILE` of 256, which is
+    // not enough once realtime LiveKit rooms (one per group), libsql
+    // websockets, reqwest connection pools, the local media-cache HTTP
+    // server, and CoreAudio AudioUnits all coexist. Hitting the cap surfaces
+    // as `EMFILE` (`Too many open files`) inside CoreAudio (`UpdateStreamFormats:
+    // 0 output streams`), `libsystem_dnssd` (`socketpair failed 24`), and
+    // websocket reconnects — i.e. voice silently failing to publish, devices
+    // disappearing from enumeration, and random kicks from voice channels.
+    // Raise the soft limit to the hard max; the hard max on macOS is
+    // typically `unlimited` (OPEN_MAX, 10240 in practice).
+    #[cfg(unix)]
+    unsafe {
+        let mut rl = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rl) == 0 {
+            let target = rl.rlim_max.min(65_536);
+            if rl.rlim_cur < target {
+                let prev = rl.rlim_cur;
+                rl.rlim_cur = target;
+                if libc::setrlimit(libc::RLIMIT_NOFILE, &rl) == 0 {
+                    eprintln!("[startup] raised RLIMIT_NOFILE soft limit {prev} -> {target}");
+                } else {
+                    eprintln!("[startup] setrlimit(RLIMIT_NOFILE, {target}) failed: {}", std::io::Error::last_os_error());
+                }
+            }
+        }
+    }
+
     // WebKitGTK 2.42+ attempts DMA-BUF rendering and aborts if GBM/EGL is
     // unavailable (e.g. certain GPU drivers, VMs, Wayland compositors without
     // DRM). Disable it unconditionally so the app doesn't crash on launch.
@@ -408,6 +435,8 @@ pub fn run() {
             commands::messages::send_message,
             commands::messages::get_channel_messages,
             commands::messages::get_dm_messages,
+            commands::messages::read_channel_messages,
+            commands::messages::read_dm_messages,
             commands::messages::ingest_channel_envelopes,
             commands::messages::ingest_dm_envelopes,
             commands::messages::list_messages_by_sender,
@@ -470,6 +499,10 @@ commands::livekit::get_livekit_token,
             commands::sfx::play_sfx,
             commands::sfx::start_ring,
             commands::sfx::stop_ring,
+            commands::terminal::terminal_open,
+            commands::terminal::terminal_write,
+            commands::terminal::terminal_resize,
+            commands::terminal::terminal_close,
         ])
         // On macOS, hide the window on close instead of quitting.
         // On window focus, re-evaluate the media-cache cap so files

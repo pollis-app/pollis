@@ -25,7 +25,7 @@ export default {
         bg: 'var(--c-bg)',
       },
       fontFamily: {
-        mono: ['"Atkinson Hyperlegible Mono"', 'ui-monospace', 'monospace'],
+        mono: ['"DM Mono"', 'ui-monospace', 'monospace'],
         sans: ['"Atkinson Hyperlegible Next"', 'system-ui', 'sans-serif'],
       },
       borderRadius: {

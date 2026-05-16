@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import React, { useEffect, useState, useCallback } from "react";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
 import { TextInput } from "../components/ui/TextInput";
 import { NavigableList } from "../components/ui/NavigableList";
 import { useAppStore } from "../stores/appStore";
+import type { RouterContext } from "../types/router";
 import * as api from "../services/api";
 
 /// Human-readable summary for each `security_event.kind` the backend
@@ -70,9 +71,15 @@ const sectionHeaderStyle: React.CSSProperties = {
 
 export const SecurityPage: React.FC = () => {
   const navigate = useNavigate();
+  const router = useRouter();
+  const { onDeleteAccount } = router.options.context as RouterContext;
   const { currentUser } = useAppStore();
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [devices, setDevices] = useState<api.DeviceInfo[] | null>(null);
   const [devicesError, setDevicesError] = useState<string | null>(null);
@@ -141,6 +148,31 @@ export const SecurityPage: React.FC = () => {
 
   const deviceDisplayName = (device: api.DeviceInfo): string =>
     device.device_name ?? shortId(device.device_id);
+
+  const handleDeleteAccount = useCallback(async () => {
+    if (!currentUser) {
+      return;
+    }
+    if (deleteConfirmText !== "DELETE") {
+      return;
+    }
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.deleteAccount(currentUser.id);
+      // Clear local state immediately so the user is logged out even if the
+      // callback chain from the router context is broken.
+      useAppStore.getState().logout();
+      if (onDeleteAccount) {
+        onDeleteAccount();
+      } else {
+        console.error("[SecurityPage] onDeleteAccount callback is undefined — falling back to logout only");
+      }
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Failed to delete account");
+      setIsDeleting(false);
+    }
+  }, [currentUser, deleteConfirmText, onDeleteAccount]);
 
   return (
     <PageShell title="Security" scrollable>
@@ -318,6 +350,44 @@ export const SecurityPage: React.FC = () => {
                 );
               }}
             />
+          </section>
+
+          {/* Danger zone — account deletion lives at the very bottom of the
+              security page so it's the last thing a user can reach. */}
+          <section className="flex flex-col gap-4 mb-12" data-testid="settings-danger-zone">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "hsl(0 60% 55%)", borderColor: "hsl(0 60% 30% / 40%)" }}
+            >
+              Danger Zone
+            </h2>
+
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              Permanently delete your account and all associated data. This cannot be undone.
+            </p>
+
+            <TextInput
+              label="Type DELETE to confirm"
+              id="settings-delete-confirm"
+              data-testid="settings-delete-confirm-input"
+              value={deleteConfirmText}
+              onChange={setDeleteConfirmText}
+              placeholder="DELETE"
+              disabled={isDeleting}
+              error={deleteError || undefined}
+            />
+
+            <Button
+              data-testid="settings-delete-account-button"
+              onClick={handleDeleteAccount}
+              disabled={deleteConfirmText !== "DELETE" || isDeleting}
+              isLoading={isDeleting}
+              loadingText="Deleting account…"
+              variant="danger"
+              className="w-full"
+            >
+              Delete my account
+            </Button>
           </section>
         </div>
       </div>

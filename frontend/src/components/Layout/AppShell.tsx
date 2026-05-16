@@ -12,6 +12,7 @@ import { ScreenShareViewer } from "../Voice/ScreenShareViewer";
 import { screenShareSession } from "../../screenshare/screenShareSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
+import { TerminalView } from "../TerminalView";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
@@ -100,6 +101,37 @@ export const AppShell: React.FC = () => {
 
   // ─── Current route pathname — needed by keyboard handlers below ─────────────
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  // The terminal is a persistent component (mounted lazily on first
+  // visit, then kept mounted and display-toggled) so the PTY session +
+  // scrollback survive navigation. The URL only governs visibility:
+  // clicking a status-bar link / Cmd+K result / Back moves off
+  // /terminal like any other view, with zero terminal-specific wiring.
+  const isTerminal = pathname === "/terminal";
+  const [terminalActivated, setTerminalActivated] = useState(false);
+  useEffect(() => {
+    if (isTerminal) {
+      setTerminalActivated(true);
+    }
+  }, [isTerminal]);
+
+  // Ctrl+` (Linux/Windows) / Cmd+` (macOS) — flip chat ⇆ terminal.
+  // Leaving uses history.back() so the prior chat view (and its
+  // selected channel) is restored exactly.
+  useEffect(() => {
+    const handle = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "`") {
+        e.preventDefault();
+        if (pathname === "/terminal") {
+          router.history.back();
+        } else {
+          router.navigate({ to: "/terminal" });
+        }
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [router, pathname]);
 
   // Global file drop — Tauri intercepts OS drag-drop before the browser sees it.
   useEffect(() => {
@@ -367,10 +399,32 @@ export const AppShell: React.FC = () => {
           and interactive while a stream is being viewed. */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row", position: "relative" }}>
         <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen((v) => !v)} />
-        <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}>
+        <div
+          style={{
+            flex: 1,
+            overflow: "hidden",
+            display: isTerminal ? "none" : "flex",
+            flexDirection: "column",
+            minWidth: 0,
+            position: "relative",
+          }}
+        >
           <Outlet />
           <ScreenShareViewer />
         </div>
+        {terminalActivated && (
+          <div
+            style={{
+              flex: 1,
+              overflow: "hidden",
+              display: isTerminal ? "flex" : "none",
+              flexDirection: "column",
+              minWidth: 0,
+            }}
+          >
+            <TerminalView visible={isTerminal} />
+          </div>
+        )}
       </div>
 
       {/* VoiceBar — shown above bottom bar while user is in a voice channel */}
@@ -406,15 +460,13 @@ export const AppShell: React.FC = () => {
       {/* On chat screens, invert: dark bg with accent text. Otherwise: accent bg with dark text. */}
       <div
         style={{
-          height: 28,
           flexShrink: 0,
           borderTop: "1px solid var(--c-border)",
           background: isChatScreen ? "var(--c-bg)" : "var(--c-accent)",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          paddingLeft: 12,
-          paddingRight: 12,
+          padding: "8px 10px",
         }}
       >
         <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />
@@ -434,7 +486,11 @@ export const AppShell: React.FC = () => {
                 // page useEffect tries to bounce off a transient mismatch),
                 // then swap the voice room, then clear the alert.
                 router.navigate({ to: "/call/$callId", params: { callId: incomingCall.callId } });
-                voiceSession.setIntent({ channelId: incomingCall.roomName, groupId: null });
+                voiceSession.setIntent({
+                  channelId: incomingCall.roomName,
+                  groupId: null,
+                  counterpartyUserId: incomingCall.callerId,
+                });
                 setIncomingCall(null);
               }}
               aria-label={`Answer call from @${incomingCall.callerUsername}`}

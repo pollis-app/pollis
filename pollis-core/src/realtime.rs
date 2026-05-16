@@ -1,7 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use tokio::task::JoinHandle;
 
 use crate::sink::EventSink;
@@ -135,6 +138,8 @@ pub struct LiveKitState {
     /// Active room connections keyed by room ID.
     /// Room is wrapped in Arc so it can be cloned out of the MutexGuard for
     /// publish operations without holding the lock across an await point.
+    /// Desktop only — mobile uses the native LiveKit SDK, not the Rust one.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     pub rooms: HashMap<String, (Arc<livekit::Room>, JoinHandle<()>)>,
 
     /// Room IDs currently being connected (between Room::connect call and map insertion).
@@ -146,6 +151,7 @@ impl LiveKitState {
     pub fn new() -> Self {
         Self {
             channel: None,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             rooms: HashMap::new(),
             connecting: HashSet::new(),
         }

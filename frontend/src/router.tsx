@@ -246,6 +246,15 @@ const callRoute = createRoute({
   component: CallPage,
 });
 
+// The terminal pane is a persistent component owned by AppShell (so the
+// PTY + scrollback survive navigation). This route only flips the URL so
+// links / Cmd+K / back navigation move off it like any other view.
+const terminalRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/terminal",
+  component: () => null,
+});
+
 // ─── Route tree ────────────────────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -281,6 +290,7 @@ const routeTree = rootRoute.addChildren([
   allJoinRequestsRoute,
   searchRoute,
   callRoute,
+  terminalRoute,
 ]);
 
 // ─── Router factory ────────────────────────────────────────────────────────────

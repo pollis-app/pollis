@@ -41,6 +41,13 @@ export interface JoinTimings {
 export interface VoiceIntent {
   channelId: string;
   groupId: string | null;
+  /**
+   * The OTHER participant's user id when this is a 1:1 call (`call-<ulid>`
+   * room). Required for those rooms because their voice E2EE key is derived
+   * from the DM's MLS group between the two users, and the room itself has
+   * no DB row to look up. `null`/omitted for group channels and DMs.
+   */
+  counterpartyUserId?: string | null;
 }
 
 export type VoicePhase = 'idle' | 'joining' | 'joined' | 'leaving';
@@ -192,8 +199,8 @@ class VoiceSessionManager {
 
   /**
    * Re-run the reconciliation loop without changing intent. Used when an
-   * external guard input (e.g. `currentUser`, `networkStatus`) changes and
-   * the session needs to tear down even though the intent itself is still set.
+   * external guard input (e.g. `currentUser`) changes and the session needs
+   * to tear down even though the intent itself is still set.
    */
   refresh(): void {
     void this.reconcile();
@@ -292,9 +299,6 @@ class VoiceSessionManager {
     if (!store.currentUser) {
       return false;
     }
-    if (store.networkStatus === 'kill-switch') {
-      return false;
-    }
     return true;
   }
 
@@ -344,6 +348,7 @@ class VoiceSessionManager {
         inputDevice: input,
         outputDevice: output,
         audioProcessing,
+        counterpartyUserId: target.counterpartyUserId ?? null,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -689,11 +694,11 @@ voiceSession.subscribe(() => {
   }
 });
 
-// React to currentUser / kill-switch changes by re-running reconciliation.
-// Logging out, getting kicked offline, etc. should tear down any active
-// voice session without each caller having to remember to.
+// React to currentUser changes by re-running reconciliation.
+// Logging out should tear down any active voice session without each caller
+// having to remember to.
 useAppStore.subscribe((state, prev) => {
-  if (state.currentUser !== prev.currentUser || state.networkStatus !== prev.networkStatus) {
+  if (state.currentUser !== prev.currentUser) {
     voiceSession.refresh();
   }
 });

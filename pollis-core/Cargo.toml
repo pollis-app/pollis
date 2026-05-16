@@ -23,7 +23,7 @@ test-harness = []
 uniffi = { version = "0.31", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["fs", "sync", "rt-multi-thread", "time", "macros", "io-util", "net", "process", "signal"] }
 async-trait = "0.1"
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
 libsql = { version = "0.6", features = ["remote"] }
@@ -48,21 +48,16 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 anyhow = "1"
 dotenvy = "0.15"
 thiserror = "1"
-once_cell = "1"
 zeroize = { version = "1", features = ["derive"] }
-livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
-libwebrtc = "0.3"
-cpal = "0.15"
 # RNNoise (Rust port) — runs as a pre-APM NS stage when the user enables
 # Click Suppression. Handles transients (keyboard clicks, mouse clicks)
 # that APM's spectral NS misses. Default features pull in clap/dasp/hound
-# for the bundled CLI; we only need the library.
+# for the bundled CLI; we only need the library. Pure Rust — cross-compiles
+# fine; only the gated voice modules use it, so it's harmless on mobile.
 nnnoiseless = { version = "0.5", default-features = false }
-rodio = { version = "0.19", default-features = false, features = ["wav"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp"] }
 blurhash = "0.2"
 futures-util = "0.3"
-bytes = "1"
 # Local-loopback HTTP server for serving cached media to the webview.
 # One URL pattern (`http://127.0.0.1:<port>/<token>/<hash>`) drives every
 # `<img>/<audio>/<video>` element — replaces the bifurcated asset:// (images)
@@ -80,8 +75,10 @@ gethostname = "1.1.0"
 # webrtc-audio-processing-2 >= 2.1 which most distros don't ship yet.
 #
 # Windows is excluded: webrtc-audio-processing-sys 2.0.4 vendors a meson +
-# abseil-cpp build that has zero MSVC support upstream.
-[target.'cfg(not(target_os = "windows"))'.dependencies]
+# abseil-cpp build that has zero MSVC support upstream. iOS/Android are
+# excluded for the same reason — the bundled C++ build hardcodes
+# -mmacos-version-min and has no NDK path; mobile does not do voice.
+[target.'cfg(not(any(target_os = "windows", target_os = "ios", target_os = "android")))'.dependencies]
 webrtc-audio-processing = { version = "2", features = ["bundled"] }
 
 # ScreenCaptureKit bindings for macOS screen share. macos_14_0 enables the
@@ -91,6 +88,19 @@ webrtc-audio-processing = { version = "2", features = ["bundled"] }
 # fine; we already bumped the app's minimum to macOS 14 for this feature.
 [target.'cfg(target_os = "macos")'.dependencies]
 screencapturekit = { version = "2", features = ["macos_14_0"] }
+
+# Desktop-only crates, excluded from the mobile (iOS/Android) build:
+# - portable-pty: in-app terminal pane; pulls termios 0.2.2 (no ios arm).
+# - livekit/libwebrtc: Rust LiveKit realtime/media engine. Mobile uses the
+#   native LiveKit SDK (@livekit/react-native) instead — see issue #185.
+# - cpal/rodio: host audio I/O for voice + sound effects; no mobile path
+#   and mobile drops voice.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+portable-pty = "0.8"
+livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
+libwebrtc = "0.3"
+cpal = "0.15"
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
 
 [[bin]]
 name = "uniffi-bindgen"

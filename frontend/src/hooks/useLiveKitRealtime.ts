@@ -3,7 +3,7 @@ import { Channel, invoke } from '@tauri-apps/api/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
-import { messageQueryKeys, useDMConversations } from './queries/useMessages';
+import { messageQueryKeys, useDMConversations, markIngested } from './queries/useMessages';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
 import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
@@ -104,7 +104,6 @@ export function useLiveKitRealtime() {
     selectedChannelId,
     selectedConversationId,
     currentUser,
-    networkStatus,
   } = useAppStore();
 
   const { query: prefsQuery } = usePreferences();
@@ -210,11 +209,42 @@ export function useLiveKitRealtime() {
   // Recreated if the user identity changes (e.g. logout → login as someone else).
 
   useEffect(() => {
-    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
+    if (!isTauriReady || !currentUser) {
       return;
     }
 
     const channel = new Channel<RealtimeEvent>();
+
+    // Pull new envelopes for a conversation, then invalidate so the local
+    // read picks them up. The local-first read path no longer runs ingest
+    // inside the queryFn, so realtime hints must drive it explicitly.
+    const ingestAndInvalidate = (
+      channelId: string | null,
+      conversationId: string | null,
+    ) => {
+      const targetId = channelId ?? conversationId;
+      if (!targetId) {
+        return;
+      }
+      const command = channelId ? 'ingest_channel_envelopes' : 'ingest_dm_envelopes';
+      const args = channelId
+        ? { userId: currentUser.id, channelId }
+        : { userId: currentUser.id, dmChannelId: conversationId };
+      markIngested(targetId);
+      invoke(command, args)
+        .catch((err) => {
+          console.warn(`[realtime] ${command} failed:`, err);
+        })
+        .finally(() => {
+          if (channelId) {
+            queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
+            queryClientRef.current.invalidateQueries({ queryKey: ['last-message', 'channel', channelId] });
+          } else if (conversationId) {
+            queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
+            queryClientRef.current.invalidateQueries({ queryKey: ['last-message', 'conversation', conversationId] });
+          }
+        });
+    };
 
     channel.onmessage = (event) => {
       if (event.type === 'dm_created') {
@@ -301,27 +331,14 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'edited_message') {
-        const channelId = event.channel_id;
-        const conversationId = event.conversation_id;
-        if (channelId) {
-          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
-        } else if (conversationId) {
-          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
-        }
+        ingestAndInvalidate(event.channel_id, event.conversation_id);
         return;
       }
 
       if (event.type === 'deleted_message') {
-        // Refetching the channel triggers ingest, which applies the
-        // type='delete' tombstone envelope as a soft-delete on the local
-        // row. The MessageList then renders it as "[deleted]".
-        const channelId = event.channel_id;
-        const conversationId = event.conversation_id;
-        if (channelId) {
-          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
-        } else if (conversationId) {
-          queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
-        }
+        // Ingest applies the type='delete' tombstone envelope as a
+        // soft-delete on the local row; MessageList renders [deleted].
+        ingestAndInvalidate(event.channel_id, event.conversation_id);
         queryClientRef.current.invalidateQueries({ queryKey: ['last-message'] });
         return;
       }
@@ -334,6 +351,12 @@ export function useLiveKitRealtime() {
         // Wipe stale presence for the reconnected room — Rust will re-emit
         // a fresh participant snapshot right after.
         usePresenceStore.getState().resetRoom(event.room_id);
+        // Catch up on welcomes that may have arrived during the outage so
+        // new-group invites apply without waiting for the user to open a
+        // channel from one of those groups.
+        invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+          console.warn('[realtime] reconnect: poll_mls_welcomes failed:', err);
+        });
         return;
       }
 
@@ -418,23 +441,9 @@ export function useLiveKitRealtime() {
       // conversation data but never trigger notifications or unread badges.
       const isOwnMessage = event.sender_id === currentUserIdRef.current;
 
-      // Always invalidate the affected room's query so re-entering the channel
-      // shows the new message immediately. For currently-selected rooms this
-      // triggers an immediate refetch; for others it just marks stale for next
-      // mount. Without this, React Query's staleTime serves cached pages that
-      // omit messages received while the user was elsewhere.
-      if (channelId) {
-        queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.channel(channelId) });
-      } else if (conversationId) {
-        queryClientRef.current.invalidateQueries({ queryKey: messageQueryKeys.conversation(conversationId) });
-      }
-
-      // Always update the last-message preview regardless of which channel is selected
-      if (channelId) {
-        queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "channel", channelId] });
-      } else if (conversationId) {
-        queryClientRef.current.invalidateQueries({ queryKey: ["last-message", "conversation", conversationId] });
-      }
+      // Ingest the new envelope, then invalidate the affected room's
+      // query and last-message preview so they pick the new message up.
+      ingestAndInvalidate(channelId, conversationId);
 
       const isSelected =
         (channelId && channelId === selectedChannelIdRef.current) ||
@@ -458,20 +467,20 @@ export function useLiveKitRealtime() {
     });
 
     return () => {
-      // Disconnect all rooms when the user logs out or kill-switch activates.
+      // Disconnect all rooms when the user logs out.
       invoke('connect_rooms', {
         roomIds: [],
         userId: currentUser.id,
         username: currentUser.username ?? currentUser.id,
       }).catch(() => { });
     };
-  }, [isTauriReady, currentUser?.id, networkStatus]);
+  }, [isTauriReady, currentUser?.id]);
 
   // ── Connect rooms whenever the room list changes ───────────────────────────
   // Rust handles the diff — only connects new rooms, disconnects removed ones.
 
   useEffect(() => {
-    if (!isTauriReady || !currentUser || networkStatus === 'kill-switch') {
+    if (!isTauriReady || !currentUser) {
       return;
     }
 
@@ -482,5 +491,17 @@ export function useLiveKitRealtime() {
     }).catch((err) => {
       console.error('[realtime] connect_rooms failed:', err);
     });
-  }, [isTauriReady, allRoomIds, currentUser?.id, currentUser?.username, networkStatus]);
+  }, [isTauriReady, allRoomIds, currentUser?.id, currentUser?.username]);
+
+  // One-time welcome poll on sign-in / app-ready. Catches welcomes for
+  // groups the user was invited to while offline so new-group invites
+  // apply without requiring them to open a channel from each group first.
+  useEffect(() => {
+    if (!isTauriReady || !currentUser) {
+      return;
+    }
+    invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+      console.warn('[realtime] startup poll_mls_welcomes failed:', err);
+    });
+  }, [isTauriReady, currentUser?.id]);
 }

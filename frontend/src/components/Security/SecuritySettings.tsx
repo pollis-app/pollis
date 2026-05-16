@@ -5,9 +5,10 @@ import {
   ShieldCheck,
   Lock,
   RefreshCw,
-  Eye,
-  EyeOff,
 } from "lucide-react";
+import { Button } from "../ui/Button";
+import { Switch } from "../ui/Switch";
+import { PasswordInput } from "../ui/PasswordInput";
 
 export interface VerifiedContact {
   id: string;
@@ -64,8 +65,6 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
   const [exportPassword, setExportPassword] = useState("");
   const [importPassword, setImportPassword] = useState("");
   const [importFile, setImportFile] = useState<File | undefined>(undefined);
-  const [showExportPassword, setShowExportPassword] = useState(false);
-  const [showImportPassword, setShowImportPassword] = useState(false);
 
   const exportStrength = useMemo(() => strength(exportPassword), [exportPassword]);
   const importStrength = useMemo(() => strength(importPassword), [importPassword]);
@@ -93,20 +92,13 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
       {/* Message previews */}
       <section className="flex flex-col gap-3">
         <h2 className="section-label px-0 border-b pb-1" style={{ borderColor: 'var(--c-border)' }}>Notifications</h2>
-        <label className="flex items-center gap-3 cursor-pointer">
-          <input
-            data-testid="message-previews-toggle"
-            type="checkbox"
-            checked={messagePreviewsEnabled}
-            onChange={(e) => onToggleMessagePreviews?.(e.target.checked)}
-            className="w-3 h-3"
-            style={{ accentColor: 'var(--c-accent)' }}
-          />
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>Message previews</span>
-            <span className="text-2xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Show decrypted previews in notifications — may leak on lock screen</span>
-          </div>
-        </label>
+        <Switch
+          data-testid="message-previews-toggle"
+          label="Message previews"
+          description="Show decrypted previews in notifications — may leak on lock screen"
+          checked={messagePreviewsEnabled}
+          onChange={(checked) => onToggleMessagePreviews?.(checked)}
+        />
       </section>
 
       {/* Backup */}
@@ -117,75 +109,40 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
           {/* Export */}
           <div className="flex flex-col gap-3">
             <h3 className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>Export keys</h3>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="export-password" className="section-label px-0">Password</label>
-              <div className="flex gap-1">
-                <input
-                  id="export-password"
-                  data-testid="export-password-input"
-                  type={showExportPassword ? "text" : "password"}
-                  value={exportPassword}
-                  onChange={(e) => setExportPassword(e.target.value)}
-                  placeholder="Strong unique password"
-                  className="pollis-input flex-1"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowExportPassword((p) => !p)}
-                  aria-label="Toggle password visibility"
-                  className="icon-btn"
-                >
-                  {showExportPassword ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
-                </button>
-              </div>
-              {exportPassword && (
-                <span className="text-2xs font-mono" style={{ color: strengthColor(exportStrength.score) }}>
-                  {exportStrength.label}
-                </span>
-              )}
-            </div>
-            <button
+            <PasswordInput
+              id="export-password"
+              data-testid="export-password-input"
+              label="Password"
+              placeholder="Strong unique password"
+              value={exportPassword}
+              onChange={setExportPassword}
+              strength={exportPassword ? { label: exportStrength.label, color: strengthColor(exportStrength.score) } : undefined}
+            />
+            <Button
               data-testid="export-backup-button"
               onClick={() => onExportBackup?.(exportPassword)}
               disabled={exportStrength.score < 3}
-              className="btn-primary self-start flex items-center gap-1.5"
+              variant="primary"
+              className="self-start"
             >
               <Download size={17} aria-hidden="true" />
               Export
-            </button>
+            </Button>
             <p className="text-2xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Store in a safe place — losing it means losing access.</p>
           </div>
 
           {/* Import */}
           <div className="flex flex-col gap-3">
             <h3 className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>Import keys</h3>
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="import-password" className="section-label px-0">Password</label>
-              <div className="flex gap-1">
-                <input
-                  id="import-password"
-                  data-testid="import-password-input"
-                  type={showImportPassword ? "text" : "password"}
-                  value={importPassword}
-                  onChange={(e) => setImportPassword(e.target.value)}
-                  placeholder="Password used during export"
-                  className="pollis-input flex-1"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowImportPassword((p) => !p)}
-                  aria-label="Toggle password visibility"
-                  className="icon-btn"
-                >
-                  {showImportPassword ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
-                </button>
-              </div>
-              {importPassword && (
-                <span className="text-2xs font-mono" style={{ color: strengthColor(importStrength.score) }}>
-                  {importStrength.label}
-                </span>
-              )}
-            </div>
+            <PasswordInput
+              id="import-password"
+              data-testid="import-password-input"
+              label="Password"
+              placeholder="Password used during export"
+              value={importPassword}
+              onChange={setImportPassword}
+              strength={importPassword ? { label: importStrength.label, color: strengthColor(importStrength.score) } : undefined}
+            />
             <input
               data-testid="import-backup-file-input"
               type="file"
@@ -195,15 +152,16 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
               className="text-xs font-mono"
               style={{ color: 'var(--c-text-dim)' }}
             />
-            <button
+            <Button
               data-testid="import-backup-button"
               onClick={() => onImportBackup?.(importPassword, importFile)}
               disabled={!importFile || importStrength.score < 2}
-              className="btn-primary self-start flex items-center gap-1.5"
+              variant="primary"
+              className="self-start"
             >
               <Upload size={17} aria-hidden="true" />
               Import
-            </button>
+            </Button>
             <p className="text-2xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Replaces current identity keys. Use cautiously.</p>
           </div>
         </div>
@@ -268,13 +226,14 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
             })}
           </div>
         )}
-        <button
+        <Button
           data-testid="clear-all-sessions-button"
           onClick={onClearSessions}
-          className="btn-ghost self-start"
+          variant="ghost"
+          className="self-start"
         >
           Clear all sessions
-        </button>
+        </Button>
       </section>
     </div>
   );

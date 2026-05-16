@@ -4,6 +4,7 @@ import { Phone } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
+import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "@tauri-apps/api/core";
 import { voiceSession } from "../voice";
 
@@ -61,7 +62,12 @@ export const DMPage: React.FC = () => {
   const canShowProfile = isOneOnOne;
   // Calling is only offered once the other party has accepted the DM, so an
   // unwanted DM request can never be escalated to a phone call.
-  const canCall = isOneOnOne && otherAcceptedAt !== null;
+  const otherPresence = usePresenceStatus(otherUserId);
+  const isOtherOnline = otherPresence === "online";
+  // Calls to an offline user fail at the LiveKit handshake (nobody to
+  // create/answer the room), so only offer the call button when the peer
+  // is online.
+  const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
 
   const startCall = async () => {
     if (!currentUser || !otherUserId) {
@@ -73,7 +79,11 @@ export const DMPage: React.FC = () => {
         callerId: currentUser.id,
         callerUsername: currentUser.username ?? currentUser.id,
       });
-      voiceSession.setIntent({ channelId: result.room_name, groupId: null });
+      voiceSession.setIntent({
+        channelId: result.room_name,
+        groupId: null,
+        counterpartyUserId: otherUserId,
+      });
       navigate({ to: "/call/$callId", params: { callId: result.call_id } });
     } catch (err) {
       console.error("[call] start_call failed:", err);
@@ -94,20 +104,13 @@ export const DMPage: React.FC = () => {
             <button
               data-testid="dm-header-username"
               onClick={() => navigate({ to: "/user/$userId", params: { userId: otherUserId! } })}
-              className="font-mono"
+              className="font-mono transition-colors text-inherit hover:text-[var(--c-accent)]"
               style={{
                 background: "none",
                 border: "none",
                 padding: 0,
-                color: "inherit",
                 cursor: "pointer",
                 fontSize: "inherit",
-              }}
-              onMouseEnter={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.color = "";
               }}
               aria-label={`View profile of @${username}`}
             >

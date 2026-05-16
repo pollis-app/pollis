@@ -24,8 +24,8 @@ pub async fn prepare_voice_connection(channel_id: String, user_id: String, displ
 }
 
 #[tauri::command]
-pub async fn join_voice_channel(channel_id: String, user_id: String, display_name: String, input_device: Option<String>, output_device: Option<String>, audio_processing: pollis_core::commands::voice_apm::ApmConfig, state: State<'_, Arc<AppState>>) -> Result<()> {
-    pollis_core::commands::voice::join_voice_channel(channel_id, user_id, display_name, input_device, output_device, audio_processing, &state).await
+pub async fn join_voice_channel(channel_id: String, user_id: String, display_name: String, input_device: Option<String>, output_device: Option<String>, audio_processing: pollis_core::commands::voice_apm::ApmConfig, counterparty_user_id: Option<String>, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::voice::join_voice_channel(channel_id, user_id, display_name, input_device, output_device, audio_processing, counterparty_user_id, &state).await
 }
 
 #[tauri::command]

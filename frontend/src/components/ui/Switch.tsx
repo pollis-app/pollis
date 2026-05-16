@@ -8,6 +8,7 @@ interface SwitchProps {
   className?: string;
   id?: string;
   description?: string;
+  "data-testid"?: string;
 }
 
 export const Switch: React.FC<SwitchProps> = ({
@@ -18,6 +19,7 @@ export const Switch: React.FC<SwitchProps> = ({
   className = "",
   id,
   description,
+  "data-testid": testId,
 }) => {
   const inputId = id || `switch-${label.toLowerCase().replace(/\s+/g, "-")}`;
   const descriptionId = description ? `${inputId}-description` : undefined;
@@ -27,6 +29,7 @@ export const Switch: React.FC<SwitchProps> = ({
       <div className="flex items-center gap-3">
         <button
           id={inputId}
+          data-testid={testId}
           type="button"
           role="switch"
           aria-checked={checked}
@@ -40,10 +43,16 @@ export const Switch: React.FC<SwitchProps> = ({
           }}
         >
           <span
-            className="inline-block h-3 w-3 transform rounded-full transition-transform duration-200"
+            className="inline-block h-4 w-4 transform rounded-full transition-transform duration-200"
             style={{
               background: "var(--c-bg)",
-              transform: checked ? "translateX(20px)" : "translateX(4px)",
+              // Track is w-9 (2.25rem), thumb is w-4 (1rem). Express travel
+              // in rem (not px) so it scales with the same root font size the
+              // track does — keeps the dot centered with an even 0.125rem
+              // inset at any font-size preference.
+              transform: checked
+                ? "translateX(1.125rem)"
+                : "translateX(0.125rem)",
             }}
           />
         </button>

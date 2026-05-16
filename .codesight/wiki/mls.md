@@ -82,6 +82,20 @@ When a new device (deviceC) enrolls for an existing user:
 
 The approver does NOT reconcile during approval (deviceC has no KPs yet at that point). DeviceC handles its own group joining via external-join.
 
+## Voice Key Export
+
+Voice channels reuse the same MLS group as the channel's messages. The shared per-room symmetric key is derived from the MLS exporter secret at the current epoch:
+
+```text
+voice_key = MlsGroup::export_secret(
+    label   = "pollis/voice/v1",
+    context = epoch.to_be_bytes(),
+    length  = 32,
+)
+```
+
+Both peers compute the same 32-byte key because both hold the same exporter secret at the same epoch. The key is handed to LiveKit's `FrameCryptor` (AES-128-GCM, libwebrtc-native) via `RoomOptions::encryption` so the SFU only ever sees ciphertext audio. On every commit merge in `process_pending_commits_inner` the key rotates without a reconnect — see `voice_e2ee::on_mls_epoch_changed` and [audio-processing.md](./audio-processing.md#end-to-end-encryption).
+
 ## Message Encrypt/Decrypt
 
 **Send** (`send_message`):

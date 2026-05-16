@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, NetworkStatus, VoiceParticipant } from '../types';
+import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant } from '../types';
 
 interface AppStore extends AppState {
   // User profile data from Turso
@@ -22,8 +22,6 @@ interface AppStore extends AppState {
   addChannel: (channel: Channel) => void;
   setDMConversations: (conversations: DMConversation[]) => void;
   addDMConversation: (conversation: DMConversation) => void;
-  setNetworkStatus: (status: NetworkStatus) => void;
-  setKillSwitchEnabled: (enabled: boolean) => void;
   setMessageQueue: (queue: MessageQueueItem[]) => void;
   addToMessageQueue: (item: MessageQueueItem) => void;
   updateMessageQueueItem: (id: string, updates: Partial<MessageQueueItem>) => void;
@@ -116,8 +114,6 @@ export const useAppStore = create<AppStore>((set) => ({
   groups: [],
   channels: {},
   dmConversations: [],
-  networkStatus: 'offline',
-  killSwitchEnabled: false,
   messageQueue: [],
   replyToMessageId: null,
   showThreadId: null,
@@ -167,9 +163,6 @@ export const useAppStore = create<AppStore>((set) => ({
   addDMConversation: (conversation) => set((state) => ({
     dmConversations: [...state.dmConversations, conversation]
   })),
-  
-  setNetworkStatus: (status) => set({ networkStatus: status }),
-  setKillSwitchEnabled: (enabled) => set({ killSwitchEnabled: enabled }),
   
   setMessageQueue: (queue) => set({ messageQueue: queue }),
   addToMessageQueue: (item) => set((state) => ({
@@ -254,8 +247,6 @@ export const useAppStore = create<AppStore>((set) => ({
     groups: [],
     channels: {},
     dmConversations: [],
-    networkStatus: 'offline',
-    killSwitchEnabled: false,
     messageQueue: [],
     replyToMessageId: null,
     showThreadId: null,

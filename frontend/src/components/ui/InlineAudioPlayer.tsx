@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { Play, Pause } from "lucide-react";
+import { formatDuration } from "../../utils/format";
 
 interface InlineAudioPlayerProps {
   src: string;
@@ -8,12 +9,6 @@ interface InlineAudioPlayerProps {
   autoPlay?: boolean;
   onClick?: () => void;
 }
-
-const formatTime = (time: number) => {
-  const minutes = Math.floor(time / 60);
-  const seconds = Math.floor(time % 60);
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-};
 
 export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
   src,
@@ -125,7 +120,7 @@ export const InlineAudioPlayer: React.FC<InlineAudioPlayerProps> = ({
         className="font-mono text-xs whitespace-nowrap"
         style={{ color: "var(--c-text-dim)" }}
       >
-        {formatTime(currentTime)} / {formatTime(duration)}
+        {formatDuration(currentTime)} / {formatDuration(duration)}
       </span>
     </div>
   );

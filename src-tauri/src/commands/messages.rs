@@ -29,6 +29,16 @@ pub async fn get_dm_messages(user_id: String, dm_channel_id: String, limit: Opti
 }
 
 #[tauri::command]
+pub async fn read_channel_messages(channel_id: String, limit: Option<i64>, cursor: Option<MessageCursor>, state: State<'_, Arc<AppState>>) -> Result<MessagePage> {
+    pollis_core::commands::messages::read_channel_messages(channel_id, limit, cursor, &state).await
+}
+
+#[tauri::command]
+pub async fn read_dm_messages(dm_channel_id: String, limit: Option<i64>, cursor: Option<MessageCursor>, state: State<'_, Arc<AppState>>) -> Result<MessagePage> {
+    pollis_core::commands::messages::read_dm_messages(dm_channel_id, limit, cursor, &state).await
+}
+
+#[tauri::command]
 pub async fn ingest_channel_envelopes(user_id: String, channel_id: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::messages::ingest_channel_envelopes(user_id, channel_id, &state).await
 }

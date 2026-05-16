@@ -214,13 +214,13 @@ export const MessageList: React.FC<MessageListProps> = ({
           >
             <div className="flex items-start gap-2 min-w-0">
               <span
-                className="flex-shrink-0 font-mono text-sm italic"
+                className="flex-shrink-0 font-mono text-sm"
                 style={{ color: "var(--c-text-dim)" }}
               >
                 blocked user
               </span>
               <span
-                className="font-mono text-sm italic"
+                className="font-mono text-sm"
                 style={{ color: "var(--c-text-muted)" }}
               >
                 [blocked]

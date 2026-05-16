@@ -198,12 +198,13 @@
         <div class="faq-question">Is it really end-to-end encrypted?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Yes. Messages are encrypted on your device using the same kind of cryptography banks and secure messengers use. Your private keys never leave your computer.</p>
+            <p>Yes. Messages, files, and voice are all encrypted on your device using the same kind of cryptography banks and secure messengers use. Your private keys never leave your computer.</p>
             <p>The server can see <strong>who</strong> is messaging <strong>when</strong>, but not <strong>what</strong>.</p>
           </div>
           <div class="dev">
             <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. Private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) through the <code>keyring</code> crate — never on disk, never sent anywhere.</p>
-            <p>Server sees: user IDs, group/channel membership, message timestamps, sizes, public keys. Server does not see: plaintext, file contents, private keys.</p>
+            <p>Voice is end-to-end encrypted too: audio frames are AES-128-GCM encrypted by libwebrtc's <code>FrameCryptor</code> post-Opus / pre-SRTP, keyed by a 32-byte secret derived from the channel's MLS group via <code>MlsGroup::export_secret("pollis/voice/v1", epoch, 32)</code>. The LiveKit SFU forwards ciphertext only; the key rotates on every MLS epoch advance.</p>
+            <p>Server sees: user IDs, group/channel membership, message timestamps, sizes, public keys, voice presence and RTP routing metadata. Server does not see: message plaintext, file contents, voice audio, private keys.</p>
           </div>
         </div>
       </div>

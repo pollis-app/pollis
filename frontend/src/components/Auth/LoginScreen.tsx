@@ -115,24 +115,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                             }
                           }}
                           disabled={!account.email}
-                          className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors"
+                          className="flex items-center gap-1 px-2 py-1 font-mono text-xs transition-colors border-2 border-[var(--c-border)] text-[var(--c-text-dim)] enabled:cursor-pointer enabled:hover:border-[var(--c-accent)] enabled:hover:text-[var(--c-text)]"
                           style={{
                             background: "var(--c-surface)",
-                            border: "2px solid var(--c-border)",
                             borderRadius: "0.5rem",
-                            color: "var(--c-text-dim)",
-                            cursor: account.email ? "pointer" : "default",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!account.email) {
-                              return;
-                            }
-                            (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-accent)";
-                            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
-                          }}
-                          onMouseLeave={(e) => {
-                            (e.currentTarget as HTMLButtonElement).style.borderColor = "var(--c-border)";
-                            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-dim)";
                           }}
                         >
                           <span>{account.username}</span>
@@ -153,20 +139,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 <button
                   data-testid="wipe-local-data-button"
                   onClick={() => setView("wipe")}
-                  className="text-xs font-mono self-center"
+                  className="text-xs font-mono self-center transition-colors text-[var(--c-text-muted)] hover:text-[#ff6b6b]"
                   style={{
-                    color: "var(--c-text-muted)",
                     background: "none",
                     border: "none",
                     cursor: "pointer",
                     padding: "0.25rem 0",
                     marginTop: "1rem",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.color = "#ff6b6b";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
                   }}
                 >
                   Delete local profiles

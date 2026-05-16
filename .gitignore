@@ -26,7 +26,6 @@ frontend/dist/
 frontend/.vite/
 frontend/package-lock.json
 frontend/package.json.md5
-test-results/
 
 # Database
 *.db

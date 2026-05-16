@@ -7,8 +7,13 @@ use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore::{self, Keystore};
 use crate::commands::pin::UnlockState;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::commands::screenshare::ScreenShareState;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use crate::commands::terminal::PtySession;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::commands::voice::VoiceState;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::commands::voice_test::VoiceTestState;
 use crate::realtime::LiveKitState;
 
@@ -30,8 +35,11 @@ pub struct AppState {
     pub keystore: Arc<dyn Keystore>,
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
     pub livekit: Arc<Mutex<LiveKitState>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     pub voice: Arc<Mutex<VoiceState>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     pub voice_test: Arc<Mutex<VoiceTestState>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     pub screenshare: Arc<Mutex<ScreenShareState>>,
     pub update_required: Arc<AtomicBool>,
     /// Per-device ULID, set during login. Each physical device gets a stable ID
@@ -61,6 +69,12 @@ pub struct AppState {
     /// gated since other local users could otherwise read decrypted
     /// media in flight.
     pub media_server_token: Arc<Mutex<Option<String>>>,
+    /// Live in-app terminal sessions, keyed by the id returned from
+    /// `terminal_open`. Spawned on first activation, kept for the app's
+    /// lifetime; dropping an entry kills + reaps its child shell.
+    /// Desktop only — the terminal pane is gated out on mobile targets.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    pub terminals: Arc<Mutex<HashMap<String, PtySession>>>,
 }
 
 impl AppState {
@@ -88,8 +102,11 @@ impl AppState {
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             voice: Arc::new(Mutex::new(VoiceState::new())),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             voice_test: Arc::new(Mutex::new(VoiceTestState::new())),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             screenshare: Arc::new(Mutex::new(ScreenShareState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
@@ -97,6 +114,8 @@ impl AppState {
             unlock: Arc::new(Mutex::new(None)),
             media_server_port: Arc::new(Mutex::new(None)),
             media_server_token: Arc::new(Mutex::new(None)),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            terminals: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -157,12 +176,18 @@ impl AppState {
         }
 
         *self.local_db.lock().await = Some(db);
+        // Scope the media cache to this user. Two clients on the same machine
+        // (dev workflow) otherwise share `app_data_dir/media-cache` but each
+        // has its own db_key, so client B can't decrypt client A's cache
+        // entries and the media server returns 500.
+        crate::commands::r2::set_cache_user(Some(user_id));
         Ok(())
     }
 
     /// Close the current user's database (called on logout).
     pub async fn unload_user_db(&self) {
         *self.local_db.lock().await = None;
+        crate::commands::r2::set_cache_user(None);
     }
 
     pub fn check_not_outdated(&self) -> crate::error::Result<()> {

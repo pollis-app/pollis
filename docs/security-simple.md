@@ -6,7 +6,7 @@ To use Pollis you sign in with your email — we send you a one-time code — an
 
 You can use Pollis on more than one device. Sign in on the new one, confirm a code on the old one, and the two agree privately to trust each other. New devices start empty — they don't get your old messages — but from then on, both devices receive everything going forward.
 
-Files like pictures, documents, and voice notes are sealed the same way. Voice chat is the exception: when you talk in a voice channel, your voice passes through our servers in a form we could technically listen to. We don't, and we don't record it, but we won't pretend it's sealed the way text is. Anything you wouldn't want overheard probably shouldn't go over voice.
+Files like pictures, documents, and voice notes are sealed the same way. Voice chat too: when you talk in a voice channel, the audio is sealed on your computer before it goes to our voice servers and only the other people in the channel can open it. The servers route packets they cannot listen to. The same group keys that protect your text messages produce the voice key, so anyone you've added to a channel can hear you and nobody else can.
 
 A few honest trade-offs. Because we can't read your messages, we can't get them back for you if you lose everything. We can see who you talk to and roughly when — that's just how the internet works. If somebody steals your computer while it's already unlocked, they can read your messages, because at that point it thinks they're you. And the privacy is only as strong as the people you're talking to.
 

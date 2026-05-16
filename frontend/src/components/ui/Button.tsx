@@ -15,7 +15,7 @@ interface ButtonProps {
   loadingText?: string;
   className?: string;
   variant?: "primary" | "secondary" | "danger" | "ghost";
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
   type?: "button" | "submit" | "reset";
   onKeyDown?: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
   autoFocus?: boolean;
@@ -42,34 +42,13 @@ export const Button: React.FC<ButtonProps> = ({
   const isDanger = variant === "danger";
   const isGhost = variant === "ghost";
 
-  const variantStyles = (() => {
-    if (isDanger) {
-      return {
-        border: "2px solid hsl(0 70% 50% / 40%)",
-        background: "transparent",
-        color: "hsl(0 70% 55%)",
-      };
-    }
-    if (isPrimary) {
-      return {
-        border: "2px solid transparent",
-        background: "var(--c-accent)",
-        color: "var(--c-bg)",
-      };
-    }
-    if (isGhost) {
-      return {
-        border: "none",
-        background: "transparent",
-        color: "var(--c-text-muted)",
-      };
-    }
-    return {
-      border: "2px solid var(--c-border-active)",
-      background: "transparent",
-      color: "var(--c-accent)",
-    };
-  })();
+  const variantClass = isDanger
+    ? "border-2 border-[hsl(0_70%_50%/0.4)] bg-transparent text-[hsl(0_70%_55%)] enabled:hover:bg-[hsl(0_70%_50%/0.1)]"
+    : isPrimary
+      ? "border-2 border-transparent bg-[var(--c-accent)] text-[var(--c-bg)] enabled:hover:opacity-[0.85]"
+      : isGhost
+        ? "border-none bg-transparent text-[var(--c-text-muted)] enabled:hover:text-[var(--c-text)]"
+        : "border-2 border-[var(--c-border-active)] bg-transparent text-[var(--c-accent)] enabled:hover:bg-[var(--c-hover)]";
 
   return (
     <button
@@ -80,34 +59,7 @@ export const Button: React.FC<ButtonProps> = ({
       autoFocus={autoFocus}
       aria-label={ariaLabel}
       data-testid={testId}
-      className={`inline-flex items-center justify-center gap-2 font-mono font-medium transition-colors focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
-      style={{
-        ...variantStyles,
-        borderRadius: "4px",
-        opacity: disabled || isLoading ? 0.5 : 1,
-        cursor: disabled || isLoading ? "not-allowed" : "pointer",
-        letterSpacing: "0.5px"
-      }}
-      onMouseEnter={(e) => {
-        if (disabled || isLoading) { return; }
-        const el = e.currentTarget as HTMLElement;
-        if (isDanger) {
-          el.style.background = "hsl(0 70% 50% / 10%)";
-        } else if (isPrimary) {
-          el.style.opacity = "0.85";
-        } else if (isGhost) {
-          el.style.color = "var(--c-text)";
-        } else {
-          el.style.background = "var(--c-hover)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (disabled || isLoading) { return; }
-        const el = e.currentTarget as HTMLElement;
-        el.style.opacity = disabled || isLoading ? "0.5" : "1";
-        el.style.background = variantStyles.background;
-        if (isGhost) { el.style.color = "var(--c-text-muted)"; }
-      }}
+      className={`inline-flex items-center justify-center gap-2 font-mono font-medium rounded-[4px] tracking-[0.5px] cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black ${variantClass} ${size === "xs" ? "px-1.5 py-0.5 text-[10px]" : size === "sm" ? "px-2.5 py-1 text-[11px]" : "px-4 py-2 text-xs"} ${className}`}
     >
       {isLoading && <Spinner />}
       {isLoading ? loadingText : children}

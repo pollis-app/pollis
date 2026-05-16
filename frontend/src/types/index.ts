@@ -102,8 +102,6 @@ export interface MessageQueueItem {
   updated_at: number;
 }
 
-export type NetworkStatus = 'online' | 'offline' | 'kill-switch';
-
 export interface Profile {
   id: string; // Clerk user ID
   user_id: string; // Local User ID (links to users table)
@@ -204,10 +202,6 @@ export interface AppState {
   groups: Group[];
   channels: Record<string, Channel[]>; // group_id -> channels
   dmConversations: DMConversation[];
-
-  // Network
-  networkStatus: NetworkStatus;
-  killSwitchEnabled: boolean;
 
   // Message queue
   messageQueue: MessageQueueItem[];

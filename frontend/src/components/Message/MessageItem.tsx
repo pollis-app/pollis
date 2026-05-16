@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
+import { formatFileSize, formatDuration } from "../../utils/format";
 import { useAppStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia, getMediaUrl } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
@@ -141,8 +144,9 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={isAuthorAdmin ? {
             background: "var(--c-accent)",
             color: "var(--c-bg)",
-            paddingLeft: "0.5rem",
-            paddingRight: "0.5rem",
+            paddingLeft: "0.25rem",
+            paddingRight: "0.25rem",
+            borderRadius: "0.125rem",
           } : {
             color: isOwn ? "var(--c-accent)" : authorColor,
           }}
@@ -164,7 +168,6 @@ export const MessageItem: React.FC<MessageItemProps> = ({
           style={{
             color: isDeleted ? "var(--c-text-muted)" : "var(--c-text)",
             whiteSpace: "pre-wrap",
-            fontStyle: isDeleted ? "italic" : undefined,
           }}
         >
           <LinkifiedText text={content} />
@@ -298,32 +301,12 @@ const BlurhashCanvas: React.FC<{ hash: string; width: number; height: number }> 
   );
 };
 
-const formatFileSize = (bytes: number) => {
-  if (bytes === 0) { return ""; }
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(1024));
-  return `${parseFloat((bytes / Math.pow(1024, i)).toFixed(1))}${sizes[i]}`;
-};
-
-const formatDuration = (seconds: number): string => {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${String(s).padStart(2, "0")}`;
-};
-
 // Shared styles for lightbox action buttons (download / esc).
 const lightboxBtnStyle: React.CSSProperties = {
-  color: "var(--c-accent)",
-  background: "none",
   border: "2px solid transparent",
   borderRadius: 4,
   cursor: "pointer",
   padding: "2px 8px",
-};
-
-const lightboxEscStyle: React.CSSProperties = {
-  ...lightboxBtnStyle,
-  color: "var(--c-text-dim)",
 };
 
 const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attachment }) => {
@@ -495,34 +478,40 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
     };
   }, [downloadUrl, attachment.localPreviewUrl]);
 
-  const triggerSave = (url: string) => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = attachment.filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  // Save to a user-chosen path via the native Tauri dialog. The `<a download>`
+  // trick doesn't work on WebKitGTK: `download` is ignored across origins
+  // (loopback media URL vs the app's tauri:// origin), so the webview just
+  // navigates to the URL and shows the browser's built-in audio/video player
+  // instead of triggering a download.
+  const triggerSave = async (url: string): Promise<boolean> => {
+    const target = await saveDialog({ defaultPath: attachment.filename });
+    if (!target) {
+      return false;
+    }
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`fetch failed: ${res.status}`);
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    await writeFile(target, bytes);
+    return true;
   };
 
   const handleDownload = async () => {
     if (downloadStatus !== "idle") { return; }
-    if (downloadUrl) {
-      // Already decrypted — save immediately, show brief confirmation.
-      triggerSave(downloadUrl);
-      setDownloadStatus("done");
-      setTimeout(() => setDownloadStatus("idle"), 2000);
-      return;
-    }
     setDownloadStatus("downloading");
     try {
-      const url = await downloadAndDecryptMedia(
-        attachment.object_key,
-        attachment.content_hash,
-        attachment.content_type,
-      );
-      triggerSave(url);
-      setDownloadStatus("done");
-      setTimeout(() => setDownloadStatus("idle"), 2000);
+      const url = downloadUrl
+        ?? await downloadAndDecryptMedia(
+          attachment.object_key,
+          attachment.content_hash,
+          attachment.content_type,
+        );
+      const saved = await triggerSave(url);
+      setDownloadStatus(saved ? "done" : "idle");
+      if (saved) {
+        setTimeout(() => setDownloadStatus("idle"), 2000);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to download");
       setDownloadStatus("idle");
@@ -571,17 +560,8 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       <button
         onClick={handleDownload}
         disabled={downloadStatus !== "idle"}
-        className="text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
+        className="text-xs font-mono transition-colors text-[var(--c-accent)] bg-transparent enabled:hover:bg-[var(--c-accent)] enabled:hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black flex items-center gap-1"
         style={{ ...lightboxBtnStyle, opacity: downloadStatus !== "idle" ? 1 : undefined }}
-        onMouseEnter={(e) => {
-          if (downloadStatus !== "idle") { return; }
-          (e.currentTarget as HTMLElement).style.background = "var(--c-accent)";
-          (e.currentTarget as HTMLElement).style.color = "black";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "none";
-          (e.currentTarget as HTMLElement).style.color = "var(--c-accent)";
-        }}
       >
         {downloadStatus === "downloading" ? (
           <>[ fetch <LoadingSpinner size="sm" /> ]</>
@@ -593,16 +573,8 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
       </button>
       <button
         onClick={() => setViewerOpen(false)}
-        className="text-xs font-mono focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black"
-        style={lightboxEscStyle}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "var(--c-accent)";
-          (e.currentTarget as HTMLElement).style.color = "black";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLElement).style.background = "none";
-          (e.currentTarget as HTMLElement).style.color = "var(--c-text-dim)";
-        }}
+        className="text-xs font-mono transition-colors text-[var(--c-text-dim)] bg-transparent hover:bg-[var(--c-accent)] hover:text-black focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] focus:ring-offset-1 focus:ring-offset-black"
+        style={lightboxBtnStyle}
       >
         [esc]
       </button>

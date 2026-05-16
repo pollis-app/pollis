@@ -1,11 +1,7 @@
 import React, { useMemo } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, Search as SearchIcon, Settings as SettingsIcon } from "lucide-react";
-
-const isMac =
-  typeof navigator !== "undefined" &&
-  navigator.platform.toUpperCase().indexOf("MAC") >= 0;
-const SEARCH_SHORTCUT_LABEL = isMac ? "⌘K" : "Ctrl+K";
+import { shortcutLabel } from "../../utils/platform";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -112,20 +108,20 @@ export const BreadcrumbNav: React.FC = () => {
         }
       }
     } else if (pathname === "/settings") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
     } else if (pathname === "/preferences") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
       out.push({ label: "Preferences", to: "/preferences" });
     } else if (pathname === "/user") {
-      out.push({ label: "Settings", to: "/settings" });
-      out.push({ label: "User", to: "/user" });
+      out.push({ label: "Account", to: "/settings" });
+      out.push({ label: "User Settings", to: "/user" });
     } else if (pathname.startsWith("/user/")) {
       out.push({ label: "Profile", to: pathname });
     } else if (pathname === "/security") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
       out.push({ label: "Security", to: "/security" });
     } else if (pathname === "/voice-settings") {
-      out.push({ label: "Settings", to: "/settings" });
+      out.push({ label: "Account", to: "/settings" });
       out.push({ label: "Voice", to: "/voice-settings" });
     } else if (pathname === "/invites") {
       out.push({ label: "Invites", to: "/invites" });
@@ -170,21 +166,14 @@ export const BreadcrumbNav: React.FC = () => {
           data-testid="breadcrumb-back-button"
           onClick={handleBack}
           aria-label="Back"
-          className="flex items-center justify-center transition-colors"
+          className="flex items-center justify-center transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
           style={{
             width: 20,
             height: 20,
             background: "none",
             border: "none",
             padding: 0,
-            color: "var(--c-text-muted)",
             cursor: "pointer",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text-muted)";
           }}
         >
           <ChevronLeft size={14} />
@@ -205,20 +194,13 @@ export const BreadcrumbNav: React.FC = () => {
             ) : (
               <button
                 onClick={() => router.navigate({ to: seg.to })}
-                className="font-mono"
+                className="font-mono transition-colors text-inherit hover:text-[var(--c-accent)]"
                 style={{
                   background: "none",
                   border: "none",
                   padding: 0,
-                  color: "inherit",
                   cursor: "pointer",
                   fontSize: "inherit",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.color = "";
                 }}
               >
                 {seg.label}
@@ -230,22 +212,15 @@ export const BreadcrumbNav: React.FC = () => {
       <button
         data-testid="breadcrumb-search-button"
         onClick={() => window.dispatchEvent(new CustomEvent("pollis:open-search"))}
-        aria-label={`Search (${SEARCH_SHORTCUT_LABEL})`}
-        title={`Search (${SEARCH_SHORTCUT_LABEL})`}
-        className="flex items-center gap-1.5 transition-colors"
+        aria-label={`Search (${shortcutLabel("K")})`}
+        title={`Search (${shortcutLabel("K")})`}
+        className="flex items-center gap-1.5 transition-colors text-[var(--c-text)] hover:text-[var(--c-accent)]"
         style={{
           height: 20,
           background: "none",
           border: "none",
           padding: "0 6px",
-          color: "var(--c-text)",
           cursor: "pointer",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-text)";
         }}
       >
         <SearchIcon size={16} />
@@ -261,31 +236,21 @@ export const BreadcrumbNav: React.FC = () => {
             lineHeight: 1.2,
           }}
         >
-          {SEARCH_SHORTCUT_LABEL}
+          {shortcutLabel("K")}
         </kbd>
       </button>
       <button
         data-testid="breadcrumb-settings-button"
         onClick={() => router.navigate({ to: "/settings" })}
         aria-label="Settings"
-        className="flex items-center justify-center transition-colors"
+        className={`flex items-center justify-center transition-colors bg-transparent hover:bg-[var(--c-hover)] hover:text-[var(--c-accent)] ${isOnSettingsHub ? "text-[var(--c-accent)]" : "text-[var(--c-text)]"}`}
         style={{
           width: 24,
           height: 24,
-          background: "none",
           border: "none",
           padding: 0,
           borderRadius: 4,
-          color: isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)",
           cursor: "pointer",
-        }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = "var(--c-accent)";
-          (e.currentTarget as HTMLButtonElement).style.background = "var(--c-hover)";
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.color = isOnSettingsHub ? "var(--c-accent)" : "var(--c-text)";
-          (e.currentTarget as HTMLButtonElement).style.background = "none";
         }}
       >
         <SettingsIcon size={16} />

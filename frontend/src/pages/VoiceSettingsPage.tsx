@@ -97,7 +97,7 @@ const selectStyle: React.CSSProperties = {
   color: "var(--c-text)",
   border: "2px solid var(--c-border)",
   padding: "6px 28px 6px 8px",
-  fontFamily: "inherit",
+  fontFamily: "var(--font-mono)",
   fontSize: "inherit",
   outline: "none",
   cursor: "pointer",
@@ -135,9 +135,23 @@ export const VoiceSettingsPage: React.FC = () => {
 
   useEffect(() => {
     invoke<AudioDevice[]>("list_audio_devices").then((devices) => {
-      setInputs(devices.filter((d) => d.kind === "input"));
-      setOutputs(devices.filter((d) => d.kind === "output"));
+      const ins = devices.filter((d) => d.kind === "input");
+      const outs = devices.filter((d) => d.kind === "output");
+      setInputs(ins);
+      setOutputs(outs);
+      // Reset stale prefs: a saved id that's no longer enumerated would make
+      // the <select> silently fall back to its first option, so the dropdown
+      // shows one device while voice tries to open another. Clear it instead.
+      if (selectedInput !== "default" && !ins.some((d) => d.id === selectedInput)) {
+        setSelectedInputState("default");
+        void voiceSession.setInputDevice("default");
+      }
+      if (selectedOutput !== "default" && !outs.some((d) => d.id === selectedOutput)) {
+        setSelectedOutputState("default");
+        void voiceSession.setOutputDevice("default");
+      }
     }).catch(() => { });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setInput = (id: string) => {
@@ -164,7 +178,7 @@ export const VoiceSettingsPage: React.FC = () => {
    */
   const savePrefsAndPushApm = (patch: Partial<PreferencesData>) => {
     const next: PreferencesData = { ...preferences.query.data, ...patch };
-    preferences.mutation.mutate(next);
+    preferences.save(next);
     void pushApmConfig(preferencesToApmConfig(next));
   };
 
@@ -177,7 +191,7 @@ export const VoiceSettingsPage: React.FC = () => {
 
   const autoJoinVoice = preferences.query.data?.auto_join_voice ?? false;
   const handleAutoJoinVoice = (enabled: boolean) => {
-    preferences.mutation.mutate({ ...preferences.query.data, auto_join_voice: enabled });
+    preferences.save({ ...preferences.query.data, auto_join_voice: enabled });
   };
 
   return (

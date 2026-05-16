@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { Check, Copy, ShieldAlert, ShieldCheck, X } from "lucide-react";
+import { Button } from "../ui/Button";
 
 interface KeyVerificationProps {
   contactName: string;
@@ -147,35 +148,36 @@ export const KeyVerification: React.FC<KeyVerificationProps> = ({
           </div>
         </div>
 
-        <button
+        <Button
           data-testid="copy-safety-number-button"
           onClick={handleCopy}
           aria-label="Copy safety number"
-          className="btn-ghost self-start flex items-center gap-1.5"
+          variant="ghost"
+          className="self-start"
         >
           {copied ? <Check size={17} aria-hidden="true" /> : <Copy size={17} aria-hidden="true" />}
           {copied ? "Copied" : "Copy safety number"}
-        </button>
+        </Button>
       </div>
 
       {/* Actions */}
       <div className="flex items-center gap-2">
-        <button
+        <Button
           data-testid="mark-verified-button"
           onClick={() => onVerified?.(contactId)}
           disabled={!matches}
-          className="btn-primary flex items-center gap-1.5"
+          variant="primary"
         >
           <ShieldCheck size={17} aria-hidden="true" />
           Mark as verified
-        </button>
-        <button
+        </Button>
+        <Button
           data-testid="cancel-verification-button"
           onClick={onCancel}
-          className="btn-ghost"
+          variant="ghost"
         >
           Cancel
-        </button>
+        </Button>
       </div>
     </div>
   );

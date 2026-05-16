@@ -65,3 +65,9 @@ CREATE TABLE IF NOT EXISTS mls_kv (
     PRIMARY KEY (scope, key)
 );
 
+CREATE TABLE IF NOT EXISTS user_cache (
+    id         TEXT PRIMARY KEY,
+    username   TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+

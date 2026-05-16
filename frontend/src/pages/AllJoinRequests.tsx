@@ -56,7 +56,7 @@ export const AllJoinRequests: React.FC = () => {
         className="flex-1 flex flex-col overflow-auto"
         style={{ background: "var(--c-bg)" }}
       >
-        <div className="px-6 py-4">
+        <div className="px-4 py-4">
           <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
             Loading…
           </p>
@@ -93,7 +93,7 @@ export const AllJoinRequests: React.FC = () => {
 
         return (
           <div key={groupId} className="flex flex-col">
-            <div className="px-6 py-4">
+            <div className="px-4 py-4">
               <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
                 Pending requests to join <span style={{ color: "var(--c-accent)" }}>{groupName}</span>
               </p>

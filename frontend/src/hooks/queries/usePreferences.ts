@@ -1,5 +1,5 @@
-import { useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect } from "react";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
 import {
@@ -156,6 +156,64 @@ export function getPreference<T>(json: string, key: string, defaultValue: T): T 
 
 const prefsKey = (userId: string | null) => ["user", "preferences", userId] as const;
 
+// Remote write throttle window. The local React Query cache update + any
+// callsite-side live effects (CSS vars, mixer state) fire on every call;
+// only the actual `invoke("save_preferences")` is rate-limited. Leading +
+// trailing edges always fire; sustained calls during the window collapse
+// to one intermediate fire every SAVE_THROTTLE_MS.
+const SAVE_THROTTLE_MS = 500;
+
+interface PendingSave {
+  userId: string;
+  prefs: PreferencesData;
+}
+
+let pendingSave: PendingSave | null = null;
+let saveThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+let lastSaveInvokeAt = 0;
+
+async function flushPendingSave(): Promise<void> {
+  if (saveThrottleTimer !== null) {
+    clearTimeout(saveThrottleTimer);
+    saveThrottleTimer = null;
+  }
+  const job = pendingSave;
+  pendingSave = null;
+  if (!job) {
+    return;
+  }
+  lastSaveInvokeAt = performance.now();
+  try {
+    await invoke("save_preferences", {
+      userId: job.userId,
+      preferencesJson: JSON.stringify(job.prefs),
+    });
+  } catch (e) {
+    console.warn("[prefs] save_preferences failed", e);
+  }
+}
+
+function scheduleSave(
+  userId: string,
+  prefs: PreferencesData,
+  queryClient: QueryClient,
+): void {
+  queryClient.setQueryData(prefsKey(userId), prefs);
+  pendingSave = { userId, prefs };
+
+  const elapsed = performance.now() - lastSaveInvokeAt;
+  if (elapsed >= SAVE_THROTTLE_MS) {
+    void flushPendingSave();
+    return;
+  }
+  if (saveThrottleTimer === null) {
+    saveThrottleTimer = setTimeout(() => {
+      saveThrottleTimer = null;
+      void flushPendingSave();
+    }, SAVE_THROTTLE_MS - elapsed);
+  }
+}
+
 export function usePreferences() {
   const currentUser = useAppStore((state) => state.currentUser);
   const queryClient = useQueryClient();
@@ -196,23 +254,17 @@ export function usePreferences() {
     staleTime: 1000 * 60 * 5,
   });
 
-  const mutation = useMutation({
-    mutationFn: async (prefs: PreferencesData) => {
-      if (!currentUser) { return; }
-      await invoke("save_preferences", {
-        userId: currentUser.id,
-        preferencesJson: JSON.stringify(prefs),
-      });
-      return prefs;
-    },
-    onSuccess: (prefs) => {
-      if (prefs) {
-        queryClient.setQueryData(prefsKey(currentUser?.id ?? null), prefs);
+  const save = useCallback(
+    (prefs: PreferencesData) => {
+      if (!currentUser) {
+        return;
       }
+      scheduleSave(currentUser.id, prefs, queryClient);
     },
-  });
+    [currentUser, queryClient],
+  );
 
-  return { query, mutation };
+  return { query, save };
 }
 
 /**

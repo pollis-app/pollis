@@ -118,11 +118,30 @@ async fn ensure_output(
         }
     }
 
+    // If the requested device can't be opened (e.g. duplex Bluetooth in HFP,
+    // stale pref), fall back to the OS default so the user still hears the
+    // test playback instead of getting "audio device not found".
     let dev_name = device_name.to_string();
-    let (stream, sample_rate, channels, buf) = tokio::task::spawn_blocking(move || {
+    let (stream, sample_rate, channels, buf, opened_name) = tokio::task::spawn_blocking(move || -> Result<_> {
         let host = cpal::default_host();
-        let dev = get_device(&host, Some(&dev_name), false)?;
-        start_speaker_stream(&dev, TEST_SPEAKER_RATE_HZ)
+        let try_open = |name: Option<&str>| -> Result<_> {
+            let dev = get_device(&host, name, false)?;
+            start_speaker_stream(&dev, TEST_SPEAKER_RATE_HZ)
+        };
+        match try_open(Some(&dev_name)) {
+            Ok((s, sr, ch, buf)) => Ok((s, sr, ch, buf, dev_name)),
+            Err(e) => {
+                let was_explicit = !dev_name.is_empty() && dev_name != "default";
+                if !was_explicit {
+                    return Err(e);
+                }
+                eprintln!(
+                    "[voice-test] speaker open failed for '{dev_name}': {e} — falling back to OS default"
+                );
+                let (s, sr, ch, buf) = try_open(None)?;
+                Ok((s, sr, ch, buf, String::from("default")))
+            }
+        }
     })
     .await
     .map_err(|e| anyhow::anyhow!("speaker init panicked: {e}"))??;
@@ -135,7 +154,7 @@ async fn ensure_output(
     s.output_buf = Some(buf.clone());
     s.output_sample_rate = sample_rate;
     s.output_channels = channels;
-    s.output_device_name = Some(device_name.to_string());
+    s.output_device_name = Some(opened_name);
     Ok((buf, sample_rate, channels))
 }
 
