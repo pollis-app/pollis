@@ -42,6 +42,14 @@
       "expo-image",
       "expo-font",
       [
+        "expo-build-properties",
+        {
+          "ios": {
+            "buildReactNativeFromSource": true
+          }
+        }
+      ],
+      [
         "expo-camera",
         {
           "cameraPermission": "Pollis needs your camera to scan the pairing QR code from your desktop."
