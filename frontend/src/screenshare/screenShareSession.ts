@@ -49,6 +49,10 @@ type StatsListener = (stats: FrameStats) => void;
 
 const FPS_WINDOW_MS = 1000;
 
+/** Reserved track key the backend mirrors the local outgoing capture under
+ *  (matches LOCAL_PREVIEW_KEY in pollis-core/src/commands/screenshare.rs). */
+export const LOCAL_PREVIEW_KEY = "__local_preview__";
+
 class ScreenShareSession {
   private subscribed = false;
   private listeners = new Map<string, Set<FrameListener>>();

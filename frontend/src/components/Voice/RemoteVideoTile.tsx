@@ -237,7 +237,7 @@ export const RemoteVideoTile: React.FC<Props> = ({
       ref={canvasRef}
       data-testid={`remote-video-tile-${trackKey}`}
       className={className}
-      style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }}
+      style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", background: "#000" }}
     />
   );
 };

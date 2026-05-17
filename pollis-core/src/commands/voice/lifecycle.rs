@@ -729,6 +729,14 @@ pub async fn get_last_join_timings(
 
 /// Disconnect from the current voice room and release all audio resources.
 pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
+    // Stop any active screen share first. We abort room_task below, so the
+    // RoomEvent::Disconnected -> on_room_disconnected path never fires on an
+    // explicit leave; without this, the share keeps capturing after the call
+    // ends. Done before we take/close the room so the track unpublishes
+    // gracefully while the connection is still alive. No-ops cheaply (the
+    // had_session guard) when nothing is being shared.
+    crate::commands::screenshare::stop_screen_share(state).await.ok();
+
     // Extract everything that needs cleanup while holding the lock, then release
     // the lock before awaiting room.close(). If the network is broken (e.g. VPN
     // dropped), room.close() hangs sending a disconnect signal — holding the lock

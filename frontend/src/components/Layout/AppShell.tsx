@@ -265,6 +265,33 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener("keydown", handle);
   }, []);
 
+  // Global voice shortcuts, active only while in a call. Discord users
+  // reach for the keyboard for mute/leave (not tile traversal), so these
+  // work from any page — Cmd/Ctrl+Shift+M toggles mic, Cmd/Ctrl+Shift+H
+  // hangs up.
+  useEffect(() => {
+    if (!activeVoiceChannelId) {
+      return;
+    }
+    const handle = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === "m") {
+        e.preventDefault();
+        voiceSession.toggleMute().catch((err) =>
+          console.error("[voice] toggleMute shortcut:", err),
+        );
+      } else if (key === "h") {
+        e.preventDefault();
+        voiceSession.leave();
+      }
+    };
+    window.addEventListener("keydown", handle);
+    return () => window.removeEventListener("keydown", handle);
+  }, [activeVoiceChannelId]);
+
   // Global Esc handler — navigate back in history (skip when search panel is open).
   // If currently viewing a channel, go directly to the group page to avoid
   // landing on "create channel" if that was in history.
