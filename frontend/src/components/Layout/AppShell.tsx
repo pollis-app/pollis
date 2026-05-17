@@ -497,6 +497,9 @@ export const AppShell: React.FC = () => {
         }}
       >
         <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />
+        {/* Fixed-height, always-rendered slot so the bar doesn't reflow as
+            the status (incoming call / alert / syncing) appears and clears. */}
+        <div className="flex items-center justify-end h-4 leading-none">
         {incomingCall ? (
           <div
             data-testid="status-bar-incoming-call"
@@ -560,6 +563,7 @@ export const AppShell: React.FC = () => {
             <LoadingSpinner size="sm" />
           </div>
         ) : null}
+        </div>
       </div>
     </div>
   );
