@@ -115,6 +115,22 @@ pub struct ScreenShareState {
     #[cfg(target_os = "macos")]
     pub macos_active: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 
+    /// Windows: handle to the free-threaded Windows.Graphics.Capture
+    /// session. `CaptureControl::stop()` joins the pump thread and ends
+    /// capture; held so `stop_screen_share` can tear it down on demand.
+    #[cfg(target_os = "windows")]
+    pub windows_capture: Option<
+        windows_capture::capture::CaptureControl<
+            WindowsCaptureHandler,
+            Box<dyn std::error::Error + Send + Sync>,
+        >,
+    >,
+    /// Windows: per-session fence, same role as `macos_active`. The WGC
+    /// frame callback checks it before touching the LiveKit source; a
+    /// fresh Arc per session so a stale stop can't fence a newer one.
+    #[cfg(target_os = "windows")]
+    pub windows_active: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+
     /// Per-remote-track drain task. Key = "{identity}-{sid}".
     pub remote_drain_tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
 }
@@ -136,6 +152,10 @@ impl ScreenShareState {
             macos_handler_id: None,
             #[cfg(target_os = "macos")]
             macos_active: None,
+            #[cfg(target_os = "windows")]
+            windows_capture: None,
+            #[cfg(target_os = "windows")]
+            windows_active: None,
             remote_drain_tasks: std::collections::HashMap::new(),
         }
     }
@@ -168,7 +188,7 @@ pub async fn subscribe_screen_share_frames(
     Ok(())
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub async fn start_screen_share(_state: &Arc<AppState>) -> Result<()> {
     Err(crate::error::Error::Other(anyhow::anyhow!(
         "screen share is not implemented on this OS yet"
@@ -739,6 +759,300 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
+// ── Windows path ──────────────────────────────────────────────────────────
+//
+// In-process via the `windows-capture` crate (Windows.Graphics.Capture).
+// Like macOS, no subprocess is needed — WGC is a clean in-proc linkage and
+// doesn't fight libwebrtc/cpal/Tauri the way Linux's libpipewire does.
+//
+// Capture flow (mirrors macOS):
+//   1. Show the system GraphicsCapturePicker (display/window/app).
+//   2. Create the LiveKit NativeVideoSource + LocalVideoTrack, publish to
+//      the current voice room as Screenshare/VP8.
+//   3. start_free_threaded a handler that owns a clone of the source and
+//      converts every BGRA8 WGC frame to I420 inline (off the tokio
+//      runtime — WGC pumps on its own worker thread).
+//   4. Stash the CaptureControl in state so stop is synchronous + ordered
+//      with the track unpublish.
+//
+// The picker + session start run inside one spawn_blocking: the picker
+// pumps a message loop and the picked item is not Send, so it can't cross
+// the await boundary. We publish first (provisional resolution; WGC's
+// real per-frame dimensions drive the stream and LiveKit tolerates a
+// per-frame size change) so no initial frames are lost.
+#[cfg(target_os = "windows")]
+pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
+    use std::sync::atomic::AtomicBool;
+
+    let room = {
+        let voice = state.voice.lock().await;
+        voice.room.clone()
+    };
+    let room = room.ok_or_else(|| {
+        crate::error::Error::Other(anyhow::anyhow!("not in a voice channel — join voice first"))
+    })?;
+
+    // Re-share must start from a clean slate (same rationale as macOS).
+    {
+        let has_prev = {
+            let ss = state.screenshare.lock().await;
+            ss.local_track.is_some() || ss.windows_capture.is_some()
+        };
+        if has_prev {
+            let _ = stop_screen_share(state).await;
+        }
+    }
+
+    // 1. LiveKit source + track. Provisional resolution; the first WGC
+    //    frame carries the true selection size and LiveKit's
+    //    NativeVideoSource tolerates per-frame size changes.
+    let source = NativeVideoSource::new(
+        VideoResolution {
+            width: 1920,
+            height: 1080,
+        },
+        true, /* is_screencast */
+    );
+    let track = LocalVideoTrack::create_video_track(
+        "screenshare",
+        RtcVideoSource::Native(source.clone()),
+    );
+    if let Err(e) = room
+        .local_participant()
+        .publish_track(
+            LocalTrack::Video(track.clone()),
+            TrackPublishOptions {
+                source: TrackSource::Screenshare,
+                video_codec: VideoCodec::VP8,
+                ..Default::default()
+            },
+        )
+        .await
+    {
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "publish screenshare: {e}"
+        )));
+    }
+    eprintln!("[screenshare] track published");
+
+    // 2. Fresh per-session fence + the frames sink for the self-preview.
+    let active_flag = std::sync::Arc::new(AtomicBool::new(true));
+    let frames_sink = {
+        let ss = state.screenshare.lock().await;
+        ss.frames.clone()
+    };
+
+    // 3. Picker + capture start, all on a blocking thread (the picker
+    //    pumps messages; the picked item is not Send).
+    let flags = WindowsCaptureFlags {
+        source: source.clone(),
+        active: std::sync::Arc::clone(&active_flag),
+        frames: frames_sink,
+    };
+    let start_res = tokio::task::spawn_blocking(
+        move || -> Result<(
+            windows_capture::capture::CaptureControl<
+                WindowsCaptureHandler,
+                Box<dyn std::error::Error + Send + Sync>,
+            >,
+            u32,
+            u32,
+        )> {
+            use windows_capture::capture::GraphicsCaptureApiHandler;
+            use windows_capture::graphics_capture_picker::GraphicsCapturePicker;
+            use windows_capture::settings::{
+                ColorFormat, CursorCaptureSettings, DirtyRegionSettings, DrawBorderSettings,
+                MinimumUpdateIntervalSettings, SecondaryWindowSettings, Settings,
+            };
+
+            let picked = match GraphicsCapturePicker::pick_item() {
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    return Err(crate::error::Error::Other(anyhow::anyhow!(
+                        "screen share cancelled"
+                    )))
+                }
+                Err(e) => {
+                    return Err(crate::error::Error::Other(anyhow::anyhow!(
+                        "screen share picker error: {e}"
+                    )))
+                }
+            };
+            let (sw, sh) = picked
+                .size()
+                .map_err(|e| anyhow::anyhow!("picker size: {e}"))?;
+            // Force even dims for VP8 + I420 chroma alignment.
+            let width = (sw.max(0) as u32) & !1;
+            let height = (sh.max(0) as u32) & !1;
+            if width == 0 || height == 0 {
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "picker reported zero-size selection"
+                )));
+            }
+            eprintln!("[screenshare] windows picked {}x{}", width, height);
+
+            // Bgra8 so the bytes are B,G,R,A in memory — identical to the
+            // macOS/Linux paths feeding libwebrtc argb_to_i420, no swizzle.
+            let settings = Settings::new(
+                picked,
+                CursorCaptureSettings::WithCursor,
+                DrawBorderSettings::Default,
+                SecondaryWindowSettings::Default,
+                MinimumUpdateIntervalSettings::Default,
+                DirtyRegionSettings::Default,
+                ColorFormat::Bgra8,
+                flags,
+            );
+            let control = WindowsCaptureHandler::start_free_threaded(settings)
+                .map_err(|e| anyhow::anyhow!("start WGC capture: {e}"))?;
+            Ok((control, width, height))
+        },
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("windows capture start panicked: {e}"))?;
+
+    let (control, width, height) = match start_res {
+        Ok(v) => v,
+        Err(e) => {
+            // Roll back the publish so the track doesn't dangle.
+            let sid = track.sid();
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            return Err(e);
+        }
+    };
+
+    // 4. Stash for stop_screen_share + announce.
+    {
+        let mut ss = state.screenshare.lock().await;
+        ss.local_source = Some(source);
+        ss.local_track = Some(track);
+        ss.windows_capture = Some(control);
+        ss.windows_active = Some(std::sync::Arc::clone(&active_flag));
+        if let Some(ev) = &ss.events {
+            let _ = ev.send(ScreenShareEvent::LocalStarted { width, height });
+        }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsCaptureFlags {
+    source: NativeVideoSource,
+    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    frames: Option<Arc<dyn RawSink>>,
+}
+
+#[cfg(target_os = "windows")]
+pub struct WindowsCaptureHandler {
+    source: NativeVideoSource,
+    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    frames: Option<Arc<dyn RawSink>>,
+    // on_frame_arrived takes &mut self (WGC serializes the callback), so a
+    // plain field suffices — no Mutex unlike the macOS &self handler.
+    last_preview: Option<std::time::Instant>,
+}
+
+#[cfg(target_os = "windows")]
+impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandler {
+    type Flags = WindowsCaptureFlags;
+    type Error = Box<dyn std::error::Error + Send + Sync>;
+
+    fn new(
+        ctx: windows_capture::capture::Context<Self::Flags>,
+    ) -> std::result::Result<Self, Self::Error> {
+        Ok(Self {
+            source: ctx.flags.source,
+            active: ctx.flags.active,
+            frames: ctx.flags.frames,
+            last_preview: None,
+        })
+    }
+
+    fn on_frame_arrived(
+        &mut self,
+        frame: &mut windows_capture::frame::Frame<'_>,
+        capture_control: windows_capture::graphics_capture_api::InternalCaptureControl,
+    ) -> std::result::Result<(), Self::Error> {
+        // Stop fence: a teardown flips this; end the pump from inside.
+        if !self.active.load(std::sync::atomic::Ordering::Acquire) {
+            capture_control.stop();
+            return Ok(());
+        }
+        let mut buffer = frame.buffer().map_err(|e| -> Self::Error { Box::new(e) })?;
+        let width = buffer.width();
+        let height = buffer.height();
+        // row_pitch is the GPU-aligned stride (>= width*4); argb_to_i420
+        // consumes it directly, same as the macOS bytes_per_row path.
+        let stride = buffer.row_pitch();
+        let bgra = buffer.as_raw_buffer();
+        let timestamp_us = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros() as i64)
+            .unwrap_or(0);
+        let preview = match &self.frames {
+            Some(sink)
+                if self
+                    .last_preview
+                    .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL) =>
+            {
+                self.last_preview = Some(std::time::Instant::now());
+                Some(sink.as_ref())
+            }
+            _ => None,
+        };
+        push_frame_windows(&self.source, width, height, stride, timestamp_us, bgra, preview);
+        Ok(())
+    }
+
+    fn on_closed(&mut self) -> std::result::Result<(), Self::Error> {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn push_frame_windows(
+    source: &NativeVideoSource,
+    width: u32,
+    height: u32,
+    stride: u32,
+    timestamp_us: i64,
+    bgra: &[u8],
+    preview: Option<&dyn RawSink>,
+) {
+    // VP8 + I420 require even dimensions.
+    let w = (width & !1) as i32;
+    let h = (height & !1) as i32;
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let mut buffer = I420Buffer::new(w as u32, h as u32);
+    {
+        let (sy, su, sv) = buffer.strides();
+        let (dy, du, dv) = buffer.data_mut();
+        // argb_to_i420 treats input as little-endian 32-bit ARGB == B,G,R,A
+        // in memory == WGC Bgra8. Same call as macOS/Linux.
+        libwebrtc::native::yuv_helper::argb_to_i420(
+            bgra, stride, dy, sy, du, su, dv, sv, w, h,
+        );
+    }
+    let frame = VideoFrame {
+        rotation: VideoRotation::VideoRotation0,
+        timestamp_us,
+        buffer,
+    };
+    source.capture_frame(&frame);
+    if let Some(sink) = preview {
+        let bytes = pack_frame_bytes(
+            LOCAL_PREVIEW_KEY,
+            w as u32,
+            h as u32,
+            timestamp_us,
+            &frame.buffer,
+        );
+        let _ = sink.send(bytes);
+    }
+}
+
 pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     let room;
     let track;
@@ -754,6 +1068,10 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     let macos_handler_id;
     #[cfg(target_os = "macos")]
     let macos_active;
+    #[cfg(target_os = "windows")]
+    let windows_capture;
+    #[cfg(target_os = "windows")]
+    let windows_active;
     {
         let mut ss = state.screenshare.lock().await;
         track = ss.local_track.take();
@@ -773,6 +1091,11 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
             macos_handler_id = ss.macos_handler_id.take();
             macos_active = ss.macos_active.take();
         }
+        #[cfg(target_os = "windows")]
+        {
+            windows_capture = ss.windows_capture.take();
+            windows_active = ss.windows_active.take();
+        }
         ev_opt = ss.events.clone();
         let voice = state.voice.lock().await;
         room = voice.room.clone();
@@ -789,7 +1112,10 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         || source_to_drop.is_some()
         || helper.is_some()
         || reader.is_some();
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
+    let had_session =
+        track.is_some() || source_to_drop.is_some() || windows_capture.is_some();
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     let had_session = track.is_some() || source_to_drop.is_some();
     if !had_session {
         return Ok(());
@@ -840,6 +1166,25 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         //    Center menubar entry stays in "ready to share" state long
         //    after our SCStream is gone — looks like we're still capturing.
         SCContentSharingPicker::set_active(false);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // 1. Fence the WGC callback from touching the source (pairs with
+        //    the Acquire load in on_frame_arrived). Only this session's
+        //    flag — taken from state — is flipped.
+        if let Some(active) = &windows_active {
+            active.store(false, std::sync::atomic::Ordering::Release);
+        }
+        // 2. Stop the capture session. CaptureControl::stop() joins the
+        //    WGC pump thread, so run it off the runtime.
+        if let Some(control) = windows_capture {
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Err(e) = control.stop() {
+                    eprintln!("[screenshare] WGC CaptureControl::stop: {e}");
+                }
+            })
+            .await;
+        }
     }
     // 3. Unpublish the track before dropping the source. LiveKit's track
     //    teardown can free the source's webrtc backing; doing it in this
