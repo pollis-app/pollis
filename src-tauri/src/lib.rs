@@ -392,6 +392,8 @@ pub fn run() {
             commands::device_enrollment::reset_identity_and_recover,
             commands::device_enrollment::finalize_device_enrollment,
             commands::device_enrollment::list_security_events,
+            commands::safety::get_safety_number,
+            commands::safety::set_contact_verified,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,
