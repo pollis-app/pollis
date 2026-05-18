@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Palette, User, ShieldCheck, Volume2 } from "lucide-react";
+import { Palette, User, ShieldCheck, Volume2, Keyboard } from "lucide-react";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -47,6 +47,14 @@ export const SettingsHubPage: React.FC = () => {
       description: "Device enrollments, identity resets",
       action: () => navigate({ to: "/security" }),
       testId: "menu-item-security",
+    },
+    {
+      id: "shortcuts",
+      label: "Key Bindings",
+      icon: <Keyboard size={14} />,
+      description: "Global keyboard shortcuts reference",
+      action: () => navigate({ to: "/shortcuts" }),
+      testId: "menu-item-shortcuts",
     },
   ];
 
