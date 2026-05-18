@@ -222,6 +222,7 @@ Concrete implications:
 - **Never reinvent UI components** — always use existing components from `frontend/src/components/ui/`. Toggles/switches use `Switch`, buttons use `Button`, text inputs use `TextInput`, etc. Do not build custom styled `<button>` or `<input>` elements when a ui/ component already exists.
 - **NO MODALS** — this is absolute. No fixed-position overlays, no backdrops, no dialog elements, no modal patterns of any kind. The only exception is the Cmd+K search menu. If a flow needs confirmation or input, replace the chat input bar (edit/delete bar pattern in `MainContent`) or navigate to a new page/view. A full page with two buttons is preferable to a modal.
 - **Confirmation and editing flows replace the chat input bar** — render a bar in place of the chat input at the bottom of `MainContent`, following the edit/delete bar pattern already established there.
+- **New static pages must be registered in three places** — when adding a page with a fixed route (e.g. `/shortcuts`, `/preferences`): (1) the route in `frontend/src/router.tsx`, (2) the `PAGE_RESULTS` array in `frontend/src/components/SearchPanel.tsx` so it's reachable via Cmd+K, and (3) the relevant nav list in `frontend/src/components/Layout/Sidebar.tsx`. This does **not** apply to dynamic/parameterized pages (e.g. `/groups/$groupId`, `/dms/$conversationId`, `/user/$userId`) — those are reached contextually, not from search/sidebar.
 
 ## Design Choices
 

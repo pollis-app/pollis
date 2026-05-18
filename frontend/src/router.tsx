@@ -38,6 +38,7 @@ import { BlockedPage } from "./pages/BlockedPage";
 import { CallPage } from "./pages/Call";
 import { RenameChannelPage } from "./pages/RenameChannelPage";
 import { RenameGroupPage } from "./pages/RenameGroupPage";
+import { KeyboardShortcutsPage } from "./pages/KeyboardShortcutsPage";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -240,6 +241,12 @@ const searchRoute = createRoute({
   component: SearchPage,
 });
 
+const keyboardShortcutsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/shortcuts",
+  component: KeyboardShortcutsPage,
+});
+
 const callRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/call/$callId",
@@ -289,6 +296,7 @@ const routeTree = rootRoute.addChildren([
   invitesRoute,
   allJoinRequestsRoute,
   searchRoute,
+  keyboardShortcutsRoute,
   callRoute,
   terminalRoute,
 ]);
