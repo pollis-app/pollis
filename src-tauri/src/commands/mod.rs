@@ -11,6 +11,7 @@ pub mod messages;
 pub mod mls;
 pub mod pin;
 pub mod r2;
+pub mod safety;
 pub mod sfx;
 pub mod terminal;
 pub mod update;

@@ -71,3 +71,17 @@ CREATE TABLE IF NOT EXISTS user_cache (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Safety-number / contact verification pins (Signal-style).
+-- TOFU: the first account_id_pub seen for a peer is stored here. A later
+-- mismatch is surfaced as a "changed" status and clears `verified`. Lives
+-- in the local (secrets) DB so a malicious Turso write to
+-- users.account_id_pub is detectable client-side.
+CREATE TABLE IF NOT EXISTS contact_verification (
+    peer_user_id     TEXT PRIMARY KEY,
+    account_id_pub   BLOB NOT NULL,
+    identity_version INTEGER NOT NULL,
+    verified         INTEGER NOT NULL DEFAULT 0,
+    first_seen_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+);
+

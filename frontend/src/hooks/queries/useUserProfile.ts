@@ -44,6 +44,45 @@ export function useOtherUserProfile(userId: string | null | undefined) {
   });
 }
 
+export interface SafetyNumberInfo {
+  safety_number: string;
+  status: "unverified" | "verified" | "changed";
+  peer_identity_version: number;
+}
+
+export const safetyQueryKeys = {
+  number: (peerUserId: string | null) => ["safety", "number", peerUserId] as const,
+};
+
+export function useSafetyNumber(peerUserId: string | null | undefined) {
+  const currentUser = useAppStore((state) => state.currentUser);
+  return useQuery({
+    queryKey: safetyQueryKeys.number(peerUserId ?? null),
+    queryFn: async (): Promise<SafetyNumberInfo> => {
+      return await invoke<SafetyNumberInfo>("get_safety_number", {
+        myUserId: currentUser!.id,
+        peerUserId,
+      });
+    },
+    enabled: !!peerUserId && !!currentUser && currentUser.id !== peerUserId,
+    staleTime: 1000 * 30,
+  });
+}
+
+export function useSetContactVerified(peerUserId: string | null | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (verified: boolean) => {
+      await invoke("set_contact_verified", { peerUserId, verified });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: safetyQueryKeys.number(peerUserId ?? null),
+      });
+    },
+  });
+}
+
 export function useUserProfile() {
   const currentUser = useAppStore((state) => state.currentUser);
 

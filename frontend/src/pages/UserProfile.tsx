@@ -4,7 +4,12 @@ import { ArrowLeft, MessageCircle, Ban } from "lucide-react";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
-import { useOtherUserProfile } from "../hooks/queries/useUserProfile";
+import {
+  useOtherUserProfile,
+  useSafetyNumber,
+  useSetContactVerified,
+} from "../hooks/queries/useUserProfile";
+import { Button } from "../components/ui/Button";
 import { useBlockUser } from "../hooks/queries";
 import { useCreateOrGetDMConversation } from "../hooks/queries/useMessages";
 import { useAppStore } from "../stores/appStore";
@@ -15,6 +20,8 @@ export const UserProfilePage: React.FC = () => {
   const currentUser = useAppStore((s) => s.currentUser);
 
   const { data: profile, isLoading } = useOtherUserProfile(userId);
+  const { data: safety } = useSafetyNumber(userId);
+  const setVerified = useSetContactVerified(userId);
   const blockMutation = useBlockUser();
   const dmMutation = useCreateOrGetDMConversation();
 
@@ -131,6 +138,78 @@ export const UserProfilePage: React.FC = () => {
                   variant="profile"
                 />
               </div>
+
+              {!isSelf && safety && (
+                <div
+                  data-testid="safety-number"
+                  className="flex flex-col gap-3 pt-4"
+                  style={{ borderTop: "1px solid var(--c-border)" }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="font-mono text-xs uppercase tracking-wide"
+                      style={{ color: "var(--c-text-muted)" }}
+                    >
+                      Safety number
+                    </span>
+                    <span
+                      data-testid="safety-status"
+                      className="font-mono text-xs"
+                      style={{
+                        color:
+                          safety.status === "verified"
+                            ? "var(--c-accent)"
+                            : safety.status === "changed"
+                              ? "var(--c-danger)"
+                              : "var(--c-text-muted)",
+                      }}
+                    >
+                      {safety.status === "verified"
+                        ? "Verified"
+                        : safety.status === "changed"
+                          ? "Changed — re-verify"
+                          : "Not verified"}
+                    </span>
+                  </div>
+                  <code
+                    className="font-mono text-sm leading-relaxed break-all"
+                    style={{ color: "var(--c-text)" }}
+                  >
+                    {safety.safety_number}
+                  </code>
+                  {safety.status === "changed" && (
+                    <span
+                      className="font-mono text-xs"
+                      style={{ color: "var(--c-danger)" }}
+                    >
+                      This contact's identity key changed since you last verified
+                      it. Compare the number again out-of-band before trusting it.
+                    </span>
+                  )}
+                  <p
+                    className="font-mono text-xs"
+                    style={{ color: "var(--c-text-muted)" }}
+                  >
+                    Compare these digits with {headlineName} over a trusted
+                    channel (in person, a call you recognise). If they match,
+                    mark this contact verified.
+                  </p>
+                  <div>
+                    <Button
+                      variant={safety.status === "verified" ? "secondary" : "primary"}
+                      disabled={setVerified.isPending}
+                      onClick={() =>
+                        setVerified.mutate(safety.status !== "verified")
+                      }
+                      data-testid="safety-verify-toggle"
+                    >
+                      {safety.status === "verified"
+                        ? "Remove verification"
+                        : "Mark verified"}
+                    </Button>
+                  </div>
+                </div>
+              )}
 
               <div style={{ borderTop: "1px solid var(--c-border)" }}>
                 <TerminalMenu items={items} onEsc={() => navigate({ to: "/dms" })} />
