@@ -25,6 +25,17 @@ use state::AppState;
 #[cfg(target_os = "macos")]
 fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        // Cmd+W only hides the window (real quit is Cmd+Q →
+        // ExitRequested), so an active screen-share would otherwise keep
+        // capturing forever with no way to stop it. Tear it down before
+        // hiding. stop_screen_share is idempotent — a no-op when nothing
+        // is sharing.
+        if let Some(state) = window.app_handle().try_state::<Arc<AppState>>() {
+            let state = state.inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+            });
+        }
         // Prevent the window from actually being destroyed.
         api.prevent_close();
         // Hide the window — it can be shown again from the dock.
@@ -494,6 +505,10 @@ commands::livekit::get_livekit_token,
             commands::voice_test::record_and_play_back,
             commands::voice_test::play_test_tone,
             commands::voice_test::stop_test_playback,
+            commands::screenshare::subscribe_screen_share_events,
+            commands::screenshare::subscribe_screen_share_frames,
+            commands::screenshare::start_screen_share,
+            commands::screenshare::stop_screen_share,
             commands::sfx::play_sfx,
             commands::sfx::start_ring,
             commands::sfx::stop_ring,
@@ -512,6 +527,22 @@ commands::livekit::get_livekit_token,
             if let tauri::WindowEvent::Focused(true) = _event {
                 pollis_core::commands::r2::enforce_cache_cap_now();
             }
+            // On Linux/Windows the user closing the window terminates
+            // the app — but Tauri runs CloseRequested before the
+            // ExitRequested cleanup above gets a chance, and the helper
+            // child can briefly outlive the parent (PR_SET_PDEATHSIG
+            // catches it eventually but the portal screencast indicator
+            // / red dot lingers). Stop the share synchronously here so
+            // the user sees an immediate clean shutdown.
+            #[cfg(not(target_os = "macos"))]
+            if let tauri::WindowEvent::CloseRequested { .. } = _event {
+                if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
+                    let state = state.inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                    });
+                }
+            }
         })
         .build(tauri::generate_context!())
         .expect("error while building Pollis")
@@ -528,6 +559,19 @@ commands::livekit::get_livekit_token,
             // able to read every media file the user viewed.
             if let tauri::RunEvent::ExitRequested { .. } = _event {
                 pollis_core::commands::r2::clear_media_cache();
+                // Also kill any active screen-share helper subprocess.
+                // kill_on_drop on the Child handle would normally take
+                // care of this when AppState is dropped, but Tauri does
+                // not guarantee state drop ordering before _exit, so we
+                // explicitly nuke it here. Belt-and-suspenders: the
+                // helper also installs PR_SET_PDEATHSIG=SIGTERM so a
+                // hard parent crash still cleans it up.
+                if let Some(state) = _app.try_state::<Arc<AppState>>() {
+                    let state = state.inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                    });
+                }
             }
         });
 }

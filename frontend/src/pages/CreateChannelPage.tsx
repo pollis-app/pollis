@@ -10,7 +10,7 @@ export const CreateChannelPage: React.FC = () => {
   const { setSelectedChannelId } = useAppStore();
 
   return (
-    <PageShell title="New Channel">
+    <PageShell title="New Channel" scrollable>
       <CreateChannel
         onSuccess={(channelId, channelType) => {
           if (!channelId || channelType === "voice") {

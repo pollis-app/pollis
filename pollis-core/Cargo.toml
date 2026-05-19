@@ -81,6 +81,22 @@ gethostname = "1.1.0"
 [target.'cfg(not(any(target_os = "windows", target_os = "ios", target_os = "android")))'.dependencies]
 webrtc-audio-processing = { version = "2", features = ["bundled"] }
 
+# ScreenCaptureKit bindings for macOS screen share. macos_14_0 enables the
+# SCContentSharingPicker API (system-provided picker for display/window/app,
+# equivalent to Linux's xdg-desktop-portal picker). 14.0+ is also the line at
+# which screen-capture privacy reminders are stable, so requiring it here is
+# fine; we already bumped the app's minimum to macOS 14 for this feature.
+[target.'cfg(target_os = "macos")'.dependencies]
+screencapturekit = { version = "2", features = ["macos_14_0"] }
+
+# Windows.Graphics.Capture wrapper for Windows screen share. High-level
+# crate over the official `windows` bindings — gives us the system capture
+# picker (equivalent to macOS SCContentSharingPicker / Linux portal), a
+# free-threaded capture session, and BGRA frame buffers, without the raw
+# D3D11 staging-texture/Map boilerplate. WGC needs Win10 1803+.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-capture = "2"
+
 # Desktop-only crates, excluded from the mobile (iOS/Android) build:
 # - portable-pty: in-app terminal pane; pulls termios 0.2.2 (no ios arm).
 # - livekit/libwebrtc: Rust LiveKit realtime/media engine. Mobile uses the

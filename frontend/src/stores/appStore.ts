@@ -41,6 +41,16 @@ interface AppStore extends AppState {
   // channel/DM the user is not currently viewing. Cleared on navigation.
   statusBarAlert: { senderUsername: string; roomId: string } | null;
   setStatusBarAlert: (alert: { senderUsername: string; roomId: string } | null) => void;
+  // Voice join failure — surfaced in the bottom bar when join_voice_channel
+  // fails (e.g. the LiveKit server is unreachable). Cleared on dismiss or on
+  // the next join attempt. Mirrored from the VoiceSessionManager.
+  voiceError: string | null;
+  setVoiceError: (message: string | null) => void;
+  // Screen-share failure — surfaced in the bottom bar when start_screen_share
+  // fails or the OS portal denies/cancels the picker. Cleared on dismiss or
+  // when a share starts/stops. Mirrored from the screen-share session.
+  screenShareError: string | null;
+  setScreenShareError: (message: string | null) => void;
   // True when local participant's mic is actively picking up audio
   isLocalSpeaking: boolean;
   setIsLocalSpeaking: (speaking: boolean) => void;
@@ -54,6 +64,28 @@ interface AppStore extends AppState {
   setVoiceParticipants: (participants: VoiceParticipant[]) => void;
   setVoiceActiveSpeakerIds: (ids: string[]) => void;
   setVoiceIsMuted: (muted: boolean) => void;
+  /** True if the local user is broadcasting their screen. */
+  screenShareLocalActive: boolean;
+  setScreenShareLocalActive: (v: boolean) => void;
+  /** Reason the local outgoing share is currently paused, or null if it is
+   *  flowing normally. Set by `local_stalled`, cleared by `local_resumed`
+   *  or `local_stopped`. */
+  localShareStallReason: "minimized" | "source_lost" | "stalled" | null;
+  setLocalShareStallReason: (
+    reason: "minimized" | "source_lost" | "stalled" | null,
+  ) => void;
+  /** Track keys of remote shares whose stream is currently stalled. The
+   *  retained last frame stays on screen with a "paused" badge; the tile is
+   *  never unmounted. Keyed presence = stalled. */
+  stalledRemoteTrackKeys: Record<string, true>;
+  setRemoteTrackStalled: (trackKey: string, stalled: boolean) => void;
+  /** Active remote screenshares keyed by participant identity. */
+  screenShareRemotes: Record<string, { trackKey: string; width: number; height: number }>;
+  upsertScreenShareRemote: (identity: string, info: { trackKey: string; width: number; height: number }) => void;
+  removeScreenShareRemote: (trackKey: string) => void;
+  /** Track key currently being viewed in the inline stream pane, if any. */
+  viewingScreenShareTrackKey: string | null;
+  setViewingScreenShareTrackKey: (k: string | null) => void;
   // Pending enrollment approval prompt — set by `useLiveKitRealtime`
   // when an `EnrollmentRequested` event arrives from the user's inbox
   // room. Causes the UI to immediately take over with the approval
@@ -112,10 +144,17 @@ export const useAppStore = create<AppStore>((set) => ({
   unreadCounts: {},
   activeVoiceChannelId: null,
   statusBarAlert: null,
+  voiceError: null,
+  screenShareError: null,
   isLocalSpeaking: false,
   voiceParticipants: [],
   voiceActiveSpeakerIds: [],
   voiceIsMuted: false,
+  screenShareLocalActive: false,
+  localShareStallReason: null,
+  stalledRemoteTrackKeys: {},
+  screenShareRemotes: {},
+  viewingScreenShareTrackKey: null,
 
   // Actions
   setCurrentUser: (user) => set({ currentUser: user }),
@@ -187,11 +226,51 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setStatusBarAlert: (alert) => set({ statusBarAlert: alert }),
 
+  setVoiceError: (message) => set({ voiceError: message }),
+
+  setScreenShareError: (message) => set({ screenShareError: message }),
+
   setIsLocalSpeaking: (speaking) => set({ isLocalSpeaking: speaking }),
 
   setVoiceParticipants: (participants) => set({ voiceParticipants: participants }),
   setVoiceActiveSpeakerIds: (ids) => set({ voiceActiveSpeakerIds: ids }),
   setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
+
+  setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
+  setLocalShareStallReason: (reason) => set({ localShareStallReason: reason }),
+  setRemoteTrackStalled: (trackKey, stalled) => set((state) => {
+    const next = { ...state.stalledRemoteTrackKeys };
+    if (stalled) {
+      next[trackKey] = true;
+    } else {
+      delete next[trackKey];
+    }
+    return { stalledRemoteTrackKeys: next };
+  }),
+  upsertScreenShareRemote: (identity, info) => set((state) => ({
+    screenShareRemotes: { ...state.screenShareRemotes, [identity]: info },
+  })),
+  removeScreenShareRemote: (trackKey) => set((state) => {
+    const next: typeof state.screenShareRemotes = {};
+    let viewing = state.viewingScreenShareTrackKey;
+    for (const [id, info] of Object.entries(state.screenShareRemotes)) {
+      if (info.trackKey !== trackKey) {
+        next[id] = info;
+      }
+    }
+    if (viewing === trackKey) {
+      viewing = null;
+    }
+    // A removed track can no longer be stalled — drop any badge state.
+    const nextStalled = { ...state.stalledRemoteTrackKeys };
+    delete nextStalled[trackKey];
+    return {
+      screenShareRemotes: next,
+      viewingScreenShareTrackKey: viewing,
+      stalledRemoteTrackKeys: nextStalled,
+    };
+  }),
+  setViewingScreenShareTrackKey: (k) => set({ viewingScreenShareTrackKey: k }),
 
   pendingEnrollmentApproval: null,
   setPendingEnrollmentApproval: (p) => set({ pendingEnrollmentApproval: p }),
@@ -223,10 +302,17 @@ export const useAppStore = create<AppStore>((set) => ({
     unreadCounts: {},
     activeVoiceChannelId: null,
     statusBarAlert: null,
+    voiceError: null,
+    screenShareError: null,
     isLocalSpeaking: false,
     voiceParticipants: [],
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
+    screenShareLocalActive: false,
+    localShareStallReason: null,
+    stalledRemoteTrackKeys: {},
+    screenShareRemotes: {},
+    viewingScreenShareTrackKey: null,
     pendingEnrollmentApproval: null,
     pendingDeleteChannelId: null,
     incomingCall: null,

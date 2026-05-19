@@ -7,7 +7,7 @@ export const CreateGroupPage: React.FC = () => {
   const navigate = useNavigate();
 
   return (
-    <PageShell title="Create Group">
+    <PageShell title="Create Group" scrollable>
       <CreateGroup onSuccess={(groupId) => navigate({ to: "/groups/$groupId", params: { groupId } })} />
     </PageShell>
   );

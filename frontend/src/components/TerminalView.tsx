@@ -75,33 +75,38 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         /* container momentarily zero-sized (hidden) — ignore */
       }
     };
-    const readyRaf = requestAnimationFrame(() => {
-      ready = true;
-      safeFit();
-    });
-
     const channel = new Channel<number[]>();
     channel.onmessage = (bytes) => {
       term.write(new Uint8Array(bytes));
     };
 
     let disposed = false;
-    invoke<string>("terminal_open", {
-      rows: term.rows,
-      cols: term.cols,
-      onOutput: channel,
-    })
-      .then((id) => {
-        if (disposed) {
-          invoke("terminal_close", { terminalId: id }).catch(() => {});
-          return;
-        }
-        terminalIdRef.current = id;
-        term.focus();
+
+    // Spawn the PTY only after the first fit, so the shell inherits the
+    // real COLUMNS/LINES. Opening it earlier with the unfitted xterm
+    // default (80x24) makes zsh compute its PROMPT_SP eol-mark padding for
+    // the wrong width — leaving a stray "%" line above every prompt that
+    // the next prompt never overwrites.
+    const readyRaf = requestAnimationFrame(() => {
+      ready = true;
+      safeFit();
+      invoke<string>("terminal_open", {
+        rows: term.rows,
+        cols: term.cols,
+        onOutput: channel,
       })
-      .catch((err) => {
-        term.write(`\r\n\x1b[31mfailed to start shell: ${err}\x1b[0m\r\n`);
-      });
+        .then((id) => {
+          if (disposed) {
+            invoke("terminal_close", { terminalId: id }).catch(() => {});
+            return;
+          }
+          terminalIdRef.current = id;
+          term.focus();
+        })
+        .catch((err) => {
+          term.write(`\r\n\x1b[31mfailed to start shell: ${err}\x1b[0m\r\n`);
+        });
+    });
 
     const encoder = new TextEncoder();
     const onDataDisposable = term.onData((data) => {

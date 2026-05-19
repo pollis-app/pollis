@@ -6,5 +6,11 @@
 	<string>alert</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Pollis needs microphone access for voice channels</string>
+	<!-- Screen sharing on macOS uses ScreenCaptureKit in-process; TCC
+	     prompts the user on first capture attempt. macOS uses its own
+	     system message regardless of this key on most OS versions, but
+	     having it set is harmless and recommended by Apple's docs. -->
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Pollis needs screen recording access to share your screen in voice channels</string>
 </dict>
 </plist>

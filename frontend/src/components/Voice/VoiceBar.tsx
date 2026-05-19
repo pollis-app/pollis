@@ -2,9 +2,10 @@ import React from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal } from "lucide-react";
+import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
+import { screenShareSession } from "../../screenshare/screenShareSession";
 
 interface VoiceBarProps {
   channelId: string;
@@ -12,7 +13,7 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const { voiceParticipants, voiceIsMuted, voiceActiveSpeakerIds, currentUser } = useAppStore();
+  const { voiceParticipants, voiceIsMuted, voiceActiveSpeakerIds, currentUser, screenShareLocalActive } = useAppStore();
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
@@ -72,6 +73,25 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         square
       >
         {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
+      </PillButton>
+
+      {/* Screen share toggle. Clicking opens the system source picker via
+          the xdg-desktop-portal; no in-app picker needed. */}
+      <PillButton
+        data-testid="voice-bar-screenshare-button"
+        accent={screenShareLocalActive ? "#ff6b6b" : "var(--c-accent)"}
+        onClick={() => {
+          if (screenShareLocalActive) {
+            screenShareSession.stop().catch((e) => console.error("[screenshare] stop", e));
+          } else {
+            screenShareSession.start().catch((e) => console.error("[screenshare] start", e));
+          }
+        }}
+        title={screenShareLocalActive ? "Stop screen share" : "Go live (share screen)"}
+        aria-label={screenShareLocalActive ? "Stop screen share" : "Share screen"}
+        square
+      >
+        {screenShareLocalActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
       </PillButton>
 
       {/* Leave button */}

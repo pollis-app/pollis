@@ -1,0 +1,30 @@
+[package]
+name = "pollis-capture-linux"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# Helper subprocess that owns the portal handshake + pipewire stream and
+# pipes BGRx frames over a Unix socket to the main Pollis binary.
+#
+# Lives in its own process because pulling libpipewire into the Pollis
+# binary alongside libwebrtc + cpal + webkit2gtk reliably breaks
+# `pw_init`. Keeping capture out of the main process makes the linkage
+# soup someone else's problem (the OS loader's).
+#
+# Linux-only by construction. On other platforms the binary compiles to
+# a stub that prints an error and exits non-zero — keeps the workspace
+# buildable from any host.
+
+[[bin]]
+name = "pollis-capture-linux"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ashpd = { version = "0.9", default-features = false, features = ["tokio"] }
+pipewire = "0.9"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "sync", "io-util", "time"] }
+clap = { version = "4", features = ["derive"] }

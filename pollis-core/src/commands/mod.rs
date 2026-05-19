@@ -24,6 +24,8 @@ pub mod sfx;
 pub mod terminal;
 pub mod update;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod screenshare;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod voice;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod voice_apm;

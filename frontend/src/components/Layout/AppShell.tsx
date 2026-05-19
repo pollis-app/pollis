@@ -8,6 +8,8 @@ import { BreadcrumbNav } from "./BreadcrumbNav";
 import { Sidebar } from "./Sidebar";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
+import { ScreenShareViewer } from "../Voice/ScreenShareViewer";
+import { screenShareSession } from "../../screenshare/screenShareSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
 import { TerminalView } from "../TerminalView";
@@ -15,10 +17,11 @@ import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
-import { Mail, Phone, X } from "lucide-react";
+import { AlertTriangle, Mail, Phone, X } from "lucide-react";
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { usePreferences } from "../../hooks/queries/usePreferences";
 import { voiceSession } from "../../voice";
+import { useGlobalShortcut } from "../../keyboard";
 import type { RouterContext } from "../../types/router";
 
 /**
@@ -37,16 +40,6 @@ export const AppShell: React.FC = () => {
   // losing their default. Changing the preference updates the live UI
   // via the sync effect below.
   const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
-        e.preventDefault();
-        setIsSidebarOpen((v) => !v);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -56,6 +49,10 @@ export const AppShell: React.FC = () => {
     activeVoiceChannelId,
     statusBarAlert,
     setStatusBarAlert,
+    voiceError,
+    setVoiceError,
+    screenShareError,
+    setScreenShareError,
     isLocalSpeaking,
     incomingCall,
     setIncomingCall,
@@ -113,24 +110,6 @@ export const AppShell: React.FC = () => {
     }
   }, [isTerminal]);
 
-  // Ctrl+` (Linux/Windows) / Cmd+` (macOS) — flip chat ⇆ terminal.
-  // Leaving uses history.back() so the prior chat view (and its
-  // selected channel) is restored exactly.
-  useEffect(() => {
-    const handle = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === "`") {
-        e.preventDefault();
-        if (pathname === "/terminal") {
-          router.history.back();
-        } else {
-          router.navigate({ to: "/terminal" });
-        }
-      }
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, [router, pathname]);
-
   // Global file drop — Tauri intercepts OS drag-drop before the browser sees it.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -166,6 +145,17 @@ export const AppShell: React.FC = () => {
     }
     invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
       console.warn('[mls] poll_mls_welcomes failed:', err);
+    });
+  }, [currentUser?.id]);
+
+  // Once authenticated, hook up the screen-share event + frame Channels.
+  // Idempotent — only the first call actually invokes the backend.
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    screenShareSession.ensureSubscribed().catch((err) => {
+      console.warn('[screenshare] ensureSubscribed failed:', err);
     });
   }, [currentUser?.id]);
 
@@ -205,18 +195,6 @@ export const AppShell: React.FC = () => {
 
   const closeSearch = useCallback(() => setIsSearchOpen(false), []);
 
-  // Cmd/Ctrl+K — open search panel
-  useEffect(() => {
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setIsSearchOpen((prev) => !prev);
-      }
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, []);
-
   // The search button in BreadcrumbNav fires this custom event so it can
   // open the panel without lifting AppShell's local state into a store.
   useEffect(() => {
@@ -225,81 +203,119 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener("pollis:open-search", handle);
   }, []);
 
-  // Cmd/Ctrl+L — lock the app behind the PIN screen without logging out.
   // Routes through the router context's onLock so App.tsx can flip the
   // top-level appState to "pin-entry" (AppShell unmounts in the process).
   const { onLock } = router.options.context as RouterContext;
-  useEffect(() => {
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "l" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        onLock();
-      }
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, [onLock]);
 
-  // Cmd+W / Ctrl+W — hide the window on macOS, close it on Windows/Linux.
-  useEffect(() => {
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "w" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        invoke("hide_window").catch(console.error);
-      }
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, []);
+  // ─── Global keyboard commands ───────────────────────────────────────────────
+  // Bound by stable command id; the key combo lives in keyboard/commands.ts
+  // (and, in future, a user-override map) — never named here. One shared
+  // dispatcher replaces the former per-shortcut window listeners. Scoped
+  // element onKeyDown handlers (chat input, grids, OTP, …) are intentionally
+  // left as-is.
 
-  // Global Esc handler — navigate back in history (skip when search panel is open).
-  // If currently viewing a channel, go directly to the group page to avoid
-  // landing on "create channel" if that was in history.
-  useEffect(() => {
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !isSearchOpen) {
-        const channelMatch = pathname.match(/^\/groups\/([^/]+)\/channels\/([^/]+)/);
-        if (channelMatch && channelMatch[2] !== "new") {
-          router.navigate({ to: "/groups/$groupId", params: { groupId: channelMatch[1] } });
-        } else {
-          router.history.back();
-        }
-      }
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, [router, isSearchOpen, pathname]);
+  useGlobalShortcut("app.toggleSidebar", () => {
+    setIsSidebarOpen((v) => !v);
+  });
 
-  // Cmd/Ctrl+R — refetch all queries without a page reload, also sync MLS state
-  useEffect(() => {
-    const handle = (e: KeyboardEvent) => {
-      if (e.key === "r" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setIsSyncing(true);
-        const mlsPromises: Promise<unknown>[] = [];
-        if (currentUser) {
+  // Leaving uses history.back() so the prior chat view (and its selected
+  // channel) is restored exactly.
+  useGlobalShortcut("app.toggleTerminal", () => {
+    if (pathname === "/terminal") {
+      router.history.back();
+    } else {
+      router.navigate({ to: "/terminal" });
+    }
+  });
+
+  useGlobalShortcut("app.toggleSearch", () => {
+    setIsSearchOpen((prev) => !prev);
+  });
+
+  useGlobalShortcut("app.lock", () => {
+    onLock();
+  });
+
+  // Hide the window on macOS, close it on Windows/Linux.
+  useGlobalShortcut("app.closeWindow", () => {
+    invoke("hide_window").catch(console.error);
+  });
+
+  // Discord users reach for the keyboard for mute/leave (not tile
+  // traversal), so these work from any page — active only while in a call.
+  useGlobalShortcut(
+    "voice.toggleMute",
+    () => {
+      voiceSession
+        .toggleMute()
+        .catch((err) => console.error("[voice] toggleMute shortcut:", err));
+    },
+    { enabled: !!activeVoiceChannelId },
+  );
+  useGlobalShortcut(
+    "voice.leave",
+    () => {
+      voiceSession.leave();
+    },
+    { enabled: !!activeVoiceChannelId },
+  );
+
+  // Navigate back in history (disabled while the search panel is open). If
+  // currently viewing a channel, go directly to the group page to avoid
+  // landing on "create channel" if that was in history. preventDefault off
+  // to mirror the prior behavior and stay out of the way of the
+  // capture-phase modal-cancel Esc handlers.
+  useGlobalShortcut(
+    "nav.back",
+    () => {
+      const channelMatch = pathname.match(
+        /^\/groups\/([^/]+)\/channels\/([^/]+)/,
+      );
+      if (channelMatch && channelMatch[2] !== "new") {
+        router.navigate({
+          to: "/groups/$groupId",
+          params: { groupId: channelMatch[1] },
+        });
+      } else {
+        router.history.back();
+      }
+    },
+    { enabled: !isSearchOpen, preventDefault: false },
+  );
+
+  // Refetch all queries without a page reload, also sync MLS state.
+  useGlobalShortcut("app.sync", () => {
+    setIsSyncing(true);
+    const mlsPromises: Promise<unknown>[] = [];
+    if (currentUser) {
+      mlsPromises.push(
+        invoke("poll_mls_welcomes", { userId: currentUser.id }).catch(
+          (err) => {
+            console.warn("[mls] poll_mls_welcomes on sync:", err);
+          },
+        ),
+      );
+      for (const group of groupsWithChannels ?? []) {
+        const firstChannel = group.channels[0];
+        if (firstChannel) {
           mlsPromises.push(
-            invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
-              console.warn('[mls] poll_mls_welcomes on sync:', err);
+            invoke("process_pending_commits", {
+              conversationId: firstChannel.id,
+              userId: currentUser.id,
+            }).catch((err) => {
+              console.warn(
+                `[mls] process_pending_commits on sync for ${group.id}:`,
+                err,
+              );
             }),
           );
-          for (const group of groupsWithChannels ?? []) {
-            const firstChannel = group.channels[0];
-            if (firstChannel) {
-              mlsPromises.push(
-                invoke('process_pending_commits', { conversationId: firstChannel.id, userId: currentUser.id }).catch((err) => {
-                  console.warn(`[mls] process_pending_commits on sync for ${group.id}:`, err);
-                }),
-              );
-            }
-          }
         }
-        Promise.all([queryClient.invalidateQueries(), ...mlsPromises]).finally(() => setIsSyncing(false));
       }
-    };
-    window.addEventListener("keydown", handle);
-    return () => window.removeEventListener("keydown", handle);
-  }, [queryClient, currentUser, groupsWithChannels]);
+    }
+    Promise.all([queryClient.invalidateQueries(), ...mlsPromises]).finally(() =>
+      setIsSyncing(false),
+    );
+  });
 
   // Auto-focus when the window gains focus (e.g. switching back from another app)
   useEffect(() => {
@@ -380,8 +396,11 @@ export const AppShell: React.FC = () => {
       {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
 
-      {/* Main content — sidebar + matched child route */}
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row" }}>
+      {/* Main content — sidebar + matched child route. The screen-share
+          viewer mounts INSIDE this region so the TitleBar (drag handle),
+          BreadcrumbNav, VoiceBar, and bottom status bar all stay visible
+          and interactive while a stream is being viewed. */}
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row", position: "relative" }}>
         <Sidebar isOpen={isSidebarOpen} onToggle={() => setIsSidebarOpen((v) => !v)} />
         <div
           style={{
@@ -390,9 +409,11 @@ export const AppShell: React.FC = () => {
             display: isTerminal ? "none" : "flex",
             flexDirection: "column",
             minWidth: 0,
+            position: "relative",
           }}
         >
           <Outlet />
+          <ScreenShareViewer />
         </div>
         {terminalActivated && (
           <div
@@ -452,6 +473,9 @@ export const AppShell: React.FC = () => {
         }}
       >
         <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />
+        {/* Fixed-height, always-rendered slot so the bar doesn't reflow as
+            the status (incoming call / alert / syncing) appears and clears. */}
+        <div className="flex items-center justify-end h-4 leading-none">
         {incomingCall ? (
           <div
             data-testid="status-bar-incoming-call"
@@ -494,6 +518,46 @@ export const AppShell: React.FC = () => {
               <X className="w-4 h-4" />
             </button>
           </div>
+        ) : voiceError ? (
+          <div
+            data-testid="status-bar-voice-error"
+            className="flex items-center gap-2"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          >
+            <span className="text-xs font-mono flex items-center gap-1">
+              <AlertTriangle className="w-4 h-4" />
+              {voiceError}
+            </span>
+            <button
+              data-testid="status-bar-voice-error-dismiss"
+              className="cursor-pointer"
+              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              onClick={() => setVoiceError(null)}
+              aria-label="Dismiss voice error"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : screenShareError ? (
+          <div
+            data-testid="status-bar-screenshare-error"
+            className="flex items-center gap-2"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          >
+            <span className="text-xs font-mono flex items-center gap-1">
+              <AlertTriangle className="w-4 h-4" />
+              {screenShareError}
+            </span>
+            <button
+              data-testid="status-bar-screenshare-error-dismiss"
+              className="cursor-pointer"
+              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              onClick={() => setScreenShareError(null)}
+              aria-label="Dismiss screen share error"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         ) : statusBarAlert ? (
           <button
             className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
@@ -515,6 +579,7 @@ export const AppShell: React.FC = () => {
             <LoadingSpinner size="sm" />
           </div>
         ) : null}
+        </div>
       </div>
     </div>
   );

@@ -99,6 +99,33 @@ const INITIAL_STATE: VoiceSessionState = {
   error: null,
 };
 
+/**
+ * Map a raw `join_voice_channel` error into something a user can act on.
+ * The backend bubbles up LiveKit internals like
+ * "LiveKit connect: engine: signal failure: validate request timed out" —
+ * unhelpful in the UI. Connectivity failures (the common case when the
+ * LiveKit server is down/unreachable) collapse to a single clear line; any
+ * other message passes through so genuine config/permission errors stay
+ * visible.
+ */
+function friendlyJoinError(raw: string): string {
+  const m = raw.toLowerCase();
+  if (
+    m.includes('validate request timed out') ||
+    m.includes('signal failure') ||
+    m.includes('timed out') ||
+    m.includes('error sending request') ||
+    m.includes('connection refused') ||
+    m.includes('dns')
+  ) {
+    return "Couldn't reach the voice server — check your connection and try again.";
+  }
+  if (m.includes('not configured')) {
+    return 'Voice is not configured on this server.';
+  }
+  return raw;
+}
+
 // ── The manager ──────────────────────────────────────────────────────────────
 
 /**
@@ -351,8 +378,9 @@ class VoiceSessionManager {
         counterpartyUserId: target.counterpartyUserId ?? null,
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error('[voice] join_voice_channel failed:', msg);
+      const raw = e instanceof Error ? e.message : String(e);
+      const msg = friendlyJoinError(raw);
+      console.error('[voice] join_voice_channel failed:', raw);
       // Best-effort cleanup in case the Rust side partially set up state
       // before failing.
       invoke('leave_voice_channel').catch(() => {});
@@ -673,6 +701,7 @@ voiceSession.subscribe(() => {
     voiceActiveSpeakerIds: string[];
     voiceIsMuted: boolean;
     isLocalSpeaking: boolean;
+    voiceError: string | null;
   }> = {};
   if (store.activeVoiceChannelId !== s.channelId) {
     patch.activeVoiceChannelId = s.channelId;
@@ -688,6 +717,12 @@ voiceSession.subscribe(() => {
   }
   if (store.isLocalSpeaking !== s.isLocalSpeaking) {
     patch.isLocalSpeaking = s.isLocalSpeaking;
+  }
+  // Mirror join failures so the shell can surface them in the status bar.
+  // Cleared automatically: every join attempt resets `error` to null at the
+  // top of `executeJoin`, which projects through here as null.
+  if (store.voiceError !== s.error) {
+    patch.voiceError = s.error;
   }
   if (Object.keys(patch).length > 0) {
     useAppStore.setState(patch);

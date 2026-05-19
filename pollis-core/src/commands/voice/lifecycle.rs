@@ -573,32 +573,54 @@ pub async fn join_voice_channel(
                     }
                 }
                 RoomEvent::TrackSubscribed { track, publication: _, participant } => {
-                    if let RemoteTrack::Audio(audio_track) = track {
-                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
-                        eprintln!("[voice] track subscribed: {track_key}");
-                        register_remote_track(
-                            audio_track.rtc_track(),
-                            track_key,
-                            Arc::clone(&voice_arc),
-                            participant.identity().to_string(),
-                            apm_rate_for_room,
-                        )
-                        .await;
+                    match track {
+                        RemoteTrack::Audio(audio_track) => {
+                            let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                            eprintln!("[voice] track subscribed: {track_key}");
+                            register_remote_track(
+                                audio_track.rtc_track(),
+                                track_key,
+                                Arc::clone(&voice_arc),
+                                participant.identity().to_string(),
+                                apm_rate_for_room,
+                            )
+                            .await;
+                        }
+                        RemoteTrack::Video(video_track) => {
+                            let track_key = format!("{}-{}", participant.identity(), video_track.sid());
+                            eprintln!("[voice] video track subscribed: {track_key}");
+                            crate::commands::screenshare::on_remote_video_subscribed(
+                                video_track,
+                                participant.identity().to_string(),
+                                &state_for_room,
+                            )
+                            .await;
+                        }
                     }
                 }
                 RoomEvent::TrackUnsubscribed { track, publication: _, participant } => {
-                    if let RemoteTrack::Audio(audio_track) = track {
-                        let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
-                        eprintln!("[voice] track unsubscribed: {track_key}");
-                        let voice = voice_arc.lock().await;
-                        let mut pb = voice.playback.lock().unwrap();
-                        if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
-                        pb.rtc_tracks.remove(&track_key);
-                        pb.identities.remove(&track_key);
-                        let buffers_arc = Arc::clone(&pb.track_buffers);
-                        drop(pb);
-                        drop(voice);
-                        buffers_arc.lock().unwrap().remove(&track_key);
+                    match track {
+                        RemoteTrack::Audio(audio_track) => {
+                            let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
+                            eprintln!("[voice] track unsubscribed: {track_key}");
+                            let voice = voice_arc.lock().await;
+                            let mut pb = voice.playback.lock().unwrap();
+                            if let Some(t) = pb.drain_tasks.remove(&track_key) { t.abort(); }
+                            pb.rtc_tracks.remove(&track_key);
+                            pb.identities.remove(&track_key);
+                            let buffers_arc = Arc::clone(&pb.track_buffers);
+                            drop(pb);
+                            drop(voice);
+                            buffers_arc.lock().unwrap().remove(&track_key);
+                        }
+                        RemoteTrack::Video(video_track) => {
+                            crate::commands::screenshare::on_remote_video_unsubscribed(
+                                video_track,
+                                participant.identity().to_string(),
+                                &state_for_room,
+                            )
+                            .await;
+                        }
                     }
                 }
 
@@ -619,10 +641,13 @@ pub async fn join_voice_channel(
 
                 RoomEvent::Disconnected { reason } => {
                     eprintln!("[voice] disconnected: {reason:?}");
-                    let voice = voice_arc.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::Disconnected);
+                    {
+                        let voice = voice_arc.lock().await;
+                        if let Some(ch) = &voice.channel {
+                            let _ = ch.send(VoiceEvent::Disconnected);
+                        }
                     }
+                    crate::commands::screenshare::on_room_disconnected(&state_for_room).await;
                     break;
                 }
                 RoomEvent::ConnectionStateChanged(conn_state) => {
@@ -704,6 +729,14 @@ pub async fn get_last_join_timings(
 
 /// Disconnect from the current voice room and release all audio resources.
 pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
+    // Stop any active screen share first. We abort room_task below, so the
+    // RoomEvent::Disconnected -> on_room_disconnected path never fires on an
+    // explicit leave; without this, the share keeps capturing after the call
+    // ends. Done before we take/close the room so the track unpublishes
+    // gracefully while the connection is still alive. No-ops cheaply (the
+    // had_session guard) when nothing is being shared.
+    crate::commands::screenshare::stop_screen_share(state).await.ok();
+
     // Extract everything that needs cleanup while holding the lock, then release
     // the lock before awaiting room.close(). If the network is broken (e.g. VPN
     // dropped), room.close() hangs sending a disconnect signal — holding the lock

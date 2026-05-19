@@ -8,6 +8,8 @@ use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore::{self, Keystore};
 use crate::commands::pin::UnlockState;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
+use crate::commands::screenshare::ScreenShareState;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::commands::terminal::PtySession;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::commands::voice::VoiceState;
@@ -37,6 +39,8 @@ pub struct AppState {
     pub voice: Arc<Mutex<VoiceState>>,
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     pub voice_test: Arc<Mutex<VoiceTestState>>,
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    pub screenshare: Arc<Mutex<ScreenShareState>>,
     pub update_required: Arc<AtomicBool>,
     /// Per-device ULID, set during login. Each physical device gets a stable ID
     /// stored in the OS keystore so it survives local DB wipes.
@@ -102,6 +106,8 @@ impl AppState {
             voice: Arc::new(Mutex::new(VoiceState::new())),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             voice_test: Arc::new(Mutex::new(VoiceTestState::new())),
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            screenshare: Arc::new(Mutex::new(ScreenShareState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
