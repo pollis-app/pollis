@@ -25,6 +25,17 @@ use state::AppState;
 #[cfg(target_os = "macos")]
 fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+        // Cmd+W only hides the window (real quit is Cmd+Q →
+        // ExitRequested), so an active screen-share would otherwise keep
+        // capturing forever with no way to stop it. Tear it down before
+        // hiding. stop_screen_share is idempotent — a no-op when nothing
+        // is sharing.
+        if let Some(state) = window.app_handle().try_state::<Arc<AppState>>() {
+            let state = state.inner().clone();
+            tauri::async_runtime::spawn(async move {
+                let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+            });
+        }
         // Prevent the window from actually being destroyed.
         api.prevent_close();
         // Hide the window — it can be shown again from the dock.
