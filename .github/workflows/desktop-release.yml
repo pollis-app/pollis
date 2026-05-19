@@ -243,6 +243,7 @@ jobs:
             libssl-dev \
             libasound2-dev \
             libpulse-dev \
+            libpipewire-0.3-dev \
             libdbus-1-dev \
             rpm \
             cmake \
