@@ -17,7 +17,7 @@ import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
-import { Mail, Phone, X } from "lucide-react";
+import { AlertTriangle, Mail, Phone, X } from "lucide-react";
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { usePreferences } from "../../hooks/queries/usePreferences";
 import { voiceSession } from "../../voice";
@@ -49,6 +49,8 @@ export const AppShell: React.FC = () => {
     activeVoiceChannelId,
     statusBarAlert,
     setStatusBarAlert,
+    voiceError,
+    setVoiceError,
     isLocalSpeaking,
     incomingCall,
     setIncomingCall,
@@ -510,6 +512,26 @@ export const AppShell: React.FC = () => {
                 invoke("cancel_call", { otherUserId: callerId, callId }).catch(() => {});
               }}
               aria-label="Decline call"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : voiceError ? (
+          <div
+            data-testid="status-bar-voice-error"
+            className="flex items-center gap-2"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          >
+            <span className="text-xs font-mono flex items-center gap-1">
+              <AlertTriangle className="w-4 h-4" />
+              {voiceError}
+            </span>
+            <button
+              data-testid="status-bar-voice-error-dismiss"
+              className="cursor-pointer"
+              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              onClick={() => setVoiceError(null)}
+              aria-label="Dismiss voice error"
             >
               <X className="w-4 h-4" />
             </button>

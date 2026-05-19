@@ -41,6 +41,11 @@ interface AppStore extends AppState {
   // channel/DM the user is not currently viewing. Cleared on navigation.
   statusBarAlert: { senderUsername: string; roomId: string } | null;
   setStatusBarAlert: (alert: { senderUsername: string; roomId: string } | null) => void;
+  // Voice join failure — surfaced in the bottom bar when join_voice_channel
+  // fails (e.g. the LiveKit server is unreachable). Cleared on dismiss or on
+  // the next join attempt. Mirrored from the VoiceSessionManager.
+  voiceError: string | null;
+  setVoiceError: (message: string | null) => void;
   // True when local participant's mic is actively picking up audio
   isLocalSpeaking: boolean;
   setIsLocalSpeaking: (speaking: boolean) => void;
@@ -122,6 +127,7 @@ export const useAppStore = create<AppStore>((set) => ({
   unreadCounts: {},
   activeVoiceChannelId: null,
   statusBarAlert: null,
+  voiceError: null,
   isLocalSpeaking: false,
   voiceParticipants: [],
   voiceActiveSpeakerIds: [],
@@ -200,6 +206,8 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setStatusBarAlert: (alert) => set({ statusBarAlert: alert }),
 
+  setVoiceError: (message) => set({ voiceError: message }),
+
   setIsLocalSpeaking: (speaking) => set({ isLocalSpeaking: speaking }),
 
   setVoiceParticipants: (participants) => set({ voiceParticipants: participants }),
@@ -255,6 +263,7 @@ export const useAppStore = create<AppStore>((set) => ({
     unreadCounts: {},
     activeVoiceChannelId: null,
     statusBarAlert: null,
+    voiceError: null,
     isLocalSpeaking: false,
     voiceParticipants: [],
     voiceActiveSpeakerIds: [],
