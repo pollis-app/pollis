@@ -207,7 +207,48 @@ jobs:
             target/x86_64-pc-windows-msvc/release/bundle/nsis/*.zip
             target/x86_64-pc-windows-msvc/release/bundle/nsis/*.sig
 
+  build-capture-helper:
+    # The Linux screen-capture helper (pollis-capture-linux) links the
+    # `pipewire` 0.9 crate, whose libspa-sys bindgen step generates
+    # `spa_video_info_raw` from the build host's *system* PipeWire headers
+    # (libpipewire is never bundled — it must match the user's running
+    # pipewire daemon at runtime). ubuntu-22.04 ships PipeWire 0.3.48,
+    # whose struct lacks `flags` and types `modifier` as i64, so libspa
+    # 0.9 fails to compile. ubuntu-24.04 ships PipeWire 1.0.5, which
+    # matches what the crate expects. Built in isolation here so the main
+    # app job can stay on ubuntu-22.04 for a low AppImage glibc floor
+    # (messaging must run on old distros) — only this small helper needs
+    # modern PipeWire, which screen share requires at runtime anyway.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Install PipeWire build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpipewire-0.3-dev \
+            clang \
+            pkg-config
+
+      - name: Build and stage screen-capture helper
+        run: ./scripts/build-capture-helper.sh x86_64-unknown-linux-gnu
+
+      - name: Upload screen-capture helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-capture-linux
+          if-no-files-found: error
+          path: src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
+
   build-linux:
+    needs: build-capture-helper
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -277,12 +318,20 @@ jobs:
         run: pnpm install
 
       # The screen-capture helper is a separate workspace binary that Tauri
-      # bundles as a sidecar (externalBin in tauri.linux.conf.json). It must
-      # be built and staged at the target-triple-suffixed path BEFORE
-      # `tauri build`, or the Linux release ships without it and screen
-      # sharing fails at runtime. Linux job only.
-      - name: Build and stage screen-capture helper
-        run: ./scripts/build-capture-helper.sh x86_64-unknown-linux-gnu
+      # bundles as a sidecar (externalBin in tauri.linux.conf.json). It is
+      # compiled in the build-capture-helper job on ubuntu-24.04 (modern
+      # PipeWire headers) and pulled in here as an artifact, staged at the
+      # target-triple-suffixed externalBin path BEFORE `tauri build` — or
+      # the Linux release ships without it and screen sharing fails at
+      # runtime.
+      - name: Download screen-capture helper
+        uses: actions/download-artifact@v4
+        with:
+          name: pollis-capture-linux
+          path: src-tauri/binaries
+
+      - name: Mark screen-capture helper executable
+        run: chmod +x src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
 
       - name: Build Linux
         env:
