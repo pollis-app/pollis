@@ -60,6 +60,196 @@ pub enum ScreenShareEvent {
         height: u32,
     },
     RemoteStopped { track_key: String },
+    /// Local capture stopped producing frames while still sharing.
+    /// `reason` ∈ "minimized" | "source_lost" | "stalled".
+    LocalStalled { reason: String },
+    /// Local capture resumed producing frames after a stall.
+    LocalResumed,
+    /// A subscribed remote screenshare stopped producing frames.
+    /// `reason` is currently always "stalled".
+    RemoteStalled { track_key: String, reason: String },
+    /// A previously-stalled remote screenshare resumed.
+    RemoteResumed { track_key: String },
+}
+
+// ── Resolution / FPS caps ─────────────────────────────────────────────────
+//
+// A 4K or ultrawide source must never reach the software VP8 encoder at
+// native resolution — it pegs a core and tanks the call. Cap every capture
+// path (macOS SCK, Windows WGC, Linux pipewire reader) to 1080p / 60fps
+// before publishing, preserving aspect ratio with even dims (VP8 + I420
+// 4:2:0 chroma require even width/height).
+
+const MAX_SHARE_WIDTH: u32 = 1920;
+const MAX_SHARE_HEIGHT: u32 = 1080;
+const MAX_SHARE_FPS: u32 = 60;
+
+/// Minimum spacing between published frames to enforce `MAX_SHARE_FPS`.
+/// Used by the Linux reader (the macOS/Windows native pipelines are
+/// already display-rate-locked and SCK/WGC honour their own interval
+/// settings; an extra clamp there would only add a timestamp compare with
+/// no benefit, so the FPS clamp lives only where frames can outrun the
+/// cap — the Linux pipewire path).
+const MIN_FRAME_INTERVAL: std::time::Duration =
+    std::time::Duration::from_nanos(1_000_000_000 / MAX_SHARE_FPS as u64);
+
+/// If a source exceeds the cap, return the largest even-dim'd size that
+/// fits inside `MAX_SHARE_WIDTH`×`MAX_SHARE_HEIGHT` while preserving aspect
+/// ratio. Returns `None` when the source already fits (no scale needed —
+/// keeps the fast path allocation-free). Inputs are assumed already
+/// even-floored by the caller.
+fn capped_dims(width: u32, height: u32) -> Option<(u32, u32)> {
+    if width <= MAX_SHARE_WIDTH && height <= MAX_SHARE_HEIGHT {
+        return None;
+    }
+    if width == 0 || height == 0 {
+        return None;
+    }
+    // Scale by the tighter of the two axis ratios so both fit. f64 keeps
+    // precision for ultrawide ratios; this runs once per resolution
+    // change at most when wired through the announce path, and at worst
+    // once per frame as a couple of cmp+mul — negligible vs. the encode.
+    let sw = MAX_SHARE_WIDTH as f64 / width as f64;
+    let sh = MAX_SHARE_HEIGHT as f64 / height as f64;
+    let scale = sw.min(sh);
+    let mut cw = (width as f64 * scale).round() as u32;
+    let mut ch = (height as f64 * scale).round() as u32;
+    // Even dims for I420 chroma; clamp so rounding can't exceed the cap.
+    cw = (cw.min(MAX_SHARE_WIDTH)) & !1;
+    ch = (ch.min(MAX_SHARE_HEIGHT)) & !1;
+    if cw == 0 || ch == 0 {
+        return None;
+    }
+    Some((cw, ch))
+}
+
+/// Apply `argb_to_i420` then, if the source exceeds the cap, downscale via
+/// `I420Buffer::scale` (libyuv `I420Scale` under the hood). The full-res
+/// I420Buffer is unavoidable — `argb_to_i420` needs an I420 destination
+/// and libwebrtc 0.3.29 exposes neither an ARGB-scale nor an `i420_scale`
+/// free function — so we convert at native res then let libyuv produce the
+/// scaled buffer. That's exactly one extra buffer alloc on the over-cap
+/// path and zero on the (common) within-cap path; last-frame-wins
+/// backpressure upstream is unchanged. Shared by all three OS push paths.
+fn convert_and_cap(
+    width: i32,
+    height: i32,
+    src_stride: u32,
+    argb: &[u8],
+) -> I420Buffer {
+    let mut buffer = I420Buffer::new(width as u32, height as u32);
+    {
+        let (sy, su, sv) = buffer.strides();
+        let (dy, du, dv) = buffer.data_mut();
+        libwebrtc::native::yuv_helper::argb_to_i420(
+            argb, src_stride, dy, sy, du, su, dv, sv, width, height,
+        );
+    }
+    match capped_dims(width as u32, height as u32) {
+        Some((cw, ch)) => buffer.scale(cw as i32, ch as i32),
+        None => buffer,
+    }
+}
+
+// ── Local stall watchdog ──────────────────────────────────────────────────
+//
+// One platform-agnostic watchdog over the local publish path. Every push
+// path bumps `last_frame` (cheap atomic store). A single task wakes ~1s and
+// compares; >2s gap while sharing → emit `LocalStalled`, next frame →
+// `LocalResumed`. No spin (interval sleep), torn down with the share via
+// `JoinHandle::abort()` so it can never leak past stop.
+
+const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(2);
+const WATCHDOG_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// `Instant` doesn't fit in an atomic, so the shared heartbeat is stored
+/// as "micros since the share-local epoch". `0` is impossible (we store at
+/// least 1) and is never read before the first frame because the watchdog
+/// only stalls after `STALL_THRESHOLD`.
+pub struct LocalCaptureHeartbeat {
+    epoch: std::time::Instant,
+    last_us: std::sync::atomic::AtomicU64,
+    /// Reason hint a platform can set when it has a precise signal
+    /// (macOS SCK idle, Windows IsIconic). 0 = generic "stalled",
+    /// 1 = "minimized", 2 = "source_lost".
+    reason: std::sync::atomic::AtomicU8,
+}
+
+impl LocalCaptureHeartbeat {
+    fn new() -> Arc<Self> {
+        let s = Arc::new(Self {
+            epoch: std::time::Instant::now(),
+            last_us: std::sync::atomic::AtomicU64::new(0),
+            reason: std::sync::atomic::AtomicU8::new(0),
+        });
+        s.beat();
+        s
+    }
+
+    /// Record a frame was pushed. Called on the hot path — a single
+    /// relaxed atomic store, no allocation.
+    fn beat(&self) {
+        let us = self.epoch.elapsed().as_micros() as u64;
+        self.last_us
+            .store(us.max(1), std::sync::atomic::Ordering::Relaxed);
+        // A delivered frame clears any precise stall hint.
+        self.reason
+            .store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Set a precise stall reason hint (1=minimized, 2=source_lost).
+    #[allow(dead_code)]
+    fn hint(&self, code: u8) {
+        self.reason
+            .store(code, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn since_last(&self) -> std::time::Duration {
+        let last = self
+            .last_us
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let now = self.epoch.elapsed().as_micros() as u64;
+        std::time::Duration::from_micros(now.saturating_sub(last))
+    }
+
+    fn reason_str(&self) -> &'static str {
+        match self.reason.load(std::sync::atomic::Ordering::Relaxed) {
+            1 => "minimized",
+            2 => "source_lost",
+            _ => "stalled",
+        }
+    }
+}
+
+/// Spawn the local stall watchdog. Returns its task handle so
+/// `stop_screen_share` can abort it (no leaked task). Emits
+/// `LocalStalled`/`LocalResumed` exactly on transitions.
+fn spawn_local_watchdog(
+    hb: Arc<LocalCaptureHeartbeat>,
+    events: Option<Arc<dyn EventSink<ScreenShareEvent>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut stalled = false;
+        let mut ticker = tokio::time::interval(WATCHDOG_TICK);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            let gap = hb.since_last();
+            if !stalled && gap >= STALL_THRESHOLD {
+                stalled = true;
+                if let Some(ev) = &events {
+                    let _ = ev.send(ScreenShareEvent::LocalStalled {
+                        reason: hb.reason_str().to_string(),
+                    });
+                }
+            } else if stalled && gap < STALL_THRESHOLD {
+                stalled = false;
+                if let Some(ev) = &events {
+                    let _ = ev.send(ScreenShareEvent::LocalResumed);
+                }
+            }
+        }
+    })
 }
 
 /// Track key the local outgoing capture is mirrored under so the sharer can
@@ -72,6 +262,27 @@ pub const LOCAL_PREVIEW_KEY: &str = "__local_preview__";
 /// stays off the hot path.
 const PREVIEW_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_millis(200);
 
+/// Surface a genuine capture/permission/portal/WGC/SCK failure: keep the
+/// raw cause on stderr, emit a `LocalError { message }` so the frontend
+/// reacts even when the failure happens after `start_screen_share` already
+/// returned (or when the caller swallows the Result), and return a
+/// structured human-readable error. Used by every start failure branch.
+/// Plain user cancellation does NOT go through here — that's a normal flow,
+/// not an error the UI must react to.
+async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Error {
+    eprintln!("[screenshare] capture failed: {human}");
+    let ev = {
+        let ss = state.screenshare.lock().await;
+        ss.events.clone()
+    };
+    if let Some(ev) = ev {
+        let _ = ev.send(ScreenShareEvent::LocalError {
+            message: human.clone(),
+        });
+    }
+    crate::error::Error::Other(anyhow::anyhow!(human))
+}
+
 // ── Top-level state ───────────────────────────────────────────────────────
 
 pub struct ScreenShareState {
@@ -80,6 +291,11 @@ pub struct ScreenShareState {
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
+    /// Shared heartbeat the active capture path bumps every frame; the
+    /// watchdog reads it. `Some` only while a share is live.
+    pub local_heartbeat: Option<Arc<LocalCaptureHeartbeat>>,
+    /// Platform-agnostic local stall watchdog task. Aborted on stop.
+    pub local_watchdog: Option<tokio::task::JoinHandle<()>>,
     /// Linux: handle to the capture helper subprocess. Dropping/killing it
     /// terminates capture.
     #[cfg(target_os = "linux")]
@@ -143,6 +359,8 @@ impl ScreenShareState {
             frames: None,
             local_track: None,
             local_source: None,
+            local_heartbeat: None,
+            local_watchdog: None,
             #[cfg(target_os = "linux")]
             local_helper: None,
             #[cfg(target_os = "linux")]
@@ -265,26 +483,39 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
     SCContentSharingPicker::show(&picker_config, move |outcome| {
         let _ = tx.send(outcome);
     });
-    let outcome = rx
-        .await
-        .map_err(|_| anyhow::anyhow!("screen share picker callback dropped before responding"))?;
+    let outcome = match rx.await {
+        Ok(o) => o,
+        Err(_) => {
+            return Err(fail_capture(
+                state,
+                "screen-share picker closed unexpectedly. Please try again.".into(),
+            )
+            .await);
+        }
+    };
     let picked = match outcome {
         SCPickerOutcome::Picked(p) => p,
         SCPickerOutcome::Cancelled => {
+            // User cancellation is a normal flow, not a failure to
+            // surface as LocalError.
             return Err(crate::error::Error::Other(anyhow::anyhow!(
                 "screen share cancelled"
             )));
         }
         SCPickerOutcome::Error(msg) => {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "screen share picker error: {msg}"
-            )));
+            eprintln!("[screenshare] SCK picker raw error: {msg}");
+            return Err(fail_capture(
+                state,
+                "macOS could not open the screen-share picker. Check Screen Recording permission in System Settings › Privacy & Security."
+                    .into(),
+            )
+            .await);
         }
     };
 
     // 2. Build the stream around the picked filter. SCStream::new is a
     //    Swift bridge call so we keep it on a blocking thread.
-    let (display_w, display_h, stream) = tokio::task::spawn_blocking(move || -> Result<_> {
+    let init = tokio::task::spawn_blocking(move || -> Result<_> {
         let filter = picked.filter();
         let (px_w, px_h) = picked.pixel_size();
         // Force even dims for VP8 + I420 chroma alignment.
@@ -306,8 +537,24 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         let stream = SCStream::new(&filter, &config);
         Ok((width, height, stream))
     })
-    .await
-    .map_err(|e| anyhow::anyhow!("screencapturekit init panicked: {e}"))??;
+    .await;
+    let (display_w, display_h, stream) = match init {
+        Ok(Ok(v)) => v,
+        Ok(Err(e)) => {
+            return Err(fail_capture(
+                state,
+                format!("Could not start screen capture: {e}"),
+            )
+            .await);
+        }
+        Err(e) => {
+            return Err(fail_capture(
+                state,
+                format!("Screen capture failed to initialize ({e})."),
+            )
+            .await);
+        }
+    };
 
     // 2. Create LiveKit source + track and publish.
     let source = NativeVideoSource::new(
@@ -334,9 +581,12 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         )
         .await
     {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "publish screenshare: {e}"
-        )));
+        eprintln!("[screenshare] publish error: {e}");
+        return Err(fail_capture(
+            state,
+            "Could not publish the screen-share to the call. Check your connection and try again.".into(),
+        )
+        .await);
     }
     eprintln!("[screenshare] track published");
 
@@ -348,14 +598,16 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
     // Fresh per-session flag — owned by this share, taken by its stop. A
     // stale stop of an older session can't reach this one.
     let active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let frames_sink = {
+    let (frames_sink, events_sink) = {
         let ss = state.screenshare.lock().await;
-        ss.frames.clone()
+        (ss.frames.clone(), ss.events.clone())
     };
+    let heartbeat = LocalCaptureHeartbeat::new();
     let handler = MacOsFrameHandler {
         source: source.clone(),
         active: std::sync::Arc::clone(&active_flag),
         frames: frames_sink,
+        heartbeat: Arc::clone(&heartbeat),
         last_preview: std::sync::Mutex::new(None),
     };
 
@@ -369,16 +621,30 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("SCStream::start_capture: {e}"))?;
         Ok((stream, handler_id))
     })
-    .await
-    .map_err(|e| anyhow::anyhow!("screencapturekit start panicked: {e}"))?;
+    .await;
 
     let (stream, handler_id) = match started {
-        Ok(s) => s,
-        Err(e) => {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
             // Roll back the publish so the track doesn't dangle in the room.
             let sid = track.sid();
             let _ = room.local_participant().unpublish_track(&sid).await;
-            return Err(e);
+            eprintln!("[screenshare] start_capture error: {e}");
+            return Err(fail_capture(
+                state,
+                "macOS denied screen capture. Grant Screen Recording permission in System Settings › Privacy & Security, then try again."
+                    .into(),
+            )
+            .await);
+        }
+        Err(e) => {
+            let sid = track.sid();
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            return Err(fail_capture(
+                state,
+                format!("Screen capture failed to start ({e})."),
+            )
+            .await);
         }
     };
 
@@ -390,6 +656,11 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         ss.macos_stream = Some(stream);
         ss.macos_handler_id = handler_id;
         ss.macos_active = Some(std::sync::Arc::clone(&active_flag));
+        ss.local_watchdog = Some(spawn_local_watchdog(
+            Arc::clone(&heartbeat),
+            events_sink,
+        ));
+        ss.local_heartbeat = Some(heartbeat);
         if let Some(ev) = &ss.events {
             let _ = ev.send(ScreenShareEvent::LocalStarted {
                 width: display_w,
@@ -405,6 +676,7 @@ struct MacOsFrameHandler {
     source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Option<Arc<dyn RawSink>>,
+    heartbeat: Arc<LocalCaptureHeartbeat>,
     /// Last time a self-preview frame was emitted. SCK fires the handler
     /// on its own dispatch queue, so interior mutability via Mutex.
     last_preview: std::sync::Mutex<Option<std::time::Instant>>,
@@ -459,6 +731,8 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
             }
             None => None,
         };
+        // Heartbeat for the stall watchdog: a real frame was delivered.
+        self.heartbeat.beat();
         push_frame_macos(&self.source, width, height, stride, timestamp_us, bgra, preview);
         // Explicitly drop the lock guard before returning so the
         // CVPixelBuffer is unlocked promptly for ScreenCaptureKit.
@@ -482,17 +756,10 @@ fn push_frame_macos(
     if w <= 0 || h <= 0 {
         return;
     }
-    let mut buffer = I420Buffer::new(w as u32, h as u32);
-    {
-        let (sy, su, sv) = buffer.strides();
-        let (dy, du, dv) = buffer.data_mut();
-        // libwebrtc::yuv_helper::argb_to_i420 treats input as little-endian
-        // 32-bit ARGB, which in memory is B,G,R,A byte order — identical to
-        // BGRA from ScreenCaptureKit. Same call as the Linux BGRx path.
-        libwebrtc::native::yuv_helper::argb_to_i420(
-            bgra, stride, dy, sy, du, su, dv, sv, w, h,
-        );
-    }
+    // Convert (BGRA == little-endian ARGB) and cap to 1080p if the source
+    // is larger — keeps a 4K/ultrawide display off the SW VP8 encoder.
+    let buffer = convert_and_cap(w, h, stride, bgra);
+    let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
         timestamp_us,
@@ -502,8 +769,8 @@ fn push_frame_macos(
     if let Some(sink) = preview {
         let bytes = pack_frame_bytes(
             LOCAL_PREVIEW_KEY,
-            w as u32,
-            h as u32,
+            out_w,
+            out_h,
             timestamp_us,
             &frame.buffer,
         );
@@ -546,25 +813,54 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
     ));
     // Defensive: remove any stale socket at this path.
     let _ = std::fs::remove_file(&socket_path);
-    let listener = UnixListener::bind(&socket_path)
-        .map_err(|e| anyhow::anyhow!("bind unix socket: {e}"))?;
+    let listener = match UnixListener::bind(&socket_path) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("[screenshare] bind unix socket: {e}");
+            return Err(fail_capture(
+                state,
+                "Could not set up the screen-capture channel. Please try again.".into(),
+            )
+            .await);
+        }
+    };
 
     // 2. Spawn the helper.
-    let helper_path = locate_helper_binary()?;
+    let helper_path = match locate_helper_binary() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[screenshare] locate helper: {e}");
+            return Err(fail_capture(
+                state,
+                "Screen-capture helper not found. Reinstall Pollis or rebuild the capture helper.".into(),
+            )
+            .await);
+        }
+    };
     eprintln!(
         "[screenshare] spawning helper {} on socket {}",
         helper_path.display(),
         socket_path.display()
     );
-    let mut helper = tokio::process::Command::new(&helper_path)
+    let helper = tokio::process::Command::new(&helper_path)
         .arg("--socket")
         .arg(&socket_path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::inherit())
         .stderr(std::process::Stdio::inherit())
         .kill_on_drop(true)
-        .spawn()
-        .map_err(|e| anyhow::anyhow!("spawn {}: {e}", helper_path.display()))?;
+        .spawn();
+    let mut helper = match helper {
+        Ok(h) => h,
+        Err(e) => {
+            eprintln!("[screenshare] spawn {}: {e}", helper_path.display());
+            return Err(fail_capture(
+                state,
+                "Could not launch the screen-capture helper. Please try again.".into(),
+            )
+            .await);
+        }
+    };
 
     // 3. Wait for the helper to connect (or to die without connecting).
     //    The portal can take a while if the user takes their time
@@ -572,16 +868,30 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
     let accept_fut = listener.accept();
     let (stream, _addr) = tokio::select! {
         res = accept_fut => {
-            let r = res.map_err(|e| anyhow::anyhow!("accept: {e}"))?;
-            eprintln!("[screenshare] helper connected");
-            r
+            match res {
+                Ok(r) => {
+                    eprintln!("[screenshare] helper connected");
+                    r
+                }
+                Err(e) => {
+                    eprintln!("[screenshare] accept: {e}");
+                    let _ = std::fs::remove_file(&socket_path);
+                    return Err(fail_capture(
+                        state,
+                        "Screen-capture helper failed to connect. Please try again.".into(),
+                    )
+                    .await);
+                }
+            }
         }
         status = helper.wait() => {
+            eprintln!("[screenshare] helper exited before connecting: {status:?}");
             let _ = std::fs::remove_file(&socket_path);
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper exited before connecting: {:?}",
-                status
-            )));
+            return Err(fail_capture(
+                state,
+                "Screen capture could not start (helper exited). Check screen-capture permission / xdg-desktop-portal and try again.".into(),
+            )
+            .await);
         }
     };
     // Once connected we can unlink the socket — the open fd keeps the
@@ -610,10 +920,15 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
     let msg = match read_result {
         Ok(r) => r,
         Err(_) => {
+            // 300s elapsed with no format. The user staring at the OS
+            // picker is the expected long case; hitting this means the
+            // portal never produced a stream.
             stop_screen_share(state).await.ok();
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper: timed out waiting for video format"
-            )));
+            return Err(fail_capture(
+                state,
+                "Screen capture timed out waiting for a source. Please try again.".into(),
+            )
+            .await);
         }
     };
     let (width, height) = match msg {
@@ -622,36 +937,54 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
             (width & !1, height & !1)
         }
         Ok(Some(HelperMsg::Frame { .. })) => {
+            eprintln!("[screenshare] helper sent frame before format");
             stop_screen_share(state).await.ok();
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper sent video frame before format"
-            )));
+            return Err(fail_capture(
+                state,
+                "Screen capture failed (protocol error). Please try again.".into(),
+            )
+            .await);
         }
         Ok(Some(HelperMsg::Error { message })) => {
+            // The helper relays portal / pipewire failures (and user
+            // cancellation surfaces here as a portal error) — show the
+            // human a single clear message, keep the raw cause on stderr.
+            eprintln!("[screenshare] helper error: {message}");
             stop_screen_share(state).await.ok();
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper: {message}"
-            )));
+            return Err(fail_capture(
+                state,
+                "Screen capture could not start. Check screen-capture permission and try again.".into(),
+            )
+            .await);
         }
         Ok(None) => {
+            eprintln!("[screenshare] helper closed socket before format");
             stop_screen_share(state).await.ok();
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper closed socket before sending video format"
-            )));
+            return Err(fail_capture(
+                state,
+                "Screen capture ended before it started. Please try again.".into(),
+            )
+            .await);
         }
         Err(e) => {
+            eprintln!("[screenshare] helper read error: {e}");
             stop_screen_share(state).await.ok();
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "capture helper read error: {e}"
-            )));
+            return Err(fail_capture(
+                state,
+                "Lost the screen-capture connection. Please try again.".into(),
+            )
+            .await);
         }
     };
 
     if width == 0 || height == 0 {
+        eprintln!("[screenshare] helper announced zero-size format");
         stop_screen_share(state).await.ok();
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "capture helper announced zero-size format"
-        )));
+        return Err(fail_capture(
+            state,
+            "Screen capture returned an invalid source size. Please try again.".into(),
+        )
+        .await);
     }
 
     // 5. Create the LiveKit track + publish.
@@ -676,10 +1009,13 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         )
         .await
     {
+        eprintln!("[screenshare] publish error: {e}");
         stop_screen_share(state).await.ok();
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "publish screenshare: {e}"
-        )));
+        return Err(fail_capture(
+            state,
+            "Could not publish the screen-share to the call. Check your connection and try again.".into(),
+        )
+        .await);
     }
     eprintln!("[screenshare] track published");
 
@@ -691,8 +1027,23 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         let ss = state.screenshare.lock().await;
         (ss.events.clone(), ss.frames.clone())
     };
+    // Heartbeat + watchdog for the local stall path. The Linux helper
+    // can stall when the captured window is minimized / closed (pipewire
+    // simply stops delivering); the watchdog reports the generic
+    // "stalled" reason since the helper doesn't relay a precise iconic
+    // signal over the wire.
+    let heartbeat = LocalCaptureHeartbeat::new();
+    let hb_for_task = Arc::clone(&heartbeat);
+    let watchdog = spawn_local_watchdog(Arc::clone(&heartbeat), events_for_task.clone());
     let reader_task = tokio::spawn(async move {
         let mut last_preview: Option<std::time::Instant> = None;
+        // FPS cap lives here — the lowest-overhead point on the Linux
+        // path. pipewire can deliver at the source's native refresh
+        // (144Hz+ displays); dropping frames before the libyuv convert +
+        // VP8 encode keeps the SW encoder off a treadmill. macOS SCK /
+        // Windows WGC honour their own MinimumUpdateInterval so they
+        // don't need this extra clamp.
+        let mut last_pushed: Option<std::time::Instant> = None;
         loop {
             match reader.read_message().await {
                 Ok(Some(HelperMsg::Frame {
@@ -702,6 +1053,16 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
                     timestamp_us,
                     bgrx,
                 })) => {
+                    // FPS cap: skip frames arriving faster than
+                    // MAX_SHARE_FPS. Cheap Instant compare, last-frame-
+                    // wins is preserved (we just drop the early one).
+                    if let Some(t) = last_pushed {
+                        if t.elapsed() < MIN_FRAME_INTERVAL {
+                            continue;
+                        }
+                    }
+                    last_pushed = Some(std::time::Instant::now());
+                    hb_for_task.beat();
                     let preview = match &frames_for_task {
                         Some(sink)
                             if last_preview
@@ -753,6 +1114,8 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         ss.local_source = Some(source);
         ss.local_track = Some(track);
         ss.local_reader_task = Some(reader_task);
+        ss.local_watchdog = Some(watchdog);
+        ss.local_heartbeat = Some(heartbeat);
         if let Some(ev) = &ss.events {
             let _ = ev.send(ScreenShareEvent::LocalStarted { width, height });
         }
@@ -830,18 +1193,22 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         )
         .await
     {
-        return Err(crate::error::Error::Other(anyhow::anyhow!(
-            "publish screenshare: {e}"
-        )));
+        eprintln!("[screenshare] publish error: {e}");
+        return Err(fail_capture(
+            state,
+            "Could not publish the screen-share to the call. Check your connection and try again.".into(),
+        )
+        .await);
     }
     eprintln!("[screenshare] track published");
 
     // 2. Fresh per-session fence + the frames sink for the self-preview.
     let active_flag = std::sync::Arc::new(AtomicBool::new(true));
-    let frames_sink = {
+    let (frames_sink, events_sink) = {
         let ss = state.screenshare.lock().await;
-        ss.frames.clone()
+        (ss.frames.clone(), ss.events.clone())
     };
+    let heartbeat = LocalCaptureHeartbeat::new();
 
     // 3. Picker + blocking capture on a dedicated owned thread.
     //
@@ -858,8 +1225,22 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         source: source.clone(),
         active: std::sync::Arc::clone(&active_flag),
         frames: frames_sink,
+        heartbeat: Arc::clone(&heartbeat),
     };
-    let (size_tx, size_rx) = tokio::sync::oneshot::channel::<Result<(u32, u32)>>();
+    // Outcome the dedicated WGC thread reports before it blocks in
+    // start(): the negotiated size, a clean user cancel (not surfaced as
+    // an error the UI must react to), or a genuine capture failure
+    // (surfaced via LocalError).
+    enum WgcStart {
+        Size(u32, u32),
+        Cancelled,
+        Failed(String),
+    }
+    let (size_tx, size_rx) = tokio::sync::oneshot::channel::<WgcStart>();
+    // The thread blocks in start() long after this command returns; a
+    // start() error there is a genuine post-return capture failure, so
+    // give the thread an events handle to emit LocalError itself.
+    let events_for_thread = events_sink.clone();
     let capture_thread = std::thread::Builder::new()
         .name("wgc-screenshare".into())
         .spawn(move || {
@@ -873,24 +1254,26 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
             let picked = match GraphicsCapturePicker::pick_item() {
                 Ok(Some(p)) => p,
                 Ok(None) => {
-                    let _ = size_tx.send(Err(crate::error::Error::Other(anyhow::anyhow!(
-                        "screen share cancelled"
-                    ))));
+                    let _ = size_tx.send(WgcStart::Cancelled);
                     return;
                 }
                 Err(e) => {
-                    let _ = size_tx.send(Err(crate::error::Error::Other(anyhow::anyhow!(
-                        "screen share picker error: {e}"
-                    ))));
+                    eprintln!("[screenshare] WGC picker error: {e}");
+                    let _ = size_tx.send(WgcStart::Failed(
+                        "Windows could not open the screen-share picker. Please try again."
+                            .into(),
+                    ));
                     return;
                 }
             };
             let (sw, sh) = match picked.size() {
                 Ok(s) => s,
                 Err(e) => {
-                    let _ = size_tx.send(Err(crate::error::Error::Other(anyhow::anyhow!(
-                        "picker size: {e}"
-                    ))));
+                    eprintln!("[screenshare] WGC picker size: {e}");
+                    let _ = size_tx.send(WgcStart::Failed(
+                        "Could not read the selected screen-share source. Please try again."
+                            .into(),
+                    ));
                     return;
                 }
             };
@@ -898,9 +1281,11 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
             let width = (sw.max(0) as u32) & !1;
             let height = (sh.max(0) as u32) & !1;
             if width == 0 || height == 0 {
-                let _ = size_tx.send(Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "picker reported zero-size selection"
-                ))));
+                eprintln!("[screenshare] WGC picker reported zero-size selection");
+                let _ = size_tx.send(WgcStart::Failed(
+                    "The selected screen-share source has an invalid size. Please try again."
+                        .into(),
+                ));
                 return;
             }
             eprintln!("[screenshare] windows picked {}x{}", width, height);
@@ -920,31 +1305,50 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
 
             // Capture is about to start; hand the size back so the caller
             // can announce and unblock.
-            let _ = size_tx.send(Ok((width, height)));
+            let _ = size_tx.send(WgcStart::Size(width, height));
 
             // Blocks here, pumping WGC, until the frame callback sees the
-            // fence flipped and stops the session.
+            // fence flipped and stops the session. An error before the
+            // fence is flipped is a genuine capture failure that happens
+            // after this command already returned Ok — surface it via
+            // LocalError so the frontend reacts.
             if let Err(e) = WindowsCaptureHandler::start(settings) {
                 eprintln!("[screenshare] WGC start/stop: {e}");
+                if let Some(ev) = &events_for_thread {
+                    let _ = ev.send(ScreenShareEvent::LocalError {
+                        message:
+                            "Screen capture stopped unexpectedly. Please try sharing again."
+                                .into(),
+                    });
+                }
             }
         })
         .map_err(|e| anyhow::anyhow!("spawn wgc capture thread: {e}"))?;
 
     let (width, height) = match size_rx.await {
-        Ok(Ok(dims)) => dims,
-        Ok(Err(e)) => {
-            // Picker cancelled / errored. Roll back the publish so the
-            // track doesn't dangle.
+        Ok(WgcStart::Size(w, h)) => (w, h),
+        Ok(WgcStart::Cancelled) => {
+            // Normal user cancel — roll back the publish, return without
+            // emitting LocalError (not a failure the UI must react to).
             let sid = track.sid();
             let _ = room.local_participant().unpublish_track(&sid).await;
-            return Err(e);
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "screen share cancelled"
+            )));
+        }
+        Ok(WgcStart::Failed(msg)) => {
+            let sid = track.sid();
+            let _ = room.local_participant().unpublish_track(&sid).await;
+            return Err(fail_capture(state, msg).await);
         }
         Err(_) => {
             let sid = track.sid();
             let _ = room.local_participant().unpublish_track(&sid).await;
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "wgc capture thread exited before reporting size"
-            )));
+            return Err(fail_capture(
+                state,
+                "Screen capture failed to start. Please try again.".into(),
+            )
+            .await);
         }
     };
 
@@ -955,6 +1359,11 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         ss.local_track = Some(track);
         ss.windows_thread = Some(capture_thread);
         ss.windows_active = Some(std::sync::Arc::clone(&active_flag));
+        ss.local_watchdog = Some(spawn_local_watchdog(
+            Arc::clone(&heartbeat),
+            events_sink,
+        ));
+        ss.local_heartbeat = Some(heartbeat);
         if let Some(ev) = &ss.events {
             let _ = ev.send(ScreenShareEvent::LocalStarted { width, height });
         }
@@ -967,6 +1376,7 @@ struct WindowsCaptureFlags {
     source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Option<Arc<dyn RawSink>>,
+    heartbeat: Arc<LocalCaptureHeartbeat>,
 }
 
 #[cfg(target_os = "windows")]
@@ -974,6 +1384,7 @@ struct WindowsCaptureHandler {
     source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Option<Arc<dyn RawSink>>,
+    heartbeat: Arc<LocalCaptureHeartbeat>,
     // on_frame_arrived takes &mut self (WGC serializes the callback), so a
     // plain field suffices — no Mutex unlike the macOS &self handler.
     last_preview: Option<std::time::Instant>,
@@ -991,6 +1402,7 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
             source: ctx.flags.source,
             active: ctx.flags.active,
             frames: ctx.flags.frames,
+            heartbeat: ctx.flags.heartbeat,
             last_preview: None,
         })
     }
@@ -1027,6 +1439,14 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
             }
             _ => None,
         };
+        // Heartbeat for the stall watchdog. WGC simply stops delivering
+        // frames when a captured window is minimized or destroyed; we
+        // don't hold the source HWND in this callback to cheaply
+        // distinguish iconic vs. closed, so the watchdog reports the
+        // generic "stalled" reason for Windows (acceptable per the
+        // contract — precise reason is only required where a cheap
+        // signal exists).
+        self.heartbeat.beat();
         push_frame_windows(&self.source, width, height, stride, timestamp_us, bgra, preview);
         Ok(())
     }
@@ -1052,16 +1472,9 @@ fn push_frame_windows(
     if w <= 0 || h <= 0 {
         return;
     }
-    let mut buffer = I420Buffer::new(w as u32, h as u32);
-    {
-        let (sy, su, sv) = buffer.strides();
-        let (dy, du, dv) = buffer.data_mut();
-        // argb_to_i420 treats input as little-endian 32-bit ARGB == B,G,R,A
-        // in memory == WGC Bgra8. Same call as macOS/Linux.
-        libwebrtc::native::yuv_helper::argb_to_i420(
-            bgra, stride, dy, sy, du, su, dv, sv, w, h,
-        );
-    }
+    // Convert (WGC Bgra8 == little-endian ARGB) and cap to 1080p.
+    let buffer = convert_and_cap(w, h, stride, bgra);
+    let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
         timestamp_us,
@@ -1071,8 +1484,8 @@ fn push_frame_windows(
     if let Some(sink) = preview {
         let bytes = pack_frame_bytes(
             LOCAL_PREVIEW_KEY,
-            w as u32,
-            h as u32,
+            out_w,
+            out_h,
             timestamp_us,
             &frame.buffer,
         );
@@ -1107,6 +1520,12 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         // would otherwise let the next reference drop free its backing
         // while in-flight handler calls are still firing.
         source_to_drop = ss.local_source.take();
+        // Tear down the stall watchdog with the share — abort the task
+        // (no leak) and drop the heartbeat.
+        if let Some(w) = ss.local_watchdog.take() {
+            w.abort();
+        }
+        ss.local_heartbeat = None;
         #[cfg(target_os = "linux")]
         {
             helper = ss.local_helper.take();
@@ -1249,14 +1668,10 @@ fn push_frame(
     if w <= 0 || h <= 0 {
         return;
     }
-    let mut buffer = I420Buffer::new(w as u32, h as u32);
-    {
-        let (sy, su, sv) = buffer.strides();
-        let (dy, du, dv) = buffer.data_mut();
-        libwebrtc::native::yuv_helper::argb_to_i420(
-            bgrx, stride, dy, sy, du, su, dv, sv, w, h,
-        );
-    }
+    // Convert (BGRx == little-endian ARGB) and cap to 1080p. A 4K /
+    // ultrawide monitor would otherwise hit the SW VP8 encoder native.
+    let buffer = convert_and_cap(w, h, stride, bgrx);
+    let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
         timestamp_us,
@@ -1266,8 +1681,8 @@ fn push_frame(
     if let Some(sink) = preview {
         let bytes = pack_frame_bytes(
             LOCAL_PREVIEW_KEY,
-            w as u32,
-            h as u32,
+            out_w,
+            out_h,
             timestamp_us,
             &frame.buffer,
         );
@@ -1467,7 +1882,46 @@ pub async fn on_remote_video_subscribed(
     let task = tokio::spawn(async move {
         use futures_util::StreamExt;
         let mut announced: Option<(u32, u32)> = None;
-        while let Some(frame) = stream.next().await {
+        // Remote stall detection: a ~2s gap with no decoded frame while
+        // the track is still subscribed → RemoteStalled; the next frame
+        // → RemoteResumed. timeout() is a cheap timer wrapper around the
+        // existing await — no extra task, no spin — and the whole loop is
+        // torn down with this drain task (aborted on unsubscribe /
+        // room-disconnect), so nothing leaks.
+        let mut stalled = false;
+        loop {
+            let next =
+                tokio::time::timeout(STALL_THRESHOLD, stream.next()).await;
+            let frame = match next {
+                Ok(Some(f)) => {
+                    if stalled {
+                        stalled = false;
+                        if let Some(ev) = &events_for_task {
+                            let _ = ev.send(ScreenShareEvent::RemoteResumed {
+                                track_key: track_key_for_task.clone(),
+                            });
+                        }
+                    }
+                    f
+                }
+                // Stream ended (track unpublished / closed) — exit the
+                // drain. RemoteStopped is emitted by the unsubscribe path.
+                Ok(None) => break,
+                // No frame within the threshold but the stream is still
+                // open — the remote sender stalled.
+                Err(_) => {
+                    if !stalled {
+                        stalled = true;
+                        if let Some(ev) = &events_for_task {
+                            let _ = ev.send(ScreenShareEvent::RemoteStalled {
+                                track_key: track_key_for_task.clone(),
+                                reason: "stalled".to_string(),
+                            });
+                        }
+                    }
+                    continue;
+                }
+            };
             let i420 = frame.buffer.to_i420();
             let w = i420.width();
             let h = i420.height();

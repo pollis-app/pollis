@@ -370,6 +370,17 @@ mod pw {
                 pw::spa::param::video::VideoFormat::I420,
                 pw::spa::param::video::VideoFormat::NV12
             ),
+            // First Rectangle = preferred/default. We bias the negotiated
+            // size toward 1080p so a compositor that honours the
+            // preference hands us a ≤1080p stream (cheapest cap — no
+            // per-frame scale needed downstream). The full range stays
+            // wide because most compositors ignore the preference and
+            // only offer the source's native size; the parent reader
+            // (screenshare.rs `convert_and_cap`) then enforces the hard
+            // 1920x1080 cap with a libyuv I420 downscale. Doing the cap
+            // there rather than re-negotiating here keeps a single
+            // last-frame-wins backpressure point and avoids
+            // negotiation-failure on compositors that can't resize.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoSize,
                 Choice,
@@ -379,12 +390,16 @@ mod pw {
                 pw::spa::utils::Rectangle { width: 1, height: 1 },
                 pw::spa::utils::Rectangle { width: 7680, height: 4320 }
             ),
+            // Preferred 60fps (matches the parent's MAX_SHARE_FPS cap);
+            // the parent reader hard-drops anything faster. Range stays
+            // open so a compositor that only offers its native refresh
+            // still negotiates — the parent FPS clamp is the backstop.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoFramerate,
                 Choice,
                 Range,
                 Fraction,
-                pw::spa::utils::Fraction { num: 30, denom: 1 },
+                pw::spa::utils::Fraction { num: 60, denom: 1 },
                 pw::spa::utils::Fraction { num: 0, denom: 1 },
                 pw::spa::utils::Fraction { num: 1000, denom: 1 }
             ),
