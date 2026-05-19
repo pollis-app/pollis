@@ -75,9 +75,26 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         /* container momentarily zero-sized (hidden) — ignore */
       }
     };
-    const channel = new Channel<number[]>();
-    channel.onmessage = (bytes) => {
-      term.write(new Uint8Array(bytes));
+    // Binary IPC: bytes arrive as an ArrayBuffer (InvokeResponseBody::Raw)
+    // with no JSON number-array bloat / parse. Hand the raw Uint8Array to
+    // xterm — its write() has an internal UTF-8 decoder that correctly
+    // holds partial multi-byte sequences split across chunks, so we must
+    // NOT TextDecode per-chunk. The write callback fires once the chunk is
+    // actually parsed/rendered: that's the true end-to-end backpressure
+    // signal we credit back to the aggregator via terminal_ack.
+    const channel = new Channel<ArrayBuffer>();
+    channel.onmessage = (buf) => {
+      const bytes = new Uint8Array(buf);
+      term.write(bytes, () => {
+        const id = terminalIdRef.current;
+        if (id === null) {
+          return;
+        }
+        invoke("terminal_ack", {
+          terminalId: id,
+          bytes: bytes.byteLength,
+        }).catch(() => {});
+      });
     };
 
     let disposed = false;

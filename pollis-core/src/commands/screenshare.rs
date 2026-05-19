@@ -380,12 +380,10 @@ impl ScreenShareState {
     }
 }
 
-/// Trait wrapper for the raw-bytes Channel sink so pollis-core stays
-/// free of a tauri runtime dependency. The src-tauri shim adapts a
-/// `tauri::ipc::Channel<InvokeResponseBody>` into this.
-pub trait RawSink: Send + Sync {
-    fn send(&self, bytes: Vec<u8>) -> Result<()>;
-}
+/// Re-export of the binary-bytes sink (now defined in `crate::sink` as a
+/// neutral home so the terminal path can share it). Kept here so existing
+/// `commands::screenshare::RawSink` imports keep working.
+pub use crate::sink::RawSink;
 
 // ── Tauri-facing commands ─────────────────────────────────────────────────
 
