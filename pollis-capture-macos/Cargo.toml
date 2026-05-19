@@ -1,0 +1,41 @@
+[package]
+name = "pollis-capture-macos"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# Helper subprocess that owns ScreenCaptureKit (the SCContentSharingPicker
+# + SCStream + frame handler) and pipes BGRx frames over a Unix socket to
+# the main Pollis binary — mirroring pollis-capture-linux.
+#
+# Why a separate process (issue #283 Phase 2): screencapturekit 2.x can
+# throw an *Objective-C* NSUnknownKeyException from inside Apple's
+# SCContentSharingPicker selection delegate, dispatched on replayd's XPC
+# queue. Rust `catch_unwind` does NOT catch an ObjC `@throw`; it reaches
+# `std::terminate` and aborts the whole process. Linux capture is already
+# a subprocess for the analogous libpipewire-linkage reason. Isolating SCK
+# the same way means an ObjC terminate kills only this helper; the parent
+# observes the socket close (its existing 2 s stall heartbeat covers
+# mid-stream death) and surfaces a structured error instead of crashing.
+#
+# macOS-only by construction. On other platforms the binary compiles to a
+# stub that prints an error and exits non-zero — keeps the workspace
+# buildable from any host.
+
+[[bin]]
+name = "pollis-capture-macos"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Shared wire protocol — same crate the Linux helper and the
+# pollis-core reader use.
+pollis-capture-proto = { path = "../pollis-capture-proto" }
+# Same screencapturekit version/features as pollis-core uses so the SCK
+# behavior is identical to the pre-split in-process path.
+screencapturekit = { version = "2", features = ["macos_14_0"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "sync", "io-util", "time"] }
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"

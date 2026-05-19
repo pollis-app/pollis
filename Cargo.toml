@@ -3,7 +3,9 @@ resolver = "2"
 members = [
     "src-tauri",
     "pollis-core",
+    "pollis-capture-proto",
     "pollis-capture-linux",
+    "pollis-capture-macos",
 ]
 
 [workspace.package]

@@ -11,6 +11,7 @@ export type ScreenShareEvent =
   | { type: "local_started"; width: number; height: number }
   | { type: "local_stopped" }
   | { type: "local_error"; message: string }
+  | { type: "local_unsupported"; message: string }
   | { type: "local_stalled"; reason: "minimized" | "source_lost" | "stalled" }
   | { type: "local_resumed" }
   | {
@@ -40,6 +41,18 @@ export function friendlyScreenShareError(raw: string): string {
     r.includes("picker")
   ) {
     return "Screen share cancelled — no window or screen was picked.";
+  }
+  // Check "unsupported desktop" BEFORE the permission branch: this is
+  // not something the user can grant (the DE has no ScreenCast backend
+  // at all), so a "allow screen recording in settings" message would be
+  // actively misleading. Distinct from a denial.
+  if (
+    r.includes("unsupported") ||
+    r.includes("no screen-sharing backend") ||
+    r.includes("does not provide a screen-sharing backend") ||
+    r.includes("no screencast")
+  ) {
+    return "Screen sharing isn't available on this desktop environment. It has no screen-sharing backend (xdg-desktop-portal ScreenCast). Use GNOME, KDE, or an X11 session.";
   }
   if (
     r.includes("permission") ||
@@ -203,6 +216,15 @@ class ScreenShareSession {
         break;
       case "local_error":
         store.setScreenShareError(friendlyScreenShareError(ev.message));
+        break;
+      case "local_unsupported":
+        // Distinct from a permission denial: the desktop environment
+        // has no screen-sharing backend at all (e.g. Linux
+        // Cinnamon/MATE/XFCE on Wayland — no xdg-desktop-portal
+        // ScreenCast). Telling the user to "grant permission" would be
+        // wrong; there is nothing to grant. Pass the backend's precise
+        // message straight through.
+        store.setScreenShareError(ev.message);
         break;
       case "local_stalled":
         store.setLocalShareStallReason(ev.reason);

@@ -81,13 +81,11 @@ gethostname = "1.1.0"
 [target.'cfg(not(any(target_os = "windows", target_os = "ios", target_os = "android")))'.dependencies]
 webrtc-audio-processing = { version = "2", features = ["bundled"] }
 
-# ScreenCaptureKit bindings for macOS screen share. macos_14_0 enables the
-# SCContentSharingPicker API (system-provided picker for display/window/app,
-# equivalent to Linux's xdg-desktop-portal picker). 14.0+ is also the line at
-# which screen-capture privacy reminders are stable, so requiring it here is
-# fine; we already bumped the app's minimum to macOS 14 for this feature.
-[target.'cfg(target_os = "macos")'.dependencies]
-screencapturekit = { version = "2", features = ["macos_14_0"] }
+# macOS screen capture (ScreenCaptureKit) no longer lives in this
+# process — issue #283 Phase 2 moved it into the `pollis-capture-macos`
+# helper subprocess for the same uncatchable-ObjC-throw reason Linux
+# capture is already a subprocess. `screencapturekit` is therefore now a
+# dependency of that helper crate, not of pollis-core.
 
 # Windows.Graphics.Capture wrapper for Windows screen share. High-level
 # crate over the official `windows` bindings — gives us the system capture
@@ -109,6 +107,10 @@ livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
 libwebrtc = "0.3"
 cpal = "0.15"
 rodio = { version = "0.19", default-features = false, features = ["wav"] }
+# Shared capture-helper wire protocol. Both the Linux and macOS capture
+# helpers are subprocesses speaking this; this is the parent-side
+# decoder. The crate is platform-free so it lives on the desktop gate.
+pollis-capture-proto = { path = "../pollis-capture-proto" }
 
 [[bin]]
 name = "uniffi-bindgen"

@@ -15,6 +15,7 @@ Start here. Navigate to the article you need.
 - [PIN Design](./pin-design.md) — Local PIN unlock: KDF/AEAD choices, blob format, lifecycle, threat model
 - [Notifications](./notifications.md) — Sound, OS notification, badge, and alert dispatcher (`notify()` + category table)
 - [Audio Processing](./audio-processing.md) — Mic-side AGC + NS + AEC pipeline (WebRTC APM), playback mixer, AEC render reference, build deps
+- [Screen-Capture Helper Split](./capture-split.md) — Per-platform capture subprocess + shared socket protocol; Linux two-backend session-type routing (#281), macOS SCK isolation (#283)
 
 ## Quick Reference
 

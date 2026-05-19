@@ -56,6 +56,16 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # The macOS screen-capture helper (pollis-capture-macos) owns
+      # ScreenCaptureKit in its own process — issue #283 Phase 2 — so an
+      # uncatchable ObjC throw from SCK can no longer kill the app.
+      # Tauri bundles it as a sidecar (externalBin in
+      # tauri.macos.conf.json). Stage it at the target-triple-suffixed
+      # path BEFORE tauri-action so it's signed + bundled. The triple
+      # must match tauri-action's --target below.
+      - name: Build and stage screen-capture helper
+        run: ./scripts/build-capture-helper.sh aarch64-apple-darwin
+
       - name: Build and sign macOS (ARM)
         uses: tauri-apps/tauri-action@v0
         env:

@@ -1,0 +1,25 @@
+[package]
+name = "pollis-capture-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+# The one shared definition of the capture-helper Unix-socket wire
+# protocol. Both per-platform helper subprocesses (pollis-capture-linux,
+# pollis-capture-macos) speak it; pollis-core's main-process reader
+# decodes it. No platform dependencies — pure byte (de)serialization so
+# it compiles on every host and stays the single source of truth for the
+# wire bytes.
+
+[lib]
+name = "pollis_capture_proto"
+path = "src/lib.rs"
+
+[dependencies]
+# Async socket I/O helpers for the decoder/encoder. tokio is already in
+# the workspace tree for every consumer of this crate.
+tokio = { version = "1", features = ["io-util", "net"] }
+
+[dev-dependencies]
+# Only the round-trip tests need the runtime + the in-memory duplex.
+tokio = { version = "1", features = ["io-util", "net", "macros", "rt", "io-util"] }
