@@ -1,4 +1,8 @@
 {
+  "build": {
+    "beforeDevCommand": "bash scripts/build-capture-helper.sh && pnpm --filter frontend dev",
+    "beforeBuildCommand": "bash scripts/build-capture-helper.sh && pnpm --filter frontend build"
+  },
   "app": {
     "windows": [
       {
@@ -16,5 +20,8 @@
         "shadow": false
       }
     ]
+  },
+  "bundle": {
+    "externalBin": ["binaries/pollis-capture-linux"]
   }
 }

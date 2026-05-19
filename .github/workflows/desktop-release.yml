@@ -275,6 +275,14 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # The screen-capture helper is a separate workspace binary that Tauri
+      # bundles as a sidecar (externalBin in tauri.linux.conf.json). It must
+      # be built and staged at the target-triple-suffixed path BEFORE
+      # `tauri build`, or the Linux release ships without it and screen
+      # sharing fails at runtime. Linux job only.
+      - name: Build and stage screen-capture helper
+        run: ./scripts/build-capture-helper.sh x86_64-unknown-linux-gnu
+
       - name: Build Linux
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

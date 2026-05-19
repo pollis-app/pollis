@@ -71,6 +71,8 @@ temp/
 src-tauri/target/
 # Cargo workspace build output (repo root)
 /target/
+# Built screen-capture sidecar, staged by scripts/build-capture-helper.sh
+src-tauri/binaries/
 dev-keystore.json
 
 test-results/
