@@ -10,6 +10,9 @@ import { useAppStore } from "../stores/appStore";
 export type ScreenShareEvent =
   | { type: "local_started"; width: number; height: number }
   | { type: "local_stopped" }
+  | { type: "local_error"; message: string }
+  | { type: "local_stalled"; reason: "minimized" | "source_lost" | "stalled" }
+  | { type: "local_resumed" }
   | {
       type: "remote_started";
       track_key: string;
@@ -17,7 +20,48 @@ export type ScreenShareEvent =
       width: number;
       height: number;
     }
-  | { type: "remote_stopped"; track_key: string };
+  | { type: "remote_stopped"; track_key: string }
+  | { type: "remote_stalled"; track_key: string; reason: "stalled" }
+  | { type: "remote_resumed"; track_key: string };
+
+/**
+ * Collapse a raw backend screen-share error string into a single clear
+ * sentence for the status bar. Known failure shapes (portal cancelled,
+ * permission denied, missing helper binary, picker dismissed) get a fixed
+ * friendly message; anything else passes through unchanged so we never hide
+ * a novel error.
+ */
+export function friendlyScreenShareError(raw: string): string {
+  const r = raw.toLowerCase();
+  if (
+    r.includes("cancel") ||
+    r.includes("dismiss") ||
+    r.includes("no source selected") ||
+    r.includes("picker")
+  ) {
+    return "Screen share cancelled — no window or screen was picked.";
+  }
+  if (
+    r.includes("permission") ||
+    r.includes("denied") ||
+    r.includes("not allowed") ||
+    r.includes("not authorized")
+  ) {
+    return "Screen share permission denied. Allow screen recording for Pollis in your OS settings.";
+  }
+  if (
+    r.includes("helper binary") ||
+    r.includes("helper not found") ||
+    (r.includes("not found") && r.includes("helper")) ||
+    r.includes("no such file")
+  ) {
+    return "Screen share helper is missing. Reinstall Pollis to restore it.";
+  }
+  if (r.includes("portal")) {
+    return "Screen share is unavailable — the desktop screen-sharing portal did not respond.";
+  }
+  return raw;
+}
 
 export interface DecodedFrame {
   trackKey: string;
@@ -148,9 +192,23 @@ class ScreenShareSession {
     switch (ev.type) {
       case "local_started":
         store.setScreenShareLocalActive(true);
+        // A fresh start clears any prior failure and stall state.
+        store.setScreenShareError(null);
+        store.setLocalShareStallReason(null);
         break;
       case "local_stopped":
         store.setScreenShareLocalActive(false);
+        store.setScreenShareError(null);
+        store.setLocalShareStallReason(null);
+        break;
+      case "local_error":
+        store.setScreenShareError(friendlyScreenShareError(ev.message));
+        break;
+      case "local_stalled":
+        store.setLocalShareStallReason(ev.reason);
+        break;
+      case "local_resumed":
+        store.setLocalShareStallReason(null);
         break;
       case "remote_started":
         store.upsertScreenShareRemote(ev.identity, {
@@ -158,9 +216,16 @@ class ScreenShareSession {
           width: ev.width,
           height: ev.height,
         });
+        store.setRemoteTrackStalled(ev.track_key, false);
         break;
       case "remote_stopped":
         store.removeScreenShareRemote(ev.track_key);
+        break;
+      case "remote_stalled":
+        store.setRemoteTrackStalled(ev.track_key, true);
+        break;
+      case "remote_resumed":
+        store.setRemoteTrackStalled(ev.track_key, false);
         break;
     }
   }

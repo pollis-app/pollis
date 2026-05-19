@@ -51,6 +51,8 @@ export const AppShell: React.FC = () => {
     setStatusBarAlert,
     voiceError,
     setVoiceError,
+    screenShareError,
+    setScreenShareError,
     isLocalSpeaking,
     incomingCall,
     setIncomingCall,
@@ -532,6 +534,26 @@ export const AppShell: React.FC = () => {
               style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
               onClick={() => setVoiceError(null)}
               aria-label="Dismiss voice error"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        ) : screenShareError ? (
+          <div
+            data-testid="status-bar-screenshare-error"
+            className="flex items-center gap-2"
+            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+          >
+            <span className="text-xs font-mono flex items-center gap-1">
+              <AlertTriangle className="w-4 h-4" />
+              {screenShareError}
+            </span>
+            <button
+              data-testid="status-bar-screenshare-error-dismiss"
+              className="cursor-pointer"
+              style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
+              onClick={() => setScreenShareError(null)}
+              aria-label="Dismiss screen share error"
             >
               <X className="w-4 h-4" />
             </button>

@@ -8,9 +8,24 @@
 // session frame stream — no extra IPC, no polling timer.
 
 import React from "react";
-import { Play, Radio } from "lucide-react";
+import { Pause, Play, Radio } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 import { useScreenShareStats } from "../../screenshare/useScreenShareStats";
+import { useAppStore } from "../../stores/appStore";
+
+/** Short status-bar copy for each local stall reason. */
+export function localStallCopy(
+  reason: "minimized" | "source_lost" | "stalled",
+): string {
+  switch (reason) {
+    case "minimized":
+      return "Your share is paused — window minimized";
+    case "source_lost":
+      return "Your share stopped — the shared window or screen is gone";
+    case "stalled":
+      return "Your share is paused — no frames are being captured";
+  }
+}
 
 interface RemoteShareInfo {
   trackKey: string;
@@ -32,13 +47,35 @@ export const ScreenShareIndicator: React.FC<Props> = ({
   onView,
 }) => {
   const stats = useScreenShareStats(remote?.trackKey ?? null);
+  const localStallReason = useAppStore((s) => s.localShareStallReason);
   if (!isLocal && !remote) {
     return null;
   }
 
   if (isLocal && !remote) {
-    // Local-only: passive "you're broadcasting" badge. No view button —
-    // a user can't watch their own stream meaningfully.
+    // Local-only: passive badge. Normally "LIVE"; when the capture is
+    // stalled it flips to a paused state so the sharer knows their
+    // audience has frozen on the last frame. No view button — a user
+    // can't watch their own stream meaningfully.
+    if (localStallReason) {
+      return (
+        <span
+          data-testid={`screenshare-local-stalled-badge-${identity}`}
+          className="flex items-center gap-1 font-mono text-[10px] flex-shrink-0"
+          style={{
+            color: "var(--c-text-dim)",
+            padding: "1px 6px",
+            border: "1px solid var(--c-border)",
+            borderRadius: 3,
+            letterSpacing: "0.05em",
+          }}
+          title={localStallCopy(localStallReason)}
+        >
+          <Pause size={10} />
+          PAUSED
+        </span>
+      );
+    }
     return (
       <span
         data-testid={`voice-screenshare-local-${identity}`}
