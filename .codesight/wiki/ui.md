@@ -55,6 +55,7 @@
 - **InvitesPage** — `frontend/src/pages/InvitesPage.tsx`
 - **JoinRequests** — props: groupId, groupName — `frontend/src/pages/JoinRequests.tsx`
 - **JoinRequestsPage** — `frontend/src/pages/JoinRequestsPage.tsx`
+- **KeyboardShortcutsPage** — "Key Bindings" global keyboard-shortcut reference (route `/shortcuts`, linked from the Account hub) — `frontend/src/pages/KeyboardShortcutsPage.tsx`
 - **KickMemberPage** — `frontend/src/pages/KickMemberPage.tsx`
 - **LeaveGroupPage** — `frontend/src/pages/LeaveGroup.tsx`
 - **Members** — props: groupId, isAdmin — `frontend/src/pages/Members.tsx`

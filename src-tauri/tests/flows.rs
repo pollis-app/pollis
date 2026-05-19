@@ -3198,3 +3198,94 @@ async fn unlock_resigns_stale_sibling_device_cert() {
 
     drop(alice);
 }
+
+// ─── Safety numbers / contact verification ───────────────────────────────────
+
+/// Full lifecycle of the Signal-style safety number:
+///   1. Creating a DM TOFU-pins the peer → status "unverified", 60 digits.
+///   2. Both sides compute the *same* number regardless of who asks.
+///   3. `set_contact_verified` flips status → "verified".
+///   4. A Turso-side `account_id_pub` swap (the exact attack this defends
+///      against) is detected → status "changed".
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn safety_number_lifecycle_and_key_change_detection() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    alice.sign_up("alice@test.local").await;
+    bob.sign_up("bob@test.local").await;
+    let alice_id = alice.user_id().to_string();
+    let bob_id = bob.user_id().to_string();
+
+    // Creating the DM runs check_and_pin_account_key for bob on alice's side.
+    alice.create_dm(&[&bob_id]).await;
+
+    let a_view = alice
+        .invoke_json(
+            "get_safety_number",
+            json!({ "myUserId": alice_id, "peerUserId": bob_id }),
+        )
+        .await;
+    assert_eq!(a_view["status"], "unverified");
+    let a_num = a_view["safety_number"].as_str().unwrap().to_string();
+    assert_eq!(
+        a_num.chars().filter(|c| c.is_ascii_digit()).count(),
+        60,
+        "safety number must be 60 digits"
+    );
+
+    // Order independence: bob asking about alice yields the identical number.
+    let b_view = bob
+        .invoke_json(
+            "get_safety_number",
+            json!({ "myUserId": bob_id, "peerUserId": alice_id }),
+        )
+        .await;
+    assert_eq!(
+        b_view["safety_number"].as_str().unwrap(),
+        a_num,
+        "both parties must derive the same safety number"
+    );
+
+    // Explicit verification.
+    alice
+        .invoke_json(
+            "set_contact_verified",
+            json!({ "peerUserId": bob_id, "verified": true }),
+        )
+        .await;
+    let verified = alice
+        .invoke_json(
+            "get_safety_number",
+            json!({ "myUserId": alice_id, "peerUserId": bob_id }),
+        )
+        .await;
+    assert_eq!(verified["status"], "verified");
+
+    // Simulate the attack: someone with Turso write access swaps bob's
+    // account_id_pub. alice's locally-pinned key no longer matches.
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE users SET account_id_pub = ?1, identity_version = identity_version + 1 \
+         WHERE id = ?2",
+        libsql::params![vec![9u8; 32], bob_id.clone()],
+    )
+    .await
+    .expect("swap bob account_id_pub");
+
+    let changed = alice
+        .invoke_json(
+            "get_safety_number",
+            json!({ "myUserId": alice_id, "peerUserId": bob_id }),
+        )
+        .await;
+    assert_eq!(
+        changed["status"], "changed",
+        "a Turso-side key swap must be detected as 'changed'"
+    );
+
+    drop(alice);
+    drop(bob);
+}

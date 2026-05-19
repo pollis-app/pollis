@@ -17,6 +17,7 @@ pub mod livekit;
 pub mod livekit;
 pub mod mls;
 pub mod r2;
+pub mod safety;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod sfx;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
