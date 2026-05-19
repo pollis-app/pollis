@@ -4,8 +4,7 @@
 use serde::Serialize;
 use tauri::ipc::{Channel, InvokeResponseBody};
 
-use pollis_core::commands::screenshare::RawSink;
-use pollis_core::sink::EventSink;
+use pollis_core::sink::{EventSink, RawSink};
 
 pub struct ChannelSink<E>(pub Channel<E>)
 where

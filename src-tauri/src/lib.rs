@@ -516,6 +516,7 @@ commands::livekit::get_livekit_token,
             commands::terminal::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_close,
+            commands::terminal::terminal_ack,
         ])
         // On macOS, hide the window on close instead of quitting.
         // On window focus, re-evaluate the media-cache cap so files
