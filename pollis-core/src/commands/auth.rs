@@ -493,9 +493,13 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     // unwrapped db_key. The orphan recompute (was here before #194)
     // moves with it — has_matching_local_account_identity can't
     // verify against a still-locked key anyway.
+    // Device registration is a fire-and-forget Turso/keystore refresh
+    // whose return value is unused here. A transient failure at launch
+    // must NOT bounce a logged-in user back to OTP (issue #247) — the
+    // row re-registers on the next reachable launch. This mirrors the
+    // network-tolerant user-existence check above.
     if let Err(e) = register_device(state, &profile.id).await {
-        eprintln!("[session] register_device failed for user {} ({e}) — bouncing to login", profile.id);
-        return Err(e);
+        eprintln!("[session] register_device failed for user {} ({e}); proceeding from accounts.json", profile.id);
     }
 
     // Conservative: if the wrapped slot is absent AND no plaintext
@@ -503,6 +507,15 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     // account_identity returns true for the wrapped-only (locked)
     // case, so we don't false-positive an enrollment gate just
     // because the user hasn't entered their PIN yet.
+    // A transient Turso failure here must NOT bounce a logged-in user
+    // back to OTP (issue #247). Unknown remote state is treated as
+    // `None`, which yields `enrollment_required = false` below: the user
+    // proceeds to PIN unlock and the enrollment gate recomputes on the
+    // next reachable launch. An un-enrolled device still cannot read
+    // history (keys are not local) — it is simply not *forced* through
+    // the gate while offline. Consistent with the network-tolerant
+    // user-existence check above; only a confirmed `None` row (user
+    // genuinely has no remote pubkey) and a present row are decisive.
     let remote_pub: Option<Vec<u8>> = match state.remote_db.conn().await {
         Ok(conn) => {
             match conn
@@ -516,19 +529,19 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
                     Ok(Some(row)) => row.get::<Option<Vec<u8>>>(0).ok().flatten(),
                     Ok(None) => None,
                     Err(e) => {
-                        eprintln!("[session] enrollment-recompute row read failed ({e}) — bouncing to login");
-                        return Err(e.into());
+                        eprintln!("[session] enrollment-recompute row read failed ({e}); skipping gate this launch");
+                        None
                     }
                 },
                 Err(e) => {
-                    eprintln!("[session] enrollment-recompute query failed ({e}) — bouncing to login");
-                    return Err(e.into());
+                    eprintln!("[session] enrollment-recompute query failed ({e}); skipping gate this launch");
+                    None
                 }
             }
         }
         Err(e) => {
-            eprintln!("[session] enrollment-recompute Turso connect failed ({e}) — bouncing to login");
-            return Err(e);
+            eprintln!("[session] enrollment-recompute Turso connect failed ({e}); skipping gate this launch");
+            None
         }
     };
 
