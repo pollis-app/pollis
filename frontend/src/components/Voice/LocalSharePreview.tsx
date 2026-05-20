@@ -5,15 +5,13 @@
 // voice participant list while sharing is active.
 
 import React from "react";
-import { Pause } from "lucide-react";
 
 import { useAppStore } from "../../stores/appStore";
 import { RemoteVideoTile } from "./RemoteVideoTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
-import { localStallCopy } from "./ScreenShareIndicator";
 
 export const LocalSharePreview: React.FC = () => {
-  const { screenShareLocalActive, localShareStallReason } = useAppStore();
+  const { screenShareLocalActive } = useAppStore();
   if (!screenShareLocalActive) {
     return null;
   }
@@ -43,21 +41,6 @@ export const LocalSharePreview: React.FC = () => {
         }}
       >
         <RemoteVideoTile trackKey={LOCAL_PREVIEW_KEY} />
-        {localShareStallReason && (
-          <div
-            data-testid="screenshare-local-stalled"
-            className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-2 text-center pointer-events-none"
-            style={{ background: "rgba(0,0,0,0.55)" }}
-          >
-            <Pause size={14} style={{ color: "var(--c-text)" }} />
-            <span
-              className="font-mono text-[10px] leading-tight"
-              style={{ color: "var(--c-text)" }}
-            >
-              {localStallCopy(localShareStallReason)}
-            </span>
-          </div>
-        )}
       </div>
     </div>
   );

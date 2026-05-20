@@ -4,10 +4,8 @@
 // latency than upload-RGBA-per-frame.
 
 import React, { useEffect, useRef } from "react";
-import { Pause } from "lucide-react";
 
 import { screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
-import { useAppStore } from "../../stores/appStore";
 
 interface Props {
   trackKey: string;
@@ -163,11 +161,6 @@ export const RemoteVideoTile: React.FC<Props> = ({
   // drop intermediate frames cleanly.
   const pendingRef = useRef<DecodedFrame | null>(null);
   const rafRef = useRef<number | null>(null);
-  // Stall badge overlays the retained last frame — the tile is never
-  // unmounted so the WebGL context (and the last painted frame) survives.
-  const isStalled = useAppStore(
-    (s) => s.stalledRemoteTrackKeys[trackKey] === true,
-  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -192,7 +185,11 @@ export const RemoteVideoTile: React.FC<Props> = ({
       }
       const bundle = glRef.current;
       const { gl } = bundle;
-      // Resize backing store on dimension change. CSS sizing is independent.
+      // Resize backing store on dimension change. CSS sizing is
+      // independent — the canvas's intrinsic dimensions (its width/
+      // height *attributes*, which we sync to the source resolution)
+      // drive `object-fit: contain` so the source pixels are scaled to
+      // fit the CSS box while preserving aspect ratio.
       if (canvas.width !== frame.width || canvas.height !== frame.height) {
         canvas.width = frame.width;
         canvas.height = frame.height;
@@ -239,42 +236,29 @@ export const RemoteVideoTile: React.FC<Props> = ({
     };
   }, [trackKey, initialWidth, initialHeight]);
 
+  // Parent's flex layout (justify/align center) does the centering;
+  // the canvas auto-sizes from its intrinsic dimensions (the width/
+  // height attributes we sync to the source resolution in render()),
+  // and max-width/max-height clamp it to fit the parent in both axes
+  // while the auto/auto width/height keeps the aspect ratio. This is
+  // the canonical pattern for preserving aspect on a replaced element
+  // and works across every engine including older WebKitGTK; relying
+  // on `object-fit: contain` is unreliable on `<canvas>` in some
+  // WebKit versions, which is what was leaving the canvas vertically
+  // compressed despite the contain hint.
   return (
-    <div
+    <canvas
+      ref={canvasRef}
+      data-testid={`remote-video-tile-${trackKey}`}
+      className={className}
       style={{
-        position: "relative",
-        display: "inline-flex",
+        display: "block",
         maxWidth: "100%",
         maxHeight: "100%",
+        width: "auto",
+        height: "auto",
+        background: "#000",
       }}
-    >
-      <canvas
-        ref={canvasRef}
-        data-testid={`remote-video-tile-${trackKey}`}
-        className={className}
-        style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", background: "#000" }}
-      />
-      {isStalled && (
-        <div
-          data-testid={`screenshare-stalled-${trackKey}`}
-          className="absolute inset-0 flex items-center justify-center pointer-events-none"
-          style={{ background: "rgba(0,0,0,0.45)" }}
-        >
-          <span
-            className="flex items-center gap-1.5 font-mono text-xs"
-            style={{
-              color: "var(--c-text)",
-              background: "var(--c-surface)",
-              border: "1px solid var(--c-border)",
-              borderRadius: 4,
-              padding: "4px 10px",
-            }}
-          >
-            <Pause size={12} />
-            Stream paused
-          </span>
-        </div>
-      )}
-    </div>
+    />
   );
 };

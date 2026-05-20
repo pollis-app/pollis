@@ -6,14 +6,16 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import { useAppStore } from "../stores/appStore";
 
-/** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`. */
+/** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`.
+ *  There is intentionally no "paused" / "stalled" concept on either end:
+ *  when capture is idle (static content) the streamer simply stops
+ *  pushing frames and the viewer's canvas keeps showing the last paint —
+ *  identical to a stream of unchanging frames, no UI signal needed. */
 export type ScreenShareEvent =
   | { type: "local_started"; width: number; height: number }
   | { type: "local_stopped" }
   | { type: "local_error"; message: string }
   | { type: "local_unsupported"; message: string }
-  | { type: "local_stalled"; reason: "minimized" | "source_lost" | "stalled" }
-  | { type: "local_resumed" }
   | {
       type: "remote_started";
       track_key: string;
@@ -21,9 +23,7 @@ export type ScreenShareEvent =
       width: number;
       height: number;
     }
-  | { type: "remote_stopped"; track_key: string }
-  | { type: "remote_stalled"; track_key: string; reason: "stalled" }
-  | { type: "remote_resumed"; track_key: string };
+  | { type: "remote_stopped"; track_key: string };
 
 /**
  * Collapse a raw backend screen-share error string into a single clear
@@ -205,14 +205,11 @@ class ScreenShareSession {
     switch (ev.type) {
       case "local_started":
         store.setScreenShareLocalActive(true);
-        // A fresh start clears any prior failure and stall state.
         store.setScreenShareError(null);
-        store.setLocalShareStallReason(null);
         break;
       case "local_stopped":
         store.setScreenShareLocalActive(false);
         store.setScreenShareError(null);
-        store.setLocalShareStallReason(null);
         break;
       case "local_error":
         store.setScreenShareError(friendlyScreenShareError(ev.message));
@@ -226,28 +223,15 @@ class ScreenShareSession {
         // message straight through.
         store.setScreenShareError(ev.message);
         break;
-      case "local_stalled":
-        store.setLocalShareStallReason(ev.reason);
-        break;
-      case "local_resumed":
-        store.setLocalShareStallReason(null);
-        break;
       case "remote_started":
         store.upsertScreenShareRemote(ev.identity, {
           trackKey: ev.track_key,
           width: ev.width,
           height: ev.height,
         });
-        store.setRemoteTrackStalled(ev.track_key, false);
         break;
       case "remote_stopped":
         store.removeScreenShareRemote(ev.track_key);
-        break;
-      case "remote_stalled":
-        store.setRemoteTrackStalled(ev.track_key, true);
-        break;
-      case "remote_resumed":
-        store.setRemoteTrackStalled(ev.track_key, false);
         break;
     }
   }
