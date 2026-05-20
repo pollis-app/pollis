@@ -81,7 +81,7 @@ export const VoiceMemberTile: React.FC<Props> = ({
       data-testid={`voice-tile-${identity}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      className="relative w-full h-full flex flex-col items-center justify-center select-none overflow-hidden font-mono"
+      className="relative w-full h-full flex flex-col select-none overflow-hidden font-mono"
       style={{
         background: "var(--c-surface)",
         border: `2px solid ${borderColor}`,
@@ -140,8 +140,8 @@ export const VoiceMemberTile: React.FC<Props> = ({
         </span>
       )}
 
-      {/* Centered identity */}
-      <div className="flex flex-col items-center gap-2 min-w-0 px-2">
+      {/* Centered identity — fills the area above the slider strip */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-2 min-w-0 px-2">
         <Avatar
           avatarKey={avatarKey}
           size={56}
@@ -171,14 +171,19 @@ export const VoiceMemberTile: React.FC<Props> = ({
         )}
       </div>
 
-      {/* In-tile volume slider, revealed on select/hover (remote only) */}
-      {showSlider && (
+      {/* In-tile volume slider strip. Always reserves vertical space on
+        * remote tiles so toggling visibility on hover/focus doesn't shift
+        * the View Stream button. `visibility: hidden` keeps the slot —
+        * `display: none` would collapse it. Local tiles never get a
+        * slider (you don't attenuate yourself), so no strip reserved. */}
+      {!isLocal && (
         <div
           data-testid={`voice-tile-volume-${identity}`}
-          className="absolute left-0 right-0 bottom-0 flex items-center justify-center py-1.5"
+          className="flex items-center justify-center py-1.5 flex-shrink-0"
           style={{
             background: "var(--c-bg)",
             borderTop: "1px solid var(--c-border)",
+            visibility: showSlider ? "visible" : "hidden",
           }}
         >
           <RemoteUserVolumeSlider identity={identity} participantName={name} />
