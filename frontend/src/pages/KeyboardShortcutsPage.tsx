@@ -1,19 +1,18 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { PageShell } from "../components/Layout/PageShell";
 import { NavigableList } from "../components/ui/NavigableList";
+import { Button } from "../components/ui/Button";
 import {
   SHORTCUT_COMMANDS,
   ALL_SHORTCUT_COMMAND_IDS,
   formatCombo,
   type ShortcutCommandId,
-  type ShortcutCategory,
 } from "../keyboard";
 import { usePreferences } from "../hooks/queries/usePreferences";
 
 interface Row {
   id: ShortcutCommandId;
   title: string;
-  category: ShortcutCategory;
   combo: string;
   isOverridden: boolean;
 }
@@ -52,7 +51,6 @@ export const KeyboardShortcutsPage: React.FC = () => {
     return {
       id,
       title: meta.title,
-      category: meta.category,
       combo: override ?? meta.defaultCombo,
       isOverridden: override !== undefined && override !== meta.defaultCombo,
     };
@@ -179,23 +177,16 @@ export const KeyboardShortcutsPage: React.FC = () => {
             ];
             if (r.isOverridden) {
               controls.push(
-                <button
+                <Button
                   key="reset"
-                  type="button"
+                  variant="ghost"
+                  size="xs"
                   onClick={() => resetToDefault(r.id)}
                   aria-label={`Reset ${r.title} to default`}
                   data-testid={`shortcut-${r.id}-reset`}
-                  className="text-xs font-mono"
-                  style={{
-                    color: "var(--c-text-dim)",
-                    background: "transparent",
-                    padding: "1px 4px",
-                    border: "none",
-                    cursor: "pointer",
-                  }}
                 >
                   reset
-                </button>,
+                </Button>,
               );
             }
             return controls;
