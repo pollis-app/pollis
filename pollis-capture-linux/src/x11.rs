@@ -46,7 +46,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use pollis_capture_proto::CaptureMsg;
 use tokio::sync::mpsc;
-use xcb::{shm, x};
+use xcb::{shm, x, Xid};
 
 /// Geometry of the monitor we capture, in root-window coordinates.
 struct CaptureRegion {
@@ -64,14 +64,19 @@ fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion>
     let primary = conn.send_request(&xcb::randr::GetOutputPrimary { window: root });
     if let Ok(primary) = conn.wait_for_reply(primary) {
         let output = primary.output();
-        if output != x::NONE {
+        // `Xid::is_none()` lives on every XID newtype the xcb 1.x bindings
+        // expose (Output / Crtc / Mode / …). It's the typed equivalent of
+        // X11's `None` sentinel — `0` for the resource id — without
+        // assuming the generated bindings expose a free `x::NONE` const
+        // (they don't — only the atom-shaped one, `x::ATOM_NONE`).
+        if !output.is_none() {
             let info = conn.send_request(&xcb::randr::GetOutputInfo {
                 output,
                 config_timestamp: x::CURRENT_TIME,
             });
             if let Ok(info) = conn.wait_for_reply(info) {
                 let crtc = info.crtc();
-                if crtc != x::NONE {
+                if !crtc.is_none() {
                     let crtc_info = conn.send_request(&xcb::randr::GetCrtcInfo {
                         crtc,
                         config_timestamp: x::CURRENT_TIME,
@@ -107,7 +112,7 @@ fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion>
                 config_timestamp: x::CURRENT_TIME,
             });
             if let Ok(c) = conn.wait_for_reply(crtc_info) {
-                if c.width() > 0 && c.height() > 0 && c.mode() != x::NONE {
+                if c.width() > 0 && c.height() > 0 && !c.mode().is_none() {
                     eprintln!(
                         "[capture/x11] capturing CRTC {}x{} at +{}+{}",
                         c.width(),
