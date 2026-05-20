@@ -30,6 +30,12 @@ export const VoiceChannelView: React.FC = () => {
         testId="voice-channel-view"
         emptyLabel="Connecting…"
         autoFocus={false}
+        // Discord-ish sizing: a hard ceiling on tile width so a solo
+        // user gets a sensibly-sized avatar tile (~240px) instead of
+        // ballooning to fill the room. A crowded room squeezes tiles
+        // down to the floor and then wraps to extra rows.
+        minCellWidth={180}
+        maxCellWidth={240}
         onActivate={(p) => {
           const share = screenShareRemotes[p.identity];
           if (share) {

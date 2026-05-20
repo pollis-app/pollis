@@ -24,8 +24,12 @@ export interface NavigableGridProps<T> {
   getKey: (item: T) => string;
   renderCell: (item: T, state: { focused: boolean }) => React.ReactNode;
   onActivate?: (item: T) => void;
-  /** Floor cell width in px before the grid starts scrolling. */
+  /** Floor cell width in px. Below this, the grid wraps to more rows. */
   minCellWidth?: number;
+  /** Ceiling cell width in px. Stops one or two tiles from ballooning
+   *  to fill the whole container — Discord-style "give each tile its
+   *  fair share, but no more than this". */
+  maxCellWidth?: number;
   /** width / height. Default 16/9. */
   aspect?: number;
   gap?: number;
@@ -45,38 +49,28 @@ function computeLayout(
   H: number,
   n: number,
   minW: number,
+  maxW: number,
   aspect: number,
   gap: number,
 ): Layout {
   if (n === 0 || W <= 0 || H <= 0) {
     return { cols: 1, cellW: 0, cellH: 0 };
   }
-  // Pick the column count whose limiting dimension yields the largest
-  // cell — the classic "fit N rectangles of fixed aspect into a box".
-  let bestCols = 1;
-  let bestSize = 0;
-  for (let c = 1; c <= n; c++) {
-    const rows = Math.ceil(n / c);
-    const cwByW = (W - gap * (c - 1)) / c;
-    const chByH = (H - gap * (rows - 1)) / rows;
-    const cwByH = chByH * aspect;
-    const size = Math.min(cwByW, cwByH);
-    if (size > bestSize) {
-      bestSize = size;
-      bestCols = c;
-    }
-  }
-  let cols = bestCols;
-  let cellW = (W - gap * (cols - 1)) / cols;
-  // Enforce the usable-size floor by dropping columns (which enlarges
-  // cells); the resulting overflow is absorbed by vertical scroll.
-  while (cols > 1 && cellW < minW) {
-    cols -= 1;
-    cellW = (W - gap * (cols - 1)) / cols;
-  }
-  if (cellW > W) {
-    cellW = W;
-  }
+  // Discord-style sizing: each tile gets `W / n` of the row width,
+  // clamped between minW and maxW. With one or two participants this
+  // prevents tiles from ballooning to fill the whole container; with
+  // many participants it prevents them from being squeezed to nothing
+  // (the layout wraps to additional rows instead and the container
+  // scrolls). Aspect-ratio is fixed (16:9 by default); height is
+  // derived, not negotiated against the container's height.
+  const target = Math.max(minW, Math.min(maxW, W / n));
+  // How many tiles of `target` width (plus gaps between them) actually
+  // fit in this row? When target is forced up to minW (many users),
+  // this is < n and we wrap. When target is forced down to maxW (one
+  // user), cols == 1.
+  let cols = Math.max(1, Math.floor((W + gap) / (target + gap)));
+  cols = Math.min(cols, n);
+  const cellW = Math.min(target, W);
   return { cols, cellW, cellH: cellW / aspect };
 }
 
@@ -86,6 +80,7 @@ export function NavigableGrid<T>({
   renderCell,
   onActivate,
   minCellWidth = 168,
+  maxCellWidth = 500,
   aspect = 16 / 9,
   gap = 12,
   autoFocus = true,
@@ -123,8 +118,8 @@ export function NavigableGrid<T>({
   }, [autoFocus, items.length]);
 
   const { cols, cellW, cellH } = useMemo(
-    () => computeLayout(box.w, box.h, items.length, minCellWidth, aspect, gap),
-    [box.w, box.h, items.length, minCellWidth, aspect, gap],
+    () => computeLayout(box.w, box.h, items.length, minCellWidth, maxCellWidth, aspect, gap),
+    [box.w, box.h, items.length, minCellWidth, maxCellWidth, aspect, gap],
   );
 
   // Scroll the focused cell into view when navigating a scrolling grid.
