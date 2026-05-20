@@ -192,10 +192,12 @@ class ScreenShareSession {
     switch (ev.type) {
       case "local_started":
         store.setScreenShareLocalActive(true);
+        store.setScreenShareLocalDimensions({ width: ev.width, height: ev.height });
         store.setScreenShareError(null);
         break;
       case "local_stopped":
         store.setScreenShareLocalActive(false);
+        store.setScreenShareLocalDimensions(null);
         store.setScreenShareError(null);
         break;
       case "local_error":

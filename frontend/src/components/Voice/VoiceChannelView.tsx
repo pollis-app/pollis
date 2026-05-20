@@ -3,7 +3,7 @@ import { useAppStore } from "../../stores/appStore";
 import { NavigableGrid } from "../ui/NavigableGrid";
 import type { VoiceParticipant } from "../../types";
 import { VoiceMemberTile } from "./VoiceMemberTile";
-import { LocalSharePreview } from "./LocalSharePreview";
+import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 
 export const VoiceChannelView: React.FC = () => {
   const {
@@ -11,6 +11,7 @@ export const VoiceChannelView: React.FC = () => {
     voiceActiveSpeakerIds,
     screenShareRemotes,
     screenShareLocalActive,
+    screenShareLocalDimensions,
     currentUser,
     setViewingScreenShareTrackKey,
   } = useAppStore();
@@ -37,6 +38,12 @@ export const VoiceChannelView: React.FC = () => {
         minCellWidth={180}
         maxCellWidth={240}
         onActivate={(p) => {
+          const isLocal = p.identity === localIdentity;
+          // Enter activates the streaming user's tile → open fullscreen.
+          if (isLocal && screenShareLocalActive) {
+            setViewingScreenShareTrackKey(LOCAL_PREVIEW_KEY);
+            return;
+          }
           const share = screenShareRemotes[p.identity];
           if (share) {
             setViewingScreenShareTrackKey(share.trackKey);
@@ -44,6 +51,24 @@ export const VoiceChannelView: React.FC = () => {
         }}
         renderCell={(p, { focused }) => {
           const isLocal = p.identity === localIdentity;
+          // Resolve which (if any) stream this participant is publishing
+          // and pass it down as a unified shape so the tile doesn't care
+          // whether it's our own preview track or a remote's.
+          let streamTrackKey: string | undefined;
+          let streamWidth: number | undefined;
+          let streamHeight: number | undefined;
+          if (isLocal && screenShareLocalActive) {
+            streamTrackKey = LOCAL_PREVIEW_KEY;
+            streamWidth = screenShareLocalDimensions?.width;
+            streamHeight = screenShareLocalDimensions?.height;
+          } else if (!isLocal) {
+            const remote = screenShareRemotes[p.identity];
+            if (remote) {
+              streamTrackKey = remote.trackKey;
+              streamWidth = remote.width;
+              streamHeight = remote.height;
+            }
+          }
           return (
             <VoiceMemberTile
               identity={p.identity}
@@ -56,14 +81,14 @@ export const VoiceChannelView: React.FC = () => {
               }
               focused={focused}
               connectionQuality={p.connectionQuality}
-              remoteShare={isLocal ? undefined : screenShareRemotes[p.identity]}
-              isLocalBroadcasting={isLocal && screenShareLocalActive}
+              streamTrackKey={streamTrackKey}
+              streamWidth={streamWidth}
+              streamHeight={streamHeight}
               onView={(trackKey) => setViewingScreenShareTrackKey(trackKey)}
             />
           );
         }}
       />
-      <LocalSharePreview />
     </div>
   );
 };

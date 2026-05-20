@@ -1,19 +1,21 @@
 // A single voice participant cell in the NavigableGrid. Discord-style:
-// avatar centered in a rounded rectangle that grows/shrinks with the
-// grid. Speaking shows an accent ring; muted / degraded-connection get
-// corner indicators. A broadcasting participant gets the existing "View
-// Stream" affordance (opens the full-window ScreenShareViewer). The
-// per-user volume slider lives at the bottom *inside* the tile and is
-// revealed when the tile is keyboard-selected or hovered (remote only —
-// you don't attenuate yourself).
+// the tile flips between two states:
+//   - Not streaming: avatar centered, name in the top-left
+//   - Streaming: low-cost preview (15fps, 2× downsampled) of their
+//     share fills the tile; clicking opens the fullscreen viewer
+// Speaking shows an accent ring; muted / degraded connection get
+// corner indicators. The per-user volume slider lives at the bottom
+// *inside* the tile and is revealed when the tile is keyboard-selected
+// or hovered (remote only — you don't attenuate yourself).
 
 import React, { useState } from "react";
-import { Play, Radio, VolumeX } from "lucide-react";
+import { VolumeX } from "lucide-react";
 
 import type { VoiceConnectionQuality } from "../../types";
 import { Avatar } from "../ui/Avatar";
-import { PillButton } from "../ui/PillButton";
 import { RemoteUserVolumeSlider } from "./RemoteUserVolumeSlider";
+import { RemoteVideoTile } from "./RemoteVideoTile";
+import { useScreenShareStats } from "../../screenshare/useScreenShareStats";
 
 interface Props {
   identity: string;
@@ -24,8 +26,13 @@ interface Props {
   isSpeaking: boolean;
   focused: boolean;
   connectionQuality?: VoiceConnectionQuality;
-  remoteShare?: { trackKey: string; width: number; height: number };
-  isLocalBroadcasting: boolean;
+  /** Track key + dimensions of this participant's active screen share.
+   *  Defined for both local-and-broadcasting and remote-broadcasting; the
+   *  tile renders the preview the same way regardless. Undefined =
+   *  not streaming → avatar layout. */
+  streamTrackKey?: string;
+  streamWidth?: number;
+  streamHeight?: number;
   onView: (trackKey: string) => void;
 }
 
@@ -53,13 +60,18 @@ export const VoiceMemberTile: React.FC<Props> = ({
   isSpeaking,
   focused,
   connectionQuality,
-  remoteShare,
-  isLocalBroadcasting,
+  streamTrackKey,
+  streamWidth,
+  streamHeight,
   onView,
 }) => {
   const [hovered, setHovered] = useState(false);
   const showSlider = !isLocal && (focused || hovered);
   const quality = degradedColor(connectionQuality);
+  const isStreaming = streamTrackKey !== undefined;
+  // Stats overlay for the streaming tile — only fetched when the
+  // hook has a key, so the hook returns inert values for non-streamers.
+  const stats = useScreenShareStats(streamTrackKey ?? null);
 
   const borderColor = isSpeaking
     ? "var(--c-accent)"
@@ -76,6 +88,24 @@ export const VoiceMemberTile: React.FC<Props> = ({
     ? "0 0 0 2px var(--c-accent)"
     : undefined;
 
+  // Stats string for the streaming tile: WxH @ Nfps. Drops to the
+  // height-only shorthand (720p / 1080p) when it matches a common
+  // rung, otherwise uses the raw height — same rule as the old
+  // ScreenShareIndicator.
+  const statsLabel = (() => {
+    if (!isStreaming) {
+      return null;
+    }
+    const w = stats.dimensions?.width ?? streamWidth;
+    const h = stats.dimensions?.height ?? streamHeight;
+    if (!w || !h) {
+      return null;
+    }
+    const heightLabel = h % 90 === 0 && h <= 4320 ? `${h}p` : `${h}px`;
+    const fpsLabel = stats.fps > 0 ? `${stats.fps}fps` : "…";
+    return `${heightLabel} ${fpsLabel}`;
+  })();
+
   return (
     <div
       data-testid={`voice-tile-${identity}`}
@@ -90,23 +120,51 @@ export const VoiceMemberTile: React.FC<Props> = ({
         transition: "border-color 0.1s, box-shadow 0.1s",
       }}
     >
-      {/* Top-left: muted */}
-      {isMuted && (
+      {/* Top-left: participant name (always present). Sits above the
+        * avatar / preview via absolute positioning so the centered
+        * content stays vertically centered. When the tile is showing
+        * a stream the name renders as a solid accent pill against the
+        * video — guarantees contrast over any source content without
+        * relying on text-shadow tricks. truncate + max-width clamps a
+        * long username so it ellipsizes inside the tile's left bound. */}
+      <span
+        className="absolute top-1.5 left-2 z-10 truncate text-xs"
+        style={
+          isStreaming
+            ? {
+                maxWidth: "calc(100% - 2.25rem)",
+                color: "var(--c-bg)",
+                background: "var(--c-accent)",
+                padding: "0.125rem 0.25rem",
+                borderRadius: "0.125rem",
+              }
+            : {
+                maxWidth: "calc(100% - 2.25rem)",
+                color: isSpeaking || isLocal ? "var(--c-accent)" : "var(--c-text)",
+              }
+        }
+        title={name}
+      >
+        {name}
+      </span>
+
+      {/* Top-right: muted OR degraded connection (mutually exclusive
+        * visually — muted shows the icon, quality the dot). Muted takes
+        * precedence since it's the more meaningful signal for the
+        * person looking at the tile. */}
+      {isMuted ? (
         <span
           data-testid={`voice-tile-muted-${identity}`}
-          className="absolute top-1.5 left-1.5"
+          className="absolute top-1.5 right-1.5 z-10"
           style={{ color: "var(--c-text-dim)" }}
           title={`${name} is muted`}
         >
           <VolumeX size={14} />
         </span>
-      )}
-
-      {/* Top-right: degraded connection */}
-      {quality && (
+      ) : quality ? (
         <span
           data-testid={`voice-tile-quality-${identity}`}
-          className="absolute top-1.5 right-1.5 flex items-center"
+          className="absolute top-1.5 right-1.5 z-10 flex items-center"
           title={`Connection: ${connectionQuality}`}
         >
           <span
@@ -119,63 +177,65 @@ export const VoiceMemberTile: React.FC<Props> = ({
             }}
           />
         </span>
-      )}
+      ) : null}
 
-      {/* Local broadcasting badge */}
-      {isLocal && isLocalBroadcasting && (
-        <span
-          data-testid={`voice-tile-live-${identity}`}
-          className="absolute top-1.5 right-1.5 flex items-center gap-1 text-[10px]"
-          style={{
-            color: "var(--c-accent)",
-            padding: "1px 5px",
-            border: "1px solid var(--c-accent)",
-            borderRadius: 3,
-            letterSpacing: "0.05em",
-          }}
-          title="You are sharing your screen"
-        >
-          <Radio size={9} className="animate-pulse" />
-          LIVE
-        </span>
-      )}
-
-      {/* Centered identity — fills the area above the slider strip */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-2 min-w-0 px-2">
-        <Avatar
-          avatarKey={avatarKey}
-          size={56}
-          alt={name}
-          testId={`voice-tile-avatar-${identity}`}
-        />
-        <span
-          className="max-w-full truncate text-xs"
-          style={{ color: isSpeaking || isLocal ? "var(--c-accent)" : "var(--c-text)" }}
-        >
-          {name}
-          {isLocal ? " (you)" : ""}
-        </span>
-
-        {/* View Stream — only for a remote participant who is broadcasting */}
-        {remoteShare && (
-          <PillButton
-            accent="var(--c-accent)"
-            data-testid={`voice-tile-view-stream-${identity}`}
-            aria-label={`View screen share from ${name}`}
-            title={`View ${remoteShare.width}×${remoteShare.height} screen share`}
-            onClick={() => onView(remoteShare.trackKey)}
-          >
-            <Play size={10} fill="currentColor" />
-            <span className="text-[10px]">View Stream</span>
-          </PillButton>
+      {/* Main area — avatar layout OR stream preview. Fills the space
+        * above the slider strip. */}
+      <div
+        className="flex-1 flex flex-col items-center justify-center min-w-0 min-h-0"
+        onClick={isStreaming ? () => onView(streamTrackKey!) : undefined}
+        style={{
+          cursor: isStreaming ? "pointer" : "default",
+          // The preview's canvas uses max-width/max-height to fit; the
+          // surrounding flex container handles centering for both
+          // states.
+          padding: isStreaming ? 0 : "0.5rem",
+          overflow: "hidden",
+        }}
+      >
+        {isStreaming ? (
+          <RemoteVideoTile
+            trackKey={streamTrackKey}
+            initialWidth={streamWidth}
+            initialHeight={streamHeight}
+            preview
+          />
+        ) : (
+          <Avatar
+            avatarKey={avatarKey}
+            size={56}
+            alt={name}
+            testId={`voice-tile-avatar-${identity}`}
+          />
         )}
       </div>
 
+      {/* Stats overlay for streaming tiles (bottom-right corner of the
+        * preview). Pulled out into the corner so it never crowds the
+        * preview itself and stays legible against any background. */}
+      {isStreaming && statsLabel && (
+        <span
+          data-testid={`voice-tile-stream-stats-${identity}`}
+          className="absolute right-1.5 z-10 font-mono text-[10px] tabular-nums pointer-events-none"
+          style={{
+            color: "var(--c-text)",
+            background: "rgba(0,0,0,0.55)",
+            padding: "1px 5px",
+            borderRadius: 3,
+            // Sit above the slider strip on remote tiles (which is
+            // always reserved), else flush against the bottom on local.
+            bottom: !isLocal ? "calc(1.5rem + 4px)" : "0.375rem",
+          }}
+        >
+          {statsLabel}
+        </span>
+      )}
+
       {/* In-tile volume slider strip. Always reserves vertical space on
         * remote tiles so toggling visibility on hover/focus doesn't shift
-        * the View Stream button. `visibility: hidden` keeps the slot —
-        * `display: none` would collapse it. Local tiles never get a
-        * slider (you don't attenuate yourself), so no strip reserved. */}
+        * the layout. `visibility: hidden` keeps the slot — `display:
+        * none` would collapse it. Local tiles never get a slider (you
+        * don't attenuate yourself). */}
       {!isLocal && (
         <div
           data-testid={`voice-tile-volume-${identity}`}

@@ -67,6 +67,13 @@ interface AppStore extends AppState {
   /** True if the local user is broadcasting their screen. */
   screenShareLocalActive: boolean;
   setScreenShareLocalActive: (v: boolean) => void;
+  /** Dimensions of the local outgoing share so the in-tile preview
+   *  can seed its canvas before the first mirrored frame arrives. Set
+   *  by `local_started`, cleared by `local_stopped`. */
+  screenShareLocalDimensions: { width: number; height: number } | null;
+  setScreenShareLocalDimensions: (
+    dims: { width: number; height: number } | null,
+  ) => void;
   /** Active remote screenshares keyed by participant identity. */
   screenShareRemotes: Record<string, { trackKey: string; width: number; height: number }>;
   upsertScreenShareRemote: (identity: string, info: { trackKey: string; width: number; height: number }) => void;
@@ -139,6 +146,7 @@ export const useAppStore = create<AppStore>((set) => ({
   voiceActiveSpeakerIds: [],
   voiceIsMuted: false,
   screenShareLocalActive: false,
+  screenShareLocalDimensions: null,
   screenShareRemotes: {},
   viewingScreenShareTrackKey: null,
 
@@ -223,6 +231,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
 
   setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
+  setScreenShareLocalDimensions: (dims) => set({ screenShareLocalDimensions: dims }),
   upsertScreenShareRemote: (identity, info) => set((state) => ({
     screenShareRemotes: { ...state.screenShareRemotes, [identity]: info },
   })),
@@ -281,6 +290,7 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
     screenShareLocalActive: false,
+    screenShareLocalDimensions: null,
     screenShareRemotes: {},
     viewingScreenShareTrackKey: null,
     pendingEnrollmentApproval: null,
