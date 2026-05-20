@@ -9,6 +9,10 @@ import {
   loadDeviceFontSize,
   saveDeviceFontSize,
 } from "../../utils/colorUtils";
+import {
+  setShortcutOverrides,
+  type ShortcutCommandId,
+} from "../../keyboard";
 
 /**
  * Mirrors `voice_apm::NsLevel` in src-tauri.
@@ -51,6 +55,13 @@ export interface PreferencesData {
    * in `src-tauri/src/commands/voice.rs`.
    */
   user_volumes?: { [userId: string]: number };
+  /**
+   * Per-command keyboard shortcut overrides, keyed by `ShortcutCommandId`.
+   * Values are canonical combo strings (e.g. `"mod+shift+k"`) understood by
+   * `keyboard/keyCombo.ts`. Missing entries fall back to the built-in
+   * `defaultCombo` in `keyboard/commands.ts`.
+   */
+  shortcut_overrides?: { [commandId: string]: string };
 }
 
 /**
@@ -248,6 +259,11 @@ export function usePreferences() {
           "user_volumes",
           undefined,
         ),
+        shortcut_overrides: getPreference<{ [commandId: string]: string } | undefined>(
+          json,
+          "shortcut_overrides",
+          undefined,
+        ),
       };
     },
     enabled: !!currentUser,
@@ -282,6 +298,12 @@ export function applyPreferences(prefs: PreferencesData): void {
   if (prefs.background_color) {
     applyBackgroundColor(prefs.background_color);
   }
+  // Shortcut overrides flow through the same bindings module that
+  // `useGlobalShortcut` resolves against on every keydown — no callsite
+  // changes needed. An undefined map clears any previous override.
+  setShortcutOverrides(
+    (prefs.shortcut_overrides ?? {}) as Partial<Record<ShortcutCommandId, string>>,
+  );
 }
 
 /**
@@ -323,10 +345,14 @@ export function useApplyPreferences(): void {
   const { query } = usePreferences();
   const currentUser = useAppStore((state) => state.currentUser);
   const data = query.data;
+  // Stringify the override map so the effect re-runs when any override
+  // changes (a React Query refetch returns a new object reference, and we
+  // don't want to re-fire on unrelated pref edits either).
+  const overridesKey = JSON.stringify(data?.shortcut_overrides ?? {});
   useEffect(() => {
     if (data) {
       applyPreferences(data);
       applyDeviceFontSize(currentUser?.id, data);
     }
-  }, [data?.accent_color, data?.background_color, data?.font_size, currentUser?.id]);
+  }, [data?.accent_color, data?.background_color, data?.font_size, overridesKey, currentUser?.id]);
 }
