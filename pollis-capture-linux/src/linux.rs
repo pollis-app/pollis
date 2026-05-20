@@ -53,7 +53,18 @@ async fn run_async(socket_path: &str) -> Result<()> {
             eprintln!("[capture] portal returned node_id={}", v.0);
             v
         }
-        Err(e) => {
+        Err(PortalError::Cancelled) => {
+            // User dismissed the picker. Surface with a distinct
+            // `cancel:` prefix so the parent can swallow the error
+            // silently instead of showing a red "permission denied"
+            // toast — cancelling is a normal flow, not a failure.
+            eprintln!("[capture] portal cancelled by user");
+            send_error(&mut sock, "cancel: user dismissed picker")
+                .await
+                .ok();
+            return Ok(());
+        }
+        Err(PortalError::Other(e)) => {
             eprintln!("[capture] portal error: {e}");
             send_error(&mut sock, &format!("portal: {e}")).await.ok();
             return Err(e);
@@ -149,10 +160,26 @@ async fn send_error(sock: &mut UnixStream, msg: &str) -> std::io::Result<()> {
     sock.write_all(&buf).await
 }
 
-async fn open_portal() -> Result<(u32, OwnedFd)> {
+/// Distinguishes "user cancelled the picker" from "everything else"
+/// so the parent can swallow cancel silently. Without this, ashpd's
+/// `Response::Cancelled` collapses into the same anyhow error path as a
+/// genuine portal failure → the parent shows a misleading "permission
+/// denied" toast for a perfectly normal Escape-press.
+enum PortalError {
+    Cancelled,
+    Other(anyhow::Error),
+}
+
+impl From<anyhow::Error> for PortalError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Other(e)
+    }
+}
+
+async fn open_portal() -> std::result::Result<(u32, OwnedFd), PortalError> {
     use ashpd::desktop::{
         screencast::{CursorMode, Screencast, SourceType},
-        PersistMode,
+        PersistMode, ResponseError,
     };
     let proxy = Screencast::new()
         .await
@@ -172,12 +199,21 @@ async fn open_portal() -> Result<(u32, OwnedFd)> {
         )
         .await
         .map_err(|e| anyhow!("select sources: {e}"))?;
-    let response = proxy
+    let request = proxy
         .start(&session, &ashpd::WindowIdentifier::default())
         .await
-        .map_err(|e| anyhow!("portal start: {e}"))?
-        .response()
-        .map_err(|e| anyhow!("portal response: {e}"))?;
+        .map_err(|e| anyhow!("portal start: {e}"))?;
+    let response = match request.response() {
+        Ok(r) => r,
+        // The picker callback returned a Cancelled response — user hit
+        // Escape, closed the window, or clicked Cancel. Surface this
+        // specifically; do NOT wrap in anyhow! since the parent's
+        // friendly-error mapping must see the structured signal.
+        Err(ashpd::Error::Response(ResponseError::Cancelled)) => {
+            return Err(PortalError::Cancelled);
+        }
+        Err(e) => return Err(PortalError::Other(anyhow!("portal response: {e}"))),
+    };
     let stream = response
         .streams()
         .first()
@@ -312,7 +348,23 @@ mod pw {
                 let chunk = datas[0].chunk();
                 let stride = chunk.stride() as u32;
                 let size = chunk.size() as usize;
-                let Some(slice) = datas[0].data() else { return; };
+                let Some(slice) = datas[0].data() else {
+                    // No CPU-mapped slice — almost certainly because the
+                    // compositor handed us a DMA-BUF buffer despite our
+                    // dataType param constraining to MemPtr|MemFd. Log
+                    // once so the next time something like #285's
+                    // "whole-monitor black preview" recurs, we see the
+                    // smoking gun instead of a silent drop.
+                    static WARNED: AtomicBool = AtomicBool::new(false);
+                    if !WARNED.swap(true, Ordering::Relaxed) {
+                        eprintln!(
+                            "[capture/pw] no CPU-mapped data on dequeued buffer (type={:?}) — \
+                             compositor likely delivered DMA-BUF; no frames will flow",
+                            datas[0].type_()
+                        );
+                    }
+                    return;
+                };
                 if slice.len() < size {
                     return;
                 }
@@ -410,9 +462,49 @@ mod pw {
         )?
         .0
         .into_inner();
-        let mut params = [pw::spa::pod::Pod::from_bytes(&values).ok_or_else(|| {
-            anyhow::anyhow!("malformed pod")
-        })?];
+
+        // Buffers param: constrain the producer to CPU-mappable buffer
+        // types (MemPtr / MemFd), excluding DMA-BUF. Without this,
+        // KWin/Mutter happily hand back DMA-BUF for whole-monitor
+        // capture (zero-copy GPU texture). MAP_BUFFERS only maps
+        // CPU-mappable backings — DMA-BUF would arrive with
+        // `data() == None`, every frame would silently drop, and the
+        // whole-monitor share would look black on the publisher and
+        // never produce a track-started event on the receiver.
+        // Reading DMA-BUF would require importing it into an EGL/Vulkan
+        // context; we don't have one, and don't want one in this
+        // helper.
+        let data_type_mask: i32 =
+            (1 << pw::spa::sys::SPA_DATA_MemPtr) | (1 << pw::spa::sys::SPA_DATA_MemFd);
+        let buffers_obj = pw::spa::pod::Object {
+            type_: pw::spa::utils::SpaTypes::ObjectParamBuffers.as_raw(),
+            id: pw::spa::param::ParamType::Buffers.as_raw(),
+            properties: vec![pw::spa::pod::Property {
+                key: pw::spa::sys::SPA_PARAM_BUFFERS_dataType,
+                flags: pw::spa::pod::PropertyFlags::empty(),
+                value: pw::spa::pod::Value::Choice(pw::spa::pod::ChoiceValue::Int(
+                    pw::spa::utils::Choice::<i32>(
+                        pw::spa::utils::ChoiceFlags::empty(),
+                        pw::spa::utils::ChoiceEnum::<i32>::Flags {
+                            default: data_type_mask,
+                            flags: vec![data_type_mask],
+                        },
+                    ),
+                )),
+            }],
+        };
+        let buffers_bytes: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &pw::spa::pod::Value::Object(buffers_obj),
+        )?
+        .0
+        .into_inner();
+
+        let format_pod = pw::spa::pod::Pod::from_bytes(&values)
+            .ok_or_else(|| anyhow::anyhow!("malformed format pod"))?;
+        let buffers_pod = pw::spa::pod::Pod::from_bytes(&buffers_bytes)
+            .ok_or_else(|| anyhow::anyhow!("malformed buffers pod"))?;
+        let mut params = [format_pod, buffers_pod];
 
         stream.connect(
             spa::utils::Direction::Input,
