@@ -122,39 +122,41 @@ rather than ship miscolored frames.
 
 ### Root cause
 
-`screencapturekit` 2.x can `@throw` an Objective-C
-`NSUnknownKeyException` from inside `SCContentSharingPicker`'s selection
-delegate (`valueForKey:` on a window whose owning app/bundle lacks the
-key), dispatched on **replayd's XPC queue**. Rust `catch_unwind` does
-**not** catch an ObjC `@throw` — it reaches `std::terminate` →
-`abort()`, killing the whole app. Upstream has no known fix (checked
-2026-05-19).
+`screencapturekit` 2.x ships a buggy `PickerResult.init(filter:)` Swift
+bridge that does `[filter valueForKey:@"includedDisplays"]` on
+`SCContentFilter`, a class without that key. Every selection from the
+system `SCContentSharingPicker` throws `NSUnknownKeyException` on
+replayd's XPC queue. Rust `catch_unwind` does **not** catch an ObjC
+`@throw` — it reaches `std::terminate` → `abort()`. Confirmed on macOS
+14.7. **No system picker is used.** Pollis enumerates with
+`SCShareableContent.current()` and renders its own picker — the
+industry-standard path used by Slack, Discord, Zoom and OBS — which
+never goes through the broken code.
 
-### Scope here: Phase 2 only
-
-- **Phase 0** (symbolicate the crash with a CI dSYM) and **Phase 1**
-  (`[patch.crates-io]` fork of `screencapturekit`, upstream PR) require
-  external artifacts / a crate fork and were **NOT done**. They are
-  still owed (see TODOs).
-- **Phase 2 (done)**: durable resilience — isolate SCK in a subprocess
-  exactly like Linux. An ObjC terminate then kills only the helper; the
-  parent observes the socket close / non-zero exit (the existing 2 s
-  stall heartbeat covers mid-stream death) and surfaces a structured
-  error. This retroactively de-risks **every** SCK call.
+The helper subprocess is still load-bearing as defense-in-depth: SCK
+has shown it'll throw and any future throw site stays isolated to the
+helper, never killing the host app.
 
 ### Layout
 
 `pollis-capture-macos/` mirrors `pollis-capture-linux/`:
 
 - `src/main.rs` — non-macOS stub + `mod macos`.
-- `src/macos.rs` — connects to the parent socket, drives
-  `SCContentSharingPicker` + `SCStream`, and the `SCStreamOutputTrait`
-  frame handler packs BGRA (== little-endian ARGB == BGRx) into the
-  shared protocol. This is the picker/stream/handler logic **extracted
-  from** `pollis-core/src/commands/screenshare.rs` (the in-process SCK
-  path is retained only as never-compiled reference behind the
-  `legacy_inproc_sck` feature; `screencapturekit` was removed from
-  `pollis-core`'s dependencies).
+- `src/macos.rs` — connects to the parent socket, enumerates available
+  displays + windows via `SCShareableContent`, sends the list back to
+  the parent (`MSG_SOURCES`), waits for the parent's `MSG_SELECT`,
+  builds an `SCContentFilter` from the chosen display/window, and runs
+  the `SCStream`. The `SCStreamOutputTrait` frame handler packs BGRA
+  (== little-endian ARGB == BGRx) into the shared protocol.
+- **No `SCContentSharingPicker`.** The system picker's
+  `PickerResult.init(filter:)` Swift bridge does
+  `[filter valueForKey:@"includedDisplays"]` on a key
+  `SCContentFilter` doesn't expose, throws `NSUnknownKeyException`,
+  and kills the helper on **every** selection — confirmed on macOS
+  14.7. The industry-standard answer (used by Slack, Discord, Zoom,
+  OBS): enumerate via `SCShareableContent.current` and render an
+  in-app picker. That's what Pollis does. Less Apple gloss, but
+  works.
 - Parent death watch: macOS has no `PR_SET_PDEATHSIG`; the helper polls
   `getppid()` and exits if reparented to launchd.
 
@@ -163,40 +165,60 @@ key), dispatched on **replayd's XPC queue**. Rust `catch_unwind` does
 - `src-tauri/tauri.macos.conf.json`: `externalBin`
   `binaries/pollis-capture-macos`, Developer-ID signed, **same team
   9JF7WWYMU2**.
-- `scripts/build-capture-helper.sh` is now platform-aware (Linux →
-  linux helper, macOS → macos helper) and the macOS CI job stages the
-  helper before `tauri-action` so it is signed + bundled.
+- `src-tauri/build.rs` builds the per-OS helper crate and stages it at
+  `src-tauri/binaries/<helper>-<triple>` automatically on every cargo
+  build of the `pollis` crate. Skips when the file is already present so
+  CI's pre-built Linux artifact (from ubuntu-24.04, PipeWire 1.0) is
+  reused on the app job (ubuntu-22.04). No shell script wrapper — runs
+  uniformly for `cargo check`, `tauri dev`, and `tauri build` on macOS
+  and Linux. Windows is skipped (WGC is in-process).
 
-### OPEN RISK (not silently assumed)
+### Picker UX
 
-`SCContentSharingPicker` must be driven from a process with a
-**window-server connection**. Whether the system picker presents
-correctly from a **helper process** (vs. the main app, which has the
-foreground GUI activation) is **UNVERIFIED** — it was slated to be the
-Phase 0 spike, which is out of scope. This is flagged prominently in
-`pollis-capture-macos/src/main.rs` and `src/macos.rs`. If the picker
-does NOT appear from the helper, the fallback is one of:
+On macOS the picker is a Pollis component (`ScreenSharePicker.tsx`),
+not the macOS system picker. It opens in-place inside the voice
+channel view (no modal — project rule), showing a tabbed grid of
+displays and windows. The user picks one, the frontend sends
+`Selection` to the parked helper via `start_screen_share`, the helper
+builds the `SCContentFilter` and starts the `SCStream`. Cancel returns
+to the participant grid.
 
-1. The **parent** drives the picker and hands the helper an
-   already-selected `SCContentFilter` (the helper then only owns
-   `SCStream` + the frame handler — still isolates the streaming SCK
-   surface, but the picker selection delegate would run in-process,
-   only partially de-risked).
-2. Revert to in-process SCK with the Phase 1 `[patch.crates-io]` fork.
+On Linux the system portal (`xdg-desktop-portal`) is the consent gate
+and **is** the picker; on Windows the WGC picker plays the same role.
+The frontend calls `enumerate_screen_sources` first and, if the
+returned list is empty (the backend's signal that this platform
+handles selection itself), goes straight to `start_screen_share(null)`.
 
-Do not treat the macOS split as proven end-to-end until this is
-verified on a real macOS host.
+### Wire protocol (macOS extension)
+
+`pollis-capture-proto` carries two extra message types just for the
+macOS picker handshake:
+
+- `MSG_SOURCES (0x03)` helper → parent: JSON `SourceList` of the
+  enumerated displays + windows.
+- `MSG_SELECT (0x04)` parent → helper: JSON `Selection` —
+  `{kind: "display" | "window", id: <CGDirectDisplayID | CGWindowID>}`.
+
+Linux helpers never send `MSG_SOURCES` and never read `MSG_SELECT`.
+The same opcodes are reserved in the proto crate so both helpers
+share one wire format definition.
 
 ## Parent-side pipeline (unchanged, shared by all paths)
 
 `pollis-core/src/commands/screenshare.rs`:
 
-- `start_screen_share` (`#[cfg(any(target_os = "linux",
-  target_os = "macos"))]`) — binds a Unix socket, spawns the
-  per-platform helper (`capture_helper_name()` →
-  `locate_capture_helper()`), reads the `Format` via
-  `pollis_capture_proto::read_msg`, creates the LiveKit
-  `NativeVideoSource` + track, publishes, then spawns the reader task.
+- `enumerate_screen_sources` (macOS) — binds a Unix socket, spawns the
+  helper, reads the `MSG_SOURCES` list, parks the helper in
+  `picker_session` waiting for the upcoming `Select`, returns the
+  list to the frontend.
+- `cancel_screen_share_picker` — kills a parked picker helper when the
+  user backs out of the in-app picker without selecting.
+- `start_screen_share(selection)` — reuses the parked picker helper if
+  present (macOS) or spawns a fresh helper (Linux portal path). On
+  macOS sends `MSG_SELECT` with the user's pick, then reads `Format`
+  from the same helper. Linux skips the Select (no such message). On
+  both, creates the LiveKit `NativeVideoSource` + track, publishes,
+  spawns the reader task.
 - Reader task — `read_msg` loop: FPS cap, `convert_and_cap`
   (libyuv ARGB→I420 + 1080p downscale), `source.capture_frame`,
   self-preview, 2 s stall heartbeat.
@@ -206,11 +228,6 @@ verified on a real macOS host.
 
 ## Follow-up TODOs
 
-- **#283 Phase 0**: symbolicate the SCK crash with a CI-produced dSYM.
-- **#283 Phase 1**: `[patch.crates-io]` fork of `screencapturekit`;
-  upstream PR for the `valueForKey:` `NSUnknownKeyException`.
-- **#283**: verify `SCContentSharingPicker` presents from the helper
-  process (the OPEN RISK above) before treating the split as proven.
 - **#281 Phase 2**: X11 XDamage (changed-region capture).
 - **#281 Phase 3**: X11 cursor via XFixes `GetCursorImage`.
 - **#281 Phase 4**: X11 HiDPI / fractional scaling; multi-monitor edge
@@ -222,11 +239,15 @@ verified on a real macOS host.
 - `pollis-capture-linux/src/linux.rs` — session probe + Portal/X11
   dispatch.
 - `pollis-capture-linux/src/x11.rs` — v1 xcb/SHM/RandR backend.
-- `pollis-capture-macos/src/macos.rs` — SCK picker/stream/handler.
+- `pollis-capture-macos/src/macos.rs` — SCShareableContent enumeration
+  + SCContentFilter + SCStream/handler.
+- `frontend/src/components/Voice/ScreenSharePicker.tsx` — in-app picker
+  UI (macOS path).
 - `pollis-core/src/commands/screenshare.rs` — shared parent pipeline,
   deny-vs-unsupported split.
 - `frontend/src/screenshare/screenShareSession.ts` —
   `local_unsupported` event + distinct error message.
 - `src-tauri/tauri.linux.conf.json`, `src-tauri/tauri.macos.conf.json`
   — sidecar packaging.
-- `scripts/build-capture-helper.sh` — platform-aware helper build.
+- `src-tauri/build.rs` — auto-builds + stages the per-OS helper sidecar
+  during the main app's cargo build.

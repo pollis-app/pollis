@@ -200,19 +200,41 @@ async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Err
 
 // ── Top-level state ───────────────────────────────────────────────────────
 
+/// A connected capture-helper session — the spawned child plus the two
+/// halves of its Unix-socket connection. We split the stream because the
+/// parent both **writes** (Select message on macOS) and **reads** (Format
+/// + Frames). Owning both halves lets us park the writer in state while
+/// the reader task drains frames; dropping the writer would signal EOF
+/// to the helper's reader and risk an early exit.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub struct HelperSession {
+    pub child: tokio::process::Child,
+    pub reader: tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>,
+    pub writer: tokio::net::unix::OwnedWriteHalf,
+}
+
 pub struct ScreenShareState {
     pub events: Option<Arc<dyn EventSink<ScreenShareEvent>>>,
     pub frames: Option<Arc<dyn RawSink>>,
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
-    /// Linux/macOS: handle to the capture helper subprocess. Both
-    /// platforms now use the same subprocess + shared-protocol model
-    /// (Linux for libpipewire isolation, macOS for SCK uncatchable-ObjC
-    /// isolation — issue #283 Phase 2). Dropping/killing it terminates
-    /// capture; the reader task observes the socket close.
+    /// macOS picker phase: helper is spawned and has sent its `Sources`
+    /// list; we're waiting on the user's pick from the in-app picker.
+    /// `start_screen_share` consumes this (sends `Select`, transitions
+    /// to capture); `cancel_screen_share_picker` discards it.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub picker_session: Option<HelperSession>,
+    /// Linux/macOS: handle to the capture helper subprocess.
+    /// Linux for libpipewire isolation; macOS for SCK uncatchable-ObjC
+    /// isolation (#283 Phase 2). Dropping/killing it terminates capture;
+    /// the reader task observes the socket close.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub local_helper: Option<tokio::process::Child>,
+    /// Kept open for the lifetime of the capture so the helper's read
+    /// side doesn't see EOF and exit early. Dropped on stop.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    pub local_writer: Option<tokio::net::unix::OwnedWriteHalf>,
     /// Linux/macOS: the supervising task that reads from the helper's
     /// socket and pushes frames into the LiveKit source.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -247,7 +269,11 @@ impl ScreenShareState {
             local_track: None,
             local_source: None,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
+            picker_session: None,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             local_helper: None,
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            local_writer: None,
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             local_reader_task: None,
             #[cfg(target_os = "windows")]
@@ -287,359 +313,28 @@ pub async fn subscribe_screen_share_frames(
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-pub async fn start_screen_share(_state: &Arc<AppState>) -> Result<()> {
+pub async fn start_screen_share(
+    _state: &Arc<AppState>,
+    _selection: Option<pollis_capture_proto::Selection>,
+) -> Result<()> {
     Err(crate::error::Error::Other(anyhow::anyhow!(
         "screen share is not implemented on this OS yet"
     )))
 }
 
-// ── LEGACY in-process macOS SCK path (issue #283 Phase 2: REMOVED) ────────
-//
-// The functions below (`start_screen_share`, `MacOsFrameHandler`,
-// `push_frame_macos`) were the in-process ScreenCaptureKit path. They are
-// retained verbatim ONLY as reference and are gated behind a feature that
-// is never enabled (`legacy_inproc_sck`) so they do not compile — the
-// `screencapturekit` dependency has been removed from `pollis-core`
-// because SCK now lives in the `pollis-capture-macos` helper subprocess.
-//
-// Why removed: screencapturekit can `@throw` an Objective-C
-// `NSUnknownKeyException` from inside `SCContentSharingPicker`'s
-// selection delegate, dispatched on replayd's XPC queue. Rust
-// `catch_unwind` does NOT catch an ObjC throw — it reaches
-// `std::terminate` and aborts the whole app. The durable fix is process
-// isolation, mirroring Linux. See the shared helper-subprocess path
-// below (`#[cfg(any(target_os = "linux", target_os = "macos"))]`) and
-// `.codesight/wiki/capture-split.md`.
-#[cfg(all(target_os = "macos", feature = "legacy_inproc_sck"))]
-pub async fn start_screen_share_legacy_sck(state: &Arc<AppState>) -> Result<()> {
-    use screencapturekit::content_sharing_picker::{
-        SCContentSharingPicker, SCContentSharingPickerConfiguration,
-        SCContentSharingPickerMode, SCPickerOutcome,
-    };
-    use screencapturekit::prelude::*;
-
-    let room = {
-        let voice = state.voice.lock().await;
-        voice.room.clone()
-    };
-    let room = room.ok_or_else(|| {
-        crate::error::Error::Other(anyhow::anyhow!("not in a voice channel — join voice first"))
-    })?;
-
-    // Re-share must start from a clean slate. If a previous session is
-    // still parked in state (shared → stopped → shares again), fully tear
-    // it down first; leftover SCStream / picker state otherwise makes the
-    // next capture deliver blank frames that render as a green screen.
-    {
-        let has_prev = {
-            let ss = state.screenshare.lock().await;
-            ss.local_track.is_some() || ss.macos_stream.is_some()
-        };
-        if has_prev {
-            let _ = stop_screen_share(state).await;
-        }
-    }
-
-    // 1. Show the macOS system content-sharing picker. Equivalent to Linux's
-    //    xdg-desktop-portal picker — system-modal, lets the user choose a
-    //    display, a window, or an app. The picker is non-blocking: show()
-    //    returns immediately and Swift fires the callback on the main run
-    //    loop when the user makes a selection. Bridge it to async via a
-    //    oneshot channel.
-    let mut picker_config = SCContentSharingPickerConfiguration::new();
-    picker_config.set_allowed_picker_modes(&[
-        SCContentSharingPickerMode::SingleDisplay,
-        SCContentSharingPickerMode::SingleWindow,
-        SCContentSharingPickerMode::SingleApplication,
-    ]);
-
-    let (tx, rx) = tokio::sync::oneshot::channel::<SCPickerOutcome>();
-    SCContentSharingPicker::show(&picker_config, move |outcome| {
-        let _ = tx.send(outcome);
-    });
-    let outcome = match rx.await {
-        Ok(o) => o,
-        Err(_) => {
-            return Err(fail_capture(
-                state,
-                "screen-share picker closed unexpectedly. Please try again.".into(),
-            )
-            .await);
-        }
-    };
-    let picked = match outcome {
-        SCPickerOutcome::Picked(p) => p,
-        SCPickerOutcome::Cancelled => {
-            // User cancellation is a normal flow, not a failure to
-            // surface as LocalError.
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "screen share cancelled"
-            )));
-        }
-        SCPickerOutcome::Error(msg) => {
-            eprintln!("[screenshare] SCK picker raw error: {msg}");
-            return Err(fail_capture(
-                state,
-                "macOS could not open the screen-share picker. Check Screen Recording permission in System Settings › Privacy & Security."
-                    .into(),
-            )
-            .await);
-        }
-    };
-
-    // 2. Build the stream around the picked filter. SCStream::new is a
-    //    Swift bridge call so we keep it on a blocking thread.
-    let init = tokio::task::spawn_blocking(move || -> Result<_> {
-        let filter = picked.filter();
-        let (px_w, px_h) = picked.pixel_size();
-        // Force even dims for VP8 + I420 chroma alignment.
-        let width = px_w & !1;
-        let height = px_h & !1;
-        if width == 0 || height == 0 {
-            return Err(crate::error::Error::Other(anyhow::anyhow!(
-                "picker reported zero-size selection"
-            )));
-        }
-        eprintln!("[screenshare] macOS picked {}x{}", width, height);
-
-        let config = SCStreamConfiguration::new()
-            .with_width(width)
-            .with_height(height)
-            .with_pixel_format(PixelFormat::BGRA)
-            .with_shows_cursor(true);
-
-        let stream = SCStream::new(&filter, &config);
-        Ok((width, height, stream))
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+pub async fn enumerate_screen_sources(
+    _state: &Arc<AppState>,
+) -> Result<pollis_capture_proto::SourceList> {
+    Ok(pollis_capture_proto::SourceList {
+        displays: Vec::new(),
+        windows: Vec::new(),
     })
-    .await;
-    let (display_w, display_h, stream) = match init {
-        Ok(Ok(v)) => v,
-        Ok(Err(e)) => {
-            return Err(fail_capture(
-                state,
-                format!("Could not start screen capture: {e}"),
-            )
-            .await);
-        }
-        Err(e) => {
-            return Err(fail_capture(
-                state,
-                format!("Screen capture failed to initialize ({e})."),
-            )
-            .await);
-        }
-    };
+}
 
-    // 2. Create LiveKit source + track and publish.
-    let source = NativeVideoSource::new(
-        VideoResolution {
-            width: display_w,
-            height: display_h,
-        },
-        true, /* is_screencast */
-    );
-    let track = LocalVideoTrack::create_video_track(
-        "screenshare",
-        RtcVideoSource::Native(source.clone()),
-    );
-    eprintln!("[screenshare] publishing track {}x{}", display_w, display_h);
-    if let Err(e) = room
-        .local_participant()
-        .publish_track(
-            LocalTrack::Video(track.clone()),
-            TrackPublishOptions {
-                source: TrackSource::Screenshare,
-                video_codec: VideoCodec::VP8,
-                ..Default::default()
-            },
-        )
-        .await
-    {
-        eprintln!("[screenshare] publish error: {e}");
-        return Err(fail_capture(
-            state,
-            "Could not publish the screen-share to the call. Check your connection and try again.".into(),
-        )
-        .await);
-    }
-    eprintln!("[screenshare] track published");
-
-    // 3. Hook the SCStream output to push every BGRA sample into the source.
-    //    The handler runs on ScreenCaptureKit's own dispatch queue (not a
-    //    tokio worker), so the BGRA→I420 conversion happens off the runtime.
-    //    The active flag lets stop_screen_share fence the handler from
-    //    touching the source after teardown begins.
-    // Fresh per-session flag — owned by this share, taken by its stop. A
-    // stale stop of an older session can't reach this one.
-    let active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let frames_sink = {
-        let ss = state.screenshare.lock().await;
-        ss.frames.clone()
-    };
-    let handler = MacOsFrameHandler {
-        source: source.clone(),
-        active: std::sync::Arc::clone(&active_flag),
-        frames: frames_sink,
-        last_preview: std::sync::Mutex::new(None),
-    };
-
-    // 4. start_capture is blocking + may take a moment if TCC is prompting,
-    //    so push it off the runtime and surface errors as LocalError.
-    let started = tokio::task::spawn_blocking(move || -> Result<(SCStream, Option<usize>)> {
-        let mut stream = stream;
-        let handler_id = stream.add_output_handler(handler, SCStreamOutputType::Screen);
-        stream
-            .start_capture()
-            .map_err(|e| anyhow::anyhow!("SCStream::start_capture: {e}"))?;
-        Ok((stream, handler_id))
-    })
-    .await;
-
-    let (stream, handler_id) = match started {
-        Ok(Ok(s)) => s,
-        Ok(Err(e)) => {
-            // Roll back the publish so the track doesn't dangle in the room.
-            let sid = track.sid();
-            let _ = room.local_participant().unpublish_track(&sid).await;
-            eprintln!("[screenshare] start_capture error: {e}");
-            return Err(fail_capture(
-                state,
-                "macOS denied screen capture. Grant Screen Recording permission in System Settings › Privacy & Security, then try again."
-                    .into(),
-            )
-            .await);
-        }
-        Err(e) => {
-            let sid = track.sid();
-            let _ = room.local_participant().unpublish_track(&sid).await;
-            return Err(fail_capture(
-                state,
-                format!("Screen capture failed to start ({e})."),
-            )
-            .await);
-        }
-    };
-
-    // 5. Stash everything for stop_screen_share + Drop.
-    {
-        let mut ss = state.screenshare.lock().await;
-        ss.local_source = Some(source);
-        ss.local_track = Some(track);
-        ss.macos_stream = Some(stream);
-        ss.macos_handler_id = handler_id;
-        ss.macos_active = Some(std::sync::Arc::clone(&active_flag));
-        if let Some(ev) = &ss.events {
-            let _ = ev.send(ScreenShareEvent::LocalStarted {
-                width: display_w,
-                height: display_h,
-            });
-        }
-    }
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+pub async fn cancel_screen_share_picker(_state: &Arc<AppState>) -> Result<()> {
     Ok(())
-}
-
-#[cfg(all(target_os = "macos", feature = "legacy_inproc_sck"))]
-struct MacOsFrameHandler {
-    source: NativeVideoSource,
-    active: std::sync::Arc<std::sync::atomic::AtomicBool>,
-    frames: Option<Arc<dyn RawSink>>,
-    /// Last time a self-preview frame was emitted. SCK fires the handler
-    /// on its own dispatch queue, so interior mutability via Mutex.
-    last_preview: std::sync::Mutex<Option<std::time::Instant>>,
-}
-
-#[cfg(all(target_os = "macos", feature = "legacy_inproc_sck"))]
-impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
-    fn did_output_sample_buffer(
-        &self,
-        sample: screencapturekit::prelude::CMSampleBuffer,
-        output_type: screencapturekit::prelude::SCStreamOutputType,
-    ) {
-        use screencapturekit::cv::CVPixelBufferLockFlags;
-        use screencapturekit::prelude::SCStreamOutputType;
-
-        if !matches!(output_type, SCStreamOutputType::Screen) {
-            return;
-        }
-        // Bail before touching the source if a stop is in progress. SCK's
-        // output queue keeps draining for a moment after stop_capture(),
-        // and the source's backing may already be freed by the unpublish
-        // path. Acquire ordering pairs with the Release store in stop.
-        if !self.active.load(std::sync::atomic::Ordering::Acquire) {
-            return;
-        }
-        let Some(pixel_buffer) = sample.image_buffer() else {
-            return;
-        };
-        let Ok(guard) = pixel_buffer.lock(CVPixelBufferLockFlags::READ_ONLY) else {
-            return;
-        };
-        let width = guard.width() as u32;
-        let height = guard.height() as u32;
-        let stride = guard.bytes_per_row() as u32;
-        let bgra = guard.as_slice();
-        // CMSampleBuffer presentation timestamps are in CMTime; for now we
-        // use a wall-clock μs since this matches what LiveKit downstream
-        // surfaces in to_i420 path and is sufficient for screencast.
-        let timestamp_us = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros() as i64)
-            .unwrap_or(0);
-        let preview = match &self.frames {
-            Some(sink) => {
-                let mut lp = self.last_preview.lock().unwrap();
-                if lp.map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL) {
-                    *lp = Some(std::time::Instant::now());
-                    Some(sink.as_ref())
-                } else {
-                    None
-                }
-            }
-            None => None,
-        };
-        push_frame_macos(&self.source, width, height, stride, timestamp_us, bgra, preview);
-        // Explicitly drop the lock guard before returning so the
-        // CVPixelBuffer is unlocked promptly for ScreenCaptureKit.
-        drop(guard);
-    }
-}
-
-#[cfg(all(target_os = "macos", feature = "legacy_inproc_sck"))]
-fn push_frame_macos(
-    source: &NativeVideoSource,
-    width: u32,
-    height: u32,
-    stride: u32,
-    timestamp_us: i64,
-    bgra: &[u8],
-    preview: Option<&dyn RawSink>,
-) {
-    // Same constraint as Linux: VP8 + I420 require even dimensions.
-    let w = (width & !1) as i32;
-    let h = (height & !1) as i32;
-    if w <= 0 || h <= 0 {
-        return;
-    }
-    // Convert (BGRA == little-endian ARGB) and cap to 1080p if the source
-    // is larger — keeps a 4K/ultrawide display off the SW VP8 encoder.
-    let buffer = convert_and_cap(w, h, stride, bgra);
-    let (out_w, out_h) = (buffer.width(), buffer.height());
-    let frame = VideoFrame {
-        rotation: VideoRotation::VideoRotation0,
-        timestamp_us,
-        buffer,
-    };
-    source.capture_frame(&frame);
-    if let Some(sink) = preview {
-        let bytes = pack_frame_bytes(
-            LOCAL_PREVIEW_KEY,
-            out_w,
-            out_h,
-            timestamp_us,
-            &frame.buffer,
-        );
-        let _ = sink.send(bytes);
-    }
 }
 
 // ── Shared helper-subprocess capture path (Linux + macOS) ─────────────────
@@ -651,40 +346,24 @@ fn push_frame_macos(
 // FPS cap, libyuv ARGB->I420 — is identical. This is exactly the
 // de-risking #283 Phase 2 buys: every SCK call now runs in a process
 // whose death the parent already tolerates.
+
+/// Spawn the per-platform capture helper and wait for it to connect back
+/// over a fresh Unix socket. Returns the established session split into
+/// read/write halves so the parent can both send `Select` (macOS picker
+/// reply) and read `Format`/`Frame` messages. Used by both
+/// `enumerate_screen_sources` (macOS picker phase) and
+/// `start_screen_share` (Linux/Windows direct path).
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
+async fn spawn_and_accept_helper(
+    state: &Arc<AppState>,
+) -> Result<HelperSession> {
     use tokio::net::UnixListener;
 
-    let room = {
-        let voice = state.voice.lock().await;
-        voice.room.clone()
-    };
-    let room = room.ok_or_else(|| {
-        crate::error::Error::Other(anyhow::anyhow!("not in a voice channel — join voice first"))
-    })?;
-
-    // Re-share from a clean slate: kill any lingering helper/reader from a
-    // previous session before spawning a new one.
-    {
-        let has_prev = {
-            let ss = state.screenshare.lock().await;
-            ss.local_track.is_some()
-                || ss.local_helper.is_some()
-                || ss.local_reader_task.is_some()
-        };
-        if has_prev {
-            let _ = stop_screen_share(state).await;
-        }
-    }
-
-    // 1. Pick a socket path and bind. Filesystem path (not abstract) so
-    //    we can clean it up explicitly on stop.
     let socket_path = std::env::temp_dir().join(format!(
         "pollis-capture-{}-{}.sock",
         std::process::id(),
         chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0)
     ));
-    // Defensive: remove any stale socket at this path.
     let _ = std::fs::remove_file(&socket_path);
     let listener = match UnixListener::bind(&socket_path) {
         Ok(l) => l,
@@ -698,7 +377,6 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         }
     };
 
-    // 2. Spawn the per-platform helper.
     let helper_path = match locate_capture_helper() {
         Ok(p) => p,
         Err(e) => {
@@ -735,57 +413,202 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         }
     };
 
-    // 3. Wait for the helper to connect (or to die without connecting).
-    //    The portal can take a while if the user takes their time
-    //    picking — give them 5 minutes before we give up.
     let accept_fut = listener.accept();
     let (stream, _addr) = tokio::select! {
-        res = accept_fut => {
-            match res {
-                Ok(r) => {
-                    eprintln!("[screenshare] helper connected");
-                    r
-                }
-                Err(e) => {
-                    eprintln!("[screenshare] accept: {e}");
-                    let _ = std::fs::remove_file(&socket_path);
-                    return Err(fail_capture(
-                        state,
-                        "Screen-capture helper failed to connect. Please try again.".into(),
-                    )
-                    .await);
-                }
+        res = accept_fut => match res {
+            Ok(r) => {
+                eprintln!("[screenshare] helper connected");
+                r
             }
-        }
+            Err(e) => {
+                eprintln!("[screenshare] accept: {e}");
+                let _ = std::fs::remove_file(&socket_path);
+                return Err(fail_capture(
+                    state,
+                    "Screen-capture helper failed to connect. Please try again.".into(),
+                )
+                .await);
+            }
+        },
         status = helper.wait() => {
             eprintln!("[screenshare] helper exited before connecting: {status:?}");
             let _ = std::fs::remove_file(&socket_path);
             return Err(fail_capture(
                 state,
-                "Screen capture could not start (helper exited). Check screen-capture permission / xdg-desktop-portal and try again.".into(),
+                "Screen capture could not start (helper exited). Check screen-capture permission and try again.".into(),
             )
             .await);
         }
     };
-    // Once connected we can unlink the socket — the open fd keeps the
-    // session alive and there's nothing more to bind to.
     let _ = std::fs::remove_file(&socket_path);
 
-    // Park the helper handle in state immediately so a concurrent
-    // `stop_screen_share` (e.g. user clicked stop while waiting for
-    // the picker, or the publish below errors and they cancel) can
-    // kill it via the standard cleanup path.
-    {
+    let (read_half, write_half) = stream.into_split();
+    Ok(HelperSession {
+        child: helper,
+        reader: tokio::io::BufReader::with_capacity(64 * 1024, read_half),
+        writer: write_half,
+    })
+}
+
+/// macOS: spawn the helper, let it enumerate via `SCShareableContent`,
+/// and return the list of capturable displays + windows. The helper
+/// stays parked in `state.screenshare.picker_session` waiting for the
+/// upcoming `start_screen_share(Some(selection))`. On Linux/Windows this
+/// returns `Err`; the frontend should never call it on those platforms
+/// (the portal/WGC picker handles selection).
+#[cfg(target_os = "macos")]
+pub async fn enumerate_screen_sources(
+    state: &Arc<AppState>,
+) -> Result<pollis_capture_proto::SourceList> {
+    use pollis_capture_proto::{read_msg, CaptureMsg};
+
+    // Discard any previous picker session that never got chosen.
+    cancel_screen_share_picker(state).await.ok();
+
+    let mut session = spawn_and_accept_helper(state).await?;
+    let msg = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        read_msg(&mut session.reader),
+    )
+    .await
+    .map_err(|_| {
+        crate::error::Error::Other(anyhow::anyhow!(
+            "screen-capture helper did not return a source list (timed out)"
+        ))
+    })?;
+    let list = match msg {
+        Ok(Some(CaptureMsg::Sources(list))) => list,
+        Ok(Some(CaptureMsg::Error { message })) => {
+            // Pass the helper's message through verbatim — the
+            // frontend's `friendlyScreenShareError` collapses it into
+            // a short, user-facing sentence (TCC denial, no displays,
+            // etc). Wrapping here would just lengthen the string the
+            // status bar has to render.
+            return Err(crate::error::Error::Other(anyhow::anyhow!(message)));
+        }
+        Ok(Some(other)) => {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "unexpected helper message during enumeration: {other:?}"
+            )));
+        }
+        Ok(None) => {
+            return Err(crate::error::Error::Other(anyhow::anyhow!(
+                "screen-capture helper exited before sending source list"
+            )));
+        }
+        Err(e) => return Err(crate::error::Error::Other(anyhow::anyhow!(e))),
+    };
+
+    let mut ss = state.screenshare.lock().await;
+    ss.picker_session = Some(session);
+    Ok(list)
+}
+
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub async fn enumerate_screen_sources(
+    _state: &Arc<AppState>,
+) -> Result<pollis_capture_proto::SourceList> {
+    // The system portal (Linux) or system picker (Windows) handles
+    // source selection. The frontend should not call this on these
+    // platforms — but returning an empty list is a safer no-op than
+    // an error if it ever does.
+    Ok(pollis_capture_proto::SourceList {
+        displays: Vec::new(),
+        windows: Vec::new(),
+    })
+}
+
+/// Discard a parked picker session — used when the user backs out of
+/// the in-app picker without selecting a source.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
+    let session = {
         let mut ss = state.screenshare.lock().await;
-        ss.local_helper = Some(helper);
+        ss.picker_session.take()
+    };
+    if let Some(mut session) = session {
+        let _ = session.child.kill().await;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+pub async fn cancel_screen_share_picker(_state: &Arc<AppState>) -> Result<()> {
+    Ok(())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub async fn start_screen_share(
+    state: &Arc<AppState>,
+    selection: Option<pollis_capture_proto::Selection>,
+) -> Result<()> {
+    use pollis_capture_proto::encode_select;
+    use tokio::io::AsyncWriteExt;
+
+    let room = {
+        let voice = state.voice.lock().await;
+        voice.room.clone()
+    };
+    let room = room.ok_or_else(|| {
+        crate::error::Error::Other(anyhow::anyhow!("not in a voice channel — join voice first"))
+    })?;
+
+    // Re-share from a clean slate: kill any lingering helper/reader from a
+    // previous session before spawning a new one.
+    {
+        let has_prev = {
+            let ss = state.screenshare.lock().await;
+            ss.local_track.is_some()
+                || ss.local_helper.is_some()
+                || ss.local_reader_task.is_some()
+        };
+        if has_prev {
+            let _ = stop_screen_share(state).await;
+        }
     }
 
-    // 4. Read the first protocol message; expect Format. Anything
-    //    else (or EOF) is a hard failure. Generous 5-min timeout
-    //    covers the user staring at the picker.
-    // 64KB buffered read — frame headers are ~25 bytes, payload read
-    // direct. The decode itself is the shared `pollis-capture-proto`.
-    let mut reader = tokio::io::BufReader::with_capacity(64 * 1024, stream);
+    // Acquire the helper: reuse a parked picker session (macOS, after
+    // enumerate→user-pick) or spawn a fresh one (Linux portal path).
+    let parked = {
+        let mut ss = state.screenshare.lock().await;
+        ss.picker_session.take()
+    };
+    let mut session = match parked {
+        Some(s) => s,
+        None => spawn_and_accept_helper(state).await?,
+    };
+
+    // macOS picker reply. The helper is parked between Sources and
+    // Format; Select unblocks it. Linux helpers ignore this (no such
+    // protocol message is sent without a Selection).
+    if let Some(sel) = &selection {
+        if let Err(e) = session.writer.write_all(&encode_select(sel)).await {
+            eprintln!("[screenshare] send Select: {e}");
+            return Err(fail_capture(
+                state,
+                "Could not deliver the screen-share selection to the helper. Please try again.".into(),
+            )
+            .await);
+        }
+        let _ = session.writer.flush().await;
+    }
+
+    // Park the helper handle + writer in state so a concurrent
+    // `stop_screen_share` (e.g. user clicked stop while waiting for
+    // the picker, or the publish below errors and they cancel) can
+    // kill it via the standard cleanup path. The writer stays open
+    // for the capture's lifetime so the helper's read side doesn't
+    // see EOF and exit early.
+    {
+        let mut ss = state.screenshare.lock().await;
+        ss.local_helper = Some(session.child);
+        ss.local_writer = Some(session.writer);
+    }
+
+    // Read the first protocol message; expect Format. Anything
+    // else (or EOF) is a hard failure. Generous 5-min timeout
+    // covers the user staring at the portal picker on Linux.
+    let mut reader = session.reader;
     eprintln!("[screenshare] awaiting video format from helper");
     let read_result = tokio::time::timeout(
         std::time::Duration::from_secs(300),
@@ -812,8 +635,10 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
             eprintln!("[screenshare] helper announced {}x{}", width, height);
             (width & !1, height & !1)
         }
-        Ok(Some(CaptureMsg::Frame { .. })) => {
-            eprintln!("[screenshare] helper sent frame before format");
+        Ok(Some(CaptureMsg::Frame { .. }))
+        | Ok(Some(CaptureMsg::Sources(_)))
+        | Ok(Some(CaptureMsg::Select(_))) => {
+            eprintln!("[screenshare] helper sent unexpected message before format");
             stop_screen_share(state).await.ok();
             return Err(fail_capture(
                 state,
@@ -1001,6 +826,10 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
                     // the new dimensions; LiveKit's NativeVideoSource
                     // tolerates per-frame size changes.
                 }
+                Ok(Some(CaptureMsg::Sources(_))) | Ok(Some(CaptureMsg::Select(_))) => {
+                    // Only valid during the picker handshake — should
+                    // never appear once frames are flowing. Ignore.
+                }
                 Ok(Some(CaptureMsg::Error { message })) => {
                     if let Some(ev) = &events_for_task {
                         let _ = ev.send(ScreenShareEvent::LocalError { message });
@@ -1055,7 +884,10 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
 // real per-frame dimensions drive the stream and LiveKit tolerates a
 // per-frame size change) so no initial frames are lost.
 #[cfg(target_os = "windows")]
-pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
+pub async fn start_screen_share(
+    state: &Arc<AppState>,
+    _selection: Option<pollis_capture_proto::Selection>,
+) -> Result<()> {
     use std::sync::atomic::AtomicBool;
 
     let room = {
@@ -1395,6 +1227,8 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     let mut helper;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     let reader;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let mut picker;
     #[cfg(target_os = "windows")]
     let windows_thread;
     #[cfg(target_os = "windows")]
@@ -1411,6 +1245,11 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         {
             helper = ss.local_helper.take();
             reader = ss.local_reader_task.take();
+            picker = ss.picker_session.take();
+            // Dropping the writer closes our half of the socket so the
+            // helper sees EOF and exits cleanly even if its parent-death
+            // poll is mid-sleep.
+            ss.local_writer = None;
         }
         #[cfg(target_os = "windows")]
         {
@@ -1430,7 +1269,8 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
     let had_session = track.is_some()
         || source_to_drop.is_some()
         || helper.is_some()
-        || reader.is_some();
+        || reader.is_some()
+        || picker.is_some();
     #[cfg(target_os = "windows")]
     let had_session =
         track.is_some() || source_to_drop.is_some() || windows_thread.is_some();
@@ -1454,6 +1294,11 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         }
         if let Some(h) = helper.as_mut() {
             let _ = h.kill().await;
+        }
+        // A picker-phase helper that was orphaned (e.g. capture failed
+        // before consuming the picker session) needs the same kill.
+        if let Some(p) = picker.as_mut() {
+            let _ = p.child.kill().await;
         }
     }
     #[cfg(target_os = "windows")]

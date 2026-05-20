@@ -4,8 +4,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use pollis_capture_proto::{encode_error, encode_format, encode_frame_header};
-use tokio::io::AsyncWriteExt;
+use pollis_capture_proto::{
+    encode_error, encode_format, encode_frame_header, encode_sources, read_msg, CaptureMsg,
+    DisplaySource, Selection, SourceList, WindowSource,
+};
+use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
@@ -34,74 +37,183 @@ enum Wire {
 pub fn run() -> Result<()> {
     let args = Args::parse();
 
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()?;
+    // Promote to an accessory Cocoa app at runtime. Display capture
+    // works without this (Mach services), but per-window SCStream
+    // asserts in CoreGraphics with `CGS_REQUIRE_INIT` when the
+    // process has no window-server connection. NSApplication +
+    // accessory activation policy connects us to the window server
+    // without showing a Dock icon or menu bar. No Info.plist needed.
+    install_accessory_app();
 
-    rt.block_on(async move { run_async(&args.socket).await })
+    // tokio runtime lives on a worker thread because `NSApp.run()`
+    // owns the main thread forever; when the worker decides to exit
+    // (parent socket closed / capture done) it calls process::exit
+    // and the kernel reaps both threads.
+    let socket = args.socket;
+    std::thread::Builder::new()
+        .name("pollis-capture-tokio".into())
+        .spawn(move || {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("[capture-mac] tokio runtime: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let result = rt.block_on(run_async(&socket));
+            if let Err(e) = &result {
+                eprintln!("[capture-mac] {e}");
+            }
+            std::process::exit(if result.is_ok() { 0 } else { 1 });
+        })?;
+
+    run_main_loop();
+    // run_main_loop never returns; the worker thread always
+    // process::exit's first. Unreachable but required for the type.
+    Ok(())
+}
+
+fn install_accessory_app() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+
+    let mtm = MainThreadMarker::new()
+        .expect("install_accessory_app must run on the main thread");
+    let app = NSApplication::sharedApplication(mtm);
+    app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+    #[allow(deprecated)]
+    app.finishLaunching();
+}
+
+fn run_main_loop() {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::NSApplication;
+
+    let mtm = MainThreadMarker::new().expect("run_main_loop must run on the main thread");
+    let app = NSApplication::sharedApplication(mtm);
+    // Blocking call into Cocoa's main run loop. Only returns on
+    // `[NSApp terminate:]`, which we never invoke — the tokio worker
+    // exits via `process::exit` instead.
+    app.run();
 }
 
 async fn run_async(socket_path: &str) -> Result<()> {
     eprintln!("[capture-mac] connecting to parent socket {socket_path}");
-    let mut sock = UnixStream::connect(socket_path)
+    let sock = UnixStream::connect(socket_path)
         .await
         .with_context(|| format!("connect to {socket_path}"))?;
-    eprintln!("[capture-mac] connected — showing SCK picker");
+    let (read_half, mut write_half) = sock.into_split();
+    eprintln!("[capture-mac] connected");
 
     // macOS has no PR_SET_PDEATHSIG. Poll getppid(): if the parent dies
     // it reparents to launchd (ppid becomes 1) — exit so we don't leak a
     // live SCStream. Cheap, 1 s cadence.
     spawn_parent_death_watch();
 
+    // ── Phase 1: enumerate + send the source list ───────────────────────
+    //
+    // SCShareableContent is the API Slack/Discord/Zoom/OBS use to
+    // enumerate displays + windows for their in-app pickers. We send
+    // the result to the parent verbatim; the parent renders the picker
+    // UI in the webview and sends back a Select.
+    eprintln!("[capture-mac] enumerating shareable content");
+    let (list, content_cache) = match enumerate_sources() {
+        Ok(pair) => pair,
+        Err(e) => {
+            // Permission denial / no displays / etc — surface as a
+            // structured protocol Error. Send the raw inner message
+            // (no prefix); the parent and frontend's
+            // friendly-error mapping rely on substring matching
+            // ("permission" / "declined") and a prefix would break it.
+            let msg = format!("{e}");
+            let _ = write_half.write_all(&encode_error(&msg)).await;
+            return Err(anyhow!(msg));
+        }
+    };
+    eprintln!(
+        "[capture-mac] enumerated {} displays, {} windows",
+        list.displays.len(),
+        list.windows.len()
+    );
+    write_half
+        .write_all(&encode_sources(&list))
+        .await
+        .context("send Sources")?;
+
+    // ── Phase 2: wait for the user's pick (Select) ──────────────────────
+    //
+    // Parent reads Sources, renders the picker, user clicks, parent
+    // sends Select. Generous timeout to cover human-pace decision.
+    let mut reader = BufReader::with_capacity(4096, read_half);
+    let select = tokio::time::timeout(
+        std::time::Duration::from_secs(300),
+        read_msg(&mut reader),
+    )
+    .await
+    .map_err(|_| anyhow!("timed out waiting for screen-share selection"))?;
+    let selection = match select {
+        Ok(Some(CaptureMsg::Select(sel))) => sel,
+        Ok(Some(other)) => {
+            return Err(anyhow!(
+                "unexpected message before Select: {other:?}"
+            ));
+        }
+        Ok(None) => {
+            // Parent closed the socket — user cancelled the picker. Not
+            // an error.
+            eprintln!("[capture-mac] parent closed socket before Select — exiting");
+            return Ok(());
+        }
+        Err(e) => return Err(anyhow!("read Select: {e}")),
+    };
+    eprintln!("[capture-mac] received selection: {selection:?}");
+
+    // ── Phase 3: build SCContentFilter + SCStream, stream frames ────────
     let (tx, mut rx) = mpsc::channel::<Wire>(2);
     let stop = Arc::new(AtomicBool::new(false));
 
-    // Start SCK on a dedicated blocking context: the picker callback and
-    // SCStream start are Swift FFI calls. Errors before the first frame
-    // are sent as 0xFF and end the run.
+    // Start SCK on a dedicated blocking context: filter construction and
+    // SCStream::start_capture are Swift FFI. Errors before the first
+    // frame are sent as 0xFF and end the run.
     let stop_for_cap = Arc::clone(&stop);
     let tx_for_cap = tx.clone();
-    let cap_handle = tokio::task::spawn_blocking(move || {
-        if let Err(e) = start_capture(tx_for_cap.clone(), stop_for_cap) {
+    let _cap_handle = tokio::task::spawn_blocking(move || {
+        if let Err(e) = start_capture(content_cache, selection, tx_for_cap.clone(), stop_for_cap) {
             eprintln!("[capture-mac] capture error: {e}");
-            // Best-effort error relay; the parent maps 0xFF to a
-            // structured capture failure.
-            let _ = tx_for_cap.blocking_send(Wire::Bytes(encode_error(&format!(
-                "screencapturekit: {e}"
-            ))));
+            let _ =
+                tx_for_cap.blocking_send(Wire::Bytes(encode_error(&format!("capture: {e}"))));
         }
     });
 
-    // Drain channel -> socket. On any write error (EPIPE, parent gone)
+    // Drain channel → socket. On any write error (EPIPE, parent gone)
     // stop and exit; the SCK side observes `stop` on its next frame.
-    let result: Result<()> = async {
-        while let Some(item) = rx.recv().await {
-            match item {
-                Wire::Bytes(b) => {
-                    if let Err(e) = sock.write_all(&b).await {
-                        eprintln!("[capture-mac] socket write error: {e} — exiting");
-                        break;
-                    }
+    let mut sock = write_half;
+    while let Some(item) = rx.recv().await {
+        match item {
+            Wire::Bytes(b) => {
+                if let Err(e) = sock.write_all(&b).await {
+                    eprintln!("[capture-mac] socket write error: {e} — exiting");
+                    break;
                 }
-                Wire::Frame { header, bgrx } => {
-                    if let Err(e) = sock.write_all(&header).await {
-                        eprintln!("[capture-mac] socket write error: {e} — exiting");
-                        break;
-                    }
-                    if let Err(e) = sock.write_all(&bgrx).await {
-                        eprintln!("[capture-mac] socket write error: {e} — exiting");
-                        break;
-                    }
+            }
+            Wire::Frame { header, bgrx } => {
+                if let Err(e) = sock.write_all(&header).await {
+                    eprintln!("[capture-mac] socket write error: {e} — exiting");
+                    break;
+                }
+                if let Err(e) = sock.write_all(&bgrx).await {
+                    eprintln!("[capture-mac] socket write error: {e} — exiting");
+                    break;
                 }
             }
         }
-        Ok(())
     }
-    .await;
 
     stop.store(true, Ordering::Relaxed);
-    cap_handle.abort();
-    result
+    Ok(())
 }
 
 /// Poll getppid(); exit if reparented to launchd (parent died).
@@ -120,77 +232,138 @@ fn spawn_parent_death_watch() {
         .ok();
 }
 
-/// Show the system content-sharing picker, build the SCStream around the
-/// picked filter, and stream frames to `tx` as shared-protocol messages.
-/// Blocking (Swift FFI) — called from `spawn_blocking`.
-///
-/// This is the SCK picker/stream/handler logic extracted verbatim (logic
-/// preserved) from `pollis-core/src/commands/screenshare.rs`'s macOS
-/// `start_screen_share` + `MacOsFrameHandler`. The only change: instead
-/// of pushing into a LiveKit `NativeVideoSource`, the handler now packs
-/// BGRx into the shared protocol and sends it over the socket. The
-/// parent reconstructs the LiveKit publish from the Format message,
-/// exactly as it already does for the Linux helper.
-fn start_capture(tx: mpsc::Sender<Wire>, stop: Arc<AtomicBool>) -> Result<()> {
-    use screencapturekit::content_sharing_picker::{
-        SCContentSharingPicker, SCContentSharingPickerConfiguration,
-        SCContentSharingPickerMode, SCPickerOutcome,
+/// Cached enumeration result kept alive across the Select wait so the
+/// `SCDisplay` / `SCWindow` handles needed to build the filter are still
+/// valid (the crate types hold retained Apple pointers).
+struct ContentCache {
+    displays: Vec<screencapturekit::shareable_content::SCDisplay>,
+    windows: Vec<screencapturekit::shareable_content::SCWindow>,
+}
+
+/// Run `SCShareableContent::get()` and project the result into our
+/// transport-layer `SourceList`. Returns the raw SCK types alongside so
+/// `start_capture` can build the filter without a second enumeration.
+fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
+    use screencapturekit::shareable_content::SCShareableContent;
+
+    // Mirrors what Slack/Discord do: skip off-screen + desktop layer.
+    let content = SCShareableContent::create()
+        .with_on_screen_windows_only(true)
+        .with_exclude_desktop_windows(true)
+        .get()
+        .map_err(|e| anyhow!("SCShareableContent: {e}"))?;
+
+    let raw_displays = content.displays();
+    let displays: Vec<DisplaySource> = raw_displays
+        .iter()
+        .enumerate()
+        .map(|(i, d)| DisplaySource {
+            id: d.display_id(),
+            width: d.width(),
+            height: d.height(),
+            // SCK doesn't expose a per-display human name; "Display N"
+            // is what every other macOS app shows.
+            name: format!("Display {}", i + 1),
+        })
+        .collect();
+
+    let raw_windows = content.windows();
+    let windows: Vec<WindowSource> = raw_windows
+        .iter()
+        .filter(|w| w.is_on_screen())
+        .filter_map(|w| {
+            let app = w.owning_application();
+            let app_name = app
+                .as_ref()
+                .map(|a| a.application_name())
+                .unwrap_or_default();
+            let bundle_id = app
+                .as_ref()
+                .map(|a| a.bundle_identifier())
+                .unwrap_or_default();
+            let title = w.title().unwrap_or_default();
+            // Skip windows that have neither a title nor an app name —
+            // they're system/agent windows the user can't recognise.
+            if title.is_empty() && app_name.is_empty() {
+                return None;
+            }
+            // Drop our own helper / parent windows from the list — no
+            // value to share Pollis to itself, and it can produce odd
+            // feedback loops.
+            if bundle_id == "xyz.pollis.desktop" || app_name == "Pollis" {
+                return None;
+            }
+            let frame = w.frame();
+            Some(WindowSource {
+                id: w.window_id(),
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                width: frame.width as u32,
+                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+                height: frame.height as u32,
+                title,
+                app_name,
+                bundle_id,
+            })
+        })
+        .collect();
+
+    let list = SourceList { displays, windows };
+    let cache = ContentCache {
+        displays: raw_displays,
+        windows: raw_windows,
     };
-    use screencapturekit::prelude::*;
+    Ok((list, cache))
+}
 
-    // 1. Show the macOS system content-sharing picker. show() returns
-    //    immediately; Swift fires the callback on the main run loop when
-    //    the user makes a selection.
-    //
-    //    UNVERIFIED (issue #283 Phase 0 spike, out of scope): whether
-    //    this picker presents from a *helper* process with no app
-    //    activation policy / window-server foreground state. If it does
-    //    not, the parent must drive the picker and hand us a selected
-    //    filter instead. Flagged in the crate-level docs + wiki.
-    let mut picker_config = SCContentSharingPickerConfiguration::new();
-    picker_config.set_allowed_picker_modes(&[
-        SCContentSharingPickerMode::SingleDisplay,
-        SCContentSharingPickerMode::SingleWindow,
-        SCContentSharingPickerMode::SingleApplication,
-    ]);
+/// Build an `SCContentFilter` from the cached enumeration and the user's
+/// pick, then run an `SCStream` until `stop` is set. Replaces the
+/// `SCContentSharingPicker::show()` path entirely — no system picker, no
+/// `valueForKey:` introspection, no `NSUnknownKeyException`.
+fn start_capture(
+    cache: ContentCache,
+    selection: Selection,
+    tx: mpsc::Sender<Wire>,
+    stop: Arc<AtomicBool>,
+) -> Result<()> {
+    use screencapturekit::stream::configuration::pixel_format::PixelFormat;
+    use screencapturekit::stream::configuration::SCStreamConfiguration;
+    use screencapturekit::stream::content_filter::SCContentFilter;
+    use screencapturekit::stream::output_type::SCStreamOutputType;
+    use screencapturekit::stream::sc_stream::SCStream;
 
-    let (ptx, prx) = std::sync::mpsc::channel::<SCPickerOutcome>();
-    SCContentSharingPicker::show(&picker_config, move |outcome| {
-        let _ = ptx.send(outcome);
-    });
-    // Block this dedicated thread until the user picks. 5-minute guard
-    // mirrors the parent's old 300 s wait for a source.
-    let outcome = prx
-        .recv_timeout(std::time::Duration::from_secs(300))
-        .map_err(|_| anyhow!("picker timed out waiting for a source"))?;
-
-    let picked = match outcome {
-        SCPickerOutcome::Picked(p) => p,
-        SCPickerOutcome::Cancelled => {
-            // User cancellation is a normal flow. Surface it as a
-            // recognisable, non-"denied" error string the parent's
-            // friendly-error mapping already handles ("cancel").
-            return Err(anyhow!("screen share cancelled (picker dismissed)"));
+    let (filter, width, height) = match selection {
+        Selection::Display { id } => {
+            let display = cache
+                .displays
+                .iter()
+                .find(|d| d.display_id() == id)
+                .ok_or_else(|| anyhow!("display {id} no longer available"))?;
+            let filter = SCContentFilter::create().with_display(display).build();
+            (filter, display.width(), display.height())
         }
-        SCPickerOutcome::Error(msg) => {
-            eprintln!("[capture-mac] SCK picker raw error: {msg}");
-            return Err(anyhow!(
-                "could not open the screen-share picker. Check Screen \
-                 Recording permission in System Settings."
-            ));
+        Selection::Window { id } => {
+            let window = cache
+                .windows
+                .iter()
+                .find(|w| w.window_id() == id)
+                .ok_or_else(|| anyhow!("window {id} closed before capture started"))?;
+            let filter = SCContentFilter::create().with_window(window).build();
+            let frame = window.frame();
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let w = frame.width as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let h = frame.height as u32;
+            (filter, w, h)
         }
     };
 
-    let filter = picked.filter();
-    let (px_w, px_h) = picked.pixel_size();
-    // Force even dims for VP8 + I420 chroma alignment (the parent also
-    // re-floors, but announcing even keeps Format honest).
-    let width = px_w & !1;
-    let height = px_h & !1;
+    // Round dimensions down to even for VP8 + I420 chroma alignment.
+    let width = width & !1;
+    let height = height & !1;
     if width == 0 || height == 0 {
-        return Err(anyhow!("picker reported zero-size selection"));
+        return Err(anyhow!("selected source reported zero size"));
     }
-    eprintln!("[capture-mac] picked {width}x{height}");
+    eprintln!("[capture-mac] capturing {width}x{height}");
 
     let config = SCStreamConfiguration::new()
         .with_width(width)
@@ -201,12 +374,13 @@ fn start_capture(tx: mpsc::Sender<Wire>, stop: Arc<AtomicBool>) -> Result<()> {
 
     // Announce the format. The parent creates the LiveKit track from
     // this exactly as it does for the Linux Format message.
-    tx.blocking_send(Wire::Bytes(encode_format(width as u32, height as u32)))
+    tx.blocking_send(Wire::Bytes(encode_format(width, height)))
         .map_err(|_| anyhow!("parent gone before format"))?;
 
     let handler = MacOsFrameHandler {
         tx: tx.clone(),
         stop: Arc::clone(&stop),
+        seen_first: std::sync::atomic::AtomicBool::new(false),
     };
     let _handler_id = stream.add_output_handler(handler, SCStreamOutputType::Screen);
     stream
@@ -214,22 +388,23 @@ fn start_capture(tx: mpsc::Sender<Wire>, stop: Arc<AtomicBool>) -> Result<()> {
         .map_err(|e| anyhow!("SCStream::start_capture: {e}"))?;
     eprintln!("[capture-mac] SCStream capture started");
 
-    // Park here until the parent closes the socket (the drain task sets
-    // `stop`) or capture dies. SCK delivers frames on its own dispatch
-    // queue via the handler; nothing to do on this thread but wait.
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
     eprintln!("[capture-mac] stopping SCStream");
     let _ = stream.stop_capture();
-    SCContentSharingPicker::set_active(false);
     Ok(())
 }
 
 struct MacOsFrameHandler {
     tx: mpsc::Sender<Wire>,
     stop: Arc<AtomicBool>,
+    /// Set the first time a frame is delivered. Used purely for a
+    /// one-shot diagnostic log — proves SCK is actually firing the
+    /// output callback (vs the parent showing a black/empty preview
+    /// because no frames ever arrived).
+    seen_first: std::sync::atomic::AtomicBool,
 }
 
 impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
@@ -257,6 +432,12 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
         let height = guard.height() as u32;
         let stride = guard.bytes_per_row() as u32;
         let bgra = guard.as_slice();
+        if !self.seen_first.swap(true, Ordering::Relaxed) {
+            eprintln!(
+                "[capture-mac] first frame delivered: {width}x{height} stride={stride} bytes={}",
+                bgra.len()
+            );
+        }
         let timestamp_us = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_micros() as i64)
@@ -272,7 +453,6 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
             header,
             bgrx: bgra.to_vec(),
         });
-        // Unlock the CVPixelBuffer promptly for ScreenCaptureKit.
         drop(guard);
     }
 }

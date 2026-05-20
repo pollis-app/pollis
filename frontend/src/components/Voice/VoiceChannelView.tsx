@@ -4,6 +4,7 @@ import { NavigableGrid } from "../ui/NavigableGrid";
 import type { VoiceParticipant } from "../../types";
 import { VoiceMemberTile } from "./VoiceMemberTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
+import { ScreenSharePicker } from "./ScreenSharePicker";
 
 export const VoiceChannelView: React.FC = () => {
   const {
@@ -12,10 +13,19 @@ export const VoiceChannelView: React.FC = () => {
     screenShareRemotes,
     screenShareLocalActive,
     screenShareLocalDimensions,
+    screenShareMode,
     currentUser,
     setViewingScreenShareTrackKey,
   } = useAppStore();
   const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
+
+  // When the user is picking a screen-share source we take over the
+  // entire channel content area with the in-app picker — no modal, no
+  // overlay. This is the project's blanket "no modals" rule
+  // (CLAUDE.md). Returns to the participant grid on cancel / start.
+  if (screenShareMode === "picking") {
+    return <ScreenSharePicker />;
+  }
 
   return (
     <div

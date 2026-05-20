@@ -25,18 +25,41 @@
 //!     Pixel format is BGRx (4 bpp), top-down. The parent does the
 //!     I420 conversion + LiveKit publish.
 //!
+//!   type 0x03  Sources (helper → parent)
+//!     payload := utf-8 JSON `SourceList`
+//!     Sent once after the helper has enumerated the OS's shareable
+//!     content (macOS only today — built around `SCShareableContent`).
+//!     Linux uses the system portal and never sends this. The parent
+//!     renders the list in its own picker UI, then replies with Select.
+//!
+//!   type 0x04  Select (parent → helper)
+//!     payload := utf-8 JSON `Selection`
+//!     The parent's response to Sources. Carries the chosen
+//!     display/window/app identifier; the helper builds an
+//!     `SCContentFilter` from it and proceeds to Format → Frame.
+//!
 //!   type 0xFF  Error
 //!     payload := utf-8 message
 //!
-//! No reverse channel. The parent stops capture by closing the socket;
-//! the helper observes EPIPE on next write or EOF on read and exits.
+//! Lifecycle on macOS: helper connects → Sources → (parent reads,
+//! shows picker) → Select → Format → Frame ... until the parent
+//! closes the socket.
+//! Lifecycle on Linux: helper connects → Format → Frame ... (no
+//! enumeration round-trip; portal owns the picker).
+//! The parent stops capture by closing the socket; the helper observes
+//! EPIPE on next write or EOF on read and exits.
 
+use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Format announcement.
 pub const MSG_FORMAT: u8 = 0x01;
 /// A single BGRx frame.
 pub const MSG_FRAME: u8 = 0x02;
+/// Enumerated shareable sources, helper → parent. JSON payload.
+pub const MSG_SOURCES: u8 = 0x03;
+/// User's pick from the in-app picker, parent → helper. JSON payload.
+pub const MSG_SELECT: u8 = 0x04;
 /// A fatal error from the helper, carrying a human-readable utf-8 string.
 pub const MSG_ERROR: u8 = 0xFF;
 
@@ -45,8 +68,7 @@ pub const MSG_ERROR: u8 = 0xFF;
 /// Kept here so encoder and decoder share one definition.
 pub const MAX_PAYLOAD_LEN: usize = 32 * 1024 * 1024;
 
-/// A decoded protocol message. Identical shape to the old per-crate
-/// `Msg` / `HelperMsg` enums it replaces.
+/// A decoded protocol message.
 #[derive(Debug)]
 pub enum CaptureMsg {
     Format {
@@ -60,9 +82,56 @@ pub enum CaptureMsg {
         timestamp_us: i64,
         bgrx: Vec<u8>,
     },
+    Sources(SourceList),
+    Select(Selection),
     Error {
         message: String,
     },
+}
+
+/// A capturable display (whole monitor).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisplaySource {
+    /// macOS `CGDirectDisplayID`. Stable across this helper's lifetime;
+    /// the parent passes it back verbatim in `Selection::Display`.
+    pub id: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Friendly label like "Built-in Retina Display" — for picker UI.
+    pub name: String,
+}
+
+/// A capturable on-screen window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WindowSource {
+    /// macOS `CGWindowID`. Stable for the window's lifetime; the parent
+    /// passes it back verbatim in `Selection::Window`.
+    pub id: u32,
+    pub width: u32,
+    pub height: u32,
+    /// Window title. Often empty — the OS doesn't enforce one.
+    pub title: String,
+    /// The owning application's display name (e.g. "Safari"). Used as
+    /// the primary label when `title` is empty.
+    pub app_name: String,
+    /// Bundle identifier where known (e.g. "com.apple.Safari"). May be
+    /// empty for daemons / agent processes without a bundle.
+    pub bundle_id: String,
+}
+
+/// The enumeration result sent helper → parent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceList {
+    pub displays: Vec<DisplaySource>,
+    pub windows: Vec<WindowSource>,
+}
+
+/// What the user picked in the in-app picker. Parent → helper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Selection {
+    Display { id: u32 },
+    Window { id: u32 },
 }
 
 // ── Encoding (helper side) ────────────────────────────────────────────────
@@ -98,6 +167,26 @@ pub fn encode_frame_header(
     header
 }
 
+/// Serialize a Sources message (helper → parent).
+pub fn encode_sources(list: &SourceList) -> Vec<u8> {
+    let json = serde_json::to_vec(list).expect("SourceList serializes");
+    let mut buf = Vec::with_capacity(1 + 4 + json.len());
+    buf.push(MSG_SOURCES);
+    buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&json);
+    buf
+}
+
+/// Serialize a Select message (parent → helper).
+pub fn encode_select(sel: &Selection) -> Vec<u8> {
+    let json = serde_json::to_vec(sel).expect("Selection serializes");
+    let mut buf = Vec::with_capacity(1 + 4 + json.len());
+    buf.push(MSG_SELECT);
+    buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&json);
+    buf
+}
+
 /// Serialize an Error message to its exact wire bytes.
 pub fn encode_error(message: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + 4 + message.len());
@@ -129,6 +218,8 @@ where
             w.write_all(&header).await?;
             w.write_all(bgrx).await
         }
+        CaptureMsg::Sources(list) => w.write_all(&encode_sources(list)).await,
+        CaptureMsg::Select(sel) => w.write_all(&encode_select(sel)).await,
         CaptureMsg::Error { message } => w.write_all(&encode_error(message)).await,
     }
 }
@@ -195,6 +286,28 @@ where
                 timestamp_us,
                 bgrx,
             }))
+        }
+        MSG_SOURCES => {
+            let mut bytes = vec![0u8; payload_len];
+            r.read_exact(&mut bytes).await?;
+            let list: SourceList = serde_json::from_slice(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("sources json: {e}"),
+                )
+            })?;
+            Ok(Some(CaptureMsg::Sources(list)))
+        }
+        MSG_SELECT => {
+            let mut bytes = vec![0u8; payload_len];
+            r.read_exact(&mut bytes).await?;
+            let sel: Selection = serde_json::from_slice(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("select json: {e}"),
+                )
+            })?;
+            Ok(Some(CaptureMsg::Select(sel)))
         }
         MSG_ERROR => {
             let mut bytes = vec![0u8; payload_len];
@@ -285,12 +398,56 @@ mod tests {
         assert!(read_msg(&mut b).await.unwrap().is_none());
     }
 
+    #[tokio::test]
+    async fn sources_roundtrip() {
+        let m = roundtrip(CaptureMsg::Sources(SourceList {
+            displays: vec![DisplaySource {
+                id: 1,
+                width: 3024,
+                height: 1964,
+                name: "Built-in Retina Display".into(),
+            }],
+            windows: vec![WindowSource {
+                id: 42,
+                width: 1280,
+                height: 720,
+                title: "claude-code — ghostty".into(),
+                app_name: "Ghostty".into(),
+                bundle_id: "com.mitchellh.ghostty".into(),
+            }],
+        }))
+        .await;
+        match m {
+            CaptureMsg::Sources(list) => {
+                assert_eq!(list.displays.len(), 1);
+                assert_eq!(list.displays[0].id, 1);
+                assert_eq!(list.windows.len(), 1);
+                assert_eq!(list.windows[0].title, "claude-code — ghostty");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn select_roundtrip() {
+        match roundtrip(CaptureMsg::Select(Selection::Display { id: 7 })).await {
+            CaptureMsg::Select(Selection::Display { id }) => assert_eq!(id, 7),
+            _ => panic!("wrong variant"),
+        }
+        match roundtrip(CaptureMsg::Select(Selection::Window { id: 13 })).await {
+            CaptureMsg::Select(Selection::Window { id }) => assert_eq!(id, 13),
+            _ => panic!("wrong variant"),
+        }
+    }
+
     // The exact opcode bytes are load-bearing across three crates;
     // pin them so an accidental renumber is caught.
     #[test]
     fn opcodes_are_stable() {
         assert_eq!(MSG_FORMAT, 0x01);
         assert_eq!(MSG_FRAME, 0x02);
+        assert_eq!(MSG_SOURCES, 0x03);
+        assert_eq!(MSG_SELECT, 0x04);
         assert_eq!(MSG_ERROR, 0xFF);
     }
 }

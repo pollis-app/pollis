@@ -67,6 +67,23 @@ interface AppStore extends AppState {
   /** True if the local user is broadcasting their screen. */
   screenShareLocalActive: boolean;
   setScreenShareLocalActive: (v: boolean) => void;
+  /** Lifecycle stage of the local screen-share UI:
+   *   - 'idle': no share in progress, no picker open
+   *   - 'picking': in-app source picker visible (macOS only; the
+   *     helper is parked on the backend awaiting the user's selection)
+   *   - 'starting': selection sent, waiting for the helper to
+   *     announce Format and the LiveKit publish to land
+   *   - 'active': frames flowing (synced with `screenShareLocalActive`)
+   *  Used by VoiceChannelView to swap the participant grid for the
+   *  inline picker without a modal. */
+  screenShareMode: "idle" | "picking" | "starting" | "active";
+  setScreenShareMode: (m: "idle" | "picking" | "starting" | "active") => void;
+  /** Sources returned by `enumerate_screen_sources` — populated when
+   *  mode flips to 'picking'. Cleared on exit. */
+  screenShareSources: import("../screenshare/screenShareSession").SourceList | null;
+  setScreenShareSources: (
+    s: import("../screenshare/screenShareSession").SourceList | null,
+  ) => void;
   /** Dimensions of the local outgoing share so the in-tile preview
    *  can seed its canvas before the first mirrored frame arrives. Set
    *  by `local_started`, cleared by `local_stopped`. */
@@ -147,6 +164,8 @@ export const useAppStore = create<AppStore>((set) => ({
   voiceIsMuted: false,
   screenShareLocalActive: false,
   screenShareLocalDimensions: null,
+  screenShareMode: "idle",
+  screenShareSources: null,
   screenShareRemotes: {},
   viewingScreenShareTrackKey: null,
 
@@ -232,6 +251,8 @@ export const useAppStore = create<AppStore>((set) => ({
 
   setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
   setScreenShareLocalDimensions: (dims) => set({ screenShareLocalDimensions: dims }),
+  setScreenShareMode: (m) => set({ screenShareMode: m }),
+  setScreenShareSources: (s) => set({ screenShareSources: s }),
   upsertScreenShareRemote: (identity, info) => set((state) => ({
     screenShareRemotes: { ...state.screenShareRemotes, [identity]: info },
   })),
@@ -291,6 +312,8 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceIsMuted: false,
     screenShareLocalActive: false,
     screenShareLocalDimensions: null,
+    screenShareMode: "idle",
+    screenShareSources: null,
     screenShareRemotes: {},
     viewingScreenShareTrackKey: null,
     pendingEnrollmentApproval: null,

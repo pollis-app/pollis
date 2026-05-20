@@ -19,6 +19,12 @@ path = "src/lib.rs"
 # Async socket I/O helpers for the decoder/encoder. tokio is already in
 # the workspace tree for every consumer of this crate.
 tokio = { version = "1", features = ["io-util", "net"] }
+# JSON payloads for the Sources/Select messages — these carry nested
+# structured data (lists of displays + windows with names) where
+# length-prefixed binary would be more code than it's worth. They're not
+# in the hot path; one Sources message per share, one Select reply.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 # Only the round-trip tests need the runtime + the in-memory duplex.

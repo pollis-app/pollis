@@ -1,36 +1,48 @@
 //! pollis-capture-macos
 //!
-//! Subprocess helper. Owns ScreenCaptureKit (SCContentSharingPicker +
-//! SCStream + the SCStreamOutputTrait frame handler) and talks to the
-//! main Pollis binary over a Unix socket whose path the parent passes on
-//! the command line. Mirrors `pollis-capture-linux`.
+//! Subprocess helper. Owns the ScreenCaptureKit surface — both
+//! `SCShareableContent` enumeration (for our in-app picker) and the
+//! `SCStream` + `SCStreamOutputTrait` capture pipeline — and talks to
+//! the main Pollis binary over a Unix socket whose path the parent
+//! passes on the command line. Mirrors `pollis-capture-linux`.
 //!
-//! Wire protocol: see `pollis-capture-proto` — the SAME 0x01 Format /
-//! 0x02 Frame / 0xFF Error framing the Linux helper uses. The parent's
-//! existing frame reader, FPS handling, libyuv ARGB->I420 conversion,
-//! LiveKit injection and 2 s stall heartbeat are all unchanged; only
-//! "where frames originate" forks here, exactly as on Linux.
+//! Wire protocol: `pollis-capture-proto`. macOS uses the full set:
+//! `0x03 Sources` (helper → parent enumeration) and `0x04 Select`
+//! (parent → helper user-pick) handshake, then `0x01 Format` /
+//! `0x02 Frame` / `0xFF Error` like every other helper.
 //!
-//! Why this is a subprocess at all (issue #283 Phase 2): an ObjC
-//! `@throw` raised on Apple's replayd XPC callback queue (observed:
-//! `NSUnknownKeyException` from `SCContentSharingPicker`'s selection
-//! delegate doing `valueForKey:` on a window whose owning app lacks the
-//! key) is *uncatchable* from Rust and hard-kills the hosting process.
-//! Putting SCK in this helper means that terminate kills only the
-//! helper; the parent observes the socket close / non-zero exit and
-//! surfaces a structured capture error. This retroactively de-risks
-//! every SCK call.
+//! ## Why a subprocess
 //!
-//! OPEN RISK (flagged, not silently assumed): `SCContentSharingPicker`
-//! must be driven from a process with a window-server connection.
-//! Whether the system picker presents correctly from THIS helper
-//! process (rather than the main app) is UNVERIFIED — it was slated to
-//! be a Phase 0 spike that is out of scope here. If the picker does not
-//! appear from the helper, this binary must instead receive an
-//! already-selected `SCContentFilter` from the parent (the parent would
-//! drive the picker and hand the helper a serialized selection), OR the
-//! split reverts to in-process with the [patch.crates-io] fork from
-//! #283 Phase 1. See `.codesight/wiki/capture-split.md`.
+//! `screencapturekit` 2.x can throw an *Objective-C*
+//! `NSUnknownKeyException` from inside SCK's picker delegate, dispatched
+//! on replayd's XPC queue (issue #283). Rust `catch_unwind` does NOT
+//! catch an ObjC `@throw`; it reaches `std::terminate` and aborts the
+//! whole process. Isolating SCK in this helper means that terminate
+//! kills only the helper; the parent observes the socket close /
+//! non-zero exit and surfaces a structured error.
+//!
+//! ## Why an in-app picker (no `SCContentSharingPicker`)
+//!
+//! The crate's `PickerResult.init(filter:)` Swift bridge calls
+//! `[filter valueForKey:@"includedDisplays"]` on `SCContentFilter`, a
+//! class that doesn't expose that key — so EVERY system-picker
+//! selection (display, window, app) throws `NSUnknownKeyException` and
+//! aborts the helper. This was confirmed on macOS 14.7. The
+//! industry-standard answer used by Slack, Discord, Zoom and OBS —
+//! enumerate via `SCShareableContent.current()` and present an in-app
+//! picker — also dodges this code path entirely. That's what Pollis
+//! does. The picker lives in `frontend/src/components/Voice/
+//! ScreenSharePicker.tsx`; this helper just enumerates + builds the
+//! resulting `SCContentFilter`.
+//!
+//! ## Accessory app
+//!
+//! The helper promotes itself to `NSApplicationActivationPolicy::Accessory`
+//! at runtime and parks the main thread in `NSApp.run()`. Display
+//! capture works without this (Mach services), but per-window
+//! `SCStream` start asserts in CoreGraphics (`CGS_REQUIRE_INIT`)
+//! unless the process has a window-server connection. No Dock icon,
+//! no menu bar, no Info.plist — purely runtime.
 
 #[cfg(not(target_os = "macos"))]
 fn main() {

@@ -39,3 +39,12 @@ screencapturekit = { version = "2", features = ["macos_14_0"] }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "sync", "io-util", "time"] }
 clap = { version = "4", features = ["derive"] }
 libc = "0.2"
+# Accessory-app bootstrap so the helper subprocess has a window-server
+# connection. Without it, SCK display capture still works (uses Mach
+# services that don't need CGS), but per-window capture fails with
+# `CGS_REQUIRE_INIT` because CoreGraphics has never been initialised.
+# Setting NSApplicationActivationPolicy=Accessory + running NSApp gives
+# us CGS for free — same pattern Slack/Discord/Zoom use for their
+# capture helpers. No Info.plist required; all runtime.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder"] }
