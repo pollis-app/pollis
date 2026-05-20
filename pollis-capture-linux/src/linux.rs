@@ -184,9 +184,14 @@ async fn run_portal(sock: &mut UnixStream) -> Result<()> {
             // silently instead of showing a red "permission denied"
             // toast — cancelling is a normal flow, not a failure.
             eprintln!("[capture] portal cancelled by user");
-            send_error(&mut sock, "cancel: user dismissed picker")
-                .await
-                .ok();
+            write_msg(
+                sock,
+                &CaptureMsg::Error {
+                    message: "cancel: user dismissed picker".into(),
+                },
+            )
+            .await
+            .ok();
             return Ok(());
         }
         Err(PortalError::Other(e)) => {
