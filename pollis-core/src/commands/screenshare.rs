@@ -60,16 +60,6 @@ pub enum ScreenShareEvent {
         height: u32,
     },
     RemoteStopped { track_key: String },
-    /// Local capture stopped producing frames while still sharing.
-    /// `reason` ∈ "minimized" | "source_lost" | "stalled".
-    LocalStalled { reason: String },
-    /// Local capture resumed producing frames after a stall.
-    LocalResumed,
-    /// A subscribed remote screenshare stopped producing frames.
-    /// `reason` is currently always "stalled".
-    RemoteStalled { track_key: String, reason: String },
-    /// A previously-stalled remote screenshare resumed.
-    RemoteResumed { track_key: String },
 }
 
 // ── Resolution / FPS caps ─────────────────────────────────────────────────
@@ -151,106 +141,14 @@ fn convert_and_cap(
     }
 }
 
-// ── Local stall watchdog ──────────────────────────────────────────────────
-//
-// One platform-agnostic watchdog over the local publish path. Every push
-// path bumps `last_frame` (cheap atomic store). A single task wakes ~1s and
-// compares; >2s gap while sharing → emit `LocalStalled`, next frame →
-// `LocalResumed`. No spin (interval sleep), torn down with the share via
-// `JoinHandle::abort()` so it can never leak past stop.
-
-const STALL_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(2);
-const WATCHDOG_TICK: std::time::Duration = std::time::Duration::from_secs(1);
-
-/// `Instant` doesn't fit in an atomic, so the shared heartbeat is stored
-/// as "micros since the share-local epoch". `0` is impossible (we store at
-/// least 1) and is never read before the first frame because the watchdog
-/// only stalls after `STALL_THRESHOLD`.
-pub struct LocalCaptureHeartbeat {
-    epoch: std::time::Instant,
-    last_us: std::sync::atomic::AtomicU64,
-    /// Reason hint a platform can set when it has a precise signal
-    /// (macOS SCK idle, Windows IsIconic). 0 = generic "stalled",
-    /// 1 = "minimized", 2 = "source_lost".
-    reason: std::sync::atomic::AtomicU8,
-}
-
-impl LocalCaptureHeartbeat {
-    fn new() -> Arc<Self> {
-        let s = Arc::new(Self {
-            epoch: std::time::Instant::now(),
-            last_us: std::sync::atomic::AtomicU64::new(0),
-            reason: std::sync::atomic::AtomicU8::new(0),
-        });
-        s.beat();
-        s
-    }
-
-    /// Record a frame was pushed. Called on the hot path — a single
-    /// relaxed atomic store, no allocation.
-    fn beat(&self) {
-        let us = self.epoch.elapsed().as_micros() as u64;
-        self.last_us
-            .store(us.max(1), std::sync::atomic::Ordering::Relaxed);
-        // A delivered frame clears any precise stall hint.
-        self.reason
-            .store(0, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    /// Set a precise stall reason hint (1=minimized, 2=source_lost).
-    #[allow(dead_code)]
-    fn hint(&self, code: u8) {
-        self.reason
-            .store(code, std::sync::atomic::Ordering::Relaxed);
-    }
-
-    fn since_last(&self) -> std::time::Duration {
-        let last = self
-            .last_us
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let now = self.epoch.elapsed().as_micros() as u64;
-        std::time::Duration::from_micros(now.saturating_sub(last))
-    }
-
-    fn reason_str(&self) -> &'static str {
-        match self.reason.load(std::sync::atomic::Ordering::Relaxed) {
-            1 => "minimized",
-            2 => "source_lost",
-            _ => "stalled",
-        }
-    }
-}
-
-/// Spawn the local stall watchdog. Returns its task handle so
-/// `stop_screen_share` can abort it (no leaked task). Emits
-/// `LocalStalled`/`LocalResumed` exactly on transitions.
-fn spawn_local_watchdog(
-    hb: Arc<LocalCaptureHeartbeat>,
-    events: Option<Arc<dyn EventSink<ScreenShareEvent>>>,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut stalled = false;
-        let mut ticker = tokio::time::interval(WATCHDOG_TICK);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        loop {
-            ticker.tick().await;
-            let gap = hb.since_last();
-            if !stalled && gap >= STALL_THRESHOLD {
-                stalled = true;
-                if let Some(ev) = &events {
-                    let _ = ev.send(ScreenShareEvent::LocalStalled {
-                        reason: hb.reason_str().to_string(),
-                    });
-                }
-            } else if stalled && gap < STALL_THRESHOLD {
-                stalled = false;
-                if let Some(ev) = &events {
-                    let _ = ev.send(ScreenShareEvent::LocalResumed);
-                }
-            }
-        }
-    })
-}
+// There is no "stalled" / "paused" concept anywhere in screenshare:
+// when capture is idle (static screen on Wayland, etc.) we simply
+// stop pushing frames. The viewer's canvas keeps showing the last
+// painted frame and the streamer's UI keeps showing "LIVE" — both
+// indistinguishable from a stream of unchanging frames. A previous
+// implementation had a 2-second watchdog emitting LocalStalled /
+// RemoteStalled events with a "Stream paused" overlay, which
+// misrepresented normal idle behaviour as a failure. Removed.
 
 /// Track key the local outgoing capture is mirrored under so the sharer can
 /// watch a low-rate preview of their own stream. Reserved sentinel — never
@@ -291,11 +189,6 @@ pub struct ScreenShareState {
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
-    /// Shared heartbeat the active capture path bumps every frame; the
-    /// watchdog reads it. `Some` only while a share is live.
-    pub local_heartbeat: Option<Arc<LocalCaptureHeartbeat>>,
-    /// Platform-agnostic local stall watchdog task. Aborted on stop.
-    pub local_watchdog: Option<tokio::task::JoinHandle<()>>,
     /// Linux: handle to the capture helper subprocess. Dropping/killing it
     /// terminates capture.
     #[cfg(target_os = "linux")]
@@ -359,8 +252,6 @@ impl ScreenShareState {
             frames: None,
             local_track: None,
             local_source: None,
-            local_heartbeat: None,
-            local_watchdog: None,
             #[cfg(target_os = "linux")]
             local_helper: None,
             #[cfg(target_os = "linux")]
@@ -596,16 +487,14 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
     // Fresh per-session flag — owned by this share, taken by its stop. A
     // stale stop of an older session can't reach this one.
     let active_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
-    let (frames_sink, events_sink) = {
+    let frames_sink = {
         let ss = state.screenshare.lock().await;
-        (ss.frames.clone(), ss.events.clone())
+        ss.frames.clone()
     };
-    let heartbeat = LocalCaptureHeartbeat::new();
     let handler = MacOsFrameHandler {
         source: source.clone(),
         active: std::sync::Arc::clone(&active_flag),
         frames: frames_sink,
-        heartbeat: Arc::clone(&heartbeat),
         last_preview: std::sync::Mutex::new(None),
     };
 
@@ -654,11 +543,6 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         ss.macos_stream = Some(stream);
         ss.macos_handler_id = handler_id;
         ss.macos_active = Some(std::sync::Arc::clone(&active_flag));
-        ss.local_watchdog = Some(spawn_local_watchdog(
-            Arc::clone(&heartbeat),
-            events_sink,
-        ));
-        ss.local_heartbeat = Some(heartbeat);
         if let Some(ev) = &ss.events {
             let _ = ev.send(ScreenShareEvent::LocalStarted {
                 width: display_w,
@@ -674,7 +558,6 @@ struct MacOsFrameHandler {
     source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Option<Arc<dyn RawSink>>,
-    heartbeat: Arc<LocalCaptureHeartbeat>,
     /// Last time a self-preview frame was emitted. SCK fires the handler
     /// on its own dispatch queue, so interior mutability via Mutex.
     last_preview: std::sync::Mutex<Option<std::time::Instant>>,
@@ -729,8 +612,6 @@ impl screencapturekit::prelude::SCStreamOutputTrait for MacOsFrameHandler {
             }
             None => None,
         };
-        // Heartbeat for the stall watchdog: a real frame was delivered.
-        self.heartbeat.beat();
         push_frame_macos(&self.source, width, height, stride, timestamp_us, bgra, preview);
         // Explicitly drop the lock guard before returning so the
         // CVPixelBuffer is unlocked promptly for ScreenCaptureKit.
@@ -949,6 +830,20 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
             // human a single clear message, keep the raw cause on stderr.
             eprintln!("[screenshare] helper error: {message}");
             stop_screen_share(state).await.ok();
+            // User-cancelled the source picker. The helper prefixes
+            // these with `cancel:`. Treat them as a no-op: clean up
+            // (already done above), exit silently with Ok so the
+            // frontend's `start().catch()` never fires and no toast
+            // appears. No LocalStarted event was emitted, so the store
+            // stays at screenShareLocalActive=false — the UI correctly
+            // shows we're not sharing without ever flashing a false
+            // "Check screen-capture permission" error.
+            let lower = message.to_lowercase();
+            if lower.starts_with("cancel:") || lower.starts_with("cancelled")
+                || lower.contains("dismiss")
+            {
+                return Ok(());
+            }
             return Err(fail_capture(
                 state,
                 "Screen capture could not start. Check screen-capture permission and try again.".into(),
@@ -1025,14 +920,6 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         let ss = state.screenshare.lock().await;
         (ss.events.clone(), ss.frames.clone())
     };
-    // Heartbeat + watchdog for the local stall path. The Linux helper
-    // can stall when the captured window is minimized / closed (pipewire
-    // simply stops delivering); the watchdog reports the generic
-    // "stalled" reason since the helper doesn't relay a precise iconic
-    // signal over the wire.
-    let heartbeat = LocalCaptureHeartbeat::new();
-    let hb_for_task = Arc::clone(&heartbeat);
-    let watchdog = spawn_local_watchdog(Arc::clone(&heartbeat), events_for_task.clone());
     let reader_task = tokio::spawn(async move {
         let mut last_preview: Option<std::time::Instant> = None;
         // FPS cap lives here — the lowest-overhead point on the Linux
@@ -1042,6 +929,13 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         // Windows WGC honour their own MinimumUpdateInterval so they
         // don't need this extra clamp.
         let mut last_pushed: Option<std::time::Instant> = None;
+        // No keep-alive / no synthetic frame replay: when the captured
+        // surface is idle, pipewire goes silent and we just stop
+        // pushing. The viewer's canvas retains the last painted frame
+        // (the GL context isn't torn down), so the share looks
+        // identical to one where the content happens to be unchanging.
+        // We trade nothing on the user-visible side and save the
+        // bandwidth + CPU of re-encoding identical pixels.
         loop {
             match reader.read_message().await {
                 Ok(Some(HelperMsg::Frame {
@@ -1060,7 +954,6 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
                         }
                     }
                     last_pushed = Some(std::time::Instant::now());
-                    hb_for_task.beat();
                     let preview = match &frames_for_task {
                         Some(sink)
                             if last_preview
@@ -1112,8 +1005,6 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         ss.local_source = Some(source);
         ss.local_track = Some(track);
         ss.local_reader_task = Some(reader_task);
-        ss.local_watchdog = Some(watchdog);
-        ss.local_heartbeat = Some(heartbeat);
         if let Some(ev) = &ss.events {
             let _ = ev.send(ScreenShareEvent::LocalStarted { width, height });
         }
@@ -1206,7 +1097,6 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         let ss = state.screenshare.lock().await;
         (ss.frames.clone(), ss.events.clone())
     };
-    let heartbeat = LocalCaptureHeartbeat::new();
 
     // 3. Picker + blocking capture on a dedicated owned thread.
     //
@@ -1223,7 +1113,6 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         source: source.clone(),
         active: std::sync::Arc::clone(&active_flag),
         frames: frames_sink,
-        heartbeat: Arc::clone(&heartbeat),
     };
     // Outcome the dedicated WGC thread reports before it blocks in
     // start(): the negotiated size, a clean user cancel (not surfaced as
@@ -1357,15 +1246,11 @@ pub async fn start_screen_share(state: &Arc<AppState>) -> Result<()> {
         ss.local_track = Some(track);
         ss.windows_thread = Some(capture_thread);
         ss.windows_active = Some(std::sync::Arc::clone(&active_flag));
-        ss.local_watchdog = Some(spawn_local_watchdog(
-            Arc::clone(&heartbeat),
-            events_sink,
-        ));
-        ss.local_heartbeat = Some(heartbeat);
         if let Some(ev) = &ss.events {
             let _ = ev.send(ScreenShareEvent::LocalStarted { width, height });
         }
     }
+    let _ = events_sink;
     Ok(())
 }
 
@@ -1374,7 +1259,6 @@ struct WindowsCaptureFlags {
     source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Option<Arc<dyn RawSink>>,
-    heartbeat: Arc<LocalCaptureHeartbeat>,
 }
 
 #[cfg(target_os = "windows")]
@@ -1382,7 +1266,6 @@ struct WindowsCaptureHandler {
     source: NativeVideoSource,
     active: std::sync::Arc<std::sync::atomic::AtomicBool>,
     frames: Option<Arc<dyn RawSink>>,
-    heartbeat: Arc<LocalCaptureHeartbeat>,
     // on_frame_arrived takes &mut self (WGC serializes the callback), so a
     // plain field suffices — no Mutex unlike the macOS &self handler.
     last_preview: Option<std::time::Instant>,
@@ -1400,7 +1283,6 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
             source: ctx.flags.source,
             active: ctx.flags.active,
             frames: ctx.flags.frames,
-            heartbeat: ctx.flags.heartbeat,
             last_preview: None,
         })
     }
@@ -1437,14 +1319,6 @@ impl windows_capture::capture::GraphicsCaptureApiHandler for WindowsCaptureHandl
             }
             _ => None,
         };
-        // Heartbeat for the stall watchdog. WGC simply stops delivering
-        // frames when a captured window is minimized or destroyed; we
-        // don't hold the source HWND in this callback to cheaply
-        // distinguish iconic vs. closed, so the watchdog reports the
-        // generic "stalled" reason for Windows (acceptable per the
-        // contract — precise reason is only required where a cheap
-        // signal exists).
-        self.heartbeat.beat();
         push_frame_windows(&self.source, width, height, stride, timestamp_us, bgra, preview);
         Ok(())
     }
@@ -1518,12 +1392,6 @@ pub async fn stop_screen_share(state: &Arc<AppState>) -> Result<()> {
         // would otherwise let the next reference drop free its backing
         // while in-flight handler calls are still firing.
         source_to_drop = ss.local_source.take();
-        // Tear down the stall watchdog with the share — abort the task
-        // (no leak) and drop the heartbeat.
-        if let Some(w) = ss.local_watchdog.take() {
-            w.abort();
-        }
-        ss.local_heartbeat = None;
         #[cfg(target_os = "linux")]
         {
             helper = ss.local_helper.take();
@@ -1880,46 +1748,13 @@ pub async fn on_remote_video_subscribed(
     let task = tokio::spawn(async move {
         use futures_util::StreamExt;
         let mut announced: Option<(u32, u32)> = None;
-        // Remote stall detection: a ~2s gap with no decoded frame while
-        // the track is still subscribed → RemoteStalled; the next frame
-        // → RemoteResumed. timeout() is a cheap timer wrapper around the
-        // existing await — no extra task, no spin — and the whole loop is
-        // torn down with this drain task (aborted on unsubscribe /
-        // room-disconnect), so nothing leaks.
-        let mut stalled = false;
-        loop {
-            let next =
-                tokio::time::timeout(STALL_THRESHOLD, stream.next()).await;
-            let frame = match next {
-                Ok(Some(f)) => {
-                    if stalled {
-                        stalled = false;
-                        if let Some(ev) = &events_for_task {
-                            let _ = ev.send(ScreenShareEvent::RemoteResumed {
-                                track_key: track_key_for_task.clone(),
-                            });
-                        }
-                    }
-                    f
-                }
-                // Stream ended (track unpublished / closed) — exit the
-                // drain. RemoteStopped is emitted by the unsubscribe path.
-                Ok(None) => break,
-                // No frame within the threshold but the stream is still
-                // open — the remote sender stalled.
-                Err(_) => {
-                    if !stalled {
-                        stalled = true;
-                        if let Some(ev) = &events_for_task {
-                            let _ = ev.send(ScreenShareEvent::RemoteStalled {
-                                track_key: track_key_for_task.clone(),
-                                reason: "stalled".to_string(),
-                            });
-                        }
-                    }
-                    continue;
-                }
-            };
+        // No stall watchdog — when the remote streamer's capture is
+        // idle, frames simply stop arriving and our local canvas keeps
+        // showing the last paint. The track stays subscribed; the next
+        // real frame is rendered when it arrives. Stream ending (track
+        // unpublished) exits this loop and RemoteStopped is emitted by
+        // the unsubscribe path.
+        while let Some(frame) = stream.next().await {
             let i420 = frame.buffer.to_i420();
             let w = i420.width();
             let h = i420.height();
