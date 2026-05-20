@@ -2,7 +2,13 @@ import React from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
 import { NavigableList } from "../components/ui/NavigableList";
-import { shortcutLabel } from "../utils/platform";
+import { isMac } from "../utils/platform";
+
+// macOS condenses ⌘ tight against the next glyph; a thin space (U+2009)
+// gives the kbd badge a little air without affecting Ctrl+ layout.
+function shortcutDisplay(key: string): string {
+  return isMac ? `⌘ ${key}` : `Ctrl+${key}`;
+}
 
 interface Shortcut {
   id: string;
@@ -58,7 +64,7 @@ export const KeyboardShortcutsPage: React.FC = () => {
                 lineHeight: 1.2,
               }}
             >
-              {s.key ? shortcutLabel(s.key) : s.label}
+              {s.key ? shortcutDisplay(s.key) : s.label}
             </kbd>
           )}
         />
