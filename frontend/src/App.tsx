@@ -99,6 +99,11 @@ function MainApp() {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
         background_color: getPreference<string | undefined>(json, "background_color", undefined),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
+        shortcut_overrides: getPreference<{ [commandId: string]: string } | undefined>(
+          json,
+          "shortcut_overrides",
+          undefined,
+        ),
       };
       applyPreferences(prefs);
       // Font size is device-local; the legacy remote field (if any) seeds it once.
