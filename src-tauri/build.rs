@@ -64,7 +64,29 @@ fn stage_capture_helper() {
     println!("cargo:rerun-if-changed={}", sidecar.display());
     println!("cargo:rerun-if-changed={}", dev_copy.display());
 
-    if sidecar.exists() && dev_copy.exists() {
+    // CI's helper job uploads only the sidecar artifact (see
+    // .github/workflows/desktop-release.yml — the build-capture-helper
+    // job runs on ubuntu-24.04 to get PipeWire 1.0 headers, the app job
+    // on 22.04 can't compile libspa). If we required both copies before
+    // skipping the rebuild, the app job would always fall through into
+    // an unbuildable nested cargo invocation. Treat the sidecar as the
+    // authoritative pre-staged artifact: when it's present, mirror it to
+    // the dev path (if missing) and skip the inner build entirely.
+    if sidecar.exists() {
+        if !dev_copy.exists() {
+            if let Some(parent) = dev_copy.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::copy(&sidecar, &dev_copy).unwrap_or_else(|e| {
+                panic!("copy {} -> {}: {e}", sidecar.display(), dev_copy.display())
+            });
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&dev_copy, std::fs::Permissions::from_mode(0o755))
+                    .expect("chmod dev copy");
+            }
+        }
         return;
     }
     std::fs::create_dir_all(&sidecar_dir).expect("create src-tauri/binaries");
