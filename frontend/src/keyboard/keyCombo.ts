@@ -142,5 +142,8 @@ export function formatCombo(combo: string): string {
     (p.key.length === 1 ? p.key.toUpperCase() : p.key.replace(/^\w/, (c) => c.toUpperCase()));
   parts.push(keyLabel);
 
-  return isMac ? parts.join("") : parts.join("+");
+  // macOS condenses modifier glyphs against the key; a thin space (U+2009)
+  // gives the kbd badge a little breathing room without bloating to a full
+  // space. Other platforms use the conventional "+" separator.
+  return isMac ? parts.join(" ") : parts.join("+");
 }
