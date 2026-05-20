@@ -6,13 +6,50 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 
 import { useAppStore } from "../stores/appStore";
 
-/** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`. */
+/** Capturable display reported by `enumerate_screen_sources`.
+ *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration). */
+export interface DisplaySource {
+  id: number;
+  width: number;
+  height: number;
+  name: string;
+}
+
+/** Capturable on-screen window reported by `enumerate_screen_sources`.
+ *  Mirrors `pollis_capture_proto::WindowSource`. */
+export interface WindowSource {
+  id: number;
+  width: number;
+  height: number;
+  title: string;
+  app_name: string;
+  bundle_id: string;
+}
+
+/** What the helper offers when it enumerates. Empty on Linux/Windows —
+ *  those platforms hand off selection to the system picker. */
+export interface SourceList {
+  displays: DisplaySource[];
+  windows: WindowSource[];
+}
+
+/** Mirrors `pollis_capture_proto::Selection` — the user's pick from our
+ *  in-app picker, sent back to the helper to construct an
+ *  `SCContentFilter`. */
+export type Selection =
+  | { kind: "display"; id: number }
+  | { kind: "window"; id: number };
+
+/** Mirrors `ScreenShareEvent` in `pollis-core/src/commands/screenshare.rs`.
+ *  There is intentionally no "paused" / "stalled" concept on either end:
+ *  when capture is idle (static content) the streamer simply stops
+ *  pushing frames and the viewer's canvas keeps showing the last paint —
+ *  identical to a stream of unchanging frames, no UI signal needed. */
 export type ScreenShareEvent =
   | { type: "local_started"; width: number; height: number }
   | { type: "local_stopped" }
   | { type: "local_error"; message: string }
-  | { type: "local_stalled"; reason: "minimized" | "source_lost" | "stalled" }
-  | { type: "local_resumed" }
+  | { type: "local_unsupported"; message: string }
   | {
       type: "remote_started";
       track_key: string;
@@ -20,9 +57,7 @@ export type ScreenShareEvent =
       width: number;
       height: number;
     }
-  | { type: "remote_stopped"; track_key: string }
-  | { type: "remote_stalled"; track_key: string; reason: "stalled" }
-  | { type: "remote_resumed"; track_key: string };
+  | { type: "remote_stopped"; track_key: string };
 
 /**
  * Collapse a raw backend screen-share error string into a single clear
@@ -41,13 +76,30 @@ export function friendlyScreenShareError(raw: string): string {
   ) {
     return "Screen share cancelled — no window or screen was picked.";
   }
+  // Check "unsupported desktop" BEFORE the permission branch: this is
+  // not something the user can grant (the DE has no ScreenCast backend
+  // at all), so a "allow screen recording in settings" message would be
+  // actively misleading. Distinct from a denial.
+  if (
+    r.includes("unsupported") ||
+    r.includes("no screen-sharing backend") ||
+    r.includes("does not provide a screen-sharing backend") ||
+    r.includes("no screencast")
+  ) {
+    return "Screen sharing isn't available on this desktop environment. It has no screen-sharing backend (xdg-desktop-portal ScreenCast). Use GNOME, KDE, or an X11 session.";
+  }
   if (
     r.includes("permission") ||
     r.includes("denied") ||
+    r.includes("declined") ||
+    r.includes("tcc") ||
     r.includes("not allowed") ||
     r.includes("not authorized")
   ) {
-    return "Screen share permission denied. Allow screen recording for Pollis in your OS settings.";
+    // Kept short so it fits the status bar on a single line. The
+    // dismiss "X" + the surrounding bar chrome eat ~80 px on a narrow
+    // window; ~50 chars is a safe ceiling.
+    return "Allow Pollis in macOS Privacy → Screen Recording.";
   }
   if (
     r.includes("helper binary") ||
@@ -179,8 +231,27 @@ class ScreenShareSession {
     return Math.round(((hist.length - 1) / span) * 1000);
   }
 
-  async start(): Promise<void> {
-    await invoke("start_screen_share");
+  /** Enumerate capturable displays + windows. On macOS this spawns the
+   *  helper, parks it waiting for our selection, and returns the list to
+   *  render in our in-app picker. On Linux/Windows the system portal /
+   *  WGC picker handles selection — the backend returns an empty list as
+   *  a signal to skip the in-app picker and go straight to `start()`. */
+  async enumerate(): Promise<SourceList> {
+    return await invoke<SourceList>("enumerate_screen_sources");
+  }
+
+  /** Discard a parked picker session — user clicked back/cancel before
+   *  picking a source. */
+  async cancelPicker(): Promise<void> {
+    await invoke("cancel_screen_share_picker");
+  }
+
+  /** Start the share. On macOS this must carry the user's `Selection`
+   *  from the in-app picker; the backend sends it to the parked helper.
+   *  On Linux/Windows it must be undefined; the system picker handles
+   *  selection. */
+  async start(selection?: Selection): Promise<void> {
+    await invoke("start_screen_share", { selection: selection ?? null });
   }
 
   async stop(): Promise<void> {
@@ -192,23 +263,33 @@ class ScreenShareSession {
     switch (ev.type) {
       case "local_started":
         store.setScreenShareLocalActive(true);
-        // A fresh start clears any prior failure and stall state.
+        store.setScreenShareLocalDimensions({ width: ev.width, height: ev.height });
+        store.setScreenShareMode("active");
+        store.setScreenShareSources(null);
         store.setScreenShareError(null);
-        store.setLocalShareStallReason(null);
         break;
       case "local_stopped":
         store.setScreenShareLocalActive(false);
+        store.setScreenShareLocalDimensions(null);
+        store.setScreenShareMode("idle");
+        store.setScreenShareSources(null);
         store.setScreenShareError(null);
-        store.setLocalShareStallReason(null);
         break;
       case "local_error":
         store.setScreenShareError(friendlyScreenShareError(ev.message));
+        store.setScreenShareMode("idle");
+        store.setScreenShareSources(null);
         break;
-      case "local_stalled":
-        store.setLocalShareStallReason(ev.reason);
-        break;
-      case "local_resumed":
-        store.setLocalShareStallReason(null);
+      case "local_unsupported":
+        // Distinct from a permission denial: the desktop environment
+        // has no screen-sharing backend at all (e.g. Linux
+        // Cinnamon/MATE/XFCE on Wayland — no xdg-desktop-portal
+        // ScreenCast). Telling the user to "grant permission" would be
+        // wrong; there is nothing to grant. Pass the backend's precise
+        // message straight through.
+        store.setScreenShareError(ev.message);
+        store.setScreenShareMode("idle");
+        store.setScreenShareSources(null);
         break;
       case "remote_started":
         store.upsertScreenShareRemote(ev.identity, {
@@ -216,16 +297,9 @@ class ScreenShareSession {
           width: ev.width,
           height: ev.height,
         });
-        store.setRemoteTrackStalled(ev.track_key, false);
         break;
       case "remote_stopped":
         store.removeScreenShareRemote(ev.track_key);
-        break;
-      case "remote_stalled":
-        store.setRemoteTrackStalled(ev.track_key, true);
-        break;
-      case "remote_resumed":
-        store.setRemoteTrackStalled(ev.track_key, false);
         break;
     }
   }

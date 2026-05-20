@@ -5,7 +5,10 @@ import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
-import { screenShareSession } from "../../screenshare/screenShareSession";
+import {
+  friendlyScreenShareError,
+  screenShareSession,
+} from "../../screenshare/screenShareSession";
 
 interface VoiceBarProps {
   channelId: string;
@@ -13,7 +16,14 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const { voiceParticipants, voiceIsMuted, voiceActiveSpeakerIds, currentUser, screenShareLocalActive } = useAppStore();
+  const {
+    voiceParticipants,
+    voiceIsMuted,
+    voiceActiveSpeakerIds,
+    currentUser,
+    screenShareLocalActive,
+    screenShareMode,
+  } = useAppStore();
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
@@ -75,20 +85,72 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
       </PillButton>
 
-      {/* Screen share toggle. Clicking opens the system source picker via
-          the xdg-desktop-portal; no in-app picker needed. */}
+      {/* Screen share toggle. On macOS we enumerate via SCShareableContent
+          and route to our in-app picker — the system picker
+          (SCContentSharingPicker) has an upstream crate bug that crashes
+          on selection (#283), so we use the same enumerate-and-pick
+          flow Slack/Discord/Zoom do. On Linux/Windows the helper falls
+          back to the system portal / WGC picker — the backend signals
+          this by returning an empty source list from enumerate(). */}
       <PillButton
         data-testid="voice-bar-screenshare-button"
-        accent={screenShareLocalActive ? "#ff6b6b" : "var(--c-accent)"}
+        accent={
+          screenShareLocalActive || screenShareMode !== "idle"
+            ? "#ff6b6b"
+            : "var(--c-accent)"
+        }
         onClick={() => {
           if (screenShareLocalActive) {
-            screenShareSession.stop().catch((e) => console.error("[screenshare] stop", e));
-          } else {
-            screenShareSession.start().catch((e) => console.error("[screenshare] start", e));
+            screenShareSession
+              .stop()
+              .catch((e) => console.error("[screenshare] stop", e));
+            return;
           }
+          if (screenShareMode === "picking") {
+            // Button doubles as a cancel affordance while the picker is open.
+            screenShareSession
+              .cancelPicker()
+              .catch((e) => console.warn("[screenshare] cancel:", e))
+              .finally(() => {
+                useAppStore.getState().setScreenShareMode("idle");
+                useAppStore.getState().setScreenShareSources(null);
+              });
+            return;
+          }
+          // Engage enumerate→pick→start. The backend returns an empty
+          // list on Linux/Windows; in that case we skip our picker and
+          // go straight to start() (system portal/WGC handles selection).
+          (async () => {
+            try {
+              const list = await screenShareSession.enumerate();
+              if (list.displays.length + list.windows.length === 0) {
+                await screenShareSession.start();
+                return;
+              }
+              useAppStore.getState().setScreenShareSources(list);
+              useAppStore.getState().setScreenShareMode("picking");
+            } catch (e) {
+              console.error("[screenshare] enumerate:", e);
+              useAppStore
+                .getState()
+                .setScreenShareError(friendlyScreenShareError(String(e)));
+            }
+          })();
         }}
-        title={screenShareLocalActive ? "Stop screen share" : "Go live (share screen)"}
-        aria-label={screenShareLocalActive ? "Stop screen share" : "Share screen"}
+        title={
+          screenShareLocalActive
+            ? "Stop screen share"
+            : screenShareMode === "picking"
+              ? "Cancel"
+              : "Go live (share screen)"
+        }
+        aria-label={
+          screenShareLocalActive
+            ? "Stop screen share"
+            : screenShareMode === "picking"
+              ? "Cancel screen share picker"
+              : "Share screen"
+        }
         square
       >
         {screenShareLocalActive ? <MonitorOff size={12} /> : <Monitor size={12} />}

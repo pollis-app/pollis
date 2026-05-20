@@ -150,6 +150,13 @@ pub async fn terminal_open(
         .map_err(map_pty)?;
 
     let mut cmd = CommandBuilder::new(default_shell());
+    // Spawn as a login shell so `.zprofile` / `.bash_profile` runs and the
+    // user's full PATH (Homebrew `eval "$(brew shellenv)"`, /usr/local/bin,
+    // nvm, fnm, asdf, etc.) is available — not just whatever launchd
+    // inherits for GUI apps on macOS. Terminal.app, iTerm2, and Warp all
+    // do this for the same reason. zsh and bash both honor `-l`.
+    #[cfg(not(windows))]
+    cmd.arg("-l");
     cmd.env("TERM", "xterm-256color");
     let home = if cfg!(windows) {
         std::env::var("USERPROFILE")

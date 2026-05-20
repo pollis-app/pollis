@@ -4,10 +4,8 @@
 // latency than upload-RGBA-per-frame.
 
 import React, { useEffect, useRef } from "react";
-import { Pause } from "lucide-react";
 
 import { screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
-import { useAppStore } from "../../stores/appStore";
 
 interface Props {
   trackKey: string;
@@ -15,6 +13,37 @@ interface Props {
   /** Hint used for canvas backing-store size before the first frame arrives. */
   initialWidth?: number;
   initialHeight?: number;
+  /** Low-cost rendering for in-grid previews: cap repaints at ~15fps and
+   *  2× downsample Y/U/V before texture upload (4× less GPU bandwidth
+   *  per frame). The fullscreen viewer omits this for source-quality
+   *  rendering. */
+  preview?: boolean;
+}
+
+const PREVIEW_MIN_PAINT_INTERVAL_MS = 1000 / 15;
+
+/// 2× nearest-neighbour downsample of a single 8-bit plane. We sample
+/// every other pixel from every other row into a tightly-packed
+/// destination buffer. Allocated once and reused across frames (the
+/// caller owns the scratch) so the hot path stays allocation-free.
+function downsample2x(
+  src: Uint8Array,
+  srcW: number,
+  srcH: number,
+  scratch: Uint8Array | null,
+): { buf: Uint8Array; w: number; h: number } {
+  const dw = srcW >> 1;
+  const dh = srcH >> 1;
+  const need = dw * dh;
+  const dst = scratch && scratch.length >= need ? scratch : new Uint8Array(need);
+  for (let y = 0; y < dh; y++) {
+    const srcOff = y * 2 * srcW;
+    const dstOff = y * dw;
+    for (let x = 0; x < dw; x++) {
+      dst[dstOff + x] = src[srcOff + (x << 1)];
+    }
+  }
+  return { buf: dst, w: dw, h: dh };
 }
 
 const VERT_SRC = `
@@ -155,6 +184,7 @@ export const RemoteVideoTile: React.FC<Props> = ({
   className,
   initialWidth,
   initialHeight,
+  preview = false,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glRef = useRef<GLBundle | null>(null);
@@ -163,11 +193,15 @@ export const RemoteVideoTile: React.FC<Props> = ({
   // drop intermediate frames cleanly.
   const pendingRef = useRef<DecodedFrame | null>(null);
   const rafRef = useRef<number | null>(null);
-  // Stall badge overlays the retained last frame — the tile is never
-  // unmounted so the WebGL context (and the last painted frame) survives.
-  const isStalled = useAppStore(
-    (s) => s.stalledRemoteTrackKeys[trackKey] === true,
-  );
+  // Preview-mode 15fps gate. We compare against the last paint and
+  // skip scheduling the rAF when a frame arrives too soon — the
+  // upcoming frame will check again.
+  const lastPaintAtRef = useRef<number>(0);
+  // Preview-mode downsample scratches. Sized on first frame, reused
+  // across frames; reallocated only if the source resolution changes.
+  const yScratchRef = useRef<Uint8Array | null>(null);
+  const uScratchRef = useRef<Uint8Array | null>(null);
+  const vScratchRef = useRef<Uint8Array | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -185,6 +219,7 @@ export const RemoteVideoTile: React.FC<Props> = ({
 
     const render = () => {
       rafRef.current = null;
+      lastPaintAtRef.current = performance.now();
       const frame = pendingRef.current;
       pendingRef.current = null;
       if (!frame || !glRef.current) {
@@ -192,11 +227,6 @@ export const RemoteVideoTile: React.FC<Props> = ({
       }
       const bundle = glRef.current;
       const { gl } = bundle;
-      // Resize backing store on dimension change. CSS sizing is independent.
-      if (canvas.width !== frame.width || canvas.height !== frame.height) {
-        canvas.width = frame.width;
-        canvas.height = frame.height;
-      }
       const cW = (frame.width + 1) >> 1;
       const cH = (frame.height + 1) >> 1;
       // Strides may exceed width when the source row is padded; we'd need
@@ -206,12 +236,44 @@ export const RemoteVideoTile: React.FC<Props> = ({
       if (frame.yStride !== frame.width || frame.uStride !== cW || frame.vStride !== cW) {
         return;
       }
+      // Preview mode: 2× downsample Y/U/V before upload. Cuts texture
+      // bandwidth 4× and keeps a wall of small preview tiles cheap.
+      // Skipped in fullscreen so the viewer gets source-quality frames.
+      let yPlane = frame.y;
+      let uPlane = frame.u;
+      let vPlane = frame.v;
+      let yW = frame.width;
+      let yH = frame.height;
+      let uvW = cW;
+      let uvH = cH;
+      if (preview) {
+        const y2 = downsample2x(frame.y, frame.width, frame.height, yScratchRef.current);
+        const u2 = downsample2x(frame.u, cW, cH, uScratchRef.current);
+        const v2 = downsample2x(frame.v, cW, cH, vScratchRef.current);
+        yScratchRef.current = y2.buf;
+        uScratchRef.current = u2.buf;
+        vScratchRef.current = v2.buf;
+        yPlane = y2.buf;
+        uPlane = u2.buf;
+        vPlane = v2.buf;
+        yW = y2.w;
+        yH = y2.h;
+        uvW = u2.w;
+        uvH = u2.h;
+      }
+      // Resize backing store on dimension change. CSS sizing is
+      // independent — the canvas's intrinsic dimensions drive
+      // max-width:100%+max-height:100%+width:auto+height:auto sizing.
+      if (canvas.width !== yW || canvas.height !== yH) {
+        canvas.width = yW;
+        canvas.height = yH;
+      }
       const yAlloc = { w: bundle.yW, h: bundle.yH };
       const uAlloc = { w: bundle.uW, h: bundle.uH };
       const vAlloc = { w: bundle.vW, h: bundle.vH };
-      uploadPlane(gl, 0, bundle.texY, frame.y, frame.width, frame.height, yAlloc);
-      uploadPlane(gl, 1, bundle.texU, frame.u, cW, cH, uAlloc);
-      uploadPlane(gl, 2, bundle.texV, frame.v, cW, cH, vAlloc);
+      uploadPlane(gl, 0, bundle.texY, yPlane, yW, yH, yAlloc);
+      uploadPlane(gl, 1, bundle.texU, uPlane, uvW, uvH, uAlloc);
+      uploadPlane(gl, 2, bundle.texV, vPlane, uvW, uvH, vAlloc);
       bundle.yW = yAlloc.w; bundle.yH = yAlloc.h;
       bundle.uW = uAlloc.w; bundle.uH = uAlloc.h;
       bundle.vW = vAlloc.w; bundle.vH = vAlloc.h;
@@ -221,6 +283,15 @@ export const RemoteVideoTile: React.FC<Props> = ({
 
     const unsubscribe = screenShareSession.onFrame(trackKey, (frame) => {
       pendingRef.current = frame;
+      // Preview-mode 15fps cap: if we painted recently, skip
+      // scheduling the rAF. The next frame arrival will check again
+      // and schedule once the interval has elapsed.
+      if (preview) {
+        const elapsed = performance.now() - lastPaintAtRef.current;
+        if (elapsed < PREVIEW_MIN_PAINT_INTERVAL_MS) {
+          return;
+        }
+      }
       if (rafRef.current === null) {
         rafRef.current = requestAnimationFrame(render);
       }
@@ -236,45 +307,36 @@ export const RemoteVideoTile: React.FC<Props> = ({
       // GL resources are tied to the canvas; dropping the canvas releases
       // them when the WebGL context is garbage collected.
       glRef.current = null;
+      // Drop preview scratches so a re-mount picks up fresh sizing.
+      yScratchRef.current = null;
+      uScratchRef.current = null;
+      vScratchRef.current = null;
     };
-  }, [trackKey, initialWidth, initialHeight]);
+  }, [trackKey, initialWidth, initialHeight, preview]);
 
+  // Parent's flex layout (justify/align center) does the centering;
+  // the canvas auto-sizes from its intrinsic dimensions (the width/
+  // height attributes we sync to the source resolution in render()),
+  // and max-width/max-height clamp it to fit the parent in both axes
+  // while the auto/auto width/height keeps the aspect ratio. This is
+  // the canonical pattern for preserving aspect on a replaced element
+  // and works across every engine including older WebKitGTK; relying
+  // on `object-fit: contain` is unreliable on `<canvas>` in some
+  // WebKit versions, which is what was leaving the canvas vertically
+  // compressed despite the contain hint.
   return (
-    <div
+    <canvas
+      ref={canvasRef}
+      data-testid={`remote-video-tile-${trackKey}`}
+      className={className}
       style={{
-        position: "relative",
-        display: "inline-flex",
+        display: "block",
         maxWidth: "100%",
         maxHeight: "100%",
+        width: "auto",
+        height: "auto",
+        background: "#000",
       }}
-    >
-      <canvas
-        ref={canvasRef}
-        data-testid={`remote-video-tile-${trackKey}`}
-        className={className}
-        style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", background: "#000" }}
-      />
-      {isStalled && (
-        <div
-          data-testid={`screenshare-stalled-${trackKey}`}
-          className="absolute inset-0 flex items-center justify-center pointer-events-none"
-          style={{ background: "rgba(0,0,0,0.45)" }}
-        >
-          <span
-            className="flex items-center gap-1.5 font-mono text-xs"
-            style={{
-              color: "var(--c-text)",
-              background: "var(--c-surface)",
-              border: "1px solid var(--c-border)",
-              borderRadius: 4,
-              padding: "4px 10px",
-            }}
-          >
-            <Pause size={12} />
-            Stream paused
-          </span>
-        </div>
-      )}
-    </div>
+    />
   );
 };

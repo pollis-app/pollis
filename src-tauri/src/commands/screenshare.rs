@@ -34,8 +34,23 @@ pub async fn subscribe_screen_share_frames(
 }
 
 #[tauri::command]
-pub async fn start_screen_share(state: State<'_, Arc<AppState>>) -> Result<()> {
-    pollis_core::commands::screenshare::start_screen_share(&state).await
+pub async fn enumerate_screen_sources(
+    state: State<'_, Arc<AppState>>,
+) -> Result<pollis_capture_proto::SourceList> {
+    pollis_core::commands::screenshare::enumerate_screen_sources(&state).await
+}
+
+#[tauri::command]
+pub async fn cancel_screen_share_picker(state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::screenshare::cancel_screen_share_picker(&state).await
+}
+
+#[tauri::command]
+pub async fn start_screen_share(
+    state: State<'_, Arc<AppState>>,
+    selection: Option<pollis_capture_proto::Selection>,
+) -> Result<()> {
+    pollis_core::commands::screenshare::start_screen_share(&state, selection).await
 }
 
 #[tauri::command]

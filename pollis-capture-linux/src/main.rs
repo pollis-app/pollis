@@ -39,6 +39,9 @@ fn main() {
 mod linux;
 
 #[cfg(target_os = "linux")]
+mod x11;
+
+#[cfg(target_os = "linux")]
 fn main() -> anyhow::Result<()> {
     linux::run()
 }

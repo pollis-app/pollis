@@ -4,13 +4,9 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use tokio::io::AsyncWriteExt;
+use pollis_capture_proto::{write_msg, CaptureMsg};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
-
-const MSG_FORMAT: u8 = 0x01;
-const MSG_FRAME: u8 = 0x02;
-const MSG_ERROR: u8 = 0xFF;
 
 #[derive(Parser, Debug)]
 #[command(name = "pollis-capture-linux", version)]
@@ -22,6 +18,103 @@ struct Args {
     socket: String,
 }
 
+/// Which capture backend the routing probe selected for this session.
+///
+/// This is decided ONCE at capture start. We route on *session type*,
+/// not desktop-environment name: GNOME and KDE both ship X11 sessions
+/// too, so a DE-name switch (issue #281's original misdiagnosis) would
+/// mis-route them. Under XWayland an X11 client gets a private root, not
+/// the composited screen, so X11 grab returns black on Wayland — the
+/// two-backend split is mandatory, not an optimization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Backend {
+    /// Wayland session with a working xdg-desktop-portal ScreenCast
+    /// backend + PipeWire. The original, unchanged path.
+    Portal,
+    /// X11 session (Xorg or an X11 session of GNOME/KDE, plus
+    /// Cinnamon/MATE/XFCE which have no ScreenCast portal backend at
+    /// all). New xcb/SHM/RandR path.
+    X11,
+    /// Wayland session with NO ScreenCast portal backend (e.g.
+    /// Cinnamon-on-Wayland-ish setups, or a portal install missing the
+    /// ScreenCast impl). Screen sharing is genuinely unavailable here —
+    /// surfaced as a distinct, non-"denied" error.
+    Unsupported,
+}
+
+/// Probe the session to decide the backend. Pure environment + bus
+/// inspection; no UI, no user interaction.
+async fn probe_backend() -> Backend {
+    // 1. Session type. $XDG_SESSION_TYPE is the canonical signal;
+    //    corroborate with $WAYLAND_DISPLAY / $DISPLAY because some
+    //    minimal/embedded sessions don't set XDG_SESSION_TYPE.
+    let session_type = std::env::var("XDG_SESSION_TYPE")
+        .unwrap_or_default()
+        .to_lowercase();
+    let has_wayland = std::env::var("WAYLAND_DISPLAY")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+    let has_x11 = std::env::var("DISPLAY")
+        .map(|v| !v.is_empty())
+        .unwrap_or(false);
+
+    let is_wayland = session_type == "wayland" || (session_type.is_empty() && has_wayland);
+    let is_x11 = session_type == "x11" || (session_type.is_empty() && has_x11 && !has_wayland);
+
+    if is_x11 && !is_wayland {
+        // X11 session — covers Cinnamon/MATE/XFCE (no ScreenCast
+        // portal backend exists) AND X11 sessions of GNOME/KDE. The
+        // X11 grab path works regardless of whether a portal is
+        // present, so we don't even probe the bus here.
+        eprintln!("[capture] probe: X11 session -> X11 backend");
+        return Backend::X11;
+    }
+
+    // Wayland (or ambiguous-leaning-Wayland): the portal path is the
+    // only one that can work — XWayland would hand X11 a private root.
+    // Gate on the ScreenCast portal actually being present.
+    if portal_screencast_available().await {
+        eprintln!("[capture] probe: Wayland + ScreenCast portal -> Portal backend");
+        Backend::Portal
+    } else {
+        eprintln!(
+            "[capture] probe: Wayland but no ScreenCast portal backend -> Unsupported"
+        );
+        Backend::Unsupported
+    }
+}
+
+/// Is `org.freedesktop.portal.ScreenCast` actually available on the
+/// session bus? A bare `xdg-desktop-portal` with only the gtk backend
+/// (Cinnamon/MATE/XFCE default) does NOT implement ScreenCast — the
+/// interface is absent and the portal call errors before any picker UI.
+/// We detect that here so we can emit a precise "your DE has no
+/// ScreenCast backend" error instead of collapsing it into "denied".
+async fn portal_screencast_available() -> bool {
+    use ashpd::desktop::screencast::Screencast;
+    // Constructing the proxy resolves the org.freedesktop.portal.Desktop
+    // name and the ScreenCast interface. If the backend doesn't
+    // implement ScreenCast this fails fast without showing any UI.
+    match Screencast::new().await {
+        Ok(proxy) => {
+            // available_source_types() is a plain property read on the
+            // ScreenCast interface — succeeds only if a real backend is
+            // wired up, which is exactly the distinction we need.
+            match proxy.available_source_types().await {
+                Ok(_) => true,
+                Err(e) => {
+                    eprintln!("[capture] ScreenCast available_source_types failed: {e}");
+                    false
+                }
+            }
+        }
+        Err(e) => {
+            eprintln!("[capture] ScreenCast proxy construction failed: {e}");
+            false
+        }
+    }
+}
+
 pub fn run() -> Result<()> {
     let args = Args::parse();
 
@@ -30,7 +123,7 @@ pub fn run() -> Result<()> {
     // kernel sends us SIGTERM so we don't end up an orphan with a live
     // pipewire stream.
     unsafe {
-        libc_pdeathsig(libc::SIGTERM);
+        libc_pdeathsig(pdeath::SIGTERM);
     }
 
     let rt = tokio::runtime::Builder::new_current_thread()
@@ -45,34 +138,81 @@ async fn run_async(socket_path: &str) -> Result<()> {
     let mut sock = UnixStream::connect(socket_path)
         .await
         .with_context(|| format!("connect to {socket_path}"))?;
-    eprintln!("[capture] connected — opening portal (waits for user picker)");
+    eprintln!("[capture] connected — probing session backend");
 
-    // Open the portal — shows the user the system source picker.
+    let backend = probe_backend().await;
+
+    match backend {
+        Backend::Portal => run_portal(&mut sock).await,
+        Backend::X11 => {
+            // The X11 backend is synchronous (xcb + SHM) and has no
+            // async work; run it on a blocking thread and bridge frames
+            // back over the same channel-to-socket drain.
+            run_x11(&mut sock).await
+        }
+        Backend::Unsupported => {
+            // Distinct from user-denial. The parent maps this onto a
+            // "your desktop environment can't screen share" UI, not a
+            // "permission denied — grant it" UI.
+            let msg = "unsupported: Screen sharing requires xdg-desktop-portal \
+                       with a ScreenCast backend; your desktop environment does \
+                       not provide one.";
+            eprintln!("[capture] {msg}");
+            write_msg(&mut sock, &CaptureMsg::Error { message: msg.into() })
+                .await
+                .ok();
+            Err(anyhow!("no ScreenCast portal backend"))
+        }
+    }
+}
+
+/// The original Wayland + xdg-desktop-portal + PipeWire path. Logic
+/// unchanged from before the split — only the wire encode now goes
+/// through the shared `pollis-capture-proto` crate instead of the
+/// hand-rolled `write_msg`/`send_error` that used to live here.
+async fn run_portal(sock: &mut UnixStream) -> Result<()> {
+    eprintln!("[capture] opening portal (waits for user picker)");
+
     let (node_id, fd) = match open_portal().await {
         Ok(v) => {
             eprintln!("[capture] portal returned node_id={}", v.0);
             v
         }
-        Err(e) => {
+        Err(PortalError::Cancelled) => {
+            // User dismissed the picker. Surface with a distinct
+            // `cancel:` prefix so the parent can swallow the error
+            // silently instead of showing a red "permission denied"
+            // toast — cancelling is a normal flow, not a failure.
+            eprintln!("[capture] portal cancelled by user");
+            send_error(&mut sock, "cancel: user dismissed picker")
+                .await
+                .ok();
+            return Ok(());
+        }
+        Err(PortalError::Other(e)) => {
             eprintln!("[capture] portal error: {e}");
-            send_error(&mut sock, &format!("portal: {e}")).await.ok();
+            // Prefix lets the parent split portal-error vs. cancel vs.
+            // genuine deny rather than collapsing them.
+            write_msg(
+                sock,
+                &CaptureMsg::Error {
+                    message: format!("portal: {e}"),
+                },
+            )
+            .await
+            .ok();
             return Err(e);
         }
     };
 
     // Channel from the pipewire OS thread (sync world) into the tokio
-    // task (async world) that owns the socket. Capacity 1 with
+    // task (async world) that owns the socket. Capacity 2 with
     // last-frame-wins backpressure: if the socket can't keep up we drop
     // frames rather than block the capture thread.
-    let (tx, mut rx) = mpsc::channel::<Msg>(2);
+    let (tx, mut rx) = mpsc::channel::<CaptureMsg>(2);
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
 
-    // Video only — see issue #175 for the audio plan. The portal's
-    // accept_audio option (per-window, no loopback) needs raw zbus
-    // calls because ashpd doesn't expose it. Capturing the system
-    // sink monitor as a fallback was tried and produces a feedback
-    // loop in any voice room.
     eprintln!("[capture] spawning pipewire video thread");
     let pw_thread = std::thread::Builder::new()
         .name("pollis-capture-pw".into())
@@ -85,11 +225,9 @@ async fn run_async(socket_path: &str) -> Result<()> {
         })
         .context("spawn pipewire thread")?;
 
-    // Drain channel -> socket. On any write error (EPIPE, parent gone)
-    // flip the stop flag so the pipewire thread exits and we return.
     let result: Result<()> = async {
         while let Some(msg) = rx.recv().await {
-            if let Err(e) = write_msg(&mut sock, msg).await {
+            if let Err(e) = write_msg(sock, &msg).await {
                 eprintln!("[capture] socket write error: {e} — exiting");
                 break;
             }
@@ -99,60 +237,70 @@ async fn run_async(socket_path: &str) -> Result<()> {
     .await;
 
     stop.store(true, Ordering::Relaxed);
-    // Don't block — pipewire thread will exit on next iteration; if it
-    // hangs the kernel reaps it on process exit.
     drop(pw_thread);
     result
 }
 
-enum Msg {
-    Format { width: u32, height: u32 },
-    Frame {
-        width: u32,
-        height: u32,
-        stride: u32,
-        timestamp_us: i64,
-        bgrx: Vec<u8>,
-    },
+/// The X11 backend (issue #281). Spawns the synchronous xcb/SHM capture
+/// loop on its own thread and drains its frames to the socket exactly
+/// the way the portal path drains the pipewire thread.
+async fn run_x11(sock: &mut UnixStream) -> Result<()> {
+    eprintln!("[capture] starting X11 (xcb/SHM/RandR) backend");
+
+    let (tx, mut rx) = mpsc::channel::<CaptureMsg>(2);
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_thread = Arc::clone(&stop);
+
+    let x11_thread = std::thread::Builder::new()
+        .name("pollis-capture-x11".into())
+        .spawn(move || {
+            eprintln!("[capture/x11] thread entered");
+            if let Err(e) = crate::x11::run_x11_capture(tx.clone(), stop_for_thread) {
+                eprintln!("[capture/x11] error: {e}");
+                let _ = tx.blocking_send(CaptureMsg::Error {
+                    message: format!("x11: {e}"),
+                });
+            }
+            eprintln!("[capture/x11] thread exiting");
+        })
+        .context("spawn x11 thread")?;
+
+    let result: Result<()> = async {
+        while let Some(msg) = rx.recv().await {
+            if let Err(e) = write_msg(sock, &msg).await {
+                eprintln!("[capture] socket write error: {e} — exiting");
+                break;
+            }
+        }
+        Ok(())
+    }
+    .await;
+
+    stop.store(true, Ordering::Relaxed);
+    drop(x11_thread);
+    result
 }
 
-async fn write_msg(sock: &mut UnixStream, msg: Msg) -> std::io::Result<()> {
-    match msg {
-        Msg::Format { width, height } => {
-            let mut buf = Vec::with_capacity(1 + 4 + 8);
-            buf.push(MSG_FORMAT);
-            buf.extend_from_slice(&8u32.to_le_bytes());
-            buf.extend_from_slice(&width.to_le_bytes());
-            buf.extend_from_slice(&height.to_le_bytes());
-            sock.write_all(&buf).await
-        }
-        Msg::Frame { width, height, stride, timestamp_us, bgrx } => {
-            let payload_len = (4 + 4 + 4 + 8 + bgrx.len()) as u32;
-            let mut header = Vec::with_capacity(1 + 4 + 4 + 4 + 4 + 8);
-            header.push(MSG_FRAME);
-            header.extend_from_slice(&payload_len.to_le_bytes());
-            header.extend_from_slice(&width.to_le_bytes());
-            header.extend_from_slice(&height.to_le_bytes());
-            header.extend_from_slice(&stride.to_le_bytes());
-            header.extend_from_slice(&timestamp_us.to_le_bytes());
-            sock.write_all(&header).await?;
-            sock.write_all(&bgrx).await
-        }
+/// Distinguishes "user cancelled the picker" from "everything else"
+/// so the parent can swallow cancel silently. Without this, ashpd's
+/// `Response::Cancelled` collapses into the same anyhow error path as a
+/// genuine portal failure → the parent shows a misleading "permission
+/// denied" toast for a perfectly normal Escape-press.
+enum PortalError {
+    Cancelled,
+    Other(anyhow::Error),
+}
+
+impl From<anyhow::Error> for PortalError {
+    fn from(e: anyhow::Error) -> Self {
+        Self::Other(e)
     }
 }
 
-async fn send_error(sock: &mut UnixStream, msg: &str) -> std::io::Result<()> {
-    let mut buf = Vec::with_capacity(1 + 4 + msg.len());
-    buf.push(MSG_ERROR);
-    buf.extend_from_slice(&(msg.len() as u32).to_le_bytes());
-    buf.extend_from_slice(msg.as_bytes());
-    sock.write_all(&buf).await
-}
-
-async fn open_portal() -> Result<(u32, OwnedFd)> {
+async fn open_portal() -> std::result::Result<(u32, OwnedFd), PortalError> {
     use ashpd::desktop::{
         screencast::{CursorMode, Screencast, SourceType},
-        PersistMode,
+        PersistMode, ResponseError,
     };
     let proxy = Screencast::new()
         .await
@@ -172,12 +320,21 @@ async fn open_portal() -> Result<(u32, OwnedFd)> {
         )
         .await
         .map_err(|e| anyhow!("select sources: {e}"))?;
-    let response = proxy
+    let request = proxy
         .start(&session, &ashpd::WindowIdentifier::default())
         .await
-        .map_err(|e| anyhow!("portal start: {e}"))?
-        .response()
-        .map_err(|e| anyhow!("portal response: {e}"))?;
+        .map_err(|e| anyhow!("portal start: {e}"))?;
+    let response = match request.response() {
+        Ok(r) => r,
+        // The picker callback returned a Cancelled response — user hit
+        // Escape, closed the window, or clicked Cancel. Surface this
+        // specifically; do NOT wrap in anyhow! since the parent's
+        // friendly-error mapping must see the structured signal.
+        Err(ashpd::Error::Response(ResponseError::Cancelled)) => {
+            return Err(PortalError::Cancelled);
+        }
+        Err(e) => return Err(PortalError::Other(anyhow!("portal response: {e}"))),
+    };
     let stream = response
         .streams()
         .first()
@@ -198,7 +355,7 @@ async fn open_portal() -> Result<(u32, OwnedFd)> {
     Ok((node_id, fd))
 }
 
-mod libc {
+mod pdeath {
     pub const SIGTERM: i32 = 15;
     pub const PR_SET_PDEATHSIG: i32 = 1;
     extern "C" {
@@ -207,12 +364,12 @@ mod libc {
 }
 
 unsafe fn libc_pdeathsig(sig: i32) {
-    let _ = libc::prctl(libc::PR_SET_PDEATHSIG, sig as u64, 0, 0, 0);
+    let _ = pdeath::prctl(pdeath::PR_SET_PDEATHSIG, sig as u64, 0, 0, 0);
 }
 
 mod pw {
-    use super::Msg;
     use anyhow::Result;
+    use pollis_capture_proto::CaptureMsg;
     use std::os::fd::OwnedFd;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Arc;
@@ -221,7 +378,7 @@ mod pw {
     pub fn run_pipewire(
         node_id: u32,
         fd: OwnedFd,
-        tx: mpsc::Sender<Msg>,
+        tx: mpsc::Sender<CaptureMsg>,
         stop: Arc<AtomicBool>,
     ) -> Result<()> {
         use pipewire as pw;
@@ -291,7 +448,7 @@ mod pw {
                         w,
                         h
                     );
-                    let _ = tx_for_format.try_send(Msg::Format { width: w, height: h });
+                    let _ = tx_for_format.try_send(CaptureMsg::Format { width: w, height: h });
                 }
             })
             .process(move |stream, ud| {
@@ -312,7 +469,23 @@ mod pw {
                 let chunk = datas[0].chunk();
                 let stride = chunk.stride() as u32;
                 let size = chunk.size() as usize;
-                let Some(slice) = datas[0].data() else { return; };
+                let Some(slice) = datas[0].data() else {
+                    // No CPU-mapped slice — almost certainly because the
+                    // compositor handed us a DMA-BUF buffer despite our
+                    // dataType param constraining to MemPtr|MemFd. Log
+                    // once so the next time something like #285's
+                    // "whole-monitor black preview" recurs, we see the
+                    // smoking gun instead of a silent drop.
+                    static WARNED: AtomicBool = AtomicBool::new(false);
+                    if !WARNED.swap(true, Ordering::Relaxed) {
+                        eprintln!(
+                            "[capture/pw] no CPU-mapped data on dequeued buffer (type={:?}) — \
+                             compositor likely delivered DMA-BUF; no frames will flow",
+                            datas[0].type_()
+                        );
+                    }
+                    return;
+                };
                 if slice.len() < size {
                     return;
                 }
@@ -320,7 +493,7 @@ mod pw {
                 // as soon as we leave this closure. Last-frame-wins:
                 // try_send fails fast when full, we just skip.
                 let bgrx = slice[..size].to_vec();
-                let _ = tx_for_proc.try_send(Msg::Frame {
+                let _ = tx_for_proc.try_send(CaptureMsg::Frame {
                     width,
                     height,
                     stride,
@@ -410,9 +583,49 @@ mod pw {
         )?
         .0
         .into_inner();
-        let mut params = [pw::spa::pod::Pod::from_bytes(&values).ok_or_else(|| {
-            anyhow::anyhow!("malformed pod")
-        })?];
+
+        // Buffers param: constrain the producer to CPU-mappable buffer
+        // types (MemPtr / MemFd), excluding DMA-BUF. Without this,
+        // KWin/Mutter happily hand back DMA-BUF for whole-monitor
+        // capture (zero-copy GPU texture). MAP_BUFFERS only maps
+        // CPU-mappable backings — DMA-BUF would arrive with
+        // `data() == None`, every frame would silently drop, and the
+        // whole-monitor share would look black on the publisher and
+        // never produce a track-started event on the receiver.
+        // Reading DMA-BUF would require importing it into an EGL/Vulkan
+        // context; we don't have one, and don't want one in this
+        // helper.
+        let data_type_mask: i32 =
+            (1 << pw::spa::sys::SPA_DATA_MemPtr) | (1 << pw::spa::sys::SPA_DATA_MemFd);
+        let buffers_obj = pw::spa::pod::Object {
+            type_: pw::spa::utils::SpaTypes::ObjectParamBuffers.as_raw(),
+            id: pw::spa::param::ParamType::Buffers.as_raw(),
+            properties: vec![pw::spa::pod::Property {
+                key: pw::spa::sys::SPA_PARAM_BUFFERS_dataType,
+                flags: pw::spa::pod::PropertyFlags::empty(),
+                value: pw::spa::pod::Value::Choice(pw::spa::pod::ChoiceValue::Int(
+                    pw::spa::utils::Choice::<i32>(
+                        pw::spa::utils::ChoiceFlags::empty(),
+                        pw::spa::utils::ChoiceEnum::<i32>::Flags {
+                            default: data_type_mask,
+                            flags: vec![data_type_mask],
+                        },
+                    ),
+                )),
+            }],
+        };
+        let buffers_bytes: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+            std::io::Cursor::new(Vec::new()),
+            &pw::spa::pod::Value::Object(buffers_obj),
+        )?
+        .0
+        .into_inner();
+
+        let format_pod = pw::spa::pod::Pod::from_bytes(&values)
+            .ok_or_else(|| anyhow::anyhow!("malformed format pod"))?;
+        let buffers_pod = pw::spa::pod::Pod::from_bytes(&buffers_bytes)
+            .ok_or_else(|| anyhow::anyhow!("malformed buffers pod"))?;
+        let mut params = [format_pod, buffers_pod];
 
         stream.connect(
             spa::utils::Direction::Input,

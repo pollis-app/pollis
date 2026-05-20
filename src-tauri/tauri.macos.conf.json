@@ -1,0 +1,12 @@
+{
+  "build": {
+    "beforeDevCommand": "pnpm --filter frontend dev",
+    "beforeBuildCommand": "pnpm --filter frontend build"
+  },
+  "bundle": {
+    "externalBin": ["binaries/pollis-capture-macos"],
+    "macOS": {
+      "signingIdentity": "Developer ID Application: Daniel Kral (9JF7WWYMU2)"
+    }
+  }
+}

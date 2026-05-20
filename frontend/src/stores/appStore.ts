@@ -67,18 +67,30 @@ interface AppStore extends AppState {
   /** True if the local user is broadcasting their screen. */
   screenShareLocalActive: boolean;
   setScreenShareLocalActive: (v: boolean) => void;
-  /** Reason the local outgoing share is currently paused, or null if it is
-   *  flowing normally. Set by `local_stalled`, cleared by `local_resumed`
-   *  or `local_stopped`. */
-  localShareStallReason: "minimized" | "source_lost" | "stalled" | null;
-  setLocalShareStallReason: (
-    reason: "minimized" | "source_lost" | "stalled" | null,
+  /** Lifecycle stage of the local screen-share UI:
+   *   - 'idle': no share in progress, no picker open
+   *   - 'picking': in-app source picker visible (macOS only; the
+   *     helper is parked on the backend awaiting the user's selection)
+   *   - 'starting': selection sent, waiting for the helper to
+   *     announce Format and the LiveKit publish to land
+   *   - 'active': frames flowing (synced with `screenShareLocalActive`)
+   *  Used by VoiceChannelView to swap the participant grid for the
+   *  inline picker without a modal. */
+  screenShareMode: "idle" | "picking" | "starting" | "active";
+  setScreenShareMode: (m: "idle" | "picking" | "starting" | "active") => void;
+  /** Sources returned by `enumerate_screen_sources` — populated when
+   *  mode flips to 'picking'. Cleared on exit. */
+  screenShareSources: import("../screenshare/screenShareSession").SourceList | null;
+  setScreenShareSources: (
+    s: import("../screenshare/screenShareSession").SourceList | null,
   ) => void;
-  /** Track keys of remote shares whose stream is currently stalled. The
-   *  retained last frame stays on screen with a "paused" badge; the tile is
-   *  never unmounted. Keyed presence = stalled. */
-  stalledRemoteTrackKeys: Record<string, true>;
-  setRemoteTrackStalled: (trackKey: string, stalled: boolean) => void;
+  /** Dimensions of the local outgoing share so the in-tile preview
+   *  can seed its canvas before the first mirrored frame arrives. Set
+   *  by `local_started`, cleared by `local_stopped`. */
+  screenShareLocalDimensions: { width: number; height: number } | null;
+  setScreenShareLocalDimensions: (
+    dims: { width: number; height: number } | null,
+  ) => void;
   /** Active remote screenshares keyed by participant identity. */
   screenShareRemotes: Record<string, { trackKey: string; width: number; height: number }>;
   upsertScreenShareRemote: (identity: string, info: { trackKey: string; width: number; height: number }) => void;
@@ -151,8 +163,9 @@ export const useAppStore = create<AppStore>((set) => ({
   voiceActiveSpeakerIds: [],
   voiceIsMuted: false,
   screenShareLocalActive: false,
-  localShareStallReason: null,
-  stalledRemoteTrackKeys: {},
+  screenShareLocalDimensions: null,
+  screenShareMode: "idle",
+  screenShareSources: null,
   screenShareRemotes: {},
   viewingScreenShareTrackKey: null,
 
@@ -237,16 +250,9 @@ export const useAppStore = create<AppStore>((set) => ({
   setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
 
   setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
-  setLocalShareStallReason: (reason) => set({ localShareStallReason: reason }),
-  setRemoteTrackStalled: (trackKey, stalled) => set((state) => {
-    const next = { ...state.stalledRemoteTrackKeys };
-    if (stalled) {
-      next[trackKey] = true;
-    } else {
-      delete next[trackKey];
-    }
-    return { stalledRemoteTrackKeys: next };
-  }),
+  setScreenShareLocalDimensions: (dims) => set({ screenShareLocalDimensions: dims }),
+  setScreenShareMode: (m) => set({ screenShareMode: m }),
+  setScreenShareSources: (s) => set({ screenShareSources: s }),
   upsertScreenShareRemote: (identity, info) => set((state) => ({
     screenShareRemotes: { ...state.screenShareRemotes, [identity]: info },
   })),
@@ -261,13 +267,9 @@ export const useAppStore = create<AppStore>((set) => ({
     if (viewing === trackKey) {
       viewing = null;
     }
-    // A removed track can no longer be stalled — drop any badge state.
-    const nextStalled = { ...state.stalledRemoteTrackKeys };
-    delete nextStalled[trackKey];
     return {
       screenShareRemotes: next,
       viewingScreenShareTrackKey: viewing,
-      stalledRemoteTrackKeys: nextStalled,
     };
   }),
   setViewingScreenShareTrackKey: (k) => set({ viewingScreenShareTrackKey: k }),
@@ -309,8 +311,9 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
     screenShareLocalActive: false,
-    localShareStallReason: null,
-    stalledRemoteTrackKeys: {},
+    screenShareLocalDimensions: null,
+    screenShareMode: "idle",
+    screenShareSources: null,
     screenShareRemotes: {},
     viewingScreenShareTrackKey: null,
     pendingEnrollmentApproval: null,

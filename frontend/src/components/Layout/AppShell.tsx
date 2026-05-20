@@ -541,12 +541,15 @@ export const AppShell: React.FC = () => {
         ) : screenShareError ? (
           <div
             data-testid="status-bar-screenshare-error"
-            className="flex items-center gap-2"
+            className="flex items-center gap-2 min-w-0 flex-1"
             style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
           >
-            <span className="text-xs font-mono flex items-center gap-1">
-              <AlertTriangle className="w-4 h-4" />
-              {screenShareError}
+            <span
+              className="text-xs font-mono flex items-center gap-1 min-w-0 truncate"
+              title={screenShareError}
+            >
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate">{screenShareError}</span>
             </span>
             <button
               data-testid="status-bar-screenshare-error-dismiss"

@@ -40,6 +40,10 @@ tauri-build = { version = "2", features = [] }
 # All non-Tauri-runtime code lives here so future CLI / TUI / mobile
 # binaries can consume it without dragging in the Tauri runtime.
 pollis-core = { path = "../pollis-core" }
+# Re-exported for the screenshare Tauri shim: `Selection` and
+# `SourceList` are part of the public command signatures (the frontend
+# sends/receives them via invoke()).
+pollis-capture-proto = { path = "../pollis-capture-proto" }
 
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"

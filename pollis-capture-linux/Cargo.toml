@@ -24,7 +24,17 @@ path = "src/main.rs"
 anyhow = "1"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Shared wire protocol — the single source of truth for the
+# Unix-socket frame bytes. Same crate the macOS helper and the
+# pollis-core reader use.
+pollis-capture-proto = { path = "../pollis-capture-proto" }
 ashpd = { version = "0.9", default-features = false, features = ["tokio"] }
 pipewire = "0.9"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "net", "sync", "io-util", "time"] }
 clap = { version = "4", features = ["derive"] }
+# X11 fallback backend (issue #281). xcb + xcb-shm: SHM is
+# non-negotiable — plain XGetImage is unusably slow at 1080p. randr
+# for output enumeration so we capture one monitor, not the spanned
+# root.
+xcb = { version = "1", features = ["shm", "randr"] }
+libc = "0.2"
