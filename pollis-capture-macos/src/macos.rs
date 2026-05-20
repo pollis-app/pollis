@@ -270,6 +270,16 @@ fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
     let raw_windows = content.windows();
     let windows: Vec<WindowSource> = raw_windows
         .iter()
+        // Window layer 0 = normal app window. Layers >= 1 are floating
+        // panels, the Dock, menu-bar status items, system overlays —
+        // none of those are things a user wants to "share". Negative
+        // layers (e.g. desktop background) also unhelpful. Slack /
+        // Discord filter identically.
+        .filter(|w| w.window_layer() == 0)
+        // `is_on_screen` excludes minimized + off-screen, but Apple
+        // also flags some agent-process windows as on-screen even
+        // when they're 1×1 pixel invisibles. The title + size
+        // filter below catches those.
         .filter(|w| w.is_on_screen())
         .filter_map(|w| {
             let app = w.owning_application();
@@ -282,24 +292,34 @@ fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
                 .map(|a| a.bundle_identifier())
                 .unwrap_or_default();
             let title = w.title().unwrap_or_default();
-            // Skip windows that have neither a title nor an app name —
-            // they're system/agent windows the user can't recognise.
-            if title.is_empty() && app_name.is_empty() {
+            let frame = w.frame();
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let w_px = frame.width as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let h_px = frame.height as u32;
+
+            // A real user-visible window has both a title and a
+            // non-trivial size. Anything missing either is almost
+            // always an invisible helper window (menu-bar agent,
+            // notification listener, IME panel, Docker daemon, etc.).
+            // The 64-pixel floor is generous — most real picker
+            // targets are at least a few hundred px.
+            if title.is_empty() {
                 return None;
             }
-            // Drop our own helper / parent windows from the list — no
-            // value to share Pollis to itself, and it can produce odd
-            // feedback loops.
+            if w_px < 64 || h_px < 64 {
+                return None;
+            }
+            // Drop our own windows from the list — no value to share
+            // Pollis to itself, and it can produce odd feedback loops.
             if bundle_id == "xyz.pollis.desktop" || app_name == "Pollis" {
                 return None;
             }
-            let frame = w.frame();
+
             Some(WindowSource {
                 id: w.window_id(),
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                width: frame.width as u32,
-                #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-                height: frame.height as u32,
+                width: w_px,
+                height: h_px,
                 title,
                 app_name,
                 bundle_id,
