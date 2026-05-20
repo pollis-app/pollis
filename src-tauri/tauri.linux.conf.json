@@ -1,7 +1,7 @@
 {
   "build": {
-    "beforeDevCommand": "bash scripts/build-capture-helper.sh && pnpm --filter frontend dev",
-    "beforeBuildCommand": "bash scripts/build-capture-helper.sh && pnpm --filter frontend build"
+    "beforeDevCommand": "pnpm --filter frontend dev",
+    "beforeBuildCommand": "pnpm --filter frontend build"
   },
   "app": {
     "windows": [
