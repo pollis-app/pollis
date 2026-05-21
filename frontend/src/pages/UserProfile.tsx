@@ -180,11 +180,11 @@ export const UserProfilePage: React.FC = () => {
                     >
                       {safety.safety_number}
                     </code>
-                    {/* QR view alongside the digits. Encodes the raw
-                        pubkeys (not the 60-digit fingerprint) so a future
-                        scanner can compare key material directly — the
-                        digits are derived from the same bytes, so any
-                        scanner that re-derives them will agree. */}
+                    {/* QR rendering disabled — no in-app scanner exists yet.
+                        Showing a QR with no way to scan it (no camera capture
+                        / decoder) is misleading UX. Re-enable once we have a
+                        Scan button + decode flow. */}
+                    {/*
                     <div className="flex flex-col items-center gap-1 flex-shrink-0">
                       <div
                         data-testid="safety-number-qr"
@@ -206,6 +206,7 @@ export const UserProfilePage: React.FC = () => {
                         Scan to verify
                       </span>
                     </div>
+                    */}
                   </div>
                   {safety.status === "changed" && (
                     <span
