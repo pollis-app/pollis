@@ -93,17 +93,26 @@ const MAX_SHARE_FPS: u32 = 60;
 
 /// Picks the codec used to publish the local screen-share track.
 ///
-/// macOS defaults to H.264. The LiveKit Rust SDK we ship
-/// (`webrtc-sys 0.3.27`) unconditionally links `VideoToolbox` and
-/// registers `RTCDefaultVideoEncoderFactory` ahead of the software
-/// encoders, so picking `H264` here routes the encode through Apple's
-/// hardware engine with zero additional wiring. Linux and Windows stay
-/// on VP8 software until their respective HW paths (VAAPI/NVENC,
-/// MediaFoundation) land in follow-up changes — see issue #293.
+/// Defaults to H.264 on every platform. The encoder factory in
+/// `webrtc-sys 0.3.27` routes the request to the best available backend
+/// for the current build/host:
+/// - macOS: `RTCDefaultVideoEncoderFactory` → VideoToolbox (HW). Always
+///   present — `framework=VideoToolbox` is linked unconditionally.
+/// - Linux: NVENC if `cuda.h` was present at build time AND `libcuda` /
+///   `libnvcuvid` dlopen at runtime; else VAAPI if `libva-dev` was
+///   present at build time AND `libva.so.2` / `libva-drm.so.2` dlopen
+///   at runtime; else OpenH264 software (`WEBRTC_USE_H264` is baked
+///   into the prebuilt libwebrtc).
+/// - Windows: OpenH264 software (no MediaFoundation factory exists in
+///   this SDK yet — see issue #293).
 ///
-/// `POLLIS_SCREENSHARE_CODEC` overrides the default at runtime so we can
-/// A/B without rebuilding. Accepts `vp8|h264|vp9|av1|h265`; anything
-/// else (including unset) → platform default above.
+/// SW H.264 (OpenH264) is roughly on par with SW VP8 in CPU cost on
+/// Linux and noticeably cheaper on Windows, so the SW fallback isn't a
+/// regression versus the previous VP8 default.
+///
+/// `POLLIS_SCREENSHARE_CODEC` overrides the default at runtime for A/B
+/// without rebuilding. Accepts `vp8|h264|vp9|av1|h265`; anything else
+/// (including unset) → H.264.
 fn pick_screenshare_codec() -> VideoCodec {
     if let Ok(v) = std::env::var("POLLIS_SCREENSHARE_CODEC") {
         match v.to_ascii_lowercase().as_str() {
@@ -115,14 +124,7 @@ fn pick_screenshare_codec() -> VideoCodec {
             _ => {}
         }
     }
-    #[cfg(target_os = "macos")]
-    {
-        VideoCodec::H264
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        VideoCodec::VP8
-    }
+    VideoCodec::H264
 }
 
 /// Minimum spacing between published frames to enforce `MAX_SHARE_FPS`.
