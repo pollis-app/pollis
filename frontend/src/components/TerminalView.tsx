@@ -125,15 +125,22 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         });
     });
 
+    // Binary IPC input, symmetric with the output Channel above: hand the
+    // raw UTF-8 bytes straight to invoke() as the request body (Tauri 2
+    // accepts a Uint8Array as InvokeArgs and ships it as InvokeBody::Raw,
+    // bypassing JSON entirely). The terminal id rides in a header so the
+    // body stays a pure byte stream. The pre-binary path was
+    // `data: Array.from(encoder.encode(data))` which expanded every
+    // keystroke into a JSON number array — a per-key serialize/parse
+    // roundtrip noticeable as input lag on WebKitGTK/X11.
     const encoder = new TextEncoder();
     const onDataDisposable = term.onData((data) => {
       const id = terminalIdRef.current;
       if (id === null) {
         return;
       }
-      invoke("terminal_write", {
-        terminalId: id,
-        data: Array.from(encoder.encode(data)),
+      invoke("terminal_write", encoder.encode(data), {
+        headers: { "x-terminal-id": id },
       }).catch(() => {});
     });
 
