@@ -11,8 +11,10 @@ import {
   Sora_600SemiBold,
   Sora_700Bold,
 } from "@expo-google-fonts/sora";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { palette } from "../theme/tokens";
 import { ThemeProvider } from "../components/theme";
+import { queryClient } from "../lib/queryClient";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -37,25 +39,27 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1, backgroundColor: palette.bg }}>
       <SafeAreaProvider>
-        <ThemeProvider>
-          <StatusBar style="light" />
-          <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: palette.bg },
-            animation: "fade",
-          }}
-        >
-          <Stack.Screen name="index" />
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-          <Stack.Screen name="group/[id]" />
-          <Stack.Screen name="chat/[id]" />
-          <Stack.Screen name="self/preferences" />
-          <Stack.Screen name="self/user-settings" />
-          <Stack.Screen name="self/security" />
-          </Stack>
-        </ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider>
+            <StatusBar style="light" />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                contentStyle: { backgroundColor: palette.bg },
+                animation: "fade",
+              }}
+            >
+              <Stack.Screen name="index" />
+              <Stack.Screen name="(auth)" />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="group/[id]" />
+              <Stack.Screen name="chat/[id]" />
+              <Stack.Screen name="self/preferences" />
+              <Stack.Screen name="self/user-settings" />
+              <Stack.Screen name="self/security" />
+            </Stack>
+          </ThemeProvider>
+        </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );
