@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, Inbox, Ban, Plus } from "lucide-react";
+import { ArrowLeft, Inbox, Ban, Plus, ShieldCheck, ShieldAlert } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
+import { usePeerVerifications } from "../hooks/queries/useUserProfile";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 
@@ -14,6 +15,17 @@ export const DMsPage: React.FC = () => {
 
   const { data: conversations = [] } = useDMConversations();
   const { data: requests = [] } = useDMRequests();
+  const { data: peerVerifications = [] } = usePeerVerifications();
+  const verificationByPeer = useMemo(() => {
+    const map = new Map<string, { verified: boolean; key_changed: boolean }>();
+    for (const entry of peerVerifications) {
+      map.set(entry.peer_user_id, {
+        verified: entry.verified,
+        key_changed: entry.key_changed,
+      });
+    }
+    return map;
+  }, [peerVerifications]);
 
   let items: TerminalMenuItem[] = [];
 
@@ -50,29 +62,48 @@ export const DMsPage: React.FC = () => {
   if (conversations.length) {
     items.push({ id: "__sep__", label: "", type: "separator" as const });
     items = items.concat(
-      conversations.map((c) => ({
-        id: c.id,
-        label: c.user2_identifier,
-        icon: (
-          <PresenceAvatar
-            userId={c.user2_id ?? null}
-            avatarKey={c.user2_avatar_url}
-            size={24}
-            alt={`${c.user2_identifier} avatar`}
-            testId={`dm-avatar-${c.id}`}
+      conversations.map((c) => {
+        const verification = c.user2_id ? verificationByPeer.get(c.user2_id) : undefined;
+        const trailingIndicator = verification?.key_changed ? (
+          <ShieldAlert
+            size={14}
+            aria-label="Identity key changed — re-verify"
+            data-testid={`dm-verification-changed-${c.id}`}
+            style={{ color: "#f0b429" }}
           />
-        ),
-        description: <LastMessagePreview conversationId={c.id} />,
-        action: () => {
-          setSelectedConversationId(c.id);
-          markRead(c.id);
-          navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } });
-        },
-        badge: unreadCounts[c.id] ?? 0,
-        testId: `dm-option-${c.id}`,
-        secondaryAction: () => navigate({ to: "/dms/$conversationId/settings", params: { conversationId: c.id } }),
-        secondaryActionLabel: `Settings for ${c.user2_identifier}`,
-      })),
+        ) : verification?.verified ? (
+          <ShieldCheck
+            size={14}
+            aria-label="Verified contact"
+            data-testid={`dm-verification-verified-${c.id}`}
+            style={{ color: "var(--c-accent)" }}
+          />
+        ) : undefined;
+        return {
+          id: c.id,
+          label: c.user2_identifier,
+          icon: (
+            <PresenceAvatar
+              userId={c.user2_id ?? null}
+              avatarKey={c.user2_avatar_url}
+              size={24}
+              alt={`${c.user2_identifier} avatar`}
+              testId={`dm-avatar-${c.id}`}
+            />
+          ),
+          description: <LastMessagePreview conversationId={c.id} />,
+          action: () => {
+            setSelectedConversationId(c.id);
+            markRead(c.id);
+            navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } });
+          },
+          badge: unreadCounts[c.id] ?? 0,
+          trailingIndicator,
+          testId: `dm-option-${c.id}`,
+          secondaryAction: () => navigate({ to: "/dms/$conversationId/settings", params: { conversationId: c.id } }),
+          secondaryActionLabel: `Settings for ${c.user2_identifier}`,
+        };
+      }),
     );
   }
 

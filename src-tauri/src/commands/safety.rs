@@ -17,3 +17,10 @@ pub async fn get_safety_number(my_user_id: String, peer_user_id: String, state: 
 pub async fn set_contact_verified(peer_user_id: String, verified: bool, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::safety::set_contact_verified(peer_user_id, verified, &state).await
 }
+
+#[tauri::command]
+pub async fn list_peer_verifications(
+    state: State<'_, Arc<AppState>>,
+) -> Result<Vec<pollis_core::commands::safety::PeerVerificationEntry>> {
+    pollis_core::commands::safety::list_peer_verifications(&state).await
+}

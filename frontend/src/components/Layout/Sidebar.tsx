@@ -11,10 +11,12 @@ import {
   Palette,
   User as UserIcon,
   ShieldCheck,
+  ShieldAlert,
   Keyboard,
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
+import { usePeerVerifications } from "../../hooks/queries/useUserProfile";
 import { useAppStore } from "../../stores/appStore";
 import { shortcutLabel } from "../../utils/platform";
 
@@ -46,6 +48,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
+  const { data: peerVerifications = [] } = usePeerVerifications();
+  // peerUserId → { verified, key_changed }. Used to glance-render the
+  // shield-check (verified) / shield-alert (changed) icons next to each
+  // DM row without an N+1 round-trip.
+  const verificationByPeer = useMemo(() => {
+    const map = new Map<string, { verified: boolean; key_changed: boolean }>();
+    for (const entry of peerVerifications) {
+      map.set(entry.peer_user_id, {
+        verified: entry.verified,
+        key_changed: entry.key_changed,
+      });
+    }
+    return map;
+  }, [peerVerifications]);
   const unreadCounts = useAppStore((s) => s.unreadCounts);
 
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
@@ -202,6 +218,28 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
           {dmConversations.map((c) => {
             const unread = unreadCounts[c.id] ?? 0;
+            const verification = c.user2_id ? verificationByPeer.get(c.user2_id) : undefined;
+            // Verified badge wins; a `key_changed` mismatch overrides
+            // verified (the contact_verification row's `verified` is
+            // cleared by check_and_pin on mismatch, so this is mostly a
+            // belt-and-braces guard against a stale local cache).
+            const trailing = verification?.key_changed ? (
+              <span
+                data-testid={`dm-verification-changed-${c.id}`}
+                title="Identity key changed — re-verify"
+                style={{ display: "inline-flex", color: "#f0b429", flexShrink: 0 }}
+              >
+                <ShieldAlert {...iconProps} />
+              </span>
+            ) : verification?.verified ? (
+              <span
+                data-testid={`dm-verification-verified-${c.id}`}
+                title="Verified contact"
+                style={{ display: "inline-flex", color: "var(--c-accent)", flexShrink: 0 }}
+              >
+                <ShieldCheck {...iconProps} />
+              </span>
+            ) : null;
             return (
               <Row
                 key={c.id}
@@ -210,6 +248,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                 onClick={() => router.navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } })}
                 label={`@${c.user2_identifier}`}
                 badge={unread > 0 ? unread : null}
+                trailing={trailing}
               />
             );
           })}
@@ -336,9 +375,11 @@ interface RowProps {
   chevron?: RowChevron;
   label: string;
   badge?: number | null;
+  /** Optional trailing decoration (e.g. shield-check / shield-alert badges) rendered before the unread badge. */
+  trailing?: React.ReactNode;
 }
 
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge }) => {
+const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing }) => {
   return (
     <div
       data-active={isActive ? "true" : "false"}
@@ -410,6 +451,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
         >
           {label}
         </span>
+        {trailing}
         {badge != null && <UnreadBadge count={badge} />}
       </button>
     </div>

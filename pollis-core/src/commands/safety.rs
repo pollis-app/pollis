@@ -34,6 +34,12 @@ pub struct SafetyNumberInfo {
     pub status: String,
     /// Peer's current identity version (bumps on account reset).
     pub peer_identity_version: i64,
+    /// Both parties' raw `account_id_pub` keys (hex, lowercased) joined
+    /// with `:` in canonical order (sorted lexicographically) so the QR
+    /// payload is identical on both sides regardless of who opens whose
+    /// profile. Decoders compare this directly — no separate "is this
+    /// my key or yours" branch needed.
+    pub qr_payload: String,
 }
 
 /// SHA-512^N over (version || pubkey || stable_id), then 6 blocks of
@@ -119,6 +125,17 @@ pub async fn get_safety_number(
     let peer_fp = fingerprint(&peer_pub, peer_user_id.as_bytes());
     let safety_number = combined(&my_fp, &peer_fp);
 
+    // QR payload: both raw pubkeys (lowercase hex) joined with `:`, in a
+    // canonical (sorted) order so both sides scan the same string.
+    let my_hex = hex::encode(&my_pub);
+    let peer_hex = hex::encode(&peer_pub);
+    let (a, b) = if my_hex <= peer_hex {
+        (&my_hex, &peer_hex)
+    } else {
+        (&peer_hex, &my_hex)
+    };
+    let qr_payload = format!("pollis-key:v{FP_VERSION}:{a}:{b}");
+
     let guard = state.local_db.lock().await;
     let db = guard
         .as_ref()
@@ -144,7 +161,71 @@ pub async fn get_safety_number(
         safety_number,
         status,
         peer_identity_version: peer_version,
+        qr_payload,
     })
+}
+
+/// Snapshot of every contact for whom the local user has a TOFU pin row,
+/// keyed by peer user id. `verified=true` means they were explicitly marked
+/// verified by the user; `key_changed=true` means the pin exists but the
+/// current `account_id_pub` differs from what was pinned. Drives the
+/// shield-icon badges in DM/contact lists and the inline key-changed
+/// banner without N round-trips for an N-DM sidebar.
+#[derive(Debug, Serialize)]
+pub struct PeerVerificationEntry {
+    pub peer_user_id: String,
+    pub verified: bool,
+    pub key_changed: bool,
+}
+
+pub async fn list_peer_verifications(
+    state: &Arc<AppState>,
+) -> Result<Vec<PeerVerificationEntry>> {
+    // Read all pinned rows from the local DB first (cheap, single query),
+    // then cross-reference against the current `account_id_pub` snapshot in
+    // Turso so we can flag mismatches as `key_changed`.
+    let pinned: Vec<(String, Vec<u8>, i64)> = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let mut stmt = db.conn().prepare(
+            "SELECT peer_user_id, account_id_pub, verified FROM contact_verification",
+        )?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Vec<u8>>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
+            })?
+            .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+        rows
+    };
+
+    if pinned.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let conn = state.remote_db.conn().await?;
+    let mut out = Vec::with_capacity(pinned.len());
+    for (peer_id, pinned_pub, verified) in pinned {
+        let current_pub = match fetch_account_key(&conn, &peer_id).await {
+            Ok((p, _)) => Some(p),
+            // Peer no longer resolves (deleted, network blip) — keep them
+            // in the list with the local pin as the only truth. Don't mark
+            // them as `key_changed` since we don't actually know.
+            Err(_) => None,
+        };
+        let key_changed = matches!(current_pub, Some(p) if p != pinned_pub);
+        out.push(PeerVerificationEntry {
+            peer_user_id: peer_id,
+            verified: verified != 0,
+            key_changed,
+        });
+    }
+    Ok(out)
 }
 
 /// Explicitly mark a contact verified (or unverified). Pins the peer's
@@ -204,6 +285,7 @@ pub async fn check_and_pin_account_key(
         )
         .ok();
 
+    let mut key_did_change = false;
     match pinned {
         Some(p) if p == peer_pub => {}
         Some(_) => {
@@ -217,6 +299,7 @@ pub async fn check_and_pin_account_key(
                  WHERE peer_user_id = ?1",
                 rusqlite::params![peer_user_id, peer_pub, peer_version],
             )?;
+            key_did_change = true;
         }
         None => {
             db.conn().execute(
@@ -225,6 +308,26 @@ pub async fn check_and_pin_account_key(
                  VALUES (?1, ?2, ?3, 0)",
                 rusqlite::params![peer_user_id, peer_pub, peer_version],
             )?;
+        }
+    }
+    // Release the local-DB lock before touching the livekit channel — the
+    // sink call is sync but the mutex on `state.livekit` is async, and we
+    // never want to hold the local DB lock across an await.
+    drop(guard);
+
+    if key_did_change {
+        // Surface the change to the open frontend inline (Signal-style
+        // "safety number changed" banner). Advisory only — the policy is
+        // ADVISORY-with-acknowledge: sends still work, the banner lets the
+        // user re-verify out-of-band. Failing to emit is non-fatal; the
+        // pin is already updated locally and the next profile open will
+        // still report status="changed".
+        let sink = state.livekit.lock().await.channel.clone();
+        if let Some(ch) = sink {
+            let _ = ch.send(crate::realtime::RealtimeEvent::KeyChanged {
+                peer_user_id: peer_user_id.to_string(),
+                peer_identity_version: peer_version,
+            });
         }
     }
     Ok(())

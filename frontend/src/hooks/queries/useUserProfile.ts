@@ -48,6 +48,35 @@ export interface SafetyNumberInfo {
   safety_number: string;
   status: "unverified" | "verified" | "changed";
   peer_identity_version: number;
+  /// Both pubkeys joined as `pollis-key:v<n>:<a>:<b>`, sorted so both
+  /// sides scan the same string. Encoded directly into the QR code.
+  qr_payload: string;
+}
+
+export interface PeerVerificationEntry {
+  peer_user_id: string;
+  verified: boolean;
+  key_changed: boolean;
+}
+
+export const peerVerificationKeys = {
+  all: ["safety", "peer-verifications"] as const,
+};
+
+/// Snapshot of every TOFU-pinned peer plus their verified/key_changed
+/// flags. Single round-trip — used for shield-badge rendering across the
+/// sidebar / DM list and for the inline key-changed banner. Invalidated
+/// on the `KeyChanged` realtime event and after `set_contact_verified`.
+export function usePeerVerifications() {
+  const currentUser = useAppStore((state) => state.currentUser);
+  return useQuery({
+    queryKey: peerVerificationKeys.all,
+    queryFn: async (): Promise<PeerVerificationEntry[]> => {
+      return await invoke<PeerVerificationEntry[]>("list_peer_verifications");
+    },
+    enabled: !!currentUser,
+    staleTime: 1000 * 60,
+  });
 }
 
 export const safetyQueryKeys = {
@@ -78,6 +107,9 @@ export function useSetContactVerified(peerUserId: string | null | undefined) {
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: safetyQueryKeys.number(peerUserId ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: peerVerificationKeys.all,
       });
     },
   });
