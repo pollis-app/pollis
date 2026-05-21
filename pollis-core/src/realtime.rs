@@ -126,6 +126,16 @@ pub enum RealtimeEvent {
         room_id: String,
         present: bool,
     },
+    /// A peer's `account_id_pub` has changed since the last TOFU pin
+    /// (Signal-style "safety number changed"). Emitted by
+    /// `check_and_pin_account_key` whenever it observes a mismatch.
+    /// Advisory — sends are not blocked. The frontend uses this to
+    /// surface an inline, dismissable banner in any open conversation
+    /// with this peer so the user can re-verify out-of-band.
+    KeyChanged {
+        peer_user_id: String,
+        peer_identity_version: i64,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

@@ -56,6 +56,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::device_enrollment::list_security_events,
             crate::commands::safety::get_safety_number,
             crate::commands::safety::set_contact_verified,
+            crate::commands::safety::list_peer_verifications,
             crate::commands::user::get_user_profile,
             crate::commands::user::update_user_profile,
             crate::commands::user::search_user_by_username,

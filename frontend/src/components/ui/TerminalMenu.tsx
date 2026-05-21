@@ -14,6 +14,10 @@ export interface TerminalMenuItem {
   testId?: string;
   // Unread count badge — shown next to label when > 0
   badge?: number;
+  // Optional inline icon rendered between label and unread badge — used for
+  // glanceable status (verified shield, key-changed warning) without
+  // overloading `icon` (which always renders to the left of the label).
+  trailingIndicator?: React.ReactNode;
   // Secondary action rendered as a ⋮ button on the right of the row
   secondaryAction?: () => void;
   secondaryActionLabel?: string;
@@ -230,6 +234,11 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
                     </span>
                   )}
                   <span>{item.label}</span>
+                  {item.trailingIndicator && (
+                    <span className="flex-shrink-0 inline-flex items-center">
+                      {item.trailingIndicator}
+                    </span>
+                  )}
                   {item.badge != null && item.badge > 0 && (
                     <span
                       className="font-mono text-xs"

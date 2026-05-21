@@ -9,6 +9,8 @@ import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
 import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
 import { useTypingStore, typingRoomKey } from '../stores/typingStore';
 import { usePresenceStore } from '../stores/presenceStore';
+import { useKeyChangeStore } from '../stores/keyChangeStore';
+import { peerVerificationKeys } from './queries/useUserProfile';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -95,6 +97,11 @@ type RealtimeEvent =
     user_id: string;
     room_id: string;
     present: boolean;
+  }
+  | {
+    type: 'key_changed';
+    peer_user_id: string;
+    peer_identity_version: number;
   };
 
 export function useLiveKitRealtime() {
@@ -415,6 +422,24 @@ export function useLiveKitRealtime() {
         usePresenceStore
           .getState()
           .setPresent(event.user_id, event.room_id, event.present);
+        return;
+      }
+
+      if (event.type === 'key_changed') {
+        // Signal-style "safety number changed" — surface inline so the
+        // user re-verifies out-of-band. Advisory; sends are unaffected.
+        useKeyChangeStore
+          .getState()
+          .flagChanged(event.peer_user_id, event.peer_identity_version);
+        // Refresh the shield-badge query so DM/contact lists drop the
+        // verified badge for this peer immediately, and the open profile
+        // recomputes its "Changed — re-verify" state.
+        queryClientRef.current.invalidateQueries({
+          queryKey: peerVerificationKeys.all,
+        });
+        queryClientRef.current.invalidateQueries({
+          queryKey: ['safety', 'number', event.peer_user_id],
+        });
         return;
       }
 

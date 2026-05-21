@@ -7,6 +7,7 @@ import { useAppStore } from "../stores/appStore";
 import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "@tauri-apps/api/core";
 import { voiceSession } from "../voice";
+import { KeyChangeBanner } from "../components/Security/KeyChangeBanner";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
@@ -142,6 +143,7 @@ export const DMPage: React.FC = () => {
           </button>
         )}
       </div>
+      <KeyChangeBanner peerUserId={otherUserId} peerLabel={username ? `@${username}` : undefined} />
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
         <MainContent />
       </div>
