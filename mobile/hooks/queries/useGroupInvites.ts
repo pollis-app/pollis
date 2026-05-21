@@ -56,6 +56,15 @@ export function useAcceptGroupInvite() {
         throw new Error("No current user");
       }
       await invoke("accept_group_invite", { inviteId, userId: currentUser.id });
+      // The MLS welcome may have already landed in Turso (the inviter
+      // queued it when sending the invite). Pull it now so the new group
+      // appears in the user's sidebar immediately instead of waiting for
+      // the next ingest-on-focus.
+      try {
+        await invoke("poll_mls_welcomes", { userId: currentUser.id });
+      } catch (e) {
+        console.warn("[mls] poll_mls_welcomes after accept failed:", e);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({

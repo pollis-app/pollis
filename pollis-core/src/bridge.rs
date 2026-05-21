@@ -179,6 +179,11 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             let user_id: String = arg(&args, "userId")?;
             ok(auth::initialize_identity(&state()?, user_id).await?)
         }
+        "poll_mls_welcomes" => {
+            let user_id: String = arg(&args, "userId")?;
+            crate::commands::mls::poll_mls_welcomes(&state()?, user_id).await?;
+            ok(())
+        }
         "logout" => {
             let delete: bool = arg_opt(&args, "deleteData")?.unwrap_or(false);
             auth::logout(&state()?, delete).await?;

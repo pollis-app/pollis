@@ -75,6 +75,14 @@ export function useAcceptDMRequest() {
         dmChannelId,
         userId: currentUser.id,
       });
+      // The other side queued an MLS welcome for us when they opened
+      // the DM. Pull it now so the conversation appears as fully-keyed
+      // immediately instead of after the next ingest.
+      try {
+        await invoke("poll_mls_welcomes", { userId: currentUser.id });
+      } catch (e) {
+        console.warn("[mls] poll_mls_welcomes after dm accept failed:", e);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({
