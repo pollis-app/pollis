@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, TextInput, Pressable } from "react-native";
-import { useFocusEffect, useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Screen, Crumb, Avatar, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
@@ -66,6 +66,7 @@ function Msg({
   time,
   text,
   pending,
+  onPressAvatar,
 }: {
   av: string;
   amber?: boolean;
@@ -73,6 +74,7 @@ function Msg({
   time: string;
   text?: string;
   pending?: boolean;
+  onPressAvatar?: () => void;
 }) {
   return (
     <View
@@ -84,7 +86,9 @@ function Msg({
         opacity: pending ? 0.55 : 1,
       }}
     >
-      <Avatar label={av} variant={amber ? "amber" : "default"} />
+      <Pressable onPress={onPressAvatar} disabled={!onPressAvatar}>
+        <Avatar label={av} variant={amber ? "amber" : "default"} />
+      </Pressable>
       <View style={{ flex: 1 }}>
         <View style={{ flexDirection: "row", alignItems: "baseline", gap: 8 }}>
           <Text
@@ -125,6 +129,7 @@ function Msg({
 }
 
 export default function TextChat() {
+  const router = useRouter();
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
   const conversationId = params.id ?? null;
   const kind: ConversationKind | null =
@@ -249,6 +254,15 @@ export default function TextChat() {
                   time={timeLabel(m.created_at)}
                   text={m.content}
                   pending={m.pending}
+                  onPressAvatar={
+                    mine
+                      ? undefined
+                      : () =>
+                          router.push({
+                            pathname: "/user/[id]",
+                            params: { id: m.sender_id },
+                          })
+                  }
                 />
               );
             })}
