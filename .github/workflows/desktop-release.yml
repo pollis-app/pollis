@@ -294,6 +294,13 @@ jobs:
           echo "Stamping version ${VERSION} into tauri.conf.json"
           jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
 
+      # libva-dev: header-only build dep for webrtc-sys's VAAPI H.264
+      # encoder wrapper. `libva.so.2` / `libva-drm.so.2` are dlopened at
+      # runtime via lazy-load shims — the binary doesn't link them — so
+      # missing libva at the user's machine just makes the VAAPI factory
+      # report unsupported and falls back to OpenH264 software. With
+      # libva headers present at build time we get the VAAPI factory
+      # compiled in; Intel/AMD iGPU users then get HW H.264. See #293.
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -307,6 +314,7 @@ jobs:
             libasound2-dev \
             libpulse-dev \
             libpipewire-0.3-dev \
+            libva-dev \
             libdbus-1-dev \
             rpm \
             cmake \
