@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { invoke } from '@tauri-apps/api/core';
 
 import { notify } from '../utils/notify';
+import { useAppStore } from '../stores/appStore';
 import { voiceSession, type JoinedEvent, type LeftEvent } from './VoiceSessionManager';
 
 interface VoiceBridgeOptions {
@@ -78,6 +79,16 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
       notify('voice_self_leave');
       pendingLeaveSfx = null;
     }, 0);
+
+    // If this client initiated a 1:1 call and the callee never picked up
+    // (outgoingCall still set when we leave the matching room), notify the
+    // callee to stop ringing. Mirrors the decline path in AppShell.
+    const outgoing = useAppStore.getState().outgoingCall;
+    if (outgoing && event.channelId === `call-${outgoing.callId}`) {
+      const { callId, calleeId } = outgoing;
+      useAppStore.getState().setOutgoingCall(null);
+      invoke('cancel_call', { otherUserId: calleeId, callId }).catch(() => {});
+    }
 
     // Optimistically remove ourselves from the cached observer list so the UI
     // drops us immediately instead of waiting for the LiveKit RoomService

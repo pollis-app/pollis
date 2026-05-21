@@ -16,6 +16,7 @@ export const DMPage: React.FC = () => {
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
   const currentUser = useAppStore((s) => s.currentUser);
+  const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
 
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
   const [memberCount, setMemberCount] = React.useState<number>(0);
@@ -79,6 +80,10 @@ export const DMPage: React.FC = () => {
         callerId: currentUser.id,
         callerUsername: currentUser.username ?? currentUser.id,
       });
+      // Record the outgoing call so the Call page can emit `cancel_call`
+      // if the caller hangs up before the callee answers. Cleared once
+      // the callee joins the LiveKit room or once cancel is sent.
+      setOutgoingCall({ callId: result.call_id, calleeId: otherUserId });
       voiceSession.setIntent({
         channelId: result.room_name,
         groupId: null,

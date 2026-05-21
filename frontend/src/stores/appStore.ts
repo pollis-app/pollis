@@ -134,6 +134,16 @@ interface AppStore extends AppState {
       | { callId: string; roomName: string; callerId: string; callerUsername: string }
       | null,
   ) => void;
+  // Outgoing 1:1 call this device initiated and is waiting on. Set in
+  // `DM.tsx` when `start_call` returns, cleared once the callee actually
+  // joins the LiveKit room (call answered) or once the caller hangs up
+  // before pickup (in which case the Call page emits `cancel_call` to stop
+  // the callee's ring). Holds just enough to address the cancel signal.
+  outgoingCall: {
+    callId: string;
+    calleeId: string;
+  } | null;
+  setOutgoingCall: (call: { callId: string; calleeId: string } | null) => void;
   logout: () => void;
 }
 
@@ -286,6 +296,9 @@ export const useAppStore = create<AppStore>((set) => ({
   incomingCall: null,
   setIncomingCall: (call) => set({ incomingCall: call }),
 
+  outgoingCall: null,
+  setOutgoingCall: (call) => set({ outgoingCall: call }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -319,6 +332,7 @@ export const useAppStore = create<AppStore>((set) => ({
     pendingEnrollmentApproval: null,
     pendingDeleteChannelId: null,
     incomingCall: null,
+    outgoingCall: null,
   }),
 }));
 
