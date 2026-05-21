@@ -260,6 +260,54 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             let user_id: String = arg(&args, "userId")?;
             ok(messages::list_channel_previews(user_id, &state()?).await?)
         }
+        "send_message" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let sender_id: String = arg(&args, "senderId")?;
+            let content: String = arg(&args, "content")?;
+            let reply_to_id: Option<String> = arg_opt(&args, "replyToId")?;
+            let sender_username: Option<String> = arg_opt(&args, "senderUsername")?;
+            ok(messages::send_message(
+                conversation_id,
+                sender_id,
+                content,
+                reply_to_id,
+                sender_username,
+                &state()?,
+            )
+            .await?)
+        }
+        "get_channel_messages" => {
+            let user_id: String = arg(&args, "userId")?;
+            let channel_id: String = arg(&args, "channelId")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            let cursor: Option<messages::MessageCursor> = arg_opt(&args, "cursor")?;
+            ok(messages::get_channel_messages(
+                user_id, channel_id, limit, cursor, &state()?,
+            )
+            .await?)
+        }
+        "get_dm_messages" => {
+            let user_id: String = arg(&args, "userId")?;
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            let cursor: Option<messages::MessageCursor> = arg_opt(&args, "cursor")?;
+            ok(messages::get_dm_messages(
+                user_id, dm_channel_id, limit, cursor, &state()?,
+            )
+            .await?)
+        }
+        "ingest_channel_envelopes" => {
+            let user_id: String = arg(&args, "userId")?;
+            let channel_id: String = arg(&args, "channelId")?;
+            messages::ingest_channel_envelopes(user_id, channel_id, &state()?).await?;
+            ok(())
+        }
+        "ingest_dm_envelopes" => {
+            let user_id: String = arg(&args, "userId")?;
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            messages::ingest_dm_envelopes(user_id, dm_channel_id, &state()?).await?;
+            ok(())
+        }
 
         // ----- dm -----
         "list_dm_channels" => {
