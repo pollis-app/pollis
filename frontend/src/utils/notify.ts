@@ -49,7 +49,7 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   dm_request:        { sound: 'ping',  osNotif: true,               alert: true                   },
   group_invite:      { sound: 'ping',  osNotif: true                                              },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
-  incoming_call:     {                  osNotif: true,               alert: true, honorsRingtonePref: true },
+  incoming_call:     {                  osNotif: true,                            honorsRingtonePref: true },
 };
 
 export type NotifyPayload = {
