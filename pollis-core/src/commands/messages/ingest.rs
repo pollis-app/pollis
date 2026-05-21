@@ -296,6 +296,29 @@ pub async fn ingest_dm_envelopes_inner(
         eprintln!("[ingest] process_pending_commits for DM {dm_channel_id}: {e}");
     }
 
+    // Re-verify each peer's `account_id_pub` against the local TOFU pin on
+    // every ingest. If a server-side swap or peer account reset has changed
+    // the key, this emits a `KeyChanged` realtime event so the conversation
+    // gets an inline banner (Signal-style) the moment we observe the change,
+    // not only when the user opens the peer's profile.
+    let peer_ids: Vec<String> = {
+        let mut out = Vec::new();
+        let mut rows = conn.query(
+            "SELECT user_id FROM dm_channel_member \
+             WHERE dm_channel_id = ?1 AND user_id <> ?2",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
+        ).await?;
+        while let Some(row) = rows.next().await? {
+            out.push(row.get::<String>(0)?);
+        }
+        out
+    };
+    for peer_id in &peer_ids {
+        if let Err(e) = crate::commands::safety::check_and_pin_account_key(state, peer_id).await {
+            eprintln!("[ingest] check_and_pin_account_key for {peer_id}: {e}");
+        }
+    }
+
     // Watermark-filtered envelope read — see ingest_channel_envelopes_inner.
     let envelopes: Vec<(String, String, String, Option<String>, Option<String>, String, String)> = {
         let mut out = Vec::new();

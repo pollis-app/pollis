@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, MessageCircle, Ban } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
@@ -171,12 +172,42 @@ export const UserProfilePage: React.FC = () => {
                           : "Not verified"}
                     </span>
                   </div>
-                  <code
-                    className="font-mono text-sm leading-relaxed break-all"
-                    style={{ color: "var(--c-text)" }}
-                  >
-                    {safety.safety_number}
-                  </code>
+                  <div className="flex items-start gap-4">
+                    <code
+                      data-testid="safety-number-digits"
+                      className="font-mono text-sm leading-relaxed break-all flex-1"
+                      style={{ color: "var(--c-text)" }}
+                    >
+                      {safety.safety_number}
+                    </code>
+                    {/* QR rendering disabled — no in-app scanner exists yet.
+                        Showing a QR with no way to scan it (no camera capture
+                        / decoder) is misleading UX. Re-enable once we have a
+                        Scan button + decode flow. */}
+                    {/*
+                    <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                      <div
+                        data-testid="safety-number-qr"
+                        style={{ background: "var(--c-bg)", padding: 4, borderRadius: 4 }}
+                      >
+                        <QRCodeSVG
+                          value={safety.qr_payload}
+                          size={104}
+                          bgColor="var(--c-bg)"
+                          fgColor="var(--c-accent)"
+                          includeMargin={false}
+                          marginSize={0}
+                        />
+                      </div>
+                      <span
+                        className="font-mono text-2xs"
+                        style={{ color: "var(--c-text-muted)" }}
+                      >
+                        Scan to verify
+                      </span>
+                    </div>
+                    */}
+                  </div>
                   {safety.status === "changed" && (
                     <span
                       className="font-mono text-xs"

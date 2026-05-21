@@ -82,6 +82,29 @@ pub async fn create_dm_channel(
         }
     }
 
+    // 2-person DM dedupe: if an existing channel already has exactly
+    // {creator, target} as its membership (order-independent, regardless
+    // of accepted_at state), return it instead of creating a duplicate.
+    // Multi-party DMs (3+ members) skip dedupe and always create fresh.
+    let others: Vec<&String> = member_ids.iter().filter(|id| *id != &creator_id).collect();
+    if others.len() == 1 {
+        let target_id = others[0].clone();
+        let mut rows = conn.query(
+            "SELECT dm_channel_id
+             FROM dm_channel_member
+             GROUP BY dm_channel_id
+             HAVING COUNT(*) = 2
+                AND SUM(CASE WHEN user_id = ?1 THEN 1 ELSE 0 END) = 1
+                AND SUM(CASE WHEN user_id = ?2 THEN 1 ELSE 0 END) = 1
+             LIMIT 1",
+            libsql::params![creator_id.clone(), target_id],
+        ).await?;
+        if let Some(row) = rows.next().await? {
+            let existing_id: String = row.get(0)?;
+            return get_dm_channel(existing_id, state).await;
+        }
+    }
+
     let id = Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
 
@@ -829,6 +852,55 @@ mod tests {
             |row| row.get(0),
         ).unwrap();
         assert_eq!(count, 3);
+    }
+
+    // ── 2-person DM dedupe lookup ─────────────────────────────────────────
+
+    fn find_two_person_dm(conn: &Connection, a: &str, b: &str) -> Option<String> {
+        conn.query_row(
+            "SELECT dm_channel_id
+             FROM dm_channel_member
+             GROUP BY dm_channel_id
+             HAVING COUNT(*) = 2
+                AND SUM(CASE WHEN user_id = ?1 THEN 1 ELSE 0 END) = 1
+                AND SUM(CASE WHEN user_id = ?2 THEN 1 ELSE 0 END) = 1
+             LIMIT 1",
+            rusqlite::params![a, b],
+            |row| row.get::<_, String>(0),
+        ).ok()
+    }
+
+    #[test]
+    fn create_dm_channel_returns_existing_for_same_pair() {
+        let conn = db();
+        setup(&conn);
+        create_dm(&conn, "dm1", "alice", &["alice", "bob"]);
+
+        // Lookup with creator/target in either order must find the same channel.
+        assert_eq!(find_two_person_dm(&conn, "alice", "bob").as_deref(), Some("dm1"));
+        assert_eq!(find_two_person_dm(&conn, "bob", "alice").as_deref(), Some("dm1"));
+
+        // A 3-person channel involving the same pair must NOT match.
+        create_dm(&conn, "dm2", "alice", &["alice", "bob", "carol"]);
+        assert_eq!(find_two_person_dm(&conn, "alice", "bob").as_deref(), Some("dm1"),
+            "2-person dm1 still matches; the 3-person dm2 must not");
+
+        // A different 2-person pair must not collide.
+        create_dm(&conn, "dm3", "alice", &["alice", "carol"]);
+        assert_eq!(find_two_person_dm(&conn, "alice", "carol").as_deref(), Some("dm3"));
+        assert_eq!(find_two_person_dm(&conn, "bob", "carol"), None);
+    }
+
+    #[test]
+    fn dedupe_finds_channel_created_by_other_user() {
+        // Duplicate-prevention case: bob created the pending request first;
+        // when alice triggers create_dm_channel(alice, [bob]) the dedupe
+        // lookup must find bob's existing channel regardless of who created it.
+        let conn = db();
+        setup(&conn);
+        create_dm(&conn, "dm1", "bob", &["bob", "alice"]);
+
+        assert_eq!(find_two_person_dm(&conn, "alice", "bob").as_deref(), Some("dm1"));
     }
 
     #[test]

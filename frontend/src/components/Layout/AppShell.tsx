@@ -56,6 +56,8 @@ export const AppShell: React.FC = () => {
     isLocalSpeaking,
     incomingCall,
     setIncomingCall,
+    viewingScreenShareTrackKey,
+    setViewingScreenShareTrackKey,
   } = useAppStore();
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -268,6 +270,12 @@ export const AppShell: React.FC = () => {
   useGlobalShortcut(
     "nav.back",
     () => {
+      // Exit fullscreen screen-share viewer first if active, so escape
+      // backs out of the viewer before navigating history.
+      if (viewingScreenShareTrackKey !== null) {
+        setViewingScreenShareTrackKey(null);
+        return;
+      }
       const channelMatch = pathname.match(
         /^\/groups\/([^/]+)\/channels\/([^/]+)/,
       );

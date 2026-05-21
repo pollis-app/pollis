@@ -61,9 +61,14 @@ interface AppStore extends AppState {
   voiceParticipants: VoiceParticipant[];
   voiceActiveSpeakerIds: string[];
   voiceIsMuted: boolean;
+  // Lifecycle phase of the local voice session — mirrored from
+  // `VoiceSessionManager`. Used to show a subtle "connecting…" indicator
+  // on the local user's own tile while LiveKit is connecting.
+  voicePhase: "idle" | "joining" | "joined" | "leaving";
   setVoiceParticipants: (participants: VoiceParticipant[]) => void;
   setVoiceActiveSpeakerIds: (ids: string[]) => void;
   setVoiceIsMuted: (muted: boolean) => void;
+  setVoicePhase: (phase: "idle" | "joining" | "joined" | "leaving") => void;
   /** True if the local user is broadcasting their screen. */
   screenShareLocalActive: boolean;
   setScreenShareLocalActive: (v: boolean) => void;
@@ -134,6 +139,16 @@ interface AppStore extends AppState {
       | { callId: string; roomName: string; callerId: string; callerUsername: string }
       | null,
   ) => void;
+  // Outgoing 1:1 call this device initiated and is waiting on. Set in
+  // `DM.tsx` when `start_call` returns, cleared once the callee actually
+  // joins the LiveKit room (call answered) or once the caller hangs up
+  // before pickup (in which case the Call page emits `cancel_call` to stop
+  // the callee's ring). Holds just enough to address the cancel signal.
+  outgoingCall: {
+    callId: string;
+    calleeId: string;
+  } | null;
+  setOutgoingCall: (call: { callId: string; calleeId: string } | null) => void;
   logout: () => void;
 }
 
@@ -162,6 +177,7 @@ export const useAppStore = create<AppStore>((set) => ({
   voiceParticipants: [],
   voiceActiveSpeakerIds: [],
   voiceIsMuted: false,
+  voicePhase: "idle",
   screenShareLocalActive: false,
   screenShareLocalDimensions: null,
   screenShareMode: "idle",
@@ -248,6 +264,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setVoiceParticipants: (participants) => set({ voiceParticipants: participants }),
   setVoiceActiveSpeakerIds: (ids) => set({ voiceActiveSpeakerIds: ids }),
   setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
+  setVoicePhase: (phase) => set({ voicePhase: phase }),
 
   setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
   setScreenShareLocalDimensions: (dims) => set({ screenShareLocalDimensions: dims }),
@@ -286,6 +303,9 @@ export const useAppStore = create<AppStore>((set) => ({
   incomingCall: null,
   setIncomingCall: (call) => set({ incomingCall: call }),
 
+  outgoingCall: null,
+  setOutgoingCall: (call) => set({ outgoingCall: call }),
+
   logout: () => set({
     currentUser: null,
     username: null,
@@ -310,6 +330,7 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceParticipants: [],
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
+    voicePhase: "idle",
     screenShareLocalActive: false,
     screenShareLocalDimensions: null,
     screenShareMode: "idle",
@@ -319,6 +340,7 @@ export const useAppStore = create<AppStore>((set) => ({
     pendingEnrollmentApproval: null,
     pendingDeleteChannelId: null,
     incomingCall: null,
+    outgoingCall: null,
   }),
 }));
 

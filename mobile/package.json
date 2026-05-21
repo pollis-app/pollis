@@ -6,7 +6,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@expo-google-fonts/geist": "^0.4.1",
@@ -36,7 +37,8 @@
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
     "react-native-svg": "15.15.4",
-    "uniffi-bindgen-react-native": "0.31.0-2"
+    "uniffi-bindgen-react-native": "0.31.0-2",
+    "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@types/react": "~19.2.14",

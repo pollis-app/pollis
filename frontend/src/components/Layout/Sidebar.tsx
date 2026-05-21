@@ -11,11 +11,15 @@ import {
   Palette,
   User as UserIcon,
   ShieldCheck,
+  ShieldAlert,
   Keyboard,
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
+import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
+import { usePeerVerifications } from "../../hooks/queries/useUserProfile";
 import { useAppStore } from "../../stores/appStore";
+import { usePresenceStatus, type PresenceStatus } from "../../stores/presenceStore";
 import { shortcutLabel } from "../../utils/platform";
 
 const SIDEBAR_WIDTH = 220;
@@ -46,7 +50,33 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
+  const { data: peerVerifications = [] } = usePeerVerifications();
+  // peerUserId → { verified, key_changed }. Used to glance-render the
+  // shield-check (verified) / shield-alert (changed) icons next to each
+  // DM row without an N+1 round-trip.
+  const verificationByPeer = useMemo(() => {
+    const map = new Map<string, { verified: boolean; key_changed: boolean }>();
+    for (const entry of peerVerifications) {
+      map.set(entry.peer_user_id, {
+        verified: entry.verified,
+        key_changed: entry.key_changed,
+      });
+    }
+    return map;
+  }, [peerVerifications]);
   const unreadCounts = useAppStore((s) => s.unreadCounts);
+
+  // Stable list of voice channel ids across all groups; powers the live
+  // "users connected" badge on voice channel rows. Realtime voice events
+  // invalidate the `voice-room-counts` query so counts refresh automatically.
+  const voiceChannelIds = useMemo(
+    () =>
+      groupsWithChannels.flatMap((g) =>
+        g.channels.filter((ch) => ch.channel_type === "voice").map((ch) => ch.id)
+      ),
+    [groupsWithChannels]
+  );
+  const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
 
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
@@ -162,7 +192,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                   group.channels.map((ch) => {
                     const isVoice = ch.channel_type === "voice";
                     const unread = unreadCounts[ch.id] ?? 0;
+                    const voiceCount = isVoice ? voiceCounts[ch.id] ?? 0 : 0;
                     const isActive = isVoice ? activeVoiceId === ch.id : activeChannelId === ch.id;
+                    const badge = isVoice
+                      ? voiceCount > 0
+                        ? voiceCount
+                        : null
+                      : unread > 0
+                        ? unread
+                        : null;
                     return (
                       <Row
                         key={ch.id}
@@ -181,7 +219,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                         }
                         leading={isVoice ? <Volume2 {...iconProps} /> : <Hash {...iconProps} />}
                         label={ch.name}
-                        badge={unread > 0 ? unread : null}
+                        badge={badge}
                       />
                     );
                   })}
@@ -202,14 +240,38 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
           {dmConversations.map((c) => {
             const unread = unreadCounts[c.id] ?? 0;
+            const verification = c.user2_id ? verificationByPeer.get(c.user2_id) : undefined;
+            // Verified badge wins; a `key_changed` mismatch overrides
+            // verified (the contact_verification row's `verified` is
+            // cleared by check_and_pin on mismatch, so this is mostly a
+            // belt-and-braces guard against a stale local cache).
+            const trailing = verification?.key_changed ? (
+              <span
+                data-testid={`dm-verification-changed-${c.id}`}
+                title="Identity key changed — re-verify"
+                style={{ display: "inline-flex", color: "#f0b429", flexShrink: 0 }}
+              >
+                <ShieldAlert {...iconProps} />
+              </span>
+            ) : verification?.verified ? (
+              <span
+                data-testid={`dm-verification-verified-${c.id}`}
+                title="Verified contact"
+                style={{ display: "inline-flex", color: "var(--c-accent)", flexShrink: 0 }}
+              >
+                <ShieldCheck {...iconProps} />
+              </span>
+            ) : null;
             return (
               <Row
                 key={c.id}
                 indent={1}
                 isActive={activeDmId === c.id}
                 onClick={() => router.navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } })}
+                leading={<PresenceDot userId={c.user2_id ?? null} />}
                 label={`@${c.user2_identifier}`}
                 badge={unread > 0 ? unread : null}
+                trailing={trailing}
               />
             );
           })}
@@ -298,7 +360,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       display: "flex",
       alignItems: "center",
       gap: rem(6),
-      padding: `${rem(8)} ${rem(10)} ${rem(9)}`,
+      padding: `${rem(8)} ${rem(10)} ${rem(8)}`,
       marginTop: bordered ? rem(4) : 0,
       border: "none",
       borderTop: bordered ? "1px solid var(--c-border)" : "none",
@@ -336,9 +398,11 @@ interface RowProps {
   chevron?: RowChevron;
   label: string;
   badge?: number | null;
+  /** Optional trailing decoration (e.g. shield-check / shield-alert badges) rendered before the unread badge. */
+  trailing?: React.ReactNode;
 }
 
-const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge }) => {
+const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, label, badge, trailing }) => {
   return (
     <div
       data-active={isActive ? "true" : "false"}
@@ -410,6 +474,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
         >
           {label}
         </span>
+        {trailing}
         {badge != null && <UnreadBadge count={badge} />}
       </button>
     </div>
@@ -431,3 +496,32 @@ const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, mute
     {count > 99 ? "99+" : count}
   </span>
 );
+
+// Standalone presence dot mirroring the styling on Avatar's overlay dot:
+// online uses the accent color, offline uses the bg color ringed in
+// accent-muted. Used in the sidebar DM list where there's no avatar behind
+// it to anchor the dot.
+const PRESENCE_COLORS: Record<PresenceStatus, string> = {
+  online: "var(--c-accent)",
+  offline: "var(--c-bg)",
+};
+
+const PresenceDot: React.FC<{ userId: string | null }> = ({ userId }) => {
+  const status = usePresenceStatus(userId);
+  return (
+    <span
+      data-testid={userId ? `sidebar-presence-${userId}` : undefined}
+      aria-label={`Presence: ${status}`}
+      style={{
+        display: "inline-block",
+        width: rem(8),
+        height: rem(8),
+        borderRadius: "50%",
+        background: PRESENCE_COLORS[status],
+        border: status === "offline" ? "1px solid var(--c-accent-muted)" : "1px solid var(--c-surface, var(--c-bg))",
+        boxSizing: "content-box",
+        flexShrink: 0,
+      }}
+    />
+  );
+};

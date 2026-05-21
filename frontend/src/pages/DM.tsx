@@ -1,12 +1,16 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { Phone } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
+import type { PendingDmRequest } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
+import { useDMRequests } from "../hooks/queries";
 import { useAppStore } from "../stores/appStore";
 import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "@tauri-apps/api/core";
 import { voiceSession } from "../voice";
+import { KeyChangeBanner } from "../components/Security/KeyChangeBanner";
+import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
@@ -16,6 +20,7 @@ export const DMPage: React.FC = () => {
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
   const currentUser = useAppStore((s) => s.currentUser);
+  const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
 
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
   const [memberCount, setMemberCount] = React.useState<number>(0);
@@ -53,9 +58,19 @@ export const DMPage: React.FC = () => {
   }, [currentUser, conversationId]);
 
   const { data: conversations = [] } = useDMConversations();
+  const { data: dmRequests = [] } = useDMRequests();
   const conv = conversations.find((c) => c.id === conversationId);
-
-  const username = conv?.user2_identifier ?? "";
+  // The DM is pending for the current user when it appears in the
+  // requests list (their own `accepted_at` is NULL). Until they accept
+  // (or block), the chat input is replaced with an accept/block bar.
+  const pendingRequest = dmRequests.find((r) => r.id === conversationId) ?? null;
+  const pendingSender = pendingRequest
+    ? pendingRequest.members.find((m) => m.user_id !== currentUser?.id)
+    : null;
+  const username = conv?.user2_identifier
+    ?? pendingSender?.username
+    ?? pendingSender?.user_id
+    ?? "";
   const isOneOnOne = memberCount === 2 && otherUserId != null;
   // Profile breadcrumb is enabled for 1:1 DMs only — group DMs (3+ members)
   // would need a picker.
@@ -69,6 +84,35 @@ export const DMPage: React.FC = () => {
   // is online.
   const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
 
+  // Pre-warm DNS / TLS / connection pool to LiveKit as soon as a callable
+  // DM is open. The token cache won't apply (the real `call-<id>` room
+  // name isn't known until `start_call` returns) but the network plumbing
+  // does, which is the dominant cost on a cold join.
+  useEffect(() => {
+    if (canCall && otherUserId) {
+      warmVoiceChannel(`call-prewarm-${otherUserId}`);
+    }
+  }, [canCall, otherUserId]);
+
+  // When the current user has not yet accepted this DM, the conversation
+  // surfaces in `dmRequests` (filtered server-side by accepted_at IS NULL).
+  // We hand the sender's identity to MainContent so it can render an
+  // accept/block bar in place of the chat input.
+  const pendingDmRequest: PendingDmRequest | null = useMemo(() => {
+    if (!pendingRequest || !pendingSender) {
+      return null;
+    }
+    return {
+      senderUserId: pendingSender.user_id,
+      senderName: pendingSender.username
+        ? `@${pendingSender.username}`
+        : pendingSender.user_id,
+      onBlocked: () => {
+        navigate({ to: "/dms/requests" });
+      },
+    };
+  }, [pendingRequest, pendingSender, navigate]);
+
   const startCall = async () => {
     if (!currentUser || !otherUserId) {
       return;
@@ -79,6 +123,10 @@ export const DMPage: React.FC = () => {
         callerId: currentUser.id,
         callerUsername: currentUser.username ?? currentUser.id,
       });
+      // Record the outgoing call so the Call page can emit `cancel_call`
+      // if the caller hangs up before the callee answers. Cleared once
+      // the callee joins the LiveKit room or once cancel is sent.
+      setOutgoingCall({ callId: result.call_id, calleeId: otherUserId });
       voiceSession.setIntent({
         channelId: result.room_name,
         groupId: null,
@@ -116,7 +164,7 @@ export const DMPage: React.FC = () => {
             >
               @{username}
             </button>
-          ) : conv ? (
+          ) : conv || pendingRequest ? (
             `@${username}`
           ) : (
             "Direct Message"
@@ -126,6 +174,7 @@ export const DMPage: React.FC = () => {
           <button
             data-testid="dm-header-call"
             onClick={startCall}
+            onMouseEnter={() => otherUserId && warmVoiceChannel(`call-prewarm-${otherUserId}`)}
             aria-label={`Call @${username}`}
             className="icon-btn-sm flex-shrink-0"
             style={{
@@ -137,8 +186,9 @@ export const DMPage: React.FC = () => {
           </button>
         )}
       </div>
+      <KeyChangeBanner peerUserId={otherUserId} peerLabel={username ? `@${username}` : undefined} />
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">
-        <MainContent />
+        <MainContent pendingDmRequest={pendingDmRequest} />
       </div>
     </div>
   );
