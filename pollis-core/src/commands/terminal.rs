@@ -268,16 +268,19 @@ pub async fn terminal_ack(
     Ok(())
 }
 
-/// Forward user keystrokes (UTF-8 bytes) to the shell. Unknown ids are a
-/// no-op — the PTY may have exited between a keypress and this call.
+/// Forward user keystrokes (UTF-8 bytes) to the shell. Borrows the id +
+/// payload so the Tauri shim can hand straight through the IPC raw body
+/// (no clone, no JSON number-array per keystroke — see issue #282 for the
+/// matching output path). Unknown ids are a no-op — the PTY may have
+/// exited between a keypress and this call.
 pub async fn terminal_write(
-    terminal_id: String,
-    data: Vec<u8>,
+    terminal_id: &str,
+    data: &[u8],
     state: &Arc<AppState>,
 ) -> Result<()> {
     let mut map = state.terminals.lock().await;
-    if let Some(session) = map.get_mut(&terminal_id) {
-        session.writer.write_all(&data).map_err(map_pty)?;
+    if let Some(session) = map.get_mut(terminal_id) {
+        session.writer.write_all(data).map_err(map_pty)?;
         let _ = session.writer.flush();
     }
     Ok(())
