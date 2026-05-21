@@ -1,19 +1,24 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, ScrollView, TextInput, Pressable } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { useFocusEffect, useLocalSearchParams } from "expo-router";
 import { Screen, Crumb, Avatar, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
-import { useMessages, type Message } from "../../hooks/queries";
+import {
+  useMessages,
+  useSendMessage,
+  useIngestConversation,
+  type ConversationKind,
+  type Message,
+} from "../../hooks/queries";
 import { useAppStore } from "../../stores/appStore";
 
-function dayKey(ts: number | string): string {
-  const d = new Date(typeof ts === "number" ? ts : ts);
-  return d.toDateString();
+function dayKey(ts: number): string {
+  return new Date(ts).toDateString();
 }
 
-function dayLabel(ts: number | string): string {
-  const d = new Date(typeof ts === "number" ? ts : ts);
+function dayLabel(ts: number): string {
+  const d = new Date(ts);
   const today = new Date();
   if (d.toDateString() === today.toDateString()) {
     return "TODAY";
@@ -28,9 +33,11 @@ function dayLabel(ts: number | string): string {
     .toUpperCase();
 }
 
-function timeLabel(ts: number | string): string {
-  const d = new Date(typeof ts === "number" ? ts : ts);
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+function timeLabel(ts: number): string {
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function Day({ label }: { label: string }) {
@@ -58,12 +65,14 @@ function Msg({
   name,
   time,
   text,
+  pending,
 }: {
   av: string;
   amber?: boolean;
   name: string;
   time: string;
   text?: string;
+  pending?: boolean;
 }) {
   return (
     <View
@@ -72,6 +81,7 @@ function Msg({
         gap: 12,
         paddingHorizontal: 18,
         paddingVertical: 8,
+        opacity: pending ? 0.55 : 1,
       }}
     >
       <Avatar label={av} variant={amber ? "amber" : "default"} />
@@ -93,7 +103,7 @@ function Msg({
               color: semantic.mute,
             }}
           >
-            {time}
+            {pending ? "sending…" : time}
           </Text>
         </View>
         {text ? (
@@ -115,13 +125,52 @@ function Msg({
 }
 
 export default function TextChat() {
-  const { id } = useLocalSearchParams<{ id: string }>();
-  const conversationId = id ?? null;
-  const [draft, setDraft] = useState("");
-  const currentUser = useAppStore((s) => s.currentUser);
-  const { data: messages = [], isLoading, isError } = useMessages(conversationId);
+  const params = useLocalSearchParams<{ id?: string; kind?: string }>();
+  const conversationId = params.id ?? null;
+  const kind: ConversationKind | null =
+    params.kind === "channel" || params.kind === "dm" ? params.kind : null;
 
-  // Group by day boundary so we render `<Day>` headers between blocks.
+  const [draft, setDraft] = useState("");
+  const scrollRef = useRef<ScrollView>(null);
+  const currentUser = useAppStore((s) => s.currentUser);
+
+  const { data, isLoading, isError } = useMessages(conversationId, kind);
+  const messages = data?.messages ?? [];
+  const sendMessage = useSendMessage(conversationId, kind);
+  const ingest = useIngestConversation();
+
+  // Trigger ingest on screen focus — covers the "returning to a chat after
+  // the app was backgrounded" case where the periodic refetch hasn't fired
+  // yet. The query invalidation inside `useIngestConversation` refreshes
+  // the visible list once new envelopes have been decrypted.
+  useFocusEffect(
+    useCallback(() => {
+      if (conversationId && kind) {
+        void ingest(conversationId, kind);
+      }
+    }, [conversationId, kind, ingest]),
+  );
+
+  // Auto-scroll to bottom whenever the message list grows (new arrival or
+  // optimistic send).
+  useEffect(() => {
+    if (messages.length === 0) {
+      return;
+    }
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    });
+  }, [messages.length]);
+
+  const onSend = () => {
+    const text = draft.trim();
+    if (!text || sendMessage.isPending) {
+      return;
+    }
+    setDraft("");
+    sendMessage.mutate({ content: text });
+  };
+
   const sections = useMemo(() => {
     const out: { label: string; messages: Message[] }[] = [];
     let lastKey = "";
@@ -136,16 +185,17 @@ export default function TextChat() {
     return out;
   }, [messages]);
 
+  const ctxLabel = kind === "dm" ? "DIRECT" : "CHANNEL";
+
   return (
     <Screen>
-      <Crumb
-        segs={[{ label: "CHAT", leaf: true }]}
-      />
+      <Crumb segs={[{ label: ctxLabel, leaf: true }]} />
       <ScrollView
+        ref={scrollRef}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingVertical: 4 }}
       >
-        {isLoading ? (
+        {isLoading && messages.length === 0 ? (
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
@@ -198,15 +248,30 @@ export default function TextChat() {
                   name={name}
                   time={timeLabel(m.created_at)}
                   text={m.content}
+                  pending={m.pending}
                 />
               );
             })}
           </View>
         ))}
+        {sendMessage.isError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.danger,
+              paddingHorizontal: 18,
+              paddingTop: 8,
+              paddingBottom: 4,
+            }}
+          >
+            {(sendMessage.error as Error).message || "Couldn't send message."}
+          </Text>
+        ) : null}
       </ScrollView>
 
       <Ctx
-        cr="CHAT"
+        cr={ctxLabel}
         name={
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Icon.hash color={semantic.ink} />
@@ -257,6 +322,9 @@ export default function TextChat() {
           onChangeText={setDraft}
           placeholder="Type a message…"
           placeholderTextColor={semantic.mute}
+          onSubmitEditing={onSend}
+          returnKeyType="send"
+          editable={!!kind && !!conversationId}
           style={{
             flex: 1,
             borderWidth: 1,
@@ -271,7 +339,8 @@ export default function TextChat() {
           }}
         />
         <Pressable
-          onPress={() => setDraft("")}
+          onPress={onSend}
+          disabled={!draft.trim() || sendMessage.isPending}
           style={{
             width: 38,
             height: 38,
@@ -279,6 +348,7 @@ export default function TextChat() {
             justifyContent: "center",
             backgroundColor: semantic.accent,
             borderRadius: r.sm,
+            opacity: !draft.trim() || sendMessage.isPending ? 0.4 : 1,
           }}
         >
           <Icon.send color="#0a0907" />

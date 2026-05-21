@@ -73,7 +73,10 @@ export default function Direct() {
               minHeight={64}
               onPress={() => {
                 setSelectedConversationId(d.id);
-                router.push(`/chat/${d.id}`);
+                router.push({
+                  pathname: "/chat/[id]",
+                  params: { id: d.id, kind: "dm" },
+                });
               }}
               glyph={<Avatar label={label} />}
               name={

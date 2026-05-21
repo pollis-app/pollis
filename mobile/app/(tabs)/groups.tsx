@@ -92,7 +92,10 @@ export default function Groups() {
                 onPress={() => {
                   setSelectedGroupId(g.id);
                   setSelectedChannelId(c.id);
-                  router.push(`/chat/${c.id}`);
+                  router.push({
+                    pathname: "/chat/[id]",
+                    params: { id: c.id, kind: "channel" },
+                  });
                 }}
               />
             ))}
