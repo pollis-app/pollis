@@ -73,20 +73,10 @@ export const VoiceMemberTile: React.FC<Props> = ({
   // hook has a key, so the hook returns inert values for non-streamers.
   const stats = useScreenShareStats(streamTrackKey ?? null);
 
-  const borderColor = isSpeaking
-    ? "var(--c-accent)"
-    : focused
-    ? "var(--c-border-active)"
-    : "var(--c-border)";
-
-  // Speaking = solid accent ring/glow (not a pulse — pulsing the whole
-  // tile dims the avatar and the volume slider mid-drag). Focus adds its
-  // own accent outline; speaking wins when both apply.
-  const boxShadow = isSpeaking
-    ? "0 0 0 2px var(--c-accent), 0 0 12px -2px var(--c-accent)"
-    : focused
-    ? "0 0 0 2px var(--c-accent)"
-    : undefined;
+  // Default border is transparent — speaking flips it to the accent
+  // color. Focus also uses the accent color so the keyboard cursor stays
+  // visible. No box-shadow / glow anywhere on the tile.
+  const borderColor = isSpeaking || focused ? "var(--c-accent)" : "transparent";
 
   // Stats string for the streaming tile: WxH @ Nfps. Drops to the
   // height-only shorthand (720p / 1080p) when it matches a common
@@ -116,8 +106,7 @@ export const VoiceMemberTile: React.FC<Props> = ({
         background: "var(--c-surface)",
         border: `2px solid ${borderColor}`,
         borderRadius: 10,
-        boxShadow,
-        transition: "border-color 0.1s, box-shadow 0.1s",
+        transition: "border-color 0.1s",
       }}
     >
       {/* Top-left: participant name (always present). Sits above the
