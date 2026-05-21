@@ -11,29 +11,46 @@ import {
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
+import { useUserProfile, useLogout } from "../../hooks/queries";
+import { useAppStore } from "../../stores/appStore";
 
 export default function Self() {
   const router = useRouter();
+  const currentUser = useAppStore((s) => s.currentUser);
+  const { data: profile } = useUserProfile();
+  const logout = useLogout();
+
+  const handle = profile?.username ?? currentUser?.username ?? "user";
+  const display = profile?.preferred_name || handle;
+  const avatarLabel = (handle || "us").slice(0, 2);
+
+  const onSignOut = () => {
+    logout.mutate(undefined, {
+      onSuccess: () => router.replace("/(auth)/email"),
+      onError: () => router.replace("/(auth)/email"),
+    });
+  };
+
   const cards = [
     {
       g: <Icon.gear color={semantic.accent} />,
       n: "Preferences",
       s: "Theme, density, behavior",
-      to: "/self/preferences",
+      to: "/self/preferences" as const,
     },
     {
       g: <Icon.user color={semantic.accent} />,
       n: "User settings",
       s: "Display name, handle, email",
-      to: "/self/user-settings",
+      to: "/self/user-settings" as const,
     },
     {
       g: <Icon.shield color={semantic.accent} />,
       n: "Security",
       s: "Keys, devices, sign out",
-      to: "/self/security",
+      to: "/self/security" as const,
     },
-  ] as const;
+  ];
 
   return (
     <Screen>
@@ -49,7 +66,7 @@ export default function Self() {
             paddingBottom: 18,
           }}
         >
-          <Avatar label="dn" size="lg" variant="amber" />
+          <Avatar label={avatarLabel} size="lg" variant="amber" />
           <View style={{ flex: 1 }}>
             <Text
               style={{
@@ -58,7 +75,7 @@ export default function Self() {
                 color: semantic.ink,
               }}
             >
-              dan
+              {display}
             </Text>
             <Text
               style={{
@@ -67,7 +84,7 @@ export default function Self() {
                 color: semantic.mute,
               }}
             >
-              @dan · key 0x4a2c
+              @{handle}
             </Text>
           </View>
           <View
@@ -115,9 +132,10 @@ export default function Self() {
             full
             variant="danger"
             icon={<Icon.exit color={semantic.danger} />}
-            onPress={() => router.replace("/(auth)/email")}
+            onPress={onSignOut}
+            disabled={logout.isPending}
           >
-            SIGN OUT
+            {logout.isPending ? "SIGNING OUT…" : "SIGN OUT"}
           </Button>
         </View>
       </Body>

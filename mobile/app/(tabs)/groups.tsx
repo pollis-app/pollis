@@ -1,4 +1,4 @@
-import { View } from "react-native";
+import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import {
   Screen,
@@ -6,59 +6,94 @@ import {
   Body,
   SectionTitle,
   ListRow,
-  Badge,
   Button,
   BottomAction,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic } from "../../theme/tokens";
-
-const GROUPS = [
-  {
-    name: "QUICK GROUP",
-    sel: "General",
-    items: [
-      { n: "General", sub: "dan: frick its been a minute", unread: 2 },
-      { n: "Random", sub: "meilan: meeting moved" },
-    ],
-  },
-  {
-    name: "TEST GROUP",
-    items: [
-      { n: "General", sub: "No new messages" },
-      { n: "Random" },
-    ],
-  },
-  {
-    name: "BLUESTONE",
-    items: [{ n: "General" }],
-  },
-];
+import { semantic, type as ty } from "../../theme/tokens";
+import { useUserGroupsWithChannels } from "../../hooks/queries";
+import { useAppStore } from "../../stores/appStore";
 
 export default function Groups() {
   const router = useRouter();
+  const { data: groups = [], isLoading, isError } = useUserGroupsWithChannels();
+  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
+  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
+
+  const totalChannels = groups.reduce((acc, g) => acc + g.channels.length, 0);
+
   return (
     <Screen>
-      <Crumb segs={[{ label: "GROUPS", leaf: true }]} end="3" />
+      <Crumb segs={[{ label: "GROUPS", leaf: true }]} end={String(totalChannels)} />
       <Body>
-        {GROUPS.map((g) => (
-          <View key={g.name}>
+        {isLoading ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            Loading groups…
+          </Text>
+        ) : null}
+        {isError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.danger,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            Couldn't load groups.
+          </Text>
+        ) : null}
+        {!isLoading && !isError && groups.length === 0 ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            No groups yet. Create one to get started.
+          </Text>
+        ) : null}
+        {groups.map((g) => (
+          <View key={g.id}>
             <SectionTitle right={<Icon.fwd color={semantic.mute} />}>
-              {g.name}
+              {g.name.toUpperCase()}
             </SectionTitle>
-            {g.items.map((c) => (
+            {g.channels.length === 0 ? (
+              <Text
+                style={{
+                  fontFamily: ty.body.fontFamily,
+                  fontSize: 12,
+                  color: semantic.mute,
+                  paddingHorizontal: 18,
+                  paddingVertical: 6,
+                }}
+              >
+                No channels.
+              </Text>
+            ) : null}
+            {g.channels.map((c) => (
               <ListRow
-                key={c.n}
-                selected={g.sel === c.n}
+                key={c.id}
                 glyph={<Icon.hash color={semantic.mute} />}
-                name={c.n}
-                sub={(c as { sub?: string }).sub}
-                onPress={() => router.push(`/chat/${g.name}-${c.n}`)}
-                end={
-                  (c as { unread?: number }).unread ? (
-                    <Badge>{(c as { unread?: number }).unread}</Badge>
-                  ) : undefined
-                }
+                name={c.name}
+                sub={c.description ?? undefined}
+                onPress={() => {
+                  setSelectedGroupId(g.id);
+                  setSelectedChannelId(c.id);
+                  router.push(`/chat/${c.id}`);
+                }}
               />
             ))}
           </View>
