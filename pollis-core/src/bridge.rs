@@ -155,7 +155,7 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
         serde_json::from_str(&args_json)?
     };
 
-    use crate::commands::{auth, dm, groups, messages, pin, user};
+    use crate::commands::{auth, device_enrollment, dm, groups, messages, pin, user};
 
     match cmd.as_str() {
         "version" => ok(env!("CARGO_PKG_VERSION")),
@@ -183,6 +183,46 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             ok(())
         }
         "list_known_accounts" => ok(auth::list_known_accounts()?),
+        // ----- device enrollment -----
+        "start_device_enrollment" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(device_enrollment::start_device_enrollment(&state()?, user_id).await?)
+        }
+        "poll_enrollment_status" => {
+            let request_id: String = arg(&args, "requestId")?;
+            ok(device_enrollment::poll_enrollment_status(&state()?, request_id).await?)
+        }
+        "finalize_device_enrollment" => {
+            let user_id: String = arg(&args, "userId")?;
+            device_enrollment::finalize_device_enrollment(&state()?, user_id).await?;
+            ok(())
+        }
+        "recover_with_secret_key" => {
+            let user_id: String = arg(&args, "userId")?;
+            let secret_key: String = arg(&args, "secretKey")?;
+            device_enrollment::recover_with_secret_key(&state()?, user_id, secret_key).await?;
+            ok(())
+        }
+        "list_pending_enrollment_requests" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(device_enrollment::list_pending_enrollment_requests(&state()?, user_id).await?)
+        }
+        "approve_device_enrollment" => {
+            let request_id: String = arg(&args, "requestId")?;
+            let verification_code: String = arg(&args, "verificationCode")?;
+            device_enrollment::approve_device_enrollment(
+                &state()?,
+                request_id,
+                verification_code,
+            )
+            .await?;
+            ok(())
+        }
+        "reject_device_enrollment" => {
+            let request_id: String = arg(&args, "requestId")?;
+            device_enrollment::reject_device_enrollment(&state()?, request_id).await?;
+            ok(())
+        }
         "list_user_devices" => {
             let user_id: String = arg(&args, "userId")?;
             ok(auth::list_user_devices(&state()?, user_id).await?)

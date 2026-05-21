@@ -56,6 +56,13 @@ interface AppStore extends AppState {
   markRead: (id: string) => void;
   incrementUnread: (id: string) => void;
   logout: () => void;
+
+  // Transient first-signup state. The Rust side returns `new_secret_key`
+  // once on `verify_otp` — we shuttle it through the PIN setup screen to
+  // the Emergency Kit display, then drop it on the floor. Stored in memory
+  // only; never persisted.
+  pendingSecretKey: string | null;
+  setPendingSecretKey: (key: string | null) => void;
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -74,6 +81,7 @@ export const useAppStore = create<AppStore>((set) => ({
   isLoading: false,
   error: null,
   unreadCounts: {},
+  pendingSecretKey: null,
 
   // Actions
   setCurrentUser: (user) => set({ currentUser: user }),
@@ -135,6 +143,7 @@ export const useAppStore = create<AppStore>((set) => ({
     })),
 
   setReplyToMessageId: (messageId) => set({ replyToMessageId: messageId }),
+  setPendingSecretKey: (key) => set({ pendingSecretKey: key }),
 
   setLoading: (loading) => set({ isLoading: loading }),
   setError: (error) => set({ error }),

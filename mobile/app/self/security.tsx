@@ -12,11 +12,14 @@ import {
   Ctx,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty } from "../../theme/tokens";
+import { semantic, type as ty, fonts } from "../../theme/tokens";
 import {
   useUserDevices,
   useRevokeDevice,
   useLogout,
+  usePendingEnrollmentRequests,
+  useApproveEnrollment,
+  useRejectEnrollment,
 } from "../../hooks/queries";
 
 function formatRelative(iso: string): string {
@@ -49,6 +52,9 @@ export default function Security() {
   const { data: devices = [], isLoading, isError } = useUserDevices();
   const revoke = useRevokeDevice();
   const logout = useLogout();
+  const { data: pendingEnrollments = [] } = usePendingEnrollmentRequests();
+  const approveEnrollment = useApproveEnrollment();
+  const rejectEnrollment = useRejectEnrollment();
   const [confirmRevoke, setConfirmRevoke] = useState<string | null>(null);
 
   const onRevoke = (deviceId: string) => {
@@ -73,6 +79,86 @@ export default function Security() {
     <Screen>
       <Crumb segs={[{ label: "SELF" }, { label: "Security", leaf: true }]} />
       <Body>
+        {pendingEnrollments.length > 0 ? (
+          <View>
+            <SectionTitle>PAIR NEW DEVICE</SectionTitle>
+            {pendingEnrollments.map((req) => (
+              <View
+                key={req.request_id}
+                style={{
+                  paddingHorizontal: 18,
+                  paddingVertical: 12,
+                  gap: 8,
+                  borderBottomWidth: 1,
+                  borderBottomColor: semantic.hairSoft,
+                }}
+              >
+                <Text
+                  style={{
+                    fontFamily: ty.body.fontFamily,
+                    fontSize: 13,
+                    color: semantic.ink,
+                  }}
+                >
+                  A new device wants to pair with your account.
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: fonts.mono400,
+                    fontSize: 18,
+                    letterSpacing: 3,
+                    color: semantic.accent,
+                  }}
+                >
+                  {req.verification_code}
+                </Text>
+                <Text
+                  style={{
+                    fontFamily: ty.body.fontFamily,
+                    fontSize: 11,
+                    color: semantic.mute,
+                  }}
+                >
+                  Confirm this code matches what's shown on the other device,
+                  then approve.
+                </Text>
+                <View style={{ flexDirection: "row", gap: 8, paddingTop: 6 }}>
+                  <Chip
+                    onPress={() => rejectEnrollment.mutate(req.request_id)}
+                  >
+                    Reject
+                  </Chip>
+                  <Chip
+                    variant="on"
+                    onPress={() =>
+                      approveEnrollment.mutate({
+                        requestId: req.request_id,
+                        verificationCode: req.verification_code,
+                      })
+                    }
+                  >
+                    {approveEnrollment.isPending ? "Approving…" : "Approve"}
+                  </Chip>
+                </View>
+              </View>
+            ))}
+            {(approveEnrollment.isError || rejectEnrollment.isError) ? (
+              <Text
+                style={{
+                  fontFamily: ty.body.fontFamily,
+                  fontSize: 12,
+                  color: semantic.danger,
+                  paddingHorizontal: 18,
+                  paddingTop: 6,
+                }}
+              >
+                {((approveEnrollment.error ?? rejectEnrollment.error) as Error)
+                  .message || "Couldn't process the enrollment request."}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
+
         <SectionTitle>DEVICES</SectionTitle>
         {isLoading ? (
           <Text

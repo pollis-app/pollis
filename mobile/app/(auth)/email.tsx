@@ -93,9 +93,10 @@ export default function AuthEmail() {
         >
           {requestOtp.isPending ? "SENDING…" : "CONTINUE"}
         </Button>
-        <Button variant="subtle" full>
-          I have a recovery key
-        </Button>
+        {/* Recovery is reachable through the standard sign-in flow: enter
+            your email, verify the OTP, and Pollis routes you to the
+            recovery-key entry on a fresh device. No dedicated button
+            needed. */}
       </BottomAction>
     </Screen>
   );
