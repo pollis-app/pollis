@@ -233,6 +233,16 @@ export default function Security() {
           </Text>
         ) : null}
 
+        <SectionTitle>SAFETY</SectionTitle>
+        <ListRow
+          minHeight={48}
+          glyph={<Icon.exit color={semantic.mute} />}
+          name="Blocked users"
+          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+          onPress={() => router.push("/self/blocked")}
+          end={<Icon.fwd color={semantic.mute} />}
+        />
+
         <SectionTitle>RECOVERY</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6 }}>
           <Text

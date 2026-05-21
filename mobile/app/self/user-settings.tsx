@@ -133,16 +133,14 @@ export default function UserSettings() {
             editable={false}
             icon={<Icon.mail color={semantic.mute} />}
           />
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
-            }}
+          <Button
+            variant="subtle"
+            full
+            onPress={() => router.push("/self/change-email")}
+            icon={<Icon.edit color={semantic.ink} />}
           >
-            Email is the address you signed in with. Changing it isn't wired
-            on mobile yet.
-          </Text>
+            Change email address
+          </Button>
         </View>
 
         {updateProfile.isError ? (

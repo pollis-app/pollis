@@ -335,7 +335,20 @@ export default function TextChat() {
         actions={
           <>
             <CtxAct icon={<Icon.people color={semantic.ink2} />} />
-            <CtxAct icon={<Icon.kebab color={semantic.ink2} />} />
+            <CtxAct
+              icon={<Icon.kebab color={semantic.ink2} />}
+              onPress={() => {
+                if (!conversationId) {
+                  return;
+                }
+                if (kind === "dm") {
+                  router.push({
+                    pathname: "/dm/info",
+                    params: { id: conversationId },
+                  });
+                }
+              }}
+            />
           </>
         }
       />

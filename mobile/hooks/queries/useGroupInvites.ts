@@ -282,6 +282,143 @@ export function useSetMemberRole(groupId: string | null) {
   });
 }
 
+export interface JoinRequest {
+  id: string;
+  group_id: string;
+  requester_id: string;
+  requester_username?: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
+export const joinRequestQueryKeys = {
+  byGroup: (groupId: string | null) => ["join-requests", "group", groupId] as const,
+  mine: (groupId: string | null, userId: string | null) =>
+    ["join-requests", "mine", groupId, userId] as const,
+};
+
+export function useGroupJoinRequests(groupId: string | null) {
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useQuery({
+    queryKey: joinRequestQueryKeys.byGroup(groupId),
+    queryFn: async (): Promise<JoinRequest[]> => {
+      if (!currentUser || !groupId) {
+        return [];
+      }
+      return await invoke<JoinRequest[]>("get_group_join_requests", {
+        groupId,
+        requesterId: currentUser.id,
+      });
+    },
+    enabled: !!(currentUser && groupId),
+    staleTime: 1000 * 30,
+  });
+}
+
+export function useMyJoinRequest(groupId: string | null) {
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useQuery({
+    queryKey: joinRequestQueryKeys.mine(groupId, currentUser?.id ?? null),
+    queryFn: async (): Promise<JoinRequest | null> => {
+      if (!currentUser || !groupId) {
+        return null;
+      }
+      return await invoke<JoinRequest | null>("get_my_join_request", {
+        groupId,
+        requesterId: currentUser.id,
+      });
+    },
+    enabled: !!(currentUser && groupId),
+    staleTime: 1000 * 30,
+  });
+}
+
+export function useRequestGroupAccess() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (groupId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("request_group_access", {
+        groupId,
+        requesterId: currentUser.id,
+      });
+      return groupId;
+    },
+    onSuccess: (groupId) => {
+      queryClient.invalidateQueries({
+        queryKey: joinRequestQueryKeys.mine(groupId, currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useApproveJoinRequest(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (requestId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("approve_join_request", {
+        requestId,
+        approverId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: joinRequestQueryKeys.byGroup(groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupInviteQueryKeys.members(groupId),
+      });
+    },
+  });
+}
+
+export function useRejectJoinRequest(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (requestId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("reject_join_request", {
+        requestId,
+        approverId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: joinRequestQueryKeys.byGroup(groupId),
+      });
+    },
+  });
+}
+
+export function useGroupBySlug(slug: string | null) {
+  return useQuery({
+    queryKey: ["group", "slug", slug] as const,
+    queryFn: async () => {
+      if (!slug) {
+        return null;
+      }
+      return await invoke<{
+        id: string;
+        slug: string;
+        name: string;
+        description?: string;
+      } | null>("search_group_by_slug", { slug });
+    },
+    enabled: !!slug && slug.length >= 2,
+    staleTime: 1000 * 60,
+  });
+}
+
 export function useLeaveGroup() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((s) => s.currentUser);

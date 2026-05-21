@@ -147,6 +147,14 @@ export default function Groups() {
         >
           NEW GROUP
         </Button>
+        <Button
+          variant="subtle"
+          full
+          icon={<Icon.search color={semantic.ink} />}
+          onPress={() => router.push("/group/discover")}
+        >
+          Join by slug
+        </Button>
       </BottomAction>
     </Screen>
   );

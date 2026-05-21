@@ -18,6 +18,7 @@ import {
   useUserGroupsWithChannels,
   useGroupMembers,
   useLeaveGroup,
+  useGroupJoinRequests,
 } from "../../hooks/queries";
 import { useAppStore } from "../../stores/appStore";
 
@@ -35,6 +36,7 @@ export default function GroupDetail() {
   const { data: channels = [], isLoading: channelsLoading } =
     useGroupChannels(groupId);
   const { data: members = [] } = useGroupMembers(groupId);
+  const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
   const leaveGroup = useLeaveGroup();
 
   const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
@@ -175,6 +177,23 @@ export default function GroupDetail() {
           }
           end={<Icon.fwd color={semantic.mute} />}
         />
+        {joinRequests.length > 0 ? (
+          <ListRow
+            minHeight={48}
+            glyph={<Icon.inbox color={semantic.mute} />}
+            name="Join requests"
+            nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+            sub={`${joinRequests.length} pending`}
+            onPress={() =>
+              groupId &&
+              router.push({
+                pathname: "/group/requests",
+                params: { groupId },
+              })
+            }
+            end={<Icon.fwd color={semantic.mute} />}
+          />
+        ) : null}
 
         <SectionTitle>DANGER</SectionTitle>
         <ListRow

@@ -190,6 +190,19 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             ok(())
         }
         "list_known_accounts" => ok(auth::list_known_accounts()?),
+        "request_email_change_otp" => {
+            let user_id: String = arg(&args, "userId")?;
+            let new_email: String = arg(&args, "newEmail")?;
+            auth::request_email_change_otp(&state()?, user_id, new_email).await?;
+            ok(())
+        }
+        "verify_email_change" => {
+            let user_id: String = arg(&args, "userId")?;
+            let new_email: String = arg(&args, "newEmail")?;
+            let code: String = arg(&args, "code")?;
+            auth::verify_email_change(&state()?, user_id, new_email, code).await?;
+            ok(())
+        }
         // ----- device enrollment -----
         "start_device_enrollment" => {
             let user_id: String = arg(&args, "userId")?;
@@ -378,6 +391,38 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             let user_id: String = arg(&args, "userId")?;
             let requester_id: String = arg(&args, "requesterId")?;
             groups::remove_member_from_group(group_id, user_id, requester_id, &state()?).await?;
+            ok(())
+        }
+        "search_group_by_slug" => {
+            let slug: String = arg(&args, "slug")?;
+            ok(groups::search_group_by_slug(slug, &state()?).await?)
+        }
+        "request_group_access" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::request_group_access(group_id, requester_id, &state()?).await?;
+            ok(())
+        }
+        "get_group_join_requests" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::get_group_join_requests(group_id, requester_id, &state()?).await?)
+        }
+        "get_my_join_request" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            ok(groups::get_my_join_request(group_id, requester_id, &state()?).await?)
+        }
+        "approve_join_request" => {
+            let request_id: String = arg(&args, "requestId")?;
+            let approver_id: String = arg(&args, "approverId")?;
+            groups::approve_join_request(request_id, approver_id, &state()?).await?;
+            ok(())
+        }
+        "reject_join_request" => {
+            let request_id: String = arg(&args, "requestId")?;
+            let approver_id: String = arg(&args, "approverId")?;
+            groups::reject_join_request(request_id, approver_id, &state()?).await?;
             ok(())
         }
         "set_member_role" => {
@@ -596,6 +641,36 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
         "list_dm_requests" => {
             let user_id: String = arg(&args, "userId")?;
             ok(dm::list_dm_requests(user_id, &state()?).await?)
+        }
+        "get_dm_channel" => {
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            ok(dm::get_dm_channel(dm_channel_id, &state()?).await?)
+        }
+        "leave_dm_channel" => {
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            let user_id: String = arg(&args, "userId")?;
+            dm::leave_dm_channel(dm_channel_id, user_id, &state()?).await?;
+            ok(())
+        }
+        "add_user_to_dm_channel" => {
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let added_by: String = arg(&args, "addedBy")?;
+            dm::add_user_to_dm_channel(dm_channel_id, user_id, added_by, &state()?).await?;
+            ok(())
+        }
+        "remove_user_from_dm_channel" => {
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            dm::remove_user_from_dm_channel(
+                dm_channel_id,
+                user_id,
+                requester_id,
+                &state()?,
+            )
+            .await?;
+            ok(())
         }
         "accept_dm_request" => {
             let dm_channel_id: String = arg(&args, "dmChannelId")?;
