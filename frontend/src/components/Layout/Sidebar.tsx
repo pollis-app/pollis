@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
+import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
 import { useAppStore } from "../../stores/appStore";
 import { shortcutLabel } from "../../utils/platform";
 
@@ -47,6 +48,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
   const unreadCounts = useAppStore((s) => s.unreadCounts);
+
+  // Stable list of voice channel ids across all groups; powers the live
+  // "users connected" badge on voice channel rows. Realtime voice events
+  // invalidate the `voice-room-counts` query so counts refresh automatically.
+  const voiceChannelIds = useMemo(
+    () =>
+      groupsWithChannels.flatMap((g) =>
+        g.channels.filter((ch) => ch.channel_type === "voice").map((ch) => ch.id)
+      ),
+    [groupsWithChannels]
+  );
+  const { data: voiceCounts = {} } = useVoiceRoomCounts(voiceChannelIds);
 
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try {
@@ -162,7 +175,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                   group.channels.map((ch) => {
                     const isVoice = ch.channel_type === "voice";
                     const unread = unreadCounts[ch.id] ?? 0;
+                    const voiceCount = isVoice ? voiceCounts[ch.id] ?? 0 : 0;
                     const isActive = isVoice ? activeVoiceId === ch.id : activeChannelId === ch.id;
+                    const badge = isVoice
+                      ? voiceCount > 0
+                        ? voiceCount
+                        : null
+                      : unread > 0
+                        ? unread
+                        : null;
                     return (
                       <Row
                         key={ch.id}
@@ -181,7 +202,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                         }
                         leading={isVoice ? <Volume2 {...iconProps} /> : <Hash {...iconProps} />}
                         label={ch.name}
-                        badge={unread > 0 ? unread : null}
+                        badge={badge}
                       />
                     );
                   })}
