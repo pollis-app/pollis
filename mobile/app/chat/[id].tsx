@@ -3,15 +3,20 @@ import { View, Text, ScrollView, TextInput, Pressable } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Screen, Crumb, Avatar, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, r } from "../../theme/tokens";
+import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import {
   useMessages,
   useSendMessage,
   useIngestConversation,
+  useToggleReaction,
+  useEditMessage,
+  useDeleteMessage,
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
 import { useAppStore } from "../../stores/appStore";
+
+const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
 
 function dayKey(ts: number): string {
   return new Date(ts).toDateString();
@@ -66,7 +71,9 @@ function Msg({
   time,
   text,
   pending,
+  edited,
   onPressAvatar,
+  onLongPress,
 }: {
   av: string;
   amber?: boolean;
@@ -74,10 +81,14 @@ function Msg({
   time: string;
   text?: string;
   pending?: boolean;
+  edited?: boolean;
   onPressAvatar?: () => void;
+  onLongPress?: () => void;
 }) {
   return (
-    <View
+    <Pressable
+      onLongPress={onLongPress}
+      delayLongPress={350}
       style={{
         flexDirection: "row",
         gap: 12,
@@ -121,10 +132,21 @@ function Msg({
             }}
           >
             {text}
+            {edited ? (
+              <Text
+                style={{
+                  fontFamily: ty.body.fontFamily,
+                  fontSize: 11,
+                  color: semantic.mute,
+                }}
+              >
+                {"  (edited)"}
+              </Text>
+            ) : null}
           </Text>
         ) : null}
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -136,6 +158,9 @@ export default function TextChat() {
     params.kind === "channel" || params.kind === "dm" ? params.kind : null;
 
   const [draft, setDraft] = useState("");
+  const [actionTarget, setActionTarget] = useState<Message | null>(null);
+  const [editTarget, setEditTarget] = useState<Message | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const scrollRef = useRef<ScrollView>(null);
   const currentUser = useAppStore((s) => s.currentUser);
 
@@ -143,6 +168,9 @@ export default function TextChat() {
   const messages = data?.messages ?? [];
   const sendMessage = useSendMessage(conversationId, kind);
   const ingest = useIngestConversation();
+  const toggleReaction = useToggleReaction(conversationId, kind);
+  const editMessage = useEditMessage(conversationId, kind);
+  const deleteMessage = useDeleteMessage(conversationId, kind);
 
   // Trigger ingest on screen focus — covers the "returning to a chat after
   // the app was backgrounded" case where the periodic refetch hasn't fired
@@ -254,6 +282,7 @@ export default function TextChat() {
                   time={timeLabel(m.created_at)}
                   text={m.content}
                   pending={m.pending}
+                  edited={!!m.edited_at}
                   onPressAvatar={
                     mine
                       ? undefined
@@ -262,6 +291,9 @@ export default function TextChat() {
                             pathname: "/user/[id]",
                             params: { id: m.sender_id },
                           })
+                  }
+                  onLongPress={
+                    m.pending ? undefined : () => setActionTarget(m)
                   }
                 />
               );
@@ -307,67 +339,307 @@ export default function TextChat() {
           </>
         }
       />
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "center",
-          gap: 10,
-          paddingVertical: 10,
-          paddingHorizontal: 12,
-          borderTopWidth: 1,
-          borderTopColor: semantic.hairSoft,
-        }}
-      >
-        <Pressable
+      {editTarget ? (
+        <View
           style={{
-            width: 38,
-            height: 38,
+            flexDirection: "row",
             alignItems: "center",
-            justifyContent: "center",
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
-          }}
-        >
-          <Icon.plus color={semantic.ink} />
-        </Pressable>
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Type a message…"
-          placeholderTextColor={semantic.mute}
-          onSubmitEditing={onSend}
-          returnKeyType="send"
-          editable={!!kind && !!conversationId}
-          style={{
-            flex: 1,
-            borderWidth: 1,
-            borderColor: semantic.hairStrong,
-            borderRadius: r.sm,
+            gap: 10,
             paddingVertical: 10,
             paddingHorizontal: 12,
-            fontFamily: ty.body.fontFamily,
-            fontSize: 14,
-            color: semantic.ink,
-            backgroundColor: semantic.fieldBg,
-          }}
-        />
-        <Pressable
-          onPress={onSend}
-          disabled={!draft.trim() || sendMessage.isPending}
-          style={{
-            width: 38,
-            height: 38,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: semantic.accent,
-            borderRadius: r.sm,
-            opacity: !draft.trim() || sendMessage.isPending ? 0.4 : 1,
+            borderTopWidth: 1,
+            borderTopColor: semantic.accent,
+            backgroundColor: semantic.accentSoft,
           }}
         >
-          <Icon.send color="#0a0907" />
+          <Pressable
+            onPress={() => {
+              setEditTarget(null);
+              setEditDraft("");
+            }}
+            style={{
+              width: 38,
+              height: 38,
+              alignItems: "center",
+              justifyContent: "center",
+              borderWidth: 1,
+              borderColor: semantic.hairStrong,
+              borderRadius: r.sm,
+            }}
+          >
+            <Icon.exit color={semantic.ink} />
+          </Pressable>
+          <TextInput
+            value={editDraft}
+            onChangeText={setEditDraft}
+            autoFocus
+            placeholder="Edit message…"
+            placeholderTextColor={semantic.mute}
+            onSubmitEditing={() => {
+              const text = editDraft.trim();
+              if (!text || !editTarget) {
+                return;
+              }
+              editMessage.mutate(
+                { messageId: editTarget.id, newContent: text },
+                {
+                  onSuccess: () => {
+                    setEditTarget(null);
+                    setEditDraft("");
+                  },
+                },
+              );
+            }}
+            returnKeyType="send"
+            style={{
+              flex: 1,
+              borderWidth: 1,
+              borderColor: semantic.accent,
+              borderRadius: r.sm,
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+              fontFamily: ty.body.fontFamily,
+              fontSize: 14,
+              color: semantic.ink,
+              backgroundColor: semantic.fieldBg,
+            }}
+          />
+          <Pressable
+            onPress={() => {
+              const text = editDraft.trim();
+              if (!text || !editTarget) {
+                return;
+              }
+              editMessage.mutate(
+                { messageId: editTarget.id, newContent: text },
+                {
+                  onSuccess: () => {
+                    setEditTarget(null);
+                    setEditDraft("");
+                  },
+                },
+              );
+            }}
+            disabled={!editDraft.trim() || editMessage.isPending}
+            style={{
+              width: 38,
+              height: 38,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: semantic.accent,
+              borderRadius: r.sm,
+              opacity:
+                !editDraft.trim() || editMessage.isPending ? 0.4 : 1,
+            }}
+          >
+            <Icon.check color="#0a0907" />
+          </Pressable>
+        </View>
+      ) : (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            paddingVertical: 10,
+            paddingHorizontal: 12,
+            borderTopWidth: 1,
+            borderTopColor: semantic.hairSoft,
+          }}
+        >
+          <Pressable
+            style={{
+              width: 38,
+              height: 38,
+              alignItems: "center",
+              justifyContent: "center",
+              borderWidth: 1,
+              borderColor: semantic.hairStrong,
+              borderRadius: r.sm,
+            }}
+          >
+            <Icon.plus color={semantic.ink} />
+          </Pressable>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Type a message…"
+            placeholderTextColor={semantic.mute}
+            onSubmitEditing={onSend}
+            returnKeyType="send"
+            editable={!!kind && !!conversationId}
+            style={{
+              flex: 1,
+              borderWidth: 1,
+              borderColor: semantic.hairStrong,
+              borderRadius: r.sm,
+              paddingVertical: 10,
+              paddingHorizontal: 12,
+              fontFamily: ty.body.fontFamily,
+              fontSize: 14,
+              color: semantic.ink,
+              backgroundColor: semantic.fieldBg,
+            }}
+          />
+          <Pressable
+            onPress={onSend}
+            disabled={!draft.trim() || sendMessage.isPending}
+            style={{
+              width: 38,
+              height: 38,
+              alignItems: "center",
+              justifyContent: "center",
+              backgroundColor: semantic.accent,
+              borderRadius: r.sm,
+              opacity: !draft.trim() || sendMessage.isPending ? 0.4 : 1,
+            }}
+          >
+            <Icon.send color="#0a0907" />
+          </Pressable>
+        </View>
+      )}
+
+      {actionTarget ? (
+        <Pressable
+          onPress={() => setActionTarget(null)}
+          style={{
+            position: "absolute",
+            top: 0,
+            bottom: 0,
+            left: 0,
+            right: 0,
+            backgroundColor: "rgba(0,0,0,0.55)",
+            justifyContent: "flex-end",
+          }}
+        >
+          <Pressable
+            onPress={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: semantic.cardBg,
+              borderTopWidth: 1,
+              borderTopColor: semantic.hair,
+              paddingHorizontal: 18,
+              paddingTop: 14,
+              paddingBottom: 30,
+              gap: 10,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                gap: 8,
+                paddingVertical: 6,
+              }}
+            >
+              {QUICK_EMOJI.map((emoji) => (
+                <Pressable
+                  key={emoji}
+                  onPress={() => {
+                    if (!actionTarget) {
+                      return;
+                    }
+                    toggleReaction.mutate({
+                      messageId: actionTarget.id,
+                      emoji,
+                      mode: "add",
+                    });
+                    setActionTarget(null);
+                  }}
+                  style={{
+                    width: 44,
+                    height: 44,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    borderWidth: 1,
+                    borderColor: semantic.hair,
+                    borderRadius: r.sm,
+                  }}
+                >
+                  <Text style={{ fontSize: 22 }}>{emoji}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            {actionTarget.sender_id === currentUser?.id ? (
+              <>
+                <Pressable
+                  onPress={() => {
+                    setEditTarget(actionTarget);
+                    setEditDraft(actionTarget.content);
+                    setActionTarget(null);
+                  }}
+                  style={{
+                    paddingVertical: 14,
+                    paddingHorizontal: 12,
+                    borderWidth: 1,
+                    borderColor: semantic.hairStrong,
+                    borderRadius: r.sm,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <Icon.edit color={semantic.ink} />
+                  <Text
+                    style={{
+                      fontFamily: ty.body.fontFamily,
+                      fontSize: 14,
+                      color: semantic.ink,
+                    }}
+                  >
+                    Edit message
+                  </Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    if (!actionTarget) {
+                      return;
+                    }
+                    deleteMessage.mutate(actionTarget.id);
+                    setActionTarget(null);
+                  }}
+                  style={{
+                    paddingVertical: 14,
+                    paddingHorizontal: 12,
+                    borderWidth: 1,
+                    borderColor: "rgba(196,106,46,0.4)",
+                    borderRadius: r.sm,
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <Icon.exit color={semantic.danger} />
+                  <Text
+                    style={{
+                      fontFamily: ty.body.fontFamily,
+                      fontSize: 14,
+                      color: semantic.danger,
+                    }}
+                  >
+                    Delete message
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
+
+            <Pressable
+              onPress={() => setActionTarget(null)}
+              style={{
+                paddingVertical: 14,
+                alignItems: "center",
+              }}
+            >
+              <Text
+                style={[ty.label, { color: semantic.mute }]}
+              >
+                CANCEL
+              </Text>
+            </Pressable>
+          </Pressable>
         </Pressable>
-      </View>
+      ) : null}
     </Screen>
   );
 }

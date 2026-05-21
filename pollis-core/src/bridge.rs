@@ -446,6 +446,45 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             messages::ingest_channel_envelopes(user_id, channel_id, &state()?).await?;
             ok(())
         }
+        "add_reaction" => {
+            let message_id: String = arg(&args, "messageId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let emoji: String = arg(&args, "emoji")?;
+            messages::add_reaction(message_id, user_id, emoji, &state()?).await?;
+            ok(())
+        }
+        "remove_reaction" => {
+            let message_id: String = arg(&args, "messageId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let emoji: String = arg(&args, "emoji")?;
+            messages::remove_reaction(message_id, user_id, emoji, &state()?).await?;
+            ok(())
+        }
+        "get_reactions" => {
+            let message_id: String = arg(&args, "messageId")?;
+            ok(messages::get_reactions(message_id, &state()?).await?)
+        }
+        "edit_message" => {
+            let conversation_id: String = arg(&args, "conversationId")?;
+            let message_id: String = arg(&args, "messageId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let new_content: String = arg(&args, "newContent")?;
+            messages::edit_message(
+                conversation_id,
+                message_id,
+                user_id,
+                new_content,
+                &state()?,
+            )
+            .await?;
+            ok(())
+        }
+        "delete_message" => {
+            let message_id: String = arg(&args, "messageId")?;
+            let user_id: String = arg(&args, "userId")?;
+            messages::delete_message(message_id, user_id, &state()?).await?;
+            ok(())
+        }
         "ingest_dm_envelopes" => {
             let user_id: String = arg(&args, "userId")?;
             let dm_channel_id: String = arg(&args, "dmChannelId")?;

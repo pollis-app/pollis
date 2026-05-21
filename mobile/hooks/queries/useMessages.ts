@@ -214,6 +214,141 @@ export function useSendMessage(
   });
 }
 
+/** React (toggle) helper. Returns a mutation that toggles a single emoji
+ *  on a message — checks the current reaction state by sending
+ *  add_reaction or remove_reaction. The caller is responsible for
+ *  tracking whether they already reacted; this hook just dispatches the
+ *  intent. */
+export function useToggleReaction(
+  conversationId: string | null,
+  kind: ConversationKind | null,
+) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (vars: {
+      messageId: string;
+      emoji: string;
+      mode: "add" | "remove";
+    }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      const cmd = vars.mode === "add" ? "add_reaction" : "remove_reaction";
+      await invoke(cmd, {
+        messageId: vars.messageId,
+        userId: currentUser.id,
+        emoji: vars.emoji,
+      });
+    },
+    onSuccess: () => {
+      if (conversationId && kind) {
+        queryClient.invalidateQueries({
+          queryKey: messageQueryKeys.conversation(conversationId, kind),
+        });
+      }
+    },
+  });
+}
+
+export function useEditMessage(
+  conversationId: string | null,
+  kind: ConversationKind | null,
+) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (vars: { messageId: string; newContent: string }) => {
+      if (!currentUser || !conversationId) {
+        throw new Error("No active conversation");
+      }
+      await invoke("edit_message", {
+        conversationId,
+        messageId: vars.messageId,
+        userId: currentUser.id,
+        newContent: vars.newContent,
+      });
+      return vars;
+    },
+    onMutate: async (vars) => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      const key = messageQueryKeys.conversation(conversationId, kind);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<{
+        messages: Message[];
+        nextCursor: MessagePage["next_cursor"];
+      }>(key);
+      queryClient.setQueryData(key, (cache: typeof previous) => {
+        if (!cache) {
+          return cache;
+        }
+        return {
+          ...cache,
+          messages: cache.messages.map((m) =>
+            m.id === vars.messageId
+              ? { ...m, content: vars.newContent, edited_at: Date.now() }
+              : m,
+          ),
+        };
+      });
+      return { previous, key };
+    },
+    onError: (_e, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(ctx.key, ctx.previous);
+      }
+    },
+  });
+}
+
+export function useDeleteMessage(
+  conversationId: string | null,
+  kind: ConversationKind | null,
+) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (messageId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("delete_message", {
+        messageId,
+        userId: currentUser.id,
+      });
+      return messageId;
+    },
+    onMutate: async (messageId) => {
+      if (!conversationId || !kind) {
+        return;
+      }
+      const key = messageQueryKeys.conversation(conversationId, kind);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<{
+        messages: Message[];
+        nextCursor: MessagePage["next_cursor"];
+      }>(key);
+      queryClient.setQueryData(key, (cache: typeof previous) => {
+        if (!cache) {
+          return cache;
+        }
+        return {
+          ...cache,
+          messages: cache.messages.filter((m) => m.id !== messageId),
+        };
+      });
+      return { previous, key };
+    },
+    onError: (_e, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(ctx.key, ctx.previous);
+      }
+    },
+  });
+}
+
 /**
  * Imperative ingest trigger — fire-and-forget. Called from `useFocusEffect`
  * in the chat screen when the screen mounts or refocuses, so the user sees
