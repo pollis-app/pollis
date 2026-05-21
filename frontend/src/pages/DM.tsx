@@ -10,6 +10,7 @@ import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "@tauri-apps/api/core";
 import { voiceSession } from "../voice";
 import { KeyChangeBanner } from "../components/Security/KeyChangeBanner";
+import { warmVoiceChannel } from "../utils/voiceWarmup";
 
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
@@ -82,6 +83,16 @@ export const DMPage: React.FC = () => {
   // create/answer the room), so only offer the call button when the peer
   // is online.
   const canCall = isOneOnOne && otherAcceptedAt !== null && isOtherOnline;
+
+  // Pre-warm DNS / TLS / connection pool to LiveKit as soon as a callable
+  // DM is open. The token cache won't apply (the real `call-<id>` room
+  // name isn't known until `start_call` returns) but the network plumbing
+  // does, which is the dominant cost on a cold join.
+  useEffect(() => {
+    if (canCall && otherUserId) {
+      warmVoiceChannel(`call-prewarm-${otherUserId}`);
+    }
+  }, [canCall, otherUserId]);
 
   // When the current user has not yet accepted this DM, the conversation
   // surfaces in `dmRequests` (filtered server-side by accepted_at IS NULL).
@@ -163,6 +174,7 @@ export const DMPage: React.FC = () => {
           <button
             data-testid="dm-header-call"
             onClick={startCall}
+            onMouseEnter={() => otherUserId && warmVoiceChannel(`call-prewarm-${otherUserId}`)}
             aria-label={`Call @${username}`}
             className="icon-btn-sm flex-shrink-0"
             style={{
