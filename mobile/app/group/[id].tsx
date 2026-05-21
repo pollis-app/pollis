@@ -137,6 +137,13 @@ export default function GroupDetail() {
           name="Members"
           nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
           sub={`${members.length}${adminCount ? ` · ${adminCount} admin` : ""}`}
+          onPress={() =>
+            groupId &&
+            router.push({
+              pathname: "/group/members",
+              params: { groupId },
+            })
+          }
           end={<Icon.fwd color={semantic.mute} />}
         />
         <ListRow
@@ -148,6 +155,21 @@ export default function GroupDetail() {
             groupId &&
             router.push({
               pathname: "/group/invite",
+              params: { groupId },
+            })
+          }
+          end={<Icon.fwd color={semantic.mute} />}
+        />
+        <ListRow
+          minHeight={48}
+          glyph={<Icon.gear color={semantic.mute} />}
+          name="Settings"
+          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+          sub="Rename, channels, danger zone"
+          onPress={() =>
+            groupId &&
+            router.push({
+              pathname: "/group/settings",
               params: { groupId },
             })
           }

@@ -87,6 +87,8 @@ export default function RootLayout() {
               <Stack.Screen name="group/[id]" />
               <Stack.Screen name="group/new" />
               <Stack.Screen name="group/invite" />
+              <Stack.Screen name="group/members" />
+              <Stack.Screen name="group/settings" />
               <Stack.Screen name="dm/new" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="user/[id]" />

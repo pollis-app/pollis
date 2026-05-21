@@ -331,6 +331,63 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             )
             .await?)
         }
+        "update_group" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            let name: Option<String> = arg_opt(&args, "name")?;
+            let description: Option<String> = arg_opt(&args, "description")?;
+            let icon_url: Option<String> = arg_opt(&args, "iconUrl")?;
+            ok(groups::update_group(
+                group_id,
+                requester_id,
+                name,
+                description,
+                icon_url,
+                &state()?,
+            )
+            .await?)
+        }
+        "delete_group" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::delete_group(group_id, requester_id, &state()?).await?;
+            ok(())
+        }
+        "update_channel" => {
+            let channel_id: String = arg(&args, "channelId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            let name: Option<String> = arg_opt(&args, "name")?;
+            let description: Option<String> = arg_opt(&args, "description")?;
+            ok(groups::update_channel(
+                channel_id,
+                requester_id,
+                name,
+                description,
+                &state()?,
+            )
+            .await?)
+        }
+        "delete_channel" => {
+            let channel_id: String = arg(&args, "channelId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::delete_channel(channel_id, requester_id, &state()?).await?;
+            ok(())
+        }
+        "remove_member_from_group" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::remove_member_from_group(group_id, user_id, requester_id, &state()?).await?;
+            ok(())
+        }
+        "set_member_role" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            let role: String = arg(&args, "role")?;
+            let requester_id: String = arg(&args, "requesterId")?;
+            groups::set_member_role(group_id, user_id, role, requester_id, &state()?).await?;
+            ok(())
+        }
         "get_group_members" => {
             let group_id: String = arg(&args, "groupId")?;
             ok(groups::get_group_members(group_id, &state()?).await?)

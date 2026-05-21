@@ -128,6 +128,160 @@ export function useGroupMembers(groupId: string | null) {
   });
 }
 
+export function useUpdateGroup(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (vars: {
+      name?: string;
+      description?: string;
+      iconUrl?: string;
+    }) => {
+      if (!currentUser || !groupId) {
+        throw new Error("No active group");
+      }
+      await invoke("update_group", {
+        groupId,
+        requesterId: currentUser.id,
+        name: vars.name ?? null,
+        description: vars.description ?? null,
+        iconUrl: vars.iconUrl ?? null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useDeleteGroup() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (groupId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("delete_group", {
+        groupId,
+        requesterId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useUpdateChannel(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (vars: {
+      channelId: string;
+      name?: string;
+      description?: string;
+    }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("update_channel", {
+        channelId: vars.channelId,
+        requesterId: currentUser.id,
+        name: vars.name ?? null,
+        description: vars.description ?? null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.channels(groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useDeleteChannel(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (channelId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("delete_channel", {
+        channelId,
+        requesterId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.channels(groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useRemoveMember(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (userId: string) => {
+      if (!currentUser || !groupId) {
+        throw new Error("No active group");
+      }
+      await invoke("remove_member_from_group", {
+        groupId,
+        userId,
+        requesterId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupInviteQueryKeys.members(groupId),
+      });
+    },
+  });
+}
+
+export function useSetMemberRole(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (vars: { userId: string; role: "admin" | "member" }) => {
+      if (!currentUser || !groupId) {
+        throw new Error("No active group");
+      }
+      await invoke("set_member_role", {
+        groupId,
+        userId: vars.userId,
+        role: vars.role,
+        requesterId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupInviteQueryKeys.members(groupId),
+      });
+    },
+  });
+}
+
 export function useLeaveGroup() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((s) => s.currentUser);
