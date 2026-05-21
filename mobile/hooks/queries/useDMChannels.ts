@@ -4,7 +4,7 @@
 // `DMConversation` view-model, picking the "other side" relative to the
 // currently signed-in user.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { useAppStore } from "../../stores/appStore";
 import type { DMConversation } from "../../types";
@@ -60,6 +60,82 @@ export function useDMChannels() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
+  });
+}
+
+export function useAcceptDMRequest() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (dmChannelId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("accept_dm_request", {
+        dmChannelId,
+        userId: currentUser.id,
+      });
+      // The other side queued an MLS welcome for us when they opened
+      // the DM. Pull it now so the conversation appears as fully-keyed
+      // immediately instead of after the next ingest.
+      try {
+        await invoke("poll_mls_welcomes", { userId: currentUser.id });
+      } catch (e) {
+        console.warn("[mls] poll_mls_welcomes after dm accept failed:", e);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useLeaveDM() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (dmChannelId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("leave_dm_channel", {
+        dmChannelId,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useCreateDM() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+
+  return useMutation({
+    mutationFn: async (vars: { memberIds: string[] }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      const raw = await invoke<RawDmChannel>("create_dm_channel", {
+        creatorId: currentUser.id,
+        memberIds: vars.memberIds,
+      });
+      return transform(raw, currentUser.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
+      });
+    },
   });
 }
 

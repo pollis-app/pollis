@@ -85,10 +85,21 @@ export default function RootLayout() {
               <Stack.Screen name="(auth)" />
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="group/[id]" />
+              <Stack.Screen name="group/new" />
+              <Stack.Screen name="group/invite" />
+              <Stack.Screen name="group/members" />
+              <Stack.Screen name="group/settings" />
+              <Stack.Screen name="group/requests" />
+              <Stack.Screen name="group/discover" />
+              <Stack.Screen name="dm/new" />
+              <Stack.Screen name="dm/info" />
               <Stack.Screen name="chat/[id]" />
+              <Stack.Screen name="user/[id]" />
               <Stack.Screen name="self/preferences" />
               <Stack.Screen name="self/user-settings" />
               <Stack.Screen name="self/security" />
+              <Stack.Screen name="self/blocked" />
+              <Stack.Screen name="self/change-email" />
             </Stack>
           </ThemeProvider>
         </QueryClientProvider>

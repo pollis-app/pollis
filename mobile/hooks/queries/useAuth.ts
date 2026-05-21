@@ -52,6 +52,7 @@ export function useRequestOtp() {
 export function useVerifyOtp() {
   const setCurrentUser = useAppStore((s) => s.setCurrentUser);
   const setUsername = useAppStore((s) => s.setUsername);
+  const setPendingSecretKey = useAppStore((s) => s.setPendingSecretKey);
 
   return useMutation({
     mutationFn: async (vars: { email: string; code: string }) => {
@@ -65,6 +66,11 @@ export function useVerifyOtp() {
       const user = profileToUser(profile);
       setCurrentUser(user);
       setUsername(profile.username);
+      // Stash the recovery key (returned only on first-device signup) so
+      // the PIN screen can hand it off to the Emergency Kit display.
+      if (profile.new_secret_key) {
+        setPendingSecretKey(profile.new_secret_key);
+      }
     },
   });
 }

@@ -23,7 +23,16 @@ export default function AuthOTP() {
     verifyOtp.mutate(
       { email, code },
       {
-        onSuccess: () => router.push("/(auth)/pin"),
+        onSuccess: (profile) => {
+          // Existing user signing in on a new device — needs to enroll
+          // first (sibling-device approval or recovery key) before any
+          // local key material exists for the PIN screen to wrap.
+          if (profile.enrollment_required) {
+            router.push("/(auth)/enrollment");
+            return;
+          }
+          router.push("/(auth)/pin");
+        },
       },
     );
   };

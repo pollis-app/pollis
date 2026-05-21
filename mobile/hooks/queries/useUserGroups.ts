@@ -2,7 +2,7 @@
 // for the read paths the mobile UI needs. Mutations (create_group,
 // invite_to_group, etc.) come later when we add those flows.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { useAppStore } from "../../stores/appStore";
 import type { Channel, Group } from "../../types";
@@ -52,6 +52,67 @@ export function useUserGroupsWithChannels() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
+  });
+}
+
+export function useCreateGroup() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+
+  return useMutation({
+    mutationFn: async (vars: {
+      name: string;
+      description?: string;
+      createDefaultTextChannel?: boolean;
+    }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      return await invoke<Group>("create_group", {
+        name: vars.name,
+        description: vars.description ?? null,
+        ownerId: currentUser.id,
+        createDefaultTextChannel: vars.createDefaultTextChannel ?? true,
+        // Mobile drops voice — never create the default voice channel.
+        createDefaultVoiceChannel: false,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
+export function useCreateChannel(groupId: string | null) {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+
+  return useMutation({
+    mutationFn: async (vars: { name: string; description?: string }) => {
+      if (!currentUser || !groupId) {
+        throw new Error("No active group");
+      }
+      return await invoke<Channel>("create_channel", {
+        groupId,
+        name: vars.name,
+        description: vars.description ?? null,
+        channelType: "text",
+        creatorId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.channels(groupId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
+      });
+    },
   });
 }
 

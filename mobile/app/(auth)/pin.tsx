@@ -99,7 +99,18 @@ export default function AuthPIN() {
       setPinMutation.mutate(
         { newPin: entered },
         {
-          onSuccess: () => router.replace("/(auth)/initializing"),
+          onSuccess: () => {
+            // First-device signup has a one-time recovery key stashed in
+            // the store by `verify_otp`. Show it before initializing so
+            // the user can save it before we drop it from memory.
+            const pendingSecretKey =
+              useAppStore.getState().pendingSecretKey;
+            if (pendingSecretKey) {
+              router.replace("/(auth)/emergency-kit");
+            } else {
+              router.replace("/(auth)/initializing");
+            }
+          },
           onError: (e) => {
             setError((e as Error).message || "Couldn't save PIN.");
             setFirstPin("");

@@ -1,27 +1,64 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text } from "react-native";
+import { useRouter } from "expo-router";
 import {
   Screen,
   Crumb,
   Body,
   SectionTitle,
-  ListRow,
   Avatar,
-  Chip,
   Field,
-  Diamond,
   Ctx,
+  Button,
+  BottomAction,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
+import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
+import { useAppStore } from "../../stores/appStore";
 
 export default function UserSettings() {
-  const [name, setName] = useState("dan");
-  const [handle, setHandle] = useState("dan");
+  const router = useRouter();
+  const currentUser = useAppStore((s) => s.currentUser);
+  const { data: profile, isLoading } = useUserProfile();
+  const updateProfile = useUpdateProfile();
+
+  const [displayName, setDisplayName] = useState("");
+  const [handle, setHandle] = useState("");
+
+  // Seed local form state once the profile loads, then leave it alone so
+  // the user's in-progress edits aren't clobbered by a background refetch.
+  const [seeded, setSeeded] = useState(false);
+  useEffect(() => {
+    if (!seeded && profile) {
+      setDisplayName(profile.preferred_name ?? "");
+      setHandle(profile.username ?? "");
+      setSeeded(true);
+    }
+  }, [profile, seeded]);
+
+  const dirty =
+    profile != null &&
+    (displayName !== (profile.preferred_name ?? "") ||
+      handle !== (profile.username ?? ""));
+
+  const onSave = () => {
+    if (!handle.trim()) {
+      return;
+    }
+    updateProfile.mutate({
+      username: handle.trim(),
+      preferredName: displayName.trim() || undefined,
+    });
+  };
+
+  const avatarLabel = (handle || currentUser?.username || "us").slice(0, 2);
 
   return (
     <Screen>
-      <Crumb segs={[{ label: "SELF" }, { label: "User settings", leaf: true }]} />
+      <Crumb
+        segs={[{ label: "SELF" }, { label: "User settings", leaf: true }]}
+      />
       <Body>
         <View
           style={{
@@ -33,7 +70,7 @@ export default function UserSettings() {
             paddingBottom: 8,
           }}
         >
-          <Avatar label="dn" size="lg" variant="amber" />
+          <Avatar label={avatarLabel} size="lg" variant="amber" />
           <View style={{ flex: 1 }}>
             <Text
               style={{
@@ -42,7 +79,7 @@ export default function UserSettings() {
                 color: semantic.ink,
               }}
             >
-              dan
+              {displayName || handle || "—"}
             </Text>
             <Text
               style={{
@@ -51,16 +88,17 @@ export default function UserSettings() {
                 color: semantic.mute,
               }}
             >
-              2 character initials · tap to change
+              {isLoading
+                ? "Loading…"
+                : "Derived from your handle's first two characters."}
             </Text>
           </View>
-          <Chip variant="on">EDIT</Chip>
         </View>
 
         <SectionTitle>IDENTITY</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
           <Text style={ty.label}>DISPLAY NAME</Text>
-          <Field value={name} onChangeText={setName} />
+          <Field value={displayName} onChangeText={setDisplayName} />
         </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
           <Text style={ty.label}>HANDLE</Text>
@@ -77,18 +115,6 @@ export default function UserSettings() {
                 @
               </Text>
             }
-            trailing={
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 10,
-                  letterSpacing: 1,
-                  color: semantic.accent,
-                }}
-              >
-                AVAILABLE
-              </Text>
-            }
           />
           <Text
             style={{
@@ -103,67 +129,62 @@ export default function UserSettings() {
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
           <Text style={ty.label}>EMAIL</Text>
           <Field
-            value="dan@example.io"
+            value={profile?.email ?? currentUser?.email ?? ""}
             editable={false}
             icon={<Icon.mail color={semantic.mute} />}
-            trailing={
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 10,
-                  letterSpacing: 1,
-                  color: semantic.accent,
-                }}
-              >
-                VERIFIED
-              </Text>
-            }
           />
+          <Button
+            variant="subtle"
+            full
+            onPress={() => router.push("/self/change-email")}
+            icon={<Icon.edit color={semantic.ink} />}
+          >
+            Change email address
+          </Button>
         </View>
 
-        <SectionTitle>PRESENCE</SectionTitle>
-        <ListRow
-          minHeight={46}
-          glyph={<Diamond size={6} />}
-          name="Status"
-          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          end={
-            <>
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 12,
-                  color: semantic.accent,
-                }}
-              >
-                Online
-              </Text>
-              <Icon.fwd color={semantic.mute} />
-            </>
-          }
-        />
-        <ListRow
-          minHeight={46}
-          glyph={<Diamond size={6} fill={false} />}
-          name="Set away after"
-          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-          end={
-            <>
-              <Text
-                style={{
-                  fontFamily: ty.body.fontFamily,
-                  fontSize: 12,
-                  color: semantic.ink2,
-                }}
-              >
-                10 min
-              </Text>
-              <Icon.fwd color={semantic.mute} />
-            </>
-          }
-        />
+        {updateProfile.isError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.danger,
+              paddingHorizontal: 18,
+              paddingTop: 10,
+            }}
+          >
+            {(updateProfile.error as Error).message || "Couldn't save changes."}
+          </Text>
+        ) : null}
+        {updateProfile.isSuccess && !dirty ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.accent,
+              paddingHorizontal: 18,
+              paddingTop: 10,
+            }}
+          >
+            Saved.
+          </Text>
+        ) : null}
       </Body>
       <Ctx cr="SELF" name="User settings" />
+      <BottomAction>
+        <Button
+          full
+          variant="primary"
+          onPress={onSave}
+          disabled={!dirty || !handle.trim() || updateProfile.isPending}
+          iconRight={<Icon.check color="#0a0907" />}
+        >
+          {updateProfile.isPending ? "SAVING…" : "SAVE CHANGES"}
+        </Button>
+        <Button variant="subtle" full onPress={() => router.back()}>
+          Cancel
+        </Button>
+      </BottomAction>
     </Screen>
   );
 }
