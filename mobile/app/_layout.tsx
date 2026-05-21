@@ -89,6 +89,7 @@ export default function RootLayout() {
               <Stack.Screen name="group/invite" />
               <Stack.Screen name="dm/new" />
               <Stack.Screen name="chat/[id]" />
+              <Stack.Screen name="user/[id]" />
               <Stack.Screen name="self/preferences" />
               <Stack.Screen name="self/user-settings" />
               <Stack.Screen name="self/security" />

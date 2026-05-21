@@ -155,7 +155,9 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
         serde_json::from_str(&args_json)?
     };
 
-    use crate::commands::{auth, device_enrollment, dm, groups, messages, pin, user};
+    use crate::commands::{
+        auth, blocks, device_enrollment, dm, groups, messages, pin, safety, user,
+    };
 
     match cmd.as_str() {
         "version" => ok(env!("CARGO_PKG_VERSION")),
@@ -451,6 +453,45 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             let user_id: String = arg(&args, "userId")?;
             ok(dm::list_dm_channels(user_id, &state()?).await?)
         }
+        // ----- search -----
+        "search_messages" => {
+            let q: String = arg(&args, "query")?;
+            let limit: Option<i64> = arg_opt(&args, "limit")?;
+            ok(messages::search_messages(q, limit, &state()?).await?)
+        }
+
+        // ----- blocks -----
+        "block_user" => {
+            let blocker_id: String = arg(&args, "blockerId")?;
+            let blocked_id: String = arg(&args, "blockedId")?;
+            blocks::block_user(blocker_id, blocked_id, &state()?).await?;
+            ok(())
+        }
+        "unblock_user" => {
+            let blocker_id: String = arg(&args, "blockerId")?;
+            let blocked_id: String = arg(&args, "blockedId")?;
+            blocks::unblock_user(blocker_id, blocked_id, &state()?).await?;
+            ok(())
+        }
+        "list_blocked_users" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(blocks::list_blocked_users(user_id, &state()?).await?)
+        }
+
+        // ----- safety -----
+        "get_safety_number" => {
+            let my_user_id: String = arg(&args, "myUserId")?;
+            let peer_user_id: String = arg(&args, "peerUserId")?;
+            ok(safety::get_safety_number(my_user_id, peer_user_id, &state()?).await?)
+        }
+        "set_contact_verified" => {
+            let peer_user_id: String = arg(&args, "peerUserId")?;
+            let verified: bool = arg(&args, "verified")?;
+            safety::set_contact_verified(peer_user_id, verified, &state()?).await?;
+            ok(())
+        }
+        "list_peer_verifications" => ok(safety::list_peer_verifications(&state()?).await?),
+
         "list_dm_requests" => {
             let user_id: String = arg(&args, "userId")?;
             ok(dm::list_dm_requests(user_id, &state()?).await?)
