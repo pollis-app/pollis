@@ -63,6 +63,30 @@ export function useDMChannels() {
   });
 }
 
+export function useAcceptDMRequest() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+  return useMutation({
+    mutationFn: async (dmChannelId: string) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      await invoke("accept_dm_request", {
+        dmChannelId,
+        userId: currentUser.id,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.requests(currentUser?.id ?? null),
+      });
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
+      });
+    },
+  });
+}
+
 export function useCreateDM() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((s) => s.currentUser);

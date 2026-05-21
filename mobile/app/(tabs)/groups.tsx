@@ -6,17 +6,26 @@ import {
   Body,
   SectionTitle,
   ListRow,
+  Chip,
   Button,
   BottomAction,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
-import { useUserGroupsWithChannels } from "../../hooks/queries";
+import {
+  useUserGroupsWithChannels,
+  usePendingGroupInvites,
+  useAcceptGroupInvite,
+  useDeclineGroupInvite,
+} from "../../hooks/queries";
 import { useAppStore } from "../../stores/appStore";
 
 export default function Groups() {
   const router = useRouter();
   const { data: groups = [], isLoading, isError } = useUserGroupsWithChannels();
+  const { data: invites = [] } = usePendingGroupInvites();
+  const acceptInvite = useAcceptGroupInvite();
+  const declineInvite = useDeclineGroupInvite();
   const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
   const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
 
@@ -26,6 +35,34 @@ export default function Groups() {
     <Screen>
       <Crumb segs={[{ label: "GROUPS", leaf: true }]} end={String(totalChannels)} />
       <Body>
+        {invites.length > 0 ? (
+          <View>
+            <SectionTitle>PENDING INVITES</SectionTitle>
+            {invites.map((inv) => (
+              <ListRow
+                key={inv.id}
+                glyph={<Icon.inbox color={semantic.accent} />}
+                name={inv.group_name}
+                sub={`from @${inv.inviter_username ?? "someone"}`}
+                end={
+                  <View style={{ flexDirection: "row", gap: 6 }}>
+                    <Chip
+                      onPress={() => declineInvite.mutate(inv.id)}
+                    >
+                      Decline
+                    </Chip>
+                    <Chip
+                      variant="on"
+                      onPress={() => acceptInvite.mutate(inv.id)}
+                    >
+                      {acceptInvite.isPending ? "…" : "Accept"}
+                    </Chip>
+                  </View>
+                }
+              />
+            ))}
+          </View>
+        ) : null}
         {isLoading ? (
           <Text
             style={{

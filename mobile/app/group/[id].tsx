@@ -1,5 +1,5 @@
 import { View, Text } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import {
   Screen,
   Crumb,
@@ -7,29 +7,58 @@ import {
   SectionTitle,
   ListRow,
   Avatar,
-  Badge,
   Chip,
   Ctx,
   CtxAct,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
+import {
+  useGroupChannels,
+  useUserGroupsWithChannels,
+  useGroupMembers,
+  useLeaveGroup,
+} from "../../hooks/queries";
+import { useAppStore } from "../../stores/appStore";
 
 export default function GroupDetail() {
   const router = useRouter();
-  // Built per-render so glyph colors track the live accent.
-  const ADMIN = [
-    { g: <Icon.people color={semantic.mute} />, n: "Members", s: "3 · 1 admin" },
-    { g: <Icon.at color={semantic.mute} />, n: "Invite a member" },
-    { g: <Icon.plus color={semantic.mute} />, n: "New channel" },
-    { g: <Icon.inbox color={semantic.mute} />, n: "Join requests", badge: "2" },
-    { g: <Icon.edit color={semantic.mute} />, n: "Rename group" },
-  ];
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const groupId = id ?? null;
+
+  // Reuse the cached groups list to find the group's metadata without
+  // hitting Turso again. Falls back to "Group" when the cache hasn't
+  // hydrated yet (deep-link / fresh launch).
+  const { data: groups = [] } = useUserGroupsWithChannels();
+  const group = groups.find((g) => g.id === groupId);
+
+  const { data: channels = [], isLoading: channelsLoading } =
+    useGroupChannels(groupId);
+  const { data: members = [] } = useGroupMembers(groupId);
+  const leaveGroup = useLeaveGroup();
+
+  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
+  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
+
+  const groupName = group?.name ?? "Group";
+  const adminCount = members.filter(
+    (m) => m.role === "admin" || m.role === "owner",
+  ).length;
+
+  const onLeave = () => {
+    if (!groupId) {
+      return;
+    }
+    leaveGroup.mutate(groupId, {
+      onSuccess: () => router.replace("/(tabs)/groups"),
+    });
+  };
+
   return (
     <Screen>
       <Crumb
-        segs={[{ label: "GROUPS" }, { label: "Quick Group", leaf: true }]}
-        end="3 MEMBERS"
+        segs={[{ label: "GROUPS" }, { label: groupName, leaf: true }]}
+        end={`${members.length || 0} MEMBERS`}
       />
       <Body>
         <View
@@ -43,9 +72,15 @@ export default function GroupDetail() {
           }}
         >
           <View style={{ flexDirection: "row" }}>
-            <Avatar label="dn" size="sm" variant="amber" style={{ marginRight: -8 }} />
-            <Avatar label="br" size="sm" style={{ marginRight: -8 }} />
-            <Avatar label="me" size="sm" />
+            {members.slice(0, 3).map((m, i) => (
+              <Avatar
+                key={m.user_id}
+                label={(m.username || m.user_id || "us").slice(0, 2)}
+                size="sm"
+                variant={i === 0 ? "amber" : "default"}
+                style={{ marginRight: i < 2 ? -8 : 0 }}
+              />
+            ))}
           </View>
           <Text
             style={{
@@ -55,62 +90,100 @@ export default function GroupDetail() {
               color: semantic.mute,
             }}
           >
-            dan, brian, meilan.solly
+            {members
+              .slice(0, 3)
+              .map((m) => m.username || m.user_id.slice(0, 6))
+              .join(", ")}
+            {members.length > 3 ? ` +${members.length - 3}` : ""}
           </Text>
-          <Chip>View all</Chip>
         </View>
 
         <SectionTitle>TEXT CHANNELS</SectionTitle>
-        <ListRow
-          selected
-          minHeight={54}
-          glyph={<Icon.hash color={semantic.accent} />}
-          name="General"
-          sub="dan: frick its been a minute"
-          onPress={() => router.push("/chat/quick-general")}
-          end={<Badge>2</Badge>}
-        />
-        <ListRow
-          minHeight={54}
-          glyph={<Icon.hash color={semantic.mute} />}
-          name="Random"
-          sub="No new messages"
-          onPress={() => router.push("/chat/quick-random")}
-        />
-
-        <SectionTitle>ADMIN</SectionTitle>
-        {ADMIN.map((rw, i) => (
+        {channelsLoading && channels.length === 0 ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingVertical: 8,
+            }}
+          >
+            Loading channels…
+          </Text>
+        ) : null}
+        {channels.map((c) => (
           <ListRow
-            key={i}
-            minHeight={48}
-            glyph={rw.g}
-            name={rw.n}
-            nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
-            end={
-              <>
-                {rw.badge ? <Badge>{rw.badge}</Badge> : null}
-                <Icon.fwd color={semantic.mute} />
-              </>
-            }
+            key={c.id}
+            minHeight={54}
+            glyph={<Icon.hash color={semantic.mute} />}
+            name={c.name}
+            sub={c.description ?? undefined}
+            onPress={() => {
+              setSelectedGroupId(groupId);
+              setSelectedChannelId(c.id);
+              router.push({
+                pathname: "/chat/[id]",
+                params: { id: c.id, kind: "channel" },
+              });
+            }}
           />
         ))}
+
+        <SectionTitle>ADMIN</SectionTitle>
+        <ListRow
+          minHeight={48}
+          glyph={<Icon.people color={semantic.mute} />}
+          name="Members"
+          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+          sub={`${members.length}${adminCount ? ` · ${adminCount} admin` : ""}`}
+          end={<Icon.fwd color={semantic.mute} />}
+        />
+        <ListRow
+          minHeight={48}
+          glyph={<Icon.at color={semantic.mute} />}
+          name="Invite a member"
+          nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+          onPress={() =>
+            groupId &&
+            router.push({
+              pathname: "/group/invite",
+              params: { groupId },
+            })
+          }
+          end={<Icon.fwd color={semantic.mute} />}
+        />
 
         <SectionTitle>DANGER</SectionTitle>
         <ListRow
           minHeight={48}
           glyph={<Icon.exit color={semantic.danger} />}
-          name="Leave group"
+          name={leaveGroup.isPending ? "Leaving…" : "Leave group"}
           nameStyle={{
             fontSize: 14,
             fontFamily: ty.body.fontFamily,
             color: semantic.danger,
           }}
+          onPress={onLeave}
         />
+        {leaveGroup.isError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.danger,
+              paddingHorizontal: 18,
+              paddingTop: 6,
+            }}
+          >
+            {(leaveGroup.error as Error).message || "Couldn't leave the group."}
+          </Text>
+        ) : null}
       </Body>
 
       <Ctx
         cr="GROUPS"
-        name="Quick Group"
+        name={groupName}
         actions={<CtxAct icon={<Icon.kebab color={semantic.ink2} />} />}
       />
     </Screen>

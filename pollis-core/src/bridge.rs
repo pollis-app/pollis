@@ -284,6 +284,45 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             )
             .await?)
         }
+        "get_group_members" => {
+            let group_id: String = arg(&args, "groupId")?;
+            ok(groups::get_group_members(group_id, &state()?).await?)
+        }
+        "leave_group" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let user_id: String = arg(&args, "userId")?;
+            groups::leave_group(group_id, user_id, &state()?).await?;
+            ok(())
+        }
+        "send_group_invite" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let inviter_id: String = arg(&args, "inviterId")?;
+            let invitee_identifier: String = arg(&args, "inviteeIdentifier")?;
+            groups::send_group_invite(
+                group_id,
+                inviter_id,
+                invitee_identifier,
+                &state()?,
+            )
+            .await?;
+            ok(())
+        }
+        "get_pending_invites" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(groups::get_pending_invites(user_id, &state()?).await?)
+        }
+        "accept_group_invite" => {
+            let invite_id: String = arg(&args, "inviteId")?;
+            let user_id: String = arg(&args, "userId")?;
+            groups::accept_group_invite(invite_id, user_id, &state()?).await?;
+            ok(())
+        }
+        "decline_group_invite" => {
+            let invite_id: String = arg(&args, "inviteId")?;
+            let user_id: String = arg(&args, "userId")?;
+            groups::decline_group_invite(invite_id, user_id, &state()?).await?;
+            ok(())
+        }
         "create_channel" => {
             let group_id: String = arg(&args, "groupId")?;
             let name: String = arg(&args, "name")?;
@@ -375,6 +414,12 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
         "list_dm_requests" => {
             let user_id: String = arg(&args, "userId")?;
             ok(dm::list_dm_requests(user_id, &state()?).await?)
+        }
+        "accept_dm_request" => {
+            let dm_channel_id: String = arg(&args, "dmChannelId")?;
+            let user_id: String = arg(&args, "userId")?;
+            dm::accept_dm_request(dm_channel_id, user_id, &state()?).await?;
+            ok(())
         }
         "create_dm_channel" => {
             let creator_id: String = arg(&args, "creatorId")?;

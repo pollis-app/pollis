@@ -10,3 +10,4 @@ export * from "./useAuth";
 export * from "./useUserSearch";
 export * from "./usePreferences";
 export * from "./useDevices";
+export * from "./useGroupInvites";
