@@ -224,6 +224,7 @@ Concrete implications:
 - **NO MODALS** — this is absolute. No fixed-position overlays, no backdrops, no dialog elements, no modal patterns of any kind. The only exception is the Cmd+K search menu. If a flow needs confirmation or input, replace the chat input bar (edit/delete bar pattern in `MainContent`) or navigate to a new page/view. A full page with two buttons is preferable to a modal.
 - **Confirmation and editing flows replace the chat input bar** — render a bar in place of the chat input at the bottom of `MainContent`, following the edit/delete bar pattern already established there.
 - **New static pages must be registered in three places** — when adding a page with a fixed route (e.g. `/shortcuts`, `/preferences`): (1) the route in `frontend/src/router.tsx`, (2) the `PAGE_RESULTS` array in `frontend/src/components/SearchPanel.tsx` so it's reachable via Cmd+K, and (3) the relevant nav list in `frontend/src/components/Layout/Sidebar.tsx`. This does **not** apply to dynamic/parameterized pages (e.g. `/groups/$groupId`, `/dms/$conversationId`, `/user/$userId`) — those are reached contextually, not from search/sidebar.
+- **No neon / glow effects** — speaking indicators, focus rings, and other UI states use solid borders or solid backgrounds, never luminous `box-shadow` spreads or blurred accent halos.
 
 ## Design Choices
 
