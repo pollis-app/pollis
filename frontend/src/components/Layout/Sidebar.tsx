@@ -17,6 +17,7 @@ import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
 import { useAppStore } from "../../stores/appStore";
+import { usePresenceStatus, type PresenceStatus } from "../../stores/presenceStore";
 import { shortcutLabel } from "../../utils/platform";
 
 const SIDEBAR_WIDTH = 220;
@@ -229,6 +230,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                 indent={1}
                 isActive={activeDmId === c.id}
                 onClick={() => router.navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } })}
+                leading={<PresenceDot userId={c.user2_id ?? null} />}
                 label={`@${c.user2_identifier}`}
                 badge={unread > 0 ? unread : null}
               />
@@ -452,3 +454,32 @@ const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, mute
     {count > 99 ? "99+" : count}
   </span>
 );
+
+// Standalone presence dot mirroring the styling on Avatar's overlay dot:
+// online uses the accent color, offline uses the bg color ringed in
+// accent-muted. Used in the sidebar DM list where there's no avatar behind
+// it to anchor the dot.
+const PRESENCE_COLORS: Record<PresenceStatus, string> = {
+  online: "var(--c-accent)",
+  offline: "var(--c-bg)",
+};
+
+const PresenceDot: React.FC<{ userId: string | null }> = ({ userId }) => {
+  const status = usePresenceStatus(userId);
+  return (
+    <span
+      data-testid={userId ? `sidebar-presence-${userId}` : undefined}
+      aria-label={`Presence: ${status}`}
+      style={{
+        display: "inline-block",
+        width: rem(8),
+        height: rem(8),
+        borderRadius: "50%",
+        background: PRESENCE_COLORS[status],
+        border: status === "offline" ? "1px solid var(--c-accent-muted)" : "1px solid var(--c-surface, var(--c-bg))",
+        boxSizing: "content-box",
+        flexShrink: 0,
+      }}
+    />
+  );
+};
