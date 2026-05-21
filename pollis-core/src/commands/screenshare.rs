@@ -91,6 +91,42 @@ const MAX_SHARE_WIDTH: u32 = 1920;
 const MAX_SHARE_HEIGHT: u32 = 1080;
 const MAX_SHARE_FPS: u32 = 60;
 
+/// Picks the codec used to publish the local screen-share track.
+///
+/// Defaults to H.264 on every platform. The encoder factory in
+/// `webrtc-sys 0.3.27` routes the request to the best available backend
+/// for the current build/host:
+/// - macOS: `RTCDefaultVideoEncoderFactory` → VideoToolbox (HW). Always
+///   present — `framework=VideoToolbox` is linked unconditionally.
+/// - Linux: NVENC if `cuda.h` was present at build time AND `libcuda` /
+///   `libnvcuvid` dlopen at runtime; else VAAPI if `libva-dev` was
+///   present at build time AND `libva.so.2` / `libva-drm.so.2` dlopen
+///   at runtime; else OpenH264 software (`WEBRTC_USE_H264` is baked
+///   into the prebuilt libwebrtc).
+/// - Windows: OpenH264 software (no MediaFoundation factory exists in
+///   this SDK yet — see issue #293).
+///
+/// SW H.264 (OpenH264) is roughly on par with SW VP8 in CPU cost on
+/// Linux and noticeably cheaper on Windows, so the SW fallback isn't a
+/// regression versus the previous VP8 default.
+///
+/// `POLLIS_SCREENSHARE_CODEC` overrides the default at runtime for A/B
+/// without rebuilding. Accepts `vp8|h264|vp9|av1|h265`; anything else
+/// (including unset) → H.264.
+fn pick_screenshare_codec() -> VideoCodec {
+    if let Ok(v) = std::env::var("POLLIS_SCREENSHARE_CODEC") {
+        match v.to_ascii_lowercase().as_str() {
+            "vp8" => return VideoCodec::VP8,
+            "h264" => return VideoCodec::H264,
+            "vp9" => return VideoCodec::VP9,
+            "av1" => return VideoCodec::AV1,
+            "h265" => return VideoCodec::H265,
+            _ => {}
+        }
+    }
+    VideoCodec::H264
+}
+
 /// Minimum spacing between published frames to enforce `MAX_SHARE_FPS`.
 /// Used by the Linux reader (the macOS/Windows native pipelines are
 /// already display-rate-locked and SCK/WGC honour their own interval
@@ -740,7 +776,7 @@ pub async fn start_screen_share(
             LocalTrack::Video(track.clone()),
             TrackPublishOptions {
                 source: TrackSource::Screenshare,
-                video_codec: VideoCodec::VP8,
+                video_codec: pick_screenshare_codec(),
                 ..Default::default()
             },
         )
@@ -927,7 +963,7 @@ pub async fn start_screen_share(
             LocalTrack::Video(track.clone()),
             TrackPublishOptions {
                 source: TrackSource::Screenshare,
-                video_codec: VideoCodec::VP8,
+                video_codec: pick_screenshare_codec(),
                 ..Default::default()
             },
         )
