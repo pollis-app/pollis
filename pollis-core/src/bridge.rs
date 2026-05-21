@@ -228,6 +228,20 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             let username: String = arg(&args, "username")?;
             ok(user::search_user_by_username(username, &state()?).await?)
         }
+        "get_preferences" => {
+            let user_id: String = arg(&args, "userId")?;
+            // Rust returns a JSON-encoded string; the JS bridge will
+            // wrap it in JSON.stringify again to feed our serde_json
+            // ser path. The TS hook JSON.parses the outer wrapper to
+            // recover the raw blob.
+            ok(user::get_preferences(user_id, &state()?).await?)
+        }
+        "save_preferences" => {
+            let user_id: String = arg(&args, "userId")?;
+            let preferences_json: String = arg(&args, "preferencesJson")?;
+            user::save_preferences(user_id, preferences_json, &state()?).await?;
+            ok(())
+        }
 
         // ----- groups -----
         "list_user_groups" => {

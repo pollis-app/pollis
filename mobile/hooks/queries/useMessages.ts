@@ -102,7 +102,12 @@ export function useMessages(
 ) {
   const currentUser = useAppStore((s) => s.currentUser);
   const limit = opts?.limit ?? 50;
-  const refetchInterval = opts?.refetchIntervalMs ?? 10_000;
+  // No polling by default. Realtime push (a follow-on PR) will invalidate
+  // this query when a new envelope arrives; until then the focus-effect
+  // ingest in the chat screen covers the "open a chat and see what was
+  // sent while I was away" case. A periodic poll would just be ripped
+  // out the moment realtime lands.
+  const refetchInterval = opts?.refetchIntervalMs ?? false;
 
   return useQuery({
     queryKey: messageQueryKeys.conversation(conversationId, kind),

@@ -8,3 +8,4 @@ export * from "./useDMChannels";
 export * from "./useMessages";
 export * from "./useAuth";
 export * from "./useUserSearch";
+export * from "./usePreferences";

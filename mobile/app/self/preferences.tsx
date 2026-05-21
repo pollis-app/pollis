@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import {
   Screen,
@@ -13,6 +12,7 @@ import {
 import { Icon } from "../../components/icons";
 import { useTheme } from "../../components/theme";
 import { semantic, type as ty, r, DEFAULT_ACCENT_HEX } from "../../theme/tokens";
+import { usePreferences } from "../../hooks/queries";
 
 const SWATCHES = [
   { n: "Amber", c: DEFAULT_ACCENT_HEX },
@@ -23,19 +23,34 @@ const SWATCHES = [
   { n: "Rust", c: "#d68f5a" },
 ];
 
-const BEHAVIOR = [
-  { n: "Show inline timestamps", on: true },
-  { n: "Show member avatars", on: true },
-  { n: "Mark verified peers with ◆", on: true },
-  { n: "Read receipts", on: false },
-  { n: "Reduce motion", on: false },
-];
+const BEHAVIOR_KEYS = [
+  { key: "show_inline_timestamps", n: "Show inline timestamps", defaultOn: true },
+  { key: "show_member_avatars", n: "Show member avatars", defaultOn: true },
+  { key: "mark_verified_peers", n: "Mark verified peers with ◆", defaultOn: true },
+  { key: "read_receipts", n: "Read receipts", defaultOn: false },
+  { key: "reduce_motion", n: "Reduce motion", defaultOn: false },
+] as const;
+
+const THEMES = ["Coal", "Paper", "System"] as const;
+const DENSITIES = ["Compact", "Comfortable"] as const;
 
 export default function Preferences() {
   const { accentHex, setAccent } = useTheme();
-  const [theme, setTheme] = useState("Coal");
-  const [density, setDensity] = useState("Compact");
-  const [toggles, setToggles] = useState(BEHAVIOR.map((b) => b.on));
+  const { data: prefs, update } = usePreferences();
+
+  const theme = prefs?.mobile_theme ?? "Coal";
+  const density = prefs?.mobile_density ?? "Compact";
+  const behavior = prefs?.mobile_behavior ?? {};
+
+  const isBehaviorOn = (key: string, fallback: boolean): boolean => {
+    const v = behavior[key];
+    return typeof v === "boolean" ? v : fallback;
+  };
+
+  const toggleBehavior = (key: string, fallback: boolean) => {
+    const next = { ...behavior, [key]: !isBehaviorOn(key, fallback) };
+    update({ mobile_behavior: next });
+  };
 
   return (
     <Screen>
@@ -43,9 +58,7 @@ export default function Preferences() {
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12 }}>
           <Text style={[ty.label, { marginBottom: 10 }]}>ACCENT</Text>
-          <View
-            style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}
-          >
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
             {SWATCHES.map((s) => {
               const sel = accentHex.toLowerCase() === s.c.toLowerCase();
               return (
@@ -98,11 +111,11 @@ export default function Preferences() {
         <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
           <Text style={[ty.label, { marginBottom: 10 }]}>THEME</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            {["Coal", "Paper", "System"].map((opt) => (
+            {THEMES.map((opt) => (
               <Chip
                 key={opt}
                 variant={theme === opt ? "on" : "default"}
-                onPress={() => setTheme(opt)}
+                onPress={() => update({ mobile_theme: opt })}
               >
                 {opt}
               </Chip>
@@ -113,11 +126,11 @@ export default function Preferences() {
         <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
           <Text style={[ty.label, { marginBottom: 10 }]}>DENSITY</Text>
           <View style={{ flexDirection: "row", gap: 8 }}>
-            {["Compact", "Comfortable"].map((opt) => (
+            {DENSITIES.map((opt) => (
               <Chip
                 key={opt}
                 variant={density === opt ? "on" : "default"}
-                onPress={() => setDensity(opt)}
+                onPress={() => update({ mobile_density: opt })}
               >
                 {opt}
               </Chip>
@@ -126,20 +139,16 @@ export default function Preferences() {
         </View>
 
         <SectionTitle>BEHAVIOR</SectionTitle>
-        {BEHAVIOR.map((b, i) => (
+        {BEHAVIOR_KEYS.map((b) => (
           <ListRow
-            key={b.n}
+            key={b.key}
             minHeight={46}
             name={b.n}
             nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
             end={
               <Toggle
-                on={toggles[i]}
-                onPress={() =>
-                  setToggles((t) =>
-                    t.map((v, idx) => (idx === i ? !v : v))
-                  )
-                }
+                on={isBehaviorOn(b.key, b.defaultOn)}
+                onPress={() => toggleBehavior(b.key, b.defaultOn)}
               />
             }
           />
