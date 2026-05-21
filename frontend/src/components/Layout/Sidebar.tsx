@@ -319,7 +319,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       display: "flex",
       alignItems: "center",
       gap: rem(6),
-      padding: `${rem(8)} ${rem(10)} ${rem(9)}`,
+      padding: `${rem(8)} ${rem(10)} ${rem(8)}`,
       marginTop: bordered ? rem(4) : 0,
       border: "none",
       borderTop: bordered ? "1px solid var(--c-border)" : "none",
