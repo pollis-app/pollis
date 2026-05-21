@@ -9,6 +9,7 @@ import {
   type WindowSource,
 } from "../../screenshare/screenShareSession";
 import { Button } from "../ui/Button";
+import { Card } from "../ui/Card";
 
 /** Inline in-app picker for macOS screen-share sources. Replaces the
  *  voice participant grid when `screenShareMode === 'picking'` — no
@@ -96,18 +97,22 @@ export const ScreenSharePicker: React.FC = () => {
         <div className="flex items-center gap-3">
           <span style={{ color: "var(--c-accent)" }}>Share screen</span>
           <div className="flex items-center gap-1">
-            <PickerTab
-              active={tab === "displays"}
+            <Button
+              variant={tab === "displays" ? "primary" : "secondary"}
+              size="sm"
               onClick={() => setTab("displays")}
-              count={displays.length}
-              label="Displays"
-            />
-            <PickerTab
-              active={tab === "windows"}
+            >
+              Displays
+              <span className="opacity-70">[{displays.length}]</span>
+            </Button>
+            <Button
+              variant={tab === "windows" ? "primary" : "secondary"}
+              size="sm"
               onClick={() => setTab("windows")}
-              count={windows.length}
-              label="Windows"
-            />
+            >
+              Windows
+              <span className="opacity-70">[{windows.length}]</span>
+            </Button>
           </div>
         </div>
         <Button
@@ -163,34 +168,6 @@ export const ScreenSharePicker: React.FC = () => {
   );
 };
 
-interface PickerTabProps {
-  active: boolean;
-  onClick: () => void;
-  count: number;
-  label: string;
-}
-
-const PickerTab: React.FC<PickerTabProps> = ({
-  active,
-  onClick,
-  count,
-  label,
-}) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className="px-2 py-1 font-mono text-xs"
-    style={{
-      color: active ? "var(--c-bg)" : "var(--c-text-muted)",
-      background: active ? "var(--c-accent)" : "transparent",
-      border: `1px solid ${active ? "var(--c-accent)" : "var(--c-border)"}`,
-    }}
-  >
-    {label}
-    <span className="ml-1 opacity-70">[{count}]</span>
-  </button>
-);
-
 interface SourceCardProps {
   disabled: boolean;
   onPick: () => void;
@@ -210,45 +187,34 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
     type="button"
     onClick={onPick}
     disabled={disabled}
-    className="flex flex-col items-stretch text-left font-mono text-xs p-2 disabled:opacity-50"
-    style={{
-      border: "1px solid var(--c-border)",
-      background: "var(--c-surface)",
-      color: "var(--c-text)",
-      // Aspect-ratio-locked thumbnail placeholder + label underneath —
-      // a 16:9 area gives the source label room to wrap.
-      minHeight: 100,
-    }}
-    onMouseEnter={(e) => {
-      if (!disabled) {
-        e.currentTarget.style.borderColor = "var(--c-accent)";
-      }
-    }}
-    onMouseLeave={(e) => {
-      e.currentTarget.style.borderColor = "var(--c-border)";
-    }}
+    className="text-left font-mono text-xs disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--c-accent)] rounded-[6px]"
+    style={{ minHeight: 100 }}
   >
-    <div
-      className="flex-1 flex items-center justify-center"
-      style={{
-        minHeight: 56,
-        background: "var(--c-bg)",
-        color: "var(--c-text-muted)",
-      }}
-    >
-      {icon}
-    </div>
-    <div className="mt-1.5 truncate" style={{ color: "var(--c-text)" }}>
-      {title}
-    </div>
-    {subtitle ? (
+    <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
       <div
-        className="truncate"
-        style={{ color: "var(--c-text-muted)", fontSize: 10 }}
+        className="flex-1 flex items-center justify-center"
+        style={{
+          minHeight: 56,
+          background: "var(--c-bg)",
+          color: "var(--c-text-muted)",
+        }}
       >
-        {subtitle}
+        {icon}
       </div>
-    ) : null}
+      <div className="p-2">
+        <div className="truncate" style={{ color: "var(--c-text)" }}>
+          {title}
+        </div>
+        {subtitle ? (
+          <div
+            className="truncate"
+            style={{ color: "var(--c-text-muted)", fontSize: 10 }}
+          >
+            {subtitle}
+          </div>
+        ) : null}
+      </div>
+    </Card>
   </button>
 );
 
