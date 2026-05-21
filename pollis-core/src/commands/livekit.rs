@@ -2,7 +2,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::Engine as _;
 use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use livekit::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -308,11 +307,11 @@ pub(crate) fn make_token(config: &Config, room_name: &str, identity: &str, displ
         .map_err(|e| Error::Other(anyhow::anyhow!("JWT sign: {e}")))
 }
 
-/// Sends a JSON event to a user's personal inbox LiveKit room via the
-/// RoomService.SendData twirp endpoint — a single HTTP POST. Replaces the
-/// previous connect-publish-disconnect cycle which opened a fresh websocket
-/// per event and took 2–5s, causing races between `call_invite` and
-/// `cancel_call` delivery. Non-fatal — errors are only logged.
+/// Sends a JSON event to a user's personal inbox LiveKit room by making a
+/// one-shot room connection. Joins `inbox-{user_id}` as identity "server",
+/// publishes the data packet, then drops the room (auto-disconnects).
+/// Spawned in a background task so callers are never blocked.
+/// Non-fatal — errors are only logged.
 pub async fn publish_to_user_inbox(
     config: &Config,
     user_id: &str,
@@ -323,44 +322,35 @@ pub async fn publish_to_user_inbox(
     }
 
     let room_name = format!("inbox-{}", user_id);
-    let raw = serde_json::to_vec(&payload)
-        .map_err(|e| Error::Other(anyhow::anyhow!("serialize inbox payload: {e}")))?;
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&raw);
-    let token = make_admin_token(config, Some(&room_name))?;
-    let url = format!(
-        "{}/twirp/livekit.RoomService/SendData",
-        twirp_base(&config.livekit_url)
-    );
-    let body = serde_json::json!({
-        "room": room_name,
-        "data": encoded,
-        "kind": "RELIABLE",
-    });
+    let token = make_token(config, &room_name, "server", "server")?;
+    let url = config.livekit_url.clone();
 
-    // Fire-and-forget so the caller (e.g. `start_call`) returns immediately;
-    // the HTTP round-trip is sub-second but we don't want any one publisher
-    // blocked on it.
     tokio::spawn(async move {
-        let result = reqwest::Client::new()
-            .post(&url)
-            .bearer_auth(&token)
-            .json(&body)
-            .send()
-            .await;
-        match result {
-            Ok(resp) => {
-                let status = resp.status();
-                if !status.is_success() {
-                    // 404 = inbox room has no active participants (recipient offline).
-                    if status == reqwest::StatusCode::NOT_FOUND {
+        match Room::connect(&url, &token, RoomOptions::default()).await {
+            Ok((room, _events)) => {
+                let raw = match serde_json::to_vec(&payload) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("[inbox] serialize error for {room_name}: {e}");
                         return;
                     }
-                    let body = resp.text().await.unwrap_or_default();
-                    eprintln!("[inbox] SendData to {room_name} failed: {status} {body}");
+                };
+                let result = room
+                    .local_participant()
+                    .publish_data(DataPacket {
+                        payload: raw,
+                        reliable: true,
+                        ..Default::default()
+                    })
+                    .await;
+                if let Err(e) = result {
+                    eprintln!("[inbox] publish_data to {room_name} failed: {e}");
                 }
+                // Dropping `room` here causes the SDK to disconnect automatically.
             }
             Err(e) => {
-                eprintln!("[inbox] SendData to {room_name} http error: {e}");
+                // Non-fatal: room may not exist if the user is offline.
+                eprintln!("[inbox] connect to {room_name} failed (user may be offline): {e}");
             }
         }
     });
