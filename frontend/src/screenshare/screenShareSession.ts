@@ -27,8 +27,10 @@ export interface WindowSource {
   bundle_id: string;
 }
 
-/** What the helper offers when it enumerates. Empty on Linux/Windows —
- *  those platforms hand off selection to the system picker. */
+/** What the helper offers when it enumerates. Populated on macOS and on
+ *  Linux X11 (RandR outputs). Empty on Windows and on Linux when the
+ *  system portal is in charge — those platforms hand off selection to
+ *  the system picker, and the frontend skips the in-app picker. */
 export interface SourceList {
   displays: DisplaySource[];
   windows: WindowSource[];
@@ -232,11 +234,13 @@ class ScreenShareSession {
     return Math.round(((hist.length - 1) / span) * 1000);
   }
 
-  /** Enumerate capturable displays + windows. On macOS this spawns the
-   *  helper, parks it waiting for our selection, and returns the list to
-   *  render in our in-app picker. On Linux/Windows the system portal /
-   *  WGC picker handles selection — the backend returns an empty list as
-   *  a signal to skip the in-app picker and go straight to `start()`. */
+  /** Enumerate capturable displays + windows. The backend spawns the
+   *  helper, parks it waiting for our selection, and returns the list
+   *  to render in our in-app picker. On macOS the list is populated via
+   *  `SCShareableContent`; on Linux X11 it's the RandR outputs. The
+   *  backend returns an empty list when the system handles selection
+   *  itself (Linux portal, Windows WGC) — frontend skips the in-app
+   *  picker and goes straight to `start()` in that case. */
   async enumerate(): Promise<SourceList> {
     return await invoke<SourceList>("enumerate_screen_sources");
   }
@@ -247,10 +251,10 @@ class ScreenShareSession {
     await invoke("cancel_screen_share_picker");
   }
 
-  /** Start the share. On macOS this must carry the user's `Selection`
-   *  from the in-app picker; the backend sends it to the parked helper.
-   *  On Linux/Windows it must be undefined; the system picker handles
-   *  selection. */
+  /** Start the share. Carries the user's `Selection` from the in-app
+   *  picker when one was shown (macOS, Linux X11 with RandR outputs).
+   *  Undefined when the system handles selection (Linux portal, Windows
+   *  WGC, or Linux X11 with no RandR outputs). */
   async start(selection?: Selection): Promise<void> {
     await invoke("start_screen_share", { selection: selection ?? null });
   }

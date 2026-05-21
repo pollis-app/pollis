@@ -44,9 +44,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use pollis_capture_proto::CaptureMsg;
+use pollis_capture_proto::{CaptureMsg, DisplaySource};
 use tokio::sync::mpsc;
-use xcb::{shm, x, Xid};
+use xcb::{shm, x, Xid, XidNew};
 
 /// Geometry of the monitor we capture, in root-window coordinates.
 struct CaptureRegion {
@@ -56,10 +56,113 @@ struct CaptureRegion {
     height: u16,
 }
 
-/// Pick the monitor to capture. Prefer the RandR primary output; fall
-/// back to the first connected/active CRTC; finally fall back to the
-/// whole root window if RandR is unavailable (very old server).
-fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion> {
+/// Enumerate the RandR outputs as `DisplaySource`s for the in-app
+/// picker. The `id` is the RandR output XID — a u32 stable for the
+/// lifetime of the X server, so passing it back in a later `Selection`
+/// from the parent still resolves to the same physical output.
+///
+/// Connected outputs without an active CRTC (unplugged-but-listed) are
+/// filtered out — capturing them returns black. RandR-absent servers
+/// return an empty list; the parent treats empty as "no picker, fall
+/// back to the default capture region" via `pick_region(None)`.
+pub fn enumerate_outputs() -> Result<Vec<DisplaySource>> {
+    let (conn, screen_num) = xcb::Connection::connect_with_extensions(
+        None,
+        &[xcb::Extension::RandR],
+        &[],
+    )
+    .context("xcb connect for enumeration")?;
+    let setup = conn.get_setup();
+    let screen = setup
+        .roots()
+        .nth(screen_num as usize)
+        .ok_or_else(|| anyhow!("no X screen {screen_num}"))?;
+    let root = screen.root();
+
+    let res_cookie = conn.send_request(&xcb::randr::GetScreenResourcesCurrent { window: root });
+    let res = match conn.wait_for_reply(res_cookie) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("[capture/x11] RandR unavailable, no outputs to enumerate: {e}");
+            return Ok(Vec::new());
+        }
+    };
+
+    let primary = conn
+        .send_request(&xcb::randr::GetOutputPrimary { window: root });
+    let primary_id: u32 = conn
+        .wait_for_reply(primary)
+        .ok()
+        .map(|r| r.output().resource_id())
+        .unwrap_or(0);
+
+    let mut displays: Vec<DisplaySource> = Vec::new();
+    for &output in res.outputs() {
+        if output.is_none() {
+            continue;
+        }
+        let info_cookie = conn.send_request(&xcb::randr::GetOutputInfo {
+            output,
+            config_timestamp: x::CURRENT_TIME,
+        });
+        let info = match conn.wait_for_reply(info_cookie) {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+        let crtc = info.crtc();
+        if crtc.is_none() {
+            continue;
+        }
+        let crtc_cookie = conn.send_request(&xcb::randr::GetCrtcInfo {
+            crtc,
+            config_timestamp: x::CURRENT_TIME,
+        });
+        let crtc_info = match conn.wait_for_reply(crtc_cookie) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if crtc_info.width() == 0 || crtc_info.height() == 0 {
+            continue;
+        }
+        let name = String::from_utf8_lossy(info.name()).into_owned();
+        let id = output.resource_id();
+        let label = if id == primary_id {
+            format!("{} (primary)", name)
+        } else {
+            name
+        };
+        displays.push(DisplaySource {
+            id,
+            width: crtc_info.width() as u32,
+            height: crtc_info.height() as u32,
+            name: label,
+        });
+    }
+
+    // Primary first — matches what users expect to see in the picker.
+    displays.sort_by_key(|d| if d.id == primary_id { 0 } else { 1 });
+    Ok(displays)
+}
+
+/// Pick the monitor to capture. If `selected_output_id` is Some, locate
+/// that RandR output and capture its CRTC. Otherwise prefer the RandR
+/// primary output; fall back to the first connected/active CRTC;
+/// finally fall back to the whole root window if RandR is unavailable
+/// (very old server).
+fn pick_region(
+    conn: &xcb::Connection,
+    root: x::Window,
+    selected_output_id: Option<u32>,
+) -> Result<CaptureRegion> {
+    if let Some(wanted) = selected_output_id {
+        if let Some(region) = region_for_output(conn, root, wanted) {
+            return Ok(region);
+        }
+        eprintln!(
+            "[capture/x11] selected output {wanted} not found / inactive; falling back to default"
+        );
+    }
+
     // Try RandR primary first.
     let primary = conn.send_request(&xcb::randr::GetOutputPrimary { window: root });
     if let Ok(primary) = conn.wait_for_reply(primary) {
@@ -151,11 +254,64 @@ fn pick_region(conn: &xcb::Connection, root: x::Window) -> Result<CaptureRegion>
     })
 }
 
+/// Resolve a specific RandR output XID to its CRTC region, or `None` if
+/// the output doesn't exist / isn't active. Used by `pick_region` when
+/// the parent passed back a user-chosen `Selection::Display`.
+fn region_for_output(
+    conn: &xcb::Connection,
+    _root: x::Window,
+    wanted_id: u32,
+) -> Option<CaptureRegion> {
+    if wanted_id == 0 {
+        return None;
+    }
+    let output = <xcb::randr::Output as XidNew>::new(wanted_id);
+    let info_cookie = conn.send_request(&xcb::randr::GetOutputInfo {
+        output,
+        config_timestamp: x::CURRENT_TIME,
+    });
+    let info = conn.wait_for_reply(info_cookie).ok()?;
+    let crtc = info.crtc();
+    if crtc.is_none() {
+        return None;
+    }
+    let crtc_cookie = conn.send_request(&xcb::randr::GetCrtcInfo {
+        crtc,
+        config_timestamp: x::CURRENT_TIME,
+    });
+    let c = conn.wait_for_reply(crtc_cookie).ok()?;
+    if c.width() == 0 || c.height() == 0 {
+        return None;
+    }
+    eprintln!(
+        "[capture/x11] capturing selected output {} {}x{} at +{}+{}",
+        wanted_id,
+        c.width(),
+        c.height(),
+        c.x(),
+        c.y()
+    );
+    Some(CaptureRegion {
+        x: c.x(),
+        y: c.y(),
+        width: c.width(),
+        height: c.height(),
+    })
+}
+
 /// Run the synchronous SHM capture loop. Sends one Format then a Frame
 /// per tick (capped to ~60 Hz; the parent reader also enforces its own
 /// MAX_SHARE_FPS clamp, so this is just to avoid a busy spin). Returns
 /// when `stop` is set or the channel/socket is gone.
-pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> Result<()> {
+///
+/// `selected_output_id` is the RandR output XID the user picked in the
+/// in-app picker. `None` means "no picker round-trip happened" — pick
+/// the default (primary / first CRTC / root window).
+pub fn run_x11_capture(
+    tx: mpsc::Sender<CaptureMsg>,
+    stop: Arc<AtomicBool>,
+    selected_output_id: Option<u32>,
+) -> Result<()> {
     // Connect with the RandR + MIT-SHM extensions.
     let (conn, screen_num) = xcb::Connection::connect_with_extensions(
         None,
@@ -185,7 +341,7 @@ pub fn run_x11_capture(tx: mpsc::Sender<CaptureMsg>, stop: Arc<AtomicBool>) -> R
         ));
     }
 
-    let region = pick_region(&conn, root)?;
+    let region = pick_region(&conn, root, selected_output_id)?;
     let width = region.width;
     let height = region.height;
     if width == 0 || height == 0 {

@@ -211,10 +211,14 @@ pub struct ScreenShareState {
 
     pub local_track: Option<LocalVideoTrack>,
     pub local_source: Option<NativeVideoSource>,
-    /// macOS picker phase: helper is spawned and has sent its `Sources`
-    /// list; we're waiting on the user's pick from the in-app picker.
-    /// `start_screen_share` consumes this (sends `Select`, transitions
-    /// to capture); `cancel_screen_share_picker` discards it.
+    /// Picker phase: helper is spawned and has sent its `Sources`
+    /// list; we're waiting on either the user's pick from the in-app
+    /// picker (macOS, Linux X11) or — for Linux Portal where the list
+    /// is empty — the parent's follow-up `start_screen_share(None)`
+    /// which forwards capture into `run_portal`'s system-picker phase.
+    /// `start_screen_share` consumes this (sends `Select` if a selection
+    /// was made, then transitions to capture); `cancel_screen_share_picker`
+    /// discards it.
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     pub picker_session: Option<HelperSession>,
     /// Linux/macOS: handle to the capture helper subprocess.
@@ -440,13 +444,23 @@ async fn spawn_and_accept_helper(
     })
 }
 
-/// macOS: spawn the helper, let it enumerate via `SCShareableContent`,
-/// and return the list of capturable displays + windows. The helper
-/// stays parked in `state.screenshare.picker_session` waiting for the
-/// upcoming `start_screen_share(Some(selection))`. On Linux/Windows this
-/// returns `Err`; the frontend should never call it on those platforms
-/// (the portal/WGC picker handles selection).
-#[cfg(target_os = "macos")]
+/// Spawn the helper, let it enumerate the OS's shareable content, and
+/// return the list to the frontend's in-app picker. The helper stays
+/// parked in `state.screenshare.picker_session` waiting for the upcoming
+/// `start_screen_share`.
+///
+/// Per platform:
+///   - macOS: helper queries `SCShareableContent` — list is always
+///     populated; frontend always renders the in-app picker.
+///   - Linux Portal: helper sends an empty list (system portal owns its
+///     own picker) — frontend skips the in-app picker and calls
+///     `start_screen_share(None)`; the parked helper's `run_portal`
+///     phase opens the system picker to the user.
+///   - Linux X11: helper sends RandR outputs — frontend renders the
+///     in-app picker; selection routes back to the parked helper via
+///     `Select`. If RandR is unavailable the list comes back empty and
+///     the helper auto-captures the default region (no Select needed).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub async fn enumerate_screen_sources(
     state: &Arc<AppState>,
 ) -> Result<pollis_capture_proto::SourceList> {
@@ -494,14 +508,12 @@ pub async fn enumerate_screen_sources(
     Ok(list)
 }
 
-#[cfg(any(target_os = "linux", target_os = "windows"))]
+#[cfg(target_os = "windows")]
 pub async fn enumerate_screen_sources(
     _state: &Arc<AppState>,
 ) -> Result<pollis_capture_proto::SourceList> {
-    // The system portal (Linux) or system picker (Windows) handles
-    // source selection. The frontend should not call this on these
-    // platforms — but returning an empty list is a safer no-op than
-    // an error if it ever does.
+    // WGC's system picker handles source selection at start time. The
+    // frontend treats an empty list as "skip the in-app picker".
     Ok(pollis_capture_proto::SourceList {
         displays: Vec::new(),
         windows: Vec::new(),

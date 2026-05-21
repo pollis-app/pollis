@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use pollis_capture_proto::{write_msg, CaptureMsg};
+use pollis_capture_proto::{read_msg, write_msg, CaptureMsg, Selection, SourceList};
+use tokio::io::BufReader;
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
 
@@ -44,10 +45,16 @@ enum Backend {
 
 /// Probe the session to decide the backend. Pure environment + bus
 /// inspection; no UI, no user interaction.
+///
+/// Order: portal first (regardless of session type), X11 fallback. The
+/// portal gives users the proper system picker with per-window selection
+/// on GNOME-on-X11 / KDE-on-X11 too, not just Wayland — so we no longer
+/// gate it on session type. X11 backend remains the fallback for
+/// Cinnamon/MATE/XFCE (no ScreenCast portal backend exists) and other
+/// X11 sessions where the portal is absent. We still refuse to pick
+/// X11 under Wayland because XWayland hands an X11 client a private
+/// root window, so xcb/SHM would capture a black surface.
 async fn probe_backend() -> Backend {
-    // 1. Session type. $XDG_SESSION_TYPE is the canonical signal;
-    //    corroborate with $WAYLAND_DISPLAY / $DISPLAY because some
-    //    minimal/embedded sessions don't set XDG_SESSION_TYPE.
     let session_type = std::env::var("XDG_SESSION_TYPE")
         .unwrap_or_default()
         .to_lowercase();
@@ -61,27 +68,21 @@ async fn probe_backend() -> Backend {
     let is_wayland = session_type == "wayland" || (session_type.is_empty() && has_wayland);
     let is_x11 = session_type == "x11" || (session_type.is_empty() && has_x11 && !has_wayland);
 
+    if portal_screencast_available().await {
+        eprintln!("[capture] probe: ScreenCast portal available -> Portal backend");
+        return Backend::Portal;
+    }
+
     if is_x11 && !is_wayland {
-        // X11 session — covers Cinnamon/MATE/XFCE (no ScreenCast
-        // portal backend exists) AND X11 sessions of GNOME/KDE. The
-        // X11 grab path works regardless of whether a portal is
-        // present, so we don't even probe the bus here.
-        eprintln!("[capture] probe: X11 session -> X11 backend");
+        eprintln!("[capture] probe: no portal, X11 session -> X11 backend");
         return Backend::X11;
     }
 
-    // Wayland (or ambiguous-leaning-Wayland): the portal path is the
-    // only one that can work — XWayland would hand X11 a private root.
-    // Gate on the ScreenCast portal actually being present.
-    if portal_screencast_available().await {
-        eprintln!("[capture] probe: Wayland + ScreenCast portal -> Portal backend");
-        Backend::Portal
-    } else {
-        eprintln!(
-            "[capture] probe: Wayland but no ScreenCast portal backend -> Unsupported"
-        );
-        Backend::Unsupported
-    }
+    eprintln!(
+        "[capture] probe: no portal{} -> Unsupported",
+        if is_wayland { ", Wayland session" } else { "" }
+    );
+    Backend::Unsupported
 }
 
 /// Is `org.freedesktop.portal.ScreenCast` actually available on the
@@ -135,34 +136,101 @@ pub fn run() -> Result<()> {
 
 async fn run_async(socket_path: &str) -> Result<()> {
     eprintln!("[capture] connecting to parent socket {socket_path}");
-    let mut sock = UnixStream::connect(socket_path)
+    let sock = UnixStream::connect(socket_path)
         .await
         .with_context(|| format!("connect to {socket_path}"))?;
     eprintln!("[capture] connected — probing session backend");
 
     let backend = probe_backend().await;
 
+    // Unsupported: tell the parent and exit. No Sources round-trip — the
+    // parent's `enumerate_screen_sources` reads our Error and surfaces
+    // "your desktop environment doesn't support screen sharing".
+    if backend == Backend::Unsupported {
+        let msg = "unsupported: Screen sharing requires xdg-desktop-portal \
+                   with a ScreenCast backend; your desktop environment does \
+                   not provide one.";
+        eprintln!("[capture] {msg}");
+        let (_r, mut w) = sock.into_split();
+        write_msg(&mut w, &CaptureMsg::Error { message: msg.into() })
+            .await
+            .ok();
+        return Err(anyhow!("no ScreenCast portal backend"));
+    }
+
+    // Enumerate sources up-front so the parent can render an in-app
+    // picker on X11 (where there's no system picker) and immediately
+    // return an empty list on Portal (where the portal owns its own
+    // picker). This matches the macOS protocol: Sources → optional
+    // Select → Format → Frames.
+    let sources = match backend {
+        Backend::Portal => SourceList { displays: Vec::new(), windows: Vec::new() },
+        Backend::X11 => SourceList {
+            displays: crate::x11::enumerate_outputs().unwrap_or_else(|e| {
+                eprintln!("[capture/x11] enumerate failed, falling back to default: {e}");
+                Vec::new()
+            }),
+            windows: Vec::new(),
+        },
+        Backend::Unsupported => unreachable!("handled above"),
+    };
+    let needs_select = !sources.displays.is_empty() || !sources.windows.is_empty();
+
+    let (read_half, write_half) = sock.into_split();
+    let mut reader = BufReader::with_capacity(8 * 1024, read_half);
+    let mut writer = write_half;
+
+    eprintln!(
+        "[capture] sending Sources ({} displays, {} windows)",
+        sources.displays.len(),
+        sources.windows.len()
+    );
+    if let Err(e) = write_msg(&mut writer, &CaptureMsg::Sources(sources)).await {
+        return Err(anyhow!("write Sources: {e}"));
+    }
+
+    // Wait for the user's pick from the in-app picker, but only if we
+    // actually offered choices. Empty Sources means "no picker shown,
+    // proceed with default capture" — for Portal the OS picker takes
+    // over from here; for X11 we fall back to `pick_region(None)`.
+    let selected_output_id: Option<u32> = if needs_select {
+        eprintln!("[capture] awaiting Select from parent");
+        match read_msg(&mut reader).await {
+            Ok(Some(CaptureMsg::Select(Selection::Display { id }))) => {
+                eprintln!("[capture] parent selected display id={id}");
+                Some(id)
+            }
+            Ok(Some(CaptureMsg::Select(Selection::Window { id: _ }))) => {
+                // No X11 window capture in v1. Treat as "use default
+                // monitor" rather than fail — the user can re-pick.
+                eprintln!("[capture] window selection unsupported on X11; using default monitor");
+                None
+            }
+            Ok(Some(other)) => {
+                return Err(anyhow!("expected Select, got {other:?}"));
+            }
+            Ok(None) => {
+                // Parent closed the socket — user cancelled before
+                // picking. Quiet exit; the picker session cleanup on
+                // the parent side already handles UI state.
+                eprintln!("[capture] parent closed socket before Select; exiting");
+                return Ok(());
+            }
+            Err(e) => return Err(anyhow!("read Select: {e}")),
+        }
+    } else {
+        None
+    };
+
     match backend {
-        Backend::Portal => run_portal(&mut sock).await,
+        Backend::Portal => run_portal(&mut writer).await,
         Backend::X11 => {
             // The X11 backend is synchronous (xcb + SHM) and has no
             // async work; run it on a blocking thread and bridge frames
             // back over the same channel-to-socket drain.
-            run_x11(&mut sock).await
+            run_x11(&mut writer, selected_output_id).await
         }
-        Backend::Unsupported => {
-            // Distinct from user-denial. The parent maps this onto a
-            // "your desktop environment can't screen share" UI, not a
-            // "permission denied — grant it" UI.
-            let msg = "unsupported: Screen sharing requires xdg-desktop-portal \
-                       with a ScreenCast backend; your desktop environment does \
-                       not provide one.";
-            eprintln!("[capture] {msg}");
-            write_msg(&mut sock, &CaptureMsg::Error { message: msg.into() })
-                .await
-                .ok();
-            Err(anyhow!("no ScreenCast portal backend"))
-        }
+        Backend::Unsupported => unreachable!("handled above"),
     }
 }
 
@@ -170,7 +238,7 @@ async fn run_async(socket_path: &str) -> Result<()> {
 /// unchanged from before the split — only the wire encode now goes
 /// through the shared `pollis-capture-proto` crate instead of the
 /// hand-rolled `write_msg`/`send_error` that used to live here.
-async fn run_portal(sock: &mut UnixStream) -> Result<()> {
+async fn run_portal(sock: &mut tokio::net::unix::OwnedWriteHalf) -> Result<()> {
     eprintln!("[capture] opening portal (waits for user picker)");
 
     let (node_id, fd) = match open_portal().await {
@@ -249,8 +317,14 @@ async fn run_portal(sock: &mut UnixStream) -> Result<()> {
 /// The X11 backend (issue #281). Spawns the synchronous xcb/SHM capture
 /// loop on its own thread and drains its frames to the socket exactly
 /// the way the portal path drains the pipewire thread.
-async fn run_x11(sock: &mut UnixStream) -> Result<()> {
-    eprintln!("[capture] starting X11 (xcb/SHM/RandR) backend");
+async fn run_x11(
+    sock: &mut tokio::net::unix::OwnedWriteHalf,
+    selected_output_id: Option<u32>,
+) -> Result<()> {
+    eprintln!(
+        "[capture] starting X11 (xcb/SHM/RandR) backend (selection={:?})",
+        selected_output_id
+    );
 
     let (tx, mut rx) = mpsc::channel::<CaptureMsg>(2);
     let stop = Arc::new(AtomicBool::new(false));
@@ -260,7 +334,11 @@ async fn run_x11(sock: &mut UnixStream) -> Result<()> {
         .name("pollis-capture-x11".into())
         .spawn(move || {
             eprintln!("[capture/x11] thread entered");
-            if let Err(e) = crate::x11::run_x11_capture(tx.clone(), stop_for_thread) {
+            if let Err(e) = crate::x11::run_x11_capture(
+                tx.clone(),
+                stop_for_thread,
+                selected_output_id,
+            ) {
                 eprintln!("[capture/x11] error: {e}");
                 let _ = tx.blocking_send(CaptureMsg::Error {
                     message: format!("x11: {e}"),

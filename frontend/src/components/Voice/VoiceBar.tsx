@@ -85,13 +85,13 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
       </PillButton>
 
-      {/* Screen share toggle. On macOS we enumerate via SCShareableContent
-          and route to our in-app picker — the system picker
-          (SCContentSharingPicker) has an upstream crate bug that crashes
-          on selection (#283), so we use the same enumerate-and-pick
-          flow Slack/Discord/Zoom do. On Linux/Windows the helper falls
-          back to the system portal / WGC picker — the backend signals
-          this by returning an empty source list from enumerate(). */}
+      {/* Screen share toggle. macOS enumerates via SCShareableContent,
+          and Linux X11 enumerates RandR outputs — both route to our
+          in-app picker (avoiding macOS's SCContentSharingPicker crash
+          bug, and giving X11 the per-monitor picker it never had). On
+          Linux Portal (Wayland or X11 with xdg-desktop-portal) and on
+          Windows the backend returns an empty list so we fall through
+          to start() and let the system picker handle selection. */}
       <PillButton
         data-testid="voice-bar-screenshare-button"
         accent={
