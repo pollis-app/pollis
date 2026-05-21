@@ -1,17 +1,19 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 import { useRouter } from "expo-router";
 import { Screen, Crumb, Card } from "../../components/ui";
 import { PollisMark } from "../../components/PollisMark";
 import { palette, semantic, type as ty } from "../../theme/tokens";
+import { useInitializeIdentity } from "../../hooks/queries/useAuth";
+import { useAppStore } from "../../stores/appStore";
 
-const STEPS = [
-  { n: "KEYS LOADED", s: "OK", done: true },
-  { n: "DEVICE PAIRED", s: "OK", done: true },
-  { n: "SYNC GROUPS", s: "62%", done: false },
-  { n: "RESOLVE PEERS", s: "—", done: false, muted: true },
-];
+interface Step {
+  n: string;
+  s: string;
+  done: boolean;
+  muted?: boolean;
+}
 
 function Corner({ pos }: { pos: "tl" | "tr" | "bl" | "br" }) {
   const top = pos[0] === "t";
@@ -37,11 +39,47 @@ function Corner({ pos }: { pos: "tl" | "tr" | "bl" | "br" }) {
 
 export default function Initializing() {
   const router = useRouter();
+  const currentUser = useAppStore((s) => s.currentUser);
+  const initIdentity = useInitializeIdentity();
+  const [error, setError] = useState<string | null>(null);
+
+  const ranRef = useState({ ran: false })[0];
 
   useEffect(() => {
-    const t = setTimeout(() => router.replace("/(tabs)/groups"), 2600);
-    return () => clearTimeout(t);
-  }, [router]);
+    if (!currentUser || ranRef.ran) {
+      return;
+    }
+    ranRef.ran = true;
+    initIdentity.mutate(currentUser.id, {
+      onSuccess: () => router.replace("/(tabs)/groups"),
+      onError: (e) => setError((e as Error).message || "Setup failed."),
+    });
+    // initIdentity is a stable mutation ref; intentionally fire once when
+    // currentUser becomes available.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id]);
+
+  const progress = initIdentity.isPending
+    ? "WORKING…"
+    : initIdentity.isSuccess
+      ? "DONE"
+      : "READY";
+  const steps: Step[] = [
+    { n: "KEYS LOADED", s: "OK", done: true },
+    { n: "DEVICE PAIRED", s: "OK", done: true },
+    {
+      n: "INITIALIZE IDENTITY",
+      s: initIdentity.isPending
+        ? "…"
+        : initIdentity.isSuccess
+          ? "OK"
+          : initIdentity.isError
+            ? "ERR"
+            : "—",
+      done: initIdentity.isSuccess,
+    },
+    { n: "RESOLVE PEERS", s: "—", done: false, muted: true },
+  ];
 
   return (
     <Screen>
@@ -49,7 +87,7 @@ export default function Initializing() {
       <Corner pos="tr" />
       <Corner pos="bl" />
       <Corner pos="br" />
-      <Crumb segs={[{ label: "INITIALIZING", leaf: true }]} end="62%" />
+      <Crumb segs={[{ label: "INITIALIZING", leaf: true }]} end={progress} />
 
       <View
         style={{
@@ -131,12 +169,16 @@ export default function Initializing() {
             <View
               style={{
                 height: 2,
-                width: "62%",
+                width: initIdentity.isSuccess
+                  ? "100%"
+                  : initIdentity.isPending
+                    ? "62%"
+                    : "30%",
                 backgroundColor: semantic.accent,
               }}
             />
           </View>
-          {STEPS.map((r2, i) => (
+          {steps.map((r2, i) => (
             <View
               key={i}
               style={{
@@ -148,9 +190,7 @@ export default function Initializing() {
             >
               <Text style={[ty.label, { fontSize: 10 }]}>
                 <Text
-                  style={{
-                    color: r2.done ? semantic.accent : semantic.mute,
-                  }}
+                  style={{ color: r2.done ? semantic.accent : semantic.mute }}
                 >
                   {r2.done ? "◆" : "◇"}
                 </Text>{" "}
@@ -159,13 +199,28 @@ export default function Initializing() {
               <Text
                 style={[
                   ty.label,
-                  { fontSize: 10, color: r2.done ? semantic.accent : semantic.ink2 },
+                  {
+                    fontSize: 10,
+                    color: r2.done ? semantic.accent : semantic.ink2,
+                  },
                 ]}
               >
                 {r2.s}
               </Text>
             </View>
           ))}
+          {error ? (
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 12,
+                color: semantic.danger,
+                marginTop: 14,
+              }}
+            >
+              {error}
+            </Text>
+          ) : null}
         </Card>
       </View>
 
