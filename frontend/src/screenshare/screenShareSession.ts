@@ -5,6 +5,7 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 
 import { useAppStore } from "../stores/appStore";
+import { playSound } from "../utils/sounds";
 
 /** Capturable display reported by `enumerate_screen_sources`.
  *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration). */
@@ -267,6 +268,7 @@ class ScreenShareSession {
         store.setScreenShareMode("active");
         store.setScreenShareSources(null);
         store.setScreenShareError(null);
+        playSound("screenshare_start");
         break;
       case "local_stopped":
         store.setScreenShareLocalActive(false);
@@ -274,6 +276,7 @@ class ScreenShareSession {
         store.setScreenShareMode("idle");
         store.setScreenShareSources(null);
         store.setScreenShareError(null);
+        playSound("screenshare_stop");
         break;
       case "local_error":
         store.setScreenShareError(friendlyScreenShareError(ev.message));
@@ -297,9 +300,11 @@ class ScreenShareSession {
           width: ev.width,
           height: ev.height,
         });
+        playSound("screenshare_start");
         break;
       case "remote_stopped":
         store.removeScreenShareRemote(ev.track_key);
+        playSound("screenshare_stop");
         break;
     }
   }
