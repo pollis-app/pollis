@@ -394,9 +394,19 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'call_canceled') {
-        const current = useAppStore.getState().incomingCall;
-        if (current && current.callId === event.call_id) {
-          useAppStore.getState().setIncomingCall(null);
+        const store = useAppStore.getState();
+        // Callee receives this when the caller hangs up before pickup —
+        // dismiss the ring UI immediately.
+        const incoming = store.incomingCall;
+        if (incoming && incoming.callId === event.call_id) {
+          store.setIncomingCall(null);
+        }
+        // Caller receives this when the callee declines — clear the
+        // outgoing-call slot so a subsequent hangup doesn't re-emit
+        // `cancel_call` toward a callee who has already declined.
+        const outgoing = store.outgoingCall;
+        if (outgoing && outgoing.callId === event.call_id) {
+          store.setOutgoingCall(null);
         }
         return;
       }

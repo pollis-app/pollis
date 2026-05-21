@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { PhoneOff } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../stores/appStore";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { voiceSession } from "../voice";
@@ -26,6 +27,8 @@ export const CallPage: React.FC = () => {
   const roomName = `call-${callId}`;
   const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
   const voiceParticipants = useAppStore((s) => s.voiceParticipants);
+  const outgoingCall = useAppStore((s) => s.outgoingCall);
+  const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
 
   // Direct navigation to /call/<id> with no active voice → bounce back. Joining
   // is initiated by the caller's DM page or the callee's accept button; we
@@ -51,7 +54,10 @@ export const CallPage: React.FC = () => {
   // Ringing timeout: if nobody else is in the room after 30s, auto-hang-up so
   // we stop publishing mic audio (and burning per-participant minutes) into
   // an empty room. Applies to both sides — caller waiting for an unanswered
-  // ring, callee whose peer dropped before their join completed.
+  // ring, callee whose peer dropped before their join completed. The
+  // voiceBridge `left` listener emits the `cancel_call` signal if this side
+  // initiated the call and the callee never joined, so the recipient's ring
+  // stops automatically here too.
   const hasRemoteParticipant = voiceParticipants.some((p) => !p.isLocal);
   useEffect(() => {
     if (hasRemoteParticipant || activeVoiceChannelId !== roomName) {
@@ -62,6 +68,30 @@ export const CallPage: React.FC = () => {
     }, RINGING_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [hasRemoteParticipant, activeVoiceChannelId, roomName]);
+
+  // Callee has joined the LiveKit room — the call is no longer pending, so
+  // a subsequent hang-up is a normal disconnect, not a ring cancel.
+  useEffect(() => {
+    if (hasRemoteParticipant && outgoingCall && outgoingCall.callId === callId) {
+      setOutgoingCall(null);
+    }
+  }, [hasRemoteParticipant, outgoingCall, callId, setOutgoingCall]);
+
+  // Backstop: if this page unmounts while the outgoing call for this id is
+  // still pending — e.g. join_voice_channel itself failed and no `left`
+  // event ever fired — emit cancel so the callee's ring doesn't get stuck.
+  // Reads through the store directly inside cleanup so we always see the
+  // latest outgoingCall, not a stale closure capture.
+  useEffect(() => {
+    return () => {
+      const pending = useAppStore.getState().outgoingCall;
+      if (pending && pending.callId === callId) {
+        const calleeId = pending.calleeId;
+        useAppStore.getState().setOutgoingCall(null);
+        invoke("cancel_call", { otherUserId: calleeId, callId }).catch(() => {});
+      }
+    };
+  }, [callId]);
 
   const hangUp = () => {
     voiceSession.leave();
