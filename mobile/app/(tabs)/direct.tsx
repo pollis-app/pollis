@@ -6,45 +6,77 @@ import {
   Body,
   ListRow,
   Avatar,
-  Badge,
-  Diamond,
   Button,
   BottomAction,
 } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
-
-const DMS = [
-  { h: "brian", s: "recently onlineman", t: "21:34", unread: 2, v: true },
-  { h: "meilan.solly", s: "hello", t: "MAY 5", v: true },
-  { h: "c8", s: "verified key 0x4a…", t: "MAY 2", v: true },
-  { h: "j0n", s: "unverified · tap to verify", t: "APR", v: false },
-  { h: "rune.4", s: "see you tomorrow", t: "APR", v: true },
-];
+import { useDMChannels } from "../../hooks/queries";
+import { useAppStore } from "../../stores/appStore";
 
 export default function Direct() {
   const router = useRouter();
+  const { data: dms = [], isLoading, isError } = useDMChannels();
+  const setSelectedConversationId = useAppStore(
+    (s) => s.setSelectedConversationId,
+  );
+
   return (
     <Screen>
-      <Crumb segs={[{ label: "DIRECT", leaf: true }]} end="5" />
+      <Crumb segs={[{ label: "DIRECT", leaf: true }]} end={String(dms.length)} />
       <Body>
-        {DMS.map((d) => (
-          <ListRow
-            key={d.h}
-            minHeight={64}
-            onPress={() => router.push(`/chat/dm-${d.h}`)}
-            glyph={
-              <Avatar
-                label={d.h.slice(0, 2)}
-                style={{
-                  borderColor: d.v ? semantic.hairStrong : semantic.mute2,
-                }}
-              />
-            }
-            name={
-              <View
-                style={{ flexDirection: "row", alignItems: "center", gap: 6 }}
-              >
+        {isLoading ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            Loading conversations…
+          </Text>
+        ) : null}
+        {isError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.danger,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            Couldn't load conversations.
+          </Text>
+        ) : null}
+        {!isLoading && !isError && dms.length === 0 ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            No direct messages yet.
+          </Text>
+        ) : null}
+        {dms.map((d) => {
+          const handle = d.user2_identifier || "user";
+          const label = handle.slice(0, 2);
+          return (
+            <ListRow
+              key={d.id}
+              minHeight={64}
+              onPress={() => {
+                setSelectedConversationId(d.id);
+                router.push(`/chat/${d.id}`);
+              }}
+              glyph={<Avatar label={label} />}
+              name={
                 <Text
                   style={{
                     fontFamily: ty.rowN.fontFamily,
@@ -52,28 +84,12 @@ export default function Direct() {
                     color: semantic.ink,
                   }}
                 >
-                  @{d.h}
+                  @{handle}
                 </Text>
-                {d.v && <Diamond size={6} />}
-              </View>
-            }
-            sub={d.s}
-            end={
-              <View style={{ alignItems: "flex-end", gap: 4 }}>
-                <Text
-                  style={{
-                    fontFamily: ty.body.fontFamily,
-                    fontSize: 10,
-                    color: semantic.mute,
-                  }}
-                >
-                  {d.t}
-                </Text>
-                {d.unread ? <Badge>{d.unread}</Badge> : null}
-              </View>
-            }
-          />
-        ))}
+              }
+            />
+          );
+        })}
       </Body>
       <BottomAction>
         <Button full icon={<Icon.plus color={semantic.ink} />}>

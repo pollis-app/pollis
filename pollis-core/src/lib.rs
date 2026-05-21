@@ -1,6 +1,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod accounts;
+pub mod bridge;
 pub mod commands;
 pub mod config;
 pub mod db;

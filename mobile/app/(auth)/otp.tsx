@@ -1,22 +1,37 @@
 import { useRef, useState } from "react";
 import { View, Text, TextInput, Pressable } from "react-native";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Screen, Crumb, Button, BottomAction } from "../../components/ui";
 import { PollisMark } from "../../components/PollisMark";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
+import { useVerifyOtp } from "../../hooks/queries/useAuth";
 
 export default function AuthOTP() {
   const router = useRouter();
-  const [code, setCode] = useState("472");
+  const { email: emailParam } = useLocalSearchParams<{ email?: string }>();
+  const email = (emailParam ?? "").trim();
+  const [code, setCode] = useState("");
   const input = useRef<TextInput>(null);
   const cells = Array.from({ length: 6 });
+  const verifyOtp = useVerifyOtp();
+
+  const onSubmit = () => {
+    if (code.length !== 6 || !email) {
+      return;
+    }
+    verifyOtp.mutate(
+      { email, code },
+      {
+        onSuccess: () => router.push("/(auth)/pin"),
+      },
+    );
+  };
 
   return (
     <Screen>
       <Crumb
         segs={[{ label: "AUTH" }, { label: "Verify email", leaf: true }]}
-        end="04:38"
       />
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 22 }}>
         <PollisMark />
@@ -31,8 +46,10 @@ export default function AuthOTP() {
             }}
           >
             We sent a 6-digit code to{" "}
-            <Text style={{ color: semantic.ink2 }}>dan@example.io</Text>. Enter
-            it to continue.
+            <Text style={{ color: semantic.ink2 }}>
+              {email || "your email"}
+            </Text>
+            . Enter it to continue.
           </Text>
         </View>
 
@@ -93,36 +110,23 @@ export default function AuthOTP() {
           value={code}
           onChangeText={(v) => setCode(v.replace(/[^0-9]/g, "").slice(0, 6))}
           keyboardType="number-pad"
+          autoFocus
           style={{ position: "absolute", opacity: 0 }}
         />
 
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-          }}
-        >
+        {verifyOtp.isError ? (
           <Text
             style={{
               fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
+              fontSize: 12,
+              color: semantic.danger,
+              textAlign: "center",
             }}
           >
-            Didn't receive it?
+            {(verifyOtp.error as Error).message ||
+              "Invalid code. Please try again."}
           </Text>
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              letterSpacing: 0.6,
-              color: semantic.accent,
-            }}
-          >
-            RESEND IN 04:38
-          </Text>
-        </View>
+        ) : null}
 
         <Pressable
           onPress={() => router.back()}
@@ -147,10 +151,11 @@ export default function AuthOTP() {
         <Button
           variant="primary"
           full
-          onPress={() => router.push("/(auth)/pin")}
+          onPress={onSubmit}
+          disabled={code.length !== 6 || verifyOtp.isPending}
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
-          VERIFY
+          {verifyOtp.isPending ? "VERIFYING…" : "VERIFY"}
         </Button>
       </BottomAction>
     </Screen>

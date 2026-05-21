@@ -2,33 +2,36 @@
 // to the Rust core (`pollis-core`) — everything else goes through `invoke()`
 // in ./invoke.ts.
 //
-// CURRENT STATE: placeholder. The `pollis-native` turbo-module
-// (`mobile/modules/pollis-native`) is wired into the build but does not yet
-// expose a generic `invoke(cmd, args)` entry point. To unblock UI work the
-// bridge currently throws a clear "not yet implemented" error for any cmd.
+// Two implementations live behind the same NativeBridge interface:
 //
-// HOW TO PLUG IN REAL BINDINGS: when `pollis-native`'s uniffi-generated
-// bindings expose a command dispatcher (e.g. `PollisNative.invoke(cmd, json)`),
-// swap `defaultBridge` for an implementation that:
-//   1. JSON-stringifies `args`,
-//   2. calls the native function across JSI,
-//   3. JSON-parses the result,
-//   4. throws if the native side returned an error.
+//   1. `pollisNativeBridge` (default in production) — calls into the
+//      `pollis-native` JSI turbo-module. JSON-marshals args, awaits the
+//      Rust `invoke()` promise, JSON-parses the result. Call sites that
+//      use `invoke<T>(cmd, args)` get fully-typed results back.
 //
-// Call sites using `invoke<T>(cmd, args)` do not change.
+//   2. `defaultBridge` (fallback) — used when neither the real native
+//      module nor an explicit override has been installed. Defers to the
+//      `registerMockCommand` registry, and throws a clear error for any
+//      unregistered command. Useful for jest / typecheck / unit work.
+//
+// Production code calls `initializeNativeBridge()` once at app startup
+// (see app/_layout.tsx) which calls Rust's `initPollis()` with config
+// and then swaps in `pollisNativeBridge`.
+
+import * as pollisNative from "pollis-native";
 
 export interface NativeBridge {
   invoke<T = unknown>(cmd: string, args?: Record<string, unknown>): Promise<T>;
 }
 
-// In-process registry of mock command handlers — useful for early UI work
-// and for the typecheck/build to pass without a real native module.
 type MockHandler = (args?: Record<string, unknown>) => unknown | Promise<unknown>;
 const mockHandlers = new Map<string, MockHandler>();
 
 /**
- * Register a mock implementation for a command. Useful while the real
- * `pollis-native` invoke dispatcher is being built. Returns a disposer.
+ * Register a mock implementation for a command. Mocks always take precedence
+ * over the underlying bridge — handy for screen-development without a real
+ * backend, or for jest tests that don't want to spin up Turso. Returns a
+ * disposer.
  */
 export function registerMockCommand(cmd: string, handler: MockHandler): () => void {
   mockHandlers.set(cmd, handler);
@@ -44,21 +47,90 @@ const defaultBridge: NativeBridge = {
       return (await mock(args)) as T;
     }
     throw new Error(
-      `[pollis-native] invoke("${cmd}") is not implemented yet. ` +
-        `Register a mock via registerMockCommand("${cmd}", …) or wire it ` +
-        `through the pollis-native turbo-module.`,
+      `[pollis-native] invoke("${cmd}") has no handler. ` +
+        `Call initializeNativeBridge() at app startup, or register a mock via ` +
+        `registerMockCommand("${cmd}", …) for development.`,
     );
+  },
+};
+
+/**
+ * Production bridge — routes invoke() through `pollis-native`'s JSI module
+ * into the Rust dispatcher in `pollis-core/src/bridge.rs`. Mocks still win
+ * if registered, so individual commands can be stubbed during UI work even
+ * after the bridge is installed.
+ */
+const pollisNativeBridge: NativeBridge = {
+  async invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+    const mock = mockHandlers.get(cmd);
+    if (mock) {
+      return (await mock(args)) as T;
+    }
+    const argsJson = args ? JSON.stringify(args) : "{}";
+    const resultJson = await pollisNative.invoke(cmd, argsJson);
+    if (resultJson === "" || resultJson === "null") {
+      return null as T;
+    }
+    return JSON.parse(resultJson) as T;
   },
 };
 
 let currentBridge: NativeBridge = defaultBridge;
 
 /**
- * Swap the underlying bridge implementation. Production code should call
- * this once at app startup with the real `pollis-native`-backed bridge.
+ * Swap the underlying bridge implementation. Most call sites should not
+ * touch this — `initializeNativeBridge()` is the normal entry point. Exposed
+ * for tests that want to inject a fully custom bridge.
  */
 export function setNativeBridge(bridge: NativeBridge): void {
   currentBridge = bridge;
+}
+
+export interface InitConfig {
+  tursoUrl: string;
+  tursoToken: string;
+  r2Endpoint?: string;
+  r2AccessKeyId?: string;
+  r2SecretAccessKey?: string;
+  r2Region?: string;
+  r2PublicUrl?: string;
+  livekitUrl?: string;
+  livekitApiKey?: string;
+  livekitApiSecret?: string;
+  resendApiKey?: string;
+}
+
+let initialized = false;
+
+/**
+ * Boot the Rust core and install the JSI-backed bridge. Idempotent — safe to
+ * call multiple times; subsequent calls are no-ops. Call once during app
+ * startup before any `invoke()` consumer mounts (the root layout in
+ * `app/_layout.tsx` is the right place).
+ *
+ * Throws if `init_pollis` on the Rust side fails (e.g. Turso URL is
+ * unreachable, config JSON is malformed).
+ */
+export async function initializeNativeBridge(config: InitConfig): Promise<void> {
+  if (initialized) {
+    return;
+  }
+  const configJson = JSON.stringify({
+    turso_url: config.tursoUrl,
+    turso_token: config.tursoToken,
+    r2_endpoint: config.r2Endpoint ?? "",
+    r2_access_key_id: config.r2AccessKeyId ?? "",
+    r2_secret_access_key: config.r2SecretAccessKey ?? "",
+    r2_region: config.r2Region ?? "auto",
+    r2_public_url: config.r2PublicUrl ?? "",
+    livekit_url: config.livekitUrl ?? "",
+    livekit_api_key: config.livekitApiKey ?? "",
+    livekit_api_secret: config.livekitApiSecret ?? "",
+    resend_api_key: config.resendApiKey ?? "",
+  });
+  await pollisNative.initPollis(configJson);
+  setNativeBridge(pollisNativeBridge);
+  initialized = true;
 }
 
 export const nativeBridge: NativeBridge = {

@@ -5,10 +5,25 @@ import { Screen, Crumb, Field, Button, BottomAction } from "../../components/ui"
 import { PollisMark } from "../../components/PollisMark";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
+import { useRequestOtp } from "../../hooks/queries/useAuth";
 
 export default function AuthEmail() {
   const router = useRouter();
-  const [email, setEmail] = useState("dan@example.io");
+  const [email, setEmail] = useState("");
+  const requestOtp = useRequestOtp();
+
+  const onSubmit = () => {
+    const trimmed = email.trim();
+    if (!trimmed) {
+      return;
+    }
+    requestOtp.mutate(trimmed, {
+      onSuccess: () => {
+        router.push({ pathname: "/(auth)/otp", params: { email: trimmed } });
+      },
+    });
+  };
+
   return (
     <Screen>
       <Crumb segs={[{ label: "AUTH" }, { label: "Identify", leaf: true }]} />
@@ -39,6 +54,18 @@ export default function AuthEmail() {
             icon={<Icon.mail color={semantic.mute} />}
           />
         </View>
+        {requestOtp.isError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 12,
+              color: semantic.danger,
+            }}
+          >
+            {(requestOtp.error as Error).message ||
+              "Couldn't send code. Check your connection and try again."}
+          </Text>
+        ) : null}
         <View
           style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
         >
@@ -60,10 +87,11 @@ export default function AuthEmail() {
         <Button
           variant="primary"
           full
-          onPress={() => router.push("/(auth)/otp")}
+          onPress={onSubmit}
+          disabled={requestOtp.isPending || !email.trim()}
           iconRight={<Icon.arrowRight color="#0a0907" />}
         >
-          CONTINUE
+          {requestOtp.isPending ? "SENDING…" : "CONTINUE"}
         </Button>
         <Button variant="subtle" full>
           I have a recovery key

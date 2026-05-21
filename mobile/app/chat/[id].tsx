@@ -1,14 +1,37 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { View, Text, ScrollView, TextInput, Pressable } from "react-native";
-import {
-  Screen,
-  Crumb,
-  Avatar,
-  Ctx,
-  CtxAct,
-} from "../../components/ui";
+import { useLocalSearchParams } from "expo-router";
+import { Screen, Crumb, Avatar, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
+import { useMessages, type Message } from "../../hooks/queries";
+import { useAppStore } from "../../stores/appStore";
+
+function dayKey(ts: number | string): string {
+  const d = new Date(typeof ts === "number" ? ts : ts);
+  return d.toDateString();
+}
+
+function dayLabel(ts: number | string): string {
+  const d = new Date(typeof ts === "number" ? ts : ts);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) {
+    return "TODAY";
+  }
+  const yest = new Date(today);
+  yest.setDate(today.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) {
+    return "YESTERDAY";
+  }
+  return d
+    .toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    .toUpperCase();
+}
+
+function timeLabel(ts: number | string): string {
+  const d = new Date(typeof ts === "number" ? ts : ts);
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
 
 function Day({ label }: { label: string }) {
   return (
@@ -35,14 +58,12 @@ function Msg({
   name,
   time,
   text,
-  image,
 }: {
   av: string;
   amber?: boolean;
   name: string;
   time: string;
   text?: string;
-  image?: string;
 }) {
   return (
     <View
@@ -88,51 +109,104 @@ function Msg({
             {text}
           </Text>
         ) : null}
-        {image ? (
-          <View
-            style={{
-              width: 180,
-              height: 120,
-              marginTop: 4,
-              borderWidth: 1,
-              borderColor: semantic.hair,
-              borderRadius: r.sm,
-              backgroundColor: semantic.cardBg,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Text style={[ty.label, { letterSpacing: 1.8 }]}>{image}</Text>
-          </View>
-        ) : null}
       </View>
     </View>
   );
 }
 
 export default function TextChat() {
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const conversationId = id ?? null;
   const [draft, setDraft] = useState("");
+  const currentUser = useAppStore((s) => s.currentUser);
+  const { data: messages = [], isLoading, isError } = useMessages(conversationId);
+
+  // Group by day boundary so we render `<Day>` headers between blocks.
+  const sections = useMemo(() => {
+    const out: { label: string; messages: Message[] }[] = [];
+    let lastKey = "";
+    for (const m of messages) {
+      const k = dayKey(m.created_at);
+      if (k !== lastKey) {
+        out.push({ label: dayLabel(m.created_at), messages: [] });
+        lastKey = k;
+      }
+      out[out.length - 1].messages.push(m);
+    }
+    return out;
+  }, [messages]);
+
   return (
     <Screen>
       <Crumb
-        segs={[
-          { label: "GROUPS" },
-          { label: "Quick Group" },
-          { label: "# General", leaf: true },
-        ]}
+        segs={[{ label: "CHAT", leaf: true }]}
       />
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingVertical: 4 }}>
-        <Day label="MAY 5" />
-        <Msg av="me" name="meilan.solly" time="21:34" text="hello" />
-        <Msg av="dn" amber name="dan" time="21:34" text="test" />
-        <Msg av="me" name="meilan.solly" time="21:36" image="NOODLES.JPG" />
-        <Day label="TODAY" />
-        <Msg av="br" name="brian" time="11:11" text="recently onlineman" />
-        <Msg av="dn" amber name="dan" time="00:00" text="frick its been a minute" />
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingVertical: 4 }}
+      >
+        {isLoading ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            Loading messages…
+          </Text>
+        ) : null}
+        {isError ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.danger,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            Couldn't load messages.
+          </Text>
+        ) : null}
+        {!isLoading && !isError && sections.length === 0 ? (
+          <Text
+            style={{
+              fontFamily: ty.body.fontFamily,
+              fontSize: 13,
+              color: semantic.mute,
+              paddingHorizontal: 18,
+              paddingTop: 12,
+            }}
+          >
+            No messages yet. Be the first to say something.
+          </Text>
+        ) : null}
+        {sections.map((section, sIdx) => (
+          <View key={`${section.label}-${sIdx}`}>
+            <Day label={section.label} />
+            {section.messages.map((m) => {
+              const mine = currentUser?.id === m.sender_id;
+              const name = m.sender_username || (mine ? "you" : "user");
+              return (
+                <Msg
+                  key={m.id}
+                  av={name.slice(0, 2)}
+                  amber={mine}
+                  name={name}
+                  time={timeLabel(m.created_at)}
+                  text={m.content}
+                />
+              );
+            })}
+          </View>
+        ))}
       </ScrollView>
 
       <Ctx
-        cr="QUICK GROUP"
+        cr="CHAT"
         name={
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
             <Icon.hash color={semantic.ink} />
@@ -143,7 +217,7 @@ export default function TextChat() {
                 color: semantic.ink,
               }}
             >
-              General
+              {conversationId ?? "—"}
             </Text>
           </View>
         }

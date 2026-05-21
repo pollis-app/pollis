@@ -218,6 +218,7 @@ export function Button({
   onPress,
   icon,
   iconRight,
+  disabled,
 }: {
   children: string;
   variant?: "default" | "primary" | "subtle" | "danger";
@@ -225,14 +226,17 @@ export function Button({
   onPress?: () => void;
   icon?: React.ReactNode;
   iconRight?: React.ReactNode;
+  disabled?: boolean;
 }) {
   const primary = variant === "primary";
   const danger = variant === "danger";
   const subtle = variant === "subtle";
   return (
     <Pressable
-      onPress={onPress}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
       style={{
+        opacity: disabled ? 0.45 : 1,
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
