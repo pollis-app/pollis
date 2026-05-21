@@ -242,6 +242,40 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             let group_id: String = arg(&args, "groupId")?;
             ok(groups::list_group_channels(group_id, &state()?).await?)
         }
+        "create_group" => {
+            let name: String = arg(&args, "name")?;
+            let description: Option<String> = arg_opt(&args, "description")?;
+            let owner_id: String = arg(&args, "ownerId")?;
+            let create_default_text_channel: Option<bool> =
+                arg_opt(&args, "createDefaultTextChannel")?;
+            let create_default_voice_channel: Option<bool> =
+                arg_opt(&args, "createDefaultVoiceChannel")?;
+            ok(groups::create_group(
+                name,
+                description,
+                owner_id,
+                create_default_text_channel,
+                create_default_voice_channel,
+                &state()?,
+            )
+            .await?)
+        }
+        "create_channel" => {
+            let group_id: String = arg(&args, "groupId")?;
+            let name: String = arg(&args, "name")?;
+            let description: Option<String> = arg_opt(&args, "description")?;
+            let channel_type: Option<String> = arg_opt(&args, "channelType")?;
+            let creator_id: String = arg(&args, "creatorId")?;
+            ok(groups::create_channel(
+                group_id,
+                name,
+                description,
+                channel_type,
+                creator_id,
+                &state()?,
+            )
+            .await?)
+        }
 
         // ----- messages -----
         "list_messages" => {
@@ -317,6 +351,11 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
         "list_dm_requests" => {
             let user_id: String = arg(&args, "userId")?;
             ok(dm::list_dm_requests(user_id, &state()?).await?)
+        }
+        "create_dm_channel" => {
+            let creator_id: String = arg(&args, "creatorId")?;
+            let member_ids: Vec<String> = arg(&args, "memberIds")?;
+            ok(dm::create_dm_channel(creator_id, member_ids, &state()?).await?)
         }
 
         _ => Err(BridgeError::Bridge(format!(

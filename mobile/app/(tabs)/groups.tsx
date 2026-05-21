@@ -106,7 +106,7 @@ export default function Groups() {
         <Button
           full
           icon={<Icon.plus color={semantic.ink} />}
-          onPress={() => router.push("/group/quick-group")}
+          onPress={() => router.push("/group/new")}
         >
           NEW GROUP
         </Button>

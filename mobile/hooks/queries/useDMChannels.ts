@@ -4,7 +4,7 @@
 // `DMConversation` view-model, picking the "other side" relative to the
 // currently signed-in user.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { useAppStore } from "../../stores/appStore";
 import type { DMConversation } from "../../types";
@@ -60,6 +60,29 @@ export function useDMChannels() {
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
+  });
+}
+
+export function useCreateDM() {
+  const queryClient = useQueryClient();
+  const currentUser = useAppStore((s) => s.currentUser);
+
+  return useMutation({
+    mutationFn: async (vars: { memberIds: string[] }) => {
+      if (!currentUser) {
+        throw new Error("No current user");
+      }
+      const raw = await invoke<RawDmChannel>("create_dm_channel", {
+        creatorId: currentUser.id,
+        memberIds: vars.memberIds,
+      });
+      return transform(raw, currentUser.id);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({
+        queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
+      });
+    },
   });
 }
 

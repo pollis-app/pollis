@@ -7,3 +7,4 @@ export * from "./useUserGroups";
 export * from "./useDMChannels";
 export * from "./useMessages";
 export * from "./useAuth";
+export * from "./useUserSearch";

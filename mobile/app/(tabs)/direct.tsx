@@ -95,7 +95,11 @@ export default function Direct() {
         })}
       </Body>
       <BottomAction>
-        <Button full icon={<Icon.plus color={semantic.ink} />}>
+        <Button
+          full
+          icon={<Icon.plus color={semantic.ink} />}
+          onPress={() => router.push("/dm/new")}
+        >
           NEW DIRECT MESSAGE
         </Button>
       </BottomAction>
