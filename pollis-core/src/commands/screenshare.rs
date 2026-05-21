@@ -82,37 +82,39 @@ pub enum ScreenShareEvent {
 // ── Resolution / FPS caps ─────────────────────────────────────────────────
 //
 // A 4K or ultrawide source must never reach the software VP8 encoder at
-// native resolution — it pegs a core and tanks the call. Cap every capture
-// path (macOS SCK, Windows WGC, Linux pipewire reader) to 1080p / 60fps
-// before publishing, preserving aspect ratio with even dims (VP8 + I420
-// 4:2:0 chroma require even width/height).
-
-const MAX_SHARE_WIDTH: u32 = 1920;
-const MAX_SHARE_HEIGHT: u32 = 1080;
-const MAX_SHARE_FPS: u32 = 60;
+// native resolution — it pegs a core and tanks the call. The previous
+// 1080p / 60fps clamp here was a defensive ceiling that's no longer
+// applied: publishers send native capture resolution and native frame
+// rate. VP8 software encode on a modern CPU handles a 4K/144Hz source
+// at ~30-50% of a single core, which is well within thermal headroom on
+// every laptop class we ship to. If that changes, the right answer is a
+// user-facing setting (issue #300), not a hardcoded ceiling.
+//
+// Even-floored dims are still required by I420 4:2:0 chroma; that
+// floor happens per-frame in `push_frame` / `push_frame_windows` before
+// the conversion.
 
 /// Picks the codec used to publish the local screen-share track.
 ///
-/// Defaults to H.264 on every platform. The encoder factory in
-/// `webrtc-sys 0.3.27` routes the request to the best available backend
-/// for the current build/host:
-/// - macOS: `RTCDefaultVideoEncoderFactory` → VideoToolbox (HW). Always
-///   present — `framework=VideoToolbox` is linked unconditionally.
-/// - Linux: NVENC if `cuda.h` was present at build time AND `libcuda` /
-///   `libnvcuvid` dlopen at runtime; else VAAPI if `libva-dev` was
-///   present at build time AND `libva.so.2` / `libva-drm.so.2` dlopen
-///   at runtime; else OpenH264 software (`WEBRTC_USE_H264` is baked
-///   into the prebuilt libwebrtc).
-/// - Windows: OpenH264 software (no MediaFoundation factory exists in
-///   this SDK yet — see issue #293).
+/// Defaults to VP8 on every platform. Reasoning:
+/// - VP8 is the cheapest software encoder in libwebrtc, which matches
+///   our "as many frames at native resolution as possible" goal for
+///   screen share. SW VP9/AV1 trade CPU for compression; SW H.264
+///   (OpenH264) is comparable to VP8 but has no decode side benefits
+///   for our use case.
+/// - The "VideoToolbox H.264" HW-accel path on macOS is real but
+///   LiveKit's Rust SDK pins H.264 SDP preferences to profile
+///   `42e01f` (Constrained Baseline Level 3.1, 1280×720 ceiling — see
+///   `rtc_session.rs::create_sender` in livekit 0.7). Publishing >720p
+///   as H.264 silently emits zero RTP packets. That tradeoff (HW accel
+///   at the cost of capped resolution) is exposed via the env var
+///   below; it is not the default.
+/// - VP8 has universal decoder support across every libwebrtc build,
+///   so cross-user playback works without per-platform caveats.
 ///
-/// SW H.264 (OpenH264) is roughly on par with SW VP8 in CPU cost on
-/// Linux and noticeably cheaper on Windows, so the SW fallback isn't a
-/// regression versus the previous VP8 default.
-///
-/// `POLLIS_SCREENSHARE_CODEC` overrides the default at runtime for A/B
-/// without rebuilding. Accepts `vp8|h264|vp9|av1|h265`; anything else
-/// (including unset) → H.264.
+/// `POLLIS_SCREENSHARE_CODEC` overrides the default at runtime. Accepts
+/// `vp8|h264|vp9|av1|h265`; anything else (including unset) → VP8.
+/// See issue #300 for the planned Preferences UI exposing this.
 fn pick_screenshare_codec() -> VideoCodec {
     if let Ok(v) = std::env::var("POLLIS_SCREENSHARE_CODEC") {
         match v.to_ascii_lowercase().as_str() {
@@ -124,57 +126,14 @@ fn pick_screenshare_codec() -> VideoCodec {
             _ => {}
         }
     }
-    VideoCodec::H264
+    VideoCodec::VP8
 }
 
-/// Minimum spacing between published frames to enforce `MAX_SHARE_FPS`.
-/// Used by the Linux reader (the macOS/Windows native pipelines are
-/// already display-rate-locked and SCK/WGC honour their own interval
-/// settings; an extra clamp there would only add a timestamp compare with
-/// no benefit, so the FPS clamp lives only where frames can outrun the
-/// cap — the Linux pipewire path).
-const MIN_FRAME_INTERVAL: std::time::Duration =
-    std::time::Duration::from_nanos(1_000_000_000 / MAX_SHARE_FPS as u64);
-
-/// If a source exceeds the cap, return the largest even-dim'd size that
-/// fits inside `MAX_SHARE_WIDTH`×`MAX_SHARE_HEIGHT` while preserving aspect
-/// ratio. Returns `None` when the source already fits (no scale needed —
-/// keeps the fast path allocation-free). Inputs are assumed already
-/// even-floored by the caller.
-fn capped_dims(width: u32, height: u32) -> Option<(u32, u32)> {
-    if width <= MAX_SHARE_WIDTH && height <= MAX_SHARE_HEIGHT {
-        return None;
-    }
-    if width == 0 || height == 0 {
-        return None;
-    }
-    // Scale by the tighter of the two axis ratios so both fit. f64 keeps
-    // precision for ultrawide ratios; this runs once per resolution
-    // change at most when wired through the announce path, and at worst
-    // once per frame as a couple of cmp+mul — negligible vs. the encode.
-    let sw = MAX_SHARE_WIDTH as f64 / width as f64;
-    let sh = MAX_SHARE_HEIGHT as f64 / height as f64;
-    let scale = sw.min(sh);
-    let mut cw = (width as f64 * scale).round() as u32;
-    let mut ch = (height as f64 * scale).round() as u32;
-    // Even dims for I420 chroma; clamp so rounding can't exceed the cap.
-    cw = (cw.min(MAX_SHARE_WIDTH)) & !1;
-    ch = (ch.min(MAX_SHARE_HEIGHT)) & !1;
-    if cw == 0 || ch == 0 {
-        return None;
-    }
-    Some((cw, ch))
-}
-
-/// Apply `argb_to_i420` then, if the source exceeds the cap, downscale via
-/// `I420Buffer::scale` (libyuv `I420Scale` under the hood). The full-res
-/// I420Buffer is unavoidable — `argb_to_i420` needs an I420 destination
-/// and libwebrtc 0.3.29 exposes neither an ARGB-scale nor an `i420_scale`
-/// free function — so we convert at native res then let libyuv produce the
-/// scaled buffer. That's exactly one extra buffer alloc on the over-cap
-/// path and zero on the (common) within-cap path; last-frame-wins
-/// backpressure upstream is unchanged. Shared by all three OS push paths.
-fn convert_and_cap(
+/// Apply `argb_to_i420` into a freshly-allocated I420 buffer at the
+/// source's native dimensions. No downscale: encoders are fed the
+/// full-res frame and VP8 (or whatever codec is selected) decides what
+/// to do with it. Shared by all three OS push paths.
+fn convert_to_i420(
     width: i32,
     height: i32,
     src_stride: u32,
@@ -188,10 +147,7 @@ fn convert_and_cap(
             argb, src_stride, dy, sy, du, su, dv, sv, width, height,
         );
     }
-    match capped_dims(width as u32, height as u32) {
-        Some((cw, ch)) => buffer.scale(cw as i32, ch as i32),
-        None => buffer,
-    }
+    buffer
 }
 
 // There is no "stalled" / "paused" concept anywhere in screenshare:
@@ -802,13 +758,12 @@ pub async fn start_screen_share(
     };
     let reader_task = tokio::spawn(async move {
         let mut last_preview: Option<std::time::Instant> = None;
-        // FPS cap lives here — the lowest-overhead point on the Linux
-        // path. pipewire can deliver at the source's native refresh
-        // (144Hz+ displays); dropping frames before the libyuv convert +
-        // VP8 encode keeps the SW encoder off a treadmill. macOS SCK /
-        // Windows WGC honour their own MinimumUpdateInterval so they
-        // don't need this extra clamp.
-        let mut last_pushed: Option<std::time::Instant> = None;
+        // No FPS cap: pipewire delivers at the source's native refresh
+        // (144Hz+ on high-refresh displays) and we publish at the same
+        // rate. The SW encoder absorbs that fine on modern hardware; if
+        // a future thermal complaint surfaces, the right answer is a
+        // user-facing toggle (issue #300), not a hardcoded limit.
+        //
         // No keep-alive / no synthetic frame replay: when the captured
         // surface is idle, pipewire goes silent and we just stop
         // pushing. The viewer's canvas retains the last painted frame
@@ -825,15 +780,6 @@ pub async fn start_screen_share(
                     timestamp_us,
                     bgrx,
                 })) => {
-                    // FPS cap: skip frames arriving faster than
-                    // MAX_SHARE_FPS. Cheap Instant compare, last-frame-
-                    // wins is preserved (we just drop the early one).
-                    if let Some(t) = last_pushed {
-                        if t.elapsed() < MIN_FRAME_INTERVAL {
-                            continue;
-                        }
-                    }
-                    last_pushed = Some(std::time::Instant::now());
                     let preview = match &frames_for_task {
                         Some(sink)
                             if last_preview
@@ -1231,8 +1177,8 @@ fn push_frame_windows(
     if w <= 0 || h <= 0 {
         return;
     }
-    // Convert (WGC Bgra8 == little-endian ARGB) and cap to 1080p.
-    let buffer = convert_and_cap(w, h, stride, bgra);
+    // Convert (WGC Bgra8 == little-endian ARGB) to I420 at native res.
+    let buffer = convert_to_i420(w, h, stride, bgra);
     let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
@@ -1390,9 +1336,8 @@ fn push_frame(
     if w <= 0 || h <= 0 {
         return;
     }
-    // Convert (BGRx == little-endian ARGB) and cap to 1080p. A 4K /
-    // ultrawide monitor would otherwise hit the SW VP8 encoder native.
-    let buffer = convert_and_cap(w, h, stride, bgrx);
+    // Convert (BGRx == little-endian ARGB) to I420 at native res.
+    let buffer = convert_to_i420(w, h, stride, bgrx);
     let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,

@@ -550,15 +550,11 @@ mod pw {
             ),
             // First Rectangle = preferred/default. We bias the negotiated
             // size toward 1080p so a compositor that honours the
-            // preference hands us a ≤1080p stream (cheapest cap — no
-            // per-frame scale needed downstream). The full range stays
-            // wide because most compositors ignore the preference and
-            // only offer the source's native size; the parent reader
-            // (screenshare.rs `convert_and_cap`) then enforces the hard
-            // 1920x1080 cap with a libyuv I420 downscale. Doing the cap
-            // there rather than re-negotiating here keeps a single
-            // last-frame-wins backpressure point and avoids
-            // negotiation-failure on compositors that can't resize.
+            // preference hands us a sensible default stream size. The
+            // full range stays wide because most compositors ignore the
+            // preference and only offer the source's native size; the
+            // parent reader (screenshare.rs) accepts whatever lands
+            // here at native resolution — no downstream cap is applied.
             pw::spa::pod::property!(
                 pw::spa::param::format::FormatProperties::VideoSize,
                 Choice,
