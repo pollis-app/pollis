@@ -10,13 +10,22 @@ import { MessageQueue } from "../Message/MessageQueue";
 import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInput";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
-import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage } from "../../hooks/queries";
+import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
 import { transformChannelMessage } from "../../hooks/queries/useMessages";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
 import { blurhashFromUrl } from "../../utils/imageProcessing";
 import { useTypingPublisher } from "../../hooks/useTypingPublisher";
 import { TypingIndicator } from "../TypingIndicator";
+
+// Passed from DM page when the current user has not yet accepted the DM.
+// Replaces the chat input with an accept/block bar.
+export interface PendingDmRequest {
+  senderUserId: string;
+  senderName: string;
+  onAccepted?: () => void;
+  onBlocked?: () => void;
+}
 
 type MediaUploadResult = {
   key: string;
@@ -42,7 +51,11 @@ type MessagesQueryData = {
   nextCursor: PageCursor | null;
 };
 
-export const MainContent: React.FC = () => {
+interface MainContentProps {
+  pendingDmRequest?: PendingDmRequest | null;
+}
+
+export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = null }) => {
   const {
     selectedChannelId,
     selectedConversationId,
@@ -53,6 +66,8 @@ export const MainContent: React.FC = () => {
     pendingDeleteChannelId,
     setPendingDeleteChannelId,
   } = useAppStore();
+  const acceptDmRequestMutation = useAcceptDMRequest();
+  const blockUserMutation = useBlockUser();
   const navigate = useNavigate();
   const deleteChannelMutation = useDeleteChannel();
   const isDeletingThisChannel =
@@ -288,6 +303,30 @@ export const MainContent: React.FC = () => {
     }
   };
 
+  const handleAcceptDmRequest = async () => {
+    if (!pendingDmRequest || !selectedConversationId) {
+      return;
+    }
+    try {
+      await acceptDmRequestMutation.mutateAsync(selectedConversationId);
+      pendingDmRequest.onAccepted?.();
+    } catch (err) {
+      console.error("Failed to accept DM request:", err);
+    }
+  };
+
+  const handleBlockDmRequest = async () => {
+    if (!pendingDmRequest) {
+      return;
+    }
+    try {
+      await blockUserMutation.mutateAsync(pendingDmRequest.senderUserId);
+      pendingDmRequest.onBlocked?.();
+    } catch (err) {
+      console.error("Failed to block user:", err);
+    }
+  };
+
   const handleSend = async (text: string, attachments: Attachment[]) => {
     if (!text.trim() && attachments.length === 0) {
       return;
@@ -480,7 +519,49 @@ export const MainContent: React.FC = () => {
 
       <MessageQueue />
 
-      {editingMessage ? (
+      {pendingDmRequest ? (
+        <div data-testid="dm-request-bar">
+          <div
+            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
+            style={{ borderTop: '1px solid var(--c-border)', background: 'var(--c-surface)' }}
+          >
+            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>
+              message request
+            </span>
+          </div>
+          <div
+            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
+            style={{ background: 'var(--c-surface)' }}
+          >
+            <p className="text-xs font-mono" style={{ color: 'var(--c-text-dim)' }}>
+              <span style={{ color: 'var(--c-text)' }}>{pendingDmRequest.senderName}</span> wants to send you messages.
+            </p>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <Button
+                data-testid="dm-request-accept"
+                variant="primary"
+                onClick={handleAcceptDmRequest}
+                isLoading={acceptDmRequestMutation.isPending}
+                loadingText="Accepting…"
+                disabled={acceptDmRequestMutation.isPending || blockUserMutation.isPending}
+                autoFocus
+              >
+                Accept
+              </Button>
+              <Button
+                data-testid="dm-request-block"
+                variant="secondary"
+                onClick={handleBlockDmRequest}
+                isLoading={blockUserMutation.isPending}
+                loadingText="Blocking…"
+                disabled={acceptDmRequestMutation.isPending || blockUserMutation.isPending}
+              >
+                Block
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : editingMessage ? (
         <div data-testid="edit-message-bar">
           <div
             className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
