@@ -183,6 +183,16 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             ok(())
         }
         "list_known_accounts" => ok(auth::list_known_accounts()?),
+        "list_user_devices" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(auth::list_user_devices(&state()?, user_id).await?)
+        }
+        "revoke_device" => {
+            let user_id: String = arg(&args, "userId")?;
+            let device_id: String = arg(&args, "deviceId")?;
+            auth::revoke_device(&state()?, user_id, device_id).await?;
+            ok(())
+        }
 
         // ----- pin -----
         "set_pin" => {
