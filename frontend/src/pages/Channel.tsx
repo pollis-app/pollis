@@ -38,7 +38,7 @@ export const ChannelPage: React.FC = () => {
   return (
     <div className="flex flex-col h-full">
       <div
-        className="flex items-center px-4 py-2 flex-shrink-0 text-xs font-mono"
+        className="flex items-center px-4 py-[7px] flex-shrink-0 text-xs font-mono"
         style={{
           borderBottom: "1px solid var(--c-border)",
           color: "var(--c-text-muted)",
