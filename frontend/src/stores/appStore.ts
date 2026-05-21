@@ -61,9 +61,14 @@ interface AppStore extends AppState {
   voiceParticipants: VoiceParticipant[];
   voiceActiveSpeakerIds: string[];
   voiceIsMuted: boolean;
+  // Lifecycle phase of the local voice session — mirrored from
+  // `VoiceSessionManager`. Used to show a subtle "connecting…" indicator
+  // on the local user's own tile while LiveKit is connecting.
+  voicePhase: "idle" | "joining" | "joined" | "leaving";
   setVoiceParticipants: (participants: VoiceParticipant[]) => void;
   setVoiceActiveSpeakerIds: (ids: string[]) => void;
   setVoiceIsMuted: (muted: boolean) => void;
+  setVoicePhase: (phase: "idle" | "joining" | "joined" | "leaving") => void;
   /** True if the local user is broadcasting their screen. */
   screenShareLocalActive: boolean;
   setScreenShareLocalActive: (v: boolean) => void;
@@ -162,6 +167,7 @@ export const useAppStore = create<AppStore>((set) => ({
   voiceParticipants: [],
   voiceActiveSpeakerIds: [],
   voiceIsMuted: false,
+  voicePhase: "idle",
   screenShareLocalActive: false,
   screenShareLocalDimensions: null,
   screenShareMode: "idle",
@@ -248,6 +254,7 @@ export const useAppStore = create<AppStore>((set) => ({
   setVoiceParticipants: (participants) => set({ voiceParticipants: participants }),
   setVoiceActiveSpeakerIds: (ids) => set({ voiceActiveSpeakerIds: ids }),
   setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
+  setVoicePhase: (phase) => set({ voicePhase: phase }),
 
   setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
   setScreenShareLocalDimensions: (dims) => set({ screenShareLocalDimensions: dims }),
@@ -310,6 +317,7 @@ export const useAppStore = create<AppStore>((set) => ({
     voiceParticipants: [],
     voiceActiveSpeakerIds: [],
     voiceIsMuted: false,
+    voicePhase: "idle",
     screenShareLocalActive: false,
     screenShareLocalDimensions: null,
     screenShareMode: "idle",

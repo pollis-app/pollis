@@ -10,6 +10,7 @@ export const VoiceChannelView: React.FC = () => {
   const {
     voiceParticipants,
     voiceActiveSpeakerIds,
+    voicePhase,
     screenShareRemotes,
     screenShareLocalActive,
     screenShareLocalDimensions,
@@ -94,6 +95,11 @@ export const VoiceChannelView: React.FC = () => {
               streamTrackKey={streamTrackKey}
               streamWidth={streamWidth}
               streamHeight={streamHeight}
+              // Connecting indicator only on the local user's own tile,
+              // and only while the session is still negotiating with
+              // LiveKit. Driven by VoiceSessionManager's phase, so it
+              // clears the instant join_voice_channel resolves.
+              isConnecting={isLocal && voicePhase === "joining"}
               onView={(trackKey) => setViewingScreenShareTrackKey(trackKey)}
             />
           );

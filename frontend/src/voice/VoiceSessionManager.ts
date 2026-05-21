@@ -700,6 +700,7 @@ voiceSession.subscribe(() => {
     voiceParticipants: VoiceParticipant[];
     voiceActiveSpeakerIds: string[];
     voiceIsMuted: boolean;
+    voicePhase: VoicePhase;
     isLocalSpeaking: boolean;
     voiceError: string | null;
   }> = {};
@@ -714,6 +715,9 @@ voiceSession.subscribe(() => {
   }
   if (store.voiceIsMuted !== s.isMuted) {
     patch.voiceIsMuted = s.isMuted;
+  }
+  if (store.voicePhase !== s.phase) {
+    patch.voicePhase = s.phase;
   }
   if (store.isLocalSpeaking !== s.isLocalSpeaking) {
     patch.isLocalSpeaking = s.isLocalSpeaking;

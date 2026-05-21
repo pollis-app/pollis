@@ -13,6 +13,7 @@ import { VolumeX } from "lucide-react";
 
 import type { VoiceConnectionQuality } from "../../types";
 import { Avatar } from "../ui/Avatar";
+import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { RemoteUserVolumeSlider } from "./RemoteUserVolumeSlider";
 import { RemoteVideoTile } from "./RemoteVideoTile";
 import { useScreenShareStats } from "../../screenshare/useScreenShareStats";
@@ -33,6 +34,10 @@ interface Props {
   streamTrackKey?: string;
   streamWidth?: number;
   streamHeight?: number;
+  /** Show a subtle connecting indicator (local user only, while the
+   *  voice session is in the `joining` phase). Cleared as soon as the
+   *  LiveKit connect resolves. */
+  isConnecting?: boolean;
   onView: (trackKey: string) => void;
 }
 
@@ -63,6 +68,7 @@ export const VoiceMemberTile: React.FC<Props> = ({
   streamTrackKey,
   streamWidth,
   streamHeight,
+  isConnecting = false,
   onView,
 }) => {
   const [hovered, setHovered] = useState(false);
@@ -137,11 +143,22 @@ export const VoiceMemberTile: React.FC<Props> = ({
         {name}
       </span>
 
-      {/* Top-right: muted OR degraded connection (mutually exclusive
-        * visually — muted shows the icon, quality the dot). Muted takes
-        * precedence since it's the more meaningful signal for the
-        * person looking at the tile. */}
-      {isMuted ? (
+      {/* Top-right: connecting spinner (local user only, while
+        * LiveKit is negotiating) → muted → degraded connection.
+        * Mutually exclusive — once connected, isConnecting flips to
+        * false and the muted/quality slot takes over. Spinner uses
+        * the existing CLI-style LoadingSpinner so it matches the
+        * rest of the app. */}
+      {isConnecting ? (
+        <span
+          data-testid={`voice-tile-connecting-${identity}`}
+          className="absolute top-1.5 right-1.5 z-10 flex items-center leading-none"
+          title="Connecting…"
+          aria-label="Connecting"
+        >
+          <LoadingSpinner size="sm" />
+        </span>
+      ) : isMuted ? (
         <span
           data-testid={`voice-tile-muted-${identity}`}
           className="absolute top-1.5 right-1.5 z-10"
