@@ -132,7 +132,7 @@ export const UpdateScreen: React.FC = () => {
           {phase !== "error" && <LoadingSpinner size="sm" />}
           <span
             className="text-xs font-mono"
-            style={{ color: phase === "error" ? "#ff6b6b" : "var(--c-text)" }}
+            style={{ color: phase === "error" ? "var(--c-danger)" : "var(--c-text)" }}
           >
             {label}
           </span>

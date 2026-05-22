@@ -15,7 +15,7 @@ export const DMSettingsPage: React.FC = () => {
     <PageShell title="Conversation Settings">
       <div className="h-full flex flex-col items-center justify-center gap-4 px-6">
         {leaveDMMutation.isError && (
-          <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+          <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
             {leaveDMMutation.error instanceof Error ? leaveDMMutation.error.message : "Failed to leave conversation"}
           </p>
         )}

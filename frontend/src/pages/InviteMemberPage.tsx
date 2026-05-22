@@ -77,7 +77,7 @@ export const InviteMemberPage: React.FC = () => {
             )}
 
             {inviteMutation.error && (
-              <p data-testid="invite-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+              <p data-testid="invite-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
                 {inviteMutation.error instanceof Error ? inviteMutation.error.message : "Failed to send invite"}
               </p>
             )}

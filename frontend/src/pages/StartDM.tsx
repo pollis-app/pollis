@@ -65,7 +65,7 @@ export const StartDM: React.FC<StartDMProps> = ({ onSuccess }) => {
           <input data-testid="dm-identifier-input" type="hidden" value={identifier} readOnly />
 
           {(error || createDMMutation.error) && (
-            <p data-testid="start-dm-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+            <p data-testid="start-dm-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
               {error ||
                 (createDMMutation.error instanceof Error
                   ? createDMMutation.error.message

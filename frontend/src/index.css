@@ -38,6 +38,9 @@
     --c-border: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 22%);
     --c-border-active: hsl(var(--accent-h) var(--accent-s) var(--accent-l) / 50%);
 
+    /* ── Status colors ─────────────────────────────────────────────── */
+    --c-danger: #ff6b6b;
+
     /* ── Text — explicit lightness (not opacity) for readable contrast */
     --c-text: hsl(var(--accent-h) var(--accent-s) var(--accent-l));
     --c-text-dim: hsl(var(--accent-h) 28% 70%);

@@ -65,7 +65,7 @@ export const TextArea: React.FC<TextAreaProps> = ({
             paddingRight: "0.75rem",
             background: "var(--c-surface)",
             color: "var(--c-text)",
-            border: `2px solid ${error ? "#ff6b6b" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
+            border: `2px solid ${error ? "var(--c-danger)" : isFocused ? "var(--c-border-active)" : "var(--c-border)"}`,
             outline: "none",
             borderRadius: "0.5rem",
             opacity: disabled ? 0.5 : 1,
@@ -79,7 +79,7 @@ export const TextArea: React.FC<TextAreaProps> = ({
         </p>
       )}
       {error && (
-        <p className="mt-1 text-xs font-mono" style={{ color: "#ff6b6b" }} role="alert">
+        <p className="mt-1 text-xs font-mono" style={{ color: "var(--c-danger)" }} role="alert">
           {error}
         </p>
       )}

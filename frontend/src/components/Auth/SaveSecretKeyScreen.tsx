@@ -135,7 +135,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
               <div>
                 <h1
                   className="text-base font-mono font-bold mb-8"
-                  style={{ color: "#ff6b6b" }}
+                  style={{ color: "var(--c-danger)" }}
                 >
                   Read before continuing
                 </h1>

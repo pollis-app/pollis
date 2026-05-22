@@ -125,7 +125,7 @@ export const SearchGroupPage: React.FC = () => {
                     <p
                       data-testid="request-rejected-indicator"
                       className="text-xs font-mono"
-                      style={{ color: '#ff6b6b' }}
+                      style={{ color: 'var(--c-danger)' }}
                     >
                       Your request was declined.
                     </p>
@@ -154,7 +154,7 @@ export const SearchGroupPage: React.FC = () => {
             )}
 
             {searchError && (
-              <p data-testid="search-group-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+              <p data-testid="search-group-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
                 {searchError}
               </p>
             )}

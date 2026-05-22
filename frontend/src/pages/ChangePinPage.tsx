@@ -112,7 +112,7 @@ export const ChangePinPage: React.FC = () => {
               <p
                 data-testid="change-pin-error"
                 className="text-xs"
-                style={{ color: "#ff6b6b" }}
+                style={{ color: "var(--c-danger)" }}
               >
                 {error}
               </p>

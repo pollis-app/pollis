@@ -117,7 +117,7 @@ export const RenameChannel: React.FC<RenameChannelProps> = ({ groupId, channelId
           <input data-testid="rename-channel-description-input" type="hidden" value={description} readOnly />
 
           {error && (
-            <p data-testid="rename-channel-error" className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+            <p data-testid="rename-channel-error" className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
               {error}
             </p>
           )}

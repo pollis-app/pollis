@@ -303,7 +303,7 @@ export const SettingsPage: React.FC = () => {
             )}
 
             {updateProfileMutation.error && (
-              <p data-testid="settings-save-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+              <p data-testid="settings-save-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
                 {updateProfileMutation.error instanceof Error
                   ? updateProfileMutation.error.message
                   : "Failed to save"}
@@ -379,7 +379,7 @@ export const SettingsPage: React.FC = () => {
                 />
                 <input data-testid="settings-email-new-input" type="hidden" value={pendingNewEmail} readOnly />
                 {emailChangeError && (
-                  <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+                  <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
                     {emailChangeError}
                   </p>
                 )}
@@ -419,7 +419,7 @@ export const SettingsPage: React.FC = () => {
                 />
                 <input data-testid="settings-email-otp-input" type="hidden" value={emailOtpCode} readOnly />
                 {emailChangeError && (
-                  <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+                  <p data-testid="settings-email-change-error" className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
                     {emailChangeError}
                   </p>
                 )}
@@ -508,7 +508,7 @@ export const SettingsPage: React.FC = () => {
             </div>
 
             {uploadError && (
-              <p data-testid="avatar-upload-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+              <p data-testid="avatar-upload-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
                 {uploadError}
               </p>
             )}
@@ -556,7 +556,7 @@ export const SettingsPage: React.FC = () => {
               )}
 
               {updateStatus === "error" && (
-                <p className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+                <p className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
                   {updateError}
                 </p>
               )}

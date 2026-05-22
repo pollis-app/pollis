@@ -352,7 +352,7 @@ export const VoiceSettingsPage: React.FC = () => {
             <p
               data-testid="voice-test-error"
               className="text-xs font-mono"
-              style={{ color: "#ff6b6b" }}
+              style={{ color: "var(--c-danger)" }}
             >
               {test.error}
             </p>

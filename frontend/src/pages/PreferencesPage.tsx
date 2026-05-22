@@ -232,7 +232,7 @@ export const PreferencesPage: React.FC = () => {
                 style={{
                   width: 90,
                   background: "var(--c-surface)",
-                  color: isValidHex(accentHexInput) ? "var(--c-text)" : "#ff6b6b",
+                  color: isValidHex(accentHexInput) ? "var(--c-text)" : "var(--c-danger)",
                   border: "1px solid var(--c-border)",
                   borderRadius: 6,
                 }}
@@ -316,7 +316,7 @@ export const PreferencesPage: React.FC = () => {
                 style={{
                   width: 90,
                   background: "var(--c-surface)",
-                  color: isValidHex(bgHexInput) ? "var(--c-text)" : "#ff6b6b",
+                  color: isValidHex(bgHexInput) ? "var(--c-text)" : "var(--c-danger)",
                   border: "1px solid var(--c-border)",
                   borderRadius: 6,
                 }}
