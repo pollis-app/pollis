@@ -1,10 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { PresignedUploadResponse } from '../types';
 
-function sanitizeFilename(name: string): string {
-  return name.replace(/[^A-Za-z0-9._-]/g, '_');
-}
-
 export async function uploadAvatar(
   userId: string,
   _aliasId: string,
@@ -16,20 +12,6 @@ export async function uploadAvatar(
   // at PUT time, and the frontend sniffs magic bytes on download to pick a
   // MIME type for the Blob.
   const key = `avatars/${userId}`;
-  const result = await invoke<{ key: string; url: string }>('upload_file', {
-    key,
-    data: Array.from(data),
-    contentType: file.type || 'image/png',
-  });
-  return { upload_url: '', object_key: result.key, public_url: result.url };
-}
-
-export async function uploadGroupIcon(
-  groupId: string,
-  file: File,
-): Promise<PresignedUploadResponse> {
-  const data = new Uint8Array(await file.arrayBuffer());
-  const key = `group-icons/${groupId}/${Date.now()}-${sanitizeFilename(file.name)}`;
   const result = await invoke<{ key: string; url: string }>('upload_file', {
     key,
     data: Array.from(data),

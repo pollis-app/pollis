@@ -36,38 +36,6 @@ export function useUserGroupsWithChannels() {
   });
 }
 
-export function useUserGroups() {
-  const currentUser = useAppStore((state) => state.currentUser);
-
-  return useQuery({
-    queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
-    queryFn: async (): Promise<Group[]> => {
-      if (!currentUser) {
-        throw new Error("No current user");
-      }
-      return await api.listUserGroups(currentUser.id);
-    },
-    enabled: !!currentUser,
-    staleTime: 1000 * 60,
-    refetchOnWindowFocus: true,
-  });
-}
-
-export function useGroupChannels(groupId: string | null) {
-  return useQuery({
-    queryKey: groupQueryKeys.channels(groupId ?? ""),
-    queryFn: async (): Promise<Channel[]> => {
-      if (!groupId) {
-        throw new Error("No group ID provided");
-      }
-      return await api.listChannels(groupId);
-    },
-    enabled: !!groupId,
-    staleTime: 1000 * 60,
-    refetchOnWindowFocus: true,
-  });
-}
-
 export function useCreateGroup() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);
@@ -115,27 +83,6 @@ export function useCreateGroup() {
           return updated;
         },
       );
-    },
-  });
-}
-
-export function useJoinGroup() {
-  const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
-
-  return useMutation({
-    mutationFn: async (groupId: string) => {
-      if (!currentUser) {
-        throw new Error("No current user");
-      }
-
-      await invoke('invite_to_group', { groupId, userId: currentUser.id });
-      return { id: groupId, slug: groupId, name: groupId, description: '', created_by: currentUser.id, created_at: 0, updated_at: 0 } as Group;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({
-        queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
-      });
     },
   });
 }

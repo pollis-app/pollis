@@ -6,7 +6,6 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../stores/appStore";
 import { MessageList } from "../Message/MessageList";
 import { ReplyPreview } from "../Message/ReplyPreview";
-import { MessageQueue } from "../Message/MessageQueue";
 import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInput";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
@@ -516,8 +515,6 @@ export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = nul
           onScrollToMessage={(id) => console.log("Scroll to:", id)}
         />
       )}
-
-      <MessageQueue />
 
       {pendingDmRequest ? (
         <div data-testid="dm-request-bar">

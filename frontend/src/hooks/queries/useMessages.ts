@@ -227,20 +227,6 @@ export function useMessages(channelId: string | null, conversationId: string | n
   };
 }
 
-/**
- * @deprecated Use useMessages(channelId, null) instead
- */
-export function useChannelMessages(channelId: string | null) {
-  return useMessages(channelId, null);
-}
-
-/**
- * @deprecated Use useMessages(null, conversationId) instead
- */
-export function useConversationMessages(conversationId: string | null) {
-  return useMessages(null, conversationId);
-}
-
 export function useSendMessage() {
   const queryClient = useQueryClient();
   const currentUser = useAppStore((state) => state.currentUser);

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant } from '../types';
+import type { AppState, User, Group, Channel, DMConversation, VoiceParticipant } from '../types';
 
 interface AppStore extends AppState {
   // User profile data from Turso
@@ -22,10 +22,6 @@ interface AppStore extends AppState {
   addChannel: (channel: Channel) => void;
   setDMConversations: (conversations: DMConversation[]) => void;
   addDMConversation: (conversation: DMConversation) => void;
-  setMessageQueue: (queue: MessageQueueItem[]) => void;
-  addToMessageQueue: (item: MessageQueueItem) => void;
-  updateMessageQueueItem: (id: string, updates: Partial<MessageQueueItem>) => void;
-  removeFromMessageQueue: (id: string) => void;
   setReplyToMessageId: (messageId: string | null) => void;
   setShowThreadId: (threadId: string | null) => void;
   setLoading: (loading: boolean) => void;
@@ -163,7 +159,6 @@ export const useAppStore = create<AppStore>((set) => ({
   groups: [],
   channels: {},
   dmConversations: [],
-  messageQueue: [],
   replyToMessageId: null,
   showThreadId: null,
   isLoading: false,
@@ -217,19 +212,6 @@ export const useAppStore = create<AppStore>((set) => ({
   setDMConversations: (conversations) => set({ dmConversations: conversations }),
   addDMConversation: (conversation) => set((state) => ({
     dmConversations: [...state.dmConversations, conversation]
-  })),
-  
-  setMessageQueue: (queue) => set({ messageQueue: queue }),
-  addToMessageQueue: (item) => set((state) => ({
-    messageQueue: [...state.messageQueue, item]
-  })),
-  updateMessageQueueItem: (id, updates) => set((state) => ({
-    messageQueue: state.messageQueue.map((item) =>
-      item.id === id ? { ...item, ...updates } : item
-    )
-  })),
-  removeFromMessageQueue: (id) => set((state) => ({
-    messageQueue: state.messageQueue.filter((item) => item.id !== id)
   })),
   
   setReplyToMessageId: (messageId) => set({ replyToMessageId: messageId }),
@@ -316,7 +298,6 @@ export const useAppStore = create<AppStore>((set) => ({
     groups: [],
     channels: {},
     dmConversations: [],
-    messageQueue: [],
     replyToMessageId: null,
     showThreadId: null,
     isLoading: false,

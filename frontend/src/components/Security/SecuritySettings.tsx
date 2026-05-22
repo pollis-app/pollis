@@ -1,14 +1,7 @@
-import React, { useMemo, useState } from "react";
-import {
-  Download,
-  Upload,
-  ShieldCheck,
-  Lock,
-  RefreshCw,
-} from "lucide-react";
+import React from "react";
+import { ShieldCheck, Lock, RefreshCw } from "lucide-react";
 import { Button } from "../ui/Button";
 import { Switch } from "../ui/Switch";
-import { PasswordInput } from "../ui/PasswordInput";
 
 export interface VerifiedContact {
   id: string;
@@ -31,25 +24,11 @@ interface SecuritySettingsProps {
   sessions?: SessionInfo[];
   messagePreviewsEnabled?: boolean;
   onToggleMessagePreviews?: (enabled: boolean) => void;
-  onExportBackup?: (password: string) => void;
-  onImportBackup?: (password: string, file?: File) => void;
   onClearSessions?: () => void;
   onResetSession?: (sessionId: string) => void;
 }
 
 const formatFingerprint = (fp: string) => (fp.match(/.{1,5}/g) || []).join(" ");
-
-const strength = (password: string) => {
-  let score = 0;
-  if (password.length >= 12) score += 1;
-  if (/[A-Z]/.test(password)) score += 1;
-  if (/[a-z]/.test(password)) score += 1;
-  if (/[0-9]/.test(password)) score += 1;
-  if (/[^A-Za-z0-9]/.test(password)) score += 1;
-
-  const labels = ["Very weak", "Weak", "Fair", "Good", "Strong", "Excellent"];
-  return { score, label: labels[score] };
-};
 
 export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
   ownFingerprint,
@@ -57,21 +36,9 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
   sessions = [],
   messagePreviewsEnabled = false,
   onToggleMessagePreviews,
-  onExportBackup,
-  onImportBackup,
   onClearSessions,
   onResetSession,
 }) => {
-  const [exportPassword, setExportPassword] = useState("");
-  const [importPassword, setImportPassword] = useState("");
-  const [importFile, setImportFile] = useState<File | undefined>(undefined);
-
-  const exportStrength = useMemo(() => strength(exportPassword), [exportPassword]);
-  const importStrength = useMemo(() => strength(importPassword), [importPassword]);
-
-  const strengthColor = (score: number) =>
-    score <= 1 ? '#ff6b6b' : score <= 2 ? '#f0b429' : score <= 3 ? 'var(--c-accent-dim)' : 'var(--c-accent)';
-
   return (
     <div
       data-testid="security-settings"
@@ -99,72 +66,6 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
           checked={messagePreviewsEnabled}
           onChange={(checked) => onToggleMessagePreviews?.(checked)}
         />
-      </section>
-
-      {/* Backup */}
-      <section className="flex flex-col gap-4">
-        <h2 className="section-label px-0 border-b pb-1" style={{ borderColor: 'var(--c-border)' }}>Encrypted Backup</h2>
-
-        <div className="grid grid-cols-2 gap-4">
-          {/* Export */}
-          <div className="flex flex-col gap-3">
-            <h3 className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>Export keys</h3>
-            <PasswordInput
-              id="export-password"
-              data-testid="export-password-input"
-              label="Password"
-              placeholder="Strong unique password"
-              value={exportPassword}
-              onChange={setExportPassword}
-              strength={exportPassword ? { label: exportStrength.label, color: strengthColor(exportStrength.score) } : undefined}
-            />
-            <Button
-              data-testid="export-backup-button"
-              onClick={() => onExportBackup?.(exportPassword)}
-              disabled={exportStrength.score < 3}
-              variant="primary"
-              className="self-start"
-            >
-              <Download size={17} aria-hidden="true" />
-              Export
-            </Button>
-            <p className="text-2xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Store in a safe place — losing it means losing access.</p>
-          </div>
-
-          {/* Import */}
-          <div className="flex flex-col gap-3">
-            <h3 className="text-2xs font-mono uppercase tracking-widest" style={{ color: 'var(--c-text-muted)' }}>Import keys</h3>
-            <PasswordInput
-              id="import-password"
-              data-testid="import-password-input"
-              label="Password"
-              placeholder="Password used during export"
-              value={importPassword}
-              onChange={setImportPassword}
-              strength={importPassword ? { label: importStrength.label, color: strengthColor(importStrength.score) } : undefined}
-            />
-            <input
-              data-testid="import-backup-file-input"
-              type="file"
-              accept=".json,.bak"
-              onChange={(e) => setImportFile(e.target.files?.[0])}
-              aria-label="Select backup file"
-              className="text-xs font-mono"
-              style={{ color: 'var(--c-text-dim)' }}
-            />
-            <Button
-              data-testid="import-backup-button"
-              onClick={() => onImportBackup?.(importPassword, importFile)}
-              disabled={!importFile || importStrength.score < 2}
-              variant="primary"
-              className="self-start"
-            >
-              <Upload size={17} aria-hidden="true" />
-              Import
-            </Button>
-            <p className="text-2xs font-mono" style={{ color: 'var(--c-text-muted)' }}>Replaces current identity keys. Use cautiously.</p>
-          </div>
-        </div>
       </section>
 
       {/* Verified contacts */}

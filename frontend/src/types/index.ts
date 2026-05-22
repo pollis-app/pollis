@@ -9,7 +9,6 @@
 
 export interface User {
   id: string;
-  clerk_id: string; // Legacy Clerk field, unused — kept for compatibility
   email?: string;
   username?: string;
   preferred_name?: string;
@@ -19,7 +18,7 @@ export interface User {
 
 export interface Group {
   // Stored in: Remote DB (Turso)
-  // Fetched via: useUserGroups() React Query hook
+  // Fetched via: useUserGroupsWithChannels() React Query hook
   id: string; // ULID
   slug: string;
   name: string;
@@ -53,7 +52,7 @@ export interface Channel {
 
 export interface Message {
   // Stored in: Local DB (encrypted)
-  // Fetched via: useChannelMessages() or useConversationMessages() React Query hooks
+  // Fetched via: useMessages() React Query hook
   // CRITICAL: Encrypted content NEVER leaves device in plaintext
   id: string; // ULID
   channel_id?: string; // NULL for direct messages
@@ -76,13 +75,6 @@ export interface Message {
   status?: 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled';
 }
 
-export interface ReplyPreview {
-  message_id: string;
-  author_username: string;
-  content_snippet: string;
-  timestamp: number;
-}
-
 export interface DMConversation {
   id: string; // ULID (conversation_id)
   user1_id: string; // user_id
@@ -91,24 +83,6 @@ export interface DMConversation {
   user2_avatar_url?: string;
   created_at: number;
   updated_at: number;
-}
-
-export interface MessageQueueItem {
-  id: string; // ULID
-  message_id: string;
-  status: 'pending' | 'sending' | 'sent' | 'failed' | 'cancelled';
-  retry_count: number;
-  created_at: number;
-  updated_at: number;
-}
-
-export interface Profile {
-  id: string; // Clerk user ID
-  user_id: string; // Local User ID (links to users table)
-  avatar_url?: string;
-  last_used_at: number;
-  created_at: number;
-  biometric_enabled: boolean;
 }
 
 export interface PresignedUploadResponse {
@@ -178,15 +152,6 @@ export interface AudioDevice {
   kind: 'input' | 'output';
 }
 
-export interface UserAlias {
-  id: string;
-  user_id: string; // User who owns this alias
-  group_id: string; // Per-user, per-group display name (required)
-  name: string; // Display name in this group
-  avatar_hash?: string; // R2 object key for group-specific avatar
-  created_at: number;
-}
-
 export * from "./blocks";
 
 export interface AppState {
@@ -202,9 +167,6 @@ export interface AppState {
   groups: Group[];
   channels: Record<string, Channel[]>; // group_id -> channels
   dmConversations: DMConversation[];
-
-  // Message queue
-  messageQueue: MessageQueueItem[];
 
   // UI state
   replyToMessageId: string | null;
