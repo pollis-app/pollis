@@ -321,6 +321,25 @@ input[type="range"]::-moz-range-thumb {
   animation: status-blink 2s ease-in-out infinite;
 }
 
+/* ── Loading spinner (Braille frame cycle) ───────────────────────── */
+@keyframes loader-spinner-frames {
+  0%   { content: "⠋"; }
+  10%  { content: "⠙"; }
+  20%  { content: "⠹"; }
+  30%  { content: "⠸"; }
+  40%  { content: "⠼"; }
+  50%  { content: "⠴"; }
+  60%  { content: "⠦"; }
+  70%  { content: "⠧"; }
+  80%  { content: "⠇"; }
+  90%  { content: "⠏"; }
+}
+
+.loader-spinner::before {
+  content: "⠋";
+  animation: loader-spinner-frames 0.8s steps(10) infinite;
+}
+
 /* ── Titlebar drag ───────────────────────────────────────────────── */
 .titlebar-drag {
   --wails-draggable: drag;
