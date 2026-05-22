@@ -52,7 +52,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   onDelete,
   onScrollToReply,
 }) => {
-  const { currentUser } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
   const isOwn = message.sender_id === currentUser?.id;
   const isLightBg = useBackgroundIsLight();
 

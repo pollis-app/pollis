@@ -6,7 +6,7 @@ import { StartDM } from "./StartDM";
 
 export const StartDMPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setSelectedConversationId } = useAppStore();
+  const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
 
   return (
     <PageShell title="New Message">

@@ -13,14 +13,12 @@ import { RemoteVideoTile } from "./RemoteVideoTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 
 export const ScreenShareViewer: React.FC = () => {
-  const {
-    viewingScreenShareTrackKey,
-    screenShareRemotes,
-    screenShareLocalActive,
-    screenShareLocalDimensions,
-    currentUser,
-    setViewingScreenShareTrackKey,
-  } = useAppStore();
+  const viewingScreenShareTrackKey = useAppStore((s) => s.viewingScreenShareTrackKey);
+  const screenShareRemotes = useAppStore((s) => s.screenShareRemotes);
+  const screenShareLocalActive = useAppStore((s) => s.screenShareLocalActive);
+  const screenShareLocalDimensions = useAppStore((s) => s.screenShareLocalDimensions);
+  const currentUser = useAppStore((s) => s.currentUser);
+  const setViewingScreenShareTrackKey = useAppStore((s) => s.setViewingScreenShareTrackKey);
   if (!viewingScreenShareTrackKey) {
     return null;
   }

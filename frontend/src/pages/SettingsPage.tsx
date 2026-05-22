@@ -13,7 +13,7 @@ import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { invoke } from "@tauri-apps/api/core";
 
 export const SettingsPage: React.FC = () => {
-  const { currentUser } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
   const setUpdateRequired = useAppStore((s) => s.setUpdateRequired);
 
   const { data: userData, isLoading } = useUserProfile();

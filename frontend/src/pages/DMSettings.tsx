@@ -8,7 +8,7 @@ import { PageShell } from "../components/Layout/PageShell";
 export const DMSettingsPage: React.FC = () => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId/settings" });
-  const { setSelectedConversationId } = useAppStore();
+  const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
   const leaveDMMutation = useLeaveDM();
 
   return (

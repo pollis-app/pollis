@@ -14,7 +14,9 @@ interface CreateGroupProps {
 }
 
 export const CreateGroup: React.FC<CreateGroupProps> = ({ onSuccess }) => {
-  const { currentUser, addGroup, setSelectedGroupId } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
+  const addGroup = useAppStore((s) => s.addGroup);
+  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");

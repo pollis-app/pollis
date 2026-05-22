@@ -55,16 +55,14 @@ interface MainContentProps {
 }
 
 export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = null }) => {
-  const {
-    selectedChannelId,
-    selectedConversationId,
-    selectedGroupId,
-    replyToMessageId,
-    setReplyToMessageId,
-    currentUser,
-    pendingDeleteChannelId,
-    setPendingDeleteChannelId,
-  } = useAppStore();
+  const selectedChannelId = useAppStore((s) => s.selectedChannelId);
+  const selectedConversationId = useAppStore((s) => s.selectedConversationId);
+  const selectedGroupId = useAppStore((s) => s.selectedGroupId);
+  const replyToMessageId = useAppStore((s) => s.replyToMessageId);
+  const setReplyToMessageId = useAppStore((s) => s.setReplyToMessageId);
+  const currentUser = useAppStore((s) => s.currentUser);
+  const pendingDeleteChannelId = useAppStore((s) => s.pendingDeleteChannelId);
+  const setPendingDeleteChannelId = useAppStore((s) => s.setPendingDeleteChannelId);
   const acceptDmRequestMutation = useAcceptDMRequest();
   const blockUserMutation = useBlockUser();
   const navigate = useNavigate();

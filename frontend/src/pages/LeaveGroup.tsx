@@ -8,7 +8,8 @@ import { PageShell } from "../components/Layout/PageShell";
 export const LeaveGroupPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId/leave" });
-  const { setSelectedGroupId, setSelectedChannelId } = useAppStore();
+  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
+  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
   const leaveGroupMutation = useLeaveGroup();
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();

@@ -7,17 +7,15 @@ import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 import { ScreenSharePicker } from "./ScreenSharePicker";
 
 export const VoiceChannelView: React.FC = () => {
-  const {
-    voiceParticipants,
-    voiceActiveSpeakerIds,
-    voicePhase,
-    screenShareRemotes,
-    screenShareLocalActive,
-    screenShareLocalDimensions,
-    screenShareMode,
-    currentUser,
-    setViewingScreenShareTrackKey,
-  } = useAppStore();
+  const voiceParticipants = useAppStore((s) => s.voiceParticipants);
+  const voiceActiveSpeakerIds = useAppStore((s) => s.voiceActiveSpeakerIds);
+  const voicePhase = useAppStore((s) => s.voicePhase);
+  const screenShareRemotes = useAppStore((s) => s.screenShareRemotes);
+  const screenShareLocalActive = useAppStore((s) => s.screenShareLocalActive);
+  const screenShareLocalDimensions = useAppStore((s) => s.screenShareLocalDimensions);
+  const screenShareMode = useAppStore((s) => s.screenShareMode);
+  const currentUser = useAppStore((s) => s.currentUser);
+  const setViewingScreenShareTrackKey = useAppStore((s) => s.setViewingScreenShareTrackKey);
   const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
 
   // When the user is picking a screen-share source we take over the

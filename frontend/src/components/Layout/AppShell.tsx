@@ -43,22 +43,20 @@ export const AppShell: React.FC = () => {
   const queryClient = useQueryClient();
   const router = useRouter();
 
-  const {
-    setGroups,
-    setChannels,
-    activeVoiceChannelId,
-    statusBarAlert,
-    setStatusBarAlert,
-    voiceError,
-    setVoiceError,
-    screenShareError,
-    setScreenShareError,
-    isLocalSpeaking,
-    incomingCall,
-    setIncomingCall,
-    viewingScreenShareTrackKey,
-    setViewingScreenShareTrackKey,
-  } = useAppStore();
+  const setGroups = useAppStore((s) => s.setGroups);
+  const setChannels = useAppStore((s) => s.setChannels);
+  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const statusBarAlert = useAppStore((s) => s.statusBarAlert);
+  const setStatusBarAlert = useAppStore((s) => s.setStatusBarAlert);
+  const voiceError = useAppStore((s) => s.voiceError);
+  const setVoiceError = useAppStore((s) => s.setVoiceError);
+  const screenShareError = useAppStore((s) => s.screenShareError);
+  const setScreenShareError = useAppStore((s) => s.setScreenShareError);
+  const isLocalSpeaking = useAppStore((s) => s.isLocalSpeaking);
+  const incomingCall = useAppStore((s) => s.incomingCall);
+  const setIncomingCall = useAppStore((s) => s.setIncomingCall);
+  const viewingScreenShareTrackKey = useAppStore((s) => s.viewingScreenShareTrackKey);
+  const setViewingScreenShareTrackKey = useAppStore((s) => s.setViewingScreenShareTrackKey);
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { query: prefsQuery } = usePreferences();

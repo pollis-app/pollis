@@ -11,7 +11,7 @@ interface RenameGroupProps {
 }
 
 export const RenameGroup: React.FC<RenameGroupProps> = ({ groupId, onSuccess }) => {
-  const { currentUser } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const updateGroup = useUpdateGroup();
 

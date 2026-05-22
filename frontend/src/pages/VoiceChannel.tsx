@@ -23,11 +23,9 @@ interface ObserverParticipant {
 export const VoiceChannelPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/voice/$channelId" });
-  const {
-    activeVoiceChannelId,
-    pendingDeleteChannelId,
-    setPendingDeleteChannelId,
-  } = useAppStore();
+  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const pendingDeleteChannelId = useAppStore((s) => s.pendingDeleteChannelId);
+  const setPendingDeleteChannelId = useAppStore((s) => s.setPendingDeleteChannelId);
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);

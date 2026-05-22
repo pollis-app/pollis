@@ -11,7 +11,10 @@ import { warmVoiceChannel } from "../utils/voiceWarmup";
 export const GroupPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId" });
-  const { setSelectedGroupId, setSelectedChannelId, markRead, unreadCounts } = useAppStore();
+  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
+  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
+  const markRead = useAppStore((s) => s.markRead);
+  const unreadCounts = useAppStore((s) => s.unreadCounts);
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);

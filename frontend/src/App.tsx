@@ -56,12 +56,10 @@ function setupDebugDevices(userId: string) {
 }
 
 function MainApp() {
-  const {
-    currentUser,
-    setCurrentUser,
-    pendingEnrollmentApproval,
-    setPendingEnrollmentApproval,
-  } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
+  const setCurrentUser = useAppStore((s) => s.setCurrentUser);
+  const pendingEnrollmentApproval = useAppStore((s) => s.pendingEnrollmentApproval);
+  const setPendingEnrollmentApproval = useAppStore((s) => s.setPendingEnrollmentApproval);
   const updateRequired = useAppStore((s) => s.updateRequired);
 
   const [appState, setAppState] = useState<AppState>("initializing");

@@ -6,7 +6,7 @@ import { useAppStore } from "../stores/appStore";
 
 export const SearchPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setSelectedConversationId } = useAppStore();
+  const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
 
   return (
     <PageShell title="Search">

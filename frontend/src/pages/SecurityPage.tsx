@@ -73,7 +73,7 @@ export const SecurityPage: React.FC = () => {
   const navigate = useNavigate();
   const router = useRouter();
   const { onDeleteAccount } = router.options.context as RouterContext;
-  const { currentUser } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 

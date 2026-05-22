@@ -107,11 +107,9 @@ type RealtimeEvent =
 export function useLiveKitRealtime() {
   const { isReady: isTauriReady } = useTauriReady();
   const queryClient = useQueryClient();
-  const {
-    selectedChannelId,
-    selectedConversationId,
-    currentUser,
-  } = useAppStore();
+  const selectedChannelId = useAppStore((s) => s.selectedChannelId);
+  const selectedConversationId = useAppStore((s) => s.selectedConversationId);
+  const currentUser = useAppStore((s) => s.currentUser);
 
   const { query: prefsQuery } = usePreferences();
   const { data: groupsWithChannels } = useUserGroupsWithChannels();

@@ -7,7 +7,8 @@ import { useUserGroupsWithChannels, useAllPendingJoinRequests } from "../hooks/q
 
 export const GroupsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setSelectedGroupId, unreadCounts } = useAppStore();
+  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
+  const unreadCounts = useAppStore((s) => s.unreadCounts);
 
   const { data: groupsWithChannels, isLoading: groupsLoading, error: groupsError } = useUserGroupsWithChannels();
   const { data: allJoinRequests = [] } = useAllPendingJoinRequests();

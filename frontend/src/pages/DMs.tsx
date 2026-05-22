@@ -11,7 +11,9 @@ import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 
 export const DMsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { setSelectedConversationId, markRead, unreadCounts } = useAppStore();
+  const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
+  const markRead = useAppStore((s) => s.markRead);
+  const unreadCounts = useAppStore((s) => s.unreadCounts);
 
   const { data: conversations = [] } = useDMConversations();
   const { data: requests = [] } = useDMRequests();

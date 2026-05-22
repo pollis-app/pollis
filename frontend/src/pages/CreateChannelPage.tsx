@@ -7,7 +7,7 @@ import { CreateChannel } from "./CreateChannel";
 export const CreateChannelPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId/channels/new" });
-  const { setSelectedChannelId } = useAppStore();
+  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
 
   return (
     <PageShell title="New Channel" scrollable>

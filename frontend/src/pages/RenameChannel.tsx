@@ -12,7 +12,7 @@ interface RenameChannelProps {
 }
 
 export const RenameChannel: React.FC<RenameChannelProps> = ({ groupId, channelId, onSuccess }) => {
-  const { currentUser } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const updateChannel = useUpdateChannel();
 

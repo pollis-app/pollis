@@ -16,14 +16,12 @@ interface VoiceBarProps {
 }
 
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
-  const {
-    voiceParticipants,
-    voiceIsMuted,
-    voiceActiveSpeakerIds,
-    currentUser,
-    screenShareLocalActive,
-    screenShareMode,
-  } = useAppStore();
+  const voiceParticipants = useAppStore((s) => s.voiceParticipants);
+  const voiceIsMuted = useAppStore((s) => s.voiceIsMuted);
+  const voiceActiveSpeakerIds = useAppStore((s) => s.voiceActiveSpeakerIds);
+  const currentUser = useAppStore((s) => s.currentUser);
+  const screenShareLocalActive = useAppStore((s) => s.screenShareLocalActive);
+  const screenShareMode = useAppStore((s) => s.screenShareMode);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 

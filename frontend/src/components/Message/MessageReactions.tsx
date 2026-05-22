@@ -9,7 +9,7 @@ interface MessageReactionsProps {
 }
 
 export const MessageReactions: React.FC<MessageReactionsProps> = ({ messageId }) => {
-  const { currentUser } = useAppStore();
+  const currentUser = useAppStore((s) => s.currentUser);
   const { data: reactions = [] } = useReactions(messageId);
   const addReaction = useAddReaction();
   const removeReaction = useRemoveReaction();

@@ -9,7 +9,7 @@ import { useDMConversations } from "../hooks/queries/useMessages";
 import type { RouterContext } from "../types/router";
 
 export const RootPage: React.FC = () => {
-  const { unreadCounts } = useAppStore();
+  const unreadCounts = useAppStore((s) => s.unreadCounts);
   const navigate = useNavigate();
   const router = useRouter();
   const { onLogout } = router.options.context as RouterContext;
