@@ -22,14 +22,53 @@ interface TypingStore {
   byRoom: Record<string, Record<string, TypingEntry>>;
   setTyping: (roomKey: TypingRoomKey, userId: string, username: string) => void;
   clearTyping: (roomKey: TypingRoomKey, userId: string) => void;
-  // Drop expired entries; called from a polling effect so the UI re-renders
-  // when a typing indicator times out without an explicit clear.
-  pruneExpired: () => void;
+}
+
+// Per-entry expiry timers, keyed by `${roomKey}|${userId}`. Lives outside
+// Zustand state because timer handles aren't UI-relevant — they're internal
+// scheduling. Replacing the periodic prune with one timeout per active entry
+// means the cost scales with the number of typers, not with mount count.
+const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function timerKey(roomKey: TypingRoomKey, userId: string): string {
+  return `${roomKey}|${userId}`;
+}
+
+function removeEntry(
+  state: { byRoom: Record<string, Record<string, TypingEntry>> },
+  roomKey: TypingRoomKey,
+  userId: string,
+): { byRoom: Record<string, Record<string, TypingEntry>> } {
+  const room = state.byRoom[roomKey];
+  if (!room || !(userId in room)) {
+    return state;
+  }
+  const next = { ...room };
+  delete next[userId];
+  const byRoom = { ...state.byRoom };
+  if (Object.keys(next).length === 0) {
+    delete byRoom[roomKey];
+  } else {
+    byRoom[roomKey] = next;
+  }
+  return { byRoom };
 }
 
 export const useTypingStore = create<TypingStore>((set) => ({
   byRoom: {},
   setTyping: (roomKey, userId, username) => {
+    const key = timerKey(roomKey, userId);
+    const existing = expiryTimers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    expiryTimers.set(
+      key,
+      setTimeout(() => {
+        expiryTimers.delete(key);
+        set((state) => removeEntry(state, roomKey, userId));
+      }, TYPING_TTL_MS),
+    );
     set((state) => {
       const room = { ...(state.byRoom[roomKey] ?? {}) };
       room[userId] = { username, expiresAt: Date.now() + TYPING_TTL_MS };
@@ -37,44 +76,13 @@ export const useTypingStore = create<TypingStore>((set) => ({
     });
   },
   clearTyping: (roomKey, userId) => {
-    set((state) => {
-      const room = state.byRoom[roomKey];
-      if (!room || !(userId in room)) {
-        return state;
-      }
-      const next = { ...room };
-      delete next[userId];
-      const byRoom = { ...state.byRoom };
-      if (Object.keys(next).length === 0) {
-        delete byRoom[roomKey];
-      } else {
-        byRoom[roomKey] = next;
-      }
-      return { byRoom };
-    });
-  },
-  pruneExpired: () => {
-    set((state) => {
-      const now = Date.now();
-      let changed = false;
-      const byRoom: Record<string, Record<string, TypingEntry>> = {};
-      for (const [roomKey, room] of Object.entries(state.byRoom)) {
-        const live: Record<string, TypingEntry> = {};
-        for (const [userId, entry] of Object.entries(room)) {
-          if (entry.expiresAt > now) {
-            live[userId] = entry;
-          } else {
-            changed = true;
-          }
-        }
-        if (Object.keys(live).length > 0) {
-          byRoom[roomKey] = live;
-        } else if (Object.keys(room).length > 0) {
-          changed = true;
-        }
-      }
-      return changed ? { byRoom } : state;
-    });
+    const key = timerKey(roomKey, userId);
+    const t = expiryTimers.get(key);
+    if (t) {
+      clearTimeout(t);
+      expiryTimers.delete(key);
+    }
+    set((state) => removeEntry(state, roomKey, userId));
   },
 }));
 
