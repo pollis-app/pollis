@@ -19,6 +19,20 @@ import * as os from "os";
 import * as childProcess from "child_process";
 import { autoUpdater } from "electron-updater";
 
+// Chromium 130 unconditionally offers AV1 (+ its RTX retransmission codec)
+// in WebRTC screen-share contexts, then fails its own sdp_offer_answer.cc
+// validation on the resulting SDP ("BUNDLE codec collision PT=35",
+// "RTX mapped to PT not in codec list", etc.). Disable the AV1 RTC encoder
+// at Chromium init so it never reaches the offer. Belt-and-suspenders
+// alongside the renderer-side SDP munger in frontend/src/screenshare/sdpMunger.ts —
+// the flag prevents the issue at source; the munger catches anything the
+// flag misses (e.g. AV1 still appearing in receive-only m-sections).
+// Must run BEFORE app.whenReady so Chromium sees it during initialisation.
+app.commandLine.appendSwitch(
+  "disable-features",
+  "WebRtcAllowAv1Encoder,WebRtcAllowAv1ScreenshareEncoder",
+);
+
 // pollis-node lives at <repo-root>/pollis-node; from electron/dist/main.js,
 // ../../pollis-node resolves to <repo-root>/pollis-node
 // eslint-disable-next-line @typescript-eslint/no-var-requires
