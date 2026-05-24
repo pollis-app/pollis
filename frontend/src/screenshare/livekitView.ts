@@ -183,6 +183,13 @@ class LiveKitView {
       // browser releases the capture handle.
       await this.unpublishScreenShare();
     }
+    console.info('[livekit-view] publishScreenShare: calling publishTrack', {
+      trackId: track.id,
+      trackKind: track.kind,
+      trackLabel: track.label,
+      settings: track.getSettings(),
+    });
+    const t0 = performance.now();
     const publication = await room.localParticipant.publishTrack(track, {
       source: Track.Source.ScreenShare,
       // Force VP8 to avoid a Chromium SDP collision on payload_type 35
@@ -195,6 +202,11 @@ class LiveKitView {
       // Disable simulcast for screen-share — high-bitrate single layer
       // matches text legibility better than scaled-down spatial layers.
       simulcast: false,
+    });
+    console.info('[livekit-view] publishScreenShare: publishTrack resolved', {
+      elapsedMs: Math.round(performance.now() - t0),
+      sid: publication.trackSid,
+      source: publication.source,
     });
     this.localPublication = publication;
     // The publication wraps the MediaStreamTrack as a LocalVideoTrack.
@@ -226,6 +238,10 @@ class LiveKitView {
         height: settings.height,
       });
     }
+    console.info('[livekit-view] publishScreenShare: emitting + done', {
+      localPreviewKey: LOCAL_PREVIEW_KEY,
+      tracksSize: this.tracks.size,
+    });
     this.emit();
   }
 

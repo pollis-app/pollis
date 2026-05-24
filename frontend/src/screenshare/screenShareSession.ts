@@ -327,9 +327,17 @@ class ScreenShareSession {
       store.setScreenShareMode("idle");
       throw new Error("getDisplayMedia returned no video track");
     }
+    console.info("[screenshare] getDisplayMedia returned, handing track to livekitView", {
+      trackId: track.id,
+      label: track.label,
+      readyState: track.readyState,
+      muted: track.muted,
+    });
     try {
       await livekitView.publishScreenShare(track);
+      console.info("[screenshare] publishScreenShare completed");
     } catch (e) {
+      console.error("[screenshare] publishScreenShare threw:", e);
       // Publish failed — make sure the OS capture handle is released so
       // the "you're sharing" indicator goes away.
       try {
