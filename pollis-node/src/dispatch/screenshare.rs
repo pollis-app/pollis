@@ -11,30 +11,62 @@
 // should either add the re-export or surface the type through a thin
 // dispatch-friendly wrapper.
 
+use std::sync::Arc;
+
 use napi::bindgen_prelude::*;
 
+use crate::events::{extract_channel_id, NapiSink, RawNapiSink};
 use crate::state::{core_err, ensure_state, json_err};
+use pollis_core::commands::screenshare::ScreenShareEvent;
+use pollis_core::sink::{EventSink, RawSink};
 
 pub async fn dispatch(
     cmd: &str,
     args: &serde_json::Value,
 ) -> Option<Result<serde_json::Value>> {
     match cmd {
-        "subscribe_screen_share_events" => Some(Err(Error::from_reason(
-            "Phase 3: NapiSink not yet wired for subscribe_screen_share_events".to_string(),
-        ))),
-        "subscribe_screen_share_frames" => Some(Err(Error::from_reason(
-            "Phase 3: NapiSink (raw-bytes) not yet wired for subscribe_screen_share_frames"
-                .to_string(),
-        ))),
-        "start_screen_share" => Some(Err(Error::from_reason(
-            "Phase 3: pollis_capture_proto::Selection needs a re-export through pollis-core before start_screen_share can be ported (pollis-node may not add the dep directly)".to_string(),
-        ))),
+        "subscribe_screen_share_events" => Some(subscribe_screen_share_events(args).await),
+        "subscribe_screen_share_frames" => Some(subscribe_screen_share_frames(args).await),
+        "start_screen_share" => Some(start_screen_share(args).await),
         "enumerate_screen_sources" => Some(enumerate_screen_sources(args).await),
         "cancel_screen_share_picker" => Some(cancel_screen_share_picker(args).await),
         "stop_screen_share" => Some(stop_screen_share(args).await),
         _ => None,
     }
+}
+
+async fn start_screen_share(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        #[serde(default)]
+        selection: Option<pollis_core::pollis_capture_proto::Selection>,
+    }
+    let Args { selection } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::screenshare::start_screen_share(&state, selection)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn subscribe_screen_share_events(args: &serde_json::Value) -> Result<serde_json::Value> {
+    let channel_id = extract_channel_id(args, "onEvent")?;
+    let sink: Arc<dyn EventSink<ScreenShareEvent>> = Arc::new(NapiSink::new(channel_id));
+    let state = ensure_state().await?;
+    pollis_core::commands::screenshare::subscribe_screen_share_events(sink, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn subscribe_screen_share_frames(args: &serde_json::Value) -> Result<serde_json::Value> {
+    let channel_id = extract_channel_id(args, "onFrame")?;
+    let sink: Arc<dyn RawSink> = Arc::new(RawNapiSink::new(channel_id));
+    let state = ensure_state().await?;
+    pollis_core::commands::screenshare::subscribe_screen_share_frames(sink, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
 }
 
 async fn enumerate_screen_sources(_args: &serde_json::Value) -> Result<serde_json::Value> {

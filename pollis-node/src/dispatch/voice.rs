@@ -1,18 +1,21 @@
 // Port of `src-tauri/src/commands/voice.rs`. Channel-using commands
 // (`subscribe_voice_events`) stay stubbed pending Phase 3 NapiSink.
 
+use std::sync::Arc;
+
 use napi::bindgen_prelude::*;
 
+use crate::events::{extract_channel_id, NapiSink};
 use crate::state::{core_err, ensure_state, json_err};
+use pollis_core::commands::voice::VoiceEvent;
+use pollis_core::sink::EventSink;
 
 pub async fn dispatch(
     cmd: &str,
     args: &serde_json::Value,
 ) -> Option<Result<serde_json::Value>> {
     match cmd {
-        "subscribe_voice_events" => Some(Err(Error::from_reason(
-            "Phase 3: NapiSink not yet wired for subscribe_voice_events".to_string(),
-        ))),
+        "subscribe_voice_events" => Some(subscribe_voice_events(args).await),
         "list_audio_devices" => Some(list_audio_devices(args).await),
         "prepare_voice_connection" => Some(prepare_voice_connection(args).await),
         "join_voice_channel" => Some(join_voice_channel(args).await),
@@ -25,6 +28,16 @@ pub async fn dispatch(
         "get_last_join_timings" => Some(get_last_join_timings(args).await),
         _ => None,
     }
+}
+
+async fn subscribe_voice_events(args: &serde_json::Value) -> Result<serde_json::Value> {
+    let channel_id = extract_channel_id(args, "onEvent")?;
+    let sink: Arc<dyn EventSink<VoiceEvent>> = Arc::new(NapiSink::new(channel_id));
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::subscribe_voice_events(sink, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
 }
 
 async fn list_audio_devices(_args: &serde_json::Value) -> Result<serde_json::Value> {

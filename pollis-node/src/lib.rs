@@ -2,7 +2,10 @@
 extern crate napi_derive;
 
 mod dispatch;
+mod events;
 mod state;
+
+pub use events::{register_event_emitters, JsRawFrame};
 
 use napi::bindgen_prelude::*;
 

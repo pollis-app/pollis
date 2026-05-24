@@ -1,18 +1,21 @@
 // Port of `src-tauri/src/commands/voice_test.rs`. Channel-using commands
 // (`subscribe_voice_test_events`) stay stubbed pending Phase 3 NapiSink.
 
+use std::sync::Arc;
+
 use napi::bindgen_prelude::*;
 
+use crate::events::{extract_channel_id, NapiSink};
 use crate::state::{core_err, ensure_state, json_err};
+use pollis_core::commands::voice_test::VoiceTestEvent;
+use pollis_core::sink::EventSink;
 
 pub async fn dispatch(
     cmd: &str,
     args: &serde_json::Value,
 ) -> Option<Result<serde_json::Value>> {
     match cmd {
-        "subscribe_voice_test_events" => Some(Err(Error::from_reason(
-            "Phase 3: NapiSink not yet wired for subscribe_voice_test_events".to_string(),
-        ))),
+        "subscribe_voice_test_events" => Some(subscribe_voice_test_events(args).await),
         "start_mic_test" => Some(start_mic_test(args).await),
         "set_mic_test_monitor" => Some(set_mic_test_monitor(args).await),
         "stop_mic_test" => Some(stop_mic_test(args).await),
@@ -21,6 +24,16 @@ pub async fn dispatch(
         "stop_test_playback" => Some(stop_test_playback(args).await),
         _ => None,
     }
+}
+
+async fn subscribe_voice_test_events(args: &serde_json::Value) -> Result<serde_json::Value> {
+    let channel_id = extract_channel_id(args, "onEvent")?;
+    let sink: Arc<dyn EventSink<VoiceTestEvent>> = Arc::new(NapiSink::new(channel_id));
+    let state = ensure_state().await?;
+    pollis_core::commands::voice_test::subscribe_voice_test_events(sink, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
 }
 
 async fn start_mic_test(args: &serde_json::Value) -> Result<serde_json::Value> {

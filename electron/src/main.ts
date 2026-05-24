@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, webContents } from "electron";
 import * as path from "path";
 
 // pollis-node lives at <repo-root>/pollis-node; from electron/dist/main.js,
@@ -8,6 +8,10 @@ const pollisNode = require("../../pollis-node") as {
   ping: () => string;
   init: (envFile?: string | null) => Promise<void>;
   invoke: (cmd: string, args?: unknown) => Promise<unknown>;
+  registerEventEmitters: (
+    jsonEmit: (envelope: { channelId: string; payload: unknown }) => void,
+    rawEmit: (frame: { channelId: string; payload: Buffer }) => void,
+  ) => void;
 };
 
 const isDev = process.env.NODE_ENV !== "production";
@@ -18,6 +22,19 @@ const VITE_DEV_URL = "http://localhost:5173";
 const DEV_ENV_FILE = isDev
   ? path.resolve(__dirname, "..", "..", ".env.development")
   : null;
+
+function broadcastChannel(channelId: string, payload: unknown): void {
+  // Any renderer that called `channelOn(channelId, …)` is listening on this
+  // exact event name. We fan out to every active webContents rather than
+  // tracking per-channel ownership — channelIds are random + unique, so a
+  // renderer that doesn't care gets a no-op listener miss.
+  const name = `channel:${channelId}`;
+  for (const wc of webContents.getAllWebContents()) {
+    if (!wc.isDestroyed()) {
+      wc.send(name, payload);
+    }
+  }
+}
 
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -44,21 +61,23 @@ function createWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(async () => {
-  // Smoke test: confirm pollis-node loaded and the simple no-state path works
   console.log("[pollis-node]", pollisNode.ping());
 
-  // Bootstrap AppState (Turso connection, keystore, etc.) — fails fast if
-  // env vars are missing in dev.
   try {
     await pollisNode.init(DEV_ENV_FILE);
     console.log("[pollis-node] AppState initialized");
   } catch (e) {
     console.error("[pollis-node] init failed:", e);
-    // Continue anyway in dev so the UI loads with command errors visible.
   }
 
-  // Single IPC entry point — main dispatches every command name into
-  // pollis-node.invoke(), which routes to pollis_core via a match table.
+  // Wire Rust event sinks → renderer ipcRenderer.on. Must register BEFORE
+  // any subscribe_* invocation; the Rust side stores the callback in a
+  // static OnceLock and panics on send() if it's not set.
+  pollisNode.registerEventEmitters(
+    ({ channelId, payload }) => broadcastChannel(channelId, payload),
+    ({ channelId, payload }) => broadcastChannel(channelId, payload),
+  );
+
   ipcMain.handle("invoke", async (_e, cmd: string, args: unknown) => {
     return pollisNode.invoke(cmd, args);
   });

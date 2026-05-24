@@ -7,9 +7,14 @@
 // based commands stay stubbed (returning a Phase 3 TODO) — they need the
 // NapiSink work in Phase 3.
 
+use std::sync::Arc;
+
 use napi::bindgen_prelude::*;
 
+use crate::events::{extract_channel_id, NapiSink};
 use crate::state::{core_err, ensure_state, json_err};
+use pollis_core::realtime::RealtimeEvent;
+use pollis_core::sink::EventSink;
 
 pub async fn dispatch(
     cmd: &str,
@@ -18,9 +23,7 @@ pub async fn dispatch(
     match cmd {
         "get_livekit_token" => Some(get_livekit_token(args).await),
         "get_livekit_url" => Some(get_livekit_url(args).await),
-        "subscribe_realtime" => Some(Err(Error::from_reason(
-            "Phase 3: NapiSink not yet wired for subscribe_realtime".to_string(),
-        ))),
+        "subscribe_realtime" => Some(subscribe_realtime(args).await),
         "connect_rooms" => Some(connect_rooms(args).await),
         "publish_ping" => Some(publish_ping(args).await),
         "publish_typing" => Some(publish_typing(args).await),
@@ -31,6 +34,16 @@ pub async fn dispatch(
         "cancel_call" => Some(cancel_call(args).await),
         _ => None,
     }
+}
+
+async fn subscribe_realtime(args: &serde_json::Value) -> Result<serde_json::Value> {
+    let channel_id = extract_channel_id(args, "onEvent")?;
+    let sink: Arc<dyn EventSink<RealtimeEvent>> = Arc::new(NapiSink::new(channel_id));
+    let state = ensure_state().await?;
+    pollis_core::commands::livekit::subscribe_realtime(sink, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
 }
 
 async fn get_livekit_token(args: &serde_json::Value) -> Result<serde_json::Value> {

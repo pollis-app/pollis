@@ -4,18 +4,20 @@
 //   - `terminal_write` consumes a raw IPC body (binary keystroke path), the
 //     symmetric input side. Both need binary-args / binary-events plumbing.
 
+use std::sync::Arc;
+
 use napi::bindgen_prelude::*;
 
+use crate::events::{extract_channel_id, RawNapiSink};
 use crate::state::{core_err, ensure_state, json_err};
+use pollis_core::sink::RawSink;
 
 pub async fn dispatch(
     cmd: &str,
     args: &serde_json::Value,
 ) -> Option<Result<serde_json::Value>> {
     match cmd {
-        "terminal_open" => Some(Err(Error::from_reason(
-            "Phase 3: NapiSink (raw-bytes) not yet wired for terminal_open".to_string(),
-        ))),
+        "terminal_open" => Some(terminal_open(args).await),
         "terminal_write" => Some(Err(Error::from_reason(
             "Phase 3: raw-bytes IPC body not yet wired for terminal_write".to_string(),
         ))),
@@ -24,6 +26,22 @@ pub async fn dispatch(
         "terminal_ack" => Some(terminal_ack(args).await),
         _ => None,
     }
+}
+
+async fn terminal_open(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        rows: u16,
+        cols: u16,
+    }
+    let Args { rows, cols } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let channel_id = extract_channel_id(args, "onOutput")?;
+    let sink: Arc<dyn RawSink> = Arc::new(RawNapiSink::new(channel_id));
+    let state = ensure_state().await?;
+    let id = pollis_core::commands::terminal::terminal_open(rows, cols, sink, &state)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(id).map_err(json_err)
 }
 
 async fn terminal_resize(args: &serde_json::Value) -> Result<serde_json::Value> {
