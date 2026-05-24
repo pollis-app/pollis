@@ -1,17 +1,22 @@
-// Phase 2: port of `src-tauri/src/commands/install_kind.rs` into the napi dispatch
-// pattern. See pollis-node/src/lib.rs for the invoke() entry point. Each arm
-// here corresponds to a single tauri::command from the legacy shim.
-//
-// Phase 2 agent: replace the stub with match arms for every command in
-// docs/electron-migration-inventory.md under the `install_kind` section. Channel-
-// based commands stay stubbed (returning a Phase 3 TODO) — they need the
-// NapiSink work in Phase 3.
+// Port of `src-tauri/src/commands/install_kind.rs`. The Tauri implementation
+// reads `tauri::utils::config::BundleType` to decide whether the running
+// binary is AUR-packaged. That API does not exist post-port. Phase 5
+// (electron-builder) will surface install kind via an env var / bundled JSON
+// / filesystem probe and we'll wire it in then. Until then, the command
+// returns a clear error so frontend probes don't silently get a `None`
+// (which would imply "auto-updater is OK to run") and unmask the pacman
+// install we explicitly want to block.
 
 use napi::bindgen_prelude::*;
 
 pub async fn dispatch(
-    _cmd: &str,
+    cmd: &str,
     _args: &serde_json::Value,
 ) -> Option<Result<serde_json::Value>> {
-    None
+    match cmd {
+        "detect_managed_install" => Some(Err(Error::from_reason(
+            "Phase 5: install_kind needs Electron-side replacement".to_string(),
+        ))),
+        _ => None,
+    }
 }
