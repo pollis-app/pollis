@@ -86,9 +86,15 @@ win:
   target:
     - nsis
     - portable
-  # TODO: configure EV cert signing for release builds in Phase 7.
-  # signingHashAlgorithms: ['sha256']
-  # certificateFile / certificatePassword come from env in CI.
+  # Azure Trusted Signing — same provider the Tauri pipeline uses
+  # (.github/workflows/desktop-release.yml). The hook script wraps
+  # signtool with Azure's `/dlib` + `/dmdf` integration. Reads
+  # SIGNTOOL_PATH / SIGNING_DLIB_PATH / SIGN_METADATA_PATH from env at
+  # signing time; CI sets all three. Local builds without those env
+  # vars produce unsigned .exe with a warning (see sign.js).
+  sign: ./build/sign.js
+  signingHashAlgorithms:
+    - sha256
   icon: ../../src-tauri/icons/icon.ico
 
 linux:
