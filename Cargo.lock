@@ -4701,6 +4701,8 @@ dependencies = [
  "napi-derive",
  "napi-sys",
  "once_cell",
+ "serde",
+ "serde_json",
  "tokio",
 ]
 
@@ -6154,10 +6156,14 @@ dependencies = [
 name = "pollis-node"
 version = "0.1.0"
 dependencies = [
+ "dotenvy",
  "napi",
  "napi-build",
  "napi-derive",
  "pollis-core",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
