@@ -322,14 +322,19 @@ pub(crate) fn make_token(config: &Config, room_name: &str, identity: &str, displ
         .map_err(|e| Error::Other(anyhow::anyhow!("JWT sign: {e}")))
 }
 
-/// Mints a JWT for a hidden participant. Used by the renderer-side
-/// livekit-client view connection under Electron — the JS client opens a
-/// second connection to the same voice room as `${userId}:view` to receive
-/// remote screen-share video and publish its own. The `hidden: true` grant
-/// keeps it out of every other client's participant roster (so it doesn't
-/// double-count next to the Rust voice participant). Publish is enabled
-/// because the same connection is also used for the renderer-side
-/// `getDisplayMedia` publish path.
+/// Mints a JWT for the renderer-side livekit-client view connection
+/// under Electron. The JS client opens a second connection to the same
+/// voice room as `${userId}:view` to receive remote screen-share video
+/// and publish its own.
+///
+/// NOT hidden. `hidden: true` looks like the right knob — "keep this
+/// participant out of other clients' rosters" — but it has a fatal side
+/// effect: LiveKit's SFU refuses to ROUTE tracks from a hidden
+/// participant to other clients, so the publisher's screenshare track
+/// never reaches receivers. We instead keep the participant visible at
+/// the LiveKit level and filter `:view` identities out of the UI roster
+/// in `list_voice_participants` (see the `.ends_with(":view")` filter
+/// there) — same end result for the UI, without breaking track routing.
 pub(crate) fn make_view_token(
     config: &Config,
     room_name: &str,
@@ -354,7 +359,7 @@ pub(crate) fn make_view_token(
             can_publish: true,
             can_subscribe: true,
             can_publish_data: false,
-            hidden: Some(true),
+            hidden: None,
         },
     };
 
