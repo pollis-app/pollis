@@ -31,7 +31,7 @@ pub async fn dispatch(
 }
 
 async fn subscribe_voice_events(args: &serde_json::Value) -> Result<serde_json::Value> {
-    let channel_id = extract_channel_id(args, "onEvent")?;
+    let channel_id = extract_channel_id(args, "on_event")?;
     let sink: Arc<dyn EventSink<VoiceEvent>> = Arc::new(NapiSink::new(channel_id));
     let state = ensure_state().await?;
     pollis_core::commands::voice::subscribe_voice_events(sink, &state)

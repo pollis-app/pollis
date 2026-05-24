@@ -50,7 +50,7 @@ async fn start_screen_share(args: &serde_json::Value) -> Result<serde_json::Valu
 }
 
 async fn subscribe_screen_share_events(args: &serde_json::Value) -> Result<serde_json::Value> {
-    let channel_id = extract_channel_id(args, "onEvent")?;
+    let channel_id = extract_channel_id(args, "on_event")?;
     let sink: Arc<dyn EventSink<ScreenShareEvent>> = Arc::new(NapiSink::new(channel_id));
     let state = ensure_state().await?;
     pollis_core::commands::screenshare::subscribe_screen_share_events(sink, &state)
@@ -60,7 +60,7 @@ async fn subscribe_screen_share_events(args: &serde_json::Value) -> Result<serde
 }
 
 async fn subscribe_screen_share_frames(args: &serde_json::Value) -> Result<serde_json::Value> {
-    let channel_id = extract_channel_id(args, "onFrame")?;
+    let channel_id = extract_channel_id(args, "on_frame")?;
     let sink: Arc<dyn RawSink> = Arc::new(RawNapiSink::new(channel_id));
     let state = ensure_state().await?;
     pollis_core::commands::screenshare::subscribe_screen_share_frames(sink, &state)

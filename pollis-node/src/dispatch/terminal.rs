@@ -35,7 +35,7 @@ async fn terminal_open(args: &serde_json::Value) -> Result<serde_json::Value> {
         cols: u16,
     }
     let Args { rows, cols } = serde_json::from_value(args.clone()).map_err(json_err)?;
-    let channel_id = extract_channel_id(args, "onOutput")?;
+    let channel_id = extract_channel_id(args, "on_output")?;
     let sink: Arc<dyn RawSink> = Arc::new(RawNapiSink::new(channel_id));
     let state = ensure_state().await?;
     let id = pollis_core::commands::terminal::terminal_open(rows, cols, sink, &state)

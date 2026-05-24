@@ -13,10 +13,11 @@
     "clean": "pnpm --filter frontend clean && cargo clean --manifest-path src-tauri/Cargo.toml",
     "build:pollis-node": "pnpm --filter @pollis/pollis-node build",
     "build:electron": "pnpm --filter @pollis/electron build",
-    "dev:electron": "concurrently -k -n vite,electron 'pnpm --filter frontend dev' 'pnpm --filter @pollis/electron start'"
+    "dev:electron": "concurrently -k -n vite,electron 'pnpm --filter frontend dev' 'wait-on -t 30000 tcp:5173 && pnpm --filter @pollis/electron start'"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "wait-on": "^8.0.1",
     "wrangler": "^4.76.0"
   },
   "packageManager": "pnpm@10.25.0",
@@ -25,5 +26,13 @@
   },
   "dependencies": {
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild",
+      "sharp",
+      "workerd"
+    ]
   }
 }
