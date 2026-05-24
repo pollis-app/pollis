@@ -102,7 +102,7 @@ windows-capture = "2"
 # - cpal/rodio: host audio I/O for voice + sound effects; no mobile path
 #   and mobile drops voice.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
-portable-pty = "0.8"
+portable-pty = "0.9"
 livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
 libwebrtc = "0.3"
 cpal = "0.15"
