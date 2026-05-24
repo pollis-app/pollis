@@ -1,8 +1,7 @@
-// Port of `src-tauri/src/commands/terminal.rs`. Two commands stay stubbed
-// pending Phase 3:
-//   - `terminal_open` takes a raw-bytes Channel for PTY output (NapiSink)
-//   - `terminal_write` consumes a raw IPC body (binary keystroke path), the
-//     symmetric input side. Both need binary-args / binary-events plumbing.
+// Port of `src-tauri/src/commands/terminal.rs`. PTY output streams via
+// `terminal_open`'s `RawNapiSink` (Channel<Buffer>); PTY input arrives via
+// `terminal_write`'s binary IPC body — both binary paths to keep the
+// typing-latency win from commits 2b877d0 + 850661b intact.
 
 use std::sync::Arc;
 
@@ -18,14 +17,44 @@ pub async fn dispatch(
 ) -> Option<Result<serde_json::Value>> {
     match cmd {
         "terminal_open" => Some(terminal_open(args).await),
+        // terminal_write goes through the binary `route_raw` path in
+        // dispatch/mod.rs — its body arrives as `Buffer` (zero-copy from
+        // the JS Uint8Array), terminal_id rides in the `x-terminal-id`
+        // header. If a caller mis-routes it through invoke() (JSON path)
+        // this arm errors with a clear message instead of silently
+        // base64-decoding and re-encoding.
         "terminal_write" => Some(Err(Error::from_reason(
-            "Phase 3: raw-bytes IPC body not yet wired for terminal_write".to_string(),
+            "terminal_write: send via invoke_raw (Uint8Array args), not invoke (JSON args)"
+                .to_string(),
         ))),
         "terminal_resize" => Some(terminal_resize(args).await),
         "terminal_close" => Some(terminal_close(args).await),
         "terminal_ack" => Some(terminal_ack(args).await),
         _ => None,
     }
+}
+
+/// Binary keystroke path. Called from `dispatch::route_raw` when the
+/// renderer fires `invoke("terminal_write", Uint8Array, { headers: {…} })`.
+/// `body` is the byte slice the user typed; `terminal_id` rides in the
+/// `x-terminal-id` header so we don't allocate a JSON envelope per keypress.
+pub(super) async fn write_raw(
+    body: &[u8],
+    headers: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    let terminal_id = headers
+        .get("x-terminal-id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            Error::from_reason(
+                "terminal_write: missing x-terminal-id header".to_string(),
+            )
+        })?;
+    let state = ensure_state().await?;
+    pollis_core::commands::terminal::terminal_write(terminal_id, body, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
 }
 
 async fn terminal_open(args: &serde_json::Value) -> Result<serde_json::Value> {

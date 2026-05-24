@@ -48,6 +48,27 @@ pub async fn invoke(
     dispatch::route(&cmd, args).await
 }
 
+/// Binary-body entry point. Used by commands that ship raw bytes on the
+/// hot path — today only `terminal_write`, which is keystroke-rate so
+/// JSON-encoding each call would re-introduce the typing latency that
+/// commits `2b877d0` and `850661b` fixed under Tauri.
+///
+/// The renderer-side bridge auto-routes invoke() calls with Uint8Array
+/// args through here (see electron/src/main.ts `ipcMain.handle("invoke")`),
+/// so callers don't need to know about it. `body` is a napi Buffer —
+/// zero-copy wrapper around the JS ArrayBuffer. `headers` is the
+/// `options.headers` object the JS side passed (e.g.
+/// `{ "x-terminal-id": "<id>" }`).
+#[napi]
+pub async fn invoke_raw(
+    cmd: String,
+    body: napi::bindgen_prelude::Buffer,
+    headers: Option<serde_json::Value>,
+) -> Result<serde_json::Value> {
+    let headers = headers.unwrap_or(serde_json::Value::Null);
+    dispatch::route_raw(&cmd, body.as_ref(), &headers).await
+}
+
 /// Bootstrap the local loopback HTTP media server. Mirrors the boot pattern
 /// in `src-tauri/src/lib.rs:347-354` — sets the on-disk media cache dir on
 /// the r2 commands module, spawns the axum server on an OS-assigned port,

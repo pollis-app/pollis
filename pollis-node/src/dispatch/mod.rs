@@ -28,6 +28,22 @@ pub mod user;
 pub mod voice;
 pub mod voice_test;
 
+/// Binary-body dispatch. Today only `terminal_write` arrives here; other
+/// commands stay on the JSON `route()` path. Adding a new binary command
+/// = one arm here. See `pollis_node::invoke_raw` for the entry point.
+pub async fn route_raw(
+    cmd: &str,
+    body: &[u8],
+    headers: &serde_json::Value,
+) -> Result<serde_json::Value> {
+    match cmd {
+        "terminal_write" => terminal::write_raw(body, headers).await,
+        _ => Err(Error::from_reason(format!(
+            "unknown binary command: {cmd}"
+        ))),
+    }
+}
+
 pub async fn route(cmd: &str, args: serde_json::Value) -> Result<serde_json::Value> {
     if cmd == "ping" {
         return Ok(serde_json::Value::String("pong".into()));

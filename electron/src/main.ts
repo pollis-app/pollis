@@ -40,6 +40,11 @@ const pollisNode = require("../../pollis-node") as {
   ping: () => string;
   init: (envFile?: string | null) => Promise<void>;
   invoke: (cmd: string, args?: unknown) => Promise<unknown>;
+  invokeRaw: (
+    cmd: string,
+    body: Buffer,
+    headers?: Record<string, string> | null,
+  ) => Promise<unknown>;
   startMediaServer: (cacheDir: string) => Promise<number>;
   registerEventEmitters: (
     jsonEmit: (envelope: { channelId: string; payload: unknown }) => void,
@@ -239,9 +244,24 @@ void app.whenReady().then(async () => {
     { useSystemPicker: true },
   );
 
-  ipcMain.handle("invoke", async (_e, cmd: string, args: unknown) => {
-    return pollisNode.invoke(cmd, args);
-  });
+  ipcMain.handle(
+    "invoke",
+    async (_e, cmd: string, args: unknown, options: unknown) => {
+      // Binary hot path: when the renderer ships a Uint8Array (today only
+      // terminal_write, ~1 byte per keystroke), bypass JSON serialization
+      // and route through `invokeRaw` so the bytes land on Rust as a
+      // zero-copy &[u8]. Reproduces the binary-IPC perf win commits
+      // 2b877d0 + 850661b put in for Tauri. Headers (e.g.
+      // `{ "x-terminal-id": "<id>" }`) ride along.
+      if (args instanceof Uint8Array) {
+        const headers =
+          (options as { headers?: Record<string, string> } | null | undefined)
+            ?.headers ?? null;
+        return pollisNode.invokeRaw(cmd, Buffer.from(args), headers);
+      }
+      return pollisNode.invoke(cmd, args);
+    },
+  );
 
   // ── Updater handlers ───────────────────────────────────────────────────
   // electron-updater requires a packaged + (on mac) signed build to do
