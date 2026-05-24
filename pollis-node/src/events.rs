@@ -46,18 +46,46 @@ pub fn register_event_emitters(
     Ok(())
 }
 
-/// Pull `__CHANNEL__:<id>` out of a string-valued arg field. Matches the
-/// shape the frontend bridge's `ElectronChannel.toJSON()` produces.
+/// Pull the channel id out of an arg field that holds a frontend
+/// `ElectronChannel`. Two shapes are accepted because Electron's
+/// `ipcRenderer.invoke` serializes args via Structured Clone (not
+/// JSON.stringify), so `toJSON()` is bypassed and the class's enumerable
+/// fields come through directly:
+///
+///   * `{ channelId: string, id: number }` — the Structured Clone shape
+///     of `ElectronChannel`; this is what the IPC actually delivers
+///   * `"__CHANNEL__:<id>"` — the `toJSON()` string shape, kept as a
+///     fallback for callers that pre-serialize themselves (and for the
+///     existing smoke tests)
+///
+/// After Phase 4's bridge / preload split, the IPC delivers the object
+/// shape; the string shape stays callable so future callers that bypass
+/// the bridge don't have to know the internal representation.
 pub fn extract_channel_id(args: &serde_json::Value, field: &str) -> Result<String> {
-    let raw = args
+    let v = args
         .get(field)
-        .and_then(|v| v.as_str())
         .ok_or_else(|| Error::from_reason(format!("missing channel arg: {field}")))?;
-    raw.strip_prefix("__CHANNEL__:")
-        .map(|s| s.to_string())
-        .ok_or_else(|| {
-            Error::from_reason(format!("invalid channel marker in {field}: {raw}"))
-        })
+    if let Some(s) = v.as_str() {
+        return s
+            .strip_prefix("__CHANNEL__:")
+            .map(|s| s.to_string())
+            .ok_or_else(|| {
+                Error::from_reason(format!("invalid channel marker in {field}: {s}"))
+            });
+    }
+    if let Some(obj) = v.as_object() {
+        // After camel→snake conversion in route(), `channelId` becomes
+        // `channel_id`.
+        if let Some(id) = obj.get("channel_id").and_then(|v| v.as_str()) {
+            return Ok(id.to_string());
+        }
+        if let Some(id) = obj.get("channelId").and_then(|v| v.as_str()) {
+            return Ok(id.to_string());
+        }
+    }
+    Err(Error::from_reason(format!(
+        "channel arg {field} is neither a string nor an object with channel_id: {v}"
+    )))
 }
 
 /// JSON event sink. One per subscribe_* call; the same `OnceLock`-stored
