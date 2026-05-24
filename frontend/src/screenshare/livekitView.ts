@@ -323,7 +323,14 @@ class LiveKitView {
     this.wireRoomEvents(room);
 
     try {
-      await room.connect(url, token, { autoSubscribe: true });
+      // autoSubscribe:false so the view client never subscribes to
+      // *audio* tracks (those belong to the Rust voice client) — they
+      // would add audio codec entries to this PC's SDP, and Chromium 130
+      // assigns those a PT that collides with screen-share video's PT in
+      // the BUNDLE group ("A BUNDLE group contains a codec collision for
+      // payload_type='35'"), which torpedoes screen-share publish. Manual
+      // per-track subscription below opts in only to screen-share video.
+      await room.connect(url, token, { autoSubscribe: false });
     } catch (e) {
       console.error('[livekit-view] connect failed:', e);
       try {
@@ -346,22 +353,16 @@ class LiveKitView {
     this.currentRoom = room;
     this.current = target;
 
-    // Pick up tracks that were already published before we joined.
-    // livekit-client fires TrackSubscribed after `connect` resolves for
-    // each existing publication, but it does so asynchronously — and we
-    // want the React snapshot correct as soon as a tile mounts.
+    // Opt in to any existing screen-share publications (subscribe-only-
+    // what-we-need pattern). Audio publications are ignored — see the
+    // autoSubscribe:false rationale above.
     for (const participant of room.remoteParticipants.values()) {
       for (const publication of participant.trackPublications.values()) {
         if (
           publication.kind === Track.Kind.Video &&
-          publication.track &&
           publication.source === Track.Source.ScreenShare
         ) {
-          this.handleTrackSubscribed(
-            publication.track,
-            publication,
-            participant,
-          );
+          publication.setSubscribed(true);
         }
       }
     }
@@ -403,6 +404,18 @@ class LiveKitView {
   // ── Room event wiring ─────────────────────────────────────────────────────
 
   private wireRoomEvents(room: Room): void {
+    // With autoSubscribe:false, new publications arrive as TrackPublished.
+    // Filter to video screen-share and opt in; everything else (audio,
+    // camera if it ever appears) is ignored — keeps audio codecs out of
+    // this PC's SDP, which prevents the PT=35 BUNDLE collision.
+    room.on(RoomEvent.TrackPublished, (publication) => {
+      if (
+        publication.kind === Track.Kind.Video &&
+        publication.source === Track.Source.ScreenShare
+      ) {
+        publication.setSubscribed(true);
+      }
+    });
     room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
       this.handleTrackSubscribed(track, publication, participant);
     });

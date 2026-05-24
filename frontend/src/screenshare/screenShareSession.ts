@@ -14,7 +14,7 @@
 import { Channel, hasMediaDevices, invoke } from "../bridge";
 
 import { useAppStore } from "../stores/appStore";
-import { playSound } from "../utils/sounds";
+import { playSfx, SFX } from "../utils/sfx";
 
 /** Capturable display reported by `enumerate_screen_sources`.
  *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration). */
@@ -356,7 +356,7 @@ class ScreenShareSession {
       store.setScreenShareLocalDimensions(null);
     }
     store.setScreenShareMode("active");
-    playSound("screenshare_start");
+    playSfx(SFX.ping);
   }
 
   async stop(): Promise<void> {
@@ -367,7 +367,7 @@ class ScreenShareSession {
       store.setScreenShareLocalActive(false);
       store.setScreenShareLocalDimensions(null);
       store.setScreenShareMode("idle");
-      playSound("screenshare_stop");
+      playSfx(SFX.ping);
       return;
     }
     await invoke("stop_screen_share");
@@ -382,7 +382,7 @@ class ScreenShareSession {
         store.setScreenShareMode("active");
         store.setScreenShareSources(null);
         store.setScreenShareError(null);
-        playSound("screenshare_start");
+        playSfx(SFX.ping);
         break;
       case "local_stopped":
         store.setScreenShareLocalActive(false);
@@ -390,7 +390,7 @@ class ScreenShareSession {
         store.setScreenShareMode("idle");
         store.setScreenShareSources(null);
         store.setScreenShareError(null);
-        playSound("screenshare_stop");
+        playSfx(SFX.ping);
         break;
       case "local_error":
         store.setScreenShareError(friendlyScreenShareError(ev.message));
@@ -414,11 +414,11 @@ class ScreenShareSession {
           width: ev.width,
           height: ev.height,
         });
-        playSound("screenshare_start");
+        playSfx(SFX.ping);
         break;
       case "remote_stopped":
         store.removeScreenShareRemote(ev.track_key);
-        playSound("screenshare_stop");
+        playSfx(SFX.ping);
         break;
     }
   }
