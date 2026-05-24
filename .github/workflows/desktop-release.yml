@@ -30,8 +30,7 @@ jobs:
       - name: Stamp version from git tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Stamping version ${VERSION} into tauri.conf.json"
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          ./scripts/bump-version.sh "$VERSION\"
 
       - name: Load production secrets
         run: |
@@ -111,8 +110,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Stamping version ${VERSION} into tauri.conf.json"
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          ./scripts/bump-version.sh "$VERSION\"
 
       - name: Load production secrets
         shell: bash
@@ -291,8 +289,7 @@ jobs:
       - name: Stamp version from git tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Stamping version ${VERSION} into tauri.conf.json"
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          ./scripts/bump-version.sh "$VERSION\"
 
       # libva-dev: header-only build dep for webrtc-sys's VAAPI H.264
       # encoder wrapper. `libva.so.2` / `libva-drm.so.2` are dlopened at
