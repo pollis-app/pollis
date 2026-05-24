@@ -6,6 +6,7 @@ members = [
     "pollis-capture-proto",
     "pollis-capture-linux",
     "pollis-capture-macos",
+    "pollis-node",
 ]
 
 [workspace.package]

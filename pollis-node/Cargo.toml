@@ -1,0 +1,15 @@
+[package]
+name = "pollis-node"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = { version = "2", default-features = false, features = ["napi9", "tokio_rt"] }
+napi-derive = "2"
+pollis-core = { path = "../pollis-core" }
+
+[build-dependencies]
+napi-build = "2"
