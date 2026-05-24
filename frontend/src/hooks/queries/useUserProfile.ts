@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../bridge";
 import * as api from "../../services/api";
 import { useAppStore } from "../../stores/appStore";
 import { messageQueryKeys } from "./useMessages";

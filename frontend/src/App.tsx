@@ -4,7 +4,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./bridge";
 import { useAppStore } from "./stores/appStore";
 import { LoginScreen } from "./components/Auth/LoginScreen";
 import { SaveSecretKeyScreen } from "./components/Auth/SaveSecretKeyScreen";

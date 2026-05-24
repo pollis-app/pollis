@@ -1,7 +1,7 @@
 import React, { useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { PhoneOff } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { useAppStore } from "../stores/appStore";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { voiceSession } from "../voice";

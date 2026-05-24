@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback, useEffect, useImperativeHandle } 
 import { open } from "@tauri-apps/plugin-dialog";
 import { writeFile, readFile, stat } from "@tauri-apps/plugin-fs";
 import { tempDir } from "@tauri-apps/api/path";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../bridge";
 import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize } from "../../utils/format";

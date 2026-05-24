@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../bridge";
 import { useAppStore } from "../../stores/appStore";
 import type { BlockedUser, DmChannel } from "../../types";
 

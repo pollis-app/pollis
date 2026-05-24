@@ -1,6 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../bridge";
 import { useAppStore } from "../../stores/appStore";
 import {
   applyAccentColor,

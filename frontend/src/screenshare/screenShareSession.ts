@@ -2,7 +2,7 @@
 // once per process, mirrors lifecycle into the Zustand store, and exposes a
 // pub/sub dispatcher for raw I420 frame buffers keyed by trackKey.
 
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "../bridge";
 
 import { useAppStore } from "../stores/appStore";
 import { playSound } from "../utils/sounds";

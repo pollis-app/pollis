@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../bridge";
 import type { Reaction } from "../../types";
 
 export const reactionQueryKeys = {

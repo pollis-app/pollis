@@ -1,5 +1,5 @@
 import { useEffect, useRef, useMemo } from 'react';
-import { Channel, invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '../bridge';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
