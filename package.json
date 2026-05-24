@@ -10,7 +10,10 @@
     "build:macos": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target universal-apple-darwin'",
     "build:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'",
     "lint": "pnpm --filter frontend lint",
-    "clean": "pnpm --filter frontend clean && cargo clean --manifest-path src-tauri/Cargo.toml"
+    "clean": "pnpm --filter frontend clean && cargo clean --manifest-path src-tauri/Cargo.toml",
+    "build:pollis-node": "pnpm --filter @pollis/pollis-node build",
+    "build:electron": "pnpm --filter @pollis/electron build",
+    "dev:electron": "concurrently -k -n vite,electron 'pnpm --filter frontend dev' 'pnpm --filter @pollis/electron start'"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
