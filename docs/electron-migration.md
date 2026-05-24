@@ -33,7 +33,7 @@ frontend/ (React + Vite + Tailwind — mostly unchanged)
 
 **Decision: napi-rs over sidecar.** One process. Zero IPC overhead for Rust calls. Crash isolation handled via `std::panic::set_hook` converting panics to napi errors. libwebrtc threads cohabit fine with Node's libuv. Used in production by 1Password, Bitwarden, Storybook, Prisma, swc.
 
-**Decision: side-by-side, not replace-in-place.** Both binaries build from the same `pollis-core` + `frontend/`. `pnpm dev` keeps working; `pnpm dev:electron` is new. We flip the default only when Electron is at full parity. Never break main.
+**Decision: side-by-side, not replace-in-place.** Both binaries build from the same `pollis-core` + `frontend/`. As of v1.1.0 `pnpm dev` runs the Electron flow; the legacy Tauri path stays available as `pnpm dev:tauri`. Tauri's `build:*` scripts are similarly renamed to `build:tauri:*`. Never break main.
 
 ## Phases
 
@@ -61,7 +61,7 @@ frontend/ (React + Vite + Tailwind — mostly unchanged)
 | | Criterion | Status |
 |---|---|---|
 | ✅ | Every Tauri command has a napi equivalent | 144 arms — every shim ported or stubbed-with-reason |
-| ⬜ | `pnpm dev:electron` runs Pollis with feature parity to `pnpm dev` | code in place; needs end-to-end GUI smoke test in a real desktop session |
+| ✅ | `pnpm dev` runs Pollis (Electron) with feature parity to the legacy `pnpm dev:tauri` | verified in dogfood — voice + screenshare + DMs + groups all working |
 | ⬜ | Screenshare receive + publish works on Linux Wayland, Linux X11, macOS, Windows | verified at the wiring level; per-platform GUI verification pending |
 | ⬜ | Voice works on all three platforms | Rust voice path untouched; should work identically |
 | ⬜ | Bundled artifacts build in CI on native runners | workflow scaffolded; needs a real tag push to verify |

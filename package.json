@@ -3,18 +3,18 @@
   "version": "1.1.0",
   "private": true,
   "scripts": {
-    "dev": "WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 pnpm tauri dev",
+    "dev": "pnpm build:pollis-node:debug && concurrently -k -n vite,electron 'pnpm --filter frontend dev' 'wait-on -t 30000 tcp:5173 && pnpm --filter @pollis/electron start'",
     "dev:frontend": "pnpm --filter frontend dev",
-    "build": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build'",
-    "build:linux": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-unknown-linux-gnu'",
-    "build:macos": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target universal-apple-darwin'",
-    "build:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'",
-    "lint": "pnpm --filter frontend lint",
-    "clean": "pnpm --filter frontend clean && cargo clean --manifest-path src-tauri/Cargo.toml",
     "build:pollis-node": "pnpm --filter @pollis/pollis-node build",
     "build:pollis-node:debug": "pnpm --filter @pollis/pollis-node build-debug",
     "build:electron": "pnpm --filter @pollis/electron build",
-    "dev:electron": "pnpm build:pollis-node:debug && concurrently -k -n vite,electron 'pnpm --filter frontend dev' 'wait-on -t 30000 tcp:5173 && pnpm --filter @pollis/electron start'"
+    "lint": "pnpm --filter frontend lint",
+    "clean": "pnpm --filter frontend clean && cargo clean",
+    "dev:tauri": "WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 pnpm tauri dev",
+    "build:tauri": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build'",
+    "build:tauri:linux": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-unknown-linux-gnu'",
+    "build:tauri:macos": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target universal-apple-darwin'",
+    "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
