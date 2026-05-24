@@ -1,17 +1,172 @@
-// Phase 2: port of `src-tauri/src/commands/voice.rs` into the napi dispatch
-// pattern. See pollis-node/src/lib.rs for the invoke() entry point. Each arm
-// here corresponds to a single tauri::command from the legacy shim.
-//
-// Phase 2 agent: replace the stub with match arms for every command in
-// docs/electron-migration-inventory.md under the `voice` section. Channel-
-// based commands stay stubbed (returning a Phase 3 TODO) — they need the
-// NapiSink work in Phase 3.
+// Port of `src-tauri/src/commands/voice.rs`. Channel-using commands
+// (`subscribe_voice_events`) stay stubbed pending Phase 3 NapiSink.
 
 use napi::bindgen_prelude::*;
 
+use crate::state::{core_err, ensure_state, json_err};
+
 pub async fn dispatch(
-    _cmd: &str,
-    _args: &serde_json::Value,
+    cmd: &str,
+    args: &serde_json::Value,
 ) -> Option<Result<serde_json::Value>> {
-    None
+    match cmd {
+        "subscribe_voice_events" => Some(Err(Error::from_reason(
+            "Phase 3: NapiSink not yet wired for subscribe_voice_events".to_string(),
+        ))),
+        "list_audio_devices" => Some(list_audio_devices(args).await),
+        "prepare_voice_connection" => Some(prepare_voice_connection(args).await),
+        "join_voice_channel" => Some(join_voice_channel(args).await),
+        "leave_voice_channel" => Some(leave_voice_channel(args).await),
+        "toggle_voice_mute" => Some(toggle_voice_mute(args).await),
+        "set_remote_user_volume" => Some(set_remote_user_volume(args).await),
+        "set_voice_input_device" => Some(set_voice_input_device(args).await),
+        "set_voice_output_device" => Some(set_voice_output_device(args).await),
+        "set_voice_audio_processing" => Some(set_voice_audio_processing(args).await),
+        "get_last_join_timings" => Some(get_last_join_timings(args).await),
+        _ => None,
+    }
+}
+
+async fn list_audio_devices(_args: &serde_json::Value) -> Result<serde_json::Value> {
+    let out = pollis_core::commands::voice::list_audio_devices()
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(out).map_err(json_err)
+}
+
+async fn prepare_voice_connection(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        channel_id: String,
+        user_id: String,
+        display_name: String,
+    }
+    let Args {
+        channel_id,
+        user_id,
+        display_name,
+    } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::prepare_voice_connection(
+        channel_id,
+        user_id,
+        display_name,
+        &state,
+    )
+    .await
+    .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn join_voice_channel(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        channel_id: String,
+        user_id: String,
+        display_name: String,
+        input_device: Option<String>,
+        output_device: Option<String>,
+        audio_processing: pollis_core::commands::voice_apm::ApmConfig,
+        counterparty_user_id: Option<String>,
+    }
+    let Args {
+        channel_id,
+        user_id,
+        display_name,
+        input_device,
+        output_device,
+        audio_processing,
+        counterparty_user_id,
+    } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::join_voice_channel(
+        channel_id,
+        user_id,
+        display_name,
+        input_device,
+        output_device,
+        audio_processing,
+        counterparty_user_id,
+        &state,
+    )
+    .await
+    .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn leave_voice_channel(_args: &serde_json::Value) -> Result<serde_json::Value> {
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::leave_voice_channel(&state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn toggle_voice_mute(_args: &serde_json::Value) -> Result<serde_json::Value> {
+    let state = ensure_state().await?;
+    let out = pollis_core::commands::voice::toggle_voice_mute(&state)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(out).map_err(json_err)
+}
+
+async fn set_remote_user_volume(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        user_id: String,
+        volume: f32,
+    }
+    let Args { user_id, volume } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::set_remote_user_volume(user_id, volume, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn set_voice_input_device(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        device_name: String,
+    }
+    let Args { device_name } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::set_voice_input_device(device_name, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn set_voice_output_device(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        device_name: String,
+    }
+    let Args { device_name } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::set_voice_output_device(device_name, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn set_voice_audio_processing(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        config: pollis_core::commands::voice_apm::ApmConfig,
+    }
+    let Args { config } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::voice::set_voice_audio_processing(config, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn get_last_join_timings(_args: &serde_json::Value) -> Result<serde_json::Value> {
+    let state = ensure_state().await?;
+    let out = pollis_core::commands::voice::get_last_join_timings(&state)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(out).map_err(json_err)
 }

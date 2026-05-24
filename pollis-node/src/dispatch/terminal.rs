@@ -1,17 +1,73 @@
-// Phase 2: port of `src-tauri/src/commands/terminal.rs` into the napi dispatch
-// pattern. See pollis-node/src/lib.rs for the invoke() entry point. Each arm
-// here corresponds to a single tauri::command from the legacy shim.
-//
-// Phase 2 agent: replace the stub with match arms for every command in
-// docs/electron-migration-inventory.md under the `terminal` section. Channel-
-// based commands stay stubbed (returning a Phase 3 TODO) — they need the
-// NapiSink work in Phase 3.
+// Port of `src-tauri/src/commands/terminal.rs`. Two commands stay stubbed
+// pending Phase 3:
+//   - `terminal_open` takes a raw-bytes Channel for PTY output (NapiSink)
+//   - `terminal_write` consumes a raw IPC body (binary keystroke path), the
+//     symmetric input side. Both need binary-args / binary-events plumbing.
 
 use napi::bindgen_prelude::*;
 
+use crate::state::{core_err, ensure_state, json_err};
+
 pub async fn dispatch(
-    _cmd: &str,
-    _args: &serde_json::Value,
+    cmd: &str,
+    args: &serde_json::Value,
 ) -> Option<Result<serde_json::Value>> {
-    None
+    match cmd {
+        "terminal_open" => Some(Err(Error::from_reason(
+            "Phase 3: NapiSink (raw-bytes) not yet wired for terminal_open".to_string(),
+        ))),
+        "terminal_write" => Some(Err(Error::from_reason(
+            "Phase 3: raw-bytes IPC body not yet wired for terminal_write".to_string(),
+        ))),
+        "terminal_resize" => Some(terminal_resize(args).await),
+        "terminal_close" => Some(terminal_close(args).await),
+        "terminal_ack" => Some(terminal_ack(args).await),
+        _ => None,
+    }
+}
+
+async fn terminal_resize(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        terminal_id: String,
+        rows: u16,
+        cols: u16,
+    }
+    let Args {
+        terminal_id,
+        rows,
+        cols,
+    } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::terminal::terminal_resize(terminal_id, rows, cols, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn terminal_close(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        terminal_id: String,
+    }
+    let Args { terminal_id } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::terminal::terminal_close(terminal_id, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn terminal_ack(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        terminal_id: String,
+        bytes: usize,
+    }
+    let Args { terminal_id, bytes } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::terminal::terminal_ack(terminal_id, bytes, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
 }
