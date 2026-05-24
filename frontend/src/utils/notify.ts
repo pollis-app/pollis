@@ -1,4 +1,4 @@
-import { invoke } from '../bridge';
+import { sendNotification } from '../bridge';
 import { playSfx } from './sfx';
 import { useAppStore } from '../stores/appStore';
 
@@ -138,7 +138,7 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
   if (config.osNotif && prefs.allowOsNotif && prefs.osPermissionGranted && ringtoneAllowed && !cooled) {
     const title = payload.title ?? 'New message';
     const body = payload.body ?? (payload.senderUsername ? `${payload.senderUsername}: New message` : '');
-    invoke('plugin:notification|notify', { options: { title, body } }).catch(() => {});
+    sendNotification({ title, body }).catch(() => {});
     fired = true;
   }
 

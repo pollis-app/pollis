@@ -1,5 +1,5 @@
 import React, { useCallback } from "react";
-import { open } from "@tauri-apps/plugin-shell";
+import { shellOpen } from "../../bridge";
 
 // Matches http://, https://, and www. prefixed URLs
 const URL_REGEX =
@@ -28,7 +28,7 @@ export const LinkifiedText: React.FC<LinkifiedTextProps> = ({ text }) => {
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>, url: string) => {
       e.preventDefault();
-      open(ensureProtocol(url));
+      shellOpen(ensureProtocol(url));
     },
     [],
   );

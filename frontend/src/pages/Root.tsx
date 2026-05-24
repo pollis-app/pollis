@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
-import { exit } from "@tauri-apps/plugin-process";
+import { exit } from "../bridge";
 import { Users, MessageCircle, Mail, UserPlus, LogOut, Power } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useAppStore } from "../stores/appStore";

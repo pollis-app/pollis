@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Minus, Square, X, Maximize2 } from "lucide-react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "../../bridge";
 import { PollisLogo } from "../ui/PollisLogo";
 import { isMac } from "../../utils/platform";
 
