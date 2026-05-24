@@ -96,13 +96,19 @@ webrtc-audio-processing = { version = "2", features = ["bundled"] }
 windows-capture = "2"
 
 # Desktop-only crates, excluded from the mobile (iOS/Android) build:
-# - portable-pty: in-app terminal pane; pulls termios 0.2.2 (no ios arm).
+# - nix: openpty(3) + pre_exec PTY for the in-app terminal pane. Replaced
+#   portable-pty 0.9 because its `close_random_fds` post-fork sweep aborts
+#   under Electron's high-FD-count renderer ("Crashing due to FD ownership
+#   violation" — Rust's I/O safety guard catches close() of an OwnedFd it
+#   tracks). nix is already a transitive dep via several crates; declaring
+#   it explicitly with `pty` lets us call `openpty` + `Winsize` directly.
 # - livekit/libwebrtc: Rust LiveKit realtime/media engine. Mobile uses the
 #   native LiveKit SDK (@livekit/react-native) instead — see issue #185.
 # - cpal/rodio: host audio I/O for voice + sound effects; no mobile path
 #   and mobile drops voice.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
-portable-pty = "0.9"
+nix = { version = "0.30", features = ["term"] }
+libc = "0.2"
 livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
 libwebrtc = "0.3"
 cpal = "0.15"
