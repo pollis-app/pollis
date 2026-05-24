@@ -83,6 +83,10 @@ function createWindow(): BrowserWindow {
     // each corner.
     backgroundColor: "#00000000",
     transparent: true,
+    // PNG works as the window icon on all three platforms; electron-builder
+    // picks the per-platform .icns/.ico at package time (see
+    // electron-builder.yml). In dev this also drives the taskbar/dock icon.
+    icon: path.resolve(__dirname, "..", "..", "src-tauri", "icons", "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -138,6 +142,18 @@ function createWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(async () => {
+  // macOS dock icon in dev — packaged builds get this from the .icns
+  // electron-builder bundles, but in `pnpm dev:electron` the dock shows
+  // Electron's default mascot without this.
+  if (process.platform === "darwin" && app.dock) {
+    const iconPath = path.resolve(__dirname, "..", "..", "src-tauri", "icons", "icon.png");
+    try {
+      app.dock.setIcon(iconPath);
+    } catch (e) {
+      console.warn("[dock] setIcon failed:", e);
+    }
+  }
+
   // Register the custom file:// equivalent before any window loads. The
   // renderer's `convertFileSrc(path)` returns `pollis-file://<encoded>` and
   // <img>/<audio>/<video> tags resolve against this handler.

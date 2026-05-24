@@ -380,35 +380,45 @@ pub async fn publish_to_user_inbox(
     }
 
     let room_name = format!("inbox-{}", user_id);
-    let token = make_token(config, &room_name, "server", "server")?;
-    let url = config.livekit_url.clone();
+    let token = make_admin_token(config, Some(&room_name))?;
+    let url = format!(
+        "{}/twirp/livekit.RoomService/SendData",
+        twirp_base(&config.livekit_url)
+    );
 
+    let raw = serde_json::to_vec(&payload).map_err(Error::Serde)?;
+    let body = serde_json::json!({
+        "room": room_name,
+        "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &raw),
+        "kind": "RELIABLE",
+    });
+
+    // Fire-and-forget over HTTP — a single Twirp POST instead of a full
+    // Room::connect + DTLS + ICE round trip (which was costing ~2-5s of
+    // ring latency). The HTTP path is what `publish_ping` / `publish_typing`
+    // can't use (they ride the already-connected Room), but for inbox
+    // wakeups (call invites, etc.) where no persistent connection exists,
+    // SendData is the right tool.
     tokio::spawn(async move {
-        match Room::connect(&url, &token, RoomOptions::default()).await {
-            Ok((room, _events)) => {
-                let raw = match serde_json::to_vec(&payload) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("[inbox] serialize error for {room_name}: {e}");
-                        return;
+        match reqwest::Client::new()
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let status = resp.status();
+                if !status.is_success() {
+                    // 404 → room doesn't exist (user offline). Treat as advisory.
+                    if status != reqwest::StatusCode::NOT_FOUND {
+                        let body_text = resp.text().await.unwrap_or_default();
+                        eprintln!("[inbox] SendData {status}: {body_text}");
                     }
-                };
-                let result = room
-                    .local_participant()
-                    .publish_data(DataPacket {
-                        payload: raw,
-                        reliable: true,
-                        ..Default::default()
-                    })
-                    .await;
-                if let Err(e) = result {
-                    eprintln!("[inbox] publish_data to {room_name} failed: {e}");
                 }
-                // Dropping `room` here causes the SDK to disconnect automatically.
             }
             Err(e) => {
-                // Non-fatal: room may not exist if the user is offline.
-                eprintln!("[inbox] connect to {room_name} failed (user may be offline): {e}");
+                eprintln!("[inbox] SendData http error: {e}");
             }
         }
     });

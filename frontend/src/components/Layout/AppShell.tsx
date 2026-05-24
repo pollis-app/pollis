@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
@@ -62,14 +62,17 @@ export const AppShell: React.FC = () => {
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { query: prefsQuery } = usePreferences();
 
-  // Apply the sidebar default whenever the preference first loads or the
-  // user changes it. Cmd/Ctrl+B presses don't fight this since they only
-  // mutate session state — when the preference value is unchanged, the
-  // dependency stays stable and this effect won't re-fire.
+  // Apply the sidebar default ONCE per session, the first time prefs land.
+  // The preference governs only the initial open/closed state at app
+  // start — toggling it later in Preferences must not slam the live
+  // sidebar shut or open, since that would clobber the user's current
+  // Cmd/Ctrl+B state (or their click on the sidebar's collapse handle).
   const sidebarDefault = prefsQuery.data?.sidebar_open_by_default;
+  const sidebarDefaultApplied = useRef(false);
   useEffect(() => {
-    if (sidebarDefault !== undefined) {
+    if (sidebarDefault !== undefined && !sidebarDefaultApplied.current) {
       setIsSidebarOpen(sidebarDefault);
+      sidebarDefaultApplied.current = true;
     }
   }, [sidebarDefault]);
 
