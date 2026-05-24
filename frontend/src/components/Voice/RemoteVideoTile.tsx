@@ -63,7 +63,13 @@ const RemoteVideoTileElectron: React.FC<Props> = ({
     livekitView.getSnapshot.bind(livekitView),
   );
 
-  const track = trackKey === LOCAL_PREVIEW_KEY ? undefined : tracks.get(trackKey);
+  // LOCAL_PREVIEW_KEY works the same as any other track key here —
+  // publishScreenShare stores the local capture track under that key in
+  // livekitView.tracks. The previous explicit exclusion was a leftover
+  // from the Tauri-era flow where local preview rendered through a
+  // separate canvas pipeline; under Electron the local track is just
+  // another MediaStreamTrack and <video srcObject> handles it natively.
+  const track = tracks.get(trackKey);
 
   useEffect(() => {
     const el = videoRef.current;
