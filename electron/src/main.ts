@@ -80,7 +80,13 @@ function createWindow(): BrowserWindow {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      // sandbox:true restricts the preload to contextBridge + ipcRenderer
+      // (the only two things our preload uses), so we get the renderer
+      // sandbox for free. Bumping this back to false should never be
+      // necessary unless the preload adds direct Node API usage — which
+      // it shouldn't, since everything heavy lives in pollis-node behind
+      // ipcMain.handle handlers in the main process.
+      sandbox: true,
     },
   });
 
