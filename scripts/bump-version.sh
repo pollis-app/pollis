@@ -1,20 +1,21 @@
 #!/usr/bin/env bash
 #
-# Propagate one version string to every place it lives in the repo.
+# CI-internal: propagate one version string to every place it lives in
+# the repo. NOT a developer workflow step — devs should never run this.
 #
-# Usage:
-#   scripts/bump-version.sh 1.2.3         # explicit semver
-#   scripts/bump-version.sh               # re-apply whatever is in VERSION
+# Source of truth is the git tag. The release ceremony is one command:
 #
-# Source of truth: the `VERSION` file at repo root. Everything else is
-# derived. CI scripts call this with the tag-derived version before
-# building, so a tag push (`v1.2.3` → `1.2.3`) automatically stamps
-# every package.json / Cargo.toml / tauri.conf.json before the build
-# sees them. Local devs can run it ad-hoc to keep things consistent
-# between releases.
+#     git tag -a v1.2.3 -m "Release v1.2.3" && git push --tags
+#
+# CI extracts the version from the tag and calls this script with that
+# value to stamp every package.json / Cargo.toml / tauri.conf.json
+# before the build sees them. Committed file values are placeholders
+# that CI overwrites — devs don't need to keep them current.
+#
+# Usage (CI only):
+#   scripts/bump-version.sh 1.2.3         # explicit semver — required
 #
 # Locations updated:
-#   - VERSION                              (the source itself, if arg given)
 #   - Cargo.toml                           [workspace.package].version
 #                                          → pollis (src-tauri), pollis-core,
 #                                            pollis-node all inherit it via
@@ -35,41 +36,36 @@ cd "$REPO_ROOT"
 
 VERSION="${1:-}"
 if [ -z "$VERSION" ]; then
-  if [ ! -f VERSION ]; then
-    echo "error: no version arg given and no VERSION file at repo root" >&2
-    exit 1
-  fi
-  VERSION="$(tr -d '[:space:]' < VERSION)"
+  echo "error: usage: $0 <semver>" >&2
+  echo "       version is required — this script is CI-internal and is not part of the dev workflow." >&2
+  exit 1
 fi
 
 # Strict semver MAJOR.MINOR.PATCH (+ optional -prerelease.build.tags).
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
   echo "error: '$VERSION' is not strict semver MAJOR.MINOR.PATCH[-pre]" >&2
-  echo "       (got from ${1:+arg}${1:-VERSION file}; '1.1' isn't valid, use '1.1.0')" >&2
+  echo "       ('1.1' isn't valid, use '1.1.0')" >&2
   exit 1
 fi
 
 echo "Bumping to v${VERSION}"
 
-# 1. VERSION file
-echo "$VERSION" > VERSION
-
-# 2. Cargo workspace — pollis-core / pollis-node / src-tauri all inherit
-#    via `version.workspace = true`, so this single line stamps three crates.
+# Cargo workspace — pollis-core / pollis-node / src-tauri all inherit
+# via `version.workspace = true`, so this single line stamps three crates.
 sed -i.bak -E "/^\[workspace\.package\]/,/^\[/{
   s/^version = \".*\"/version = \"${VERSION}\"/
 }" Cargo.toml
 rm -f Cargo.toml.bak
 
-# 3. Every package.json — single-line "version" field at top level.
-#    Use jq so we don't accidentally rewrite nested "version" fields in
-#    sub-trees (e.g. dependencies pinned to a literal "version": "x").
+# Every package.json — single-line "version" field at top level. Use jq
+# so we don't accidentally rewrite nested "version" fields in sub-trees
+# (e.g. dependencies pinned to a literal "version": "x").
 for pkg in package.json frontend/package.json electron/package.json pollis-node/package.json; do
   jq --arg v "$VERSION" '.version = $v' "$pkg" > "$pkg.tmp"
   mv "$pkg.tmp" "$pkg"
 done
 
-# 4. tauri.conf.json — top-level "version".
+# tauri.conf.json — top-level "version".
 jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
 mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
 
@@ -80,4 +76,3 @@ for f in package.json frontend/package.json electron/package.json pollis-node/pa
   v="$(jq -r .version "$f")"
   printf '  %-40s %s\n' "$f" "$v"
 done
-echo "  VERSION                                  $(cat VERSION)"
