@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
-import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { writeFile } from "@tauri-apps/plugin-fs";
+import { dialogSave, writeFile } from "../../bridge";
 import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize, formatDuration } from "../../utils/format";
@@ -484,7 +483,7 @@ const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({ attach
   // navigates to the URL and shows the browser's built-in audio/video player
   // instead of triggering a download.
   const triggerSave = async (url: string): Promise<boolean> => {
-    const target = await saveDialog({ defaultPath: attachment.filename });
+    const target = await dialogSave({ defaultPath: attachment.filename });
     if (!target) {
       return false;
     }

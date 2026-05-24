@@ -7,6 +7,8 @@ mod state;
 
 pub use events::{register_event_emitters, JsRawFrame};
 
+use std::path::PathBuf;
+
 use napi::bindgen_prelude::*;
 
 use crate::state::ensure_state;
@@ -44,4 +46,28 @@ pub async fn invoke(
 ) -> Result<serde_json::Value> {
     let args = args.unwrap_or(serde_json::Value::Null);
     dispatch::route(&cmd, args).await
+}
+
+/// Bootstrap the local loopback HTTP media server. Mirrors the boot pattern
+/// in `src-tauri/src/lib.rs:347-354` — sets the on-disk media cache dir on
+/// the r2 commands module, spawns the axum server on an OS-assigned port,
+/// and parks the port on AppState so `get_media_url` returns valid URLs.
+///
+/// Call once from Electron main after `init()`. Returns the bound port.
+#[napi]
+pub async fn start_media_server(cache_dir: String) -> Result<u32> {
+    let cache_dir = PathBuf::from(cache_dir);
+    if let Err(e) = std::fs::create_dir_all(&cache_dir) {
+        return Err(Error::from_reason(format!(
+            "create_dir_all({}): {e}",
+            cache_dir.display()
+        )));
+    }
+    pollis_core::commands::r2::set_media_cache_dir(cache_dir);
+    let state = ensure_state().await?;
+    let port = pollis_core::media_server::spawn(state.clone())
+        .await
+        .map_err(|e| Error::from_reason(format!("spawn media server: {e}")))?;
+    *state.media_server_port.lock().await = Some(port);
+    Ok(port as u32)
 }

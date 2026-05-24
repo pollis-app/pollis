@@ -119,7 +119,7 @@ function MainApp() {
     try {
       // Check for required update before anything else (skip in dev)
       if (!import.meta.env.DEV) {
-        const { check: checkUpdate } = await import("@tauri-apps/plugin-updater");
+        const { check: checkUpdate } = await import("./bridge");
         const update = await checkUpdate();
         if (update) {
           await invoke("mark_update_required");

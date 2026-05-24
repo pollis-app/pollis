@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { invoke } from "../../bridge";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
 import { TitleBar } from "./TitleBar";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { Sidebar } from "./Sidebar";
@@ -240,7 +239,7 @@ export const AppShell: React.FC = () => {
 
   // Hide the window on macOS, close it on Windows/Linux.
   useGlobalShortcut("app.closeWindow", () => {
-    invoke("hide_window").catch(console.error);
+    hideWindow().catch(console.error);
   });
 
   // Discord users reach for the keyboard for mute/leave (not tile

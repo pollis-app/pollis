@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { invoke } from "../bridge";
+import { invoke, isPermissionGranted, requestPermission } from "../bridge";
 import { usePreferences, applyPreferences, applyDeviceFontSize } from "../hooks/queries/usePreferences";
 import {
   hslToHex,
@@ -168,12 +168,12 @@ export const Preferences: React.FC = () => {
     // When enabling, ensure we have OS-level permission (prompts on macOS)
     if (val) {
       try {
-        const granted: boolean | null = await invoke('plugin:notification|is_permission_granted');
-        if (granted !== true) {
-          await invoke('plugin:notification|request_permission');
+        const granted = await isPermissionGranted();
+        if (!granted) {
+          await requestPermission();
         }
       } catch {
-        // Notification plugin unavailable — ignore
+        // Notification host unavailable — ignore
       }
     }
   };

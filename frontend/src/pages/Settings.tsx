@@ -7,9 +7,12 @@ import { resizeImage } from "../utils/imageProcessing";
 import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar, userQueryKeys } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
-import { getVersion } from "@tauri-apps/api/app";
-import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
-import { invoke } from "../bridge";
+import {
+  getVersion,
+  check as checkForUpdate,
+  convertFileSrc,
+  invoke,
+} from "../bridge";
 
 export const Settings: React.FC = () => {
   const { currentUser } = useAppStore();
@@ -77,25 +80,24 @@ export const Settings: React.FC = () => {
         return;
       }
       // Convert the native path to a File-like object via fetch(convertFileSrc(path)).
-      // Tauri exposes native paths through the asset protocol.
-      import("@tauri-apps/api/core").then(({ convertFileSrc }) => {
-        const src = convertFileSrc(imagePath);
-        fetch(src)
-          .then((r) => r.blob())
-          .then((blob) => {
-            const name = imagePath.split(/[\\/]/).pop() ?? "image";
-            const file = new File([blob], name, { type: blob.type || "image/png" });
-            setSelectedFile(file);
-            setUploadError(null);
-            if (preview) {
-              URL.revokeObjectURL(preview);
-            }
-            setPreview(URL.createObjectURL(file));
-          })
-          .catch((err) => {
-            console.error("[Settings] pathdrop read failed:", err);
-          });
-      });
+      // Tauri exposes native paths through the asset protocol; Electron uses
+      // the custom `pollis-file://` protocol registered in main.
+      const src = convertFileSrc(imagePath);
+      fetch(src)
+        .then((r) => r.blob())
+        .then((blob) => {
+          const name = imagePath.split(/[\\/]/).pop() ?? "image";
+          const file = new File([blob], name, { type: blob.type || "image/png" });
+          setSelectedFile(file);
+          setUploadError(null);
+          if (preview) {
+            URL.revokeObjectURL(preview);
+          }
+          setPreview(URL.createObjectURL(file));
+        })
+        .catch((err) => {
+          console.error("[Settings] pathdrop read failed:", err);
+        });
     };
 
     window.addEventListener("pollis:pathdrop", handlePathDrop);
