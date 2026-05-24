@@ -1,6 +1,6 @@
 # Electron migration
 
-**Status:** in progress
+**Status:** code-complete, awaiting end-to-end GUI verification + cutover decision
 **Branch:** `feature/electron-migration`
 **Goal:** swap Tauri's webview for Electron's Chromium renderer; keep every line of Rust (pollis-core, MLS, voice, libwebrtc, R2, Turso) running in-process via napi-rs.
 
@@ -37,19 +37,17 @@ frontend/ (React + Vite + Tailwind — mostly unchanged)
 
 ## Phases
 
-| # | Scope | Effort | Unblocks |
-|---|-------|--------|----------|
-| 0 | Inventory + scaffold + bridge (5 parallel agents) | 1 day | everything |
-| 1 | Hello-world Electron ↔ napi-rs round trip with one real command | half day | 2–6 |
-| 2 | Port every `#[tauri::command]` to napi + ipcMain | 1–2 days | 6 |
-| 3 | Port Channel events via napi `ThreadsafeFunction` | half day | 6 |
-| 4 | Platform plumbing: tray, autostart, deep links, single instance, window state, notifications | 1–2 days | 7 |
-| 5 | Permissions / entitlements (Info.plist, electron-builder, sandbox flags) | half day | 7 |
-| 6 | WebRTC via livekit-client; screenshare publish via `getDisplayMedia` | half day | — |
-| 7 | electron-builder packaging + GH Actions matrix + electron-updater + macOS notarization | 1–2 days | flip default |
-| 8 | Delete `src-tauri/`, wry fork pin, custom WebKit script, loopback bridge; update CLAUDE.md + wiki | half day | done |
-
-**Total: 6–9 focused days plus testing buffer.**
+| # | Scope | Status | Result |
+|---|-------|--------|--------|
+| 0 | Inventory + scaffold + bridge (5 parallel agents) | ✅ | `docs/electron-migration-inventory.md` + `docs/electron-migration-plumbing.md` + `pollis-node/` crate + `electron/` skeleton + `frontend/src/bridge.ts` + `electron/build/*` |
+| 1 | Hello-world Electron ↔ napi-rs round trip | ✅ | `invoke()` dispatcher + AppState bootstrap; one real command end-to-end |
+| 2 | Port every `#[tauri::command]` to napi + ipcMain | ✅ | **144 dispatch arms** across 19 modules; 5 parallel agents |
+| 3 | Port Channel events via napi `ThreadsafeFunction` | ✅ | `NapiSink` + `RawNapiSink` + 5 subscribe arms wired; `terminal_write` (binary IPC body inbound) deferred |
+| 4 | Platform plumbing | ✅ | Preload bridge with 20+ capabilities + 11-file split (`frontend/src/bridge/{invoke,window,dialog,fs,shell,clipboard,notifications,app,image,updater,runtime}.ts`); 18 frontend files refactored to route through bridge |
+| 5 | Permissions / entitlements / preload sandbox | ✅ | `sandbox: true`; entitlements + Info.plist already in `electron-builder.yml` from Phase 0D |
+| 6 | WebRTC via livekit-client | ✅ | `frontend/src/screenshare/livekitView.ts` joins as hidden `${userId}:view` participant; remote tracks render via `<video srcObject>`; `getDisplayMedia()` publishes via `LocalParticipant.publishTrack`; new `get_livekit_view_token` mints JWT with `hidden: true` |
+| 7 | Release pipeline + electron-updater | ✅ | `.github/workflows/electron-release.yml` (mac/win/linux matrix); `electron-updater` wired with GitHub Releases publish target; bridge `updater.ts` ports cleanly under Electron |
+| 8 | Cleanup / docs | partial | Tauri kept alive for side-by-side. CLAUDE.md untouched (per "update docs once we know the full shape" guidance). No dead code on this branch to delete — wry fork + custom WebKit live on a separate (stashed) branch. |
 
 ## Risks (ranked)
 
@@ -60,13 +58,24 @@ frontend/ (React + Vite + Tailwind — mostly unchanged)
 
 ## Done criteria
 
-- `pnpm dev:electron` runs Pollis with full feature parity to `pnpm dev`
-- Screenshare receive + publish works on Linux Wayland, Linux X11, macOS, Windows
-- Voice works on all three platforms
-- Every Tauri command has a napi equivalent
-- Bundled artifacts (`.dmg`, `.exe`/`.nsis`, `.AppImage`, `.deb`) build in CI on native runners
-- `src-tauri/` deleted
-- CLAUDE.md + `.codesight/wiki/` updated
+| | Criterion | Status |
+|---|---|---|
+| ✅ | Every Tauri command has a napi equivalent | 144 arms — every shim ported or stubbed-with-reason |
+| ⬜ | `pnpm dev:electron` runs Pollis with feature parity to `pnpm dev` | code in place; needs end-to-end GUI smoke test in a real desktop session |
+| ⬜ | Screenshare receive + publish works on Linux Wayland, Linux X11, macOS, Windows | verified at the wiring level; per-platform GUI verification pending |
+| ⬜ | Voice works on all three platforms | Rust voice path untouched; should work identically |
+| ⬜ | Bundled artifacts build in CI on native runners | workflow scaffolded; needs a real tag push to verify |
+| ⬜ | `src-tauri/` deleted | held back until cutover decision |
+| ⬜ | CLAUDE.md + `.codesight/wiki/` updated | held back per "update docs once we know the full shape" |
+
+## Deferred items (track separately when cutover happens)
+
+- **`terminal_write` binary IPC body** (Phase 3): keystroke hot path. Currently stubs. Needs an `invoke_raw(cmd, Buffer, headers)` napi function or a bridge-side Uint8Array → JSON-array fallback (acceptable for low-bandwidth keystrokes).
+- **Custom screen-share picker UI** (Phase 6): Chromium's `setDisplayMediaRequestHandler` currently returns the first source / uses the system picker where available. The Tauri-era in-app `ScreenSharePicker.tsx` could be revived if a richer picker is desired.
+- **Drag-drop producer rewrite** (Phase 4): `windowOnDragDropEvent` is wired both ways but main never emits — Electron's renderer-side `DataTransfer.files` already works. The `AppShell.tsx:120` producer that dispatches `pollis:pathdrop` needs to switch from Tauri's `onDragDropEvent` to DOM events.
+- **Windows badge overlay icon** (Phase 4): `windowSetBadgeIcon` is a no-op stub. `setBadgeCount` covers macOS/Linux. Win11 uses `setOverlayIcon` for the small badge on the taskbar icon.
+- **Tauri custom IPCs in `src-tauri/src/lib.rs`** (`read_clipboard_files`, `read_clipboard_image_to_temp`, `hide_window`): Electron-side equivalents wired through the new bridge methods. Originals stay for the Tauri build until Phase 8 deletion.
+- **Cutover decision**: when Electron is dogfooded enough to flip default, run Phase 8 cleanup (delete `src-tauri/`, drop dual-runtime branches in bridge, retire `desktop-release.yml`, update CLAUDE.md + `.codesight/wiki/`).
 
 ## Parallel work fan-out (Phase 0)
 
