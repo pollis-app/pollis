@@ -1,8 +1,17 @@
 // Screen-share session glue. Subscribes to backend event + frame Channels
 // once per process, mirrors lifecycle into the Zustand store, and exposes a
 // pub/sub dispatcher for raw I420 frame buffers keyed by trackKey.
+//
+// Dual-runtime branching:
+//   - Under Electron, screen-share publish goes through the renderer:
+//     `getDisplayMedia` → `livekitView.publishScreenShare`. The Rust
+//     capture helper is bypassed. The frame Channel subscription on
+//     `ensureSubscribed` is harmless because no frames will be pushed.
+//   - Under Tauri (WebKitGTK has no `getDisplayMedia`), publish goes
+//     through `invoke('start_screen_share', …)` as before, and the I420
+//     frame channel feeds the canvas tile.
 
-import { Channel, invoke } from "../bridge";
+import { Channel, hasMediaDevices, invoke } from "../bridge";
 
 import { useAppStore } from "../stores/appStore";
 import { playSound } from "../utils/sounds";
@@ -159,12 +168,25 @@ class ScreenShareSession {
   private lastBytes = new Map<string, number>();
   private statsListeners = new Map<string, Set<StatsListener>>();
 
-  /** Idempotent. Call once after auth so the backend Channels are wired. */
+  /** Idempotent. Call once after auth so the backend Channels are wired.
+   *  Under Electron this is a no-op — the Rust event/frame channels are
+   *  unused; the JS livekit-client view drives everything. The import of
+   *  `./livekitView` ensures its store subscription is installed so it
+   *  follows voice phase changes from the moment the user lands on a
+   *  page that calls `ensureSubscribed`. */
   async ensureSubscribed(): Promise<void> {
     if (this.subscribed) {
       return;
     }
     this.subscribed = true;
+
+    if (hasMediaDevices()) {
+      // Trigger the side-effect: importing livekitView installs its
+      // store subscription, so the JS view client is ready to follow
+      // voice phase changes.
+      await import("./livekitView");
+      return;
+    }
 
     const events = new Channel<ScreenShareEvent>();
     events.onmessage = (ev) => this.handleEvent(ev);
@@ -232,30 +254,122 @@ class ScreenShareSession {
     return Math.round(((hist.length - 1) / span) * 1000);
   }
 
-  /** Enumerate capturable displays + windows. On macOS this spawns the
-   *  helper, parks it waiting for our selection, and returns the list to
-   *  render in our in-app picker. On Linux/Windows the system portal /
-   *  WGC picker handles selection — the backend returns an empty list as
-   *  a signal to skip the in-app picker and go straight to `start()`. */
+  /** Enumerate capturable displays + windows. On macOS (under Tauri) this
+   *  spawns the helper, parks it waiting for our selection, and returns
+   *  the list to render in our in-app picker. On Linux/Windows the system
+   *  portal / WGC picker handles selection — the backend returns an empty
+   *  list as a signal to skip the in-app picker and go straight to
+   *  `start()`. Under Electron we always return an empty list: Chromium's
+   *  `getDisplayMedia` (driven by `setDisplayMediaRequestHandler` in
+   *  electron/src/main.ts) handles selection itself. */
   async enumerate(): Promise<SourceList> {
+    if (hasMediaDevices()) {
+      return { displays: [], windows: [] };
+    }
     return await invoke<SourceList>("enumerate_screen_sources");
   }
 
   /** Discard a parked picker session — user clicked back/cancel before
-   *  picking a source. */
+   *  picking a source. Under Electron there's no parked picker (Chromium
+   *  drives selection inline). */
   async cancelPicker(): Promise<void> {
+    if (hasMediaDevices()) {
+      return;
+    }
     await invoke("cancel_screen_share_picker");
   }
 
-  /** Start the share. On macOS this must carry the user's `Selection`
-   *  from the in-app picker; the backend sends it to the parked helper.
-   *  On Linux/Windows it must be undefined; the system picker handles
-   *  selection. */
+  /** Start the share. Under Electron this opens Chromium's
+   *  `getDisplayMedia`, then publishes the resulting track via
+   *  livekit-client on the view connection. Under Tauri the call is
+   *  delegated to the Rust capture helper: on macOS the `selection`
+   *  carries the user's pick from our in-app picker; on Linux/Windows
+   *  it must be undefined so the system portal / WGC picker can show. */
   async start(selection?: Selection): Promise<void> {
+    if (hasMediaDevices()) {
+      await this.startElectron();
+      return;
+    }
     await invoke("start_screen_share", { selection: selection ?? null });
   }
 
+  /** Renderer-side publish path. Captures via `getDisplayMedia`, hands
+   *  the track to the livekit-client view connection, and mirrors the
+   *  lifecycle into the Zustand store (so VoiceBar / VoiceMemberTile
+   *  switch to the streaming state) without going through the Rust
+   *  event channel. */
+  private async startElectron(): Promise<void> {
+    // Imported lazily so the Tauri build doesn't pull in the
+    // livekit-client SDK when it'd never use it. (Tree-shaking would
+    // ordinarily do this for us, but the dynamic import makes it
+    // explicit and survives any future Vite config quirks.)
+    const { livekitView } = await import("./livekitView");
+    const store = useAppStore.getState();
+    store.setScreenShareMode("starting");
+    store.setScreenShareError(null);
+    let stream: MediaStream;
+    try {
+      // Audio is intentionally off — voice goes through the Rust voice
+      // client, and getDisplayMedia audio is unreliable cross-platform.
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      store.setScreenShareError(friendlyScreenShareError(msg));
+      store.setScreenShareMode("idle");
+      throw e;
+    }
+    const track = stream.getVideoTracks()[0];
+    if (!track) {
+      store.setScreenShareError("Screen share returned no video track.");
+      store.setScreenShareMode("idle");
+      throw new Error("getDisplayMedia returned no video track");
+    }
+    try {
+      await livekitView.publishScreenShare(track);
+    } catch (e) {
+      // Publish failed — make sure the OS capture handle is released so
+      // the "you're sharing" indicator goes away.
+      try {
+        track.stop();
+      } catch {
+        // ignore
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      store.setScreenShareError(friendlyScreenShareError(msg));
+      store.setScreenShareMode("idle");
+      throw e;
+    }
+    const settings = track.getSettings();
+    store.setScreenShareLocalActive(true);
+    if (
+      typeof settings.width === "number" &&
+      typeof settings.height === "number"
+    ) {
+      store.setScreenShareLocalDimensions({
+        width: settings.width,
+        height: settings.height,
+      });
+    } else {
+      store.setScreenShareLocalDimensions(null);
+    }
+    store.setScreenShareMode("active");
+    playSound("screenshare_start");
+  }
+
   async stop(): Promise<void> {
+    if (hasMediaDevices()) {
+      const { livekitView } = await import("./livekitView");
+      await livekitView.unpublishScreenShare();
+      const store = useAppStore.getState();
+      store.setScreenShareLocalActive(false);
+      store.setScreenShareLocalDimensions(null);
+      store.setScreenShareMode("idle");
+      playSound("screenshare_stop");
+      return;
+    }
     await invoke("stop_screen_share");
   }
 

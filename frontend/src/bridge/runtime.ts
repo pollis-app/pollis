@@ -108,6 +108,23 @@ export function hasTauri(): boolean {
   );
 }
 
+/**
+ * True when the runtime exposes a real `getDisplayMedia` (Chromium under
+ * Electron, modern Firefox/Safari). False under Tauri's WebKitGTK on
+ * Linux because it does not implement getDisplayMedia / WebRTC at all.
+ *
+ * Drives the screen-share publish branch: under Electron we capture in
+ * the renderer and hand the MediaStreamTrack to livekit-client; under
+ * Tauri we fall back to the Rust capture helper subprocess.
+ */
+export function hasMediaDevices(): boolean {
+  return (
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices &&
+    typeof navigator.mediaDevices.getDisplayMedia === "function"
+  );
+}
+
 export function electron(): ElectronAPI {
   if (!window.electronAPI) {
     throw new Error("electron(): called without an Electron host");

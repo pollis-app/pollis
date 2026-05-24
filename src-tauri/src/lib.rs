@@ -470,6 +470,7 @@ pub fn run() {
             commands::mls::reconcile_group_mls,
             commands::mls::process_pending_commits,
 commands::livekit::get_livekit_token,
+            commands::livekit::get_livekit_view_token,
             commands::livekit::get_livekit_url,
             commands::livekit::subscribe_realtime,
             commands::livekit::connect_rooms,

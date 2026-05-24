@@ -22,6 +22,7 @@ pub async fn dispatch(
 ) -> Option<Result<serde_json::Value>> {
     match cmd {
         "get_livekit_token" => Some(get_livekit_token(args).await),
+        "get_livekit_view_token" => Some(get_livekit_view_token(args).await),
         "get_livekit_url" => Some(get_livekit_url(args).await),
         "subscribe_realtime" => Some(subscribe_realtime(args).await),
         "connect_rooms" => Some(connect_rooms(args).await),
@@ -60,6 +61,30 @@ async fn get_livekit_token(args: &serde_json::Value) -> Result<serde_json::Value
     } = serde_json::from_value(args.clone()).map_err(json_err)?;
     let state = ensure_state().await?;
     let out = pollis_core::commands::livekit::get_livekit_token(
+        room_name,
+        identity,
+        display_name,
+        &state,
+    )
+    .await
+    .map_err(core_err)?;
+    serde_json::to_value(out).map_err(json_err)
+}
+
+async fn get_livekit_view_token(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        room_name: String,
+        identity: String,
+        display_name: String,
+    }
+    let Args {
+        room_name,
+        identity,
+        display_name,
+    } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    let out = pollis_core::commands::livekit::get_livekit_view_token(
         room_name,
         identity,
         display_name,

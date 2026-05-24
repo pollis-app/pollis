@@ -33,6 +33,12 @@ struct VideoGrants {
     can_publish: bool,
     can_subscribe: bool,
     can_publish_data: bool,
+    /// LiveKit JWT field for "hidden participant": the server still routes
+    /// tracks to this client but does not include it in any room roster
+    /// returned to other peers. Used by the JS-side screenshare view client
+    /// so it doesn't appear in the participant list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hidden: Option<bool>,
 }
 
 // ── LiveKit server (RoomService) API ───────────────────────────────────────
@@ -297,6 +303,50 @@ pub(crate) fn make_token(config: &Config, room_name: &str, identity: &str, displ
             can_publish: true,
             can_subscribe: true,
             can_publish_data: true,
+            hidden: None,
+        },
+    };
+
+    let mut header = Header::new(Algorithm::HS256);
+    header.typ = Some("JWT".to_string());
+    let key = EncodingKey::from_secret(config.livekit_api_secret.as_bytes());
+    encode(&header, &claims, &key)
+        .map_err(|e| Error::Other(anyhow::anyhow!("JWT sign: {e}")))
+}
+
+/// Mints a JWT for a hidden participant. Used by the renderer-side
+/// livekit-client view connection under Electron — the JS client opens a
+/// second connection to the same voice room as `${userId}:view` to receive
+/// remote screen-share video and publish its own. The `hidden: true` grant
+/// keeps it out of every other client's participant roster (so it doesn't
+/// double-count next to the Rust voice participant). Publish is enabled
+/// because the same connection is also used for the renderer-side
+/// `getDisplayMedia` publish path.
+pub(crate) fn make_view_token(
+    config: &Config,
+    room_name: &str,
+    identity: &str,
+    display_name: &str,
+) -> Result<String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?
+        .as_secs();
+
+    let claims = LiveKitClaims {
+        iss: config.livekit_api_key.clone(),
+        sub: identity.to_string(),
+        iat: now,
+        exp: now + 3600,
+        nbf: now,
+        name: display_name.to_string(),
+        video: VideoGrants {
+            room: room_name.to_string(),
+            room_join: true,
+            can_publish: true,
+            can_subscribe: true,
+            can_publish_data: false,
+            hidden: Some(true),
         },
     };
 
@@ -470,6 +520,17 @@ pub async fn get_livekit_token(
     state: &Arc<AppState>,
 ) -> Result<String> {
     make_token(&state.config, &room_name, &identity, &display_name)
+}
+
+/// Mint a subscribe-only, hidden JWT for the renderer-side livekit-client
+/// view connection. See `make_view_token` for the grant shape.
+pub async fn get_livekit_view_token(
+    room_name: String,
+    identity: String,
+    display_name: String,
+    state: &Arc<AppState>,
+) -> Result<String> {
+    make_view_token(&state.config, &room_name, &identity, &display_name)
 }
 
 pub async fn get_livekit_url(state: &Arc<AppState>) -> Result<String> {

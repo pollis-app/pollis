@@ -14,6 +14,11 @@ pub async fn get_livekit_token(room_name: String, identity: String, display_name
 }
 
 #[tauri::command]
+pub async fn get_livekit_view_token(room_name: String, identity: String, display_name: String, state: State<'_, Arc<AppState>>) -> Result<String> {
+    pollis_core::commands::livekit::get_livekit_view_token(room_name, identity, display_name, &state).await
+}
+
+#[tauri::command]
 pub async fn get_livekit_url(state: State<'_, Arc<AppState>>) -> Result<String> {
     pollis_core::commands::livekit::get_livekit_url(&state).await
 }

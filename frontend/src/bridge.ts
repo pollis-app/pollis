@@ -29,7 +29,7 @@
 
 // Re-export the runtime helpers so any caller (and any new bridge module)
 // uses the canonical detection path.
-export { hasElectron, hasTauri } from "./bridge/runtime";
+export { hasElectron, hasTauri, hasMediaDevices } from "./bridge/runtime";
 export type { DragDropPayload, ElectronAPI } from "./bridge/runtime";
 
 // invoke / Channel / listen — the original three-symbol surface.

@@ -1,11 +1,21 @@
-// WebGL renderer for an I420 video frame stream coming from the backend
-// screen-share Channel. Three LUMINANCE textures (Y/U/V) sampled in a
-// fragment shader that does the YUV→RGB conversion. Cheaper and lower
-// latency than upload-RGBA-per-frame.
+// Remote screen-share renderer.
+//
+// Under Electron (Chromium): the JS-side livekit-client view client
+// subscribes to remote video tracks and stashes them in `livekitView`.
+// We render via a plain `<video srcObject>` — hardware decoded by the
+// browser, 60fps, free.
+//
+// Under Tauri (WebKitGTK on Linux has no WebRTC): the Rust backend
+// decodes frames and pushes I420 planes to the renderer over IPC. A
+// WebGL shader does YUV→RGB on a `<canvas>`. The original implementation
+// — kept here because the Tauri target still ships during the dual-
+// runtime period.
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useSyncExternalStore } from "react";
 
-import { screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
+import { hasElectron } from "../../bridge";
+import { livekitView } from "../../screenshare/livekitView";
+import { LOCAL_PREVIEW_KEY, screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
 
 interface Props {
   trackKey: string;
@@ -16,11 +26,97 @@ interface Props {
   /** Low-cost rendering for in-grid previews: cap repaints at ~15fps and
    *  2× downsample Y/U/V before texture upload (4× less GPU bandwidth
    *  per frame). The fullscreen viewer omits this for source-quality
-   *  rendering. */
+   *  rendering. Ignored under Electron (the browser already throttles
+   *  hidden/offscreen video). */
   preview?: boolean;
 }
 
 const PREVIEW_MIN_PAINT_INTERVAL_MS = 1000 / 15;
+
+// ── Electron / WebRTC path ───────────────────────────────────────────────────
+
+/**
+ * The `trackKey` plumbing was designed for the Rust path where the same
+ * publisher might fan out multiple tracks (e.g. capture + preview). With
+ * livekit-client we key by publisher identity. The Rust event channel
+ * happens to set `trackKey = publisher_identity` when emitting
+ * `remote_started`, which is the same value we store in
+ * `screenShareRemotes` and pass back here as `trackKey` — so the JS
+ * receiver can use it directly. The only exception is the local
+ * preview key, which doesn't apply under Electron (the local capture
+ * track is already in a renderer-side MediaStream we can render
+ * directly — but the existing flow renders local preview through this
+ * same component, so we handle that case by reading from
+ * `livekitView` under the publisher identity used by the local share).
+ */
+const RemoteVideoTileElectron: React.FC<Props> = ({
+  trackKey,
+  className,
+  initialWidth,
+  initialHeight,
+}) => {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  const tracks = useSyncExternalStore(
+    livekitView.subscribe.bind(livekitView),
+    livekitView.getSnapshot.bind(livekitView),
+    livekitView.getSnapshot.bind(livekitView),
+  );
+
+  const track = trackKey === LOCAL_PREVIEW_KEY ? undefined : tracks.get(trackKey);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) {
+      return;
+    }
+    if (!track) {
+      el.srcObject = null;
+      return;
+    }
+    // Wrap the bare MediaStreamTrack in a MediaStream — what <video> wants.
+    el.srcObject = new MediaStream([track]);
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.catch === "function") {
+      playPromise.catch((e) => {
+        // Browsers reject play() on muted/unmuted policy edges. The video
+        // tag is muted, autoPlay, and playsInline, so this should never
+        // throw under Electron — but log for diagnosis if it does.
+        console.warn("[RemoteVideoTile] video.play rejected:", e);
+      });
+    }
+    return () => {
+      el.srcObject = null;
+    };
+  }, [track]);
+
+  return (
+    <video
+      ref={videoRef}
+      data-testid={`remote-video-tile-${trackKey}`}
+      className={className}
+      // Muted: screenshare audio is handled by the Rust voice client. If
+      // the track ever carries audio (it won't under our current grant)
+      // we'd want it silenced anyway to avoid double-routing.
+      autoPlay
+      muted
+      playsInline
+      width={initialWidth}
+      height={initialHeight}
+      style={{
+        display: "block",
+        maxWidth: "100%",
+        maxHeight: "100%",
+        width: "auto",
+        height: "auto",
+        background: "#000",
+        objectFit: "contain",
+      }}
+    />
+  );
+};
+
+// ── Tauri / MJPEG fallback ───────────────────────────────────────────────────
 
 /// 2× nearest-neighbour downsample of a single 8-bit plane. We sample
 /// every other pixel from every other row into a tightly-packed
@@ -179,7 +275,7 @@ function uploadPlane(
   }
 }
 
-export const RemoteVideoTile: React.FC<Props> = ({
+const RemoteVideoTileTauri: React.FC<Props> = ({
   trackKey,
   className,
   initialWidth,
@@ -318,12 +414,7 @@ export const RemoteVideoTile: React.FC<Props> = ({
   // the canvas auto-sizes from its intrinsic dimensions (the width/
   // height attributes we sync to the source resolution in render()),
   // and max-width/max-height clamp it to fit the parent in both axes
-  // while the auto/auto width/height keeps the aspect ratio. This is
-  // the canonical pattern for preserving aspect on a replaced element
-  // and works across every engine including older WebKitGTK; relying
-  // on `object-fit: contain` is unreliable on `<canvas>` in some
-  // WebKit versions, which is what was leaving the canvas vertically
-  // compressed despite the contain hint.
+  // while the auto/auto width/height keeps the aspect ratio.
   return (
     <canvas
       ref={canvasRef}
@@ -339,4 +430,13 @@ export const RemoteVideoTile: React.FC<Props> = ({
       }}
     />
   );
+};
+
+// ── Dispatch ────────────────────────────────────────────────────────────────
+
+export const RemoteVideoTile: React.FC<Props> = (props) => {
+  if (hasElectron()) {
+    return <RemoteVideoTileElectron {...props} />;
+  }
+  return <RemoteVideoTileTauri {...props} />;
 };

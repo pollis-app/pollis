@@ -10,6 +10,8 @@ import {
   clipboard,
   Notification,
   nativeImage,
+  session,
+  desktopCapturer,
 } from "electron";
 import * as path from "path";
 import * as fs from "fs/promises";
@@ -165,6 +167,33 @@ void app.whenReady().then(async () => {
   pollisNode.registerEventEmitters(
     ({ channelId, payload }) => broadcastChannel(channelId, payload),
     ({ channelId, payload }) => broadcastChannel(channelId, payload),
+  );
+
+  // navigator.mediaDevices.getDisplayMedia in the renderer doesn't work
+  // unless the main process registers a handler that picks a source. The
+  // v1 implementation hands back the first screen — Chromium then shows
+  // its own permission UI to the user, so the result is the standard
+  // browser flow (no custom picker required). TODO(phase-6-followup):
+  // build a custom in-app picker that lists all screens + windows so the
+  // user can pick a specific window or non-primary monitor.
+  session.defaultSession.setDisplayMediaRequestHandler(
+    async (_request, callback) => {
+      try {
+        const sources = await desktopCapturer.getSources({
+          types: ["screen", "window"],
+        });
+        const first = sources[0];
+        if (!first) {
+          callback({});
+          return;
+        }
+        callback({ video: first });
+      } catch (e) {
+        console.error("[displayMedia] getSources failed:", e);
+        callback({});
+      }
+    },
+    { useSystemPicker: true },
   );
 
   ipcMain.handle("invoke", async (_e, cmd: string, args: unknown) => {
