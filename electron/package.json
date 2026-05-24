@@ -7,6 +7,9 @@
     "build": "tsc",
     "start": "tsc && electron dist/main.js"
   },
+  "dependencies": {
+    "electron-updater": "^6.3.9"
+  },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "concurrently": "^9.1.2",

@@ -131,4 +131,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("clipboard:readFiles") as Promise<string[]>,
   clipboardReadImageToTemp: () =>
     ipcRenderer.invoke("clipboard:readImageToTemp") as Promise<string | null>,
+
+  // ── Auto-updater ───────────────────────────────────────────────────────────
+  updaterCheck: () =>
+    ipcRenderer.invoke("updater:check") as Promise<{ version: string } | null>,
+  updaterDownloadAndInstall: () =>
+    ipcRenderer.invoke("updater:downloadAndInstall"),
+  updaterOnEvent: (
+    cb: (envelope: {
+      event: "Started" | "Progress" | "Finished";
+      data: { contentLength?: number; chunkLength?: number };
+    }) => void,
+  ) =>
+    subscribe("updater:event", (payload) =>
+      cb(
+        payload as {
+          event: "Started" | "Progress" | "Finished";
+          data: { contentLength?: number; chunkLength?: number };
+        },
+      ),
+    ),
 });

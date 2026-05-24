@@ -152,12 +152,20 @@ nsis:
   # TODO: add `installerIcon`, `uninstallerIcon`, `installerHeaderIcon`
   # once the .ico assets land in this directory.
 
-# TODO: wire electron-updater target in Phase 7. The Tauri config used
-# https://cdn.pollis.com/releases/update-{{bundle_type}}.json with a
-# minisign pubkey; the Electron equivalent is `publish:` with provider
-# `generic` (url: https://cdn.pollis.com/releases/) plus a code-signing
-# cert for installer trust (electron-updater verifies the installer
-# signature, not a separate minisign blob).
-# publish:
-#   provider: generic
-#   url: https://cdn.pollis.com/releases/
+# Auto-updater publish target. GitHub Releases is the path of least
+# resistance — electron-builder uploads installers + latest{,-mac,-linux}.yml
+# manifests as release assets, and `autoUpdater` reads them via the
+# default GitHub provider. Requires GH_TOKEN env in CI; locally the upload
+# is skipped silently (electron-builder warns and continues).
+#
+# If we later want to mirror to cdn.pollis.com (where the Tauri pipeline
+# served minisign-signed update.json), switch provider to `generic` with
+# `url: https://cdn.pollis.com/releases/`. electron-updater verifies the
+# installer's code-signature, not a separate detached signature — so the
+# pollis.com mirror would just hold the same assets electron-builder
+# already produces.
+publish:
+  provider: github
+  owner: actuallydan
+  repo: pollis
+  releaseType: draft

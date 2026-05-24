@@ -17,6 +17,7 @@ import * as path from "path";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as childProcess from "child_process";
+import { autoUpdater } from "electron-updater";
 
 // pollis-node lives at <repo-root>/pollis-node; from electron/dist/main.js,
 // ../../pollis-node resolves to <repo-root>/pollis-node
@@ -204,6 +205,59 @@ void app.whenReady().then(async () => {
 
   ipcMain.handle("invoke", async (_e, cmd: string, args: unknown) => {
     return pollisNode.invoke(cmd, args);
+  });
+
+  // ── Updater handlers ───────────────────────────────────────────────────
+  // electron-updater requires a packaged + (on mac) signed build to do
+  // anything real. In dev (`pnpm dev:electron`), short-circuit so the UI's
+  // mounted check call doesn't throw — same shape Tauri's plugin uses when
+  // there's no update.
+  ipcMain.handle("updater:check", async () => {
+    if (!app.isPackaged) {
+      return null;
+    }
+    try {
+      const res = await autoUpdater.checkForUpdates();
+      if (!res || !res.updateInfo || res.updateInfo.version === app.getVersion()) {
+        return null;
+      }
+      return { version: res.updateInfo.version };
+    } catch (e) {
+      console.warn("[updater] check failed:", e);
+      return null;
+    }
+  });
+
+  ipcMain.handle("updater:downloadAndInstall", async () => {
+    if (!app.isPackaged) {
+      throw new Error("updater not available in dev");
+    }
+    await autoUpdater.downloadUpdate();
+    // quitAndInstall is triggered by the 'update-downloaded' listener
+    // below; this just kicks off the download.
+  });
+
+  autoUpdater.on("download-progress", (p) => {
+    sendToAllRenderers("updater:event", {
+      event: "Progress",
+      data: { chunkLength: Math.round(p.delta ?? 0) },
+    });
+  });
+  autoUpdater.on("update-available", (info) => {
+    sendToAllRenderers("updater:event", {
+      event: "Started",
+      data: { contentLength: undefined, version: info.version },
+    });
+  });
+  autoUpdater.on("update-downloaded", () => {
+    sendToAllRenderers("updater:event", { event: "Finished", data: {} });
+    // Caller invokes app.relaunch via the existing process.relaunch path
+    // after the UI transitions through the "installing" / "relaunching"
+    // states — keep that flow intact.
+    autoUpdater.quitAndInstall(false, true);
+  });
+  autoUpdater.on("error", (e) => {
+    console.error("[updater] error:", e);
   });
 
   // ── Window handlers ──────────────────────────────────────────────────────
