@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from "react";
-import { invoke, Channel } from "@tauri-apps/api/core";
+import { invoke, Channel } from "../bridge";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";

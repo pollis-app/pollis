@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../bridge';
 import type { User, Group, Channel, Message, AccountsIndex } from '../types';
 
 // ── Auth ───────────────────────────────────────────────────────────────────

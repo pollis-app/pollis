@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { useAppStore } from "../stores/appStore";
 import { TYPING_REFRESH_MS } from "../stores/typingStore";
 

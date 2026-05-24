@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAppStore } from "../stores/appStore";
 import { useRequestGroupAccess, useMyJoinRequest, useUserGroupsWithChannels, groupQueryKeys } from "../hooks/queries";

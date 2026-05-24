@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../bridge';
 
 /**
  * Play a named sound effect via the Rust backend.

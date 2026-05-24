@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "../bridge";
 
 // Mirrors VoiceTestEvent in src-tauri/src/commands/voice_test.rs
 type VoiceTestEvent =

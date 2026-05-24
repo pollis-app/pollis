@@ -9,7 +9,7 @@ import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { getVersion } from "@tauri-apps/api/app";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 
 export const Settings: React.FC = () => {
   const { currentUser } = useAppStore();

@@ -1,4 +1,4 @@
-import { Channel, invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '../bridge';
 
 import { useAppStore } from '../stores/appStore';
 import type { VoiceParticipant, VoiceConnectionQuality } from '../types';

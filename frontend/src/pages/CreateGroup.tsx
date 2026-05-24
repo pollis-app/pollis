@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useAppStore } from "../stores/appStore";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
 import { deriveSlug } from "../utils/urlRouting";
 import { groupQueryKeys } from "../hooks/queries/useGroups";

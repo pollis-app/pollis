@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../bridge";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TitleBar } from "./TitleBar";
 import { BreadcrumbNav } from "./BreadcrumbNav";

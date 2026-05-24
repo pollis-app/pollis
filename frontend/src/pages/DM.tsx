@@ -7,7 +7,7 @@ import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
 import { useAppStore } from "../stores/appStore";
 import { usePresenceStatus } from "../stores/presenceStore";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { voiceSession } from "../voice";
 import { KeyChangeBanner } from "../components/Security/KeyChangeBanner";
 import { warmVoiceChannel } from "../utils/voiceWarmup";

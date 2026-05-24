@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke } from '../bridge';
 
 import { notify } from '../utils/notify';
 import { useAppStore } from '../stores/appStore';

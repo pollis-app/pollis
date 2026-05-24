@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { usePreferences, applyPreferences, applyDeviceFontSize } from "../hooks/queries/usePreferences";
 import {
   hslToHex,
