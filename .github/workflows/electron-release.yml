@@ -1,0 +1,265 @@
+name: Electron Release
+
+# Phase 7: parallel pipeline to the legacy Tauri release. Each platform job
+# builds pollis-node (the napi-rs cdylib), the React frontend, and the
+# Electron app via electron-builder. Artifacts (.dmg / .exe / .AppImage /
+# .deb) upload per-platform; a final job concatenates them into a release.
+#
+# Triggered by:
+#   - push of any v* tag → full release
+#   - workflow_dispatch  → ad-hoc artifact build for testing
+#
+# Signing: macOS uses the same Apple Developer ID cert as the Tauri
+# pipeline (Developer ID Application: Daniel Kral (9JF7WWYMU2)). Windows is
+# unsigned for now — TODO before public ship.
+#
+# Auto-update artifacts (latest.yml / latest-mac.yml) are produced by
+# electron-builder when `publish:` is set in electron-builder.yml. Phase 7
+# wires the actual publish target (probably R2 or a release-asset URL).
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pollis-node
+
+      - name: Stamp version from git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v' electron/package.json > tmp.json && mv tmp.json electron/package.json
+          jq --arg v "$VERSION" '.version = $v' pollis-node/package.json > tmp.json && mv tmp.json pollis-node/package.json
+
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+
+      - name: Install audio-processing build deps
+        run: brew install meson ninja
+
+      - name: Install pnpm deps
+        run: pnpm install
+
+      - name: Build pollis-node (aarch64)
+        run: pnpm --filter @pollis/pollis-node exec napi build --platform --release --target aarch64-apple-darwin
+        working-directory: pollis-node
+
+      - name: Build pollis-node (x64)
+        run: pnpm --filter @pollis/pollis-node exec napi build --platform --release --target x86_64-apple-darwin
+        working-directory: pollis-node
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
+
+      - name: Build Electron + sign + notarize
+        env:
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm --filter @pollis/electron exec electron-builder --mac --arm64 --x64 --config build/electron-builder.yml
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-electron-macos
+          if-no-files-found: error
+          path: |
+            electron/release/*.dmg
+            electron/release/*.zip
+            electron/release/latest-mac.yml
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pollis-node
+
+      - name: Stamp version from git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v' electron/package.json > tmp.json && mv tmp.json electron/package.json
+          jq --arg v "$VERSION" '.version = $v' pollis-node/package.json > tmp.json && mv tmp.json pollis-node/package.json
+
+      - name: Load production secrets
+        shell: bash
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+
+      - name: Install pnpm deps
+        run: pnpm install
+
+      - name: Build pollis-node
+        run: pnpm build:pollis-node
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
+
+      - name: Build Electron (unsigned — TODO: EV cert)
+        run: pnpm --filter @pollis/electron exec electron-builder --win --x64 --config build/electron-builder.yml
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-electron-windows
+          if-no-files-found: error
+          path: |
+            electron/release/*.exe
+            electron/release/latest.yml
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pollis-node
+
+      - name: Stamp version from git tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          jq --arg v "$VERSION" '.version = $v' electron/package.json > tmp.json && mv tmp.json electron/package.json
+          jq --arg v "$VERSION" '.version = $v' pollis-node/package.json > tmp.json && mv tmp.json pollis-node/package.json
+
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+
+      # webrtc-audio-processing-sys vendored build needs these on Linux
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build clang libgtk-3-dev libasound2-dev libpulse-dev libdbus-1-dev
+
+      - name: Install pnpm deps
+        run: pnpm install
+
+      - name: Build pollis-node
+        run: pnpm build:pollis-node
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
+
+      - name: Build Electron
+        run: pnpm --filter @pollis/electron exec electron-builder --linux --x64 --config build/electron-builder.yml
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-electron-linux
+          if-no-files-found: error
+          path: |
+            electron/release/*.AppImage
+            electron/release/*.deb
+            electron/release/*.rpm
+            electron/release/latest-linux.yml
+
+  release:
+    needs: [build-macos, build-windows, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: true
+
+  # TODO Phase 7 follow-ups:
+  #  - Upload latest{,-mac,-linux}.yml + installer assets to R2 (or release-asset
+  #    URL) and point electron-updater at it (publish: block in
+  #    electron-builder.yml).
+  #  - Wire Windows EV cert signing (CSC_LINK + CSC_KEY_PASSWORD secrets).
+  #  - Apply prod DB migration (mirror the Tauri pipeline's db-apply step;
+  #    currently runs from desktop-release.yml — both pipelines hitting the
+  #    same Turso is fine but only one should own migrations).
+  #  - Decide cutover: when Electron is the default, delete desktop-release.yml
+  #    in Phase 8.
