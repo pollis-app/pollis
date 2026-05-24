@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { Phone } from "lucide-react";
+import { Phone, PhoneCall } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import type { PendingDmRequest } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
@@ -22,6 +22,7 @@ export const DMPage: React.FC = () => {
   const markRead = useAppStore((s) => s.markRead);
   const currentUser = useAppStore((s) => s.currentUser);
   const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
+  const outgoingCall = useAppStore((s) => s.outgoingCall);
 
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
   const [memberCount, setMemberCount] = React.useState<number>(0);
@@ -174,21 +175,56 @@ export const DMPage: React.FC = () => {
             "Direct Message"
           )}
         </span>
-        {canCall && (
-          <button
-            data-testid="dm-header-call"
-            onClick={startCall}
-            onMouseEnter={() => otherUserId && warmVoiceChannel(`call-prewarm-${otherUserId}`)}
-            aria-label={`Call @${username}`}
-            className="icon-btn-sm flex-shrink-0"
-            style={{
-              position: 'absolute',
-              right: '0.75rem'
-            }}
-          >
-            <Phone size={14} aria-hidden="true" />
-          </button>
-        )}
+        {canCall && (() => {
+          // If there's a live outgoing 1:1 call to this exact user, the
+          // button returns the user to the call room instead of starting
+          // a new one. Visual + label both flip so it's obvious this is
+          // a "rejoin" action, not "initiate".
+          const inCallWithThisUser =
+            outgoingCall != null && outgoingCall.calleeId === otherUserId;
+          return (
+            <button
+              data-testid="dm-header-call"
+              onClick={() => {
+                if (inCallWithThisUser) {
+                  navigate({
+                    to: "/call/$callId",
+                    params: { callId: outgoingCall.callId },
+                  });
+                } else {
+                  void startCall();
+                }
+              }}
+              onMouseEnter={() =>
+                !inCallWithThisUser &&
+                otherUserId &&
+                warmVoiceChannel(`call-prewarm-${otherUserId}`)
+              }
+              aria-label={
+                inCallWithThisUser
+                  ? `Return to call with @${username}`
+                  : `Call @${username}`
+              }
+              title={
+                inCallWithThisUser
+                  ? `Return to call with @${username}`
+                  : `Call @${username}`
+              }
+              className="icon-btn-sm flex-shrink-0"
+              style={{
+                position: "absolute",
+                right: "0.75rem",
+                color: inCallWithThisUser ? "var(--c-accent)" : undefined,
+              }}
+            >
+              {inCallWithThisUser ? (
+                <PhoneCall size={14} aria-hidden="true" />
+              ) : (
+                <Phone size={14} aria-hidden="true" />
+              )}
+            </button>
+          );
+        })()}
       </div>
       <KeyChangeBanner peerUserId={otherUserId} peerLabel={username ? `@${username}` : undefined} />
       <div className="flex-1 overflow-hidden flex flex-col min-h-0">

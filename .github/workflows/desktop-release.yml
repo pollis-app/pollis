@@ -1,9 +1,19 @@
-name: Desktop Release
+name: Desktop Release (Tauri — frozen)
 
+# Tauri pipeline. As of v1.1.0 the project ships from electron-release.yml.
+# This workflow no longer auto-fires on tag push so v1.1.0+ tags don't
+# republish the cdn.pollis.com/releases/update-*.json Tauri-format
+# manifests — leaving Tauri-side updaters pinned at v1.0.164 (the last
+# Tauri-built release). Old Tauri users keep polling, see no newer
+# version, and stay on what they have until they manually install the
+# Electron build. They can't pull an Electron .AppImage/.exe/.dmg via
+# the Tauri updater because Tauri verifies a minisign signature that the
+# Electron build doesn't carry — but more importantly, we just don't
+# advertise it to them.
+#
+# `workflow_dispatch` is kept so a hotfix Tauri build can still be cut
+# manually if needed during the migration window.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 jobs:
