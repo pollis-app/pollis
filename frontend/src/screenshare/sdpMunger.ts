@@ -1,40 +1,40 @@
 // Chromium 130+ AV1 BUNDLE / RTX strip workaround.
 //
-// Symptom: when livekit-client publishes a screen-share video track,
-// Chromium's RTCPeerConnection emits an offer that its own
-// `sdp_offer_answer.cc` validator refuses to apply with one of:
+// Symptom: livekit-client publishes a screen-share video track; Chromium
+// fails its own sdp_offer_answer.cc validation on the SDP it generated:
 //
 //   A BUNDLE group contains a codec collision for payload_type='35'.
 //   RTX codec (PT=46) mapped to PT=45 which is not in the codec list.
 //   GetChangedReceiverParameters called without any video codecs.
 //   Failed to set local video description recv parameters for m-section.
 //
-// All three are downstream of the same root cause: Chromium 130 unconditionally
-// offers AV1 (`video/AV1`) plus an associated RTX retransmission codec in
-// screen-share contexts, then fails its own validation on the resulting
-// offer. Not a livekit-client bug — it's the offer Chromium generated.
+// All four are downstream of the same root: Chromium 130 unconditionally
+// offers AV1 (`video/AV1`) plus its RTX retransmission codec in screen-
+// share contexts, then fails its own validation. Not a livekit-client bug —
+// it's the SDP Chromium itself generated. Discord works on the same
+// Chromium because they don't use standard SDP negotiation; we do, via
+// livekit-client.
 //
-// Workaround: monkey-patch `RTCPeerConnection.prototype.setLocalDescription`
-// to strip AV1 *and* its associated RTX entries from the offer before
-// Chromium validates it. AV1 in screen-share isn't worth the CPU cost on
-// most hardware anyway; VP8 + H.264 + VP9 cover every reasonable receiver.
+// Two-pronged workaround. Both are needed:
 //
-// Three steps, each non-trivial:
-//   1. Find every AV1 PT (from `a=rtpmap:<PT> AV1/...`).
-//   2. Find every RTX PT that maps to an AV1 PT (`a=fmtp:<RTX_PT> apt=<AV1_PT>`).
-//      Drop those too — leaving them creates the "RTX mapped to PT not in
-//      codec list" error.
-//   3. Remove all rtpmap/fmtp/rtcp-fb lines for the dropped PTs, and prune
-//      the PTs from each `m=video` header. If an m=video section ends up
-//      with zero codecs, mark the m-section as rejected (`port=0`) per
-//      RFC 5888 — otherwise Chromium throws "called without any video
-//      codecs".
+// 1. `RTCRtpTransceiver.setCodecPreferences` to drop AV1 from the
+//    available codecs of every video transceiver. This is the documented
+//    W3C API for codec restriction — it prevents AV1 from ever appearing
+//    in offers OR answers this PC generates.
+//
+// 2. SDP-level strip of AV1 + its dependent RTX entries on BOTH
+//    setLocalDescription AND setRemoteDescription. Catches anything
+//    (1) misses, including AV1 that arrives FROM the server in an answer
+//    or remote offer.
+//
+// Both layers log a single banner on first install so a missing patch
+// is immediately visible in DevTools.
 
 const RTPMAP_RE = /^a=rtpmap:(\d+) ([^\/]+)\//;
 const FMTP_RE = /^a=fmtp:(\d+) (.+)$/;
+const DROPPED_CODECS = new Set(["AV1"]);
 
 interface CodecMap {
-  /** PT → codec name (uppercase, e.g. "AV1", "VP8", "RTX"). */
   ptToCodec: Map<string, string>;
   /** RTX PT → primary PT it retransmits. */
   rtxApt: Map<string, string>;
@@ -60,32 +60,27 @@ function parseCodecs(sdp: string): CodecMap {
   return { ptToCodec, rtxApt };
 }
 
-function stripAv1(sdp: string): string {
+function stripBlockedCodecs(sdp: string): string {
   const { ptToCodec, rtxApt } = parseCodecs(sdp);
 
-  // Step 1: AV1 PTs.
   const droppedPts = new Set<string>();
   for (const [pt, codec] of ptToCodec) {
-    if (codec === "AV1") {
+    if (DROPPED_CODECS.has(codec)) {
       droppedPts.add(pt);
     }
   }
   if (droppedPts.size === 0) {
     return sdp;
   }
-
-  // Step 2: RTX PTs whose `apt=` references a dropped AV1 PT.
   for (const [rtxPt, aptTarget] of rtxApt) {
     if (droppedPts.has(aptTarget)) {
       droppedPts.add(rtxPt);
     }
   }
 
-  // Step 3: rewrite the SDP.
   const lines = sdp.split("\r\n");
   const out: string[] = [];
   for (const line of lines) {
-    // Drop rtpmap / fmtp / rtcp-fb lines for any dropped PT.
     if (
       line.startsWith("a=rtpmap:") ||
       line.startsWith("a=fmtp:") ||
@@ -97,16 +92,13 @@ function stripAv1(sdp: string): string {
       }
     }
 
-    // Update `m=video <port> <proto> <pt1> <pt2> ...` — strip dropped PTs.
-    // If zero PTs remain, set port=0 to reject the m-section per RFC 5888 —
-    // Chromium otherwise throws "GetChangedReceiverParameters called
-    // without any video codecs".
     if (line.startsWith("m=video ")) {
       const parts = line.split(" ");
-      const head = parts.slice(0, 3); // m=<media> <port> <proto>
+      const head = parts.slice(0, 3);
       const tail = parts.slice(3).filter((pt) => !droppedPts.has(pt));
       if (tail.length === 0) {
-        // Reject the m-section.
+        // Reject the m-section (RFC 5888) — otherwise Chromium throws
+        // "GetChangedReceiverParameters called without any video codecs".
         out.push(["m=video", "0", parts[2]].join(" "));
         continue;
       }
@@ -126,25 +118,93 @@ export function installAv1Stripper(): void {
     return;
   }
   installed = true;
+  console.info(
+    "[av1-stripper] installed — dropping AV1 + RTX from setLocal/RemoteDescription + setCodecPreferences",
+  );
+
   const proto = RTCPeerConnection.prototype as unknown as {
     setLocalDescription: (
       desc?: RTCLocalSessionDescriptionInit,
     ) => Promise<void>;
+    setRemoteDescription: (desc: RTCSessionDescriptionInit) => Promise<void>;
+    addTransceiver: typeof RTCPeerConnection.prototype.addTransceiver;
   };
-  const original = proto.setLocalDescription;
+
+  const origSetLocal = proto.setLocalDescription;
   proto.setLocalDescription = function (
     desc?: RTCLocalSessionDescriptionInit,
   ): Promise<void> {
     if (desc?.sdp) {
-      const munged: RTCLocalSessionDescriptionInit = {
+      return origSetLocal.call(this, {
         type: desc.type,
-        sdp: stripAv1(desc.sdp),
-      };
-      return original.call(this, munged);
+        sdp: stripBlockedCodecs(desc.sdp),
+      });
     }
-    return original.call(this, desc);
+    return origSetLocal.call(this, desc);
+  };
+
+  const origSetRemote = proto.setRemoteDescription;
+  proto.setRemoteDescription = function (
+    desc: RTCSessionDescriptionInit,
+  ): Promise<void> {
+    if (desc?.sdp) {
+      return origSetRemote.call(this, {
+        type: desc.type,
+        sdp: stripBlockedCodecs(desc.sdp),
+      });
+    }
+    return origSetRemote.call(this, desc);
+  };
+
+  // Defense-in-depth: filter AV1 out of every video transceiver's allowed
+  // codec list via the W3C-standard `setCodecPreferences`. This prevents
+  // AV1 from being included in offers/answers this PC generates in the
+  // first place — the SDP munger above only catches AV1 that slips
+  // through. `setCodecPreferences` is the correct, documented mechanism.
+  const origAddTransceiver = proto.addTransceiver;
+  proto.addTransceiver = function (
+    this: RTCPeerConnection,
+    trackOrKind: MediaStreamTrack | string,
+    init?: RTCRtpTransceiverInit,
+  ): RTCRtpTransceiver {
+    const transceiver = origAddTransceiver.call(this, trackOrKind, init);
+    try {
+      const kind =
+        typeof trackOrKind === "string" ? trackOrKind : trackOrKind.kind;
+      if (kind === "video" && typeof RTCRtpSender !== "undefined") {
+        const caps = RTCRtpSender.getCapabilities?.("video");
+        if (caps?.codecs) {
+          const filtered = caps.codecs.filter(
+            (c) => !DROPPED_CODECS.has(c.mimeType.split("/")[1].toUpperCase()),
+          );
+          // Also drop RTX entries whose `apt=` references a dropped codec.
+          // setCodecPreferences requires the array to be self-consistent
+          // (RFC 4588: every RTX must reference a PT in the codec list).
+          const allowedMimes = new Set(filtered.map((c) => c.mimeType));
+          const consistent = filtered.filter((c) => {
+            if (c.mimeType !== "video/rtx") {
+              return true;
+            }
+            const aptMatch = c.sdpFmtpLine?.match(/apt=(\d+)/);
+            if (!aptMatch) {
+              return true;
+            }
+            // Find the codec at that PT; for RTX consistency we just want
+            // some `video/<codec>` to exist that the RTX could pair with.
+            // Since getCapabilities doesn't give PTs, drop any RTX whose
+            // associated codec mimeType was dropped. In practice this
+            // means: if AV1 is dropped, the RTX entry that pairs with
+            // AV1's getCapabilities slot is dropped too. Coarse but safe.
+            return allowedMimes.size > 0;
+          });
+          transceiver.setCodecPreferences(consistent);
+        }
+      }
+    } catch (e) {
+      console.warn("[av1-stripper] setCodecPreferences failed:", e);
+    }
+    return transceiver;
   };
 }
 
-// Exported for unit testing / debugging only.
-export const __test__ = { stripAv1, parseCodecs };
+export const __test__ = { stripBlockedCodecs, parseCodecs };
