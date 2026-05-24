@@ -77,6 +77,12 @@ function createWindow(): BrowserWindow {
     // safe to set them unconditionally.
     titleBarStyle: "hidden",
     roundedCorners: true,
+    // Transparent backing so the renderer's own CSS background paints the
+    // corners — otherwise the BrowserWindow's default opaque white shows
+    // through the rounded-mask cutouts and you get four white pixels in
+    // each corner.
+    backgroundColor: "#00000000",
+    transparent: true,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

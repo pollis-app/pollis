@@ -179,6 +179,16 @@ class LiveKitView {
     }
     const publication = await room.localParticipant.publishTrack(track, {
       source: Track.Source.ScreenShare,
+      // Force VP8 to avoid a Chromium SDP collision on payload_type 35
+      // when AV1 and H.264 are both offered with the same dynamic PT
+      // ("A BUNDLE group contains a codec collision for
+      // payload_type='35'"). VP8 is the universally supported screen-
+      // share codec and has no PT conflict. Switch to vp9/av1 later
+      // once Chromium's PT allocator settles.
+      videoCodec: 'vp8',
+      // Disable simulcast for screen-share — high-bitrate single layer
+      // matches text legibility better than scaled-down spatial layers.
+      simulcast: false,
     });
     this.localPublication = publication;
     // The publication wraps the MediaStreamTrack as a LocalVideoTrack.

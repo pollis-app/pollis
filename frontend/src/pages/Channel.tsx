@@ -10,6 +10,7 @@ export const ChannelPage: React.FC = () => {
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
   const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
   const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
+  const markRead = useAppStore((s) => s.markRead);
   const pendingDeleteChannelId = useAppStore((s) => s.pendingDeleteChannelId);
   const setPendingDeleteChannelId = useAppStore((s) => s.setPendingDeleteChannelId);
 
@@ -21,8 +22,13 @@ export const ChannelPage: React.FC = () => {
       setSelectedGroupId(groupId);
     }
     setSelectedChannelId(channelId);
+    // Clear the unread badge regardless of how the user got here — direct
+    // URL, breadcrumb back-nav, deep link. Previously markRead only fired
+    // from the Group page's channel-list click handler, so a direct route
+    // visit left the bottom-bar count stuck.
+    markRead(channelId);
     return () => { setSelectedChannelId(null); };
-  }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId]);
+  }, [groupId, channelId, setSelectedGroupId, setSelectedChannelId, markRead]);
 
   useEffect(() => {
     return () => { setPendingDeleteChannelId(null); };

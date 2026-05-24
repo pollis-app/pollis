@@ -90,6 +90,17 @@ export const TitleBar: React.FC = () => {
     </div>
   );
 
+  // CSS app-region marker — Electron (Chromium) reads this directly and
+  // makes the area draggable. Tauri ignores it and relies on
+  // data-tauri-drag-region + the onMouseDown handler instead. The two
+  // approaches coexist cleanly.
+  const dragStyle: React.CSSProperties = {
+    WebkitAppRegion: "drag",
+  } as React.CSSProperties;
+  const noDragStyle: React.CSSProperties = {
+    WebkitAppRegion: "no-drag",
+  } as React.CSSProperties;
+
   return (
     <div
       data-testid="title-bar"
@@ -104,9 +115,12 @@ export const TitleBar: React.FC = () => {
         // the previous 8px sat the dots noticeably tighter to the corner.
         paddingLeft: isMac ? 12 : 12,
         paddingRight: isMac ? 12 : 0,
+        ...dragStyle,
       } as React.CSSProperties}
     >
-      {isMac ? macControls : (
+      {isMac ? (
+        <div style={noDragStyle}>{macControls}</div>
+      ) : (
         <div className="flex items-center gap-2">
           <PollisLogo size={14} color="var(--c-accent)" />
           <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>Pollis</span>
@@ -125,7 +139,9 @@ export const TitleBar: React.FC = () => {
         <div className="flex items-center gap-2">
           <PollisLogo size={14} color="var(--c-accent)" />
         </div>
-      ) : winControls}
+      ) : (
+        <div style={noDragStyle}>{winControls}</div>
+      )}
     </div>
   );
 };

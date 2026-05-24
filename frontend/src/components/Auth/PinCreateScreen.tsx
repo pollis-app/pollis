@@ -120,6 +120,9 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
 
             <div>
               <InputOtp
+                /* key forces a remount on step transition so the
+                   focus / highlight state resets to the first slot */
+                key={step}
                 length={4}
                 value={currentValue}
                 onChange={(v) => {

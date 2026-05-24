@@ -156,8 +156,16 @@ async fn room_service_list_participants(
     Ok(parsed
         .participants
         .into_iter()
-        // Filter out internal "server" participants used for data-channel fanout.
-        .filter(|p| p.identity != "server" && p.identity != "pollis-backend")
+        // Filter out internal "server" participants used for data-channel
+        // fanout, and the renderer-side `:view` clients used for screen-share
+        // receive (Phase 6) — those represent the same physical user as the
+        // matching `voice-<id>` participant and would otherwise dup the
+        // sidebar list.
+        .filter(|p| {
+            p.identity != "server"
+                && p.identity != "pollis-backend"
+                && !p.identity.ends_with(":view")
+        })
         .map(|p| VoiceParticipantInfo {
             name: if p.name.is_empty() {
                 p.identity.clone()

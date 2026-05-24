@@ -2,3 +2,9 @@ packages:
   - frontend
   - electron
   - pollis-node
+
+ignoredBuiltDependencies:
+  - electron
+  - esbuild
+  - sharp
+  - workerd

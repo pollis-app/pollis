@@ -1,22 +1,17 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Circle, Pencil, Trash2, Volume2, X } from "lucide-react";
+import { ArrowLeft, Pencil, Trash2, Volume2, X } from "lucide-react";
 import { useAppStore } from "../stores/appStore";
 import { useDeleteChannel, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
+import { VoiceMemberTile } from "../components/Voice/VoiceMemberTile";
 import { useVoiceParticipants } from "../hooks/queries/useVoiceParticipants";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import { Button } from "../components/ui/Button";
-import { NavigableList } from "../components/ui/NavigableList";
-import { Avatar } from "../components/ui/Avatar";
+import { NavigableGrid } from "../components/ui/NavigableGrid";
+import type { VoiceParticipant } from "../types";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 import { voiceSession } from "../voice";
-
-interface ObserverParticipant {
-  identity: string;
-  name: string;
-  avatar_url?: string | null;
-}
 
 
 
@@ -146,44 +141,50 @@ export const VoiceChannelPage: React.FC = () => {
         </Button>
       </div>
 
-      {/* Participant list */}
+      {/* Participant list. When the user is IN the call we show the live
+          VoiceChannelView (active speakers, screenshare streams,
+          connection quality). When they're a bystander we show the same
+          tile grid in an inert variant — no speaking indicators, no
+          stream rendering — so the layout is identical the moment they
+          hit Join. */}
       {isInCall ? (
         <VoiceChannelView />
       ) : (
         <div
-          className="flex-1 flex flex-col font-mono text-xs"
+          className="flex-1 flex flex-col font-mono text-xs min-h-0"
           style={{
             borderTop: "1px solid var(--c-border)",
             borderBottom: "1px solid var(--c-border)",
           }}
         >
-          <NavigableList<ObserverParticipant>
-            items={observerParticipants}
+          <NavigableGrid<VoiceParticipant>
+            items={observerParticipants.map((p): VoiceParticipant => ({
+              identity: p.identity,
+              name: p.name,
+              avatarKey: p.avatar_url ?? null,
+              isMuted: false,
+              isLocal: false,
+            }))}
             getKey={(p) => p.identity}
-            autoFocus={false}
+            testId="voice-channel-observers"
             emptyLabel="No one in this channel"
-            renderRow={(p) => (
-              <>
-                <span
-                  className="text-lg"
-                  style={{
-                    color: "var(--c-border)",
-                    lineHeight: 1.25,
-                    flexShrink: 0,
-                    display: "flex",
-                    alignItems: "center",
-                  }}
-                >
-                  <Circle size={12} fill="var(--c-border)" />
-                </span>
-                <Avatar
-                  avatarKey={p.avatar_url ?? null}
-                  size={20}
-                  alt={p.name}
-                  testId={`voice-observer-avatar-${p.identity}`}
-                />
-                <span className="flex-1 truncate">{p.name}</span>
-              </>
+            autoFocus={false}
+            minCellWidth={180}
+            maxCellWidth={240}
+            renderCell={(p, { focused }) => (
+              <VoiceMemberTile
+                identity={p.identity}
+                name={p.name}
+                avatarKey={p.avatarKey ?? null}
+                isMuted={false}
+                isLocal={false}
+                isSpeaking={false}
+                focused={focused}
+                // No stream props in the inert preview, so onView is
+                // never reachable — `isStreaming ? () => onView(...) : undefined`
+                // in VoiceMemberTile.tsx:192 short-circuits to undefined.
+                onView={() => {}}
+              />
             )}
           />
         </div>

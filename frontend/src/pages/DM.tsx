@@ -19,6 +19,7 @@ export const DMPage: React.FC = () => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
   const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
+  const markRead = useAppStore((s) => s.markRead);
   const currentUser = useAppStore((s) => s.currentUser);
   const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
 
@@ -28,8 +29,11 @@ export const DMPage: React.FC = () => {
 
   useEffect(() => {
     setSelectedConversationId(conversationId);
+    // Same fix as ChannelPage: clear the unread badge on any nav path,
+    // not just the DMs list click handler.
+    markRead(conversationId);
     return () => { setSelectedConversationId(null); };
-  }, [conversationId, setSelectedConversationId]);
+  }, [conversationId, setSelectedConversationId, markRead]);
 
   // Fetch member list for the conversation so we can target the right
   // user_id when blocking or calling, and discover whether the other party
