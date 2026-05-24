@@ -78,6 +78,7 @@ const RemoteVideoTileElectron: React.FC<Props> = ({
     }
     if (!track) {
       el.srcObject = null;
+      livekitView.clearStats(trackKey);
       return;
     }
     // Wrap the bare MediaStreamTrack in a MediaStream — what <video> wants.
@@ -85,16 +86,57 @@ const RemoteVideoTileElectron: React.FC<Props> = ({
     const playPromise = el.play();
     if (playPromise && typeof playPromise.catch === "function") {
       playPromise.catch((e) => {
-        // Browsers reject play() on muted/unmuted policy edges. The video
-        // tag is muted, autoPlay, and playsInline, so this should never
-        // throw under Electron — but log for diagnosis if it does.
         console.warn("[RemoteVideoTile] video.play rejected:", e);
       });
     }
+
+    // Per-frame stats via requestVideoFrameCallback (Chromium-supported,
+    // perfect for Electron). Counts decoded frames over a sliding 1s
+    // window, reads native dimensions from the metadata each frame so
+    // the tile picks up resolution changes (e.g. window resize while
+    // sharing). Tauri's path doesn't enter this branch — its frame
+    // listener lives in screenShareSession.
+    let frames = 0;
+    let windowStart = performance.now();
+    let lastWidth = 0;
+    let lastHeight = 0;
+    let cancelled = false;
+    type RVFC = (now: number, metadata: VideoFrameCallbackMetadata) => void;
+    const supportsRvfc =
+      typeof el.requestVideoFrameCallback === "function";
+    if (supportsRvfc) {
+      const tick: RVFC = (_now, metadata) => {
+        if (cancelled) {
+          return;
+        }
+        frames += 1;
+        if (metadata.width) {
+          lastWidth = metadata.width;
+        }
+        if (metadata.height) {
+          lastHeight = metadata.height;
+        }
+        const elapsed = performance.now() - windowStart;
+        if (elapsed >= 1000) {
+          livekitView.recordStats(trackKey, {
+            fps: Math.round((frames * 1000) / elapsed),
+            width: lastWidth,
+            height: lastHeight,
+          });
+          frames = 0;
+          windowStart = performance.now();
+        }
+        el.requestVideoFrameCallback(tick);
+      };
+      el.requestVideoFrameCallback(tick);
+    }
+
     return () => {
+      cancelled = true;
       el.srcObject = null;
+      livekitView.clearStats(trackKey);
     };
-  }, [track]);
+  }, [track, trackKey]);
 
   return (
     <video

@@ -53,7 +53,14 @@ function computeLayout(
   aspect: number,
   gap: number,
 ): Layout {
-  if (n === 0 || W <= 0 || H <= 0) {
+  // Only W gates layout — cellH is derived from cellW via the aspect
+  // ratio, so H is informational. Bailing on H <= 0 used to cause the
+  // observer view (NavigableGrid in a flex column where height settles
+  // after first paint) to render zero-sized tiles forever, since
+  // box.h started at 0 and the H-gated branch returned cellW: 0 from
+  // every recompute.
+  void H;
+  if (n === 0 || W <= 0) {
     return { cols: 1, cellW: 0, cellH: 0 };
   }
   // Discord-style sizing: each tile gets `W / n` of the row width,

@@ -128,6 +128,72 @@ class LiveKitView {
   private localTrack: LocalVideoTrack | null = null;
   private localPublication: LocalTrackPublication | null = null;
 
+  // ── Per-track stats (FPS + decoded dimensions) ────────────────────────────
+  //
+  // RemoteVideoTile feeds these via requestVideoFrameCallback on the
+  // <video> element. The Tauri-era stats path (screenShareSession's
+  // FrameListener) doesn't fire under Electron because no frames flow
+  // through the Rust channel — livekit-client + Chromium own the decode
+  // pipeline now. Mirroring stats here gives useScreenShareStats a single
+  // source of truth per runtime.
+  private statsByKey = new Map<
+    string,
+    { fps: number; width: number; height: number }
+  >();
+  private statsListeners = new Map<
+    string,
+    Set<(s: { fps: number; width: number; height: number }) => void>
+  >();
+
+  recordStats(
+    key: string,
+    stats: { fps: number; width: number; height: number },
+  ): void {
+    this.statsByKey.set(key, stats);
+    const set = this.statsListeners.get(key);
+    if (set) {
+      for (const fn of set) {
+        fn(stats);
+      }
+    }
+  }
+
+  clearStats(key: string): void {
+    this.statsByKey.delete(key);
+    const set = this.statsListeners.get(key);
+    if (set) {
+      const zero = { fps: 0, width: 0, height: 0 };
+      for (const fn of set) {
+        fn(zero);
+      }
+    }
+  }
+
+  onStats(
+    key: string,
+    cb: (s: { fps: number; width: number; height: number }) => void,
+  ): () => void {
+    let set = this.statsListeners.get(key);
+    if (!set) {
+      set = new Set();
+      this.statsListeners.set(key, set);
+    }
+    set.add(cb);
+    const current = this.statsByKey.get(key);
+    if (current) {
+      cb(current);
+    }
+    return () => {
+      const s = this.statsListeners.get(key);
+      if (s) {
+        s.delete(cb);
+        if (s.size === 0) {
+          this.statsListeners.delete(key);
+        }
+      }
+    };
+  }
+
   // ── Subscription API ──────────────────────────────────────────────────────
 
   /** useSyncExternalStore subscribe. */
@@ -405,6 +471,17 @@ class LiveKitView {
       } catch (e) {
         console.warn('[livekit-view] unpublish on leave:', e);
       }
+    }
+    // Clear the Zustand store mirror of local-screenshare state — the
+    // unpublishScreenShare above closes the track but doesn't touch
+    // store.screenShareLocalActive/Mode/Dimensions. Without this reset
+    // the next voice-rejoin renders the tile as "still streaming" with
+    // no actual stream behind it.
+    const store = useAppStore.getState();
+    if (store.screenShareLocalActive) {
+      store.setScreenShareLocalActive(false);
+      store.setScreenShareLocalDimensions(null);
+      store.setScreenShareMode('idle');
     }
     if (room) {
       try {
