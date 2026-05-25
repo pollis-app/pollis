@@ -115,6 +115,46 @@ pub async fn derive_voice_key(
     Ok((key, idx, epoch, mls_group_id))
 }
 
+/// JSON-serializable wrapper around the derived key for the napi command.
+/// Used by the renderer-side livekit-client view connection to enable
+/// E2EE on screen-share publishes/subscribes with the same MLS-derived
+/// key the Rust voice path uses.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct E2eeKeyInfo {
+    pub key: Vec<u8>,
+    pub key_index: i32,
+    pub epoch: u64,
+    pub mls_group_id: String,
+}
+
+/// Renderer-facing entry point. Returns the same MLS-derived shared key
+/// the Rust voice path uses for `KeyProvider::with_shared_key`, so the
+/// JS-side `livekit-client`'s ExternalE2EEKeyProvider can encrypt the
+/// screen-share video track with an interop-compatible key. Both SDKs
+/// HKDF the shared key with the canonical `LKFrameEncryptionKey` salt
+/// internally, so passing the raw 32-byte MLS export to both produces
+/// the same per-frame encryption key on every peer.
+pub async fn get_voice_e2ee_key(
+    channel_id: String,
+    user_id: String,
+    counterparty_user_id: Option<String>,
+    state: &Arc<AppState>,
+) -> Result<E2eeKeyInfo> {
+    let (key, key_index, epoch, mls_group_id) = derive_voice_key(
+        state,
+        &channel_id,
+        &user_id,
+        counterparty_user_id.as_deref(),
+    )
+    .await?;
+    Ok(E2eeKeyInfo {
+        key,
+        key_index,
+        epoch,
+        mls_group_id,
+    })
+}
+
 async fn derive_voice_key_for_group(
     state: &Arc<AppState>,
     mls_group_id: &str,

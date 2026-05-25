@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { useAppStore } from "../stores/appStore";
 
 // Issue #176: pre-warm DNS / TLS / token mint to LiveKit on user "intent"

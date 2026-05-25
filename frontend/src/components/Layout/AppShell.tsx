@@ -1,8 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
 import { TitleBar } from "./TitleBar";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { Sidebar } from "./Sidebar";
@@ -29,17 +28,35 @@ import type { RouterContext } from "../../types/router";
  * It owns the terminal chrome (TitleBar, BreadcrumbNav, VoiceBar, bottom status bar)
  * and renders the matched child route via <Outlet />.
  */
+const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
+
 export const AppShell: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
-  // Sidebar visibility is driven by the user preference
-  // `sidebar_open_by_default`. Cmd/Ctrl+B toggles for the current session
-  // only — flipping it does NOT write back to the preference, so users
-  // who keep it closed by default can still pop it open ad-hoc without
-  // losing their default. Changing the preference updates the live UI
-  // via the sync effect below.
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  // Sidebar visibility — initial value read synchronously from
+  // localStorage so there's no flash of the wrong state at mount. The
+  // preference query (async, below) re-mirrors into localStorage when
+  // it lands, so a change made on this device (or pulled from the
+  // backend after sign-in on another device) is reflected on next open.
+  //
+  // Cmd/Ctrl+B and clicking the sidebar collapse handle only mutate
+  // this session state — they don't write back to the preference, so a
+  // user who keeps it closed by default can still pop it open ad-hoc
+  // without losing their default.
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    const stored = window.localStorage.getItem(SIDEBAR_DEFAULT_LS_KEY);
+    if (stored === "true") {
+      return true;
+    }
+    if (stored === "false") {
+      return false;
+    }
+    return true;
+  });
   const queryClient = useQueryClient();
   const router = useRouter();
 
@@ -63,14 +80,16 @@ export const AppShell: React.FC = () => {
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { query: prefsQuery } = usePreferences();
 
-  // Apply the sidebar default whenever the preference first loads or the
-  // user changes it. Cmd/Ctrl+B presses don't fight this since they only
-  // mutate session state — when the preference value is unchanged, the
-  // dependency stays stable and this effect won't re-fire.
+  // Mirror the preference into localStorage so next app open reads the
+  // current value at useState init. Never touches live state — this is
+  // strictly a write to disk.
   const sidebarDefault = prefsQuery.data?.sidebar_open_by_default;
   useEffect(() => {
-    if (sidebarDefault !== undefined) {
-      setIsSidebarOpen(sidebarDefault);
+    if (sidebarDefault !== undefined && typeof window !== "undefined") {
+      window.localStorage.setItem(
+        SIDEBAR_DEFAULT_LS_KEY,
+        sidebarDefault ? "true" : "false",
+      );
     }
   }, [sidebarDefault]);
 
@@ -240,7 +259,7 @@ export const AppShell: React.FC = () => {
 
   // Hide the window on macOS, close it on Windows/Linux.
   useGlobalShortcut("app.closeWindow", () => {
-    invoke("hide_window").catch(console.error);
+    hideWindow().catch(console.error);
   });
 
   // Discord users reach for the keyboard for mute/leave (not tile

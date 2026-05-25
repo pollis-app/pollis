@@ -1,8 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect, useImperativeHandle } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { writeFile, readFile, stat } from "@tauri-apps/plugin-fs";
-import { tempDir } from "@tauri-apps/api/path";
-import { invoke } from "@tauri-apps/api/core";
+import {
+  dialogOpen,
+  writeFile,
+  readFile,
+  stat,
+  tempDir,
+  readClipboardFiles,
+  readClipboardImageToTemp,
+} from "../../bridge";
 import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize } from "../../utils/format";
@@ -333,7 +338,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   const handlePickFiles = useCallback(async () => {
     if (attachments.length >= maxAttachments) { return; }
     try {
-      const result = await open({
+      const result = await dialogOpen({
         multiple: true,
         directory: false,
         title: "Add files",
@@ -468,9 +473,10 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     }
 
     // For files copied from the OS file manager, WebKit doesn't expose the
-    // clipboard data — invoke Rust to read it directly via the OS clipboard API.
-    // We don't prevent default here so normal text paste still works alongside.
-    invoke<string[]>("read_clipboard_files").then((paths) => {
+    // clipboard data — go through the bridge to read it via the OS clipboard
+    // API (Rust under Tauri, Node's clipboard module under Electron). We
+    // don't prevent default here so normal text paste still works alongside.
+    readClipboardFiles().then((paths) => {
       if (paths.length > 0) {
         handlePaths(paths);
         return;
@@ -478,8 +484,8 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
       // WebKitGTK doesn't expose clipboard images as DataTransferItem files
       // the way macOS WebKit does, so screenshots / "copy image" from a
       // browser fall through to here. Fetch the raster image from the OS
-      // clipboard via Rust, write it to temp, and import as an attachment.
-      invoke<string>("read_clipboard_image_to_temp").then((path) => {
+      // clipboard, write it to temp, and import as an attachment.
+      readClipboardImageToTemp().then((path) => {
         if (path) {
           handlePaths([path]);
         }

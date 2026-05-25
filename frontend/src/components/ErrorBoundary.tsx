@@ -27,10 +27,10 @@ export class ErrorBoundary extends React.Component<
       return;
     }
     try {
-      const { relaunch } = await import("@tauri-apps/plugin-process");
+      const { relaunch } = await import("../bridge");
       await relaunch();
     } catch (e) {
-      // Fallback if Tauri plugin is unavailable (e.g. browser-only mode)
+      // Fallback if neither host is available (e.g. browser-only mode)
       console.error("Could not relaunch:", e);
       window.location.reload();
     }

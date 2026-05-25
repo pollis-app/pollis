@@ -1,7 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { check } from "@tauri-apps/plugin-updater";
-import { relaunch } from "@tauri-apps/plugin-process";
-import { invoke } from "@tauri-apps/api/core";
+import { check, relaunch, invoke } from "../bridge";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 
 type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "relaunching" | "error";

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
-import { open } from "@tauri-apps/plugin-shell";
+import { shellOpen } from "../../bridge";
 
 // Known limitation (low priority): inline previews only fire when the URL ends in
 // a recognised image/video extension. Sites like Giphy/Tenor/Imgur that serve media
@@ -74,7 +74,7 @@ export const MediaLinkUnfurl: React.FC<MediaLinkUnfurlProps> = ({ text }) => {
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
 
   const handleClick = useCallback((url: string) => {
-    open(ensureProtocol(url));
+    shellOpen(ensureProtocol(url));
   }, []);
 
   const visible = links.filter((l) => !hidden.has(l.url));

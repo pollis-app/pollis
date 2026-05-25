@@ -1,6 +1,10 @@
 import { useEffect } from "react";
-import { getCurrentWindow, availableMonitors } from "@tauri-apps/api/window";
-import { LogicalSize, LogicalPosition } from "@tauri-apps/api/dpi";
+import {
+  getCurrentWindow,
+  availableMonitors,
+  LogicalSize,
+  LogicalPosition,
+} from "../bridge";
 
 const STORAGE_KEY = "pollis-window-state";
 

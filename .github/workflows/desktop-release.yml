@@ -1,9 +1,19 @@
-name: Desktop Release
+name: Desktop Release (Tauri — frozen)
 
+# Tauri pipeline. As of v1.1.0 the project ships from electron-release.yml.
+# This workflow no longer auto-fires on tag push so v1.1.0+ tags don't
+# republish the cdn.pollis.com/releases/update-*.json Tauri-format
+# manifests — leaving Tauri-side updaters pinned at v1.0.164 (the last
+# Tauri-built release). Old Tauri users keep polling, see no newer
+# version, and stay on what they have until they manually install the
+# Electron build. They can't pull an Electron .AppImage/.exe/.dmg via
+# the Tauri updater because Tauri verifies a minisign signature that the
+# Electron build doesn't carry — but more importantly, we just don't
+# advertise it to them.
+#
+# `workflow_dispatch` is kept so a hotfix Tauri build can still be cut
+# manually if needed during the migration window.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 jobs:
@@ -30,8 +40,7 @@ jobs:
       - name: Stamp version from git tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Stamping version ${VERSION} into tauri.conf.json"
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          ./scripts/bump-version.sh "$VERSION"
 
       - name: Load production secrets
         run: |
@@ -111,8 +120,7 @@ jobs:
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Stamping version ${VERSION} into tauri.conf.json"
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          ./scripts/bump-version.sh "$VERSION"
 
       - name: Load production secrets
         shell: bash
@@ -204,7 +212,7 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        run: pnpm build:windows
+        run: pnpm build:tauri:windows
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -291,8 +299,7 @@ jobs:
       - name: Stamp version from git tag
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
-          echo "Stamping version ${VERSION} into tauri.conf.json"
-          jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > tmp.json && mv tmp.json src-tauri/tauri.conf.json
+          ./scripts/bump-version.sh "$VERSION"
 
       # libva-dev: header-only build dep for webrtc-sys's VAAPI H.264
       # encoder wrapper. `libva.so.2` / `libva-drm.so.2` are dlopened at
@@ -367,7 +374,7 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm build:linux
+        run: pnpm build:tauri:linux
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4

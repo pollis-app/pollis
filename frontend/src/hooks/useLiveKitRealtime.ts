@@ -1,5 +1,10 @@
 import { useEffect, useRef, useMemo } from 'react';
-import { Channel, invoke } from '@tauri-apps/api/core';
+import {
+  Channel,
+  invoke,
+  isPermissionGranted,
+  requestPermission,
+} from '../bridge';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
@@ -198,10 +203,9 @@ export function useLiveKitRealtime() {
     const allowCallRingtone = loadDeviceCallRingtone(currentUser?.id ?? null);
 
     const sync = async () => {
-      const result: boolean | null = await invoke('plugin:notification|is_permission_granted');
-      let granted = result === true;
+      let granted = await isPermissionGranted();
       if (!granted && allowOsNotif) {
-        const state: string = await invoke('plugin:notification|request_permission');
+        const state = await requestPermission();
         granted = state === 'granted';
       }
       setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: granted, allowCallRingtone });

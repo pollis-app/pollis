@@ -4,7 +4,7 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "./bridge";
 import { useAppStore } from "./stores/appStore";
 import { LoginScreen } from "./components/Auth/LoginScreen";
 import { SaveSecretKeyScreen } from "./components/Auth/SaveSecretKeyScreen";
@@ -119,7 +119,7 @@ function MainApp() {
     try {
       // Check for required update before anything else (skip in dev)
       if (!import.meta.env.DEV) {
-        const { check: checkUpdate } = await import("@tauri-apps/plugin-updater");
+        const { check: checkUpdate } = await import("./bridge");
         const update = await checkUpdate();
         if (update) {
           await invoke("mark_update_required");

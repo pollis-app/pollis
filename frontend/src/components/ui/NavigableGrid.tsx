@@ -3,7 +3,6 @@ import React, {
   useEffect,
   useLayoutEffect,
   useMemo,
-  useRef,
   useState,
 } from "react";
 
@@ -53,7 +52,14 @@ function computeLayout(
   aspect: number,
   gap: number,
 ): Layout {
-  if (n === 0 || W <= 0 || H <= 0) {
+  // Only W gates layout — cellH is derived from cellW via the aspect
+  // ratio, so H is informational. Bailing on H <= 0 used to cause the
+  // observer view (NavigableGrid in a flex column where height settles
+  // after first paint) to render zero-sized tiles forever, since
+  // box.h started at 0 and the H-gated branch returned cellW: 0 from
+  // every recompute.
+  void H;
+  if (n === 0 || W <= 0) {
     return { cols: 1, cellW: 0, cellH: 0 };
   }
   // Discord-style sizing: each tile gets `W / n` of the row width,
@@ -87,13 +93,23 @@ export function NavigableGrid<T>({
   emptyLabel = "No one here yet.",
   testId,
 }: NavigableGridProps<T>) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  // Track the grid container via a state-backed ref callback rather than
+  // useRef + useLayoutEffect with [] deps. The grid root is conditionally
+  // rendered (empty-state vs items-state are different JSX subtrees), so
+  // a single-shot useLayoutEffect binds ResizeObserver to whichever
+  // element happens to be mounted at first paint — when the empty branch
+  // renders first (query loading → 0 items → emptyLabel) and the items
+  // branch renders a tick later (data arrives → N items), the ref-based
+  // approach silently never installs the observer on the items
+  // container, box.w stays 0, computeLayout returns cellW: 0, and tiles
+  // render as zero-sized dots. The ref-callback variant re-fires the
+  // effect whenever the actual DOM element changes.
+  const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const [focused, setFocused] = useState(0);
   const [box, setBox] = useState({ w: 0, h: 0 });
 
   useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) {
+    if (!containerEl) {
       return;
     }
     const ro = new ResizeObserver((entries) => {
@@ -102,9 +118,9 @@ export function NavigableGrid<T>({
         setBox({ w: r.width, h: r.height });
       }
     });
-    ro.observe(el);
+    ro.observe(containerEl);
     return () => ro.disconnect();
-  }, []);
+  }, [containerEl]);
 
   // Keep focus in range as the participant set changes shape.
   useEffect(() => {
@@ -113,7 +129,7 @@ export function NavigableGrid<T>({
 
   useEffect(() => {
     if (autoFocus && items.length > 0) {
-      containerRef.current?.focus();
+      containerEl?.focus();
     }
   }, [autoFocus, items.length]);
 
@@ -124,7 +140,7 @@ export function NavigableGrid<T>({
 
   // Scroll the focused cell into view when navigating a scrolling grid.
   useEffect(() => {
-    const el = containerRef.current?.querySelector<HTMLElement>(
+    const el = containerEl?.querySelector<HTMLElement>(
       `[data-grid-index="${focused}"]`,
     );
     el?.scrollIntoView({ block: "nearest" });
@@ -188,7 +204,7 @@ export function NavigableGrid<T>({
 
   return (
     <div
-      ref={containerRef}
+      ref={setContainerEl}
       tabIndex={0}
       onKeyDown={handleKeyDown}
       data-testid={testId}
@@ -221,7 +237,7 @@ export function NavigableGrid<T>({
             }
             e.preventDefault();
             setFocused(i);
-            containerRef.current?.focus();
+            containerEl?.focus();
           }}
         >
           {renderCell(item, { focused: i === focused })}

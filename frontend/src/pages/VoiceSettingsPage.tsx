@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";

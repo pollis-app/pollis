@@ -1,0 +1,564 @@
+name: Electron Release
+
+# Full Electron release pipeline. Mirrors desktop-release.yml's capabilities
+# end-to-end: macOS signed + notarized DMG/ZIP, Windows Azure Trusted-Signed
+# NSIS + portable EXE, Linux AppImage + .deb + .rpm, R2 upload, GitHub
+# release, AUR push, install.sh + latest.json refresh.
+#
+# Trigger: tag push (`git tag v1.2.0 && git push --tags`) — the entire
+# release ceremony. workflow_dispatch is kept for ad-hoc rebuilds where
+# you want to test the pipeline without cutting a real tag (e.g.
+# v1.2.0-rc.3 from a non-tag branch).
+#
+# Coexists with desktop-release.yml during the migration window — both
+# fire on the same tag and produce distinct artifact sets (Tauri's
+# `pollis-*` vs Electron's `pollis-electron-*`). Either or both can be
+# the source of a given GH release. Once we cut over fully to Electron,
+# delete desktop-release.yml in the Phase 8 cleanup pass.
+#
+# Artifact-name discipline: every uploaded artifact is prefixed
+# `pollis-electron-*` so it never collides with desktop-release.yml's
+# `pollis-*` artifacts on the same workflow run / GitHub release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_override:
+        description: "Optional version override for ad-hoc rebuilds (e.g. 1.2.0-rc.3). Omit to use the tag-derived version when triggered by a tag push, or fail if neither is present."
+        required: false
+  # Tag-driven release: `git tag v1.2.0 && git push --tags` is the entire
+  # ceremony. CI extracts the version from the tag and stamps every file
+  # via scripts/bump-version.sh before building.
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pollis-node
+
+      - name: Resolve + stamp version
+        run: |
+          # Tag-driven by default. Manual workflow_dispatch can override
+          # for ad-hoc rebuilds. Errors out if neither is present (catches
+          # the user dispatching from a non-tag branch with no override).
+          VERSION="${{ github.event.inputs.version_override }}"
+          if [ -z "$VERSION" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "error: no version available (push a v* tag or pass version_override)" >&2
+            exit 1
+          fi
+          ./scripts/bump-version.sh "$VERSION"
+          echo "POLLIS_VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      - name: Install audio-processing build deps
+        run: brew install meson ninja
+
+      - name: Install pnpm deps
+        run: pnpm install
+
+      - name: Build pollis-node (universal — arm64 + x64)
+        run: |
+          pnpm --filter @pollis/pollis-node exec napi build --platform --release --target aarch64-apple-darwin
+          pnpm --filter @pollis/pollis-node exec napi build --platform --release --target x86_64-apple-darwin
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
+
+      - name: Compile electron main + preload
+        run: pnpm --filter @pollis/electron build
+
+      # electron-builder reads CSC_LINK + CSC_KEY_PASSWORD for the Developer
+      # ID Application cert, APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD +
+      # APPLE_TEAM_ID for notarization. Same Apple Developer credentials
+      # as the Tauri pipeline.
+      - name: Build + sign + notarize macOS (universal)
+        env:
+          CSC_LINK: ${{ secrets.APPLE_CERTIFICATE }}
+          CSC_KEY_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm --filter @pollis/electron exec electron-builder \
+            --mac --arm64 --x64 \
+            --config build/electron-builder.yml \
+            --publish onTagOrDraft
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-electron-macos
+          if-no-files-found: error
+          path: |
+            electron/release/*.dmg
+            electron/release/*.zip
+            electron/release/*.blockmap
+            electron/release/latest-mac.yml
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pollis-node
+
+      - name: Resolve + stamp version
+        shell: bash
+        run: |
+          # Tag-driven by default. Manual workflow_dispatch can override
+          # for ad-hoc rebuilds. Errors out if neither is present (catches
+          # the user dispatching from a non-tag branch with no override).
+          VERSION="${{ github.event.inputs.version_override }}"
+          if [ -z "$VERSION" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "error: no version available (push a v* tag or pass version_override)" >&2
+            exit 1
+          fi
+          ./scripts/bump-version.sh "$VERSION"
+          echo "POLLIS_VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Load production secrets
+        shell: bash
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      - name: Install OpenSSL via vcpkg
+        shell: bash
+        run: |
+          vcpkg install openssl:x64-windows-static-md
+          echo "OPENSSL_DIR=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md" >> $GITHUB_ENV
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+
+      # Mirrors desktop-release.yml's Azure Trusted Signing setup verbatim —
+      # the sign.js hook (electron/build/sign.js) calls signtool with the
+      # same /dlib + /dmdf args Tauri's signCommand used.
+      - name: Install Artifact Signing client + SignTool
+        shell: pwsh
+        run: |
+          $toolsDir = Join-Path $env:RUNNER_TEMP "artifact-signing"
+          New-Item -ItemType Directory -Force -Path $toolsDir | Out-Null
+
+          nuget install Microsoft.Windows.SDK.BuildTools -OutputDirectory $toolsDir -ExcludeVersion
+          nuget install Microsoft.ArtifactSigning.Client -OutputDirectory $toolsDir -ExcludeVersion
+
+          $signtool = Get-ChildItem -Path $toolsDir -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Select-Object -First 1
+          $dlib = Get-ChildItem -Path $toolsDir -Recurse -Filter Azure.CodeSigning.Dlib.dll |
+            Where-Object { $_.FullName -match '\\x64\\' } |
+            Select-Object -First 1
+
+          if (-not $signtool) { throw "signtool.exe not found under $toolsDir" }
+          if (-not $dlib)     { throw "Azure.CodeSigning.Dlib.dll not found under $toolsDir" }
+
+          "SIGNTOOL_PATH=$($signtool.FullName)"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SIGNING_DLIB_PATH=$($dlib.FullName)"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Write Artifact Signing metadata
+        shell: pwsh
+        env:
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+        run: |
+          $metadataPath = Join-Path $env:RUNNER_TEMP "sign-metadata.json"
+          [ordered]@{
+            Endpoint               = $env:AZURE_SIGNING_ENDPOINT
+            CodeSigningAccountName = $env:AZURE_SIGNING_ACCOUNT
+            CertificateProfileName = $env:AZURE_CERT_PROFILE
+          } | ConvertTo-Json | Out-File -FilePath $metadataPath -Encoding utf8
+          "SIGN_METADATA_PATH=$metadataPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Install pnpm deps
+        run: pnpm install
+
+      - name: Build pollis-node
+        run: pnpm build:pollis-node
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
+
+      - name: Compile electron main + preload
+        run: pnpm --filter @pollis/electron build
+
+      - name: Build + sign Windows
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm --filter @pollis/electron exec electron-builder \
+            --win --x64 \
+            --config build/electron-builder.yml \
+            --publish onTagOrDraft
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-electron-windows
+          if-no-files-found: error
+          path: |
+            electron/release/*.exe
+            electron/release/*.blockmap
+            electron/release/latest.yml
+
+  build-linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: pollis-node
+
+      - name: Resolve + stamp version
+        run: |
+          # Tag-driven by default. Manual workflow_dispatch can override
+          # for ad-hoc rebuilds. Errors out if neither is present (catches
+          # the user dispatching from a non-tag branch with no override).
+          VERSION="${{ github.event.inputs.version_override }}"
+          if [ -z "$VERSION" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            echo "error: no version available (push a v* tag or pass version_override)" >&2
+            exit 1
+          fi
+          ./scripts/bump-version.sh "$VERSION"
+          echo "POLLIS_VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      # libwebrtc-sys + webrtc-audio-processing-sys (vendored) need these
+      # on Linux; rpm is for the .rpm target; libva-dev wires VAAPI H.264
+      # for Intel/AMD iGPUs.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libpulse-dev \
+            libdbus-1-dev \
+            libssl-dev \
+            libva-dev \
+            rpm \
+            cmake \
+            clang \
+            ninja-build
+
+      - name: Install meson (newer than apt)
+        run: |
+          python3 -m pip install --user 'meson>=1.3'
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install pnpm deps
+        run: pnpm install
+
+      - name: Build pollis-node
+        run: pnpm build:pollis-node
+
+      - name: Build frontend
+        run: pnpm --filter frontend build
+
+      - name: Compile electron main + preload
+        run: pnpm --filter @pollis/electron build
+
+      - name: Build Electron (AppImage + deb + rpm)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pnpm --filter @pollis/electron exec electron-builder \
+            --linux --x64 \
+            --config build/electron-builder.yml \
+            --publish onTagOrDraft
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-electron-linux
+          if-no-files-found: error
+          path: |
+            electron/release/*.AppImage
+            electron/release/*.deb
+            electron/release/*.rpm
+            electron/release/*.blockmap
+            electron/release/latest-linux.yml
+
+  apply-migrations:
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Idempotent — scripts/db-apply.sh records each migration row in
+      # schema_migrations and skips any already-applied. Both pipelines
+      # (Tauri and Electron) can run db-apply on the same release without
+      # collision; this step just ensures the Electron path doesn't ship
+      # binaries against an un-migrated schema if it runs without the
+      # Tauri pipeline.
+      - name: Apply pending DB migrations to production
+        env:
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_ADMIN_TOKEN }}
+        run: ./scripts/db-apply.sh
+
+  release:
+    needs: [build-macos, build-windows, build-linux, apply-migrations]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        run: |
+          VERSION="${{ github.event.inputs.version_override }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(jq -r .version electron/package.json)
+          fi
+          echo "POLLIS_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "POLLIS_TAG=v$VERSION" >> $GITHUB_ENV
+
+      - name: Load production secrets
+        run: |
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      - name: Download all Electron artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Inventory artifact tree
+        run: find artifacts -type f | sort
+
+      # Mirrors desktop-release.yml — the curl|sh installer comes from
+      # website/install.sh and is hosted at cdn.pollis.com/releases/install.sh.
+      # The script itself decides which artifact to fetch per platform, so
+      # the same URL works for Tauri and Electron releases.
+      - name: Upload install script to R2
+        run: |
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp website/install.sh "s3://pollis/releases/install.sh" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "text/plain" \
+            --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Upload installers to R2
+        run: |
+          VERSION="${POLLIS_TAG}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          MAC_DMG=$(find artifacts/pollis-electron-macos -name "*.dmg" | head -1)
+          WIN_EXE=$(find artifacts/pollis-electron-windows -name "*.exe" ! -name "*portable*" | head -1)
+          LINUX_APPIMAGE=$(find artifacts/pollis-electron-linux -name "*.AppImage" | head -1)
+          LINUX_DEB=$(find artifacts/pollis-electron-linux -name "*.deb" | head -1)
+          LINUX_RPM=$(find artifacts/pollis-electron-linux -name "*.rpm" | head -1)
+
+          aws s3 cp "$MAC_DMG"          "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg"      --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$WIN_EXE"          "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe"   --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$LINUX_APPIMAGE"   "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$LINUX_DEB"        "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.deb"      --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$LINUX_RPM"        "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.rpm"      --endpoint-url "${ENDPOINT}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      # electron-updater reads latest{,-mac,-linux}.yml + .blockmap files
+      # at the publish URL — for `publish: github` they live as GitHub
+      # release assets already (electron-builder uploaded them via
+      # `--publish onTagOrDraft` in the per-platform jobs). We also mirror
+      # to R2 so the marketing CDN (cdn.pollis.com) can serve them for
+      # users who prefer that path / for the legacy update.json clients.
+      - name: Upload electron-updater manifests + blockmaps to R2
+        run: |
+          VERSION="${POLLIS_TAG}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          for f in $(find artifacts -type f \( -name "latest*.yml" -o -name "*.blockmap" \)); do
+            aws s3 cp "$f" "s3://pollis/releases/${VERSION}/$(basename "$f")" \
+              --endpoint-url "${ENDPOINT}" \
+              --cache-control "no-cache"
+          done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Publish latest.json to R2 (marketing site discovery)
+        run: |
+          VERSION="${POLLIS_TAG}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          cat > latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "macos":     "https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-macos.dmg",
+            "windows":   "https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-windows.exe",
+            "linux":     "https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.AppImage",
+            "linux_deb": "https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.deb",
+            "linux_rpm": "https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.rpm"
+          }
+          EOF
+          aws s3 cp latest.json "s3://pollis/releases/latest.json" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.POLLIS_TAG }}
+          files: |
+            artifacts/pollis-electron-macos/**/*.dmg
+            artifacts/pollis-electron-macos/**/*.zip
+            artifacts/pollis-electron-macos/**/latest-mac.yml
+            artifacts/pollis-electron-macos/**/*.blockmap
+            artifacts/pollis-electron-windows/**/*.exe
+            artifacts/pollis-electron-windows/**/latest.yml
+            artifacts/pollis-electron-windows/**/*.blockmap
+            artifacts/pollis-electron-linux/**/*.AppImage
+            artifacts/pollis-electron-linux/**/*.deb
+            artifacts/pollis-electron-linux/**/*.rpm
+            artifacts/pollis-electron-linux/**/latest-linux.yml
+            artifacts/pollis-electron-linux/**/*.blockmap
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(env.POLLIS_VERSION, '-') }}
+
+      # Mirrors desktop-release.yml AUR push. Skip prereleases like
+      # v1.0.43-beta.1 — AUR has no notion of prereleases. The PKGBUILD
+      # at aur.archlinux.org/pollis.git is the same package whether it
+      # was built by Tauri or Electron; the .deb checksum is what tells
+      # users which payload they're getting.
+      - name: Publish to AUR
+        if: "!contains(env.POLLIS_VERSION, '-')"
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${POLLIS_VERSION}"
+
+          DEB_PATH=$(find artifacts/pollis-electron-linux -name "*.deb" | head -1)
+          SHA256=$(sha256sum "$DEB_PATH" | awk '{print $1}')
+
+          mkdir -p ~/.ssh
+          echo "$AUR_SSH_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<'SSHEOF'
+          Host aur.archlinux.org
+            IdentityFile ~/.ssh/aur
+            User aur
+          SSHEOF
+
+          git clone ssh://aur@aur.archlinux.org/pollis.git aur-pollis
+          cd aur-pollis
+
+          sed -i "s/^pkgver=.*/pkgver=${VERSION}/" PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          sed -i "s/^sha256sums=.*/sha256sums=('${SHA256}')/" PKGBUILD
+
+          docker run --rm -v "$PWD:/pkg" archlinux:base-devel bash -c \
+            "cp /pkg/PKGBUILD /tmp/ && chown -R nobody:nobody /tmp/PKGBUILD && cd /tmp && sudo -u nobody makepkg --printsrcinfo > /pkg/.SRCINFO"
+
+          git config user.name "Pollis Bot"
+          git config user.email "hello@pollis.com"
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "No AUR changes to commit"
+          else
+            git commit -m "Update to v${VERSION}"
+            git push
+          fi

@@ -1,29 +1,28 @@
 import { useEffect } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
-import { Image } from '@tauri-apps/api/image';
+import { getCurrentWindow, Image, type PollisImage } from '../bridge';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { isWindows } from '../utils/platform';
 
 // Lazy-loaded icon images for Windows taskbar swap.
 // Cached after the first fetch so repeated badge changes don't re-fetch.
-let windowsDefaultIcon: Image | null = null;
-let windowsNotifIcon: Image | null = null;
+let windowsDefaultIcon: PollisImage | null = null;
+let windowsNotifIcon: PollisImage | null = null;
 
-async function loadWindowsIcon(url: string): Promise<Image> {
+async function loadWindowsIcon(url: string): Promise<PollisImage> {
   const res = await fetch(url);
   const bytes = new Uint8Array(await res.arrayBuffer());
   return Image.fromBytes(bytes);
 }
 
-async function getWindowsDefaultIcon(): Promise<Image> {
+async function getWindowsDefaultIcon(): Promise<PollisImage> {
   if (!windowsDefaultIcon) {
     windowsDefaultIcon = await loadWindowsIcon('/windows-icon-default.png');
   }
   return windowsDefaultIcon;
 }
 
-async function getWindowsNotifIcon(): Promise<Image> {
+async function getWindowsNotifIcon(): Promise<PollisImage> {
   if (!windowsNotifIcon) {
     windowsNotifIcon = await loadWindowsIcon('/windows-icon-notification.png');
   }

@@ -1,0 +1,177 @@
+# electron-builder configuration for Pollis.
+#
+# Translated from src-tauri/tauri.conf.json (+ tauri.linux.conf.json,
+# tauri.macos.conf.json, Info.plist, Entitlements.plist) so the bundle
+# story stays identical across the Tauri -> Electron migration.
+#
+# `version`, `name`, `description`, `author` are read from
+# electron/package.json (the @pollis/electron workspace) — electron-builder
+# does not duplicate them here.
+
+appId: com.pollis.app
+productName: Pollis
+copyright: "Copyright (c) 2026 Daniel Kral"
+
+directories:
+  buildResources: build
+  output: release
+
+files:
+  # Compiled electron main + preload bundles (output of @pollis/electron build)
+  - "dist/**/*"
+  # Compiled React frontend (output of `pnpm --filter frontend build`)
+  - "../frontend/dist/**/*"
+  - "node_modules/**/*"
+  - "package.json"
+
+extraResources:
+  # napi-rs native addon that replaces the Rust backend Tauri commands.
+  # Loaded at runtime via require('pollis-node') from the main process.
+  - from: "../pollis-node"
+    to: "pollis-node"
+    filter:
+      - "*.node"
+      - "index.js"
+      - "index.d.ts"
+  # TODO: package the screenshare capture helper that today lives in
+  # src-tauri/binaries/pollis-capture-{linux,macos}. Decide in Phase 7
+  # whether to ship as an extraResource, embed inside pollis-node, or
+  # drop entirely if pollis-node performs the capture itself.
+
+# Native .node addons cannot be loaded from inside the asar archive —
+# unpack them so dlopen() can mmap the file directly.
+asarUnpack:
+  - "**/*.node"
+  - "**/pollis-node/**"
+
+# TODO: declare deep-link schemes here once the Electron app registers
+# a custom protocol. The current Tauri build does not register one
+# (tauri.conf.json has no plugins.deep-link entry, and no pollis://
+# scheme is referenced anywhere in src-tauri/).
+# protocols:
+#   - name: "Pollis Deep Link"
+#     schemes: ["pollis"]
+
+mac:
+  category: public.app-category.social-networking
+  # Tauri build target was "all" -> dmg + zip is the standard pair for
+  # Sparkle/electron-updater-style auto-update.
+  target:
+    - dmg
+    - zip
+  # From src-tauri/tauri.conf.json -> bundle.macOS.minimumSystemVersion
+  minimumSystemVersion: "14.0"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # Mirrors src-tauri/Info.plist + adds the camera key Tauri never declared
+  # (Pollis does not use camera today, but Apple rejects builds that touch
+  # AVCaptureDevice without the key — keep it ready for future video).
+  extendInfo:
+    NSMicrophoneUsageDescription: "Pollis needs microphone access for voice channels"
+    NSCameraUsageDescription: "Pollis uses your camera for video calls."
+    NSScreenCaptureUsageDescription: "Pollis needs screen recording access to share your screen in voice channels"
+    NSUserNotificationAlertStyle: alert
+    LSApplicationCategoryType: public.app-category.social-networking
+  # Signing identity matches the Tauri config; CI overrides via env vars.
+  # Set CSC_IDENTITY_AUTO_DISCOVERY=false to skip signing locally.
+  identity: "Developer ID Application: Daniel Kral (9JF7WWYMU2)"
+  icon: ../../src-tauri/icons/AppIcon.icns
+
+win:
+  # Tauri default for Windows was "all" which produces nsis + msi.
+  # Portable is added for users who can't install — same parity Tauri gave
+  # via msi+nsis combo.
+  target:
+    - nsis
+    - portable
+  # Azure Trusted Signing — same provider the Tauri pipeline uses
+  # (.github/workflows/desktop-release.yml). The hook script wraps
+  # signtool with Azure's `/dlib` + `/dmdf` integration. Reads
+  # SIGNTOOL_PATH / SIGNING_DLIB_PATH / SIGN_METADATA_PATH from env at
+  # signing time; CI sets all three. Local builds without those env
+  # vars produce unsigned .exe with a warning (see sign.js).
+  sign: ./build/sign.js
+  signingHashAlgorithms:
+    - sha256
+  icon: ../../src-tauri/icons/icon.ico
+
+linux:
+  # Tauri shipped deb + rpm + AppImage with bundleMediaFramework=true.
+  target:
+    - AppImage
+    - deb
+    - rpm
+  category: Network
+  # Synth-set so `xdg-mime default pollis.desktop x-scheme-handler/pollis`
+  # works once a custom protocol is registered. Safe to ship empty-handed
+  # today (no handler will fire) — flip the protocols: block above first.
+  mimeTypes:
+    - x-scheme-handler/pollis
+  # Tauri icon list maps to electron-builder's auto-resolution from the
+  # directory; it picks up the 32/64/128/128@2x/512 PNGs automatically.
+  icon: ../../src-tauri/icons/
+
+deb:
+  # Mirror src-tauri/tauri.conf.json -> bundle.linux.deb.depends.
+  depends:
+    - libasound2
+    - libpulse0
+    - libdbus-1-3
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libsecret-1-0
+
+rpm:
+  # Mirror src-tauri/tauri.conf.json -> bundle.linux.rpm.depends, plus the
+  # electron runtime deps that Tauri's webview didn't need.
+  depends:
+    - "libasound.so.2()(64bit)"
+    - "libpulse.so.0()(64bit)"
+    - "libdbus-1.so.3()(64bit)"
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - libXtst
+    - xdg-utils
+    - at-spi2-core
+    - libsecret
+
+appImage:
+  # Tauri had bundleMediaFramework: true so AppImage shipped ffmpeg/gst.
+  # electron-builder's AppImage already bundles Chromium's media stack,
+  # so no extra flag is needed — Electron's libffmpeg.so is included by
+  # default. Keeping this block as a marker.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  # TODO: add `installerIcon`, `uninstallerIcon`, `installerHeaderIcon`
+  # once the .ico assets land in this directory.
+
+# Auto-updater publish target. GitHub Releases is the path of least
+# resistance — electron-builder uploads installers + latest{,-mac,-linux}.yml
+# manifests as release assets, and `autoUpdater` reads them via the
+# default GitHub provider. Requires GH_TOKEN env in CI; locally the upload
+# is skipped silently (electron-builder warns and continues).
+#
+# If we later want to mirror to cdn.pollis.com (where the Tauri pipeline
+# served minisign-signed update.json), switch provider to `generic` with
+# `url: https://cdn.pollis.com/releases/`. electron-updater verifies the
+# installer's code-signature, not a separate detached signature — so the
+# pollis.com mirror would just hold the same assets electron-builder
+# already produces.
+publish:
+  provider: github
+  owner: actuallydan
+  repo: pollis
+  releaseType: draft

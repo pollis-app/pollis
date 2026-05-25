@@ -506,6 +506,12 @@ pub async fn join_voice_channel(
     let existing_remote: Vec<(String, String, bool)> = room
         .remote_participants()
         .into_iter()
+        // Skip renderer-side `:view` clients (Phase 6 — Electron screen-
+        // share connection). They share the same user as the matching
+        // `voice-<id>` participant and would otherwise dup the tile grid.
+        // The screen-share tracks they publish are still routed (they're
+        // not hidden); we just don't render them as a separate tile.
+        .filter(|(_, p)| !p.identity().to_string().ends_with(":view"))
         .map(|(_id, p)| {
             // Seed mute state from current publications — TrackMuted only
             // fires on transitions, so a participant who muted before we
@@ -548,8 +554,12 @@ pub async fn join_voice_channel(
         while let Some(event) = events.recv().await {
             match event {
                 RoomEvent::ParticipantConnected(p) => {
-                    eprintln!("[voice] participant joined: {}", p.identity());
                     let identity = p.identity().to_string();
+                    // Same filter as the seed loop above — see comment there.
+                    if identity.ends_with(":view") {
+                        continue;
+                    }
+                    eprintln!("[voice] participant joined: {identity}");
                     let is_muted = p.track_publications().values().any(|pub_| pub_.is_muted());
                     let avatar_url =
                         lookup_avatar_url_for_identity(&state_for_room, &identity).await;
@@ -564,12 +574,14 @@ pub async fn join_voice_channel(
                     }
                 }
                 RoomEvent::ParticipantDisconnected(p) => {
-                    eprintln!("[voice] participant left: {}", p.identity());
+                    let identity = p.identity().to_string();
+                    if identity.ends_with(":view") {
+                        continue;
+                    }
+                    eprintln!("[voice] participant left: {identity}");
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
-                        let _ = ch.send(VoiceEvent::ParticipantLeft {
-                            identity: p.identity().to_string(),
-                        });
+                        let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
                     }
                 }
                 RoomEvent::TrackSubscribed { track, publication: _, participant } => {
