@@ -37,6 +37,12 @@ interface AppStore extends AppState {
   // Voice channel — null when not in a call
   activeVoiceChannelId: string | null;
   setActiveVoiceChannelId: (id: string | null) => void;
+  // The other user_id in a 1:1 call (`call-*` room). Null for group voice
+  // channels and DMs. Used by the screen-share E2EE key derivation in
+  // `livekitView.executeJoin` so it resolves the same MLS group the Rust
+  // voice path picked. Mirrored from VoiceSessionManager.
+  voiceCounterpartyUserId: string | null;
+  setVoiceCounterpartyUserId: (id: string | null) => void;
   // Status bar alert — shown in bottom bar when a message arrives for a
   // channel/DM the user is not currently viewing. Cleared on navigation.
   statusBarAlert: { senderUsername: string; roomId: string } | null;
@@ -170,6 +176,7 @@ export const useAppStore = create<AppStore>((set) => ({
   error: null,
   unreadCounts: {},
   activeVoiceChannelId: null,
+  voiceCounterpartyUserId: null,
   statusBarAlert: null,
   voiceError: null,
   screenShareError: null,
@@ -252,6 +259,7 @@ export const useAppStore = create<AppStore>((set) => ({
   })),
 
   setActiveVoiceChannelId: (id) => set({ activeVoiceChannelId: id }),
+  setVoiceCounterpartyUserId: (id) => set({ voiceCounterpartyUserId: id }),
 
   setStatusBarAlert: (alert) => set({ statusBarAlert: alert }),
 
@@ -323,6 +331,7 @@ export const useAppStore = create<AppStore>((set) => ({
     error: null,
     unreadCounts: {},
     activeVoiceChannelId: null,
+    voiceCounterpartyUserId: null,
     statusBarAlert: null,
     voiceError: null,
     screenShareError: null,

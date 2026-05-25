@@ -26,6 +26,7 @@
 // connection.
 
 import {
+  ExternalE2EEKeyProvider,
   LocalTrackPublication,
   Room,
   RoomEvent,
@@ -68,6 +69,18 @@ interface ViewIntent {
   channelId: string;
   userId: string;
   displayName: string;
+  /** The other user_id in a 1:1 call (`call-*` room). Null for group voice
+   *  channels and DMs. Needed by the E2EE key derivation in
+   *  `get_voice_e2ee_key` so call-room MLS lookups resolve to the right
+   *  DM group. Mirrors VoiceSessionManager's counterpartyUserId. */
+  counterpartyUserId: string | null;
+}
+
+interface E2eeKeyInfo {
+  key: number[];
+  key_index: number;
+  epoch: number;
+  mls_group_id: string;
 }
 
 // ── Identity helpers ─────────────────────────────────────────────────────────
@@ -403,9 +416,58 @@ class LiveKitView {
       return true;
     }
 
+    // E2EE setup. Derive the shared MLS key the Rust voice path already
+    // uses (`pollis/voice/v1` exporter from the channel's MLS group), feed
+    // it into livekit-client's ExternalE2EEKeyProvider. Both publisher
+    // and subscriber `:view` clients are MLS members of the same group,
+    // so they derive identical keys and decrypt each other's screen-share
+    // video. Audio frames still ride the Rust voice path's own E2EE.
+    //
+    // If key fetch fails (MLS not loaded yet, call-room without
+    // counterparty, etc.), fall back to unencrypted — the screen-share
+    // still works, just not E2EE. Better to surface video at all than
+    // hard-fail. Log loud so it's visible in production telemetry.
+    let keyProvider: ExternalE2EEKeyProvider | null = null;
+    let keyInfo: E2eeKeyInfo | null = null;
+    try {
+      keyInfo = await invoke<E2eeKeyInfo>('get_voice_e2ee_key', {
+        channelId: target.channelId,
+        userId: target.userId,
+        counterpartyUserId: target.counterpartyUserId,
+      });
+      keyProvider = new ExternalE2EEKeyProvider();
+      // setKey expects ArrayBuffer; .buffer is the underlying allocation.
+      await keyProvider.setKey(new Uint8Array(keyInfo.key).buffer);
+      console.info('[livekit-view] e2ee armed', {
+        mls_group: keyInfo.mls_group_id,
+        epoch: keyInfo.epoch,
+        key_index: keyInfo.key_index,
+      });
+    } catch (e) {
+      console.warn(
+        '[livekit-view] e2ee key fetch failed — screen-share will NOT be end-to-end encrypted:',
+        e,
+      );
+      keyProvider = null;
+    }
+
     const room = new Room({
       adaptiveStream: true,
       dynacast: true,
+      ...(keyProvider != null
+        ? {
+            e2ee: {
+              keyProvider,
+              // livekit-client ships an E2EE worker; the URL form lets
+              // Vite resolve it from the package's exports without
+              // bundling it into the main chunk.
+              worker: new Worker(
+                new URL('livekit-client/e2ee-worker', import.meta.url),
+                { type: 'module' },
+              ),
+            },
+          }
+        : {}),
     });
 
     this.wireRoomEvents(room);
@@ -419,6 +481,9 @@ class LiveKitView {
       // payload_type='35'"), which torpedoes screen-share publish. Manual
       // per-track subscription below opts in only to screen-share video.
       await room.connect(url, token, { autoSubscribe: false });
+      if (keyProvider) {
+        await room.setE2EEEnabled(true);
+      }
     } catch (e) {
       console.error('[livekit-view] connect failed:', e);
       try {
@@ -686,6 +751,7 @@ if (typeof window !== 'undefined') {
       channelId: s.activeVoiceChannelId,
       userId: s.currentUser.id,
       displayName: s.currentUser.username ?? s.currentUser.id,
+      counterpartyUserId: s.voiceCounterpartyUserId ?? null,
     };
   };
 
@@ -698,6 +764,7 @@ if (typeof window !== 'undefined') {
     if (
       state.voicePhase !== prev.voicePhase ||
       state.activeVoiceChannelId !== prev.activeVoiceChannelId ||
+      state.voiceCounterpartyUserId !== prev.voiceCounterpartyUserId ||
       state.currentUser !== prev.currentUser
     ) {
       livekitView.setIntent(computeIntent());

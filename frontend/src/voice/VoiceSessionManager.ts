@@ -56,6 +56,10 @@ export interface VoiceSessionState {
   phase: VoicePhase;
   channelId: string | null;
   groupId: string | null;
+  /** The other user_id in a 1:1 call (`call-*` room). Null for group
+   *  voice channels. Needed by the screen-share E2EE path so its MLS key
+   *  derivation resolves the same group the Rust voice path picked. */
+  counterpartyUserId: string | null;
   participants: VoiceParticipant[];
   activeSpeakerIds: string[];
   isMuted: boolean;
@@ -92,6 +96,7 @@ const INITIAL_STATE: VoiceSessionState = {
   phase: 'idle',
   channelId: null,
   groupId: null,
+  counterpartyUserId: null,
   participants: [],
   activeSpeakerIds: [],
   isMuted: false,
@@ -349,6 +354,7 @@ class VoiceSessionManager {
       phase: 'joining',
       channelId: target.channelId,
       groupId: target.groupId,
+      counterpartyUserId: target.counterpartyUserId ?? null,
       isMuted: false,
       isLocalSpeaking: false,
       participants: [
@@ -387,6 +393,7 @@ class VoiceSessionManager {
       this.setState({
         phase: 'idle',
         channelId: null,
+        counterpartyUserId: null,
         groupId: null,
         participants: [],
         activeSpeakerIds: [],
@@ -409,6 +416,7 @@ class VoiceSessionManager {
       this.setState({
         phase: 'idle',
         channelId: null,
+        counterpartyUserId: null,
         groupId: null,
         participants: [],
         activeSpeakerIds: [],
@@ -472,6 +480,7 @@ class VoiceSessionManager {
     this.setState({
       phase: 'idle',
       channelId: null,
+      counterpartyUserId: null,
       groupId: null,
       participants: [],
       activeSpeakerIds: [],
@@ -697,6 +706,7 @@ voiceSession.subscribe(() => {
   const store = useAppStore.getState();
   const patch: Partial<{
     activeVoiceChannelId: string | null;
+    voiceCounterpartyUserId: string | null;
     voiceParticipants: VoiceParticipant[];
     voiceActiveSpeakerIds: string[];
     voiceIsMuted: boolean;
@@ -706,6 +716,9 @@ voiceSession.subscribe(() => {
   }> = {};
   if (store.activeVoiceChannelId !== s.channelId) {
     patch.activeVoiceChannelId = s.channelId;
+  }
+  if (store.voiceCounterpartyUserId !== s.counterpartyUserId) {
+    patch.voiceCounterpartyUserId = s.counterpartyUserId;
   }
   if (store.voiceParticipants !== s.participants) {
     patch.voiceParticipants = s.participants;

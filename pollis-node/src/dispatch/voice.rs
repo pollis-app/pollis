@@ -26,8 +26,34 @@ pub async fn dispatch(
         "set_voice_output_device" => Some(set_voice_output_device(args).await),
         "set_voice_audio_processing" => Some(set_voice_audio_processing(args).await),
         "get_last_join_timings" => Some(get_last_join_timings(args).await),
+        "get_voice_e2ee_key" => Some(get_voice_e2ee_key(args).await),
         _ => None,
     }
+}
+
+async fn get_voice_e2ee_key(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        channel_id: String,
+        user_id: String,
+        #[serde(default)]
+        counterparty_user_id: Option<String>,
+    }
+    let Args {
+        channel_id,
+        user_id,
+        counterparty_user_id,
+    } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    let info = pollis_core::commands::voice_e2ee::get_voice_e2ee_key(
+        channel_id,
+        user_id,
+        counterparty_user_id,
+        &state,
+    )
+    .await
+    .map_err(core_err)?;
+    serde_json::to_value(info).map_err(json_err)
 }
 
 async fn subscribe_voice_events(args: &serde_json::Value) -> Result<serde_json::Value> {
