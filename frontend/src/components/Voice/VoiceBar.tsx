@@ -117,6 +117,16 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
               });
             return;
           }
+          // Any other non-idle mode (e.g. 'starting' that wedged because
+          // publishTrack hung on a dead Wayland-portal track) — let the
+          // button recover the state by force-stopping. stop() is safe to
+          // call when nothing is published; it just resets the store.
+          if (screenShareMode !== "idle") {
+            screenShareSession
+              .stop()
+              .catch((e) => console.warn("[screenshare] force-stop:", e));
+            return;
+          }
           // Engage enumerate→pick→start. The backend returns an empty
           // list on Linux/Windows; in that case we skip our picker and
           // go straight to start() (system portal/WGC handles selection).

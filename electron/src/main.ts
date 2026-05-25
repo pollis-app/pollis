@@ -33,6 +33,23 @@ app.commandLine.appendSwitch(
   "WebRtcAllowAv1Encoder,WebRtcAllowAv1ScreenshareEncoder",
 );
 
+// Linux GL/media baseline. Chromium-on-Linux WebRTC has at least four
+// independently-fragile layers (SDP negotiation, codec selection, GPU
+// compositor, capture source). This block is the "every Linux Electron app
+// ships these" baseline — VS Code, Discord, Slack all have an equivalent
+// paragraph. Add new switches here as we hit them; never blindly remove one
+// without confirming what user-reported bug it papered over.
+if (process.platform === "linux") {
+  // Force native GLX/EGL. Chromium 130 defaults the Linux GL backend to
+  // ANGLE → ZINK (Mesa's experimental GL-on-Vulkan translator), which
+  // crashes on NVIDIA proprietary drivers with "ZINK: vkEnumeratePhysicalDevices
+  // failed". The GPU process exits, no compositor, no rendered video — even
+  // for screenshare tracks that publish/subscribe successfully at the SDP
+  // layer. `use-gl=desktop` skips ANGLE entirely and goes straight to
+  // libGL.so, which NVIDIA ships and Mesa serves for AMD/Intel.
+  app.commandLine.appendSwitch("use-gl", "desktop");
+}
+
 // pollis-node lives at <repo-root>/pollis-node; from electron/dist/main.js,
 // ../../pollis-node resolves to <repo-root>/pollis-node
 // eslint-disable-next-line @typescript-eslint/no-var-requires

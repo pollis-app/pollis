@@ -542,12 +542,16 @@ class LiveKitView {
     // store.screenShareLocalActive/Mode/Dimensions. Without this reset
     // the next voice-rejoin renders the tile as "still streaming" with
     // no actual stream behind it.
+    //
+    // Unconditional — earlier we only reset when `screenShareLocalActive`
+    // was true, but that flag is set AFTER publishTrack resolves. On Linux
+    // when a portal-sourced track makes publish hang indefinitely, the
+    // flag never flips, so leaving the call left mode='starting' wedged
+    // forever and the user could not recover even by rejoining.
     const store = useAppStore.getState();
-    if (store.screenShareLocalActive) {
-      store.setScreenShareLocalActive(false);
-      store.setScreenShareLocalDimensions(null);
-      store.setScreenShareMode('idle');
-    }
+    store.setScreenShareLocalActive(false);
+    store.setScreenShareLocalDimensions(null);
+    store.setScreenShareMode('idle');
     if (room) {
       try {
         await room.disconnect();

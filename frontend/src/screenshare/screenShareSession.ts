@@ -334,19 +334,40 @@ class ScreenShareSession {
       muted: track.muted,
     });
     try {
-      await livekitView.publishScreenShare(track);
+      // 15s ceiling on publishTrack. On Linux a Wayland-portal-sourced
+      // track can leave LiveKit's publish promise unresolved forever
+      // (PipeWire delivers a dead stream; readyState stays "live", the
+      // SDK never receives frames so it never completes setup). Without
+      // the race, the user is stuck at mode='starting' with no recovery.
+      await Promise.race([
+        livekitView.publishScreenShare(track),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("publishTrack timed out after 15s")),
+            15000,
+          ),
+        ),
+      ]);
       console.info("[screenshare] publishScreenShare completed");
     } catch (e) {
       console.error("[screenshare] publishScreenShare threw:", e);
-      // Publish failed — make sure the OS capture handle is released so
-      // the "you're sharing" indicator goes away.
+      // Publish failed (or timed out) — release the OS capture handle so
+      // the "you're sharing" indicator goes away, then drop any in-flight
+      // publication the SDK may have half-registered before the timeout.
       try {
         track.stop();
       } catch {
         // ignore
       }
+      try {
+        await livekitView.unpublishScreenShare();
+      } catch {
+        // ignore — best-effort cleanup
+      }
       const msg = e instanceof Error ? e.message : String(e);
       store.setScreenShareError(friendlyScreenShareError(msg));
+      store.setScreenShareLocalActive(false);
+      store.setScreenShareLocalDimensions(null);
       store.setScreenShareMode("idle");
       throw e;
     }
