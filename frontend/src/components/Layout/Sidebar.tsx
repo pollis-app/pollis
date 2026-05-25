@@ -269,7 +269,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
                 isActive={activeDmId === c.id}
                 onClick={() => router.navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } })}
                 leading={<PresenceDot userId={c.user2_id ?? null} />}
-                label={`@${c.user2_identifier}`}
+                label={c.user2_identifier}
                 badge={unread > 0 ? unread : null}
                 trailing={trailing}
               />
