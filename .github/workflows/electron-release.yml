@@ -54,6 +54,19 @@ jobs:
         with:
           workspaces: pollis-node
 
+      # sccache wraps rustc so individual compile units are cached across
+      # branches, not just whole-target-dir keyed on Cargo.lock. Wins big
+      # when Cargo.lock changes a single dep — Swatinem misses the whole
+      # target dir, sccache rebuilds only the touched crates from cache.
+      # GHA backend uses the same actions cache quota as Swatinem.
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+      - name: Enable sccache wrapper
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+
       - name: Resolve + stamp version
         run: |
           # Tag-driven by default. Manual workflow_dispatch can override
@@ -147,6 +160,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: pollis-node
+
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+      - name: Enable sccache wrapper
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
 
       - name: Resolve + stamp version
         shell: bash
@@ -279,6 +300,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: pollis-node
+
+      - name: Run sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+      - name: Enable sccache wrapper
+        shell: bash
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
 
       - name: Resolve + stamp version
         run: |
