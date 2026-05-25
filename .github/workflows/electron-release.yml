@@ -58,14 +58,44 @@ jobs:
       # branches, not just whole-target-dir keyed on Cargo.lock. Wins big
       # when Cargo.lock changes a single dep — Swatinem misses the whole
       # target dir, sccache rebuilds only the touched crates from cache.
-      # GHA backend uses the same actions cache quota as Swatinem.
+      # Swatinem still earns its keep caching the cargo registry + git
+      # index, which sccache doesn't touch.
+      #
+      # Backend is R2 (S3-compatible), NOT GH Actions Cache. The GHA
+      # backend has two problems we're done with: it's flaky (occasional
+      # HTML maintenance pages from artifactcache.actions.githubusercontent.com
+      # that take the whole build down), and it's per-branch-scoped + 10 GB
+      # capped. R2 is permanent, shared across branches, and effectively
+      # unlimited. Bucket has a 14-day lifecycle rule on the R2 side so
+      # objects expire (sccache's S3 backend has no eviction of its own).
       - name: Run sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
-      - name: Enable sccache wrapper
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Enable sccache wrapper (probe + fail-soft)
         shell: bash
+        env:
+          SCCACHE_BUCKET: pollis-sccache
+          SCCACHE_ENDPOINT: ${{ secrets.R2_S3_ENDPOINT }}
+          SCCACHE_REGION: auto
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          # Probe the R2 backend with --start-server, which exits
+          # non-zero if the bucket/endpoint/creds don't resolve. On
+          # success: persist all sccache env vars to $GITHUB_ENV so
+          # subsequent cargo invocations can find them. On failure:
+          # build cold rather than killing the pipeline. Cold builds
+          # are slow, dead pipelines are slower.
+          if sccache --start-server >/dev/null 2>&1; then
+            echo "::notice::sccache R2 backend reachable; enabling RUSTC_WRAPPER"
+            echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+            echo "SCCACHE_BUCKET=$SCCACHE_BUCKET" >> $GITHUB_ENV
+            echo "SCCACHE_ENDPOINT=$SCCACHE_ENDPOINT" >> $GITHUB_ENV
+            echo "SCCACHE_REGION=$SCCACHE_REGION" >> $GITHUB_ENV
+            echo "AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID" >> $GITHUB_ENV
+            echo "AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY" >> $GITHUB_ENV
+          else
+            echo "::warning::sccache R2 backend unreachable — building without cache"
+          fi
 
       - name: Resolve + stamp version
         run: |
@@ -162,12 +192,25 @@ jobs:
           workspaces: pollis-node
 
       - name: Run sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
-      - name: Enable sccache wrapper
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Enable sccache wrapper (probe + fail-soft)
         shell: bash
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          # GH Actions Cache occasionally serves HTML maintenance pages
+          # from artifactcache.actions.githubusercontent.com; sccache
+          # treats the cache as required and dies on first wrapper call,
+          # killing every cargo invocation. Probe with --start-server,
+          # which exits non-zero if the backend is unreachable. On
+          # success: enable the wrapper. On failure: build cold and
+          # carry on. Cold builds are slow, dead pipelines are slower.
+          export SCCACHE_GHA_ENABLED=true
+          if sccache --start-server >/dev/null 2>&1; then
+            echo "::notice::sccache backend reachable; enabling RUSTC_WRAPPER"
+            echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+            echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          else
+            echo "::warning::sccache backend unreachable (likely GH Actions Cache outage) — building without cache"
+          fi
 
       - name: Resolve + stamp version
         shell: bash
@@ -302,12 +345,25 @@ jobs:
           workspaces: pollis-node
 
       - name: Run sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
-      - name: Enable sccache wrapper
+        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Enable sccache wrapper (probe + fail-soft)
         shell: bash
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          # GH Actions Cache occasionally serves HTML maintenance pages
+          # from artifactcache.actions.githubusercontent.com; sccache
+          # treats the cache as required and dies on first wrapper call,
+          # killing every cargo invocation. Probe with --start-server,
+          # which exits non-zero if the backend is unreachable. On
+          # success: enable the wrapper. On failure: build cold and
+          # carry on. Cold builds are slow, dead pipelines are slower.
+          export SCCACHE_GHA_ENABLED=true
+          if sccache --start-server >/dev/null 2>&1; then
+            echo "::notice::sccache backend reachable; enabling RUSTC_WRAPPER"
+            echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+            echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          else
+            echo "::warning::sccache backend unreachable (likely GH Actions Cache outage) — building without cache"
+          fi
 
       - name: Resolve + stamp version
         run: |
