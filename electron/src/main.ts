@@ -40,14 +40,17 @@ app.commandLine.appendSwitch(
 // paragraph. Add new switches here as we hit them; never blindly remove one
 // without confirming what user-reported bug it papered over.
 if (process.platform === "linux") {
-  // Force native GLX/EGL. Chromium 130 defaults the Linux GL backend to
-  // ANGLE → ZINK (Mesa's experimental GL-on-Vulkan translator), which
-  // crashes on NVIDIA proprietary drivers with "ZINK: vkEnumeratePhysicalDevices
-  // failed". The GPU process exits, no compositor, no rendered video — even
-  // for screenshare tracks that publish/subscribe successfully at the SDP
-  // layer. `use-gl=desktop` skips ANGLE entirely and goes straight to
-  // libGL.so, which NVIDIA ships and Mesa serves for AMD/Intel.
-  app.commandLine.appendSwitch("use-gl", "desktop");
+  // Force ANGLE's GL backend instead of the default Vulkan one. Chromium
+  // 130 only allows `gl=egl-angle` now (use-gl=desktop is rejected at
+  // startup with "not found in allowed implementations"), so the choice
+  // is which backend ANGLE wraps — Vulkan or GL. On NVIDIA proprietary
+  // drivers ANGLE → Vulkan tries Mesa's ZINK translator and crashes:
+  // "ZINK: vkEnumeratePhysicalDevices failed". The GPU process exits, no
+  // compositor, no rendered video — even for screenshare tracks that
+  // publish/subscribe successfully at the SDP layer. Setting use-angle=gl
+  // tells ANGLE to wrap native libGL (NVIDIA's libglvnd-shipped driver
+  // for them, Mesa's for AMD/Intel), which is well-tested.
+  app.commandLine.appendSwitch("use-angle", "gl");
 }
 
 // pollis-node lives at <repo-root>/pollis-node; from electron/dist/main.js,
