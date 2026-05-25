@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Minus, Square, X, Maximize2 } from "lucide-react";
+import React from "react";
+import { Minus, Square, X } from "lucide-react";
 import { getCurrentWindow } from "../../bridge";
 import { PollisLogo } from "../ui/PollisLogo";
 import { isMac } from "../../utils/platform";
@@ -7,8 +7,6 @@ import { isMac } from "../../utils/platform";
 const win = () => getCurrentWindow();
 
 export const TitleBar: React.FC = () => {
-  const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
-
   const handleMinimize = () => win().minimize().catch(console.error);
   const handleMaximize = () => win().toggleMaximize().catch(console.error);
   const handleClose = () => win().close().catch(console.error);
@@ -20,45 +18,10 @@ export const TitleBar: React.FC = () => {
     win().startDragging().catch(console.error);
   };
 
-  // macOS traffic lights (left side, standard order: close / minimize / zoom).
-  // Sizing matches Apple's NSWindow defaults: 12px buttons, 8px gap edge-to-edge.
-  const macControls = (
-    <div className="flex items-center gap-2 flex-shrink-0">
-      <button
-        data-testid="title-bar-close"
-        onClick={handleClose}
-        onMouseEnter={() => setHoveredBtn("close")}
-        onMouseLeave={() => setHoveredBtn(null)}
-        aria-label="Close"
-        className="w-3 h-3 rounded-full flex items-center justify-center transition-opacity"
-        style={{ background: "#ff5f57", opacity: hoveredBtn ? 1 : 0.85 }}
-      >
-        {hoveredBtn === "close" && <X size={7} strokeWidth={3} color="#7a0000" />}
-      </button>
-      <button
-        data-testid="title-bar-minimize"
-        onClick={handleMinimize}
-        onMouseEnter={() => setHoveredBtn("minimize")}
-        onMouseLeave={() => setHoveredBtn(null)}
-        aria-label="Minimize"
-        className="w-3 h-3 rounded-full flex items-center justify-center transition-opacity"
-        style={{ background: "#febc2e", opacity: hoveredBtn ? 1 : 0.85 }}
-      >
-        {hoveredBtn === "minimize" && <Minus size={7} strokeWidth={3} color="#7a4800" />}
-      </button>
-      <button
-        data-testid="title-bar-maximize"
-        onClick={handleMaximize}
-        onMouseEnter={() => setHoveredBtn("maximize")}
-        onMouseLeave={() => setHoveredBtn(null)}
-        aria-label="Zoom"
-        className="w-3 h-3 rounded-full flex items-center justify-center transition-opacity"
-        style={{ background: "#28c840", opacity: hoveredBtn ? 1 : 0.85 }}
-      >
-        {hoveredBtn === "maximize" && <Maximize2 size={6} strokeWidth={3} color="#006400" />}
-      </button>
-    </div>
-  );
+  // macOS: native traffic lights are drawn by the OS via Electron's
+  // `titleBarStyle: "hiddenInset"`. We just reserve enough horizontal space
+  // on the left so our own UI doesn't overlap them.
+  const macControls = <div className="flex-shrink-0" style={{ width: 68 }} />;
 
   // Windows / Linux controls (right side)
   const winControls = (
@@ -108,7 +71,7 @@ export const TitleBar: React.FC = () => {
       onMouseDown={handleMouseDown}
       className="flex items-center justify-between flex-shrink-0 select-none"
       style={{
-        height: 36,
+        height: isMac ? 32 : 36,
         background: "var(--c-surface)",
         borderBottom: "1px solid var(--c-border)",
         // 12px left inset matches Finder/Safari/native NSWindow placement;
