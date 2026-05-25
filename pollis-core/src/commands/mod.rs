@@ -20,7 +20,13 @@ pub mod r2;
 pub mod safety;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod sfx;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+// Terminal pane: real PTY backend on Unix desktop, Windows stub until
+// ConPTY is wired. Gated out entirely on mobile.
+#[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
+#[path = "terminal_unix.rs"]
+pub mod terminal;
+#[cfg(target_os = "windows")]
+#[path = "terminal_windows.rs"]
 pub mod terminal;
 pub mod update;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
