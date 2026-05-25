@@ -241,6 +241,7 @@ jobs:
         run: pnpm --filter @pollis/electron build
 
       - name: Build + sign Windows
+        shell: bash
         env:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
