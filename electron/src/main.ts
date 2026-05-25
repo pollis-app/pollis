@@ -52,7 +52,10 @@ const pollisNode = require("../../pollis-node") as {
   ) => void;
 };
 
-const isDev = process.env.NODE_ENV !== "production";
+// `app.isPackaged` is the reliable signal — NODE_ENV is unset in packaged
+// builds, so the previous `NODE_ENV !== "production"` test was always true
+// in shipped binaries, opening DevTools and trying to load the Vite dev URL.
+const isDev = !app.isPackaged;
 const VITE_DEV_URL = "http://localhost:5173";
 // In dev, .env.development sits at the repo root (one level up from electron/).
 // In prod, env values are baked into the Rust binary at compile time via
@@ -124,8 +127,12 @@ function createWindow(): BrowserWindow {
     void win.loadURL(VITE_DEV_URL);
     win.webContents.openDevTools({ mode: "detach" });
   } else {
+    // Packaged: frontend lands at <resources>/frontend (see
+    // electron-builder.yml extraResources). The previous path traversed
+    // outside the asar and 404'd, which is why the shipped app showed
+    // the blank-frame + auto-opened DevTools fallback.
     void win.loadFile(
-      path.join(__dirname, "..", "..", "frontend", "dist", "index.html"),
+      path.join(process.resourcesPath, "frontend", "index.html"),
     );
   }
 

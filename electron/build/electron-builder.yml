@@ -15,6 +15,11 @@ copyright: "Copyright (c) 2026 Daniel Kral"
 # filename → "@pollis/electron_1.1.0_amd64.deb". Pin to "Pollis-<version>-…"
 # parity with the Tauri pipeline artifacts.
 artifactName: "Pollis-${version}.${ext}"
+# electron-builder defaults the binary name to the package `name` field
+# ("@pollis/electron"), which it sanitises to "@polliselectron". That's
+# what you see in the .deb's /usr/bin entry — and why `pollis` isn't on
+# $PATH after install. Force the bin name to plain "pollis".
+executableName: pollis
 
 directories:
   buildResources: build
@@ -23,8 +28,6 @@ directories:
 files:
   # Compiled electron main + preload bundles (output of @pollis/electron build)
   - "dist/**/*"
-  # Compiled React frontend (output of `pnpm --filter frontend build`)
-  - "../frontend/dist/**/*"
   - "node_modules/**/*"
   - "package.json"
 
@@ -37,6 +40,13 @@ extraResources:
       - "*.node"
       - "index.js"
       - "index.d.ts"
+  # Compiled React frontend (output of `pnpm --filter frontend build`).
+  # NOT inside `files:` because electron-builder's appDir is `electron/`
+  # and `..`-prefixed globs in `files:` get silently dropped from the
+  # asar. As an extraResource it lands at process.resourcesPath/frontend/
+  # — main.ts loadFile path matches.
+  - from: "../frontend/dist"
+    to: "frontend"
   # TODO: package the screenshare capture helper that today lives in
   # src-tauri/binaries/pollis-capture-{linux,macos}. Decide in Phase 7
   # whether to ship as an extraResource, embed inside pollis-node, or

@@ -392,9 +392,19 @@ jobs:
 
       - name: Resolve version
         run: |
+          # Same tag-or-override resolution as the build jobs. Earlier this
+          # fell back to `jq -r .version electron/package.json` — that reads
+          # the committed file (1.1.0) because the build jobs' bump-version.sh
+          # mutations are job-local, so on-disk package.json on main never
+          # advances. That mismatch caused R2 paths + AUR pkgver to be stuck
+          # at 1.1.0 while the artifacts inside were stamped correctly.
           VERSION="${{ github.event.inputs.version_override }}"
+          if [ -z "$VERSION" ] && [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
           if [ -z "$VERSION" ]; then
-            VERSION=$(jq -r .version electron/package.json)
+            echo "error: no version available (push a v* tag or pass version_override)" >&2
+            exit 1
           fi
           echo "POLLIS_VERSION=$VERSION" >> $GITHUB_ENV
           echo "POLLIS_TAG=v$VERSION" >> $GITHUB_ENV
