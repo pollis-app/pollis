@@ -466,10 +466,12 @@ export const AppShell: React.FC = () => {
         )}
       </div>
 
-      {/* VoiceBar — shown above bottom bar while user is in a voice channel */}
-      {activeVoiceChannelId !== null && (
+      {/* VoiceBar — only after the join completes, not during the
+          'joining' phase. Mute/share/leave controls only make sense once
+          the LiveKit room is actually connected. */}
+      {voiceState.kind === 'joined' && (
         <VoiceBar
-          channelId={activeVoiceChannelId}
+          channelId={voiceState.channelId}
           channelName={voiceChannelName}
         />
       )}

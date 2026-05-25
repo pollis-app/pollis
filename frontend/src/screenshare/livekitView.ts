@@ -281,6 +281,20 @@ class LiveKitView {
       // Disable simulcast for screen-share — high-bitrate single layer
       // matches text legibility better than scaled-down spatial layers.
       simulcast: false,
+      // Encoder ceilings — not targets. WebRTC's TWCC bandwidth estimator
+      // ramps up toward these when the link sustains it, ramps down on
+      // packet loss. Default LiveKit screenshare cap is 15 fps; bumping to
+      // 60 covers the game-stream-to-lobby use case. Bitrate ceiling of
+      // 8 Mbps is comfortable for 1080p60 VP8 and headroom for the
+      // power-user case; the estimator will hold back on slower links.
+      // maintain-framerate biases toward smoother motion over crisper
+      // text when the encoder has to give something up under pressure.
+      videoEncoding: {
+        maxFramerate: 60,
+        maxBitrate: 8_000_000,
+        priority: 'high',
+      },
+      degradationPreference: 'maintain-framerate',
     });
     console.info('[livekit-view] publishScreenShare: publishTrack resolved', {
       elapsedMs: Math.round(performance.now() - t0),

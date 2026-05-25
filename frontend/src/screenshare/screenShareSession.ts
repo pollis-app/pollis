@@ -310,8 +310,16 @@ class ScreenShareSession {
     try {
       // Audio is intentionally off — voice goes through the Rust voice
       // client, and getDisplayMedia audio is unreliable cross-platform.
+      //
+      // frameRate ceiling: 60 fps. xdg-desktop-portal (Linux), ScreenCaptureKit
+      // (macOS), and WGC (Windows) all cap source capture at ~60 fps on the
+      // typical compositor, so asking for higher gets silently clamped to 60.
+      // The source track feeds both the local preview <video> and the LiveKit
+      // publish path — bumping it here gets us up to display-rate previews
+      // (subject to compositor) and gives the encoder headroom to push 60 fps
+      // out to receivers when bandwidth allows.
       stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: { frameRate: { ideal: 60, max: 60 } },
         audio: false,
       });
     } catch (e) {
