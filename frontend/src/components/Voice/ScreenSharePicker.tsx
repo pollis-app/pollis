@@ -19,10 +19,17 @@ import { Card } from "../ui/Card";
  *  parked helper, which builds an `SCContentFilter` and starts the
  *  `SCStream`. Industry-standard pattern — what Slack/Discord/Zoom do. */
 export const ScreenSharePicker: React.FC = () => {
-  const sources = useAppStore((s) => s.screenShareSources);
-  const setScreenShareMode = useAppStore((s) => s.setScreenShareMode);
-  const setScreenShareSources = useAppStore((s) => s.setScreenShareSources);
-  const setScreenShareError = useAppStore((s) => s.setScreenShareError);
+  // Picker only renders when shareState.kind === 'picking', so sources are
+  // guaranteed present. Narrowed via the union; bail to null defensively
+  // for the brief frame where state may have transitioned away.
+  const sources = useAppStore((s) =>
+    s.voiceState.kind === 'joined' && s.voiceState.share.kind === 'picking'
+      ? s.voiceState.share.sources
+      : null,
+  );
+  const shareCancelPicker = useAppStore((s) => s.shareCancelPicker);
+  const shareStartStarting = useAppStore((s) => s.shareStartStarting);
+  const shareFailed = useAppStore((s) => s.shareFailed);
   const [busy, setBusy] = useState(false);
 
   // Tab between Displays and Windows. Default to Displays — most
@@ -48,22 +55,19 @@ export const ScreenSharePicker: React.FC = () => {
     } catch (e) {
       console.warn("[screenshare] cancel picker:", e);
     } finally {
-      setScreenShareMode("idle");
-      setScreenShareSources(null);
+      shareCancelPicker();
       setBusy(false);
     }
   }
 
   async function handlePick(selection: Selection) {
     setBusy(true);
-    setScreenShareMode("starting");
+    shareStartStarting();
     try {
       await screenShareSession.start(selection);
     } catch (e) {
       console.error("[screenshare] start:", e);
-      setScreenShareError(friendlyScreenShareError(String(e)));
-      setScreenShareMode("idle");
-      setScreenShareSources(null);
+      shareFailed(friendlyScreenShareError(String(e)));
     } finally {
       setBusy(false);
     }

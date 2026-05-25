@@ -227,7 +227,9 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations } = useDMConversations();
   const { members: allGroupMembers } = useAllGroupMembers();
-  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const activeVoiceChannelId = useAppStore((s) =>
+    s.voiceState.kind === 'idle' ? null : s.voiceState.channelId,
+  );
   const currentUserId = useAppStore((s) => s.currentUser?.id ?? null);
 
   // Build the full list of searchable items, active voice channel sorted to top

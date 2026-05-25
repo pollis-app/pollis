@@ -701,48 +701,75 @@ export const voiceSession = new VoiceSessionManager();
  */
 voiceSession.subscribe(() => {
   const s = voiceSession.getSnapshot();
-  // Map manager state → store state. Avoid setting fields that didn't change
-  // so subscribers don't churn on equal-value writes.
   const store = useAppStore.getState();
-  const patch: Partial<{
-    activeVoiceChannelId: string | null;
-    voiceCounterpartyUserId: string | null;
-    voiceParticipants: VoiceParticipant[];
-    voiceActiveSpeakerIds: string[];
-    voiceIsMuted: boolean;
-    voicePhase: VoicePhase;
-    isLocalSpeaking: boolean;
-    voiceError: string | null;
-  }> = {};
-  if (store.activeVoiceChannelId !== s.channelId) {
-    patch.activeVoiceChannelId = s.channelId;
+  const v = store.voiceState;
+
+  // Lifecycle transitions — drive the union via semantic methods. The
+  // store guards them, so out-of-order writes from a stale snapshot
+  // become no-ops + console.warn instead of bad state.
+  switch (s.phase) {
+    case 'idle': {
+      if (v.kind === 'leaving' || v.kind === 'joining') {
+        store.voiceLeft();
+      } else if (v.kind === 'joined') {
+        store.voiceLeft();
+      }
+      // If the manager moved straight from joining → idle with an error,
+      // surface it as a join failure even though we already collapsed to
+      // idle above. (The store's voiceJoinFailed only fires from joining;
+      // for the idle landing we set voiceError directly.)
+      if (s.error && store.voiceError !== s.error) {
+        store.setVoiceError(s.error);
+      }
+      break;
+    }
+    case 'joining': {
+      if (v.kind === 'idle' && s.channelId) {
+        store.voiceStartJoining(s.channelId, s.counterpartyUserId);
+      } else if (v.kind === 'joining' && s.channelId && (v.channelId !== s.channelId || v.counterpartyUserId !== s.counterpartyUserId)) {
+        // Channel switched mid-join — reset and restart.
+        store.voiceLeft();
+        store.voiceStartJoining(s.channelId, s.counterpartyUserId);
+      }
+      break;
+    }
+    case 'joined': {
+      if (v.kind === 'joining' && s.channelId) {
+        store.voiceJoined();
+      } else if (v.kind === 'idle' && s.channelId) {
+        // Race: snapshot skipped 'joining'. Synthesize it.
+        store.voiceStartJoining(s.channelId, s.counterpartyUserId);
+        store.voiceJoined();
+      }
+      // Mic-mute mirror.
+      const after = useAppStore.getState().voiceState;
+      if (after.kind === 'joined' && after.micMuted !== s.isMuted) {
+        store.voiceSetMicMuted(s.isMuted);
+      }
+      break;
+    }
+    case 'leaving': {
+      if (v.kind === 'joining' || v.kind === 'joined') {
+        store.voiceStartLeaving();
+      }
+      break;
+    }
   }
-  if (store.voiceCounterpartyUserId !== s.counterpartyUserId) {
-    patch.voiceCounterpartyUserId = s.counterpartyUserId;
-  }
+
+  // Collection / derived fields stay as direct sets.
   if (store.voiceParticipants !== s.participants) {
-    patch.voiceParticipants = s.participants;
+    useAppStore.setState({ voiceParticipants: s.participants });
   }
   if (store.voiceActiveSpeakerIds !== s.activeSpeakerIds) {
-    patch.voiceActiveSpeakerIds = s.activeSpeakerIds;
-  }
-  if (store.voiceIsMuted !== s.isMuted) {
-    patch.voiceIsMuted = s.isMuted;
-  }
-  if (store.voicePhase !== s.phase) {
-    patch.voicePhase = s.phase;
+    useAppStore.setState({ voiceActiveSpeakerIds: s.activeSpeakerIds });
   }
   if (store.isLocalSpeaking !== s.isLocalSpeaking) {
-    patch.isLocalSpeaking = s.isLocalSpeaking;
+    useAppStore.setState({ isLocalSpeaking: s.isLocalSpeaking });
   }
-  // Mirror join failures so the shell can surface them in the status bar.
-  // Cleared automatically: every join attempt resets `error` to null at the
-  // top of `executeJoin`, which projects through here as null.
+  // Join errors mirror through the store's separate voiceError field;
+  // the union's idle state doesn't carry the error itself.
   if (store.voiceError !== s.error) {
-    patch.voiceError = s.error;
-  }
-  if (Object.keys(patch).length > 0) {
-    useAppStore.setState(patch);
+    useAppStore.setState({ voiceError: s.error });
   }
 });
 

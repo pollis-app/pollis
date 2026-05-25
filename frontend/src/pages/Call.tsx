@@ -25,7 +25,9 @@ export const CallPage: React.FC = () => {
   const navigate = useNavigate();
   const { callId } = useParams({ from: "/call/$callId" });
   const roomName = `call-${callId}`;
-  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const activeVoiceChannelId = useAppStore((s) =>
+    s.voiceState.kind === 'idle' ? null : s.voiceState.channelId,
+  );
   const voiceParticipants = useAppStore((s) => s.voiceParticipants);
   const outgoingCall = useAppStore((s) => s.outgoingCall);
   const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);

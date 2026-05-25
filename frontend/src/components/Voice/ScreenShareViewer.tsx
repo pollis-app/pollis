@@ -11,16 +11,19 @@ import { X } from "lucide-react";
 import { useAppStore } from "../../stores/appStore";
 import { RemoteVideoTile } from "./RemoteVideoTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
+import { shareOf } from "../../types/voice-state";
 
 export const ScreenShareViewer: React.FC = () => {
   const {
     viewingScreenShareTrackKey,
     screenShareRemotes,
-    screenShareLocalActive,
-    screenShareLocalDimensions,
+    voiceState,
     currentUser,
     setViewingScreenShareTrackKey,
   } = useAppStore();
+  const share = shareOf(voiceState);
+  const screenShareLocalActive = share.kind === 'active';
+  const screenShareLocalDimensions = share.kind === 'active' ? share.dimensions : null;
   if (!viewingScreenShareTrackKey) {
     return null;
   }

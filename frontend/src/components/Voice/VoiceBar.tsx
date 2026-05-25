@@ -9,6 +9,7 @@ import {
   friendlyScreenShareError,
   screenShareSession,
 } from "../../screenshare/screenShareSession";
+import { shareOf } from "../../types/voice-state";
 
 interface VoiceBarProps {
   channelId: string;
@@ -18,12 +19,17 @@ interface VoiceBarProps {
 export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
   const {
     voiceParticipants,
-    voiceIsMuted,
+    voiceState,
     voiceActiveSpeakerIds,
     currentUser,
-    screenShareLocalActive,
-    screenShareMode,
   } = useAppStore();
+  const voiceIsMuted = voiceState.kind === 'joined' ? voiceState.micMuted : false;
+  const share = shareOf(voiceState);
+  const shareActive = share.kind === 'active';
+  // Anything non-idle/non-picking means the button should become a "stop"
+  // affordance — covers in-flight `starting` (recovery from wedged publish)
+  // and `failed` (lets the user clear the error state by stopping).
+  const shareInFlight = share.kind !== 'idle';
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
@@ -94,34 +100,29 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
           this by returning an empty source list from enumerate(). */}
       <PillButton
         data-testid="voice-bar-screenshare-button"
-        accent={
-          screenShareLocalActive || screenShareMode !== "idle"
-            ? "#ff6b6b"
-            : "var(--c-accent)"
-        }
+        accent={shareInFlight ? "#ff6b6b" : "var(--c-accent)"}
         onClick={() => {
-          if (screenShareLocalActive) {
+          if (shareActive) {
             screenShareSession
               .stop()
               .catch((e) => console.error("[screenshare] stop", e));
             return;
           }
-          if (screenShareMode === "picking") {
+          if (share.kind === "picking") {
             // Button doubles as a cancel affordance while the picker is open.
             screenShareSession
               .cancelPicker()
               .catch((e) => console.warn("[screenshare] cancel:", e))
               .finally(() => {
-                useAppStore.getState().setScreenShareMode("idle");
-                useAppStore.getState().setScreenShareSources(null);
+                useAppStore.getState().shareCancelPicker();
               });
             return;
           }
-          // Any other non-idle mode (e.g. 'starting' that wedged because
-          // publishTrack hung on a dead Wayland-portal track) — let the
-          // button recover the state by force-stopping. stop() is safe to
-          // call when nothing is published; it just resets the store.
-          if (screenShareMode !== "idle") {
+          // Any other non-idle share state (e.g. 'starting' that wedged
+          // because publishTrack hung on a dead Wayland-portal track, or
+          // 'failed') — let the button recover by force-stopping.
+          // shareStopped() is safe from any joined-state.
+          if (shareInFlight) {
             screenShareSession
               .stop()
               .catch((e) => console.warn("[screenshare] force-stop:", e));
@@ -137,33 +138,32 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
                 await screenShareSession.start();
                 return;
               }
-              useAppStore.getState().setScreenShareSources(list);
-              useAppStore.getState().setScreenShareMode("picking");
+              useAppStore.getState().shareStartPicking(list);
             } catch (e) {
               console.error("[screenshare] enumerate:", e);
-              useAppStore
-                .getState()
-                .setScreenShareError(friendlyScreenShareError(String(e)));
+              useAppStore.getState().shareFailed(friendlyScreenShareError(String(e)));
             }
           })();
         }}
         title={
-          screenShareLocalActive
+          shareActive
             ? "Stop screen share"
-            : screenShareMode === "picking"
+            : share.kind === "picking"
               ? "Cancel"
-              : "Go live (share screen)"
+              : shareInFlight
+                ? "Cancel (recover)"
+                : "Go live (share screen)"
         }
         aria-label={
-          screenShareLocalActive
+          shareActive
             ? "Stop screen share"
-            : screenShareMode === "picking"
+            : share.kind === "picking"
               ? "Cancel screen share picker"
               : "Share screen"
         }
         square
       >
-        {screenShareLocalActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
+        {shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
       </PillButton>
 
       {/* Leave button */}

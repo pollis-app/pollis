@@ -185,7 +185,9 @@ export function useLiveKitRealtime() {
 
   // Track the voice room the user is currently connected to so we only play
   // join/leave cues for rooms they can actually hear.
-  const activeVoiceChannelId = useAppStore((s) => s.activeVoiceChannelId);
+  const activeVoiceChannelId = useAppStore((s) =>
+    s.voiceState.kind === 'idle' ? null : s.voiceState.channelId,
+  );
   const activeVoiceChannelIdRef = useRef<string | null>(activeVoiceChannelId);
   useEffect(() => { activeVoiceChannelIdRef.current = activeVoiceChannelId; }, [activeVoiceChannelId]);
 

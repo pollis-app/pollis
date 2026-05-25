@@ -19,10 +19,12 @@ export const VoiceChannelPage: React.FC = () => {
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/voice/$channelId" });
   const {
-    activeVoiceChannelId,
+    voiceState,
     pendingDeleteChannelId,
     setPendingDeleteChannelId,
   } = useAppStore();
+  const activeVoiceChannelId =
+    voiceState.kind === 'idle' ? null : voiceState.channelId;
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);
