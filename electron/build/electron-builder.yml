@@ -11,6 +11,10 @@
 appId: com.pollis.app
 productName: Pollis
 copyright: "Copyright (c) 2026 Daniel Kral"
+# Without this, the scoped package name (@pollis/electron) ends up in the
+# filename → "@pollis/electron_1.1.0_amd64.deb". Pin to "Pollis-<version>-…"
+# parity with the Tauri pipeline artifacts.
+artifactName: "Pollis-${version}.${ext}"
 
 directories:
   buildResources: build
@@ -92,9 +96,10 @@ win:
   # SIGNTOOL_PATH / SIGNING_DLIB_PATH / SIGN_METADATA_PATH from env at
   # signing time; CI sets all three. Local builds without those env
   # vars produce unsigned .exe with a warning (see sign.js).
-  sign: ./build/sign.js
-  signingHashAlgorithms:
-    - sha256
+  signtoolOptions:
+    sign: ./build/sign.js
+    signingHashAlgorithms:
+      - sha256
   icon: ../../src-tauri/icons/icon.ico
 
 linux:
