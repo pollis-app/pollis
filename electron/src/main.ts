@@ -108,7 +108,10 @@ function createWindow(): BrowserWindow {
     // PNG works as the window icon on all three platforms; electron-builder
     // picks the per-platform .icns/.ico at package time (see
     // electron-builder.yml). In dev this also drives the taskbar/dock icon.
-    icon: path.resolve(__dirname, "..", "..", "src-tauri", "icons", "icon.png"),
+    // Packaged: lives next to the other extraResources; dev: at repo path.
+    icon: app.isPackaged
+      ? path.join(process.resourcesPath, "icon.png")
+      : path.resolve(__dirname, "..", "..", "src-tauri", "icons", "icon.png"),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,

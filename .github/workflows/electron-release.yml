@@ -591,6 +591,11 @@ jobs:
           package() {
             # Extract the data archive from the .deb
             bsdtar -xf data.tar.* -C "\${pkgdir}/"
+            # electron-builder doesn't add a /usr/bin entry — it only installs
+            # the binary to /opt/Pollis/pollis. Drop a symlink so the user can
+            # actually type 'pollis' in a terminal.
+            install -d "\${pkgdir}/usr/bin"
+            ln -sf /opt/Pollis/pollis "\${pkgdir}/usr/bin/pollis"
           }
           PKGBUILD_EOF
 
