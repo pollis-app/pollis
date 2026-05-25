@@ -113,12 +113,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pnpm --filter @pollis/electron exec electron-builder \
             --mac --arm64 --x64 \
             --config build/electron-builder.yml \
-            --publish onTagOrDraft
+            --publish never
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
@@ -246,12 +245,11 @@ jobs:
           AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pnpm --filter @pollis/electron exec electron-builder \
             --win --x64 \
             --config build/electron-builder.yml \
-            --publish onTagOrDraft
+            --publish never
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -347,13 +345,11 @@ jobs:
         run: pnpm --filter @pollis/electron build
 
       - name: Build Electron (AppImage + deb + rpm)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           pnpm --filter @pollis/electron exec electron-builder \
             --linux --x64 \
             --config build/electron-builder.yml \
-            --publish onTagOrDraft
+            --publish never
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -453,11 +449,10 @@ jobs:
           AWS_DEFAULT_REGION: auto
 
       # electron-updater reads latest{,-mac,-linux}.yml + .blockmap files
-      # at the publish URL — for `publish: github` they live as GitHub
-      # release assets already (electron-builder uploaded them via
-      # `--publish onTagOrDraft` in the per-platform jobs). We also mirror
-      # to R2 so the marketing CDN (cdn.pollis.com) can serve them for
-      # users who prefer that path / for the legacy update.json clients.
+      # at the publish URL — for `publish: github` they're published to the
+      # GH release by the `Publish GitHub release` step below. We also
+      # mirror them to R2 so cdn.pollis.com can serve them for the legacy
+      # update.json clients / marketing site.
       - name: Upload electron-updater manifests + blockmaps to R2
         run: |
           VERSION="${POLLIS_TAG}"
