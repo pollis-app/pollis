@@ -171,7 +171,10 @@ void app.whenReady().then(async () => {
   // macOS dock icon in dev — packaged builds get this from the .icns
   // electron-builder bundles, but in `pnpm dev:electron` the dock shows
   // Electron's default mascot without this.
-  if (process.platform === "darwin" && app.dock) {
+  // Only needed in dev — packaged Mac bundles get the dock icon from the
+  // .icns electron-builder embeds, and the src-tauri/icons path doesn't
+  // exist inside the asar (it's not in extraResources).
+  if (isDev && process.platform === "darwin" && app.dock) {
     const iconPath = path.resolve(__dirname, "..", "..", "src-tauri", "icons", "icon.png");
     try {
       app.dock.setIcon(iconPath);

@@ -9,6 +9,12 @@ export default defineConfig({
   plugins: [react()],
   // Load VITE_* env vars from the monorepo root so we only need a single .env.development
   envDir: '..',
+  // Emit relative asset URLs in the built index.html. Electron loads the
+  // packaged HTML via `file://`, where absolute paths like `/assets/x.js`
+  // resolve to `file:///assets/x.js` and 404 — the window then shows just
+  // the title bar with no rendered content. Relative (`./assets/x.js`)
+  // works under both `file://` (packaged) and the Vite dev server.
+  base: './',
   resolve: isPlaywright
     ? {
         alias: {
