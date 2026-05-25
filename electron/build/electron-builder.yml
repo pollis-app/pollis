@@ -47,6 +47,11 @@ extraResources:
   # — main.ts loadFile path matches.
   - from: "../frontend/dist"
     to: "frontend"
+  # In-window icon (BrowserWindow.icon). Without this the dev-time path
+  # `__dirname/../../src-tauri/icons/icon.png` resolves to nothing in
+  # packaged builds → broken-image placeholder in the taskbar/dock.
+  - from: "../src-tauri/icons/icon.png"
+    to: "icon.png"
   # TODO: package the screenshare capture helper that today lives in
   # src-tauri/binaries/pollis-capture-{linux,macos}. Decide in Phase 7
   # whether to ship as an extraResource, embed inside pollis-node, or
