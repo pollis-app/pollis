@@ -80,7 +80,9 @@ mac:
     LSApplicationCategoryType: public.app-category.social-networking
   # Signing identity matches the Tauri config; CI overrides via env vars.
   # Set CSC_IDENTITY_AUTO_DISCOVERY=false to skip signing locally.
-  identity: "Developer ID Application: Daniel Kral (9JF7WWYMU2)"
+  # electron-builder ≥26 rejects the "Developer ID Application:" prefix and
+  # auto-selects the cert type from the keychain — pass the common name only.
+  identity: "Daniel Kral (9JF7WWYMU2)"
   icon: ../../src-tauri/icons/AppIcon.icns
 
 win:
