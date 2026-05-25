@@ -63,19 +63,28 @@ export const AppShell: React.FC = () => {
   const {
     setGroups,
     setChannels,
-    activeVoiceChannelId,
+    voiceState,
     statusBarAlert,
     setStatusBarAlert,
     voiceError,
     setVoiceError,
-    screenShareError,
-    setScreenShareError,
     isLocalSpeaking,
     incomingCall,
     setIncomingCall,
     viewingScreenShareTrackKey,
     setViewingScreenShareTrackKey,
+    shareStopped,
   } = useAppStore();
+  // Channel id derives from the union. Replaces the standalone
+  // activeVoiceChannelId field that used to be stored separately.
+  const activeVoiceChannelId =
+    voiceState.kind === 'idle' ? null : voiceState.channelId;
+  // Screenshare errors live in the union as `share: { kind: 'failed' }`
+  // instead of a top-level field. Dismissing clears via shareStopped().
+  const screenShareError =
+    voiceState.kind === 'joined' && voiceState.share.kind === 'failed'
+      ? voiceState.share.error
+      : null;
 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { query: prefsQuery } = usePreferences();
@@ -457,10 +466,12 @@ export const AppShell: React.FC = () => {
         )}
       </div>
 
-      {/* VoiceBar — shown above bottom bar while user is in a voice channel */}
-      {activeVoiceChannelId !== null && (
+      {/* VoiceBar — only after the join completes, not during the
+          'joining' phase. Mute/share/leave controls only make sense once
+          the LiveKit room is actually connected. */}
+      {voiceState.kind === 'joined' && (
         <VoiceBar
-          channelId={activeVoiceChannelId}
+          channelId={voiceState.channelId}
           channelName={voiceChannelName}
         />
       )}
@@ -582,7 +593,7 @@ export const AppShell: React.FC = () => {
               data-testid="status-bar-screenshare-error-dismiss"
               className="cursor-pointer"
               style={{ color: "inherit", background: "none", border: "none", padding: 0, lineHeight: 0 }}
-              onClick={() => setScreenShareError(null)}
+              onClick={() => shareStopped()}
               aria-label="Dismiss screen share error"
             >
               <X className="w-4 h-4" />

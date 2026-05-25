@@ -33,6 +33,13 @@ app.commandLine.appendSwitch(
   "WebRtcAllowAv1Encoder,WebRtcAllowAv1ScreenshareEncoder",
 );
 
+// Linux GL/media baseline goes here when we figure out the right
+// combination. Tried `use-gl=desktop` (rejected by Chromium 130's allowed
+// list) and `use-angle=gl` (different EGL init failure + broke the
+// xdg-desktop-portal handshake). NVIDIA + ANGLE + Mesa on Linux is a
+// moving target; revisit with a fresh repro + bisect once the dust
+// settles on Chromium's default backend choice.
+
 // pollis-node lives at <repo-root>/pollis-node; from electron/dist/main.js,
 // ../../pollis-node resolves to <repo-root>/pollis-node
 // eslint-disable-next-line @typescript-eslint/no-var-requires

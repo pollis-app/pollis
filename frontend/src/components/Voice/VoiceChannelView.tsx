@@ -5,26 +5,28 @@ import type { VoiceParticipant } from "../../types";
 import { VoiceMemberTile } from "./VoiceMemberTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 import { ScreenSharePicker } from "./ScreenSharePicker";
+import { shareOf } from "../../types/voice-state";
 
 export const VoiceChannelView: React.FC = () => {
   const {
     voiceParticipants,
     voiceActiveSpeakerIds,
-    voicePhase,
+    voiceState,
     screenShareRemotes,
-    screenShareLocalActive,
-    screenShareLocalDimensions,
-    screenShareMode,
     currentUser,
     setViewingScreenShareTrackKey,
   } = useAppStore();
   const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
+  const share = shareOf(voiceState);
+  const shareActive = share.kind === 'active';
+  const shareLocalDims = shareActive ? share.dimensions : null;
+  const isJoining = voiceState.kind === 'joining';
 
   // When the user is picking a screen-share source we take over the
   // entire channel content area with the in-app picker — no modal, no
   // overlay. This is the project's blanket "no modals" rule
   // (CLAUDE.md). Returns to the participant grid on cancel / start.
-  if (screenShareMode === "picking") {
+  if (share.kind === "picking") {
     return <ScreenSharePicker />;
   }
 
@@ -51,7 +53,7 @@ export const VoiceChannelView: React.FC = () => {
         onActivate={(p) => {
           const isLocal = p.identity === localIdentity;
           // Enter activates the streaming user's tile → open fullscreen.
-          if (isLocal && screenShareLocalActive) {
+          if (isLocal && shareActive) {
             setViewingScreenShareTrackKey(LOCAL_PREVIEW_KEY);
             return;
           }
@@ -68,10 +70,10 @@ export const VoiceChannelView: React.FC = () => {
           let streamTrackKey: string | undefined;
           let streamWidth: number | undefined;
           let streamHeight: number | undefined;
-          if (isLocal && screenShareLocalActive) {
+          if (isLocal && shareActive) {
             streamTrackKey = LOCAL_PREVIEW_KEY;
-            streamWidth = screenShareLocalDimensions?.width;
-            streamHeight = screenShareLocalDimensions?.height;
+            streamWidth = shareLocalDims?.width;
+            streamHeight = shareLocalDims?.height;
           } else if (!isLocal) {
             const remote = screenShareRemotes[p.identity];
             if (remote) {
@@ -99,7 +101,7 @@ export const VoiceChannelView: React.FC = () => {
               // and only while the session is still negotiating with
               // LiveKit. Driven by VoiceSessionManager's phase, so it
               // clears the instant join_voice_channel resolves.
-              isConnecting={isLocal && voicePhase === "joining"}
+              isConnecting={isLocal && isJoining}
               onView={(trackKey) => setViewingScreenShareTrackKey(trackKey)}
             />
           );

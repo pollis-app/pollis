@@ -305,26 +305,31 @@ class ScreenShareSession {
     // explicit and survives any future Vite config quirks.)
     const { livekitView } = await import("./livekitView");
     const store = useAppStore.getState();
-    store.setScreenShareMode("starting");
-    store.setScreenShareError(null);
+    store.shareStartStarting();
     let stream: MediaStream;
     try {
       // Audio is intentionally off — voice goes through the Rust voice
       // client, and getDisplayMedia audio is unreliable cross-platform.
+      //
+      // frameRate ceiling: 60 fps. xdg-desktop-portal (Linux), ScreenCaptureKit
+      // (macOS), and WGC (Windows) all cap source capture at ~60 fps on the
+      // typical compositor, so asking for higher gets silently clamped to 60.
+      // The source track feeds both the local preview <video> and the LiveKit
+      // publish path — bumping it here gets us up to display-rate previews
+      // (subject to compositor) and gives the encoder headroom to push 60 fps
+      // out to receivers when bandwidth allows.
       stream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
+        video: { frameRate: { ideal: 60, max: 60 } },
         audio: false,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      store.setScreenShareError(friendlyScreenShareError(msg));
-      store.setScreenShareMode("idle");
+      store.shareFailed(friendlyScreenShareError(msg));
       throw e;
     }
     const track = stream.getVideoTracks()[0];
     if (!track) {
-      store.setScreenShareError("Screen share returned no video track.");
-      store.setScreenShareMode("idle");
+      store.shareFailed("Screen share returned no video track.");
       throw new Error("getDisplayMedia returned no video track");
     }
     console.info("[screenshare] getDisplayMedia returned, handing track to livekitView", {
@@ -334,36 +339,46 @@ class ScreenShareSession {
       muted: track.muted,
     });
     try {
-      await livekitView.publishScreenShare(track);
+      // 15s ceiling on publishTrack. On Linux a Wayland-portal-sourced
+      // track can leave LiveKit's publish promise unresolved forever
+      // (PipeWire delivers a dead stream; readyState stays "live", the
+      // SDK never receives frames so it never completes setup). Without
+      // the race, the user is stuck at share={kind:'starting'} forever.
+      await Promise.race([
+        livekitView.publishScreenShare(track),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("publishTrack timed out after 15s")),
+            15000,
+          ),
+        ),
+      ]);
       console.info("[screenshare] publishScreenShare completed");
     } catch (e) {
       console.error("[screenshare] publishScreenShare threw:", e);
-      // Publish failed — make sure the OS capture handle is released so
-      // the "you're sharing" indicator goes away.
+      // Publish failed (or timed out) — release the OS capture handle so
+      // the "you're sharing" indicator goes away, then drop any in-flight
+      // publication the SDK may have half-registered before the timeout.
       try {
         track.stop();
       } catch {
         // ignore
       }
+      try {
+        await livekitView.unpublishScreenShare();
+      } catch {
+        // ignore — best-effort cleanup
+      }
       const msg = e instanceof Error ? e.message : String(e);
-      store.setScreenShareError(friendlyScreenShareError(msg));
-      store.setScreenShareMode("idle");
+      store.shareFailed(friendlyScreenShareError(msg));
       throw e;
     }
     const settings = track.getSettings();
-    store.setScreenShareLocalActive(true);
-    if (
-      typeof settings.width === "number" &&
-      typeof settings.height === "number"
-    ) {
-      store.setScreenShareLocalDimensions({
-        width: settings.width,
-        height: settings.height,
-      });
-    } else {
-      store.setScreenShareLocalDimensions(null);
-    }
-    store.setScreenShareMode("active");
+    const dims =
+      typeof settings.width === "number" && typeof settings.height === "number"
+        ? { width: settings.width, height: settings.height }
+        : null;
+    store.shareStarted(track.id, dims);
     playSfx(SFX.ping);
   }
 
@@ -372,9 +387,7 @@ class ScreenShareSession {
       const { livekitView } = await import("./livekitView");
       await livekitView.unpublishScreenShare();
       const store = useAppStore.getState();
-      store.setScreenShareLocalActive(false);
-      store.setScreenShareLocalDimensions(null);
-      store.setScreenShareMode("idle");
+      store.shareStopped();
       playSfx(SFX.ping);
       return;
     }
@@ -385,25 +398,23 @@ class ScreenShareSession {
     const store = useAppStore.getState();
     switch (ev.type) {
       case "local_started":
-        store.setScreenShareLocalActive(true);
-        store.setScreenShareLocalDimensions({ width: ev.width, height: ev.height });
-        store.setScreenShareMode("active");
-        store.setScreenShareSources(null);
-        store.setScreenShareError(null);
+        // Tauri path: backend signals the start after its capture helper
+        // has published. Synthesize the renderer-side state transitions
+        // (starting → active) so the union ends up in the same shape as
+        // the Electron renderer path.
+        store.shareStartStarting();
+        store.shareStarted(
+          "tauri-local",
+          { width: ev.width, height: ev.height },
+        );
         playSfx(SFX.ping);
         break;
       case "local_stopped":
-        store.setScreenShareLocalActive(false);
-        store.setScreenShareLocalDimensions(null);
-        store.setScreenShareMode("idle");
-        store.setScreenShareSources(null);
-        store.setScreenShareError(null);
+        store.shareStopped();
         playSfx(SFX.ping);
         break;
       case "local_error":
-        store.setScreenShareError(friendlyScreenShareError(ev.message));
-        store.setScreenShareMode("idle");
-        store.setScreenShareSources(null);
+        store.shareFailed(friendlyScreenShareError(ev.message));
         break;
       case "local_unsupported":
         // Distinct from a permission denial: the desktop environment
@@ -412,9 +423,7 @@ class ScreenShareSession {
         // ScreenCast). Telling the user to "grant permission" would be
         // wrong; there is nothing to grant. Pass the backend's precise
         // message straight through.
-        store.setScreenShareError(ev.message);
-        store.setScreenShareMode("idle");
-        store.setScreenShareSources(null);
+        store.shareFailed(ev.message);
         break;
       case "remote_started":
         store.upsertScreenShareRemote(ev.identity, {

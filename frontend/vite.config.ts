@@ -7,20 +7,14 @@ const isPlaywright = process.env.VITE_PLAYWRIGHT === 'true'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  // Electron loads index.html via `file://`, so absolute asset paths like
-  // `/assets/*` resolve to the filesystem root instead of the html's dir.
-  // Emit `./assets/*` so the bundle loads regardless of where the app was
-  // installed. In Vite dev (pnpm dev), Vite still serves from `/` at the
-  // dev server root — this only affects `vite build` output.
-  base: './',
-  // Load VITE_* env vars from the monorepo root so we only need a single .env.development
-  envDir: '..',
   // Emit relative asset URLs in the built index.html. Electron loads the
   // packaged HTML via `file://`, where absolute paths like `/assets/x.js`
   // resolve to `file:///assets/x.js` and 404 — the window then shows just
   // the title bar with no rendered content. Relative (`./assets/x.js`)
   // works under both `file://` (packaged) and the Vite dev server.
   base: './',
+  // Load VITE_* env vars from the monorepo root so we only need a single .env.development
+  envDir: '..',
   resolve: isPlaywright
     ? {
         alias: {

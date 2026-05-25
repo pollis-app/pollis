@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant } from '../types';
+import type { ShareState, VoiceState } from '../types/voice-state';
+import type { SourceList } from '../screenshare/screenShareSession';
 
 interface AppStore extends AppState {
   // User profile data from Turso
@@ -34,74 +36,52 @@ interface AppStore extends AppState {
   markRead: (id: string) => void;
   // Increments the unread count for a conversation or channel by 1
   incrementUnread: (id: string) => void;
-  // Voice channel — null when not in a call
-  activeVoiceChannelId: string | null;
-  setActiveVoiceChannelId: (id: string | null) => void;
-  // The other user_id in a 1:1 call (`call-*` room). Null for group voice
-  // channels and DMs. Used by the screen-share E2EE key derivation in
-  // `livekitView.executeJoin` so it resolves the same MLS group the Rust
-  // voice path picked. Mirrored from VoiceSessionManager.
-  voiceCounterpartyUserId: string | null;
-  setVoiceCounterpartyUserId: (id: string | null) => void;
+  // Voice room + local screenshare state. Single source of truth — see
+  // `frontend/src/types/voice-state.ts` for the union shape. Replaces the
+  // previous bag of flags (`voicePhase`, `screenShareMode`,
+  // `screenShareLocalActive`, `activeVoiceChannelId`,
+  // `voiceCounterpartyUserId`, `voiceIsMuted`, `screenShareSources`,
+  // `screenShareLocalDimensions`) that could contradict each other.
+  voiceState: VoiceState;
+
+  // Semantic transitions. Each one guards on the current state's `kind`
+  // and no-ops (with a console.warn) if the transition isn't allowed.
+  // Prefer these over setVoiceState() for everyday writes — they
+  // document the lifecycle and prevent skipping phases.
+  voiceStartJoining: (channelId: string, counterpartyUserId: string | null) => void;
+  voiceJoined: () => void;
+  voiceJoinFailed: (error: string) => void;
+  voiceStartLeaving: () => void;
+  voiceLeft: () => void;
+  voiceSetMicMuted: (muted: boolean) => void;
+
+  shareStartPicking: (sources: SourceList) => void;
+  shareCancelPicker: () => void;
+  shareStartStarting: () => void;
+  shareStarted: (trackId: string, dimensions: { width: number; height: number } | null) => void;
+  shareSetDimensions: (dimensions: { width: number; height: number } | null) => void;
+  shareFailed: (error: string) => void;
+  shareStopped: () => void;
+
   // Status bar alert — shown in bottom bar when a message arrives for a
   // channel/DM the user is not currently viewing. Cleared on navigation.
   statusBarAlert: { senderUsername: string; roomId: string } | null;
   setStatusBarAlert: (alert: { senderUsername: string; roomId: string } | null) => void;
   // Voice join failure — surfaced in the bottom bar when join_voice_channel
   // fails (e.g. the LiveKit server is unreachable). Cleared on dismiss or on
-  // the next join attempt. Mirrored from the VoiceSessionManager.
+  // the next join attempt.
   voiceError: string | null;
   setVoiceError: (message: string | null) => void;
-  // Screen-share failure — surfaced in the bottom bar when start_screen_share
-  // fails or the OS portal denies/cancels the picker. Cleared on dismiss or
-  // when a share starts/stops. Mirrored from the screen-share session.
-  screenShareError: string | null;
-  setScreenShareError: (message: string | null) => void;
-  // True when local participant's mic is actively picking up audio
+  // True when local participant's mic is actively picking up audio.
+  // Derived from LiveKit speaker events; not part of the lifecycle union.
   isLocalSpeaking: boolean;
   setIsLocalSpeaking: (speaking: boolean) => void;
-  // Live voice channel state — mirrored from `voiceSession` in src/voice/.
-  // The manager is the source of truth; these fields are a write-through
-  // projection so existing readers (VoiceBar/VoiceChannelView/AppShell/etc.)
-  // keep working without subscribing to the manager directly.
+  // Live voice channel participants — driven by LiveKit events.
+  // Collection data, kept separate from the lifecycle union.
   voiceParticipants: VoiceParticipant[];
   voiceActiveSpeakerIds: string[];
-  voiceIsMuted: boolean;
-  // Lifecycle phase of the local voice session — mirrored from
-  // `VoiceSessionManager`. Used to show a subtle "connecting…" indicator
-  // on the local user's own tile while LiveKit is connecting.
-  voicePhase: "idle" | "joining" | "joined" | "leaving";
   setVoiceParticipants: (participants: VoiceParticipant[]) => void;
   setVoiceActiveSpeakerIds: (ids: string[]) => void;
-  setVoiceIsMuted: (muted: boolean) => void;
-  setVoicePhase: (phase: "idle" | "joining" | "joined" | "leaving") => void;
-  /** True if the local user is broadcasting their screen. */
-  screenShareLocalActive: boolean;
-  setScreenShareLocalActive: (v: boolean) => void;
-  /** Lifecycle stage of the local screen-share UI:
-   *   - 'idle': no share in progress, no picker open
-   *   - 'picking': in-app source picker visible (macOS only; the
-   *     helper is parked on the backend awaiting the user's selection)
-   *   - 'starting': selection sent, waiting for the helper to
-   *     announce Format and the LiveKit publish to land
-   *   - 'active': frames flowing (synced with `screenShareLocalActive`)
-   *  Used by VoiceChannelView to swap the participant grid for the
-   *  inline picker without a modal. */
-  screenShareMode: "idle" | "picking" | "starting" | "active";
-  setScreenShareMode: (m: "idle" | "picking" | "starting" | "active") => void;
-  /** Sources returned by `enumerate_screen_sources` — populated when
-   *  mode flips to 'picking'. Cleared on exit. */
-  screenShareSources: import("../screenshare/screenShareSession").SourceList | null;
-  setScreenShareSources: (
-    s: import("../screenshare/screenShareSession").SourceList | null,
-  ) => void;
-  /** Dimensions of the local outgoing share so the in-tile preview
-   *  can seed its canvas before the first mirrored frame arrives. Set
-   *  by `local_started`, cleared by `local_stopped`. */
-  screenShareLocalDimensions: { width: number; height: number } | null;
-  setScreenShareLocalDimensions: (
-    dims: { width: number; height: number } | null,
-  ) => void;
   /** Active remote screenshares keyed by participant identity. */
   screenShareRemotes: Record<string, { trackKey: string; width: number; height: number }>;
   upsertScreenShareRemote: (identity: string, info: { trackKey: string; width: number; height: number }) => void;
@@ -175,20 +155,12 @@ export const useAppStore = create<AppStore>((set) => ({
   isLoading: false,
   error: null,
   unreadCounts: {},
-  activeVoiceChannelId: null,
-  voiceCounterpartyUserId: null,
+  voiceState: { kind: 'idle' },
   statusBarAlert: null,
   voiceError: null,
-  screenShareError: null,
   isLocalSpeaking: false,
   voiceParticipants: [],
   voiceActiveSpeakerIds: [],
-  voiceIsMuted: false,
-  voicePhase: "idle",
-  screenShareLocalActive: false,
-  screenShareLocalDimensions: null,
-  screenShareMode: "idle",
-  screenShareSources: null,
   screenShareRemotes: {},
   viewingScreenShareTrackKey: null,
 
@@ -258,26 +230,149 @@ export const useAppStore = create<AppStore>((set) => ({
     },
   })),
 
-  setActiveVoiceChannelId: (id) => set({ activeVoiceChannelId: id }),
-  setVoiceCounterpartyUserId: (id) => set({ voiceCounterpartyUserId: id }),
+  // ── Voice + share transitions ──────────────────────────────────────────
+  // Each transition guards on the current `voiceState.kind`. Bad
+  // transitions are logged + dropped instead of mutating state — this is
+  // the whole point of the union: contradictory state is unrepresentable.
+  voiceStartJoining: (channelId, counterpartyUserId) => set((state) => {
+    if (state.voiceState.kind !== 'idle') {
+      console.warn('[voiceState] voiceStartJoining ignored:', state.voiceState.kind);
+      return {};
+    }
+    return {
+      voiceState: { kind: 'joining', channelId, counterpartyUserId },
+      voiceError: null,
+    };
+  }),
+  voiceJoined: () => set((state) => {
+    if (state.voiceState.kind !== 'joining') {
+      console.warn('[voiceState] voiceJoined ignored:', state.voiceState.kind);
+      return {};
+    }
+    const { channelId, counterpartyUserId } = state.voiceState;
+    return {
+      voiceState: {
+        kind: 'joined',
+        channelId,
+        counterpartyUserId,
+        micMuted: false,
+        share: { kind: 'idle' },
+      },
+    };
+  }),
+  voiceJoinFailed: (error) => set((state) => {
+    if (state.voiceState.kind !== 'joining') {
+      console.warn('[voiceState] voiceJoinFailed ignored:', state.voiceState.kind);
+      return {};
+    }
+    return { voiceState: { kind: 'idle' }, voiceError: error };
+  }),
+  voiceStartLeaving: () => set((state) => {
+    // Tolerate from joining or joined; the user can hit "leave" while we
+    // were still connecting.
+    if (state.voiceState.kind !== 'joining' && state.voiceState.kind !== 'joined') {
+      console.warn('[voiceState] voiceStartLeaving ignored:', state.voiceState.kind);
+      return {};
+    }
+    return { voiceState: { kind: 'leaving', channelId: state.voiceState.channelId } };
+  }),
+  voiceLeft: () => set(() => ({
+    // Unconditional reset — clears share state along the way since the
+    // union guarantees share can't outlive the joined parent.
+    voiceState: { kind: 'idle' },
+  })),
+  voiceSetMicMuted: (muted) => set((state) => {
+    if (state.voiceState.kind !== 'joined') {
+      return {};
+    }
+    return { voiceState: { ...state.voiceState, micMuted: muted } };
+  }),
+
+  shareStartPicking: (sources) => set((state) => {
+    if (state.voiceState.kind !== 'joined' || state.voiceState.share.kind !== 'idle') {
+      console.warn('[voiceState] shareStartPicking ignored:', state.voiceState.kind, 'share=', state.voiceState.kind === 'joined' ? state.voiceState.share.kind : 'n/a');
+      return {};
+    }
+    return {
+      voiceState: { ...state.voiceState, share: { kind: 'picking', sources } },
+    };
+  }),
+  shareCancelPicker: () => set((state) => {
+    if (state.voiceState.kind !== 'joined' || state.voiceState.share.kind !== 'picking') {
+      return {};
+    }
+    return { voiceState: { ...state.voiceState, share: { kind: 'idle' } } };
+  }),
+  shareStartStarting: () => set((state) => {
+    if (state.voiceState.kind !== 'joined') {
+      console.warn('[voiceState] shareStartStarting ignored:', state.voiceState.kind);
+      return {};
+    }
+    // From idle (Linux portal path) or picking (macOS in-app picker).
+    if (state.voiceState.share.kind !== 'idle' && state.voiceState.share.kind !== 'picking') {
+      console.warn('[voiceState] shareStartStarting ignored, share=', state.voiceState.share.kind);
+      return {};
+    }
+    return {
+      voiceState: {
+        ...state.voiceState,
+        share: { kind: 'starting', startedAt: performance.now() },
+      },
+    };
+  }),
+  shareStarted: (trackId, dimensions) => set((state) => {
+    if (state.voiceState.kind !== 'joined' || state.voiceState.share.kind !== 'starting') {
+      console.warn('[voiceState] shareStarted ignored:', state.voiceState.kind, state.voiceState.kind === 'joined' ? state.voiceState.share.kind : 'n/a');
+      return {};
+    }
+    return {
+      voiceState: {
+        ...state.voiceState,
+        share: { kind: 'active', trackId, dimensions },
+      },
+    };
+  }),
+  shareSetDimensions: (dimensions) => set((state) => {
+    if (state.voiceState.kind !== 'joined' || state.voiceState.share.kind !== 'active') {
+      return {};
+    }
+    return {
+      voiceState: {
+        ...state.voiceState,
+        share: { ...state.voiceState.share, dimensions },
+      },
+    };
+  }),
+  shareFailed: (error) => set((state) => {
+    if (state.voiceState.kind !== 'joined') {
+      console.warn('[voiceState] shareFailed ignored, voice=', state.voiceState.kind);
+      return {};
+    }
+    return {
+      voiceState: {
+        ...state.voiceState,
+        share: { kind: 'failed', error },
+      },
+    };
+  }),
+  shareStopped: () => set((state) => {
+    // Unconditional reset of share — safe to call from any share state
+    // (active, failed, starting, picking). The reset-on-leave path also
+    // calls voiceLeft which clears share via the union structure.
+    if (state.voiceState.kind !== 'joined') {
+      return {};
+    }
+    return {
+      voiceState: { ...state.voiceState, share: { kind: 'idle' } },
+    };
+  }),
 
   setStatusBarAlert: (alert) => set({ statusBarAlert: alert }),
-
   setVoiceError: (message) => set({ voiceError: message }),
-
-  setScreenShareError: (message) => set({ screenShareError: message }),
-
   setIsLocalSpeaking: (speaking) => set({ isLocalSpeaking: speaking }),
 
   setVoiceParticipants: (participants) => set({ voiceParticipants: participants }),
   setVoiceActiveSpeakerIds: (ids) => set({ voiceActiveSpeakerIds: ids }),
-  setVoiceIsMuted: (muted) => set({ voiceIsMuted: muted }),
-  setVoicePhase: (phase) => set({ voicePhase: phase }),
-
-  setScreenShareLocalActive: (v) => set({ screenShareLocalActive: v }),
-  setScreenShareLocalDimensions: (dims) => set({ screenShareLocalDimensions: dims }),
-  setScreenShareMode: (m) => set({ screenShareMode: m }),
-  setScreenShareSources: (s) => set({ screenShareSources: s }),
   upsertScreenShareRemote: (identity, info) => set((state) => ({
     screenShareRemotes: { ...state.screenShareRemotes, [identity]: info },
   })),
@@ -330,20 +425,12 @@ export const useAppStore = create<AppStore>((set) => ({
     isLoading: false,
     error: null,
     unreadCounts: {},
-    activeVoiceChannelId: null,
-    voiceCounterpartyUserId: null,
+    voiceState: { kind: 'idle' },
     statusBarAlert: null,
     voiceError: null,
-    screenShareError: null,
     isLocalSpeaking: false,
     voiceParticipants: [],
     voiceActiveSpeakerIds: [],
-    voiceIsMuted: false,
-    voicePhase: "idle",
-    screenShareLocalActive: false,
-    screenShareLocalDimensions: null,
-    screenShareMode: "idle",
-    screenShareSources: null,
     screenShareRemotes: {},
     viewingScreenShareTrackKey: null,
     pendingEnrollmentApproval: null,

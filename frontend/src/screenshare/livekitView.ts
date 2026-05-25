@@ -281,6 +281,20 @@ class LiveKitView {
       // Disable simulcast for screen-share — high-bitrate single layer
       // matches text legibility better than scaled-down spatial layers.
       simulcast: false,
+      // Encoder ceilings — not targets. WebRTC's TWCC bandwidth estimator
+      // ramps up toward these when the link sustains it, ramps down on
+      // packet loss. Default LiveKit screenshare cap is 15 fps; bumping to
+      // 60 covers the game-stream-to-lobby use case. Bitrate ceiling of
+      // 8 Mbps is comfortable for 1080p60 VP8 and headroom for the
+      // power-user case; the estimator will hold back on slower links.
+      // maintain-framerate biases toward smoother motion over crisper
+      // text when the encoder has to give something up under pressure.
+      videoEncoding: {
+        maxFramerate: 60,
+        maxBitrate: 8_000_000,
+        priority: 'high',
+      },
+      degradationPreference: 'maintain-framerate',
     });
     console.info('[livekit-view] publishScreenShare: publishTrack resolved', {
       elapsedMs: Math.round(performance.now() - t0),
@@ -299,12 +313,7 @@ class LiveKitView {
     track.addEventListener('ended', () => {
       void this.unpublishScreenShare();
       // Notify the store so VoiceMemberTile flips back to the avatar.
-      const store = useAppStore.getState();
-      if (store.screenShareLocalActive) {
-        store.setScreenShareLocalActive(false);
-        store.setScreenShareLocalDimensions(null);
-        store.setScreenShareMode('idle');
-      }
+      useAppStore.getState().shareStopped();
     });
     this.tracks.set(LOCAL_PREVIEW_KEY, track);
     const settings = track.getSettings();
@@ -537,17 +546,12 @@ class LiveKitView {
         console.warn('[livekit-view] unpublish on leave:', e);
       }
     }
-    // Clear the Zustand store mirror of local-screenshare state — the
-    // unpublishScreenShare above closes the track but doesn't touch
-    // store.screenShareLocalActive/Mode/Dimensions. Without this reset
-    // the next voice-rejoin renders the tile as "still streaming" with
-    // no actual stream behind it.
-    const store = useAppStore.getState();
-    if (store.screenShareLocalActive) {
-      store.setScreenShareLocalActive(false);
-      store.setScreenShareLocalDimensions(null);
-      store.setScreenShareMode('idle');
-    }
+    // Unconditional share reset on leave. The union structure means
+    // share state lives inside `joined.share`, so once voiceLeft() lands
+    // it's gone too — but call shareStopped() first to be explicit while
+    // we're still in `joined`, in case the consumer flow handles
+    // share-stopped and voice-left as distinct UI events.
+    useAppStore.getState().shareStopped();
     if (room) {
       try {
         await room.disconnect();
@@ -738,20 +742,17 @@ if (typeof window !== 'undefined') {
       return null;
     }
     const s = useAppStore.getState();
-    if (s.voicePhase !== 'joined') {
-      return null;
-    }
-    if (!s.activeVoiceChannelId) {
+    if (s.voiceState.kind !== 'joined') {
       return null;
     }
     if (!s.currentUser) {
       return null;
     }
     return {
-      channelId: s.activeVoiceChannelId,
+      channelId: s.voiceState.channelId,
       userId: s.currentUser.id,
       displayName: s.currentUser.username ?? s.currentUser.id,
-      counterpartyUserId: s.voiceCounterpartyUserId ?? null,
+      counterpartyUserId: s.voiceState.counterpartyUserId,
     };
   };
 
@@ -762,9 +763,7 @@ if (typeof window !== 'undefined') {
 
   useAppStore.subscribe((state, prev) => {
     if (
-      state.voicePhase !== prev.voicePhase ||
-      state.activeVoiceChannelId !== prev.activeVoiceChannelId ||
-      state.voiceCounterpartyUserId !== prev.voiceCounterpartyUserId ||
+      state.voiceState !== prev.voiceState ||
       state.currentUser !== prev.currentUser
     ) {
       livekitView.setIntent(computeIntent());
