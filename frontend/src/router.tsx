@@ -39,6 +39,7 @@ import { CallPage } from "./pages/Call";
 import { RenameChannelPage } from "./pages/RenameChannelPage";
 import { RenameGroupPage } from "./pages/RenameGroupPage";
 import { KeyboardShortcutsPage } from "./pages/KeyboardShortcutsPage";
+import { UpdatePage } from "./pages/UpdatePage";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -247,6 +248,12 @@ const keyboardShortcutsRoute = createRoute({
   component: KeyboardShortcutsPage,
 });
 
+const updateRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/update",
+  component: UpdatePage,
+});
+
 const callRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/call/$callId",
@@ -297,6 +304,7 @@ const routeTree = rootRoute.addChildren([
   allJoinRequestsRoute,
   searchRoute,
   keyboardShortcutsRoute,
+  updateRoute,
   callRoute,
   terminalRoute,
 ]);

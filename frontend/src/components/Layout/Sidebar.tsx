@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Keyboard,
+  Download,
 } from "lucide-react";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -141,6 +142,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     { id: "voice-settings", label: "Voice", icon: <Volume2 {...iconProps} />, to: "/voice-settings" as const, isActive: pathname === "/voice-settings" },
     { id: "security", label: "Security", icon: <ShieldCheck {...iconProps} />, to: "/security" as const, isActive: pathname === "/security" || pathname.startsWith("/security/") },
     { id: "shortcuts", label: "Key Bindings", icon: <Keyboard {...iconProps} />, to: "/shortcuts" as const, isActive: pathname === "/shortcuts" },
+    { id: "update", label: "Software Update", icon: <Download {...iconProps} />, to: "/update" as const, isActive: pathname === "/update" },
   ];
   const isOnAnySettings = isOnSettingsHub || settingsItems.some((s) => s.isActive);
 

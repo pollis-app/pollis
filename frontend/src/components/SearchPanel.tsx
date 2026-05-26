@@ -188,6 +188,7 @@ const PAGE_RESULTS: SearchResultItem[] = [
   { type: "page", id: "page-voice-settings", name: "Voice Settings", breadcrumb: "/settings/voice", path: "/voice-settings", keywords: "microphone speaker audio mic noise suppression echo cancellation agc auto join" },
   { type: "page", id: "page-security", name: "Security", breadcrumb: "/security", path: "/security", keywords: "audit log devices identity key rotation" },
   { type: "page", id: "page-shortcuts", name: "Key Bindings", breadcrumb: "/shortcuts", path: "/shortcuts", keywords: "key bindings keyboard shortcuts hotkeys keybindings cmd ctrl" },
+  { type: "page", id: "page-update", name: "Software Update", breadcrumb: "/update", path: "/update", keywords: "update version upgrade install release" },
   { type: "page", id: "page-invites", name: "Invites", breadcrumb: "/invites", path: "/invites", keywords: "pending invitations groups" },
   { type: "page", id: "page-join-requests", name: "Join Requests", breadcrumb: "/join-requests", path: "/join-requests", keywords: "pending group membership" },
   { type: "page", id: "page-dm-requests", name: "DM Requests", breadcrumb: "/dms/requests", path: "/dms/requests", keywords: "direct message pending" },

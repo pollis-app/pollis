@@ -106,6 +106,12 @@ interface AppStore extends AppState {
   ) => void;
   updateRequired: boolean;
   setUpdateRequired: (v: boolean) => void;
+  // Latest version detected by the in-app poller while the user is signed in.
+  // null = no update detected (or not yet checked); a string = the version
+  // returned by the updater bridge's `check()`. Drives the discrete "Update
+  // available" indicator in the bottom bar.
+  availableUpdateVersion: string | null;
+  setAvailableUpdateVersion: (v: string | null) => void;
   // Channel id pending admin delete confirmation. When non-null and equal to
   // selectedChannelId, MainContent replaces the chat input with the
   // delete-channel confirm bar.
@@ -399,6 +405,9 @@ export const useAppStore = create<AppStore>((set) => ({
 
   updateRequired: false,
   setUpdateRequired: (v) => set({ updateRequired: v }),
+
+  availableUpdateVersion: null,
+  setAvailableUpdateVersion: (v) => set({ availableUpdateVersion: v }),
 
   pendingDeleteChannelId: null,
   setPendingDeleteChannelId: (channelId) => set({ pendingDeleteChannelId: channelId }),
