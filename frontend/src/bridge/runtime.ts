@@ -88,6 +88,17 @@ export interface ElectronAPI {
   // ── Clipboard ──────────────────────────────────────────────────────────
   clipboardReadFiles: () => Promise<string[]>;
   clipboardReadImageToTemp: () => Promise<string | null>;
+
+  // ── Desktop media (screenshare source enumeration) ────────────────────
+  desktopMediaEnumerate: () => Promise<
+    Array<{
+      id: string;
+      name: string;
+      kind: "display" | "window";
+      displayId: string | null;
+      thumbnailDataUrl: string;
+    }>
+  >;
 }
 
 declare global {

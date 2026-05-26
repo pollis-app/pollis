@@ -167,6 +167,12 @@ class ScreenShareSession {
   private lastDims = new Map<string, { width: number; height: number }>();
   private lastBytes = new Map<string, number>();
   private statsListeners = new Map<string, Set<StatsListener>>();
+  // Under Electron, our picker hands back numeric ids from the
+  // DisplaySource/WindowSource shape, but the underlying capture API needs
+  // Electron's opaque source.id string (`"screen:0:0"` / `"window:<n>"`).
+  // Cache the mapping each time enumerate() runs so start(selection) can
+  // recover the right Electron id.
+  private electronSourceIds = new Map<string, string>();
 
   /** Idempotent. Call once after auth so the backend Channels are wired.
    *  Under Electron this is a no-op — the Rust event/frame channels are
@@ -257,14 +263,48 @@ class ScreenShareSession {
   /** Enumerate capturable displays + windows. On macOS (under Tauri) this
    *  spawns the helper, parks it waiting for our selection, and returns
    *  the list to render in our in-app picker. On Linux/Windows the system
-   *  portal / WGC picker handles selection — the backend returns an empty
-   *  list as a signal to skip the in-app picker and go straight to
-   *  `start()`. Under Electron we always return an empty list: Chromium's
-   *  `getDisplayMedia` (driven by `setDisplayMediaRequestHandler` in
-   *  electron/src/main.ts) handles selection itself. */
+   *  portal / WGC picker handles selection — the Tauri backend returns an
+   *  empty list as a signal to skip the in-app picker and go straight to
+   *  `start()`. Under Electron, we enumerate sources through
+   *  `desktopCapturer.getSources()` over IPC and route them to the same
+   *  in-app picker so the UX is identical on every platform. */
   async enumerate(): Promise<SourceList> {
     if (hasMediaDevices()) {
-      return { displays: [], windows: [] };
+      const api = (window as Window & { electronAPI?: { desktopMediaEnumerate?: () => Promise<Array<{ id: string; name: string; kind: "display" | "window" }>> } }).electronAPI;
+      if (!api?.desktopMediaEnumerate) {
+        return { displays: [], windows: [] };
+      }
+      const raw = await api.desktopMediaEnumerate();
+      this.electronSourceIds.clear();
+      const displays: DisplaySource[] = [];
+      const windows: WindowSource[] = [];
+      for (const s of raw) {
+        if (s.kind === "display") {
+          const id = displays.length;
+          // Thumbnails are PNG data URLs at the size requested in
+          // electron/src/main.ts. ScreenSharePicker currently shows
+          // name-only tiles — wiring the thumbnail through to the
+          // component is a follow-up (#TODO).
+          this.electronSourceIds.set(`display:${id}`, s.id);
+          // Electron's desktopCapturer doesn't surface per-source
+          // dimensions; pass 0 and let downstream code treat it as
+          // "unknown". Live dimensions come from the MediaStreamTrack's
+          // getSettings() after capture starts.
+          displays.push({ id, width: 0, height: 0, name: s.name });
+        } else {
+          const id = windows.length;
+          this.electronSourceIds.set(`window:${id}`, s.id);
+          windows.push({
+            id,
+            width: 0,
+            height: 0,
+            title: s.name,
+            app_name: "",
+            bundle_id: "",
+          });
+        }
+      }
+      return { displays, windows };
     }
     return await invoke<SourceList>("enumerate_screen_sources");
   }
@@ -279,26 +319,49 @@ class ScreenShareSession {
     await invoke("cancel_screen_share_picker");
   }
 
-  /** Start the share. Under Electron this opens Chromium's
-   *  `getDisplayMedia`, then publishes the resulting track via
-   *  livekit-client on the view connection. Under Tauri the call is
-   *  delegated to the Rust capture helper: on macOS the `selection`
-   *  carries the user's pick from our in-app picker; on Linux/Windows
-   *  it must be undefined so the system portal / WGC picker can show. */
+  /** Start the share. Under Electron the `selection` carries the user's
+   *  pick from the in-app picker (required — without it, capture cannot
+   *  target a specific source). Under Tauri the call is delegated to the
+   *  Rust capture helper: on macOS the `selection` is the picker result;
+   *  on Linux/Windows it must be undefined so the system portal / WGC
+   *  picker can show. */
   async start(selection?: Selection): Promise<void> {
     if (hasMediaDevices()) {
-      await this.startElectron();
+      await this.startElectron(selection);
       return;
     }
     await invoke("start_screen_share", { selection: selection ?? null });
   }
 
-  /** Renderer-side publish path. Captures via `getDisplayMedia`, hands
-   *  the track to the livekit-client view connection, and mirrors the
-   *  lifecycle into the Zustand store (so VoiceBar / VoiceMemberTile
-   *  switch to the streaming state) without going through the Rust
-   *  event channel. */
-  private async startElectron(): Promise<void> {
+  /** Renderer-side publish path. Captures the picked source via
+   *  `getUserMedia` with `chromeMediaSourceId`, hands the track to the
+   *  livekit-client view connection, and mirrors the lifecycle into the
+   *  Zustand store (so VoiceBar / VoiceMemberTile switch to the
+   *  streaming state) without going through the Rust event channel. */
+  private async startElectron(selection?: Selection): Promise<void> {
+    // The in-app picker (ScreenSharePicker.tsx) always supplies a
+    // selection on the Electron path; this is the safety net for any
+    // future code path that forgets to enumerate first. We deliberately
+    // do NOT fall back to `getDisplayMedia` here — without a selection,
+    // Chromium's default behavior is "auto-pick the first source",
+    // which silently captures the primary display and was the symptom
+    // we just fixed. Fail loudly instead.
+    if (!selection) {
+      const store = useAppStore.getState();
+      const msg = "Screen share requires a picked source.";
+      store.shareFailed(msg);
+      throw new Error(msg);
+    }
+    const electronSourceId = this.electronSourceIds.get(
+      `${selection.kind}:${selection.id}`,
+    );
+    if (!electronSourceId) {
+      const store = useAppStore.getState();
+      const msg = "Screen share selection no longer available — re-open the picker.";
+      store.shareFailed(msg);
+      throw new Error(msg);
+    }
+
     // Imported lazily so the Tauri build doesn't pull in the
     // livekit-client SDK when it'd never use it. (Tree-shaking would
     // ordinarily do this for us, but the dynamic import makes it
@@ -309,18 +372,35 @@ class ScreenShareSession {
     let stream: MediaStream;
     try {
       // Audio is intentionally off — voice goes through the Rust voice
-      // client, and getDisplayMedia audio is unreliable cross-platform.
+      // client, and screenshare audio is unreliable cross-platform.
       //
-      // frameRate ceiling: 60 fps. xdg-desktop-portal (Linux), ScreenCaptureKit
-      // (macOS), and WGC (Windows) all cap source capture at ~60 fps on the
-      // typical compositor, so asking for higher gets silently clamped to 60.
-      // The source track feeds both the local preview <video> and the LiveKit
-      // publish path — bumping it here gets us up to display-rate previews
-      // (subject to compositor) and gives the encoder headroom to push 60 fps
-      // out to receivers when bandwidth allows.
-      stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { frameRate: { ideal: 60, max: 60 } },
+      // Why getUserMedia + chromeMediaSourceId instead of getDisplayMedia:
+      // getDisplayMedia routes through setDisplayMediaRequestHandler in
+      // the main process, which would either show the system picker
+      // (macOS 15+ only) or — on every other platform/version — need a
+      // deferred-callback dance to surface our in-app picker. The
+      // legacy mediaSource API skips that entirely and lets us target a
+      // specific source directly. This is the same pattern Slack,
+      // Discord, and VSCode use for their custom screenshare pickers.
+      //
+      // frameRate ceiling: 60 fps. xdg-desktop-portal (Linux),
+      // ScreenCaptureKit (macOS), and WGC (Windows) all cap source
+      // capture at ~60 fps on the typical compositor, so asking for
+      // higher gets silently clamped to 60.
+      //
+      // TS lib.dom.d.ts dropped the typing for the legacy `mandatory`
+      // constraints bag; cast through `unknown` to a partial
+      // MediaTrackConstraints to satisfy strict TS without lying to
+      // callers about the runtime shape.
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
+        video: {
+          mandatory: {
+            chromeMediaSource: "desktop",
+            chromeMediaSourceId: electronSourceId,
+            maxFrameRate: 60,
+          },
+        } as unknown as MediaTrackConstraints,
       });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
