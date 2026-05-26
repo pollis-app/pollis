@@ -96,6 +96,12 @@ export interface ElectronAPI {
       name: string;
       kind: "display" | "window";
       displayId: string | null;
+      // Logical (device-independent) size for display sources; 0 for
+      // window sources (Electron's desktopCapturer doesn't expose
+      // per-window dimensions without capturing).
+      width: number;
+      height: number;
+      // PNG data URL at 320×200 — sized for the picker tile.
       thumbnailDataUrl: string;
     }>
   >;
