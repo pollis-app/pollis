@@ -9,7 +9,7 @@
 The rest of this document is the design note that drove the work — kept for context, not authoritative on the final shape. Where implementation diverges, the code wins. Notable divergences:
 
 - `verify_otp` does not return `pin_required_to_complete_signup`; the frontend reads `get_unlock_state` to decide between pin-create and pin-entry.
-- A new Tauri command, `finalize_device_enrollment`, runs the cert / key-package / external-join work after `set_pin` completes (formerly bundled into the enrollment commands themselves).
+- A new backend command, `finalize_device_enrollment`, runs the cert / key-package / external-join work after `set_pin` completes (formerly bundled into the enrollment commands themselves).
 - The "we just produced raw key material and have no PIN yet" handoff goes through `account_identity::unlock_state_with_fresh_db_key`, which generates a fresh `db_key` alongside the account_id_key and replaces `AppState.unlock`. `set_pin` reads from there instead of the legacy keystore slots (which remain only as a migration fallback for upgraders coming from a pre-PIN build).
 
 ---
@@ -231,7 +231,7 @@ Critically: the Turso-side account is untouched. Other devices for the same user
 
 ## New and changed commands
 
-Registered in `src-tauri/src/lib.rs`. The shim layer lives in `src-tauri/src/commands/pin.rs`; the real implementation is in `pollis-core/src/commands/pin.rs` (alongside `auth.rs` and `account_identity.rs` in the same crate).
+Dispatched in `pollis-node/src/dispatch/pin.rs` (the active path), with a parallel `#[tauri::command]` shim retained under `src-tauri/src/commands/pin.rs` for rollback. The real implementation is in `pollis-core/src/commands/pin.rs` (alongside `auth.rs` and `account_identity.rs` in the same crate).
 
 - `set_pin(old_pin: Option<String>, new_pin: String) -> Result<()>`
   - Initial set and change. See lifecycle above.
@@ -326,7 +326,7 @@ Commands the frontend uses:
 
 ## Testing
 
-All scenarios to add to `src-tauri/tests/flows.rs` under the `test-harness` feature. Each uses `tauri::test::get_ipc_response` against the real commands.
+All scenarios to add to `src-tauri/tests/flows.rs` under the `test-harness` feature. Each drives the real command implementations through the same dispatch path the runtime uses, without mocking the DB layer.
 
 - `pin_set_lock_unlock_roundtrip` — signup → set_pin → lock → unlock with correct PIN → assert `UserProfile` matches and local DB is queryable.
 - `pin_wrong_counter_and_lockout` — 9 wrong attempts return `PinIncorrect` with correct `attempts_remaining`; 10th wipes wrapped blobs and local DB; next `unlock` returns `PinNotSet`.
@@ -341,9 +341,9 @@ All scenarios to add to `src-tauri/tests/flows.rs` under the `test-harness` feat
 
 Grep targets, then audit each hit:
 
-- `const SESSION_KEY: &str = "session";` — `src-tauri/src/commands/auth.rs:10`. Delete.
-- All `SESSION_KEY` uses: auth.rs:277, 333, 372, 551, 631, 839, 875. Delete.
-- `identity_key_private` / `identity_key_public` string literals: auth.rs:647-648, auth.rs:883-884. Delete.
+- `const SESSION_KEY: &str = "session";` — `pollis-core/src/commands/auth.rs` (originally `src-tauri/src/commands/auth.rs:10`). Delete.
+- All `SESSION_KEY` uses in `pollis-core/src/commands/auth.rs` (originally auth.rs:277, 333, 372, 551, 631, 839, 875). Delete.
+- `identity_key_private` / `identity_key_public` string literals in `pollis-core/src/commands/auth.rs` (originally auth.rs:647-648, auth.rs:883-884). Delete.
 - `.unwrap_or_default()` on parse: `accounts.rs:31`, `keystore.rs:69`. Replace with loud-failure variants described above.
 - `std::fs::write(...)` on `accounts.json`: `accounts.rs:42`. Replace with tempfile+fsync+rename.
 - Unwrapped `db_key` generation at `state.rs:82-88`. Becomes an unwrap-existing-wrapped-blob path; the random-generate path moves into `set_pin`.

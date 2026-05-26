@@ -1,17 +1,21 @@
 # Pollis
 
-A desktop messaging app with end-to-end encryption. Think Slack, but nobody — including the people running it — can read your messages. Built with Tauri 2, so it's a native app on macOS, Linux, and Windows with a Rust backend and React frontend.
+A desktop messaging app with end-to-end encryption. Think Slack, but nobody — including the people running it — can read your messages. Built as an Electron app on macOS, Linux, and Windows, with a React frontend and a native Rust backend loaded into Electron's main process as a Node addon — the heavy lifting (crypto, MLS state, voice/screenshare) runs in Rust, not in the renderer.
 
 ![Pollis App](readme/hero.png)
 
 ## How it works
 
-Messages are encrypted on your device using MLS (Messaging Layer Security) before they ever leave your machine. The backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the Tauri app is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
+Messages are encrypted on your device using MLS (Messaging Layer Security) before they ever leave your machine. The Rust backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the desktop binary is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
+
+The renderer calls into the Rust backend via a single IPC bridge: `window.electronAPI.invoke(cmd, args)` → preload → Electron main process → `pollis-node` (the napi-rs binding that loads `pollis-core` as a native Node addon) → real implementation in `pollis-core`. Same JSON shape on both ends.
 
 **Stack**
-- **Desktop**: Tauri 2 (Rust + React/TypeScript)
+- **Desktop shell**: Electron 33 (main process + Chromium renderer + preload bridge)
+- **Frontend**: React 19, TypeScript, Vite, TailwindCSS
+- **Backend**: Rust split into `pollis-core` (reusable crate; also consumed by mobile via uniffi) and `pollis-node` (napi-rs binding loaded into the Electron main process)
 - **Encryption**: MLS (Messaging Layer Security) for group channel encryption, AES-256-GCM. Voice channels are end-to-end encrypted too — per-frame AES-128-GCM via libwebrtc's `FrameCryptor`, keyed from the MLS group's exporter secret, so the LiveKit SFU forwards ciphertext only.
-- **Remote DB**: Turso (libSQL) — direct from the app, no middleman
+- **Remote DB**: Turso (libSQL) — direct from the Rust core, no middleman
 - **Local DB**: SQLite via rusqlite (encrypted at rest, key in OS keystore)
 - **Auth**: Email OTP, session stored in the OS keystore
 - **Real-time**: LiveKit (voice calls via Rust `livekit` crate, real-time presence)
@@ -27,7 +31,7 @@ Forward secrecy is provided by MLS's key schedule: each epoch advance rotates th
 
 ## Releases
 
-Builds for macOS (Apple Silicon), Windows, and Linux are published automatically on every version tag via GitHub Actions. Binaries are uploaded to Cloudflare R2, and a `latest.json` manifest is written alongside them. The marketing site at [pollis.com](https://pollis.com) reads that manifest on load to always show the current download links.
+Builds for macOS, Windows, and Linux are published automatically on every version tag via GitHub Actions (`.github/workflows/electron-release.yml`). `electron-builder` produces DMG + ZIP (mac), NSIS + portable (win), and AppImage + deb + rpm (linux); the workflow uploads them as GitHub Release assets along with the `latest.yml` / `latest-mac.yml` / `latest-linux.yml` manifests that `electron-updater` reads at runtime. The same workflow mirrors a `latest.json` to R2 so the marketing site at [pollis.com](https://pollis.com) can always show the current download links. Auto-update trust is rooted in the OS code signature on each installer — Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows.
 
 ![Pollis UI](readme/new_app.png)
 
@@ -38,7 +42,7 @@ Builds for macOS (Apple Silicon), Windows, and Linux are published automatically
 - Node.js 18+
 - pnpm 10.25+
 - Rust (stable, via rustup)
-- Tauri v2 system dependencies — see [tauri.app/start/prerequisites](https://tauri.app/start/prerequisites/)
+- A C/C++ toolchain so `napi-rs` can link the `pollis-node` addon: Xcode Command Line Tools on macOS, MSVC Build Tools on Windows, `build-essential` on Linux
 - Access to Doppler for secrets (ask the project owner)
 
 ### Setup
@@ -50,9 +54,11 @@ pnpm install          # Install JS dependencies
 ### Running
 
 ```bash
-pnpm dev              # Full desktop app (Rust + React)
-pnpm dev:frontend     # Frontend only in browser (no Tauri commands)
+pnpm dev              # Full desktop app — builds pollis-node (debug), then runs Vite + Electron concurrently
+pnpm dev:frontend     # Frontend only, in the browser (no Electron main process, no Rust IPC)
 ```
+
+Under the hood `pnpm dev` builds the Rust addon with `pnpm --filter @pollis/pollis-node build-debug`, then starts the Vite dev server on `:5173` and Electron's main process in parallel via `concurrently`. The first run also builds dependent Rust crates, which can take a few minutes; subsequent runs are fast.
 
 ### Skipping email OTP in development
 
@@ -97,11 +103,24 @@ All dev-only env vars. Set them in `.env.development` or pass inline.
 ### Building
 
 ```bash
-pnpm build            # Current platform
-pnpm build:macos      # Universal macOS binary
-pnpm build:linux      # amd64 AppImage, deb, rpm
-pnpm build:windows    # amd64 NSIS installer
+# Build the Rust addon (release) and the Electron main bundle
+pnpm build:pollis-node
+pnpm --filter @pollis/electron build
+
+# Package for the current platform
+pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml
+
+# Package for a specific target
+pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml --mac
+pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml --win
+pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml --linux
 ```
+
+The packaging config lives at `electron/build/electron-builder.yml`. Local builds skip code signing unless the relevant env vars (`CSC_LINK` / `CSC_KEY_PASSWORD` on macOS; `SIGNTOOL_PATH` / `SIGNING_DLIB_PATH` / `SIGN_METADATA_PATH` on Windows) are set — CI sets all of them.
+
+#### Legacy Tauri build (rollback only)
+
+The Tauri shell at `src-tauri/` is retained as a rollback path, not the active build. The `dev:tauri` / `build:tauri*` scripts in the root `package.json` still work, but Tauri is not what ships.
 
 ### Testing
 
@@ -117,9 +136,11 @@ The integration harness (`src-tauri/tests/flows.rs`) is gated behind the `test-h
 ## Project layout
 
 ```
-pollis-core/ # Reusable Rust backend — commands, DB, MLS encryption, auth (no Tauri runtime)
-src-tauri/   # Tauri desktop binary — #[tauri::command] shims, plugins, lifecycle
-frontend/    # React app — Vite, TypeScript, TailwindCSS
+pollis-core/  # Reusable Rust backend — commands, DB, MLS encryption, auth (no shell dependency; also exposed to mobile via uniffi)
+pollis-node/  # napi-rs binding — loads pollis-core into Node, dispatches `invoke` calls from the Electron main process
+electron/     # Electron app — main process, preload bridge, electron-builder config
+frontend/    # React app — Vite, TypeScript, TailwindCSS, runtime-host bridge at src/bridge/
+src-tauri/   # Legacy Tauri desktop binary — retained for rollback, not the active shell
 website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
 ```
 

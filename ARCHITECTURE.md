@@ -10,16 +10,17 @@ For deeper, file-anchored documentation see `.codesight/wiki/index.md`. For the 
 
 | Layer | Tech |
 |---|---|
-| Desktop shell | Tauri 2 (Rust backend + WebKit-based webview frontend) |
-| Frontend | React + TypeScript, Vite, TailwindCSS, TanStack Router (memory history), TanStack Query, Zustand (UI state only) |
-| Backend | Rust, Tauri commands invoked via `invoke()` from the frontend |
+| Desktop shell | Electron 33 (Node + Chromium renderer + preload bridge) |
+| Frontend | React 19 + TypeScript, Vite, TailwindCSS, TanStack Router (memory history), TanStack Query, Zustand (UI state only) |
+| Backend | Rust split into `pollis-core` (reusable crate; also exposed to mobile via uniffi) and `pollis-node` (napi-rs binding loaded into Electron's main process), invoked from the renderer via `window.electronAPI.invoke(cmd, args)` |
 | End-to-end encryption | MLS (RFC 9420) via OpenMLS 0.8 for messages and files; AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` for voice, keyed by the MLS group's exporter secret |
 | Remote DB | Turso (libSQL) via `libsql` 0.6, native Hrana/HTTP2 protocol over TLS |
 | Local DB | SQLite via `rusqlite` 0.31 with bundled SQLCipher; per-user file `pollis_{user_id}.db` |
 | Auth | Email OTP (Resend) + 4-digit per-user local PIN unlocking PIN-wrapped key blobs in the OS keystore |
 | Object storage | Cloudflare R2 (S3-compatible) via AWS SigV4, with convergent encryption for attachments |
 | Real-time signalling + voice | LiveKit (Rust crate), JWT-signed room tokens |
-| Audio capture | `cpal` mic → optional RNNoise → WebRTC APM (AGC2 + NS + HPF + AEC) → LiveKit publish (all in Rust — no JS media path) |
+| Audio capture | `cpal` mic → optional RNNoise → WebRTC APM (AGC2 + NS + HPF + AEC) → LiveKit publish (all in Rust — the renderer never touches media) |
+| Packaging + auto-update | `electron-builder` (DMG + ZIP, NSIS + portable, AppImage + deb + rpm) and `electron-updater` against GitHub Releases; OS code signature (Apple Developer ID + notarization, Azure Trusted Signing) is the trust root |
 | Secrets | Doppler → GitHub Actions; local dev uses `.env.development` |
 
 The marketing site under `website/` is static HTML on Cloudflare Pages and is not part of the desktop app.
@@ -30,7 +31,7 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 
 1. **End-to-end encrypted messaging, files, and voice.** All message content is MLS-encrypted on the device before it leaves; the server never sees plaintext. Files are convergent-encrypted with the key delivered inside the MLS-encrypted message. Voice frames are AES-128-GCM-encrypted by libwebrtc's `FrameCryptor`, keyed by the channel's MLS-exporter secret, so the LiveKit SFU forwards ciphertext only.
 2. **Zero-knowledge server.** Turso stores ciphertext envelopes, public MLS material, and metadata. It cannot read messages or recover any private key.
-3. **Direct to Turso.** The Tauri backend opens a libSQL connection directly to Turso — there is no intermediate API server. All business logic runs in the Tauri Rust process.
+3. **Direct to Turso.** The Rust backend, loaded into Electron's main process as a Node addon (`pollis-node` over `pollis-core`), opens a libSQL connection directly to Turso — there is no intermediate API server. All business logic runs in the main process.
 4. **Local-first secrets.** Private keys, MLS group state, and decrypted plaintext only exist on the user's device. Disk copies are protected by SQLCipher (local DB) and Argon2id-derived AEAD wrapping (keystore).
 5. **Bounded but reliable history.** Members joining at MLS epoch N cannot decrypt messages from epoch < N (an MLS property), and new devices for an existing user start empty (no Megolm-style key backup). Within those limits, every message that was sent while a member was a member must be deliverable and decryptable on every device that user owns. See `CLAUDE.md` § "Messages must work" for the product principle.
 
@@ -39,17 +40,22 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 ## Network architecture
 
 ```
-┌────────────────────────────┐
-│ Tauri desktop app          │
-│  ├─ React webview (UI)     │
-│  └─ Rust backend           │ ◀──── invoke() commands ─────┐
-└──────┬─────────────────────┘                              │
-       │                                                    │
-       │ direct libSQL/Hrana over TLS                       │ no HTTP server in the middle —
-       ▼                                                    │ business logic runs inside
-┌────────────────┐   ┌──────────────┐   ┌────────────────┐  │ the Tauri process
-│ Turso          │   │ Cloudflare R2│   │ LiveKit (SFU)  │  │
-│ (metadata,     │   │ (encrypted   │   │ (signalling + │ ─┘
+┌─────────────────────────────────────────────┐
+│ Electron desktop app                        │
+│  ├─ Renderer (Chromium): React UI           │
+│  │     window.electronAPI.invoke(cmd, args) │
+│  │     window.electronAPI.channelOn(id, cb) │
+│  ├─ Preload bridge                          │
+│  └─ Main process (Node)                     │ ◀── ipcMain.handle("invoke", …) ──┐
+│        loads pollis-node (napi-rs)          │                                   │
+│        → pollis-core (Rust)                 │                                   │
+└──────┬──────────────────────────────────────┘                                   │
+       │                                                                          │
+       │ direct libSQL/Hrana over TLS                                              │ no HTTP server in
+       ▼                                                                          │ the middle — all
+┌────────────────┐   ┌──────────────┐   ┌────────────────┐                        │ logic runs in the
+│ Turso          │   │ Cloudflare R2│   │ LiveKit (SFU)  │                        │ main process via
+│ (metadata,     │   │ (encrypted   │   │ (signalling + │ ───────────────────────┘ pollis-node
 │ ciphertext,    │   │ attachments, │   │ voice frames   │
 │ MLS commit log,│   │ avatars)     │   │ AES-GCM        │
 │ welcomes,      │   └──────────────┘   │ E2EE at SFU)   │
@@ -57,9 +63,11 @@ The marketing site under `website/` is static HTML on Cloudflare Pages and is no
 └────────────────┘
 ```
 
-There is **no HTTP/gRPC backend between the desktop app and Turso.** All CRUD, MLS group operations, R2 uploads, LiveKit token minting, and Resend OTP requests run inside the Tauri Rust process and are exposed to React via Tauri commands.
+There is **no HTTP/gRPC backend between the desktop app and Turso.** All CRUD, MLS group operations, R2 uploads, LiveKit token minting, and Resend OTP requests run inside the Electron main process via the loaded `pollis-node` addon, and are reached by the renderer through the preload bridge.
 
-WebRTC is not available in Tauri's WebKitGTK webview on Linux, so voice (and any future video) is implemented in Rust using the `livekit` crate. JS-based media APIs are not an option on our target platforms.
+**IPC shape.** The renderer calls `window.electronAPI.invoke(cmd, args)` (defined in `electron/src/preload.ts`). The preload script forwards this to the main process as `ipcRenderer.invoke("invoke", cmd, args)`. The main process (`electron/src/main.ts`) handles the single `"invoke"` channel by dispatching by command name into `pollis-node`'s dispatch tree (`pollis-node/src/dispatch/<module>.rs`), which calls `pollis_core::commands::*`. Streaming events flow the other direction: `pollis-core` pushes envelopes through a Rust → Node `ThreadsafeFunction` registered once at startup; the main process forwards each envelope to renderers via `webContents.send("channel:<id>", payload)`; the renderer subscribes via `window.electronAPI.channelOn(id, handler)`. This is the path used for voice frames, screenshare frames, realtime events, and terminal output.
+
+Media stays in Rust by design. The renderer's Chromium does have WebRTC available, but voice and screenshare run inside `pollis-core` for two reasons: (a) **cross-platform parity** — the same media pipeline is consumed by mobile through uniffi, so one code path covers desktop and mobile, and (b) **predictable allocation** — multi-MB media buffers passed through the V8 heap produce visible GC stutter, while Rust's manual allocation does not. JS-based media APIs are reserved for the future when a small preview or thumbnail needs it.
 
 ---
 
@@ -122,17 +130,23 @@ For the full key-material taxonomy, KDF/AEAD parameters, and attack-surface anal
 
 ```
 React component
-  → invoke("command_name", { args })
-    → #[tauri::command] shim (src-tauri/src/commands/*.rs)
-      → pollis_core::commands::* (pollis-core/src/commands/*.rs)
-        → Turso (remote, metadata + ciphertext) and/or
-          SQLCipher local (secrets, MLS state)
+  → invoke("command_name", { args })            // from frontend/src/bridge
+    → window.electronAPI.invoke(...)            // preload (electron/src/preload.ts)
+      → ipcRenderer.invoke("invoke", cmd, args) // IPC over MessagePort
+        → ipcMain.handle("invoke", ...)         // main (electron/src/main.ts)
+          → pollis-node dispatch                // pollis-node/src/dispatch/*.rs
+            → pollis_core::commands::*          // pollis-core/src/commands/*.rs
+              → Turso (metadata + ciphertext) and/or
+                SQLCipher local (secrets, MLS state)
+            ← Result<T>
+          ← Result<T>
+        ← Result<T>
       ← Result<T>
     ← Result<T>
   ← TanStack Query cache
 ```
 
-The shim layer exists only to bridge `tauri::State` into a plain `&AppState` reference. Real business logic lives in `pollis-core`, which has no `tauri` runtime dependency and is also consumed by uniffi-generated mobile bindings.
+The renderer never imports `@tauri-apps/*` or Electron APIs directly. It imports `invoke` / `Channel` / window / dialog / fs / shell / app / updater from `frontend/src/bridge`, a thin runtime-host bridge that resolves to `window.electronAPI` under Electron and retains a legacy Tauri fallback. Real business logic lives in `pollis-core`, which has no shell-runtime dependency and is also consumed by uniffi-generated mobile bindings.
 
 **TanStack Query is the source of truth** for remote data. Components read through hooks in `frontend/src/hooks/queries/`. **Zustand** holds only UI state — selected group/channel, transient session data, current user reference. There is no parallel client-side store for remote data.
 
@@ -140,9 +154,9 @@ Routing uses TanStack Router with **memory history** (no browser URL bar in a de
 
 ---
 
-## Tauri commands (selected)
+## Backend commands (selected)
 
-Registered in `src-tauri/src/lib.rs`. The `#[tauri::command]` shims live under `src-tauri/src/commands/`; the real implementations are in `pollis-core/src/commands/` (one module per row in the table below).
+Dispatched in `pollis-node/src/dispatch/` (the active path) — one match arm per command, forwarding the JSON-shaped `invoke(cmd, args)` from the Electron main process into `pollis_core::commands::*`. The real implementations are in `pollis-core/src/commands/` (one module per row in the table below). The Tauri shims under `src-tauri/src/commands/` are retained as a rollback path but are not what runs in shipping binaries.
 
 | Module | Commands |
 |---|---|
@@ -166,10 +180,10 @@ For the full reference see `.codesight/wiki/commands.md`.
 
 ## Project structure
 
-The Rust workspace has two crates: `pollis-core` (reusable backend, no Tauri runtime) and `pollis` (the Tauri desktop binary). The split lets future front-ends — a CLI, a TUI, mobile via uniffi — consume the same command/state/db/MLS code without dragging in the Tauri runtime, plugins, and lifecycle.
+The Rust workspace splits the backend into `pollis-core` (reusable, no shell-runtime dependency) and two shell-specific layers: `pollis-node` (the napi-rs binding loaded into Electron's main process — the active shipping path) and `pollis` (the legacy Tauri desktop binary, kept for rollback). The split lets other front-ends — a CLI, a TUI, mobile via uniffi — consume the same command/state/db/MLS code without dragging in any particular shell.
 
 ```
-pollis-core/              # Reusable Rust backend (no tauri::* types)
+pollis-core/              # Reusable Rust backend (no shell-runtime types)
   src/
     commands/             # Real command implementations (auth, groups, messages, mls, voice, …)
     db/                   # libSQL (remote) + SQLCipher (local) + migrations
@@ -183,7 +197,22 @@ pollis-core/              # Reusable Rust backend (no tauri::* types)
     error.rs              # Error / Result types
     lib.rs                # uniffi exports for mobile bindings
 
-src-tauri/                # Tauri desktop binary
+pollis-node/              # napi-rs binding (active shipping path)
+  src/
+    lib.rs                # Addon entry; loads .env.development; ThreadsafeFunction registration
+    state.rs              # Per-process AppState shared with pollis-core
+    events.rs             # Rust → Node event channel plumbing
+    dispatch/             # invoke dispatch — one arm per command module
+
+electron/                 # Electron app
+  src/
+    main.ts               # Main process — loads pollis-node, registers ipcMain handlers, owns BrowserWindow + auto-updater
+    preload.ts            # Exposes window.electronAPI to the renderer
+  build/
+    electron-builder.yml  # Packaging config (DMG/ZIP/NSIS/AppImage/deb/rpm + signing hooks)
+    sign.js               # Windows signing hook (Azure Trusted Signing)
+
+src-tauri/                # Legacy Tauri desktop binary (retained for rollback; not the active shipping path)
   src/
     commands/             # Thin #[tauri::command] shims forwarding to pollis_core
     sink.rs               # ChannelSink adapter — wraps tauri::ipc::Channel into EventSink
@@ -193,10 +222,11 @@ src-tauri/                # Tauri desktop binary
 
 frontend/                 # React app
   src/
+    bridge/               # Runtime-host bridge — invoke/Channel/window/dialog/fs/shell/app/updater route through window.electronAPI; legacy Tauri fallback retained
     components/           # UI components (auth, layout, message, voice, ui/, …)
     pages/                # Route pages
     hooks/queries/        # TanStack Query hooks
-    services/             # invoke() wrappers, R2 upload helpers
+    services/             # Frontend-side helpers (R2 upload, etc.)
     stores/               # Zustand (UI state only)
     types/                # TypeScript types — kept aligned with Rust structs
     router.tsx, main.tsx  # TanStack Router setup, app entry
@@ -212,7 +242,9 @@ docs/security-whitepaper.md   # Auditor-facing protocol/threat model
 
 | | Trusted | Untrusted |
 |---|---|---|
-| | User's device, OS keystore, the SQLCipher local DB, the Tauri binary at install, the user-held Secret Key, the user-held PIN | Network, Turso, Cloudflare R2, LiveKit, Resend, server operators |
+| | User's device, OS keystore, the SQLCipher local DB, the signed Electron binary (main process + preload + `pollis-node`/`pollis-core` addon) at the installed version, the user-held Secret Key, the user-held PIN | Network, Turso, Cloudflare R2, LiveKit, Resend, server operators |
+
+Binary integrity at install and at every auto-update rests on the OS-native code signature: Apple Developer ID + notarization (Gatekeeper checks both at launch and at install) on macOS, Azure Trusted Signing (Authenticode) on Windows. `electron-updater` verifies the same signature before invoking the installer, so a tampered download cannot replace the running binary.
 
 What the server can see: user metadata, social graph, encrypted message envelopes (size, sender, timestamp), MLS commit/welcome timing, public keys.
 

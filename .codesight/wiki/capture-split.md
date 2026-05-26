@@ -162,6 +162,9 @@ helper, never killing the host app.
 
 ### Packaging
 
+The helper sidecar packaging story is in transition: the legacy `src-tauri/` build pipeline ships a working sidecar today, while the active Electron pipeline's strategy (extraResource via electron-builder, or fold-in to `pollis-node`) is still being decided. Both paths are documented here so the helper can be wired into the Electron build without re-discovering the constraints.
+
+**Legacy Tauri shell (still produces a runnable helper):**
 - `src-tauri/tauri.macos.conf.json`: `externalBin`
   `binaries/pollis-capture-macos`, Developer-ID signed, **same team
   9JF7WWYMU2**.
@@ -172,6 +175,9 @@ helper, never killing the host app.
   reused on the app job (ubuntu-22.04). No shell script wrapper — runs
   uniformly for `cargo check`, `tauri dev`, and `tauri build` on macOS
   and Linux. Windows is skipped (WGC is in-process).
+
+**Electron shell (active path; helper packaging is a TODO in `electron/build/electron-builder.yml`):**
+- The decision pending in the config TODO is whether to ship the helper as an `extraResources` entry next to `pollis-node`, embed it inside `pollis-node`, or drop the separate binary entirely if `pollis-node` performs the capture itself. Until that lands, screenshare under the Electron build will not have a packaged helper.
 
 ### Picker UX
 
@@ -248,6 +254,8 @@ share one wire format definition.
 - `frontend/src/screenshare/screenShareSession.ts` —
   `local_unsupported` event + distinct error message.
 - `src-tauri/tauri.linux.conf.json`, `src-tauri/tauri.macos.conf.json`
-  — sidecar packaging.
+  — sidecar packaging in the legacy Tauri build.
 - `src-tauri/build.rs` — auto-builds + stages the per-OS helper sidecar
-  during the main app's cargo build.
+  during the legacy Tauri shell's cargo build.
+- `electron/build/electron-builder.yml` — active build config; helper
+  packaging strategy is the open TODO described in "Packaging" above.

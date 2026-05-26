@@ -1,6 +1,8 @@
-# Windows Code Signing — Azure Artifact Signing
+# Windows Code Signing — Azure Trusted Signing
 
-Pollis signs Windows `.exe` artifacts (inner binary + NSIS installer) using **Azure Artifact Signing** (formerly Trusted Signing). Signing runs on the `windows-latest` GitHub Actions runner via `TAURI_WINDOWS_SIGN_COMMAND`. The private key lives in Azure's HSM — no PFX, no hardware token.
+Pollis signs Windows `.exe` artifacts (inner binary + NSIS installer) using **Azure Trusted Signing**. Signing runs on the `windows-latest` GitHub Actions runner via `electron-builder`'s `signtoolOptions.sign` hook (`electron/build/sign.js`), which wraps `signtool.exe` with Azure's `/dlib` + `/dmdf` integration. The private key lives in Azure's HSM — no PFX, no hardware token.
+
+> Note: in earlier names of the service this was called "Azure Artifact Signing". The Azure resources below still appear under that namespace in the `az` CLI surface (`az artifact-signing …`) even though Microsoft markets the service as Trusted Signing today.
 
 This article documents the Azure-side state so a future migration (e.g. individual → organization tenant) can be reproduced from a clean slate.
 
@@ -98,7 +100,7 @@ Steps 2 and 4 are **portal-only** — no CLI path exists. Everything else is scr
      --scope "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CodeSigning/codeSigningAccounts/<account>/certificateProfiles/pollis-public"
    ```
 
-8. **Update Doppler** with the six secrets from the table above. The CI workflow (`.github/workflows/desktop-release.yml`) picks them up automatically.
+8. **Update Doppler** with the six secrets from the table above. The CI workflow (`.github/workflows/electron-release.yml`) picks them up automatically; `electron-builder`'s sign hook reads them at signing time and passes them into the Azure dlib.
 
 ## Migrating to an organization tenant
 
