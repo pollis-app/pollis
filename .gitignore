@@ -76,3 +76,5 @@ src-tauri/binaries/
 dev-keystore.json
 
 test-results/
+playwright-report/
+playwright/.cache/
