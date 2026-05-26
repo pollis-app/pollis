@@ -16,7 +16,8 @@ import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
-import { AlertTriangle, Mail, Phone, X } from "lucide-react";
+import { AlertTriangle, Download, Mail, Phone, X } from "lucide-react";
+import { startUpdatePolling, stopUpdatePolling } from "../../services/updatePoller";
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { usePreferences } from "../../hooks/queries/usePreferences";
 import { voiceSession } from "../../voice";
@@ -74,6 +75,7 @@ export const AppShell: React.FC = () => {
     viewingScreenShareTrackKey,
     setViewingScreenShareTrackKey,
     shareStopped,
+    availableUpdateVersion,
   } = useAppStore();
   // Channel id derives from the union. Replaces the standalone
   // activeVoiceChannelId field that used to be stored separately.
@@ -208,6 +210,22 @@ export const AppShell: React.FC = () => {
 
   // Maintain a LiveKit room connection for the active channel/conversation
   useLiveKitRealtime();
+
+  // Poll for app updates every 15 minutes once the user reaches the main
+  // app. The startup gate in App.tsx already covers the launch-time check;
+  // this picks up releases published while the user is signed in. The
+  // poller is a module-level singleton so StrictMode double-mount or
+  // AppShell remount can't duplicate the timer. Skip in dev — the updater
+  // bridge already returns null there, but no point burning a timer.
+  useEffect(() => {
+    if (import.meta.env.DEV) {
+      return;
+    }
+    startUpdatePolling();
+    return () => {
+      stopUpdatePolling();
+    };
+  }, []);
 
   // Sync unread count to OS dock/taskbar badge
   useBadge();
@@ -511,6 +529,26 @@ export const AppShell: React.FC = () => {
         }}
       >
         <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />
+        <div className="flex items-center gap-3">
+        {availableUpdateVersion && (
+          <button
+            data-testid="status-bar-update-available"
+            className="text-xs font-mono flex items-center gap-1 cursor-pointer"
+            style={{
+              color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)",
+              background: "none",
+              border: "none",
+              padding: 0,
+              lineHeight: 0,
+            }}
+            onClick={() => router.navigate({ to: "/update" })}
+            aria-label={`Update available: ${availableUpdateVersion}`}
+            title={`Update available: ${availableUpdateVersion}`}
+          >
+            <Download className="w-4 h-4" />
+            <span>Update available</span>
+          </button>
+        )}
         {/* Fixed-height, always-rendered slot so the bar doesn't reflow as
             the status (incoming call / alert / syncing) appears and clears. */}
         <div className="flex items-center justify-end h-4 leading-none">
@@ -620,6 +658,7 @@ export const AppShell: React.FC = () => {
             <LoadingSpinner size="sm" />
           </div>
         ) : null}
+        </div>
         </div>
       </div>
     </div>
