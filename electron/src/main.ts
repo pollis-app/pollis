@@ -237,32 +237,47 @@ void app.whenReady().then(async () => {
     ({ channelId, payload }) => broadcastChannel(channelId, payload),
   );
 
-  // navigator.mediaDevices.getDisplayMedia in the renderer doesn't work
-  // unless the main process registers a handler that picks a source. The
-  // v1 implementation hands back the first screen — Chromium then shows
-  // its own permission UI to the user, so the result is the standard
-  // browser flow (no custom picker required). TODO(phase-6-followup):
-  // build a custom in-app picker that lists all screens + windows so the
-  // user can pick a specific window or non-primary monitor.
-  session.defaultSession.setDisplayMediaRequestHandler(
-    async (_request, callback) => {
-      try {
-        const sources = await desktopCapturer.getSources({
-          types: ["screen", "window"],
-        });
-        const first = sources[0];
-        if (!first) {
-          callback({});
-          return;
-        }
-        callback({ video: first });
-      } catch (e) {
-        console.error("[displayMedia] getSources failed:", e);
-        callback({});
-      }
-    },
-    { useSystemPicker: true },
-  );
+  // Screenshare uses the in-app picker (frontend/src/components/Voice/
+  // ScreenSharePicker.tsx) on every platform. Sources come from the
+  // `desktopMedia:enumerate` IPC below; capture is initiated via
+  // `getUserMedia({ video: { mandatory: { chromeMediaSourceId } } })` in
+  // the renderer, which targets a specific source directly and never
+  // routes through `setDisplayMediaRequestHandler`.
+  //
+  // The handler still has to exist — if it's absent, the renderer can't
+  // even call `getDisplayMedia` (Electron returns NotSupportedError).
+  // Deny every request to make sure no code path silently auto-picks the
+  // primary display (the previous "callback({ video: first })" was the
+  // bug behind grabbing the wrong monitor on macOS <15, where
+  // useSystemPicker is a no-op).
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    callback({});
+  });
+
+  ipcMain.handle("desktopMedia:enumerate", async () => {
+    // 320x200 thumbnails — large enough for the picker tiles, small
+    // enough to keep enumeration snappy even with many windows. Without
+    // a thumbnailSize argument desktopCapturer returns full-screen
+    // captures, which on a 5K display can stall the picker for seconds.
+    const sources = await desktopCapturer.getSources({
+      types: ["screen", "window"],
+      thumbnailSize: { width: 320, height: 200 },
+    });
+    return sources.map((s) => ({
+      id: s.id,
+      name: s.name,
+      // Electron tags screen sources with ids like "screen:0:0" and
+      // window sources with "window:<hwnd>:<n>". The prefix is the
+      // authoritative kind.
+      kind: s.id.startsWith("screen:") ? "display" : "window",
+      // `display_id` is populated for screen sources on macOS/Windows;
+      // pass through for callers that want to match against
+      // `screen.getAllDisplays()`.
+      displayId: s.display_id || null,
+      // PNG data URL of the thumbnail at the size requested above.
+      thumbnailDataUrl: s.thumbnail.toDataURL(),
+    }));
+  });
 
   ipcMain.handle(
     "invoke",

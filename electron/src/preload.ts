@@ -132,6 +132,25 @@ contextBridge.exposeInMainWorld("electronAPI", {
   clipboardReadImageToTemp: () =>
     ipcRenderer.invoke("clipboard:readImageToTemp") as Promise<string | null>,
 
+  // ── Desktop media (screenshare source enumeration) ────────────────────────
+  // Returns the raw Electron source list for screen+window capture. The
+  // renderer pairs each `id` with the value of `chromeMediaSourceId` in a
+  // `getUserMedia({ video: { mandatory: {...} } })` call to capture that
+  // specific source. The handler in main never resolves
+  // `setDisplayMediaRequestHandler` for these — the renderer goes through
+  // the legacy mediaSource API instead, which is the same path
+  // Slack/Discord/VSCode use for custom pickers.
+  desktopMediaEnumerate: () =>
+    ipcRenderer.invoke("desktopMedia:enumerate") as Promise<
+      Array<{
+        id: string;
+        name: string;
+        kind: "display" | "window";
+        displayId: string | null;
+        thumbnailDataUrl: string;
+      }>
+    >,
+
   // ── Auto-updater ───────────────────────────────────────────────────────────
   updaterCheck: () =>
     ipcRenderer.invoke("updater:check") as Promise<{ version: string } | null>,
