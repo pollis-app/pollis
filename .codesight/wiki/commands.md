@@ -1,8 +1,8 @@
-# Tauri Commands
+# Backend Commands
 
-All backend calls from the frontend use `invoke("command_name", { args })`. Commands are registered in `src-tauri/src/lib.rs`. The `#[tauri::command]` shims under `src-tauri/src/commands/` are thin forwarders — the real implementations live in `pollis-core/src/commands/` so a future CLI / TUI / mobile binary can call them without the Tauri runtime. Edit `pollis-core`, not the shims.
+All backend calls from the frontend use `invoke("command_name", { args })` (imported from `frontend/src/bridge`, which routes to `window.electronAPI.invoke` under Electron). The active dispatch happens in `pollis-node/src/dispatch/`: a one-line match arm per command forwards the JSON-shaped call from the Electron main process into `pollis-core/src/commands/`. The implementations live in `pollis-core` so a CLI / TUI / mobile binding (uniffi) can call them without any shell-runtime dependency. Edit `pollis-core`, not the shims.
 
-The path in each section header below points at the implementation in `pollis-core`. The shim with the same module name in `src-tauri/src/commands/` re-exports the types and forwards each command verbatim.
+The path in each section header below points at the implementation in `pollis-core`. The `pollis-node` dispatch arm with the same module name re-exports the types and forwards each command verbatim. Legacy `#[tauri::command]` shims under `src-tauri/src/commands/` exist for rollback but are not the active path.
 
 ## auth (`commands/auth.rs`)
 - `initialize_identity(user_id)` — ensure MLS credentials + KPs, poll welcomes. Requires the local DB to be open (post-`set_pin` / `unlock`).

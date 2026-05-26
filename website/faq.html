@@ -177,7 +177,7 @@
             <p>A desktop messaging app with group channels and direct messages, like Slack, but your messages are encrypted on your device before they leave it. The people running Pollis can't read them.</p>
           </div>
           <div class="dev">
-            <p>Tauri 2 desktop client (Rust + React) that connects directly to a Turso/libSQL backend. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>; the server only stores ciphertext envelopes plus routing metadata. No intermediate app server.</p>
+            <p>Electron desktop client with a React UI and a Rust core for cryptography, MLS group state, and real-time media. The Rust core connects directly to a Turso/libSQL backend. Messages are end-to-end encrypted with MLS (RFC 9420) via <code>openmls</code>; the server only stores ciphertext envelopes plus routing metadata. No intermediate app server.</p>
           </div>
         </div>
       </div>
@@ -230,7 +230,7 @@
             <p>macOS, Windows, and Linux.</p>
           </div>
           <div class="dev">
-            <p>macOS (universal binary — Apple Silicon + Intel), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Built with Tauri 2.</p>
+            <p>macOS (universal binary — Apple Silicon + Intel), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID on macOS, Azure Trusted Signing on Windows.</p>
           </div>
         </div>
       </div>
@@ -302,7 +302,7 @@
             <p>Anyone can create a group inside the app. To add someone, invite them by their Pollis username — they need an account already.</p>
           </div>
           <div class="dev">
-            <p>Groups are created via the <code>create_group</code> Tauri command; members are added by username via <code>invite_to_group</code>. Adding someone generates an MLS Welcome that seeds their device into the group ratchet at the current epoch. DMs are implemented as 2-person MLS groups.</p>
+            <p>Groups are created via the <code>create_group</code> backend command; members are added by username via <code>invite_to_group</code>. Adding someone generates an MLS Welcome that seeds their device into the group ratchet at the current epoch. DMs are implemented as 2-person MLS groups.</p>
           </div>
         </div>
       </div>

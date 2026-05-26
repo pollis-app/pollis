@@ -7,7 +7,7 @@ Start here. Navigate to the article you need.
 - [Overview](./overview.md) — Architecture, stack, project structure
 - [Database](./database.md) — Remote (Turso) and local (SQLite) schemas with all columns
 - [MLS](./mls.md) — Message Layer Security: encryption, group membership, multi-device
-- [Tauri Commands](./commands.md) — Rust backend command reference
+- [Backend Commands](./commands.md) — Rust backend command reference
 - [UI Components](./ui.md) — React component inventory
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
@@ -22,8 +22,10 @@ Start here. Navigate to the article you need.
 | Layer | Tech | Location |
 |-------|------|----------|
 | Frontend | React, TypeScript, Vite, TailwindCSS | `frontend/src/` |
+| Desktop shell | Electron 33 (main + preload + renderer) | `electron/src/` |
 | Backend (logic) | Rust workspace crate `pollis-core` | `pollis-core/src/` |
-| Backend (Tauri shell) | Rust, Tauri 2 — `#[tauri::command]` shims, plugins, lifecycle | `src-tauri/src/` |
+| Backend (host binding) | Rust napi-rs binding `pollis-node` loaded by the Electron main process | `pollis-node/src/` |
+| Backend (legacy shell, rollback only) | Rust, Tauri 2 — `#[tauri::command]` shims, plugins, lifecycle | `src-tauri/src/` |
 | Remote DB | Turso (libSQL) | `pollis-core/src/db/migrations/000000_baseline.sql` + `000*.sql` |
 | Local DB | SQLite (rusqlite) | `pollis-core/src/db/local_schema.sql` |
 | Encryption | OpenMLS (RFC 9420) | `pollis-core/src/commands/mls.rs` |

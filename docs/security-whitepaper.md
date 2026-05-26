@@ -14,12 +14,12 @@
 |---|---|
 | The user's device | Network (any path between the device and any remote service) |
 | The OS keystore (Keychain / Secret Service / Credential Manager) | Turso (libSQL) — the remote relational database |
-| The Tauri 2 application binary at the version the user installed | Cloudflare R2 — object storage for attachments |
+| The Electron application binary (renderer + preload + Rust sidecar `pollis-node`) at the version the user installed | Cloudflare R2 — object storage for attachments |
 | The local SQLCipher database file | LiveKit — SFU and signalling for voice and realtime events |
 | The user-held Secret Key (printed once, expected to be stored offline) | Resend — outbound email transit for OTPs |
 | The user-held PIN (in the user's head) | Anyone with read access to a copy of `accounts.json` or the keystore who does not also have the PIN |
 
-The application is built and shipped by the operators of the Pollis services. The trust delegation is the same as Signal Desktop or WhatsApp Desktop: the binary is trusted at install time, after which the cryptographic protocol is what defends against the *server* side of the same operator. Reproducible builds are not currently a goal; binary integrity rests on platform code-signing (Apple notarization on macOS, Azure Artifact Signing on Windows — see `.codesight/wiki/windows-signing.md`).
+The application is built and shipped by the operators of the Pollis services. The trust delegation is the same as Signal Desktop or WhatsApp Desktop: the binary is trusted at install time, after which the cryptographic protocol is what defends against the *server* side of the same operator. Reproducible builds are not currently a goal; binary integrity rests on platform code-signing (Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows — see `.codesight/wiki/windows-signing.md`). The auto-update path verifies the same OS-native signature on every downloaded installer before launch (Gatekeeper on macOS, Authenticode on Windows), so an attacker who tampers with a release artifact in transit cannot get the running binary to install it.
 
 ### 1.2 What the server can and cannot see
 
@@ -41,7 +41,7 @@ Pollis carries three nested identities. Distinguishing them is essential for the
 
 ### 2.1 Account identity (per user)
 
-A long-lived Ed25519 keypair (RFC 8032), generated on the device that completes signup. Source: `src-tauri/src/commands/account_identity.rs::generate_account_identity`. The public half is published to `users.account_id_pub` (BLOB, 32 bytes) at signup. The private half exists in exactly two places:
+A long-lived Ed25519 keypair (RFC 8032), generated on the device that completes signup. Source: `pollis-core/src/commands/account_identity.rs::generate_account_identity`. The public half is published to `users.account_id_pub` (BLOB, 32 bytes) at signup. The private half exists in exactly two places:
 
 1. On the user's enrolled devices, on disk only as ciphertext in the OS keystore slot `account_id_key_wrapped_{user_id}` (see §3 for wrapping).
 2. On the server, on disk only as ciphertext in the `account_recovery` table, wrapped under a key derived from a user-held *Secret Key* the server has never seen.
@@ -66,7 +66,7 @@ The local PIN is a *device-local unlock* factor, not a server credential. It doe
 
 ### 3.1 KDF and AEAD choices
 
-Source: `src-tauri/src/commands/pin.rs`.
+Source: `pollis-core/src/commands/pin.rs`.
 
 - **PIN format:** 4 ASCII digits — `validate_pin`. ~13 bits of entropy.
 - **KDF:** Argon2id (RFC 9106), Argon2 crate `0.5`, version 0x13. Parameters: `m_cost = 64 MiB`, `t_cost = 3`, `p_cost = 1`, output 32 bytes. Tuned to ~250 ms on a mid-range Apple-silicon or Ryzen 5 device, deliberately above the OWASP 2024 first-choice password-storage minimum (m=19 MiB, t=2). Parameters are stored inside the `pin_meta_{user_id}` blob, not hard-coded at unwrap time, so they can be bumped on any future re-wrap without a migration.
@@ -103,7 +103,7 @@ After PIN setup, raw `db_key` and raw `account_id_key` exist on disk only inside
 
 ## 4. Authentication Flow (OTP)
 
-Source: `src-tauri/src/commands/auth.rs::request_otp`, `verify_otp`.
+Source: `pollis-core/src/commands/auth.rs::request_otp`, `verify_otp`.
 
 The OTP factor exists only to prove control of an email address. It is *not* the device unlock factor (that's the PIN) and it is *not* the account-recovery factor (that's the Secret Key).
 
@@ -127,7 +127,7 @@ A user with an existing `account_id_pub` can add a second device through one of 
 
 ### 5.1 Approval path (in-band, sibling-device-mediated)
 
-Source: `src-tauri/src/commands/device_enrollment.rs`.
+Source: `pollis-core/src/commands/device_enrollment.rs`.
 
 1. New device generates an **ephemeral X25519 keypair** (`x25519-dalek` 2.0, `StaticSecret` from `OsRng` bytes). The private half is held in `AppState.enrollment_ephemeral_keys: HashMap<request_id, Vec<u8>>` — *in memory only*. App restart mid-enrollment forfeits the request.
 2. New device generates a 6-digit verification code (`OsRng` → `u32 mod 1_000_000`, zero-padded).
@@ -188,7 +188,7 @@ Verification failures currently log a warning and proceed (the comment block at 
 ### 6.1 Standard and library
 
 - **Specification:** RFC 9420 — The Messaging Layer Security (MLS) Protocol.
-- **Implementation:** `openmls` 0.8 (https://github.com/openmls/openmls), with `openmls_rust_crypto` 0.5 providing the crypto provider over the `RustCrypto` AEAD/HKDF/HPKE primitives, and a Pollis-defined `MlsStore` (`src-tauri/src/signal/mls_storage.rs`) implementing the `openmls_traits::storage::StorageProvider` trait against the local SQLCipher `mls_kv` table.
+- **Implementation:** `openmls` 0.8 (https://github.com/openmls/openmls), with `openmls_rust_crypto` 0.5 providing the crypto provider over the `RustCrypto` AEAD/HKDF/HPKE primitives, and a Pollis-defined `MlsStore` (`pollis-core/src/signal/mls_storage.rs`) implementing the `openmls_traits::storage::StorageProvider` trait against the local SQLCipher `mls_kv` table.
 - **Cipher suite:** `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (single `const CS` at the top of `mls.rs`). This is suite 1 in RFC 9420 §17.1, MTI for MLS 1.0:
   - HPKE (RFC 9180): DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-128-GCM
   - Hash: SHA-256
@@ -259,7 +259,7 @@ The product principle in `CLAUDE.md` is exactly stated: messages sent before a m
 
 ## 7. Local Encrypted Storage (SQLCipher)
 
-Source: `src-tauri/src/db/local.rs`.
+Source: `pollis-core/src/db/local.rs`.
 
 - **Library:** `rusqlite` 0.31 with the `bundled-sqlcipher` feature, which links a vendored SQLCipher 4 (a fork of SQLite providing page-level AES-256-CBC with per-page HMAC-SHA512 for tamper detection; PBKDF2-HMAC-SHA512 page-key derivation is part of the default profile but is not used by Pollis — see "Key application" below).
 - **Key application:** `PRAGMA key = "x'{hex}'";` with the 32-byte raw key; this skips SQLCipher's own KDF and uses the raw key directly as the page key — appropriate because the input is a CSPRNG-generated 32-byte uniform key, not a passphrase.
@@ -281,10 +281,10 @@ User profile rows, group/channel metadata, membership, blocks: those live on Tur
 
 ## 8. Remote Database Transport (Turso / libSQL)
 
-Source: `src-tauri/src/db/remote.rs`.
+Source: `pollis-core/src/db/remote.rs`.
 
 - **Library:** `libsql` 0.6 with the `remote` feature, which uses Turso's **Hrana over HTTP/2** (the libSQL native protocol). The connection URL scheme is `libsql://...`. TLS is mandatory; `libsql` 0.6's `remote` feature uses `rustls` under the hood with the system trust store.
-- **Authentication:** a long-lived bearer `TURSO_TOKEN` baked into the desktop binary's environment (`src-tauri/src/config.rs::Config::load`). Per-user authentication is **not** layered on top of this — every Pollis client signs into the same Turso database with the same token. Row-level security is enforced at the *application* layer, in Rust commands, not by Turso.
+- **Authentication:** a long-lived bearer `TURSO_TOKEN` baked into the desktop binary's environment (`pollis-core/src/config.rs::Config::load`). Per-user authentication is **not** layered on top of this — every Pollis client signs into the same Turso database with the same token. Row-level security is enforced at the *application* layer, in Rust commands, not by Turso.
 - **Resilience:** `RemoteDb::with_retry` handles transient Hrana stream eviction (libsql idle-stream GC) by reconnecting and retrying once. Non-transient errors surface.
 
 ### 8.1 Threat consequence of a single shared token
@@ -293,7 +293,7 @@ A reverse-engineer who extracts `TURSO_TOKEN` from a built binary can open a lib
 
 - Read every public-metadata table (which is the same threat surface as a server-side database compromise).
 - Insert rows into tables not protected by application-level checks. The application enforces:
-  - Per-actor permission on group/channel CRUD inside Tauri commands (the actor's `user_id` is supplied by the frontend and trusted because the frontend got it from the unlocked `account_id_key`).
+  - Per-actor permission on group/channel CRUD inside the backend commands (the actor's `user_id` is supplied by the frontend and trusted because the frontend got it from the unlocked `account_id_key`).
   - Atomic claim semantics on `mls_key_package`.
   - `device_cert` cryptographic verification *on the read path*.
 - They cannot decrypt any message — those are MLS-encrypted.
@@ -305,7 +305,7 @@ The general shape — a desktop client carrying a credential to talk to backing 
 
 ## 9. Object Storage (Cloudflare R2)
 
-Source: `src-tauri/src/commands/r2.rs`.
+Source: `pollis-core/src/commands/r2.rs`.
 
 ### 9.1 Convergent encryption (attachments)
 
@@ -324,7 +324,7 @@ This is the same shape as MEGA's "Convergent Encrypted" layer (without its block
 
 R2 is reached over HTTPS with **AWS SigV4** (`sigv4_headers`): canonical request → string-to-sign → date-region-service-derived signing key (HMAC-SHA256) → signature in the `Authorization` header. The `R2_ACCESS_KEY_ID` and `R2_SECRET_KEY` are baked into the binary, like `TURSO_TOKEN`. Same shared-credential trust model (§8.1).
 
-The upload Tauri command (`upload_media`) reads files from disk by path, not over IPC, so arbitrary-size attachments do not hit IPC framing limits.
+The `upload_media` command reads files from disk by path inside the Rust sidecar, not over Electron IPC, so arbitrary-size attachments do not hit IPC framing limits.
 
 ### 9.4 Avatars and group icons
 
@@ -334,7 +334,7 @@ These go through `upload_file` / `download_file` (the non-`upload_media` path) a
 
 ## 10. Real-Time Media (LiveKit)
 
-Source: `src-tauri/src/commands/livekit.rs`, `voice.rs`, `realtime.rs`.
+Source: `pollis-core/src/commands/livekit.rs`, `voice.rs`, `realtime.rs`.
 
 ### 10.1 Authentication
 
@@ -369,7 +369,7 @@ The MLS group used is the same group that protects the channel's text messages (
 
 ### 10.3 Audio pipeline (defensive context)
 
-Mic capture: `cpal` in 10 ms i16 mono frames → optional RNNoise (`nnnoiseless`) → WebRTC AudioProcessing module (AGC2 + NS + HPF + AEC, via `webrtc-audio-processing`) → LiveKit `NativeAudioSource.capture_frame` → SRTP. There is no JS-layer media path because Tauri's WebKitGTK webview on Linux does not expose WebRTC; this is enforced by the architecture and is described in `CLAUDE.md`. Audio never enters the webview.
+Mic capture: `cpal` in 10 ms i16 mono frames → optional RNNoise (`nnnoiseless`) → WebRTC AudioProcessing module (AGC2 + NS + HPF + AEC, via `webrtc-audio-processing`) → LiveKit `NativeAudioSource.capture_frame` → SRTP. The entire pipeline runs in the Rust sidecar; audio never enters the renderer. This is a deliberate architecture choice (cross-platform parity with mobile, and predictable allocation that avoids V8 GC pressure on multi-MB media buffers), enforced by the surrounding code and described in `CLAUDE.md`.
 
 ### 10.4 Signalling channel
 
