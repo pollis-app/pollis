@@ -177,6 +177,10 @@ interface SourceCardProps {
   onPick: () => void;
   title: string;
   subtitle?: string;
+  /** PNG data URL — when present, renders as the tile preview. When
+   *  absent (Tauri capture helper path, which doesn't ship preview
+   *  frames), the `icon` is shown instead. */
+  thumbnail?: string;
   icon: React.ReactNode;
 }
 
@@ -185,6 +189,7 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
   onPick,
   title,
   subtitle,
+  thumbnail,
   icon,
 }) => (
   <button
@@ -196,14 +201,30 @@ const SourceCardShell: React.FC<SourceCardProps> = ({
   >
     <Card padding="none" className="flex flex-col items-stretch h-full overflow-hidden">
       <div
-        className="flex-1 flex items-center justify-center"
+        className="flex-1 flex items-center justify-center overflow-hidden"
         style={{
-          minHeight: 56,
+          // Fixed aspect for thumbnails so the grid stays even when
+          // sources have wildly different aspect ratios (an ultra-wide
+          // monitor next to a portrait phone screen sharer, etc).
+          // 16:10 matches the 320×200 thumbnail size we request in main.
+          aspectRatio: "16 / 10",
           background: "var(--c-bg)",
           color: "var(--c-text-muted)",
         }}
       >
-        {icon}
+        {thumbnail ? (
+          // alt="" because the title below carries the accessible label.
+          // object-contain rather than cover so we don't crop windows
+          // whose aspect ratio differs from the thumbnail frame.
+          <img
+            src={thumbnail}
+            alt=""
+            className="w-full h-full object-contain"
+            draggable={false}
+          />
+        ) : (
+          icon
+        )}
       </div>
       <div className="p-2">
         <div className="truncate" style={{ color: "var(--c-text)" }}>
@@ -231,7 +252,17 @@ const DisplayCard: React.FC<{
     disabled={disabled}
     onPick={onPick}
     title={display.name}
-    subtitle={`${display.width} × ${display.height}`}
+    // Suppress the dim subtitle when the backend didn't supply real
+    // dimensions (0×0 looked broken; "—" would be noise). Electron's
+    // path now resolves screen sizes from screen.getAllDisplays(), so
+    // this only falls back to undefined under capture-helper paths
+    // that don't enumerate displays at all.
+    subtitle={
+      display.width > 0 && display.height > 0
+        ? `${display.width} × ${display.height}`
+        : undefined
+    }
+    thumbnail={display.thumbnailDataUrl}
     icon={<Monitor size={32} />}
   />
 );
@@ -253,7 +284,11 @@ const WindowCard: React.FC<{
       disabled={disabled}
       onPick={onPick}
       title={primary}
+      // Don't show "0 × 0" for Electron-enumerated windows; the
+      // thumbnail is the primary visual identifier, and the size is
+      // only knowable after capture starts (via track.getSettings()).
       subtitle={secondary}
+      thumbnail={window.thumbnailDataUrl}
       icon={<Square size={32} />}
     />
   );

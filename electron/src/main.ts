@@ -263,20 +263,43 @@ void app.whenReady().then(async () => {
       types: ["screen", "window"],
       thumbnailSize: { width: 320, height: 200 },
     });
-    return sources.map((s) => ({
-      id: s.id,
-      name: s.name,
-      // Electron tags screen sources with ids like "screen:0:0" and
-      // window sources with "window:<hwnd>:<n>". The prefix is the
-      // authoritative kind.
-      kind: s.id.startsWith("screen:") ? "display" : "window",
-      // `display_id` is populated for screen sources on macOS/Windows;
-      // pass through for callers that want to match against
-      // `screen.getAllDisplays()`.
-      displayId: s.display_id || null,
-      // PNG data URL of the thumbnail at the size requested above.
-      thumbnailDataUrl: s.thumbnail.toDataURL(),
-    }));
+    // Resolve display dimensions from screen.getAllDisplays(). desktopCapturer
+    // doesn't surface physical size on its source objects, but it does give
+    // us `display_id`, which is the same string id the Display.id field
+    // exposes (after toString). Build a lookup once.
+    //
+    // Logical (device-independent) size is what we show — that's how users
+    // think about their monitors ("1920×1080 display"), and matches what
+    // every other settings UI on the OS reports. Physical pixels are
+    // `size * scaleFactor` if a future caller wants them.
+    const displayById = new Map<string, { width: number; height: number }>();
+    for (const d of screen.getAllDisplays()) {
+      displayById.set(String(d.id), { width: d.size.width, height: d.size.height });
+    }
+    return sources.map((s) => {
+      const kind: "display" | "window" = s.id.startsWith("screen:") ? "display" : "window";
+      // Display dims for screen sources; windows don't have a stable
+      // size we can read without actually capturing (Electron's
+      // desktopCapturer doesn't surface NSWindow.frame / GetWindowRect),
+      // so window dimensions stay 0 and the renderer hides them.
+      const dims =
+        kind === "display" && s.display_id
+          ? displayById.get(s.display_id) ?? { width: 0, height: 0 }
+          : { width: 0, height: 0 };
+      return {
+        id: s.id,
+        name: s.name,
+        kind,
+        // `display_id` is populated for screen sources on macOS/Windows;
+        // pass through for callers that want to match against
+        // `screen.getAllDisplays()`.
+        displayId: s.display_id || null,
+        width: dims.width,
+        height: dims.height,
+        // PNG data URL of the thumbnail at the size requested above.
+        thumbnailDataUrl: s.thumbnail.toDataURL(),
+      };
+    });
   });
 
   ipcMain.handle(

@@ -17,16 +17,26 @@ import { useAppStore } from "../stores/appStore";
 import { playSfx, SFX } from "../utils/sfx";
 
 /** Capturable display reported by `enumerate_screen_sources`.
- *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration). */
+ *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration).
+ *
+ *  Under Electron, `thumbnailDataUrl` is a PNG data URL from
+ *  `desktopCapturer.getSources({ thumbnailSize })`. Under the Tauri
+ *  capture helper it is undefined (the protocol doesn't ship preview
+ *  frames; the picker falls back to the icon). */
 export interface DisplaySource {
   id: number;
   width: number;
   height: number;
   name: string;
+  thumbnailDataUrl?: string;
 }
 
 /** Capturable on-screen window reported by `enumerate_screen_sources`.
- *  Mirrors `pollis_capture_proto::WindowSource`. */
+ *  Mirrors `pollis_capture_proto::WindowSource`. Under Electron,
+ *  `width`/`height` are 0 (desktopCapturer doesn't surface per-window
+ *  dimensions without actually capturing), and `thumbnailDataUrl` is
+ *  populated. Under Tauri the dimensions are real and there is no
+ *  thumbnail. */
 export interface WindowSource {
   id: number;
   width: number;
@@ -34,6 +44,7 @@ export interface WindowSource {
   title: string;
   app_name: string;
   bundle_id: string;
+  thumbnailDataUrl?: string;
 }
 
 /** What the helper offers when it enumerates. Empty on Linux/Windows —
@@ -270,7 +281,20 @@ class ScreenShareSession {
    *  in-app picker so the UX is identical on every platform. */
   async enumerate(): Promise<SourceList> {
     if (hasMediaDevices()) {
-      const api = (window as Window & { electronAPI?: { desktopMediaEnumerate?: () => Promise<Array<{ id: string; name: string; kind: "display" | "window" }>> } }).electronAPI;
+      const api = (window as Window & {
+        electronAPI?: {
+          desktopMediaEnumerate?: () => Promise<
+            Array<{
+              id: string;
+              name: string;
+              kind: "display" | "window";
+              width: number;
+              height: number;
+              thumbnailDataUrl: string;
+            }>
+          >;
+        };
+      }).electronAPI;
       if (!api?.desktopMediaEnumerate) {
         return { displays: [], windows: [] };
       }
@@ -281,19 +305,25 @@ class ScreenShareSession {
       for (const s of raw) {
         if (s.kind === "display") {
           const id = displays.length;
-          // Thumbnails are PNG data URLs at the size requested in
-          // electron/src/main.ts. ScreenSharePicker currently shows
-          // name-only tiles — wiring the thumbnail through to the
-          // component is a follow-up (#TODO).
           this.electronSourceIds.set(`display:${id}`, s.id);
-          // Electron's desktopCapturer doesn't surface per-source
-          // dimensions; pass 0 and let downstream code treat it as
-          // "unknown". Live dimensions come from the MediaStreamTrack's
-          // getSettings() after capture starts.
-          displays.push({ id, width: 0, height: 0, name: s.name });
+          // `width`/`height` from main come from screen.getAllDisplays(),
+          // so they're populated for screens. The thumbnail is a PNG
+          // data URL at 320×200 — the picker renders it directly in the
+          // tile.
+          displays.push({
+            id,
+            width: s.width,
+            height: s.height,
+            name: s.name,
+            thumbnailDataUrl: s.thumbnailDataUrl,
+          });
         } else {
           const id = windows.length;
           this.electronSourceIds.set(`window:${id}`, s.id);
+          // Electron's desktopCapturer doesn't surface per-window
+          // dimensions without capturing; `width`/`height` stay 0 and
+          // the picker suppresses the dim subtitle. The thumbnail is
+          // still present and is the primary visual identifier.
           windows.push({
             id,
             width: 0,
@@ -301,6 +331,7 @@ class ScreenShareSession {
             title: s.name,
             app_name: "",
             bundle_id: "",
+            thumbnailDataUrl: s.thumbnailDataUrl,
           });
         }
       }

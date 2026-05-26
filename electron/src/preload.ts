@@ -147,6 +147,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
         name: string;
         kind: "display" | "window";
         displayId: string | null;
+        width: number;
+        height: number;
         thumbnailDataUrl: string;
       }>
     >,
