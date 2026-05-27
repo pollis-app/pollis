@@ -17,7 +17,7 @@ import { TitleBar } from "./components/Layout/TitleBar";
 import { DotMatrix } from "./components/ui/DotMatrix";
 import { Card } from "./components/ui/Card";
 import { UpdateScreen } from "./components/UpdateScreen";
-import { ManagedInstallScreen, type ManagedInstallInfo } from "./components/ManagedInstallScreen";
+import type { ManagedInstallInfo } from "./types";
 import * as api from "./services/api";
 import { getPreference, applyPreferences, applyDeviceFontSize, useApplyPreferences, usePreferences } from "./hooks/queries/usePreferences";
 import { restoreWindowState, useWindowState } from "./hooks/useWindowState";
@@ -38,7 +38,6 @@ type AppState =
   | "logout-confirm"
   | "identity-setup"
   | "update-required"
-  | "managed-install-update-required"
   | "ready";
 
 // Dev-only: expose device list on window.__POLLIS_DEBUG__ for console inspection.
@@ -65,7 +64,6 @@ function MainApp() {
   const updateRequired = useAppStore((s) => s.updateRequired);
 
   const [appState, setAppState] = useState<AppState>("initializing");
-  const [managedInstallInfo, setManagedInstallInfo] = useState<ManagedInstallInfo | null>(null);
   const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
   // Pending Secret Key (first-device signup) — held in component state ONLY
   // for the duration of the SaveSecretKeyScreen, never persisted.
@@ -117,26 +115,26 @@ function MainApp() {
 
   const checkStoredSession = useCallback(async () => {
     try {
-      // Check for required update before anything else (skip in dev)
+      // Launch-time auto-update: only runs for user-installed binaries
+      // (manual .dmg/.exe/.AppImage). If a system package manager owns
+      // this install (AUR today; MAS / Microsoft Store / Flatpak in the
+      // future), the in-app updater can't replace the binary — skip the
+      // gate entirely and let the user into the app. The 15-min poller
+      // surfaces the "Update available" badge in the status bar, which
+      // routes to /update where the package-manager instructions live.
+      // Dev builds skip the whole thing.
       if (!import.meta.env.DEV) {
-        const { check: checkUpdate } = await import("./bridge");
-        const update = await checkUpdate();
-        if (update) {
-          await invoke("mark_update_required");
-          // If a system package manager owns this install (AUR today; Mac
-          // App Store / Microsoft Store / snap / flatpak in the future),
-          // the in-app updater can't replace the binary. Hard-stop with
-          // a "use your package manager" screen instead of falling into
-          // the updater and letting it surface "invalid updater binary
-          // format".
-          const managed = await invoke<ManagedInstallInfo | null>("detect_managed_install");
-          if (managed) {
-            setManagedInstallInfo(managed);
-            setAppState("managed-install-update-required");
+        const managed = await invoke<ManagedInstallInfo | null>(
+          "detect_managed_install",
+        ).catch(() => null);
+        if (!managed) {
+          const { check: checkUpdate } = await import("./bridge");
+          const update = await checkUpdate();
+          if (update) {
+            await invoke("mark_update_required");
+            setAppState("update-required");
             return;
           }
-          setAppState("update-required");
-          return;
         }
       }
 
@@ -428,15 +426,6 @@ function MainApp() {
     }
     setAppState("email-auth");
   }, []);
-
-  if (appState === "managed-install-update-required" && managedInstallInfo) {
-    return (
-      <div style={{ height: "100%", width: "100%", display: "flex", flexDirection: "column" }}>
-        <TitleBar />
-        <ManagedInstallScreen info={managedInstallInfo} />
-      </div>
-    );
-  }
 
   if (appState === "update-required" || updateRequired) {
     return (
