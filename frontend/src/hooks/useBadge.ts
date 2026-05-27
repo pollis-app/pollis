@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { getCurrentWindow, Image, type PollisImage } from '../bridge';
+import { electron, hasElectron } from '../bridge/runtime';
 import { useAppStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
-import { isWindows } from '../utils/platform';
+import { isMac, isWindows } from '../utils/platform';
 
 // Lazy-loaded icon images for Windows taskbar swap.
 // Cached after the first fetch so repeated badge changes don't re-fetch.
@@ -61,6 +62,14 @@ export function useBadge() {
       // undefined clears the badge; a number sets it
       win.setBadgeCount(total > 0 ? total : undefined).catch((err) => {
         console.warn('[badge] setBadgeCount failed:', err);
+      });
+    }
+
+    // Mirror the unread count into the system tray icon (Linux + Windows).
+    // macOS has no tray; the dock badge above already covers that surface.
+    if (!isMac && hasElectron()) {
+      void electron().traySetUnread(total).catch((err) => {
+        console.warn('[tray] traySetUnread failed:', err);
       });
     }
   }, [isReady, total]);

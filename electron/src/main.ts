@@ -18,6 +18,12 @@ import * as fs from "fs/promises";
 import * as os from "os";
 import * as childProcess from "child_process";
 import { autoUpdater } from "electron-updater";
+import {
+  setupTray,
+  setTrayUnread,
+  setCloseToTray,
+  shouldHideOnClose,
+} from "./tray";
 
 // Chromium 130 unconditionally offers AV1 (+ its RTX retransmission codec)
 // in WebRTC screen-share contexts, then fails its own sdp_offer_answer.cc
@@ -146,11 +152,18 @@ function createWindow(): BrowserWindow {
     );
   }
 
-  // macOS: hide on close, don't actually close — the app stays in the dock.
-  // Tear down screen-share first so the helper subprocess and OS screencast
-  // indicator (red dot) go away immediately. Other platforms close as normal.
+  // Close behaviour:
+  //   macOS — always hide on close; the app stays in the dock until Cmd+Q
+  //   (which sets isQuitting via `before-quit`).
+  //   Linux/Windows — hide to the tray if "Close to tray" is on AND the
+  //   tray was successfully created, otherwise actually close.
+  // Either way, tear down screen-share so the OS screencast indicator
+  // (red dot) and helper subprocess go away immediately.
   win.on("close", (e) => {
-    if (process.platform === "darwin" && !isQuitting) {
+    const macHide = process.platform === "darwin" && !isQuitting;
+    const otherHide =
+      process.platform !== "darwin" && !isQuitting && shouldHideOnClose();
+    if (macHide || otherHide) {
       e.preventDefault();
       void pollisNode
         .invoke("stop_screen_share", null)
@@ -447,6 +460,30 @@ void app.whenReady().then(async () => {
     // accepts the bytes so the renderer keeps compiling.
   });
 
+  // ── System tray (Linux + Windows) ────────────────────────────────────────
+  // The renderer mirrors unread state into the tray icon alongside the dock
+  // badge so the tray surface stays in sync. The pref toggle in Preferences
+  // pushes its current value here so the close handler can pick hide-vs-quit
+  // synchronously. Both are no-ops on macOS (setupTray bails on darwin) and
+  // safe no-ops if tray init failed earlier (setTrayUnread bails on null
+  // tray, setCloseToTray flips a flag that's never read in that case).
+  // Wrapped in try/catch so a misbehaving Linux tray host can't propagate
+  // a throw back through Electron's IPC and crash the renderer's invoke.
+  ipcMain.handle("tray:setUnread", (_e, count: number) => {
+    try {
+      setTrayUnread(typeof count === "number" && count > 0 ? count : 0);
+    } catch (err) {
+      console.warn("[tray] setUnread handler failed:", err);
+    }
+  });
+  ipcMain.handle("tray:setCloseToTray", (_e, enabled: boolean) => {
+    try {
+      setCloseToTray(!!enabled);
+    } catch (err) {
+      console.warn("[tray] setCloseToTray handler failed:", err);
+    }
+  });
+
   // ── Monitor enumeration ──────────────────────────────────────────────────
   // Tauri returns physical-pixel size + position with a scaleFactor. Electron's
   // Display.bounds is already logical; multiply back so the renderer's
@@ -675,6 +712,10 @@ void app.whenReady().then(async () => {
 
   mainWindow = createWindow();
 
+  // System tray (Linux + Windows; no-op on macOS). Created after the window
+  // exists so the Show / Hide menu item can target it via the closure.
+  setupTray(() => mainWindow);
+
   app.on("activate", () => {
     // macOS dock-click: re-show the hidden window, or create a fresh one if
     // none exists (e.g. after Cmd+Q + relaunch from dock).
@@ -691,6 +732,12 @@ app.on("before-quit", () => {
 });
 
 app.on("window-all-closed", () => {
+  // On Linux/Windows the close-to-tray path keeps the process alive even
+  // after the window is hidden (electron's window-all-closed fires only on
+  // real destruction, so a hidden-but-extant window doesn't trigger this).
+  // We only ever reach this branch when the user truly closed everything,
+  // so the quit is correct regardless of the tray preference. macOS leaves
+  // the app running per platform convention.
   if (process.platform !== "darwin") {
     app.quit();
   }

@@ -40,6 +40,10 @@ export interface ElectronAPI {
   windowOnMoved: (cb: () => void) => UnlistenFn;
   windowSetBadgeCount: (count: number | null) => Promise<void>;
   windowSetBadgeIcon: (bytes: Uint8Array) => Promise<void>;
+
+  // ── System tray (Linux + Windows; no-op on macOS) ──────────────────────
+  traySetUnread: (count: number) => Promise<void>;
+  traySetCloseToTray: (enabled: boolean) => Promise<void>;
   windowOnDragDropEvent: (cb: (event: { payload: DragDropPayload }) => void) => UnlistenFn;
 
   // ── Monitors ───────────────────────────────────────────────────────────

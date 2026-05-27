@@ -60,6 +60,13 @@ extraResources:
   # packaged builds → broken-image placeholder in the taskbar/dock.
   - from: "../src-tauri/icons/icon.png"
     to: "icon.png"
+  # System-tray icons (default + unread variant). electron/src/tray.ts
+  # loads from process.resourcesPath in packaged builds and from
+  # electron/build/ in dev — same `<name>.png` shape both sides.
+  - from: "build/tray-default.png"
+    to: "tray-default.png"
+  - from: "build/tray-notification.png"
+    to: "tray-notification.png"
   # TODO: package the screenshare capture helper that today lives in
   # src-tauri/binaries/pollis-capture-{linux,macos}. Decide in Phase 7
   # whether to ship as an extraResource, embed inside pollis-node, or
