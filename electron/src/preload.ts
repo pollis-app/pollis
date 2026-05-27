@@ -63,6 +63,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.invoke("window:setBadgeCount", count),
   windowSetBadgeIcon: (bytes: Uint8Array) =>
     ipcRenderer.invoke("window:setBadgeIcon", bytes),
+
+  // ── System tray (Linux + Windows; no-op on macOS) ──────────────────────
+  traySetUnread: (count: number) =>
+    ipcRenderer.invoke("tray:setUnread", count),
+  traySetCloseToTray: (enabled: boolean) =>
+    ipcRenderer.invoke("tray:setCloseToTray", enabled),
   windowOnDragDropEvent: (
     cb: (event: {
       payload: { type: "enter" | "over" | "drop" | "leave"; paths: string[] };

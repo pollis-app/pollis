@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
+import { electron, hasElectron } from "../../bridge/runtime";
 import { useAppStore } from "../../stores/appStore";
 import {
   applyAccentColor,
@@ -45,6 +46,12 @@ export interface PreferencesData {
   auto_join_voice?: boolean;
   /** Whether the left sidebar is open by default at app start. */
   sidebar_open_by_default?: boolean;
+  /**
+   * Linux/Windows only: when true, closing the window hides the app to the
+   * system tray instead of fully exiting. macOS already hides via the Dock
+   * regardless. Default true.
+   */
+  close_to_tray?: boolean;
   /**
    * Per-remote-user output volume multipliers, keyed by `user_id`.
    * Range 0.0..=2.0; 1.0 is unity. Absent users default to unity.
@@ -254,6 +261,7 @@ export function usePreferences() {
         click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
+        close_to_tray: getPreference<boolean>(json, "close_to_tray", true),
         user_volumes: getPreference<{ [userId: string]: number } | undefined>(
           json,
           "user_volumes",
@@ -355,4 +363,18 @@ export function useApplyPreferences(): void {
       applyDeviceFontSize(currentUser?.id, data);
     }
   }, [data?.accent_color, data?.background_color, data?.font_size, overridesKey, currentUser?.id]);
+
+  // Push close-to-tray to the Electron main process so the close handler
+  // can pick hide-vs-quit synchronously. The bridge call is a no-op on
+  // macOS (main's setupTray bails on darwin) and outside Electron — safe
+  // to fire regardless of host.
+  const closeToTray = data?.close_to_tray ?? true;
+  useEffect(() => {
+    if (!hasElectron()) {
+      return;
+    }
+    void electron().traySetCloseToTray(closeToTray).catch((err) => {
+      console.warn("[tray] traySetCloseToTray failed:", err);
+    });
+  }, [closeToTray]);
 }

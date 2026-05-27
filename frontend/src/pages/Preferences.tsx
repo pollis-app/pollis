@@ -16,7 +16,8 @@ import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
 import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
-import { shortcutLabel } from "../utils/platform";
+import { electron, hasElectron } from "../bridge/runtime";
+import { isMac, shortcutLabel } from "../utils/platform";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -39,6 +40,7 @@ export const Preferences: React.FC = () => {
   const [allowSoundEffects, setAllowSoundEffects] = useState<boolean>(true);
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
+  const [closeToTray, setCloseToTray] = useState<boolean>(true);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
@@ -58,6 +60,9 @@ export const Preferences: React.FC = () => {
       }
       if (query.data.sidebar_open_by_default !== undefined) {
         setSidebarOpenByDefault(query.data.sidebar_open_by_default);
+      }
+      if (query.data.close_to_tray !== undefined) {
+        setCloseToTray(query.data.close_to_tray);
       }
     }
   }, [query.data, currentUser?.id]);
@@ -94,6 +99,7 @@ export const Preferences: React.FC = () => {
     bgH?: number; bgS?: number; bgL?: number;
     notifications?: boolean; soundEffects?: boolean;
     sidebarOpenByDefault?: boolean;
+    closeToTray?: boolean;
   }) => {
     const ah = opts.accentH ?? hue;
     const as_ = opts.accentS ?? saturation;
@@ -103,6 +109,7 @@ export const Preferences: React.FC = () => {
     const notif = opts.notifications ?? allowDesktopNotifications;
     const sfx = opts.soundEffects ?? allowSoundEffects;
     const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
+    const tray = opts.closeToTray ?? closeToTray;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
     // font_size is intentionally NOT included — it's device-local now,
@@ -118,8 +125,9 @@ export const Preferences: React.FC = () => {
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
       sidebar_open_by_default: sidebar,
+      close_to_tray: tray,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray]);
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
@@ -155,6 +163,19 @@ export const Preferences: React.FC = () => {
   const handleSidebarOpenByDefault = (val: boolean) => {
     setSidebarOpenByDefault(val);
     save({ sidebarOpenByDefault: val });
+  };
+
+  const handleCloseToTray = (val: boolean) => {
+    setCloseToTray(val);
+    save({ closeToTray: val });
+    // Push immediately so the very next window close picks up the new
+    // value (useApplyPreferences would also re-fire, but only after the
+    // throttled save round-trips through the remote prefs query).
+    if (hasElectron()) {
+      void electron().traySetCloseToTray(val).catch((err) => {
+        console.warn("[tray] traySetCloseToTray failed:", err);
+      });
+    }
   };
 
   const handleAllowCallRingtone = (val: boolean) => {
@@ -424,6 +445,19 @@ export const Preferences: React.FC = () => {
                 Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {shortcutLabel("B")}.
               </p>
             </div>
+            {!isMac && (
+              <div className="flex flex-col gap-1.5">
+                <Switch
+                  id="pref-close-to-tray"
+                  label="Close to tray"
+                  checked={closeToTray}
+                  onChange={handleCloseToTray}
+                />
+                <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                  When on, closing the window hides Pollis to the system tray instead of quitting. Right-click the tray icon to quit. If your desktop environment doesn't show tray icons (bare GNOME without the AppIndicator extension), turn this off.
+                </p>
+              </div>
+            )}
           </section>
 
           {/* Notifications */}
