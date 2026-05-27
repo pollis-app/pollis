@@ -92,3 +92,21 @@ pub async fn start_media_server(cache_dir: String) -> Result<u32> {
     *state.media_server_port.lock().await = Some(port);
     Ok(port as u32)
 }
+
+/// Gracefully tear down long-lived backend tasks so the host process
+/// can exit cleanly. Call from Electron's `before-quit` (covers Cmd+Q,
+/// dock quit, OS shutdown) and from the updater's `update-downloaded`
+/// handler before `quitAndInstall` (so Squirrel.Mac's ShipIt isn't
+/// stranded waiting for the parent PID to die).
+///
+/// Idempotent. If `init()` was never called (e.g. dev crash before
+/// state init), this is a no-op and returns `Ok`. Errors from the
+/// underlying `AppState::shutdown` are swallowed-with-log — failing to
+/// quit cleanly should not block the host from exiting.
+#[napi]
+pub async fn shutdown() -> Result<()> {
+    if let Some(state) = crate::state::try_state() {
+        state.shutdown().await;
+    }
+    Ok(())
+}

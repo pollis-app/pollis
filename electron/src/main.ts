@@ -65,6 +65,7 @@ const pollisNode = require("../../pollis-node") as {
     jsonEmit: (envelope: { channelId: string; payload: unknown }) => void,
     rawEmit: (frame: { channelId: string; payload: Buffer }) => void,
   ) => void;
+  shutdown: () => Promise<void>;
 };
 
 // `app.isPackaged` is the reliable signal — NODE_ENV is unset in packaged
@@ -83,6 +84,14 @@ let mainWindow: BrowserWindow | null = null;
 // macOS hide-on-close keeps the app running in the dock. On Cmd+Q the user
 // actually wants out — track that intent so the close handler stops hiding.
 let isQuitting = false;
+// Two-phase quit so we can await pollis-node teardown before the window
+// cascade runs. First `before-quit` invocation triggers the async
+// shutdown and preventDefaults; the inner re-`app.quit()` takes the
+// early-return branch and lets Electron's normal sequence proceed. Set
+// here in module scope so the updater path (which calls `pollisNode.
+// shutdown()` itself before `quitAndInstall`) can short-circuit the
+// async branch on the next before-quit it triggers.
+let isShuttingDown = false;
 
 // E2E flag. The Playwright harness sets POLLIS_E2E=1 to create the
 // BrowserWindow with `show: false` so the renderer loads + CDP can drive
@@ -412,27 +421,36 @@ void app.whenReady().then(async () => {
   });
   autoUpdater.on("update-downloaded", () => {
     sendToAllRenderers("updater:event", { event: "Finished", data: {} });
-    // Caller invokes app.relaunch via the existing process.relaunch path
-    // after the UI transitions through the "installing" / "relaunching"
-    // states — keep that flow intact.
-    autoUpdater.quitAndInstall(false, true);
-    // Force-exit fallback. quitAndInstall on macOS fires before-quit +
-    // closes windows + hands off to Squirrel.Mac's ShipIt helper, which
-    // waits for the parent PID to die before swapping the bundle. If
-    // pollis-node has background Tokio tasks alive (media server, event
-    // emitters, livekit connections), the Node process won't exit even
-    // after windows close, ShipIt times out, and the UI sits on
-    // "Relaunching…" forever. A 10-second wall-clock cap is well past
-    // any legitimate graceful-quit window — past that point the only
-    // working path is to nuke the process so ShipIt can take over.
-    // Mirrors the same pattern as `Tray.markQuittingFromTray` does for
-    // the close-to-tray escape hatch.
-    setTimeout(() => {
-      console.warn(
-        "[updater] graceful quit did not exit within 10s — forcing app.exit so ShipIt can swap binaries",
-      );
-      app.exit(0);
-    }, 10_000);
+    void (async () => {
+      // Drain pollis-node BEFORE quitAndInstall so by the time
+      // Squirrel.Mac (or NSIS on Windows) is watching the parent PID,
+      // there are no Tokio tasks keeping the process alive. Setting
+      // `isShuttingDown` here means the `before-quit` handler that
+      // quitAndInstall triggers will take its early-return branch
+      // instead of trying to run shutdown a second time. Errors here
+      // are logged but don't block — the safety net below catches the
+      // worst case.
+      isShuttingDown = true;
+      try {
+        await pollisNode.shutdown();
+      } catch (e) {
+        console.warn("[updater] pollis-node shutdown failed:", e);
+      }
+      autoUpdater.quitAndInstall(false, true);
+      // Safety net: a 5s wall-clock cap on the entire post-shutdown
+      // quit sequence. With graceful teardown now running, normal exit
+      // is sub-second; past 5s we're hung on something we don't
+      // control (e.g. ThreadsafeFunction Node refs that #335's
+      // follow-up will need to release), and the right move is to
+      // nuke the process so ShipIt can take over. Was 10s in v1.1.13
+      // before pollis-node had any shutdown path at all.
+      setTimeout(() => {
+        console.warn(
+          "[updater] graceful quit did not exit within 5s — forcing app.exit so ShipIt can swap binaries",
+        );
+        app.exit(0);
+      }, 5_000);
+    })();
   });
   autoUpdater.on("error", (e) => {
     console.error("[updater] error:", e);
@@ -799,8 +817,33 @@ void app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => {
-  isQuitting = true;
+app.on("before-quit", (event) => {
+  // Already torn down (or a teardown is in flight from the updater
+  // path) — let Electron's quit cascade proceed normally. Setting
+  // isQuitting here BEFORE we return guarantees the BrowserWindow
+  // close handler reads `isQuitting=true` and takes the close branch
+  // rather than the macOS hide-on-close branch.
+  if (isShuttingDown) {
+    isQuitting = true;
+    return;
+  }
+  isShuttingDown = true;
+  event.preventDefault();
+  void (async () => {
+    // Drain pollis-node before letting the window cascade run. Without
+    // this, the axum media-server task pins the Tokio runtime open
+    // forever — see #335 (refs #277 for the original symptom) and the
+    // commit message of v1.1.13 for the symptomatic "Relaunching…"
+    // hang. Errors here MUST NOT block the quit: we'd rather force-
+    // exit cleanly than wedge the app in a half-shutdown state.
+    try {
+      await pollisNode.shutdown();
+    } catch (e) {
+      console.warn("[shutdown] pollis-node shutdown failed:", e);
+    }
+    isQuitting = true;
+    app.quit();
+  })();
 });
 
 app.on("window-all-closed", () => {

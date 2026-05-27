@@ -33,18 +33,31 @@ use crate::commands::r2 as r2cmd;
 use crate::state::AppState;
 
 /// Spawn the loopback media server on an OS-assigned port. Returns the
-/// bound port so the caller can stash it in `AppState`. Server runs for
-/// the lifetime of the process.
+/// bound port so the caller can stash it in `AppState`. Server runs until
+/// `AppState::shutdown()` is called (which fires `shutdown_signal`),
+/// at which point axum's graceful-shutdown drains in-flight requests
+/// and the accept loop returns — releasing its hold on the Tokio
+/// runtime so the host process can exit.
+///
+/// Pre-#335 this task spawned with no shutdown path and pinned the
+/// runtime alive forever, causing Squirrel.Mac's ShipIt to hang during
+/// auto-update; see `electron/src/main.ts`'s graceful-quit handlers.
 pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
 
+    let shutdown_signal = state.shutdown_signal.clone();
     let app = Router::new()
         .route("/:token/:hash", get(serve_media))
         .with_state(state);
 
     tokio::spawn(async move {
-        if let Err(e) = axum::serve(listener, app).await {
+        let result = axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_signal.notified().await;
+            })
+            .await;
+        if let Err(e) = result {
             eprintln!("[media_server] axum::serve exited: {e}");
         }
     });

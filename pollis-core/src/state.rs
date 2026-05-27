@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
@@ -75,6 +75,19 @@ pub struct AppState {
     /// Desktop only — the terminal pane is gated out on mobile targets.
     #[cfg(not(any(target_os = "ios", target_os = "android")))]
     pub terminals: Arc<Mutex<HashMap<String, PtySession>>>,
+    /// Broadcasts "tear down" to every long-lived background task that
+    /// has wired itself up to wait on it. Today the media-server task
+    /// listens via `axum::serve(...).with_graceful_shutdown(...)`. A
+    /// shell can call `shutdown_signal.notify_waiters()` (via the
+    /// `shutdown()` method on AppState) when the process is exiting —
+    /// see `pollis-node`'s `shutdown` napi export and the Electron
+    /// `before-quit` / `update-downloaded` handlers in
+    /// `electron/src/main.ts`.
+    ///
+    /// Without this, the axum task's accept loop pins the Tokio runtime
+    /// alive and Squirrel.Mac's ShipIt helper sits forever waiting for
+    /// the parent PID to die — i.e. the "Relaunching…" hang #335 fixes.
+    pub shutdown_signal: Arc<Notify>,
 }
 
 impl AppState {
@@ -116,6 +129,43 @@ impl AppState {
             media_server_token: Arc::new(Mutex::new(None)),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             terminals: Arc::new(Mutex::new(HashMap::new())),
+            shutdown_signal: Arc::new(Notify::new()),
+        }
+    }
+
+    /// Tear down long-lived background tasks so the host process can
+    /// exit cleanly. Idempotent — safe to call from `before-quit` and
+    /// the updater path even though they overlap on the same code path
+    /// (electron-updater's `quitAndInstall` calls `app.quit()`, which
+    /// fires `before-quit`).
+    ///
+    /// Steps, in order:
+    /// 1. Signal `shutdown_signal` so the axum media server hits its
+    ///    graceful-shutdown branch and stops accepting new connections.
+    /// 2. Drain LiveKit room handles — close each room cleanly so the
+    ///    SFU sees a normal disconnect, then abort the per-room task so
+    ///    its event-loop holder is released.
+    ///
+    /// Voice / screenshare / terminals are NOT touched here:
+    /// * Voice cleanup happens via `leave_voice_channel`, which the
+    ///   `UpdateScreen` renderer already invokes before triggering an
+    ///   install (and is a no-op when no voice session is active).
+    /// * Terminal PtySessions die naturally when their child shell
+    ///   receives SIGTERM during process exit; nothing extra to do.
+    pub async fn shutdown(&self) {
+        self.shutdown_signal.notify_waiters();
+
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        {
+            let mut guard = self.livekit.lock().await;
+            let rooms = std::mem::take(&mut guard.rooms);
+            drop(guard);
+            for (room_id, (room, handle)) in rooms {
+                if let Err(e) = room.close().await {
+                    eprintln!("[shutdown] livekit room {room_id} close failed: {e}");
+                }
+                handle.abort();
+            }
         }
     }
 

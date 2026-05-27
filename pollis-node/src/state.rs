@@ -30,3 +30,11 @@ pub async fn ensure_state() -> Result<Arc<AppState>> {
         .await
         .cloned()
 }
+
+/// Best-effort access to the global AppState without initializing it.
+/// Returns `None` when `init()` was never called (or failed). Used by
+/// the napi `shutdown()` export so a host that imports the module but
+/// never calls `init()` can still call `shutdown()` without panicking.
+pub fn try_state() -> Option<Arc<AppState>> {
+    APP_STATE.get().cloned()
+}
