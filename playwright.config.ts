@@ -33,6 +33,22 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
+  // Two named projects so the visual-walk spec runs separately from the
+  // behavioral tests. Default `playwright test` (no --project) still
+  // executes both; the npm scripts pin them via --project=tests vs
+  // --project=screenshots so a normal `pnpm test:e2e` doesn't churn the
+  // screenshot files, and `pnpm test:e2e:screenshots` regenerates them
+  // on demand.
+  projects: [
+    {
+      name: "tests",
+      testIgnore: ["**/screenshots.spec.ts"],
+    },
+    {
+      name: "screenshots",
+      testMatch: ["**/screenshots.spec.ts"],
+    },
+  ],
   // The Electron main process loads the renderer from
   // `http://localhost:5173` in dev mode (its only non-packaged path).
   // Rather than teach main.ts about tests, the harness spins up a

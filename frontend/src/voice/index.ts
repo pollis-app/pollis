@@ -9,3 +9,4 @@ export type {
   LeftEvent,
 } from './VoiceSessionManager';
 export { installVoiceBridge } from './voiceBridge';
+export { installTrayVoiceBridge } from './trayVoiceBridge';

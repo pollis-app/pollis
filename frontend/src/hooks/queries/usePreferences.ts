@@ -53,6 +53,13 @@ export interface PreferencesData {
    */
   close_to_tray?: boolean;
   /**
+   * macOS only: when true, Pollis shows a status item in the menu bar
+   * (top-right) with quick controls (open, mute toggle, quit). Default
+   * false — the menu bar is prime real estate, so we wait for the user
+   * to opt in. Linux/Windows ignore this; their tray is always set up.
+   */
+  menubar_icon?: boolean;
+  /**
    * Per-remote-user output volume multipliers, keyed by `user_id`.
    * Range 0.0..=2.0; 1.0 is unity. Absent users default to unity.
    *
@@ -262,6 +269,7 @@ export function usePreferences() {
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
         close_to_tray: getPreference<boolean>(json, "close_to_tray", true),
+        menubar_icon: getPreference<boolean>(json, "menubar_icon", false),
         user_volumes: getPreference<{ [userId: string]: number } | undefined>(
           json,
           "user_volumes",
@@ -365,9 +373,9 @@ export function useApplyPreferences(): void {
   }, [data?.accent_color, data?.background_color, data?.font_size, overridesKey, currentUser?.id]);
 
   // Push close-to-tray to the Electron main process so the close handler
-  // can pick hide-vs-quit synchronously. The bridge call is a no-op on
-  // macOS (main's setupTray bails on darwin) and outside Electron — safe
-  // to fire regardless of host.
+  // can pick hide-vs-quit synchronously. macOS ignores this server-side
+  // (close already hides via the Dock path), but pushing is harmless and
+  // keeps the Linux/Windows path live.
   const closeToTray = data?.close_to_tray ?? true;
   useEffect(() => {
     if (!hasElectron()) {
@@ -377,4 +385,18 @@ export function useApplyPreferences(): void {
       console.warn("[tray] traySetCloseToTray failed:", err);
     });
   }, [closeToTray]);
+
+  // macOS menu-bar icon. Linux/Windows ignore this on the main side;
+  // they have a tray unconditionally once setupTray succeeds. Default
+  // is off, so the very first load on a fresh macOS install does NOT
+  // claim a menu-bar slot until the user opts in.
+  const menubarIcon = data?.menubar_icon ?? false;
+  useEffect(() => {
+    if (!hasElectron()) {
+      return;
+    }
+    void electron().traySetEnabled(menubarIcon).catch((err) => {
+      console.warn("[tray] traySetEnabled failed:", err);
+    });
+  }, [menubarIcon]);
 }

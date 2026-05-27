@@ -22,6 +22,8 @@ import {
   setupTray,
   setTrayUnread,
   setCloseToTray,
+  setTrayEnabled,
+  setTrayVoiceState,
   shouldHideOnClose,
 } from "./tray";
 
@@ -82,6 +84,15 @@ let mainWindow: BrowserWindow | null = null;
 // actually wants out — track that intent so the close handler stops hiding.
 let isQuitting = false;
 
+// E2E flag. The Playwright harness sets POLLIS_E2E=1 to create the
+// BrowserWindow with `show: false` so the renderer loads + CDP can drive
+// it, but Chromium never paints to a display. This is the closest thing
+// Electron has to a real headless mode — and unlike the post-creation
+// off-screen stash, there's no window of time where the window is
+// onscreen at default coords. `POLLIS_E2E_HEADED=1` (in the test
+// runner's parent env) disables this so a developer can watch the run.
+const isE2EHidden = process.env.POLLIS_E2E === "1";
+
 function broadcastChannel(channelId: string, payload: unknown): void {
   // Any renderer that called `channelOn(channelId, …)` is listening on this
   // exact event name. We fan out to every active webContents rather than
@@ -107,6 +118,12 @@ function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    // Under E2E we create the window hidden so it never paints to a
+    // display. Playwright's CDP-backed page.screenshot() still works
+    // against the offscreen surface, but unlike a `setPosition(off, off)`
+    // post-creation stash, there's no race where the window briefly
+    // appears at (0,0) before the test moves it.
+    show: !isE2EHidden,
     frame: false,
     // macOS-only knobs are silently ignored on other platforms, so it's
     // safe to set them unconditionally.
@@ -141,7 +158,12 @@ function createWindow(): BrowserWindow {
 
   if (isDev) {
     void win.loadURL(VITE_DEV_URL);
-    win.webContents.openDevTools({ mode: "detach" });
+    // Skip DevTools under E2E — the detached window pops up onscreen
+    // even when the main BrowserWindow is `show: false`, since it's a
+    // separate top-level window owned by Chromium's devtools frontend.
+    if (!isE2EHidden) {
+      win.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     // Packaged: frontend lands at <resources>/frontend (see
     // electron-builder.yml extraResources). The previous path traversed
@@ -483,6 +505,27 @@ void app.whenReady().then(async () => {
       console.warn("[tray] setCloseToTray handler failed:", err);
     }
   });
+  // macOS-only opt-in. Linux/Windows ignore this — they always show the
+  // tray (when supported) per the existing close-to-tray UX.
+  ipcMain.handle("tray:setEnabled", (_e, enabled: boolean) => {
+    try {
+      setTrayEnabled(!!enabled);
+    } catch (err) {
+      console.warn("[tray] setEnabled handler failed:", err);
+    }
+  });
+  // Renderer pushes voice-call + mute state so the tray menu can show
+  // an accurate "Mute mic" / "Unmute mic" / "(not in a call)" label.
+  ipcMain.handle(
+    "tray:setVoiceState",
+    (_e, inCall: boolean, muted: boolean) => {
+      try {
+        setTrayVoiceState(!!inCall, !!muted);
+      } catch (err) {
+        console.warn("[tray] setVoiceState handler failed:", err);
+      }
+    },
+  );
 
   // ── Monitor enumeration ──────────────────────────────────────────────────
   // Tauri returns physical-pixel size + position with a scaleFactor. Electron's

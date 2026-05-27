@@ -66,9 +66,15 @@ export async function launchPollis(opts: LaunchOptions = {}): Promise<LaunchedAp
   // credentials. LiveKit is optional — leave blank and the realtime
   // subscribe path becomes a no-op (DM delivery still works via the
   // polling fallback).
+  // Default: ask main.ts to create the BrowserWindow with `show: false`
+  // so the window never paints to a display. `POLLIS_E2E_HEADED=1` on
+  // the runner's env disables that and lets the windows render normally
+  // — useful for `--ui` mode or selector debugging.
+  const headed = process.env.POLLIS_E2E_HEADED === "1";
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     POLLIS_DATA_DIR: dataDir,
+    POLLIS_E2E: headed ? "0" : "1",
     DEV_OTP: process.env.DEV_OTP ?? "000000",
     TURSO_URL: tursoUrl,
     TURSO_TOKEN: tursoToken,
@@ -89,22 +95,16 @@ export async function launchPollis(opts: LaunchOptions = {}): Promise<LaunchedAp
     timeout: 30_000,
   });
 
-  // Hide every BrowserWindow the moment it's created and suppress the
-  // macOS dock icon. Electron has no native headless mode, but the
-  // renderer keeps painting whether or not the window is on screen,
-  // and `page.screenshot()` uses CDP under the hood so it sees the
-  // offscreen surface fine. Done entirely from the test side via
-  // `app.evaluate` so the application code stays unaware of tests.
+  // Primary headless mechanism: main.ts creates the BrowserWindow with
+  // `show: false` when POLLIS_E2E=1, so the window never paints to a
+  // display. The renderer still runs JS / layout / paint to the
+  // offscreen surface, which is what `page.screenshot()` reads via CDP.
   //
-  // Why move offscreen + hide rather than just `.hide()`: some
-  // Chromium scheduling paths (rAF, IntersectionObserver) throttle for
-  // hidden windows, which can starve the React mount enough to slow a
-  // test. Off-screen but "shown" keeps the scheduler happy.
-  //
-  // Set `POLLIS_E2E_HEADED=1` in the env to disable this and watch the
-  // Electron windows live — useful for debugging selector failures or
-  // running under `playwright test --ui`.
-  if (process.env.POLLIS_E2E_HEADED !== "1") {
+  // Belt-and-suspenders below: even with `show: false`, hide the macOS
+  // dock icon and stash any window off-screen if something accidentally
+  // shows one (e.g. a future `win.show()` call we missed). Skipped when
+  // POLLIS_E2E_HEADED=1 — the developer wants to see windows then.
+  if (!headed) {
     await app.evaluate(({ app: electronApp, BrowserWindow }) => {
     if (process.platform === "darwin" && electronApp.dock) {
       electronApp.dock.hide();
@@ -114,8 +114,8 @@ export async function launchPollis(opts: LaunchOptions = {}): Promise<LaunchedAp
         w.setPosition(-10000, -10000);
         w.setSkipTaskbar(true);
         w.setAlwaysOnTop(false);
-        // Belt: if the window is in the process of being shown, push
-        // it back off-screen after the show event lands.
+        // If something inside the app calls win.show() during the run,
+        // shove it back off-screen the moment it tries to appear.
         w.on("show", () => {
           try {
             w.setPosition(-10000, -10000);

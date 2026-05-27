@@ -41,9 +41,15 @@ export interface ElectronAPI {
   windowSetBadgeCount: (count: number | null) => Promise<void>;
   windowSetBadgeIcon: (bytes: Uint8Array) => Promise<void>;
 
-  // ── System tray (Linux + Windows; no-op on macOS) ──────────────────────
+  // ── System tray ────────────────────────────────────────────────────────
+  // Linux/Windows: always set up (when the DE supports it). macOS: opt-in
+  // via traySetEnabled. Voice state + the toggle-mute event are wired so
+  // the menu-bar item can host a quick mute toggle that mirrors the call.
   traySetUnread: (count: number) => Promise<void>;
   traySetCloseToTray: (enabled: boolean) => Promise<void>;
+  traySetEnabled: (enabled: boolean) => Promise<void>;
+  traySetVoiceState: (inCall: boolean, muted: boolean) => Promise<void>;
+  trayOnRequestToggleMute: (cb: () => void) => UnlistenFn;
   windowOnDragDropEvent: (cb: (event: { payload: DragDropPayload }) => void) => UnlistenFn;
 
   // ── Monitors ───────────────────────────────────────────────────────────

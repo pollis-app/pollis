@@ -41,6 +41,7 @@ export const Preferences: React.FC = () => {
   const [allowCallRingtone, setAllowCallRingtone] = useState<boolean>(true);
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
   const [closeToTray, setCloseToTray] = useState<boolean>(true);
+  const [menubarIcon, setMenubarIcon] = useState<boolean>(false);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
@@ -63,6 +64,9 @@ export const Preferences: React.FC = () => {
       }
       if (query.data.close_to_tray !== undefined) {
         setCloseToTray(query.data.close_to_tray);
+      }
+      if (query.data.menubar_icon !== undefined) {
+        setMenubarIcon(query.data.menubar_icon);
       }
     }
   }, [query.data, currentUser?.id]);
@@ -100,6 +104,7 @@ export const Preferences: React.FC = () => {
     notifications?: boolean; soundEffects?: boolean;
     sidebarOpenByDefault?: boolean;
     closeToTray?: boolean;
+    menubarIcon?: boolean;
   }) => {
     const ah = opts.accentH ?? hue;
     const as_ = opts.accentS ?? saturation;
@@ -110,6 +115,7 @@ export const Preferences: React.FC = () => {
     const sfx = opts.soundEffects ?? allowSoundEffects;
     const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
     const tray = opts.closeToTray ?? closeToTray;
+    const menubar = opts.menubarIcon ?? menubarIcon;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
     // font_size is intentionally NOT included — it's device-local now,
@@ -126,8 +132,9 @@ export const Preferences: React.FC = () => {
       allow_sound_effects: sfx,
       sidebar_open_by_default: sidebar,
       close_to_tray: tray,
+      menubar_icon: menubar,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon]);
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
@@ -174,6 +181,19 @@ export const Preferences: React.FC = () => {
     if (hasElectron()) {
       void electron().traySetCloseToTray(val).catch((err) => {
         console.warn("[tray] traySetCloseToTray failed:", err);
+      });
+    }
+  };
+
+  const handleMenubarIcon = (val: boolean) => {
+    setMenubarIcon(val);
+    save({ menubarIcon: val });
+    // Same reasoning as handleCloseToTray: apply right away so the icon
+    // appears/disappears the moment the toggle flips, without waiting
+    // for the throttled prefs round-trip.
+    if (hasElectron()) {
+      void electron().traySetEnabled(val).catch((err) => {
+        console.warn("[tray] traySetEnabled failed:", err);
       });
     }
   };
@@ -455,6 +475,19 @@ export const Preferences: React.FC = () => {
                 />
                 <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
                   When on, closing the window hides Pollis to the system tray instead of quitting. Right-click the tray icon to quit. If your desktop environment doesn't show tray icons (bare GNOME without the AppIndicator extension), turn this off.
+                </p>
+              </div>
+            )}
+            {isMac && hasElectron() && (
+              <div className="flex flex-col gap-1.5">
+                <Switch
+                  id="pref-menubar-icon"
+                  label="Show menu bar icon"
+                  checked={menubarIcon}
+                  onChange={handleMenubarIcon}
+                />
+                <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                  Adds a Pollis icon to the macOS menu bar (top right). Click it to open the window, mute the mic while in a call, or quit the app. Off by default — the dock icon already keeps Pollis reachable when the window is closed.
                 </p>
               </div>
             )}

@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { signUpAndUnlock } from "./helpers/auth";
 import { dispose, launchPollis, uniqueSuffix, type LaunchedApp } from "./helpers/launch";
 import { gotoPageViaCmdK } from "./helpers/navigate";
+import { saveScreenshotIfChanged } from "./helpers/screenshot";
 import { seedSoloContent } from "./helpers/seed";
 import { wipeTestTurso } from "./helpers/turso";
 
@@ -79,7 +80,7 @@ test("walks every static page and screenshots it", async () => {
   // App shell on the root route — sidebar now shows the seeded groups +
   // unread channel hints; bottom bar shows the unread summary.
   await expect(page.getByTestId("app-ready")).toBeVisible();
-  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "00-app-ready.png") });
+  await saveScreenshotIfChanged(page, path.join(SCREENSHOT_DIR, "00-app-ready.png"));
 
   // The Cmd+K search panel itself — open and centred on the page.
   // Captured before navigating anywhere so the result list is the
@@ -87,7 +88,7 @@ test("walks every static page and screenshots it", async () => {
   const isMac = process.platform === "darwin";
   await page.keyboard.press(isMac ? "Meta+k" : "Control+k");
   await expect(page.getByTestId("search-panel-input")).toBeVisible();
-  await page.screenshot({ path: path.join(SCREENSHOT_DIR, "01-search-panel.png") });
+  await saveScreenshotIfChanged(page, path.join(SCREENSHOT_DIR, "01-search-panel.png"));
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("search-panel")).toBeHidden();
 
@@ -99,7 +100,7 @@ test("walks every static page and screenshots it", async () => {
     // spinner in the screenshot, bump this per-entry rather than
     // globally.
     await page.waitForTimeout(300);
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, file) });
+    await saveScreenshotIfChanged(page, path.join(SCREENSHOT_DIR, file));
   }
 
   // Seeded routes — dynamic IDs, so we navigate via the in-memory
@@ -119,7 +120,7 @@ test("walks every static page and screenshots it", async () => {
       .first()
       .click();
     await page.waitForTimeout(500);
-    await page.screenshot({ path: path.join(SCREENSHOT_DIR, "group-landing.png") });
+    await saveScreenshotIfChanged(page, path.join(SCREENSHOT_DIR, "group-landing.png"));
 
     if (firstChannel !== undefined) {
       await page
@@ -130,7 +131,7 @@ test("walks every static page and screenshots it", async () => {
       // Channel load + render + scroll-to-bottom takes a tick longer
       // than the static settings pages.
       await page.waitForTimeout(800);
-      await page.screenshot({ path: path.join(SCREENSHOT_DIR, "channel-with-messages.png") });
+      await saveScreenshotIfChanged(page, path.join(SCREENSHOT_DIR, "channel-with-messages.png"));
     }
   }
 });

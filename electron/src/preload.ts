@@ -64,11 +64,21 @@ contextBridge.exposeInMainWorld("electronAPI", {
   windowSetBadgeIcon: (bytes: Uint8Array) =>
     ipcRenderer.invoke("window:setBadgeIcon", bytes),
 
-  // ── System tray (Linux + Windows; no-op on macOS) ──────────────────────
+  // ── System tray ────────────────────────────────────────────────────────
+  // Linux/Windows: tray is always set up (when the DE supports it) and the
+  // close-to-tray flag picks hide-vs-quit. macOS: opt-in via traySetEnabled
+  // from the Preferences toggle; close-to-tray is ignored on darwin since
+  // close already hides via the Dock+NSWindow path.
   traySetUnread: (count: number) =>
     ipcRenderer.invoke("tray:setUnread", count),
   traySetCloseToTray: (enabled: boolean) =>
     ipcRenderer.invoke("tray:setCloseToTray", enabled),
+  traySetEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke("tray:setEnabled", enabled),
+  traySetVoiceState: (inCall: boolean, muted: boolean) =>
+    ipcRenderer.invoke("tray:setVoiceState", inCall, muted),
+  trayOnRequestToggleMute: (cb: () => void) =>
+    subscribe("tray:requestToggleMute", () => cb()),
   windowOnDragDropEvent: (
     cb: (event: {
       payload: { type: "enter" | "over" | "drop" | "leave"; paths: string[] };

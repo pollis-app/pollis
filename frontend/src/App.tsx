@@ -25,7 +25,7 @@ import type { User, AccountInfo } from "./types";
 import { LoadingSpinner } from "./components/ui/LoaderSpinner";
 import { Button } from "./components/ui/Button";
 import { useQueryClient } from "@tanstack/react-query";
-import { installVoiceBridge } from "./voice";
+import { installTrayVoiceBridge, installVoiceBridge } from "./voice";
 
 type AppState =
   | "initializing"
@@ -232,7 +232,11 @@ function MainApp() {
       queryClient,
       preferencesProvider: () => prefsRef.current,
     });
-    return () => handle.dispose();
+    const trayHandle = installTrayVoiceBridge();
+    return () => {
+      handle.dispose();
+      trayHandle.dispose();
+    };
   }, [queryClient]);
 
   // Safety net: if currentUser is cleared (e.g. account deletion) but appState

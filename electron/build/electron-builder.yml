@@ -67,6 +67,13 @@ extraResources:
     to: "tray-default.png"
   - from: "build/tray-notification.png"
     to: "tray-notification.png"
+  # macOS menu-bar status item: dedicated mono "p" silhouette + @2x
+  # Retina variant. AppKit treats it as a template image at runtime so
+  # the silhouette auto-inverts with the menu bar theme.
+  - from: "build/tray-mac.png"
+    to: "tray-mac.png"
+  - from: "build/tray-mac@2x.png"
+    to: "tray-mac@2x.png"
   # TODO: package the screenshare capture helper that today lives in
   # src-tauri/binaries/pollis-capture-{linux,macos}. Decide in Phase 7
   # whether to ship as an extraResource, embed inside pollis-node, or
