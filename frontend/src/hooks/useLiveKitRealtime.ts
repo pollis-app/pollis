@@ -15,6 +15,7 @@ import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify'
 import { useTypingStore, typingRoomKey } from '../stores/typingStore';
 import { usePresenceStore } from '../stores/presenceStore';
 import { useKeyChangeStore } from '../stores/keyChangeStore';
+import { useRosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
 
 // Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
@@ -107,6 +108,16 @@ type RealtimeEvent =
     type: 'key_changed';
     peer_user_id: string;
     peer_identity_version: number;
+  }
+  | {
+    type: 'roster_changed';
+    conversation_id: string;
+    epoch_before: number;
+    epoch_after: number;
+    joined_user_ids: string[];
+    left_user_ids: string[];
+    devices_added: [string, string][];
+    devices_removed: [string, string][];
   };
 
 export function useLiveKitRealtime() {
@@ -428,6 +439,68 @@ export function useLiveKitRealtime() {
         usePresenceStore
           .getState()
           .setPresent(event.user_id, event.room_id, event.present);
+        return;
+      }
+
+      if (event.type === 'roster_changed') {
+        // Project the per-user / per-device diff into chronologically-
+        // ordered banners. Self-actions are filtered out so the user
+        // doesn't see "you joined" / "you left" notices for their own
+        // moves. The reconciler's own commit also fires this event, so
+        // without a self filter we'd double-render on the actor's side.
+        const selfId = currentUserIdRef.current;
+        const now = Date.now();
+        const banners: RosterBanner[] = [];
+        for (const user_id of event.joined_user_ids) {
+          if (user_id === selfId) {
+            continue;
+          }
+          banners.push({
+            id: `${event.conversation_id}:${event.epoch_after}:joined:${user_id}`,
+            observed_at_ms: now,
+            epoch: event.epoch_after,
+            payload: { kind: "joined", user_id },
+          });
+        }
+        for (const user_id of event.left_user_ids) {
+          if (user_id === selfId) {
+            continue;
+          }
+          banners.push({
+            id: `${event.conversation_id}:${event.epoch_after}:left:${user_id}`,
+            observed_at_ms: now,
+            epoch: event.epoch_after,
+            payload: { kind: "left", user_id },
+          });
+        }
+        for (const [user_id, device_id] of event.devices_added) {
+          if (user_id === selfId) {
+            continue;
+          }
+          banners.push({
+            id: `${event.conversation_id}:${event.epoch_after}:dev_add:${user_id}:${device_id}`,
+            observed_at_ms: now,
+            epoch: event.epoch_after,
+            payload: { kind: "device_added", user_id, device_id },
+          });
+        }
+        for (const [user_id, device_id] of event.devices_removed) {
+          if (user_id === selfId) {
+            continue;
+          }
+          banners.push({
+            id: `${event.conversation_id}:${event.epoch_after}:dev_rem:${user_id}:${device_id}`,
+            observed_at_ms: now,
+            epoch: event.epoch_after,
+            payload: { kind: "device_removed", user_id, device_id },
+          });
+        }
+        useRosterChangeStore.getState().push(event.conversation_id, banners);
+        // Refresh the member list so the sidebar / member roster picks
+        // up the change without waiting for the next periodic refetch.
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.members(event.conversation_id),
+        });
         return;
       }
 

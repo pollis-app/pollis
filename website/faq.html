@@ -210,6 +210,19 @@
       </div>
 
       <div class="faq-item">
+        <div class="faq-question">What happens if someone's cryptographic key changes?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Pollis detects it automatically and warns you. A red shield appears next to that person's name in every conversation you share — direct messages, group member lists, channels — and an inline notice shows up in the chat so you can re-verify them out-of-band (in person, by phone, however you trust).</p>
+            <p>You only need to verify a person once. After that, the green shield follows them everywhere they appear in your account. If their key ever changes, all those shields turn red at the same moment.</p>
+          </div>
+          <div class="dev">
+            <p>Signal-style 60-digit safety numbers derived from both parties' <code>account_id_pub</code> (SHA-512^5200, see <code>pollis-core/src/commands/safety.rs</code>). First-seen keys are pinned silently (TOFU) and surfaced on mismatch via a <code>KeyChanged</code> realtime event. Pinning runs on every DM ingest <em>and</em> on every group-reconcile commit (<code>batch_check_and_pin_account_keys</code>), so a Turso-side key swap is caught regardless of conversation type. Verification state lives in <code>contact_verification</code> keyed by <code>peer_user_id</code> (not per-conversation), which is what gives the per-user "shield follows the contact" behavior.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
         <div class="faq-question">What happens to my messages if I get a new device or reset my account?</div>
         <div class="faq-answer">
           <div class="plain">

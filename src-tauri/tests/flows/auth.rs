@@ -643,3 +643,154 @@ async fn safety_number_lifecycle_and_key_change_detection() {
     drop(alice);
     drop(bob);
 }
+
+/// Same MITM defence as the DM path, but through the GROUP roster-reconcile
+/// hook (refs #277): `reconcile_group_mls_impl` now calls
+/// `batch_check_and_pin_account_keys` so a Turso-side `account_id_pub` swap
+/// for a group member flips the local pin to `changed` next time reconcile
+/// runs — closing the historical hole where DMs had TOFU but groups didn't.
+///
+/// Flow:
+///   1. Alice + Bob + Carol all sign up.
+///   2. Alice creates a group, invites Bob; Bob accepts. This puts Bob in
+///      Alice's MLS roster and Alice reconciles → Bob's key gets pinned.
+///   3. Alice explicitly verifies Bob (status = "verified").
+///   4. Someone with Turso write access swaps Bob's `account_id_pub`.
+///   5. Alice invites Carol — this is the trigger for the next reconcile on
+///      Alice's side, which calls `batch_check_and_pin_account_keys` and
+///      observes Bob's mismatch.
+///   6. Assert: Alice's status for Bob has flipped to "changed", her
+///      `verified` flag was cleared, and `list_peer_verifications` reports
+///      `key_changed = true`.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn group_reconcile_tofu_detects_key_swap() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+    let alice_id = alice_profile.id.clone();
+    let bob_id = bob_profile.id.clone();
+
+    // 1. Group + invite + accept. Bob joining triggers reconcile on Alice's
+    //    side; the new batch helper pins Bob's account_id_pub.
+    let group_id = alice.create_group("TOFU Group").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite = bob
+        .first_pending_invite()
+        .await
+        .expect("bob should see one pending invite");
+    let invite_id = invite["id"].as_str().expect("invite id").to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+
+    // Confirm Alice has Bob pinned (unverified, no change yet).
+    let pre = alice
+        .invoke_json(
+            "get_safety_number",
+            json!({ "myUserId": alice_id, "peerUserId": bob_id }),
+        )
+        .await;
+    assert_eq!(
+        pre["status"], "unverified",
+        "after invite+accept Alice should have Bob TOFU-pinned via group reconcile"
+    );
+
+    // 2. Alice marks Bob verified out-of-band.
+    alice
+        .invoke_json(
+            "set_contact_verified",
+            json!({ "peerUserId": bob_id, "verified": true }),
+        )
+        .await;
+
+    // 3. The attack — Turso writer swaps Bob's account_id_pub. Local pin
+    //    on Alice is now stale (verified=true against the old key).
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    conn.execute(
+        "UPDATE users SET account_id_pub = ?1, identity_version = identity_version + 1 \
+         WHERE id = ?2",
+        libsql::params![vec![9u8; 32], bob_id.clone()],
+    )
+    .await
+    .expect("swap bob account_id_pub");
+
+    // Pre-reconcile snapshot: Alice still has the OLD pin and verified=1,
+    // but a fresh comparison against Turso flags key_changed=true. This
+    // is the "stale pin" state — exactly what the batch helper resolves.
+    let stale = alice
+        .invoke_json("list_peer_verifications", json!({}))
+        .await;
+    let stale_entries = stale.as_array().expect("array of PeerVerificationEntry");
+    let stale_bob = stale_entries
+        .iter()
+        .find(|e| e["peer_user_id"] == bob_id)
+        .expect("bob must be in list_peer_verifications");
+    assert_eq!(
+        stale_bob["verified"], true,
+        "verified flag should still be true before the next reconcile"
+    );
+    assert_eq!(
+        stale_bob["key_changed"], true,
+        "list_peer_verifications must flag the Turso swap as key_changed before reconcile"
+    );
+
+    // 4. Trigger the next reconcile on Alice's side by inviting Carol.
+    //    invite_to_group walks reconcile_group_mls_impl on Alice's side,
+    //    which now batch-checks every roster member's account_id_pub.
+    //    The helper observes Bob's mismatch, updates the pin in place,
+    //    clears verified, and emits KeyChanged.
+    alice.invite(&group_id, &carol_profile.username).await;
+
+    // 5. Post-reconcile assertions. The helper has absorbed the change:
+    //    - verified flipped from true → false (the security signal)
+    //    - key_changed is now false because the pin matches the new Turso key
+    //    - get_safety_number reports "unverified" (status is post-resolve)
+    let post = alice
+        .invoke_json(
+            "get_safety_number",
+            json!({ "myUserId": alice_id, "peerUserId": bob_id }),
+        )
+        .await;
+    assert_eq!(
+        post["status"], "unverified",
+        "after the batch helper refreshes the pin, status returns to 'unverified' — \
+         the verified flag was cleared in place"
+    );
+
+    let listed = alice
+        .invoke_json("list_peer_verifications", json!({}))
+        .await;
+    let entries = listed.as_array().expect("array of PeerVerificationEntry");
+    let bob_entry = entries
+        .iter()
+        .find(|e| e["peer_user_id"] == bob_id)
+        .expect("bob must be in list_peer_verifications");
+    assert_eq!(
+        bob_entry["verified"], false,
+        "the previously-verified flag MUST be cleared — this is the user-visible \
+         signal that a key change was detected through the group path"
+    );
+    assert_eq!(
+        bob_entry["key_changed"], false,
+        "the pin was refreshed in place, so a fresh comparison no longer \
+         flags key_changed"
+    );
+
+    // Self-check: Alice's OWN pin row was never created — the batch helper
+    // explicitly excludes the actor's user_id to keep contact_verification
+    // peer-only.
+    let alice_entry = entries.iter().find(|e| e["peer_user_id"] == alice_id);
+    assert!(
+        alice_entry.is_none(),
+        "actor's own user_id must never end up in contact_verification"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}

@@ -37,15 +37,17 @@ Source: `pollis-core/src/commands/mls.rs`
 
 Steps:
 1. **Build roster** from `group_member` + `group_invite` (or `dm_channel_member`)
-2. **Find devices** with unclaimed KeyPackages for roster users
-3. **Peek at tree** to see who's already a member (avoids wasting KPs)
-4. **Claim KPs** only for devices not in the tree
-5. **Diff**: desired set vs actual tree → compute adds and removes
-6. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
-7. **Write to Turso on a fresh connection**: commit to `mls_commit_log`, welcome(s) to `mls_welcome`
-8. **On success**: `merge_pending_commit` locally → advance the local epoch
-9. **On failure**: `clear_pending_commit` → leave local state at the prior epoch; caller can retry
-10. **Publish GroupInfo** so external-join works
+2. **TOFU-pin every roster peer's `account_id_pub`** via `batch_check_and_pin_account_keys` (one Turso query). First-seen keys are pinned silently; an existing pin that no longer matches the server flips `verified=0`, refreshes the pin in place, and emits a `KeyChanged` realtime event. The actor's own user id is excluded. This closes the historical group MITM hole — see `.codesight/wiki/safety.md`.
+3. **Find devices** with unclaimed KeyPackages for roster users
+4. **Peek at tree** to see who's already a member (avoids wasting KPs)
+5. **Claim KPs** only for devices not in the tree
+6. **Diff**: desired set vs actual tree → compute adds and removes
+7. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
+8. **Write to Turso on a fresh connection**: commit to `mls_commit_log`, welcome(s) to `mls_welcome`
+9. **On success**: `merge_pending_commit` locally → advance the local epoch
+10. **On failure**: `clear_pending_commit` → leave local state at the prior epoch; caller can retry
+11. **Publish GroupInfo** so external-join works
+12. **Emit `RosterChanged` event** with the user-level diff (joined / left / device added / device removed). Local sink + room broadcast so existing members render inline timeline banners.
 
 ### Ordering invariant
 

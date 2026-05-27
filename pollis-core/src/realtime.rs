@@ -136,6 +136,36 @@ pub enum RealtimeEvent {
         peer_user_id: String,
         peer_identity_version: i64,
     },
+    /// Emitted after `reconcile_group_mls_impl` produces a non-empty
+    /// commit (members or devices added/removed, with a corresponding
+    /// epoch bump). The diff is split into user-level vs device-level
+    /// transitions so the frontend can render inline "X joined / X
+    /// added a device / X left" banners directly, without consulting
+    /// any other state.
+    ///
+    /// Locally: published by the reconciling client to its own sink so
+    /// its open channel view picks up the banner immediately.
+    /// Remotely: also broadcast to the conversation's LiveKit room via
+    /// `publish_to_room_server` so already-connected peers see the
+    /// banner without needing to refetch.
+    RosterChanged {
+        conversation_id: String,
+        epoch_before: u64,
+        epoch_after: u64,
+        /// `user_id`s who had no leaves in the MLS tree before this
+        /// commit and now have at least one — i.e. "X joined".
+        joined_user_ids: Vec<String>,
+        /// `user_id`s whose last device was removed by this commit —
+        /// i.e. "X left". If a user removed one device but still has
+        /// another in the tree, they appear in `devices_removed` instead.
+        left_user_ids: Vec<String>,
+        /// `(user_id, device_id)` device additions for users who were
+        /// already in the tree — i.e. "X added a device".
+        devices_added: Vec<(String, String)>,
+        /// `(user_id, device_id)` device removals for users still in
+        /// the tree after this commit — i.e. "X removed a device".
+        devices_removed: Vec<(String, String)>,
+    },
 }
 
 /// Held in AppState behind an Arc<Mutex<_>>.

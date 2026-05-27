@@ -1,6 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MessageItem } from "./MessageItem";
 import { useBlockedUsers } from "../../hooks/queries";
+import { useGroupMembers } from "../../hooks/queries/useGroups";
+import { useRosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
 import type { Message } from "../../types";
 
 const toMs = (timestamp: number): number =>
@@ -47,8 +49,53 @@ const DayDivider: React.FC<{ label: string }> = ({ label }) => (
   </div>
 );
 
+const RosterChangeBanner: React.FC<{
+  banner: RosterBanner;
+  resolveName: (userId: string) => string;
+}> = ({ banner, resolveName }) => {
+  const name = resolveName(banner.payload.user_id);
+  let label: string;
+  switch (banner.payload.kind) {
+    case "joined":
+      label = `${name} joined the group`;
+      break;
+    case "left":
+      label = `${name} left the group`;
+      break;
+    case "device_added":
+      label = `${name} added a new device`;
+      break;
+    case "device_removed":
+      label = `${name} removed a device`;
+      break;
+  }
+  return (
+    <div
+      data-testid={`roster-banner-${banner.id}`}
+      className="flex items-center gap-3 py-2 select-none"
+    >
+      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <span
+        className="text-xs font-mono"
+        style={{ color: "var(--c-text-muted)" }}
+      >
+        {label}
+      </span>
+      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+    </div>
+  );
+};
+
 interface MessageListProps {
   messages: Message[];
+  /** MLS group / DM conversation id. When set, inline roster-change
+   *  banners (X joined / X added a device / X left) interleave with
+   *  messages chronologically. Omit on surfaces with no roster (search
+   *  results, threads). */
+  conversationId?: string | null;
+  /** Group id for resolving display names in roster banners. Equal to
+   *  `conversationId` for top-level group MLS; null for DMs. */
+  groupIdForNames?: string | null;
   adminUserIds?: Set<string>;
   /** True when the viewer is an admin in this list's group — enables
    * deleting other members' messages for moderation. */
@@ -66,6 +113,8 @@ interface MessageListProps {
 
 export const MessageList: React.FC<MessageListProps> = ({
   messages,
+  conversationId,
+  groupIdForNames,
   adminUserIds,
   viewerIsAdmin = false,
   onReply,
@@ -107,6 +156,48 @@ export const MessageList: React.FC<MessageListProps> = ({
         .sort((a, b) => a.created_at - b.created_at),
     [messages]
   );
+
+  // Roster-change banners pulled from the per-conversation store. Used
+  // for display-name resolution: groupIdForNames === conversationId for
+  // group MLS, so this read is normally cached by the same query the
+  // member list page uses.
+  const rosterBanners = useRosterChangeStore(
+    (s) => (conversationId ? s.byConversation[conversationId] : undefined) ?? [],
+  );
+  const { data: groupMembers = [] } = useGroupMembers(groupIdForNames ?? null);
+  const usernameByUserId = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of groupMembers) {
+      map.set(m.user_id, m.username ?? m.user_id);
+    }
+    return map;
+  }, [groupMembers]);
+  const resolveName = (userId: string) => usernameByUserId.get(userId) ?? userId;
+
+  // Interleave messages + roster banners by timestamp. Messages use
+  // `created_at` (Rust unix seconds or ms — `toMs` normalizes); banners
+  // carry an `observed_at_ms` set when the realtime event landed.
+  type TimelineItem =
+    | { kind: "message"; key: string; ts: number; message: Message }
+    | { kind: "banner"; key: string; ts: number; banner: RosterBanner };
+  const timeline: TimelineItem[] = useMemo(() => {
+    const items: TimelineItem[] = sortedMessages.map((message) => ({
+      kind: "message",
+      key: `msg:${message.id}`,
+      ts: toMs(message.created_at),
+      message,
+    }));
+    for (const banner of rosterBanners) {
+      items.push({
+        kind: "banner",
+        key: `banner:${banner.id}`,
+        ts: banner.observed_at_ms,
+        banner,
+      });
+    }
+    items.sort((a, b) => a.ts - b.ts);
+    return items;
+  }, [sortedMessages, rosterBanners]);
 
   // Scroll to bottom when new messages arrive (but not when older pages load).
   useEffect(() => {
@@ -169,7 +260,7 @@ export const MessageList: React.FC<MessageListProps> = ({
     onScrollToMessage?.(messageId);
   };
 
-  if (sortedMessages.length === 0) {
+  if (timeline.length === 0) {
     return (
       <div
         data-testid="empty-messages"
@@ -198,14 +289,26 @@ export const MessageList: React.FC<MessageListProps> = ({
           Loading…
         </p>
       )}
-      {sortedMessages.map((message, idx) => {
-        const prev = idx > 0 ? sortedMessages[idx - 1] : null;
-        const currentDay = startOfLocalDay(new Date(toMs(message.created_at)));
-        const prevDay = prev
-          ? startOfLocalDay(new Date(toMs(prev.created_at)))
-          : null;
-        const showDivider = prevDay === null || prevDay !== currentDay;
+      {timeline.map((item, idx) => {
+        // Day divider only fires on message items (banners aren't tied to
+        // a wall-clock day in the same way — they're notifications).
+        const prev = idx > 0 ? timeline[idx - 1] : null;
+        const currentDay = startOfLocalDay(new Date(item.ts));
+        const prevDay = prev ? startOfLocalDay(new Date(prev.ts)) : null;
+        const showDivider =
+          item.kind === "message" && (prevDay === null || prevDay !== currentDay);
 
+        if (item.kind === "banner") {
+          return (
+            <RosterChangeBanner
+              key={item.key}
+              banner={item.banner}
+              resolveName={resolveName}
+            />
+          );
+        }
+
+        const { message } = item;
         const rendered = blockedIds.has(message.sender_id) ? (
           <div
             key={message.id}
@@ -247,7 +350,7 @@ export const MessageList: React.FC<MessageListProps> = ({
         );
 
         return (
-          <React.Fragment key={`frag-${message.id}`}>
+          <React.Fragment key={item.key}>
             {showDivider && (
               <DayDivider label={formatDayDividerLabel(message.created_at)} />
             )}

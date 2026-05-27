@@ -333,6 +333,133 @@ pub async fn check_and_pin_account_key(
     Ok(())
 }
 
+/// Batch TOFU pin + change detection for the group-reconcile path.
+///
+/// Same semantics as [`check_and_pin_account_key`] but bulk-fetches every
+/// peer's `account_id_pub` in one Turso query, so a 50-member group costs
+/// one round-trip instead of fifty. New peers are pinned silently; an
+/// existing pin that no longer matches the server's current key is
+/// updated, has its `verified` flag cleared, and emits a `KeyChanged`
+/// event so any open conversation surface (DM, group, channel) can show
+/// the banner.
+///
+/// Callers should exclude their own user_id — the local user is not a
+/// peer and has no `contact_verification` row.
+///
+/// Non-fatal: failures are logged and swallowed. The MLS reconcile must
+/// continue even if Turso is briefly unreachable; the next reconcile (or
+/// the per-message ingest TOFU) will catch up.
+pub async fn batch_check_and_pin_account_keys(
+    state: &Arc<AppState>,
+    peer_user_ids: &[String],
+) -> Result<()> {
+    if peer_user_ids.is_empty() {
+        return Ok(());
+    }
+
+    // 1. One Turso SELECT for every peer. Bind by-position to avoid the
+    //    quote-and-format SQL-injection foot-gun the surrounding code
+    //    uses for its own `IN (...)` lookups (those filter by alphanum
+    //    via input scrubbing; we're stricter here because account_id_pub
+    //    is the cryptographic root of trust).
+    let conn = state.remote_db.conn().await?;
+    let placeholders = (1..=peer_user_ids.len())
+        .map(|i| format!("?{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let query = format!(
+        "SELECT id, account_id_pub, identity_version FROM users WHERE id IN ({placeholders})"
+    );
+    let params: Vec<libsql::Value> = peer_user_ids
+        .iter()
+        .map(|id| libsql::Value::Text(id.clone()))
+        .collect();
+    let mut server_keys: std::collections::HashMap<String, (Vec<u8>, i64)> =
+        std::collections::HashMap::new();
+    let mut rows = conn.query(&query, params).await?;
+    while let Some(row) = rows.next().await? {
+        let id: String = row.get(0)?;
+        let pubkey: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(1).ok().flatten();
+        let version: i64 = row.get(2).unwrap_or(0);
+        if let Some(p) = pubkey {
+            server_keys.insert(id, (p, version));
+        }
+    }
+
+    if server_keys.is_empty() {
+        return Ok(());
+    }
+
+    // 2. One local-DB SELECT for existing pins covering this batch.
+    let mut changed: Vec<(String, i64)> = Vec::new();
+    {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let mut existing: std::collections::HashMap<String, Vec<u8>> =
+            std::collections::HashMap::new();
+        {
+            let mut stmt = db.conn().prepare(
+                "SELECT peer_user_id, account_id_pub FROM contact_verification",
+            )?;
+            let rows = stmt
+                .query_map([], |r| {
+                    Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+                })?
+                .collect::<std::result::Result<Vec<_>, rusqlite::Error>>()?;
+            for (id, pubkey) in rows {
+                existing.insert(id, pubkey);
+            }
+        }
+        for (peer_id, (server_pub, server_version)) in &server_keys {
+            match existing.get(peer_id) {
+                Some(p) if p == server_pub => {
+                    // No change — leave verified flag alone.
+                }
+                Some(_) => {
+                    db.conn().execute(
+                        "UPDATE contact_verification SET \
+                           account_id_pub = ?2, identity_version = ?3, \
+                           verified = 0, updated_at = datetime('now') \
+                         WHERE peer_user_id = ?1",
+                        rusqlite::params![peer_id, server_pub, *server_version],
+                    )?;
+                    eprintln!(
+                        "[safety] group-reconcile: account_id_pub for {peer_id} changed — cleared verified"
+                    );
+                    changed.push((peer_id.clone(), *server_version));
+                }
+                None => {
+                    db.conn().execute(
+                        "INSERT OR IGNORE INTO contact_verification \
+                           (peer_user_id, account_id_pub, identity_version, verified) \
+                         VALUES (?1, ?2, ?3, 0)",
+                        rusqlite::params![peer_id, server_pub, *server_version],
+                    )?;
+                }
+            }
+        }
+    }
+
+    // 3. Emit one KeyChanged event per changed peer. Done outside the
+    //    local-DB guard so we never hold the rusqlite lock across an
+    //    await on the LiveKit mutex.
+    if !changed.is_empty() {
+        let sink = state.livekit.lock().await.channel.clone();
+        if let Some(ch) = sink {
+            for (peer_user_id, peer_identity_version) in changed {
+                let _ = ch.send(crate::realtime::RealtimeEvent::KeyChanged {
+                    peer_user_id,
+                    peer_identity_version,
+                });
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

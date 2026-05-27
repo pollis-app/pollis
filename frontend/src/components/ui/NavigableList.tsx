@@ -30,6 +30,14 @@ export interface NavigableListProps<T> {
   // Called when Enter is pressed while focus is on the row (colIndex 0).
   onEnterRow?: (item: T) => void;
 
+  // Called when the user clicks (mouse) the body of a row, excluding
+  // its controls. Separate from `onEnterRow` because some consumers
+  // (e.g. Requests) wire Enter to a destructive action that a stray
+  // click should NOT trigger. Clicking on a control inside `controls`
+  // still triggers that control natively; this only fires when the
+  // click lands on the row's main content.
+  onClickRow?: (item: T) => void;
+
   isLoading?: boolean;
   loadingLabel?: string;
   emptyLabel?: string;
@@ -55,6 +63,7 @@ export function NavigableList<T>({
   controls,
   trailing,
   onEnterRow,
+  onClickRow,
   isLoading = false,
   loadingLabel = "Loading…",
   emptyLabel = "No items.",
@@ -250,8 +259,14 @@ export function NavigableList<T>({
               {isRowFocused && nav.colIndex === 0 ? ">" : " "}
             </span>
 
-            {/* Main row content */}
-            <div className="flex-1 min-w-0 flex items-center gap-3">
+            {/* Main row content. Clickable when `onClickRow` is set —
+                cursor + onClick are gated on that so consumers without
+                row-level click navigation render exactly as before. */}
+            <div
+              className="flex-1 min-w-0 flex items-center gap-3"
+              style={{ cursor: onClickRow ? "pointer" : undefined }}
+              onClick={onClickRow ? () => onClickRow(item) : undefined}
+            >
               {renderRow(item)}
             </div>
 

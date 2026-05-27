@@ -354,6 +354,32 @@ pub async fn reconcile_group_mls_impl(
         }
     }
 
+    // 1b. TOFU-pin every roster member's account_id_pub before we use
+    //     server-reported keys to add devices to the MLS tree. Without
+    //     this, a malicious Turso write could swap a member's key on the
+    //     fly and the next reconcile would silently graft an attacker's
+    //     device into the group with no inline signal to other members.
+    //     The DM ingest path already does this per-message; groups
+    //     piggyback on reconcile because that's the only choke point
+    //     where roster changes get applied. Skip the actor's own id —
+    //     contact_verification is for peers, not self. Non-fatal: a
+    //     transient failure must not block a legitimate membership
+    //     update. Caught + logged.
+    {
+        let peers: Vec<String> = roster_user_ids
+            .iter()
+            .filter(|id| id.as_str() != actor_user_id.as_str())
+            .cloned()
+            .collect();
+        if let Err(e) = crate::commands::safety::batch_check_and_pin_account_keys(
+            state, &peers,
+        )
+        .await
+        {
+            eprintln!("[reconcile] batch_check_and_pin_account_keys failed: {e}");
+        }
+    }
+
     // 2. Find devices with unclaimed KPs for all roster users.
     let mut device_pairs: Vec<(String, String)> = Vec::new();
     {
@@ -687,6 +713,100 @@ pub async fn reconcile_group_mls_impl(
     // epoch's key while every other member has already rotated.
     if outcome.epoch_after > outcome.epoch_before {
         crate::commands::voice_e2ee::on_mls_epoch_changed(state, &conversation_id).await;
+    }
+
+    // Roster-change banners. Fire only when an actual epoch bump happened
+    // — `outcome.added` / `outcome.removed` are populated only on the
+    // committing branch, and the no-op early-returns above leave them
+    // empty. Local emit drives this client's own UI; the room-server
+    // publish reaches existing members so their inline timeline picks up
+    // the banner without refetching. New joiners don't see banners for
+    // themselves because the Welcome path doesn't go through this hook
+    // (it lives in `process_pending_welcomes`).
+    if outcome.epoch_after > outcome.epoch_before
+        && (!outcome.added.is_empty() || !outcome.removed.is_empty())
+    {
+        use std::collections::HashSet;
+
+        // Per-user device counts BEFORE this commit — derived from the
+        // `already_in_tree` snapshot captured at the top of this function.
+        let prior_user_ids: HashSet<&String> =
+            already_in_tree.iter().map(|(uid, _)| uid).collect();
+
+        // Per-user device counts AFTER this commit. Start from
+        // `already_in_tree`, drop removed pairs, add added pairs.
+        let mut post_tree: HashSet<(String, String)> = already_in_tree.clone();
+        for pair in &outcome.removed {
+            post_tree.remove(pair);
+        }
+        for pair in &outcome.added {
+            post_tree.insert(pair.clone());
+        }
+        let post_user_ids: HashSet<&String> =
+            post_tree.iter().map(|(uid, _)| uid).collect();
+
+        let mut joined_user_ids: Vec<String> = Vec::new();
+        let mut devices_added: Vec<(String, String)> = Vec::new();
+        let mut seen_added_user: HashSet<&String> = HashSet::new();
+        for pair in &outcome.added {
+            if prior_user_ids.contains(&pair.0) {
+                devices_added.push(pair.clone());
+            } else if seen_added_user.insert(&pair.0) {
+                joined_user_ids.push(pair.0.clone());
+            }
+        }
+
+        let mut left_user_ids: Vec<String> = Vec::new();
+        let mut devices_removed: Vec<(String, String)> = Vec::new();
+        let mut seen_removed_user: HashSet<&String> = HashSet::new();
+        for pair in &outcome.removed {
+            if post_user_ids.contains(&pair.0) {
+                devices_removed.push(pair.clone());
+            } else if seen_removed_user.insert(&pair.0) {
+                left_user_ids.push(pair.0.clone());
+            }
+        }
+
+        // Local emit. The sink is None during early boot / signed-out;
+        // dropping the send is the right behaviour there.
+        let sink = state.livekit.lock().await.channel.clone();
+        if let Some(ch) = sink {
+            let _ = ch.send(crate::realtime::RealtimeEvent::RosterChanged {
+                conversation_id: conversation_id.clone(),
+                epoch_before: outcome.epoch_before,
+                epoch_after: outcome.epoch_after,
+                joined_user_ids: joined_user_ids.clone(),
+                left_user_ids: left_user_ids.clone(),
+                devices_added: devices_added.clone(),
+                devices_removed: devices_removed.clone(),
+            });
+        }
+
+        // Room broadcast. Existing members already in the conversation
+        // room receive this data packet, parse the diff client-side
+        // (see `livekit/mod.rs` data-packet dispatch), and render the
+        // banner. Non-fatal: a flaky LiveKit blip mustn't fail the
+        // reconcile that already committed to Turso.
+        if let Err(e) = crate::commands::livekit::publish_to_room_server(
+            &state.config,
+            &conversation_id,
+            serde_json::json!({
+                "type": "roster_changed",
+                "conversation_id": conversation_id.clone(),
+                "epoch_before": outcome.epoch_before,
+                "epoch_after": outcome.epoch_after,
+                "joined_user_ids": joined_user_ids,
+                "left_user_ids": left_user_ids,
+                "devices_added": devices_added,
+                "devices_removed": devices_removed,
+            }),
+        )
+        .await
+        {
+            eprintln!(
+                "[realtime] reconcile: publish roster_changed for {conversation_id}: {e}"
+            );
+        }
     }
 
     Ok(outcome)

@@ -121,6 +121,8 @@ Either path ends with the new device populating `AppState.unlock`, the user sett
 - **Membership changes** flow through `reconcile_group_mls_impl` in `pollis-core/src/commands/mls.rs`. It diffs the desired roster vs. the actual MLS tree and emits a single combined commit with `Add` + `Remove` proposals. The commit is *staged* locally, persisted to Turso (`mls_commit_log` + per-recipient `mls_welcome` rows) on a fresh libSQL connection, and only then merged locally — this ordering is the invariant that prevents "local epoch ahead of remote" split-brain.
 - **External commits** (RFC 9420 §11.2.1) handle new-device joins without requiring a sibling Welcome: the device fetches the latest `GroupInfo` from `mls_group_info` and externally commits into the group.
 - **Cross-signing verification** runs on inbound commits that add devices: receivers fetch the added device's `device_cert` from `user_device` and verify against the user's `account_id_pub`. Verification is currently advisory (warn-and-proceed) — the security whitepaper documents this gap.
+- **Account-key TOFU** runs on every group reconcile and every DM message ingest. `batch_check_and_pin_account_keys` in `pollis-core/src/commands/safety.rs` bulk-fetches every roster peer's `account_id_pub` from Turso, pins first-seen values locally (`contact_verification` table), and emits a `KeyChanged` realtime event on mismatch. This closes the historical group MITM hole — previously only the DM path detected Turso-side key swaps; groups inherited the gap. The pin is per-USER (not per-conversation), so verifying a peer once propagates a shield badge to every surface where they appear.
+- **Roster-change banners.** A non-empty reconcile commit emits a `RosterChanged` realtime event with the per-user diff (joined / left / device added / device removed). The reconciler emits locally + broadcasts to the conversation's LiveKit room so already-connected peers render the inline timeline banner without refetching. See `pollis-core/src/commands/mls/reconcile.rs` and `frontend/src/stores/rosterChangeStore.ts`.
 
 For the full key-material taxonomy, KDF/AEAD parameters, and attack-surface analysis see `docs/security-whitepaper.md`.
 
@@ -208,9 +210,13 @@ electron/                 # Electron app
   src/
     main.ts               # Main process — loads pollis-node, registers ipcMain handlers, owns BrowserWindow + auto-updater
     preload.ts            # Exposes window.electronAPI to the renderer
+    tray.ts               # System tray (Linux/Windows always; macOS opt-in menu-bar status item)
   build/
     electron-builder.yml  # Packaging config (DMG/ZIP/NSIS/AppImage/deb/rpm + signing hooks)
     sign.js               # Windows signing hook (Azure Trusted Signing)
+    tray-default.png      # Linux/Windows tray icon (colored "p")
+    tray-notification.png # Linux/Windows tray icon (unread variant)
+    tray-mac.png          # macOS menu-bar icon (22x22 mono template; @2x sibling)
 
 src-tauri/                # Legacy Tauri desktop binary (retained for rollback; not the active shipping path)
   src/

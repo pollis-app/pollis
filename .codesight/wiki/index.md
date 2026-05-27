@@ -11,6 +11,7 @@ Start here. Navigate to the article you need.
 - [UI Components](./ui.md) — React component inventory
 - [Libraries](./libraries.md) — Frontend hooks, services, utilities
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
+- [Safety & Verification](./safety.md) — Signal-style safety numbers, TOFU pinning, group MITM defence (refs #277)
 - [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
 - [PIN Design](./pin-design.md) — Local PIN unlock: KDF/AEAD choices, blob format, lifecycle, threat model
 - [Notifications](./notifications.md) — Sound, OS notification, badge, and alert dispatcher (`notify()` + category table)
