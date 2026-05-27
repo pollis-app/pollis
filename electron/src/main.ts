@@ -387,9 +387,21 @@ void app.whenReady().then(async () => {
   });
 
   autoUpdater.on("download-progress", (p) => {
+    // electron-updater hands us `percent` (0–100, float) precomputed
+    // against the true CDN-reported content length. Forward it directly
+    // — the previous code only shipped `delta` (per-tick byte count)
+    // and the renderer had to sum + divide by an unknown total, which
+    // it couldn't because `update-available` doesn't carry the file
+    // size (the file hasn't downloaded yet at that point). Net result
+    // since the Electron migration: no percentage rendered, ever.
     sendToAllRenderers("updater:event", {
       event: "Progress",
-      data: { chunkLength: Math.round(p.delta ?? 0) },
+      data: {
+        chunkLength: Math.round(p.delta ?? 0),
+        percent: typeof p.percent === "number" ? p.percent : undefined,
+        transferred: typeof p.transferred === "number" ? p.transferred : undefined,
+        total: typeof p.total === "number" ? p.total : undefined,
+      },
     });
   });
   autoUpdater.on("update-available", (info) => {
@@ -404,6 +416,23 @@ void app.whenReady().then(async () => {
     // after the UI transitions through the "installing" / "relaunching"
     // states — keep that flow intact.
     autoUpdater.quitAndInstall(false, true);
+    // Force-exit fallback. quitAndInstall on macOS fires before-quit +
+    // closes windows + hands off to Squirrel.Mac's ShipIt helper, which
+    // waits for the parent PID to die before swapping the bundle. If
+    // pollis-node has background Tokio tasks alive (media server, event
+    // emitters, livekit connections), the Node process won't exit even
+    // after windows close, ShipIt times out, and the UI sits on
+    // "Relaunching…" forever. A 10-second wall-clock cap is well past
+    // any legitimate graceful-quit window — past that point the only
+    // working path is to nuke the process so ShipIt can take over.
+    // Mirrors the same pattern as `Tray.markQuittingFromTray` does for
+    // the close-to-tray escape hatch.
+    setTimeout(() => {
+      console.warn(
+        "[updater] graceful quit did not exit within 10s — forcing app.exit so ShipIt can swap binaries",
+      );
+      app.exit(0);
+    }, 10_000);
   });
   autoUpdater.on("error", (e) => {
     console.error("[updater] error:", e);

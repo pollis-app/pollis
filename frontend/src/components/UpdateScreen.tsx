@@ -56,7 +56,14 @@ export const UpdateScreen: React.FC = () => {
               break;
             case "Progress":
               downloadedBytes += event.data.chunkLength;
-              if (totalBytes > 0) {
+              // Prefer the precomputed `percent` Electron ships
+              // (electron-updater computes it against the true CDN
+              // content-length, which the `Started` event doesn't
+              // carry). Fall back to chunkLength-sum / totalBytes
+              // for the Tauri path where percent isn't included.
+              if (typeof event.data.percent === "number") {
+                setProgress(Math.round(event.data.percent));
+              } else if (totalBytes > 0) {
                 setProgress(Math.round((downloadedBytes / totalBytes) * 100));
               }
               break;

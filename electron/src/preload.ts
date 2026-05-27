@@ -177,14 +177,29 @@ contextBridge.exposeInMainWorld("electronAPI", {
   updaterOnEvent: (
     cb: (envelope: {
       event: "Started" | "Progress" | "Finished";
-      data: { contentLength?: number; chunkLength?: number };
+      data: {
+        contentLength?: number;
+        chunkLength?: number;
+        // `percent` (0–100) is forwarded by main on every download-progress
+        // event when available. Renderers should prefer it over computing
+        // a percentage from chunkLength sums.
+        percent?: number;
+        transferred?: number;
+        total?: number;
+      };
     }) => void,
   ) =>
     subscribe("updater:event", (payload) =>
       cb(
         payload as {
           event: "Started" | "Progress" | "Finished";
-          data: { contentLength?: number; chunkLength?: number };
+          data: {
+            contentLength?: number;
+            chunkLength?: number;
+            percent?: number;
+            transferred?: number;
+            total?: number;
+          };
         },
       ),
     ),

@@ -13,7 +13,23 @@ import { hasElectron } from "./runtime";
 
 export type DownloadEvent =
   | { event: "Started"; data: { contentLength?: number } }
-  | { event: "Progress"; data: { chunkLength: number } }
+  | {
+      event: "Progress";
+      data: {
+        chunkLength: number;
+        // Electron path forwards electron-updater's precomputed
+        // `percent` (0–100, float) directly when available. Renderers
+        // should prefer this over summing chunkLength because the
+        // `Started` event does NOT carry the file size on Electron
+        // (electron-updater learns it only when bytes start flowing),
+        // so the chunkLength-sum / contentLength compute can't run.
+        // Tauri's plugin still ships only chunkLength + an upfront
+        // contentLength — both code paths are handled below.
+        percent?: number;
+        transferred?: number;
+        total?: number;
+      };
+    }
   | { event: "Finished"; data: Record<string, never> };
 
 export interface PollisUpdate {
