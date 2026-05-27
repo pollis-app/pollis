@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { check, relaunch, invoke } from "../bridge";
+import { hasElectron } from "../bridge/runtime";
 import { LoadingSpinner } from "./ui/LoaderSpinner";
 
 type UpdatePhase = "preparing" | "checking" | "downloading" | "installing" | "relaunching" | "error";
@@ -70,7 +71,16 @@ export const UpdateScreen: React.FC = () => {
         }
 
         setPhase("relaunching");
-        await relaunch();
+        // Electron: main process already called autoUpdater.quitAndInstall()
+        // when the download finished — it will quit + relaunch the app
+        // itself. Calling relaunch() here (app.relaunch + app.exit(0))
+        // races with Squirrel.Mac's ShipIt handoff and can leave the
+        // install half-applied. Tauri's plugin has the opposite shape:
+        // downloadAndInstall completes the install but does NOT relaunch,
+        // so the renderer must.
+        if (!hasElectron()) {
+          await relaunch();
+        }
       } catch (err) {
         if (!cancelled) {
           console.error("[update] Auto-update failed:", err);
