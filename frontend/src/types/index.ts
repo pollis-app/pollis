@@ -7,6 +7,19 @@
 //
 // This is Signal (e2e encryption) + Slack (group features)
 
+// Shape returned by the `detect_managed_install` command. Non-null means
+// the running binary is owned by a system package manager (AUR / .deb /
+// .rpm / future MAS / MS Store / Flatpak) and the in-app updater must NOT
+// run — the user is expected to update via their package manager. Rendered
+// by the Software Update page when set.
+export type ManagedInstallInfo = {
+  kind: "aur" | "linux_system";
+  display_name: string;
+  // null when we know it's a managed install but can't guess the package
+  // manager (.deb on Debian/Ubuntu vs .rpm on Fedora vs. snap, etc.).
+  update_command: string | null;
+};
+
 export interface User {
   id: string;
   clerk_id: string; // Legacy Clerk field, unused — kept for compatibility

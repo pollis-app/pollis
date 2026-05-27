@@ -7,7 +7,7 @@ import {
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
-import type { ManagedInstallInfo } from "../components/ManagedInstallScreen";
+import type { ManagedInstallInfo } from "../types";
 
 type Status = "checking" | "available" | "none" | "error" | "managed";
 
