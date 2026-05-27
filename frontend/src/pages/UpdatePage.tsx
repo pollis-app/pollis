@@ -7,8 +7,9 @@ import {
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
+import type { ManagedInstallInfo } from "../components/ManagedInstallScreen";
 
-type Status = "checking" | "available" | "none" | "error";
+type Status = "checking" | "available" | "none" | "error" | "managed";
 
 export const UpdatePage: React.FC = () => {
   const setUpdateRequired = useAppStore((s) => s.setUpdateRequired);
@@ -16,24 +17,50 @@ export const UpdatePage: React.FC = () => {
   const setAvailableUpdateVersion = useAppStore((s) => s.setAvailableUpdateVersion);
 
   const [appVersion, setAppVersion] = useState<string>("");
-  // Seed from the cached poller result so the page lands on "available"
-  // immediately when reached from the bottom-bar indicator — no flash of
-  // "checking…" before the user can click Install.
   const [status, setStatus] = useState<Status>(cachedAvailable ? "available" : "checking");
   const [version, setVersion] = useState<string>(cachedAvailable ?? "");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [isInstalling, setIsInstalling] = useState(false);
+  const [managed, setManaged] = useState<ManagedInstallInfo | null>(null);
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
   }, []);
 
-  // Always re-check on mount so the displayed version is fresh even when
-  // the poller cache is stale. Does not block the seeded "available" UI.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        // Managed-install probe goes first. A user on an AUR / .deb / .rpm
+        // install can't use the in-app updater regardless of whether a new
+        // version exists; we want to render the "use your package manager"
+        // banner even when no update is pending so they have one place to
+        // confirm how this app gets updated.
+        const m = await invoke<ManagedInstallInfo | null>("detect_managed_install").catch(() => null);
+        if (cancelled) {
+          return;
+        }
+        if (m) {
+          setManaged(m);
+          setStatus("managed");
+          // Run the version check in the background so the "Update
+          // available: vX" line still appears on the managed screen.
+          checkForUpdate()
+            .then((update) => {
+              if (cancelled) {
+                return;
+              }
+              if (update) {
+                setVersion(update.version);
+                setAvailableUpdateVersion(update.version);
+              } else {
+                setAvailableUpdateVersion(null);
+              }
+            })
+            .catch(() => {});
+          return;
+        }
+
         const update = await checkForUpdate();
         if (cancelled) {
           return;
@@ -65,12 +92,20 @@ export const UpdatePage: React.FC = () => {
       return;
     }
     setIsInstalling(true);
-    // Mark the Rust-side flag and flip the store so App.tsx takes over
-    // with the fullscreen UpdateScreen. The screen handles graceful
-    // voice/network teardown, download, install, and relaunch.
     await invoke("mark_update_required").catch(() => {});
     setUpdateRequired(true);
   }, [status, setUpdateRequired]);
+
+  const handleCopyCommand = useCallback(async () => {
+    if (!managed?.update_command) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(managed.update_command);
+    } catch {
+      // clipboard may be unavailable; ignore
+    }
+  }, [managed]);
 
   return (
     <PageShell title="Software Update" scrollable>
@@ -115,6 +150,53 @@ export const UpdatePage: React.FC = () => {
                   <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
                     {errorMessage}
                   </p>
+                )}
+
+                {status === "managed" && managed && (
+                  <>
+                    {version && (
+                      <p className="text-xs font-mono" style={{ color: "var(--c-accent)" }}>
+                        Update available: {version}
+                      </p>
+                    )}
+                    <p
+                      className="text-xs font-mono"
+                      style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}
+                    >
+                      This install is managed by {managed.display_name}. Pollis can't
+                      update itself from inside the app — use your package manager,
+                      then relaunch.
+                    </p>
+                    {managed.update_command && (
+                      <div
+                        style={{
+                          background: "var(--c-bg-elevated, var(--c-bg))",
+                          border: "1px solid var(--c-border)",
+                          padding: "0.75rem 1rem",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "0.75rem",
+                          marginTop: "0.5rem",
+                        }}
+                      >
+                        <code
+                          className="text-xs font-mono"
+                          style={{ color: "var(--c-text)" }}
+                          data-testid="update-page-managed-command"
+                        >
+                          {managed.update_command}
+                        </code>
+                        <Button
+                          data-testid="update-page-managed-copy"
+                          size="sm"
+                          onClick={handleCopyCommand}
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
 

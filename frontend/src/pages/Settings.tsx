@@ -7,16 +7,10 @@ import { resizeImage } from "../utils/imageProcessing";
 import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar, userQueryKeys } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
-import {
-  getVersion,
-  check as checkForUpdate,
-  convertFileSrc,
-  invoke,
-} from "../bridge";
+import { convertFileSrc, invoke } from "../bridge";
 
 export const Settings: React.FC = () => {
   const { currentUser } = useAppStore();
-  const setUpdateRequired = useAppStore((s) => s.setUpdateRequired);
 
   const { data: userData, isLoading } = useUserProfile();
   const { data: avatarDownloadUrl } = useUserAvatar();
@@ -46,11 +40,6 @@ export const Settings: React.FC = () => {
   const [fileInputKey, setFileInputKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [appVersion, setAppVersion] = useState<string>("");
-  const [updateStatus, setUpdateStatus] = useState<"idle" | "checking" | "available" | "none" | "error">("idle");
-  const [updateVersion, setUpdateVersion] = useState<string>("");
-  const [updateError, setUpdateError] = useState<string>("");
-  const [isInstalling, setIsInstalling] = useState(false);
 
   useEffect(() => {
     return () => { if (preview) { URL.revokeObjectURL(preview); } };
@@ -64,10 +53,6 @@ export const Settings: React.FC = () => {
       setPhone(userData.phone || "");
     }
   }, [userData]);
-
-  useEffect(() => {
-    getVersion().then(setAppVersion).catch(() => setAppVersion("unknown"));
-  }, []);
 
   useEffect(() => { setCurrentAvatarUrl(avatarDownloadUrl || null); }, [avatarDownloadUrl]);
 
@@ -207,36 +192,6 @@ export const Settings: React.FC = () => {
       setEmailChangePending(false);
     }
   };
-
-  const handleCheckForUpdates = useCallback(async () => {
-    setUpdateStatus("checking");
-    setUpdateError("");
-    setUpdateVersion("");
-    try {
-      const update = await checkForUpdate();
-      if (update) {
-        setUpdateStatus("available");
-        setUpdateVersion(update.version);
-      } else {
-        setUpdateStatus("none");
-      }
-    } catch (error) {
-      setUpdateStatus("error");
-      setUpdateError(error instanceof Error ? error.message : "Failed to check for updates");
-    }
-  }, []);
-
-  const handleInstallUpdate = useCallback(async () => {
-    if (updateStatus !== "available") {
-      return;
-    }
-    setIsInstalling(true);
-    // Mark the Rust-side flag and flip the store so App.tsx takes over
-    // with the fullscreen UpdateScreen. The screen handles graceful
-    // voice/network teardown, download, install, and relaunch.
-    await invoke("mark_update_required").catch(() => {});
-    setUpdateRequired(true);
-  }, [updateStatus, setUpdateRequired]);
 
   if (!currentUser) {
     return (
@@ -528,60 +483,6 @@ export const Settings: React.FC = () => {
                 Upload Avatar
               </Button>
             )}
-          </section>
-
-          {/* Software Updates */}
-          <section className="flex flex-col gap-4 mb-12">
-            <h2 className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b" style={{ color: 'var(--c-text-dim)', borderColor: 'var(--c-border)' }}>
-              Software Updates
-            </h2>
-
-            <div className="flex flex-col gap-2">
-              <p className="text-xs font-mono" style={{ color: 'var(--c-text-muted)' }}>
-                Current version: <span style={{ color: 'var(--c-text)' }}>{appVersion || "Loading..."}</span>
-              </p>
-
-              {updateStatus === "available" && (
-                <p className="text-xs font-mono" style={{ color: 'var(--c-accent)' }}>
-                  Update available: {updateVersion}
-                </p>
-              )}
-
-              {updateStatus === "none" && (
-                <p className="text-xs font-mono" style={{ color: 'var(--c-accent-dim)' }}>
-                  You're up to date!
-                </p>
-              )}
-
-              {updateStatus === "error" && (
-                <p className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
-                  {updateError}
-                </p>
-              )}
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                onClick={handleCheckForUpdates}
-                disabled={updateStatus === "checking"}
-                isLoading={updateStatus === "checking"}
-                loadingText="Checking…"
-              >
-                Check for updates
-              </Button>
-
-              {updateStatus === "available" && (
-                <Button
-                  onClick={handleInstallUpdate}
-                  disabled={isInstalling}
-                  isLoading={isInstalling}
-                  loadingText="Installing…"
-                  variant="primary"
-                >
-                  Install update
-                </Button>
-              )}
-            </div>
           </section>
 
         </div>

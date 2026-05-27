@@ -2,9 +2,11 @@ import React from "react";
 import { Button } from "./ui/Button";
 
 export type ManagedInstallInfo = {
-  kind: "aur";
+  kind: "aur" | "linux_system";
   display_name: string;
-  update_command: string;
+  // null when we know it's a managed install but can't guess the package
+  // manager (.deb on Debian/Ubuntu vs .rpm on Fedora vs. snap, etc.).
+  update_command: string | null;
 };
 
 type Props = {
@@ -23,6 +25,9 @@ type Props = {
  */
 export const ManagedInstallScreen: React.FC<Props> = ({ info }) => {
   const onCopy = async () => {
+    if (!info.update_command) {
+      return;
+    }
     try {
       await navigator.clipboard.writeText(info.update_command);
     } catch {
@@ -62,24 +67,26 @@ export const ManagedInstallScreen: React.FC<Props> = ({ info }) => {
           {info.display_name} — the in-app updater can't replace package-manager
           installs. Update from a terminal, then relaunch Pollis.
         </div>
-        <div
-          style={{
-            background: "var(--c-bg-elevated, var(--c-bg))",
-            border: "1px solid var(--c-border)",
-            padding: "0.75rem 1rem",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.75rem",
-          }}
-        >
-          <code className="text-xs font-mono" style={{ color: "var(--c-text)" }}>
-            {info.update_command}
-          </code>
-          <Button data-testid="managed-install-copy" size="sm" onClick={onCopy}>
-            Copy
-          </Button>
-        </div>
+        {info.update_command && (
+          <div
+            style={{
+              background: "var(--c-bg-elevated, var(--c-bg))",
+              border: "1px solid var(--c-border)",
+              padding: "0.75rem 1rem",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "0.75rem",
+            }}
+          >
+            <code className="text-xs font-mono" style={{ color: "var(--c-text)" }}>
+              {info.update_command}
+            </code>
+            <Button data-testid="managed-install-copy" size="sm" onClick={onCopy}>
+              Copy
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
