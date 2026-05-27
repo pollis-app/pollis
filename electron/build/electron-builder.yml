@@ -14,7 +14,15 @@ copyright: "Copyright (c) 2026 Daniel Kral"
 # Without this, the scoped package name (@pollis/electron) ends up in the
 # filename → "@pollis/electron_1.1.0_amd64.deb". Pin to "Pollis-<version>-…"
 # parity with the Tauri pipeline artifacts.
-artifactName: "Pollis-${version}.${ext}"
+#
+# ${arch} is REQUIRED on macOS: --mac --arm64 --x64 builds two architectures
+# in one electron-builder run. Without ${arch} the two arm64/x64 dmg + zip
+# pairs share filenames, the second build overwrites the first on disk, and
+# the resulting latest-mac.yml lists duplicate entries with conflicting
+# hashes. Auto-update then downloads a cross-arch payload, ShipIt fails to
+# relaunch, and the user sees "Could not connect to the server". Linux and
+# Windows are single-arch today, so ${arch} just appends "x64" — harmless.
+artifactName: "Pollis-${version}-${arch}.${ext}"
 # electron-builder defaults the binary name to the package `name` field
 # ("@pollis/electron"), which it sanitises to "@polliselectron". That's
 # what you see in the .deb's /usr/bin entry — and why `pollis` isn't on

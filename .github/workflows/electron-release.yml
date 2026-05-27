@@ -443,7 +443,10 @@ jobs:
         run: |
           VERSION="${POLLIS_TAG}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          MAC_DMG=$(find artifacts/pollis-electron-macos -name "*.dmg" | head -1)
+          # install.sh hosts a single Apple-Silicon dmg — pick the arm64 one
+          # explicitly now that artifactName carries ${arch}. Intel-Mac
+          # support is gated in install.sh itself.
+          MAC_DMG=$(find artifacts/pollis-electron-macos -name "*-arm64.dmg" | head -1)
           WIN_EXE=$(find artifacts/pollis-electron-windows -name "*.exe" ! -name "*portable*" | head -1)
           LINUX_APPIMAGE=$(find artifacts/pollis-electron-linux -name "*.AppImage" | head -1)
           LINUX_DEB=$(find artifacts/pollis-electron-linux -name "*.deb" | head -1)
