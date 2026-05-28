@@ -32,6 +32,12 @@ pub async fn init(env_file: Option<String>) -> Result<()> {
         let _ = dotenvy::from_filename(&path);
     }
     ensure_state().await?;
+    // Open the host audio device in a background thread now so the first
+    // user-facing sound (typically an incoming-call ringtone) doesn't pay
+    // the cold-open cost. Linux/PulseAudio/PipeWire and idle Windows audio
+    // can take seconds to wake on first `try_default()`; doing it eagerly
+    // means the IPC for `start_ring` returns near-instantly.
+    pollis_core::commands::sfx::prewarm_audio();
     Ok(())
 }
 

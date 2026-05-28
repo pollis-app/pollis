@@ -21,6 +21,16 @@ import { voiceSession } from "../voice";
  */
 const RINGING_TIMEOUT_MS = 30_000;
 
+// React.StrictMode double-invokes mount/unmount in dev, and TanStack Router
+// can re-mount routes on state churn even in prod. Either way, an unmount
+// is NOT a reliable signal that the user actually left the call — the same
+// component may re-mount on the next tick. Buffer the backstop cancel: if
+// the same callId re-mounts within DEFER_CANCEL_MS, the unmount was
+// transient and we abort the cancel. Keyed by callId so two simultaneous
+// Call pages (which shouldn't happen, but) don't collide.
+const DEFER_CANCEL_MS = 200;
+const pendingCancels = new Map<string, ReturnType<typeof setTimeout>>();
+
 export const CallPage: React.FC = () => {
   const navigate = useNavigate();
   const { callId } = useParams({ from: "/call/$callId" });
@@ -32,25 +42,35 @@ export const CallPage: React.FC = () => {
   const outgoingCall = useAppStore((s) => s.outgoingCall);
   const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
 
-  // Direct navigation to /call/<id> with no active voice → bounce back. Joining
-  // is initiated by the caller's DM page or the callee's accept button; we
-  // don't auto-join here because we have no caller/callee context for the
-  // backend handshake.
+  // Bounce-back guard. Three cases:
+  //   1. Voice is our room → stay.
+  //   2. Voice is a different room → step out immediately (user joined a
+  //      different voice channel while this page was open, or hangup from
+  //      the other side cleared activeVoiceChannelId via `call_canceled`).
+  //   3. Voice is idle → give `voiceSession.setIntent()` → `reconcile()` a
+  //      moment to transition out of 'idle' before assuming we don't belong
+  //      here. Both call entry points (caller in DM.tsx, callee in
+  //      AppShell.tsx) call setIntent and `navigate()` synchronously, but
+  //      reconcile() runs on the next tick — without the grace, the Call
+  //      page mounts, sees `idle`, bounces back to /dms, and the cleanup
+  //      effect below fires `cancel_call`, killing the callee's ring within
+  //      ~100ms of the invite. 1500ms covers a typical 300–1000ms join.
   useEffect(() => {
-    if (!activeVoiceChannelId) {
-      navigate({ to: "/dms" });
+    if (activeVoiceChannelId === roomName) {
+      return;
     }
-  }, [activeVoiceChannelId, navigate]);
-
-  // Triggered by either the local hang-up button OR a `call_canceled` event
-  // arriving on the inbox (the realtime handler clears activeVoiceChannelId
-  // when it matches this call). Either way, leave the page.
-  useEffect(() => {
-    if (activeVoiceChannelId !== null && activeVoiceChannelId !== roomName) {
-      // User joined a different voice channel while this call page was open —
-      // step out so we don't sit on a stale call screen.
+    if (activeVoiceChannelId !== null) {
       navigate({ to: "/dms" });
+      return;
     }
+    const timer = setTimeout(() => {
+      const cur = useAppStore.getState().voiceState;
+      const curChannel = cur.kind === 'idle' ? null : cur.channelId;
+      if (curChannel !== roomName) {
+        navigate({ to: "/dms" });
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
   }, [activeVoiceChannelId, roomName, navigate]);
 
   // Ringing timeout: if nobody else is in the room after 30s, auto-hang-up so
@@ -85,13 +105,24 @@ export const CallPage: React.FC = () => {
   // Reads through the store directly inside cleanup so we always see the
   // latest outgoingCall, not a stale closure capture.
   useEffect(() => {
+    // If a deferred cancel from a previous (transient) unmount is queued
+    // for this callId, abort it — we're back.
+    const queued = pendingCancels.get(callId);
+    if (queued) {
+      clearTimeout(queued);
+      pendingCancels.delete(callId);
+    }
     return () => {
-      const pending = useAppStore.getState().outgoingCall;
-      if (pending && pending.callId === callId) {
-        const calleeId = pending.calleeId;
-        useAppStore.getState().setOutgoingCall(null);
-        invoke("cancel_call", { otherUserId: calleeId, callId }).catch(() => {});
-      }
+      const timer = setTimeout(() => {
+        pendingCancels.delete(callId);
+        const pending = useAppStore.getState().outgoingCall;
+        if (pending && pending.callId === callId) {
+          const calleeId = pending.calleeId;
+          useAppStore.getState().setOutgoingCall(null);
+          invoke("cancel_call", { otherUserId: calleeId, callId }).catch(() => {});
+        }
+      }, DEFER_CANCEL_MS);
+      pendingCancels.set(callId, timer);
     };
   }, [callId]);
 
