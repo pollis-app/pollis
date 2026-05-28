@@ -19,7 +19,7 @@ const TICK_HZ = 60;
 const TICK_DT = 1 / TICK_HZ;
 const MAX_FRAME_DT = 0.1;
 
-const PLAYER_RADIUS = 12;
+const PLAYER_RADIUS = 16;
 const PLAYER_MAX_SPEED = 320;
 const PLAYER_ACCEL = 1200;
 const PLAYER_DRAG = 1.4;
@@ -28,17 +28,17 @@ const PLAYER_INVULN_TIME = 1.6;
 
 const BULLET_SPEED = 720;
 const BULLET_LIFE = 1.1;
-const BULLET_RADIUS = 3;
+const BULLET_RADIUS = 4;
 
 const ENEMY_BULLET_SPEED = 280;
 const ENEMY_BULLET_LIFE = 2.6;
 const ENEMY_FIRE_COOLDOWN = 1.4;
-const ENEMY_RADIUS = 14;
+const ENEMY_RADIUS = 19;
 const ENEMY_MAX_SPEED = 110;
 
-const ASTEROID_LARGE = 42;
-const ASTEROID_MED = 26;
-const ASTEROID_SMALL = 14;
+const ASTEROID_LARGE = 54;
+const ASTEROID_MED = 33;
+const ASTEROID_SMALL = 19;
 
 const STAR_COUNT = 70;
 
@@ -484,7 +484,7 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
   }
 
   function drawWorld(c: CanvasRenderingContext2D) {
-    c.lineWidth = 1.6;
+    c.lineWidth = 2.2;
     c.strokeStyle = accentColor;
     c.fillStyle = accentColor;
 
@@ -555,18 +555,27 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.save();
     c.translate(e.pos.x, e.pos.y);
     c.rotate(e.rot);
+    // Inverted silhouette: solid accent fill so enemies pop against the
+    // outline-only asteroids/player. Inner detail is a dark cutout.
     c.beginPath();
-    // Hostile diamond w/ inner cross — distinct from player triangle
     c.moveTo(ENEMY_RADIUS, 0);
     c.lineTo(0, ENEMY_RADIUS * 0.85);
     c.lineTo(-ENEMY_RADIUS * 0.7, 0);
     c.lineTo(0, -ENEMY_RADIUS * 0.85);
     c.closePath();
-    c.stroke();
+    c.fill();
+    c.strokeStyle = "#02060a";
+    c.lineWidth = 2.4;
     c.beginPath();
     c.moveTo(-ENEMY_RADIUS * 0.35, 0);
-    c.lineTo(ENEMY_RADIUS * 0.5, 0);
+    c.lineTo(ENEMY_RADIUS * 0.55, 0);
     c.stroke();
+    c.beginPath();
+    c.arc(ENEMY_RADIUS * 0.15, 0, ENEMY_RADIUS * 0.18, 0, Math.PI * 2);
+    c.stroke();
+    // Restore outer stroke for subsequent draws
+    c.strokeStyle = accentColor;
+    c.lineWidth = 2.2;
     c.restore();
   }
 
@@ -716,9 +725,10 @@ function spawnBullet(s: GameState, from: Vec, angle: number, hostile: boolean) {
   const life = hostile ? ENEMY_BULLET_LIFE : BULLET_LIFE;
   const vx = Math.cos(angle) * speed;
   const vy = Math.sin(angle) * speed;
-  // Spawn slightly forward of the firing entity so it doesn't self-hit.
-  const px = from.x + Math.cos(angle) * 18;
-  const py = from.y + Math.sin(angle) * 18;
+  // Spawn slightly forward of the firing entity so it doesn't self-hit
+  // and visually exits the hull cleanly.
+  const px = from.x + Math.cos(angle) * 24;
+  const py = from.y + Math.sin(angle) * 24;
   if (slot) {
     slot.pos.x = px;
     slot.pos.y = py;
