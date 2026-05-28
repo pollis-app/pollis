@@ -197,6 +197,7 @@ const PAGE_RESULTS: SearchResultItem[] = [
   { type: "page", id: "page-groups", name: "Groups", breadcrumb: "/groups", path: "/groups", keywords: "list all" },
   { type: "page", id: "page-groups-new", name: "Create Group", breadcrumb: "/groups/new", path: "/groups/new", keywords: "new create" },
   { type: "page", id: "page-groups-search", name: "Find Groups", breadcrumb: "/groups/search", path: "/groups/search", keywords: "discover search public" },
+  { type: "page", id: "page-arcade", name: "Arcade", breadcrumb: "/arcade", path: "/arcade", keywords: "arcade game asteroids ship shoot easter egg play" },
 ];
 
 function filterResults(

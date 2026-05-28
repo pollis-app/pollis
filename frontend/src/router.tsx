@@ -40,6 +40,7 @@ import { RenameChannelPage } from "./pages/RenameChannelPage";
 import { RenameGroupPage } from "./pages/RenameGroupPage";
 import { KeyboardShortcutsPage } from "./pages/KeyboardShortcutsPage";
 import { UpdatePage } from "./pages/UpdatePage";
+import { ArcadePage } from "./pages/ArcadePage";
 
 // Re-export RouterContext so callers can import from either location.
 export type { RouterContext };
@@ -260,6 +261,12 @@ const callRoute = createRoute({
   component: CallPage,
 });
 
+const arcadeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/arcade",
+  component: ArcadePage,
+});
+
 // The terminal pane is a persistent component owned by AppShell (so the
 // PTY + scrollback survive navigation). This route only flips the URL so
 // links / Cmd+K / back navigation move off it like any other view.
@@ -306,6 +313,7 @@ const routeTree = rootRoute.addChildren([
   keyboardShortcutsRoute,
   updateRoute,
   callRoute,
+  arcadeRoute,
   terminalRoute,
 ]);
 
