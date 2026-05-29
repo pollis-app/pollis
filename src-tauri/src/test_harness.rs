@@ -236,7 +236,7 @@ pub async fn bootstrap_schema(remote: &crate::db::remote::RemoteDb) -> Result<()
         let already = conn
             .query(
                 "SELECT 1 FROM schema_migrations WHERE version = ?1",
-                libsql::params![*version],
+                [libsql::Value::Integer(i64::from(*version))],
             )
             .await
             .map_err(|e| Error::Other(anyhow::anyhow!("probe schema_migrations v{version}: {e}")))?
@@ -250,7 +250,10 @@ pub async fn bootstrap_schema(remote: &crate::db::remote::RemoteDb) -> Result<()
         run_sql_script(&conn, sql, &format!("migration {version}_{description}")).await?;
         conn.execute(
             "INSERT INTO schema_migrations (version, description) VALUES (?1, ?2)",
-            libsql::params![*version, *description],
+            (
+                libsql::Value::Integer(i64::from(*version)),
+                libsql::Value::Text(description.to_string()),
+            ),
         )
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("stamp v{version}: {e}")))?;

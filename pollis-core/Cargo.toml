@@ -32,7 +32,7 @@ async-trait = "0.1"
 # with libwebrtc-sys's bundled BoringSSL (duplicate `PKCS8_*` symbols at
 # link), so we keep system OpenSSL for the desktop link. NDK builds have
 # no system libcrypto, hence vendored on mobile.
-libsql = { version = "0.6", features = ["remote"] }
+libsql = { version = "0.9", features = ["remote"] }
 x25519-dalek = { version = "2.0", features = ["static_secrets", "reusable_secrets"] }
 ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 curve25519-dalek = "4"

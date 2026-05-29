@@ -66,7 +66,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 dotenvy = "0.15"
 # Used by src/test_harness.rs (compiled under feature = "test-harness") for
 # direct Turso access + anyhow! sites; and by tests/flows.rs.
-libsql = { version = "0.6", features = ["remote"] }
+libsql = { version = "0.9", features = ["remote"] }
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 
