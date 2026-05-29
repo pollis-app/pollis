@@ -63,8 +63,8 @@ importers:
         specifier: ^1.8.0
         version: 1.8.0(react-native-svg@15.15.4(react-native@0.83.6(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0))(react-native@0.83.6(@babel/core@7.29.0)(@react-native/metro-config@0.85.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.0))(react@19.2.0)
       pollis-native:
-        specifier: file:./modules/pollis-native
-        version: file:modules/pollis-native
+        specifier: link:./modules/pollis-native
+        version: link:modules/pollis-native
       react:
         specifier: 19.2.0
         version: 19.2.0
@@ -2695,9 +2695,6 @@ packages:
   pngjs@3.4.0:
     resolution: {integrity: sha512-NCrCHhWmnQklfH4MtJMRjZ2a8c80qXeMlQMv2uVp9ISJMTt562SbGd6n2oq0PaPgKm7Z6pL9E2UlLIhC+SHL3w==}
     engines: {node: '>=4.0.0'}
-
-  pollis-native@file:modules/pollis-native:
-    resolution: {directory: modules/pollis-native, type: directory}
 
   postcss@8.4.49:
     resolution: {integrity: sha512-OCVPnIObs4N29kxTjzLfUryOkvZEq+pf8jTF0lg8E7uETuWHA+v7j3c/xJmiqpX450191LlmZfUKkXxkTry7nA==}
@@ -6581,10 +6578,6 @@ snapshots:
       xmlbuilder: 15.1.1
 
   pngjs@3.4.0: {}
-
-  pollis-native@file:modules/pollis-native:
-    dependencies:
-      uniffi-bindgen-react-native: 0.31.0-2
 
   postcss@8.4.49:
     dependencies:
