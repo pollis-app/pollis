@@ -1,6 +1,8 @@
 uniffi::setup_scaffolding!();
 
 pub mod accounts;
+#[cfg(target_os = "android")]
+pub mod android_tls;
 pub mod bridge;
 pub mod commands;
 pub mod config;
