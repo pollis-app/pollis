@@ -60,6 +60,7 @@ struct InitConfig {
     /// the platform already gives the binary a sensible default via
     /// `db::dirs_path()`.
     #[serde(default)]
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     data_dir: Option<String>,
     #[serde(default)]
     r2_endpoint: String,
