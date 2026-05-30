@@ -155,12 +155,13 @@ function createWindow(): BrowserWindow {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      // sandbox:true restricts the preload to contextBridge + ipcRenderer
-      // (the only two things our preload uses), so we get the renderer
-      // sandbox for free. Bumping this back to false should never be
-      // necessary unless the preload adds direct Node API usage — which
-      // it shouldn't, since everything heavy lives in pollis-node behind
-      // ipcMain.handle handlers in the main process.
+      // sandbox:true restricts the preload to the sandboxed-preload module
+      // allowlist — contextBridge + ipcRenderer + webUtils (the only ones
+      // our preload uses), so we get the renderer sandbox for free. Bumping
+      // this back to false should never be necessary unless the preload adds
+      // direct Node API usage — which it shouldn't, since everything heavy
+      // lives in pollis-node behind ipcMain.handle handlers in the main
+      // process.
       sandbox: true,
     },
   });
@@ -182,6 +183,22 @@ function createWindow(): BrowserWindow {
       path.join(process.resourcesPath, "frontend", "index.html"),
     );
   }
+
+  // Safety net for stray file drops / accidental link navigations. The
+  // renderer's dropzone (bridge onDragDropEvent) preventDefaults OS file
+  // drops, so this normally never fires — but if a drop ever escapes that
+  // handler, Chromium's default action is to navigate the window to the
+  // dropped `file://…` path, blanking the app (the reported regression). In-
+  // app routing uses the history API, which does NOT trigger will-navigate,
+  // and the initial loadURL/loadFile is programmatic (also exempt), so
+  // blocking renderer-initiated full navigations away from the current
+  // document is safe for the SPA. External links go through
+  // shell.openExternal elsewhere.
+  win.webContents.on("will-navigate", (e, url) => {
+    if (url !== win.webContents.getURL()) {
+      e.preventDefault();
+    }
+  });
 
   // Close behaviour:
   //   macOS — always hide on close; the app stays in the dock until Cmd+Q
@@ -212,11 +229,12 @@ function createWindow(): BrowserWindow {
   win.on("moved", () => sendToAllRenderers("window:moved"));
 
   // OS file drag-drop: Chromium delivers files to the renderer through the
-  // standard DataTransfer API, so we don't need to intercept here. The
-  // `windowOnDragDropEvent` channel is wired for parity with Tauri but only
-  // fires from `will-prevent-unload`-style hooks if added later. The Phase
-  // 4 plumbing doc explicitly punts the producer-side rewrite — the bridge
-  // returns the listener handle for callers; main currently never emits.
+  // standard DataTransfer API, so the producer is the renderer, not main.
+  // The bridge's onDragDropEvent (frontend/src/bridge/window.ts) attaches DOM
+  // dragenter/over/leave/drop listeners, preventDefaults them, and resolves
+  // native paths via webUtils.getPathForFile — feeding the same
+  // DragDropPayload AppShell consumed under Tauri. The legacy
+  // `window:dragdrop` IPC channel is therefore dead and main never emits it.
 
   return win;
 }

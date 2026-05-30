@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 
 // All command IPC routes through a single "invoke" channel — main process
 // dispatches by name into pollis-node, same shape as Tauri's invoke_handler.
@@ -87,6 +87,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     subscribe("window:dragdrop", (payload) =>
       cb(payload as { payload: { type: "enter" | "over" | "drop" | "leave"; paths: string[] } }),
     ),
+
+  // Resolve a dropped File to its absolute path. `webUtils` is on Electron's
+  // sandboxed-preload allowlist, so this works under `sandbox: true`. The
+  // bridge's onDragDropEvent (frontend/src/bridge/window.ts) calls this for
+  // each dropped file to rebuild the native-path payload AppShell expects.
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 
   // ── Monitors ───────────────────────────────────────────────────────────────
   availableMonitors: () =>
