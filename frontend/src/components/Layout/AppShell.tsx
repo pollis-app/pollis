@@ -13,6 +13,7 @@ import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
 import { TerminalView } from "../TerminalView";
 import { useAppStore } from "../../stores/appStore";
+import { isDropTargetActive } from "../../stores/dropTargetStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
 import { useBadge } from "../../hooks/useBadge";
@@ -142,12 +143,23 @@ export const AppShell: React.FC = () => {
     }
   }, [isTerminal]);
 
-  // Global file drop — Tauri intercepts OS drag-drop before the browser sees it.
+  // Global file drop. The bridge's onDragDropEvent normalizes OS drag-drop
+  // (DOM events under Electron, native events under Tauri) into a common
+  // payload; we show the overlay and rebroadcast dropped paths to the mounted
+  // ChatInput via `pollis:pathdrop`.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     let cancelled = false;
 
     getCurrentWindow().onDragDropEvent((event) => {
+      // Only react when a ChatInput is mounted to receive the file. Otherwise
+      // (e.g. a voice/stream view) the drop has nowhere to go, so suppress the
+      // overlay. The bridge still preventDefaults the drop, so the window
+      // never navigates to the dropped file regardless of view.
+      if (!isDropTargetActive()) {
+        setIsDragOver(false);
+        return;
+      }
       if (event.payload.type === "enter" || event.payload.type === "over") {
         setIsDragOver(true);
       } else if (event.payload.type === "drop") {
