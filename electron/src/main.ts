@@ -115,6 +115,110 @@ function broadcastChannel(channelId: string, payload: unknown): void {
   }
 }
 
+// Background notification path. When the BrowserWindow is hidden (macOS
+// Cmd+W → `win.hide()`, Linux/Windows close-to-tray → same), Chromium
+// background-throttles the renderer's JS VM and the `useLiveKitRealtime`
+// `new_message` handler stops firing reliably. That means the in-renderer
+// `notify()` call that produces the system notification never runs and the
+// user gets nothing while their app sits in the dock / tray. To fix it we
+// also intercept `new_message` events here in the main process and fire
+// the OS notification ourselves when the window isn't visible. The
+// renderer keeps its current handler for the visible-window case (where
+// it already has selection + room-name context); main only steps in when
+// the renderer can't.
+//
+// State source of truth: prefs come from the Rust `get_preferences`
+// command (the same JSON blob the renderer reads — no localStorage, no
+// IPC-pushed mirror), and active user id comes from `get_session`. Both
+// are cached with short TTLs because pollis-node is in-process and the
+// calls are cheap, but doing one per incoming event would still be wasteful.
+
+type NewMessageEvent = {
+  type: "new_message";
+  channel_id: string | null;
+  conversation_id: string | null;
+  sender_id: string;
+  sender_username: string | null;
+};
+
+let bgNotifyActiveUserId: string | null = null;
+let bgNotifyActiveUserAt = 0;
+const bgNotifyPrefsByUser = new Map<
+  string,
+  { allowDesktopNotifications: boolean; at: number }
+>();
+const BG_NOTIFY_USER_TTL_MS = 60_000;
+const BG_NOTIFY_PREFS_TTL_MS = 30_000;
+
+function invalidateBgNotifyCaches(): void {
+  bgNotifyActiveUserId = null;
+  bgNotifyActiveUserAt = 0;
+  bgNotifyPrefsByUser.clear();
+}
+
+async function getBgNotifyActiveUserId(): Promise<string | null> {
+  const now = Date.now();
+  if (bgNotifyActiveUserId !== null && now - bgNotifyActiveUserAt < BG_NOTIFY_USER_TTL_MS) {
+    return bgNotifyActiveUserId;
+  }
+  try {
+    const session = (await pollisNode.invoke("get_session", null)) as
+      | { id?: string }
+      | null;
+    bgNotifyActiveUserId = session?.id ?? null;
+    bgNotifyActiveUserAt = now;
+    return bgNotifyActiveUserId;
+  } catch {
+    return bgNotifyActiveUserId;
+  }
+}
+
+async function getBgNotifyAllowed(userId: string): Promise<boolean> {
+  const now = Date.now();
+  const cached = bgNotifyPrefsByUser.get(userId);
+  if (cached && now - cached.at < BG_NOTIFY_PREFS_TTL_MS) {
+    return cached.allowDesktopNotifications;
+  }
+  try {
+    const json = (await pollisNode.invoke("get_preferences", { userId })) as string;
+    const parsed = JSON.parse(json) as { allow_desktop_notifications?: boolean };
+    const allow = parsed.allow_desktop_notifications === true;
+    bgNotifyPrefsByUser.set(userId, { allowDesktopNotifications: allow, at: now });
+    return allow;
+  } catch {
+    return cached?.allowDesktopNotifications ?? false;
+  }
+}
+
+async function maybeFireBackgroundNotification(payload: unknown): Promise<void> {
+  if (!Notification.isSupported()) {
+    return;
+  }
+  // Window visible → let the renderer's existing path own this event so
+  // selection check + room-name lookup keep working. `isVisible()` returns
+  // false after `win.hide()` (the only path Cmd+W / tray-close take), so
+  // this is the right gate.
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+    return;
+  }
+  const event = payload as Partial<NewMessageEvent> | null;
+  if (!event || event.type !== "new_message" || !event.sender_id) {
+    return;
+  }
+  const userId = await getBgNotifyActiveUserId();
+  if (!userId || event.sender_id === userId) {
+    return;
+  }
+  if (!(await getBgNotifyAllowed(userId))) {
+    return;
+  }
+  const senderUsername = event.sender_username ?? "Someone";
+  new Notification({
+    title: "New message",
+    body: `${senderUsername}: New message`,
+  }).show();
+}
+
 function sendToAllRenderers(event: string, payload?: unknown): void {
   for (const wc of webContents.getAllWebContents()) {
     if (!wc.isDestroyed()) {
@@ -277,7 +381,10 @@ void app.whenReady().then(async () => {
   // any subscribe_* invocation; the Rust side stores the callback in a
   // static OnceLock and panics on send() if it's not set.
   pollisNode.registerEventEmitters(
-    ({ channelId, payload }) => broadcastChannel(channelId, payload),
+    ({ channelId, payload }) => {
+      broadcastChannel(channelId, payload);
+      void maybeFireBackgroundNotification(payload);
+    },
     ({ channelId, payload }) => broadcastChannel(channelId, payload),
   );
 
@@ -361,7 +468,23 @@ void app.whenReady().then(async () => {
             ?.headers ?? null;
         return pollisNode.invokeRaw(cmd, Buffer.from(args), headers);
       }
-      return pollisNode.invoke(cmd, args);
+      const result = await pollisNode.invoke(cmd, args);
+      // Invalidate the main-process notification caches whenever the renderer
+      // mutates state they read from. Keeps the prefs-toggle UX immediate
+      // (no 30 s stale window after toggling "Desktop notifications") and
+      // ensures a logout / account switch wipes the cached user id before
+      // the next event arrives. Cheaper than subscribing to events on the
+      // Rust side and doesn't require new commands.
+      if (
+        cmd === "save_preferences" ||
+        cmd === "logout" ||
+        cmd === "verify_otp" ||
+        cmd === "dev_login" ||
+        cmd === "delete_account"
+      ) {
+        invalidateBgNotifyCaches();
+      }
+      return result;
     },
   );
 
