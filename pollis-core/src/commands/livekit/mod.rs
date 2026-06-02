@@ -45,10 +45,11 @@ pub use participants::{
     list_voice_participants, list_voice_room_counts, VoiceParticipantInfo, VoiceRoomCount,
 };
 pub use publish::{
-    cancel_call, publish_deleted_message_to_room, publish_edited_message_to_room,
-    publish_member_role_changed_to_room, publish_membership_changed_to_room,
-    publish_new_message_to_room, publish_ping, publish_to_room_server, publish_to_user_inbox,
-    publish_typing, publish_voice_presence, start_call, StartCallResult,
+    cancel_call, dismiss_call_on_my_devices, publish_deleted_message_to_room,
+    publish_edited_message_to_room, publish_member_role_changed_to_room,
+    publish_membership_changed_to_room, publish_new_message_to_room, publish_ping,
+    publish_to_room_server, publish_to_user_inbox, publish_typing, publish_voice_presence,
+    start_call, StartCallResult,
 };
 pub use realtime::{connect_rooms, subscribe_realtime};
 

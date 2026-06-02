@@ -18,8 +18,12 @@ import { useKeyChangeStore } from '../stores/keyChangeStore';
 import { useRosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
 
-// Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
+// Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
+// (When the same UX outcome already exists as a variant, reuse it — e.g.
+// "dismiss call on my other devices" reuses `call_canceled` because the
+// renderer-side handling is identical. Don't split logic just because the
+// trigger is different.)
 type RealtimeEvent =
   | {
     type: 'new_message';

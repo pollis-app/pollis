@@ -567,13 +567,25 @@ export const AppShell: React.FC = () => {
                 // before activeVoiceChannelId flips and any in-flight Call
                 // page useEffect tries to bounce off a transient mismatch),
                 // then swap the voice room, then clear the alert.
-                router.navigate({ to: "/call/$callId", params: { callId: incomingCall.callId } });
+                const callId = incomingCall.callId;
+                router.navigate({ to: "/call/$callId", params: { callId } });
                 voiceSession.setIntent({
                   channelId: incomingCall.roomName,
                   groupId: null,
                   counterpartyUserId: incomingCall.callerId,
                 });
                 setIncomingCall(null);
+                // Stop ringing on this user's other devices. The renderer's
+                // own `call_canceled` handler is idempotent (no-ops when the
+                // local incomingCall is null) so re-receiving our own
+                // dismissal here is safe; every other device clears within
+                // the data-packet RTT.
+                if (currentUser) {
+                  invoke("dismiss_call_on_my_devices", {
+                    userId: currentUser.id,
+                    callId,
+                  }).catch(() => {});
+                }
               }}
               aria-label={`Answer call from @${incomingCall.callerUsername}`}
             >
@@ -588,6 +600,14 @@ export const AppShell: React.FC = () => {
                 const callId = incomingCall.callId;
                 setIncomingCall(null);
                 invoke("cancel_call", { otherUserId: callerId, callId }).catch(() => {});
+                // Stop ringing on this user's other devices — same idempotent
+                // path the answer button uses; see comment there.
+                if (currentUser) {
+                  invoke("dismiss_call_on_my_devices", {
+                    userId: currentUser.id,
+                    callId,
+                  }).catch(() => {});
+                }
               }}
               aria-label="Decline call"
             >

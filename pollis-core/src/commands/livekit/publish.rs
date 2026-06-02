@@ -521,3 +521,38 @@ pub async fn cancel_call(
 
     Ok(())
 }
+
+/// Tells THIS user's other devices that the incoming call has been handled
+/// here (answered or declined), so they should stop ringing. Posts a
+/// `call_canceled` payload to the caller's own inbox room — every device
+/// the user has connected receives it through the existing realtime path.
+///
+/// Reuses the `call_canceled` event variant rather than introducing a new
+/// one: the renderer's existing handler (`useLiveKitRealtime.ts`) is already
+/// idempotent — it no-ops when local `incomingCall` is null — so the
+/// originating device safely re-receives its own dismissal, and every other
+/// device clears its alert + stops the ring within the data-packet RTT.
+///
+/// Distinct from `cancel_call` because that one posts to the OTHER party.
+/// This one posts to ourselves. Calling `cancel_call(self_id, …)` would
+/// work mechanically but conflates the "tell the peer" semantics with the
+/// "fan out to my own devices" semantics, which the type signature should
+/// keep separate.
+pub async fn dismiss_call_on_my_devices(
+    user_id: String,
+    call_id: String,
+    state: &Arc<AppState>,
+) -> Result<()> {
+    if state.config.livekit_url.is_empty() {
+        return Ok(());
+    }
+
+    let payload = serde_json::json!({
+        "type": "call_canceled",
+        "call_id": call_id,
+    });
+
+    publish_to_user_inbox(&state.config, &user_id, payload).await?;
+
+    Ok(())
+}
