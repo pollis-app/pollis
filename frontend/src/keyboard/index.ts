@@ -16,3 +16,4 @@ export {
   subscribeShortcutOverrides,
 } from "./bindings";
 export { formatCombo } from "./keyCombo";
+export { useShortcutLabel } from "./useShortcutLabel";

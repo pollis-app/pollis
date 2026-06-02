@@ -21,7 +21,7 @@ import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
 import { usePeerVerifications } from "../../hooks/queries/useUserProfile";
 import { useAppStore } from "../../stores/appStore";
 import { usePresenceStatus, type PresenceStatus } from "../../stores/presenceStore";
-import { shortcutLabel } from "../../utils/platform";
+import { useShortcutLabel } from "../../keyboard";
 
 const SIDEBAR_WIDTH = 220;
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
@@ -48,6 +48,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
@@ -302,8 +303,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
         type="button"
         data-testid="sidebar-close"
         onClick={onToggle}
-        aria-label={`Close sidebar (${shortcutLabel("B")})`}
-        title={`Close sidebar (${shortcutLabel("B")})`}
+        aria-label={`Close sidebar (${toggleSidebarLabel})`}
+        title={`Close sidebar (${toggleSidebarLabel})`}
         className="transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-text)]"
         style={{
           flexShrink: 0,
@@ -333,7 +334,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
             lineHeight: 1.2,
           }}
         >
-          {shortcutLabel("B")}
+          {toggleSidebarLabel}
         </kbd>
       </button>
     </aside>

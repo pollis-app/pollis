@@ -117,8 +117,9 @@ const KEY_LABELS: Record<string, string> = {
 };
 
 /**
- * Human-facing label for a combo, e.g. "⌘K" on macOS / "Ctrl+K" elsewhere.
- * Matches the style of the existing utils/platform `shortcutLabel`.
+ * Human-facing label for a combo, e.g. "⌘ K" on macOS / "Ctrl+K" elsewhere.
+ * Thin space (U+2009) between modifier glyphs and key on macOS gives the
+ * kbd badge some breathing room; other platforms use the conventional "+".
  */
 export function formatCombo(combo: string): string {
   const p = parseCombo(combo);
