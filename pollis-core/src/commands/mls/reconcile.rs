@@ -15,8 +15,16 @@ use ulid::Ulid;
 
 use crate::state::AppState;
 
-use super::group_state::{init_mls_group, publish_group_info};
+use super::group_state::{init_mls_group, process_pending_commits_locked, publish_group_info};
 use super::provider::{parse_credential_device_id, parse_credential_user_id, PollisProvider, CS};
+
+/// Result of the compare-and-swap commit submission in `reconcile_group_mls_impl`.
+enum SubmitOutcome {
+    /// Our commit claimed its epoch and was persisted (welcomes too).
+    Committed,
+    /// Another member already committed this epoch; nothing was written.
+    LostRace,
+}
 
 // ── Phase 4.5: MLS group self-repair ─────────────────────────────────────────
 
@@ -311,6 +319,13 @@ pub async fn reconcile_group_mls_impl(
 ) -> crate::error::Result<ReconcileOutcome> {
     let conversation_id = conversation_id.to_owned();
     let actor_user_id = actor_user_id.to_owned();
+
+    // Serialize all MLS mutations for this conversation on this device so two
+    // concurrent reconciles (or a reconcile racing the external-join path)
+    // can't both stage + commit from the same epoch. Held for the whole
+    // function; the lost-race recovery below calls the unlocked
+    // `process_pending_commits_locked` rather than re-acquiring.
+    let _mls_guard = state.mls_group_lock(&conversation_id).await;
 
     let conn = state.remote_db.conn().await?;
 
@@ -608,22 +623,33 @@ pub async fn reconcile_group_mls_impl(
         // connection here is not a retry — it's preventing a stale stream
         // from being our only attempt. On failure, roll back the local
         // pending commit before returning.
-        let remote_result: crate::error::Result<()> = async {
+        let remote_result: crate::error::Result<SubmitOutcome> = async {
             let write_conn = state.remote_db.conn().await?;
-            write_conn.execute(
-                "INSERT INTO mls_commit_log \
-                 (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                libsql::params![
-                    conversation_id.clone(),
-                    outcome.epoch_before as i64,
-                    actor_user_id.clone(),
-                    data.commit_bytes,
-                    added_uid,
-                    added_dids
-                ],
-            )
-            .await?;
+            // Claim this epoch via compare-and-swap. If another member already
+            // committed `epoch_before`, the conflict makes this a no-op (0
+            // rows) and we report a lost race instead of forking. We must NOT
+            // write the welcomes in that case — they'd point at a branch no one
+            // adopts.
+            let affected = write_conn
+                .execute(
+                    "INSERT INTO mls_commit_log \
+                     (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+                     ON CONFLICT(conversation_id, epoch) DO NOTHING",
+                    libsql::params![
+                        conversation_id.clone(),
+                        outcome.epoch_before as i64,
+                        actor_user_id.clone(),
+                        data.commit_bytes,
+                        added_uid,
+                        added_dids
+                    ],
+                )
+                .await?;
+
+            if affected == 0 {
+                return Ok(SubmitOutcome::LostRace);
+            }
 
             if let Some(welcome_bytes) = data.welcome_bytes {
                 for (uid, did) in &outcome.added {
@@ -636,7 +662,7 @@ pub async fn reconcile_group_mls_impl(
                     .await?;
                 }
             }
-            Ok(())
+            Ok(SubmitOutcome::Committed)
         }
         .await;
 
@@ -672,7 +698,44 @@ pub async fn reconcile_group_mls_impl(
                 }
                 return Err(e);
             }
-            Ok(()) => {
+            Ok(SubmitOutcome::LostRace) => {
+                // Another member committed this epoch first. Our staged commit
+                // is on a branch no one will adopt, so roll it back (same as
+                // the remote-failure path) — do NOT merge, or we'd fork. We
+                // were already a member on the canonical branch; we just lost a
+                // commit race.
+                eprintln!(
+                    "[mls] reconcile: lost epoch {} race for {conversation_id} — rolling back local pending commit and converging on the winner",
+                    outcome.epoch_before
+                );
+                {
+                    let guard = state.local_db.lock().await;
+                    if let Some(db) = guard.as_ref() {
+                        let provider = PollisProvider::new(db.conn());
+                        let group_id = GroupId::from_slice(conversation_id.as_bytes());
+                        if let Ok(Some(mut group)) = MlsGroup::load(provider.storage(), &group_id) {
+                            if let Err(clear_err) = group.clear_pending_commit(provider.storage()) {
+                                eprintln!(
+                                    "[mls] reconcile: clear_pending_commit failed after lost race: {clear_err}"
+                                );
+                            }
+                        }
+                    }
+                }
+                // Apply the winning commit so we advance to the current epoch.
+                // The lock is already held, so use the unlocked variant. The
+                // pending invite / membership row persists, so a later
+                // reconcile re-applies our change at the new epoch.
+                if let Err(e) =
+                    process_pending_commits_locked(state, &conversation_id, &actor_user_id).await
+                {
+                    eprintln!(
+                        "[mls] reconcile: converge-after-lost-race failed for {conversation_id}: {e}"
+                    );
+                }
+                return Ok(ReconcileOutcome::default());
+            }
+            Ok(SubmitOutcome::Committed) => {
                 // Remote persisted — now merge locally to advance the epoch.
                 // Scope the provider + group tightly so neither crosses an
                 // await (PollisProvider wraps &rusqlite::Connection which

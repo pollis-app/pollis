@@ -115,6 +115,67 @@ pub async fn external_join_group(
     conversation_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
+    let _guard = state.mls_group_lock(conversation_id).await;
+    external_join_group_inner(state, conversation_id, user_id).await
+}
+
+/// Result of a single external-join attempt — see [`external_join_attempt`].
+enum ExternalJoinResult {
+    /// Our external commit won its epoch and was persisted.
+    Joined,
+    /// Another member already committed at the target epoch; our freshly
+    /// built local branch is doomed and must be discarded before retrying.
+    LostRace,
+}
+
+/// Body of [`external_join_group`]. Assumes the caller already holds the
+/// per-conversation MLS lock (`state.mls_group_lock`).
+///
+/// Submits the external commit as a compare-and-swap on the target epoch (see
+/// [`external_join_attempt`]). On a lost race we discard the doomed local
+/// branch, let the winner republish GroupInfo at the advanced epoch, and retry
+/// — bounded — from the new epoch. This is what stops two concurrent joins
+/// from forking the group.
+pub(crate) async fn external_join_group_inner(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+) -> crate::error::Result<()> {
+    const MAX_JOIN_ATTEMPTS: u32 = 5;
+    for attempt in 0..MAX_JOIN_ATTEMPTS {
+        match external_join_attempt(state, conversation_id, user_id).await? {
+            ExternalJoinResult::Joined => return Ok(()),
+            ExternalJoinResult::LostRace => {
+                eprintln!(
+                    "[mls] external_join_group: lost epoch race for {conversation_id} \
+                     (attempt {}/{MAX_JOIN_ATTEMPTS}) — discarding local branch and retrying",
+                    attempt + 1
+                );
+                // Drop the doomed branch we just built so the next attempt
+                // re-joins cleanly from the advanced GroupInfo.
+                let _ = forget_local_mls_group(state, conversation_id).await;
+                // Brief backoff so the winner can publish GroupInfo at the new
+                // epoch before we re-read it.
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    100 * (attempt as u64 + 1),
+                ))
+                .await;
+            }
+        }
+    }
+    Err(crate::error::Error::Other(anyhow::anyhow!(
+        "external-join for {conversation_id}: epoch contention, exhausted {MAX_JOIN_ATTEMPTS} attempts"
+    )))
+}
+
+/// One external-join attempt: read the current GroupInfo, build an external
+/// commit against it, and try to claim its epoch in `mls_commit_log` via
+/// `ON CONFLICT(conversation_id, epoch) DO NOTHING`. Returns [`ExternalJoinResult`].
+async fn external_join_attempt(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+) -> crate::error::Result<ExternalJoinResult> {
     let device_id = state
         .device_id
         .lock()
@@ -216,23 +277,31 @@ pub async fn external_join_group(
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?
     };
 
-    // 3. Post the commit to mls_commit_log so existing members will
-    //    process it on their next process_pending_commits pass.
+    // 3. Claim this epoch in mls_commit_log via compare-and-swap. If another
+    //    member already committed `stored_epoch`, the conflict makes this a
+    //    no-op (0 rows) and we report a lost race — the branch we just built
+    //    locally is doomed and the caller will discard it and retry.
     let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO mls_commit_log \
-         (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        libsql::params![
-            conversation_id,
-            stored_epoch,
-            user_id,
-            commit_bytes,
-            user_id,
-            device_id.clone()
-        ],
-    )
-    .await?;
+    let affected = conn
+        .execute(
+            "INSERT INTO mls_commit_log \
+             (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
+             ON CONFLICT(conversation_id, epoch) DO NOTHING",
+            libsql::params![
+                conversation_id,
+                stored_epoch,
+                user_id,
+                commit_bytes,
+                user_id,
+                device_id.clone()
+            ],
+        )
+        .await?;
+
+    if affected == 0 {
+        return Ok(ExternalJoinResult::LostRace);
+    }
 
     // 4. Refresh the stored GroupInfo at the new epoch so any NEXT
     //    new device joining via this same path sees the up-to-date
@@ -247,7 +316,7 @@ pub async fn external_join_group(
         "[mls] external_join_group: {user_id}:{device_id} joined {conversation_id} from epoch {stored_epoch}"
     );
 
-    Ok(())
+    Ok(ExternalJoinResult::Joined)
 }
 
 // ── Phase 3: Group / DM creation ─────────────────────────────────────────────
@@ -412,7 +481,24 @@ pub async fn forget_local_mls_group(
 /// falls back to external-join using the published GroupInfo.
 ///
 /// `user_id` is needed for the external-join fallback.
+///
+/// Acquires the per-conversation MLS lock for the duration so concurrent
+/// callers on this device (send, channel/DM ingest, the realtime inbox
+/// handler) can't race into a commit fork. The actual work is in
+/// [`process_pending_commits_locked`]; callers that already hold the lock
+/// (e.g. reconcile's lost-race recovery) must call that directly.
 pub async fn process_pending_commits_inner(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+) -> crate::error::Result<()> {
+    let _guard = state.mls_group_lock(mls_group_id).await;
+    process_pending_commits_locked(state, mls_group_id, user_id).await
+}
+
+/// Body of [`process_pending_commits_inner`]. Assumes the caller already holds
+/// the per-conversation MLS lock (`state.mls_group_lock`).
+pub(crate) async fn process_pending_commits_locked(
     state: &Arc<AppState>,
     mls_group_id: &str,
     user_id: &str,
@@ -433,8 +519,9 @@ pub async fn process_pending_commits_inner(
     let initial_epoch = match has_group {
         Some(epoch) => epoch,
         None => {
-            // No local group — external-join to create one.
-            if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
+            // No local group — external-join to create one. Lock already held
+            // by the wrapper, so call the unlocked inner variant.
+            if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
                 eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
             }
             return Ok(());
@@ -493,7 +580,7 @@ pub async fn process_pending_commits_inner(
     //    state.
     let mut current_epoch = initial_epoch;
     let mut any_applied = false;
-    'commit_loop: for commit in pending {
+    for commit in pending {
         if commit.epoch as u64 != current_epoch {
             eprintln!(
                 "[mls] process_pending_commits: epoch gap for {mls_group_id}: \
@@ -576,14 +663,37 @@ pub async fn process_pending_commits_inner(
                 }
                 Err(e) => {
                     let msg = format!("{e}");
-                    // If we were evicted (kicked), delete the stale group so
-                    // external-join recovery can create a fresh one.
+                    // Two distinct recoverable failures, both handled by
+                    // dropping the local group so the external-rejoin below
+                    // rebuilds it from the latest published GroupInfo:
+                    //
+                    //   1. Eviction — we were removed; our keys can't open the
+                    //      commit. Re-join only if we're still a roster member
+                    //      (external_join no-ops cleanly if GroupInfo is gone).
+                    //
+                    //   2. Fork — the commit is at our CURRENT epoch (it passed
+                    //      the epoch-gap check above) yet still won't apply, so
+                    //      our local tree has diverged from the canonical
+                    //      branch. This is the residue of a historical
+                    //      concurrent-commit race (prod incident: group
+                    //      `01KQYX89…`); the UNIQUE(conversation_id, epoch)
+                    //      constraint stops new forks, but already-forked
+                    //      devices only heal by re-joining the live branch.
+                    //
+                    // Deleting drops only this device's MLS crypto state, not
+                    // its decrypted message history (that lives in the local
+                    // `message` table). The rejoin lands at the latest epoch,
+                    // so the next pass filters `epoch >= new_epoch` and can't
+                    // re-fail on the same commit — no recovery loop.
                     if msg.contains("evicted") {
                         eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
-                        let _ = group.delete(provider.storage());
                     } else {
-                        eprintln!("[mls] process_pending_commits: {e} for {mls_group_id} at epoch {} — stopping", commit.epoch);
+                        eprintln!(
+                            "[mls] process_pending_commits: commit at epoch {} for {mls_group_id} failed to apply ({e}) — local state diverged from canonical branch; deleting local group to re-join",
+                            commit.epoch
+                        );
                     }
+                    let _ = group.delete(provider.storage());
                     break;
                 }
             }
@@ -617,7 +727,8 @@ pub async fn process_pending_commits_inner(
     };
     if !group_exists {
         eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
-        if let Err(e) = external_join_group(state, mls_group_id, user_id).await {
+        // Lock already held by the wrapper, so call the unlocked inner variant.
+        if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
             eprintln!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
         }
     }
