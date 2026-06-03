@@ -111,6 +111,10 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
   }
 
   const accentColor = readAccent();
+  // Enemies + their bullets are drawn in the inverted accent so they read
+  // distinctly from the player's accent-colored ship/shots/asteroids — high
+  // contrast without introducing a second theme color or a user preference.
+  const contrastColor = invertColor(accentColor, ctx);
 
   // ─── DPR + letterbox transform ───────────────────────────────────────────
   let cssW = 0;
@@ -504,7 +508,11 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
       c.beginPath();
       c.arc(b.pos.x, b.pos.y, BULLET_RADIUS, 0, Math.PI * 2);
       if (b.hostile) {
+        // Inverted-accent outline so hostile fire is distinguishable from the
+        // player's accent-colored shots. Restore accent for later draws.
+        c.strokeStyle = contrastColor;
         c.stroke();
+        c.strokeStyle = accentColor;
       } else {
         c.fill();
       }
@@ -555,8 +563,10 @@ export function startGame(canvas: HTMLCanvasElement): GameHandle {
     c.save();
     c.translate(e.pos.x, e.pos.y);
     c.rotate(e.rot);
-    // Inverted silhouette: solid accent fill so enemies pop against the
-    // outline-only asteroids/player. Inner detail is a dark cutout.
+    // Inverted silhouette: solid inverted-accent fill so enemies pop against
+    // the outline-only, accent-colored asteroids/player. Inner detail is a
+    // dark cutout. (drawEnemy's save/restore reverts fillStyle afterward.)
+    c.fillStyle = contrastColor;
     c.beginPath();
     c.moveTo(ENEMY_RADIUS, 0);
     c.lineTo(0, ENEMY_RADIUS * 0.85);
@@ -898,4 +908,44 @@ function readAccent(): string {
     .getPropertyValue("--c-accent")
     .trim();
   return v || "#5ce1e6";
+}
+
+/**
+ * RGB-invert a CSS color. Normalizes any canvas-parseable color (the accent
+ * arrives as `hsl(...)` from `--c-accent`) to RGB by round-tripping it through
+ * the 2D context — the same parse the renderer already relies on — then
+ * inverts each channel. Used to derive the enemy/hostile-bullet color from the
+ * accent so the game stays single-accent and preference-free.
+ */
+function invertColor(color: string, ctx: CanvasRenderingContext2D): string {
+  const prev = ctx.fillStyle;
+  ctx.fillStyle = color;
+  const normalized = String(ctx.fillStyle);
+  ctx.fillStyle = prev;
+
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (normalized.startsWith("#")) {
+    const hex = normalized.slice(1);
+    const full =
+      hex.length === 3
+        ? hex
+            .split("")
+            .map((ch) => ch + ch)
+            .join("")
+        : hex;
+    r = parseInt(full.slice(0, 2), 16);
+    g = parseInt(full.slice(2, 4), 16);
+    b = parseInt(full.slice(4, 6), 16);
+  } else {
+    const parts = normalized.match(/[\d.]+/g);
+    if (parts && parts.length >= 3) {
+      r = Math.round(parseFloat(parts[0]));
+      g = Math.round(parseFloat(parts[1]));
+      b = Math.round(parseFloat(parts[2]));
+    }
+  }
+  const inv = (n: number) => (255 - n).toString(16).padStart(2, "0");
+  return `#${inv(r)}${inv(g)}${inv(b)}`;
 }
