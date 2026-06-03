@@ -1020,3 +1020,114 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
     drop(dave);
     drop(erin);
 }
+
+/// #356 — a device whose `user_device` row has been deleted (the revoked-device
+/// state) must not be able to climb back into a group it was removed from.
+///
+/// Modeled cross-user: each `TestClient` user gets its own local DB, whereas
+/// the harness shares one local DB per `user_id` and so cannot represent two
+/// independent devices of the *same* user (that intra-user path is validated by
+/// manual multi-device testing). The MLS mechanics are identical either way —
+/// a leaf whose device cert is gone must fail cross-signing verification, so the
+/// device cannot rejoin. Before this fix the verification was advisory, so a
+/// removed device with live Turso write creds external-joined straight back in.
+///
+/// Asserts: after removal + cert deletion the device does NOT auto-rejoin,
+/// cannot read post-removal messages, and does not wedge the group (the
+/// rejected self-add must not be allowed to squat the epoch under the
+/// UNIQUE(conversation_id, epoch) constraint).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn revoked_device_cannot_rejoin_group() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Revoke").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // bob + carol join.
+    for (c, p) in [(&bob, &bob_p), (&carol, &carol_p)] {
+        alice.invite(&group_id, &p.username).await;
+        let invite_id = c
+            .first_pending_invite()
+            .await
+            .expect("invite")["id"]
+            .as_str()
+            .expect("invite id")
+            .to_string();
+        c.accept_invite(&invite_id).await;
+        c.poll().await;
+        alice.process_commits_for(&channel_id).await;
+    }
+    bob.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // Baseline: everyone decrypts.
+    alice.send_channel_message(&channel_id, "before").await;
+    for (c, label) in [(&alice, "alice"), (&bob, "bob"), (&carol, "carol")] {
+        let msgs = c.fetch_channel_messages(&channel_id).await;
+        let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(
+            contents.contains(&"before"),
+            "{label} should decrypt 'before', got: {contents:?}"
+        );
+    }
+
+    // Revoke bob's device: delete its `user_device` row so cross-signing
+    // verification can no longer pass for it (the revoked-device state).
+    {
+        let conn = alice.state.remote_db.conn().await.expect("remote conn");
+        conn.execute(
+            "DELETE FROM user_device WHERE user_id = ?1",
+            libsql::params![bob_p.id.clone()],
+        )
+        .await
+        .expect("delete bob user_device");
+    }
+
+    // Remove bob from the group — reconcile prunes his leaf.
+    alice.remove_member(&group_id, &bob_p.id).await;
+    alice.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // bob syncs: evicted → must NOT external-join back in (device row gone).
+    bob.fetch_channel_messages(&channel_id).await;
+
+    // alice sends after the revoke.
+    alice.send_channel_message(&channel_id, "after-revoke").await;
+
+    // alice + carol read it; bob (revoked, out of the tree) does not.
+    for (c, label) in [(&alice, "alice"), (&carol, "carol")] {
+        let msgs = c.fetch_channel_messages(&channel_id).await;
+        let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(
+            contents.contains(&"after-revoke"),
+            "{label} should decrypt 'after-revoke', got: {contents:?}"
+        );
+    }
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_contents: Vec<&str> = bob_msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+    assert!(
+        !bob_contents.contains(&"after-revoke"),
+        "REVOCATION BYPASS: revoked bob decrypted a post-revoke message — it rejoined the group. got: {bob_contents:?}"
+    );
+
+    // No wedge: the group keeps advancing after the rejected rejoin attempt.
+    alice.send_channel_message(&channel_id, "after-2").await;
+    let carol_msgs = carol.fetch_channel_messages(&channel_id).await;
+    let carol_contents: Vec<&str> = carol_msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+    assert!(
+        carol_contents.contains(&"after-2"),
+        "group wedged after revoke — carol could not receive a new message. got: {carol_contents:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
