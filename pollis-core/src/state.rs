@@ -88,6 +88,18 @@ pub struct AppState {
     /// alive and Squirrel.Mac's ShipIt helper sits forever waiting for
     /// the parent PID to die — i.e. the "Relaunching…" hang #335 fixes.
     pub shutdown_signal: Arc<Notify>,
+    /// Per-conversation locks serializing MLS group mutations within this
+    /// process. The MLS sync path (`process_pending_commits`,
+    /// `external_join_group`, reconcile) has several independent callers —
+    /// `send_message`, channel + DM ingest, the realtime inbox handler, and
+    /// device-enrollment finalize. Without serialization two of them can both
+    /// observe "no local group", both external-join, and post two distinct
+    /// commits at the same epoch, forking the group (prod incident: group
+    /// `01KQYX89…`). One lock per `conversation_id` makes the
+    /// read-modify-write of an MLS group's local state + its commit-log INSERT
+    /// atomic on this device. Cross-device races are caught instead by the
+    /// `UNIQUE(conversation_id, epoch)` constraint on `mls_commit_log`.
+    pub mls_group_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl AppState {
@@ -130,7 +142,28 @@ impl AppState {
             #[cfg(not(any(target_os = "ios", target_os = "android")))]
             terminals: Arc::new(Mutex::new(HashMap::new())),
             shutdown_signal: Arc::new(Notify::new()),
+            mls_group_locks: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Acquire the per-conversation MLS lock. The returned guard must be held
+    /// for the full read-modify-write of the group's local MLS state plus its
+    /// `mls_commit_log` INSERT, so concurrent callers on this device can't race
+    /// into a commit fork. The lock is keyed by `conversation_id` (group_id for
+    /// channels, conversation_id for DMs — the same id used as the MLS group
+    /// id). Non-reentrant: a caller already holding this lock must call the
+    /// `*_locked` helper variants rather than re-acquiring.
+    pub async fn mls_group_lock(
+        &self,
+        conversation_id: &str,
+    ) -> tokio::sync::OwnedMutexGuard<()> {
+        let entry = {
+            let mut map = self.mls_group_locks.lock().await;
+            map.entry(conversation_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(())))
+                .clone()
+        };
+        entry.lock_owned().await
     }
 
     /// Tear down long-lived background tasks so the host process can
