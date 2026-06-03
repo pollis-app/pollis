@@ -65,6 +65,7 @@ export const AppShell: React.FC = () => {
     setGroups,
     setChannels,
     voiceState,
+    voiceParticipants,
     statusBarAlert,
     setStatusBarAlert,
     voiceError,
@@ -417,7 +418,25 @@ export const AppShell: React.FC = () => {
       return "voice";
     }
     if (activeVoiceChannelId.startsWith("call-")) {
-      return "call";
+      // 1:1 DM call — show the other person's name, not a generic "call".
+      const peerId =
+        voiceState.kind === "joined" || voiceState.kind === "joining"
+          ? voiceState.counterpartyUserId
+          : null;
+      if (peerId) {
+        const peer = voiceParticipants.find(
+          (p) => p.identity === `voice-${peerId}`,
+        );
+        if (peer?.name) {
+          return peer.name;
+        }
+        // Peer hasn't joined the room yet (outgoing ring) — fall back to the
+        // caller name from the incoming-call slot when it's the same person.
+        if (incomingCall && incomingCall.callerId === peerId) {
+          return incomingCall.callerUsername;
+        }
+      }
+      return "Call";
     }
     for (const g of groupsWithChannels ?? []) {
       const ch = g.channels.find((c) => c.id === activeVoiceChannelId);
@@ -426,7 +445,7 @@ export const AppShell: React.FC = () => {
       }
     }
     return "voice";
-  }, [activeVoiceChannelId, groupsWithChannels]);
+  }, [activeVoiceChannelId, groupsWithChannels, voiceState, voiceParticipants, incomingCall]);
 
   return (
     <div
