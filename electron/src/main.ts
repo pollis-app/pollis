@@ -493,6 +493,19 @@ void app.whenReady().then(async () => {
   // anything real. In dev (`pnpm dev:electron`), short-circuit so the UI's
   // mounted check call doesn't throw — same shape Tauri's plugin uses when
   // there's no update.
+
+  // Detect-only checks. `autoDownload` defaults to true, which makes a plain
+  // `checkForUpdates()` (run every 15 min by the renderer's updatePoller, whose
+  // sole job is to surface an "update available" banner) silently download the
+  // update in the background. The `update-downloaded` listener below then
+  // quitAndInstalls it — so a routine check would update the app out from under
+  // the user while it's open. Turning autoDownload off makes `checkForUpdates()`
+  // report-only; the actual download happens only via the explicit
+  // `updater:downloadAndInstall` consent path (UpdateScreen). autoInstallOnAppQuit
+  // is left at its default so an update fetched through that consent flow still
+  // installs cleanly on quit if the user doesn't restart immediately.
+  autoUpdater.autoDownload = false;
+
   ipcMain.handle("updater:check", async () => {
     if (!app.isPackaged) {
       return null;
