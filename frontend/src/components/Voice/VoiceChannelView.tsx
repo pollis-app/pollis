@@ -22,6 +22,15 @@ export const VoiceChannelView: React.FC = () => {
   const shareLocalDims = shareActive ? share.dimensions : null;
   const isJoining = voiceState.kind === 'joining';
 
+  // Navigating away from the voice/call view drops any fullscreen stream.
+  // The viewer lives in AppShell (global overlay) so it would otherwise stay
+  // pinned over other pages when the user leaves this view without closing the
+  // stream first. Runs on unmount only — `setViewingScreenShareTrackKey` is a
+  // stable Zustand setter.
+  React.useEffect(() => {
+    return () => setViewingScreenShareTrackKey(null);
+  }, [setViewingScreenShareTrackKey]);
+
   // When the user is picking a screen-share source we take over the
   // entire channel content area with the in-app picker — no modal, no
   // overlay. This is the project's blanket "no modals" rule
