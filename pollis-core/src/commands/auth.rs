@@ -418,6 +418,15 @@ pub async fn dev_login(
 /// also read a `session_{uid}` keystore blob — a redundant second
 /// source of truth whose transient read failures were a direct cause
 /// of issue #184 kicking users back to OTP. The blob is gone.
+/// Return this device's stable `device_id` (the one registered in
+/// `user_device` and used to scope per-device identities), or `None` if the
+/// device hasn't been registered yet this process. The frontend uses it to
+/// build its own per-device voice identity (`voice-{user_id}:{device_id}`) so
+/// it can tell which voice participant is itself (#140).
+pub async fn get_device_id(state: &Arc<AppState>) -> Result<Option<String>> {
+    Ok(state.device_id.lock().await.clone())
+}
+
 pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     // In development, DEV_EMAIL bypasses the normal session check and logs in directly.
     // Set DEV_EMAIL=user@example.com in .env.development to auto-login on every startup.

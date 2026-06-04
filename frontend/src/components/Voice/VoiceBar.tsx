@@ -5,6 +5,7 @@ import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
+import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import {
   friendlyScreenShareError,
   screenShareSession,
@@ -21,7 +22,6 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
     voiceParticipants,
     voiceState,
     voiceActiveSpeakerIds,
-    currentUser,
   } = useAppStore();
   const voiceIsMuted = voiceState.kind === 'joined' ? voiceState.micMuted : false;
   const share = shareOf(voiceState);
@@ -41,8 +41,10 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
   const leave = () => voiceSession.leave();
 
   // The voice bar is feedback about *other* speakers, so always exclude self.
-  // Local participant identity is `voice-${userId}` (see VoiceSessionManager).
-  const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
+  // The local participant is flagged `isLocal` by VoiceSessionManager (which
+  // owns the device-suffixed identity), so we read it off the list rather than
+  // reconstructing `voice-${userId}`.
+  const localIdentity = voiceParticipants.find((p) => p.isLocal)?.identity ?? null;
   const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter((id) => id !== localIdentity);
   const lastRemoteSpeakerId = remoteActiveSpeakerIds.at(-1);
 
@@ -194,7 +196,8 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
         {lastRemoteSpeakerId
           ? <>
             <Volume2 size={12} style={{ verticalAlign: "middle" }} />
-            {voiceParticipants.find(p => p.identity === lastRemoteSpeakerId)?.name}
+            {disambiguateVoiceNames(voiceParticipants).get(lastRemoteSpeakerId)
+              ?? voiceParticipants.find(p => p.identity === lastRemoteSpeakerId)?.name}
           </>
           : null}
       </span>

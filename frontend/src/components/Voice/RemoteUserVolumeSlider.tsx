@@ -4,12 +4,12 @@ import { Volume2 } from "lucide-react";
 import {
   usePreferences,
   clampRemoteUserVolume,
-  userIdFromVoiceIdentity,
   REMOTE_USER_VOLUME_MIN,
   REMOTE_USER_VOLUME_MAX,
   REMOTE_USER_VOLUME_DEFAULT,
   type PreferencesData,
 } from "../../hooks/queries/usePreferences";
+import { userIdFromVoiceIdentity } from "../../voice/identity";
 
 interface RemoteUserVolumeSliderProps {
   identity: string;

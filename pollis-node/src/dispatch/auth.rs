@@ -19,6 +19,7 @@ pub async fn dispatch(
         "verify_email_change" => Some(verify_email_change(args).await),
         "dev_login" => Some(dev_login(args).await),
         "get_session" => Some(get_session(args).await),
+        "get_device_id" => Some(get_device_id(args).await),
         "logout" => Some(logout(args).await),
         "delete_account" => Some(delete_account(args).await),
         "list_known_accounts" => Some(list_known_accounts(args).await),
@@ -129,6 +130,14 @@ async fn dev_login(args: &serde_json::Value) -> Result<serde_json::Value> {
 async fn get_session(_args: &serde_json::Value) -> Result<serde_json::Value> {
     let state = ensure_state().await?;
     let out = pollis_core::commands::auth::get_session(&state)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(out).map_err(json_err)
+}
+
+async fn get_device_id(_args: &serde_json::Value) -> Result<serde_json::Value> {
+    let state = ensure_state().await?;
+    let out = pollis_core::commands::auth::get_device_id(&state)
         .await
         .map_err(core_err)?;
     serde_json::to_value(out).map_err(json_err)

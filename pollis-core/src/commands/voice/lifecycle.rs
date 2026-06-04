@@ -29,7 +29,23 @@ use crate::{
 use super::devices::get_device;
 use super::playback::{ensure_playback, register_remote_track};
 use super::streams::start_mic_stream;
-use super::types::{JoinTimings, VoiceEvent, VoiceWarmup, VOICE_WARMUP_TTL};
+use super::types::{
+    user_id_from_voice_identity, JoinTimings, VoiceEvent, VoiceWarmup, VOICE_WARMUP_TTL,
+};
+
+/// Build the per-device LiveKit identity for a voice participant:
+/// `voice-{user_id}:{device_id}` when a device id is known (the normal case
+/// once logged in), falling back to the legacy `voice-{user_id}` when it
+/// isn't yet. The `:device_id` suffix is what lets two devices of the same
+/// user coexist in one room instead of colliding on the SFU and kicking each
+/// other (#140) — it mirrors the realtime/inbox flow in `livekit/realtime.rs`.
+/// Parse the `user_id` back out with `types::user_id_from_voice_identity`.
+fn voice_identity(user_id: &str, device_id: Option<&str>) -> String {
+    match device_id {
+        Some(d) => format!("voice-{user_id}:{d}"),
+        None => format!("voice-{user_id}"),
+    }
+}
 
 // ── Tauri commands ────────────────────────────────────────────────────────
 
@@ -99,10 +115,14 @@ pub async fn prepare_voice_connection(
         }
     }
 
+    // Identity must match the one `join_voice_channel` will mint, or the
+    // warmed token is useless. device_id is stable for the process lifetime,
+    // so it doesn't need to be part of the warmup cache key above.
+    let device_id = state.device_id.lock().await.clone();
     let token = make_token(
         &state.config,
         &channel_id,
-        &format!("voice-{user_id}"),
+        &voice_identity(&user_id, device_id.as_deref()),
         &display_name,
     )?;
 
@@ -222,6 +242,15 @@ pub async fn join_voice_channel(
         return Err(anyhow::anyhow!("LiveKit is not configured on this server").into());
     }
 
+    // Per-device LiveKit identity (#140): `voice-{user_id}:{device_id}`. Lets a
+    // second device of the same user join the room as a distinct participant
+    // instead of getting kicked on an identity collision. Stable for the
+    // process, so it's resolved once here and reused for the token, the local
+    // speaking-indicator identity, the seed ParticipantJoined, and the
+    // self-hear filter below.
+    let device_id = state.device_id.lock().await.clone();
+    let local_identity = voice_identity(&user_id, device_id.as_deref());
+
     // Try to consume a fresh warmup for this exact channel + identity. If
     // the warmup is stale or for a different room/user we mint a new token.
     // VoiceWarmup implements Drop (to abort its background task) so we can't
@@ -262,7 +291,7 @@ pub async fn join_voice_channel(
             let t = make_token(
                 &state.config,
                 &channel_id,
-                &format!("voice-{user_id}"),
+                &local_identity,
                 &display_name,
             )?;
             jwt_mint_ms = jwt_start.elapsed().as_millis() as u64;
@@ -407,7 +436,7 @@ pub async fn join_voice_channel(
     // the user's effective level (after AGC + NS) rather than raw input.
     let audio_source_task = audio_source.clone();
     let voice_arc_frame = Arc::clone(&state.voice);
-    let local_identity = format!("voice-{user_id}");
+    let local_identity_for_speaking = local_identity.clone();
     let apm_for_capture = apm_handle.clone();
     let denoiser_for_capture = Arc::clone(&denoiser_arc);
     let frame_task = tokio::spawn(async move {
@@ -462,9 +491,9 @@ pub async fn join_voice_channel(
                     let voice = voice_arc_frame.lock().await;
                     if let Some(ch) = &voice.channel {
                         if is_speaking {
-                            let _ = ch.send(VoiceEvent::SpeakingStarted { identity: local_identity.clone() });
+                            let _ = ch.send(VoiceEvent::SpeakingStarted { identity: local_identity_for_speaking.clone() });
                         } else {
-                            let _ = ch.send(VoiceEvent::SpeakingStopped { identity: local_identity.clone() });
+                            let _ = ch.send(VoiceEvent::SpeakingStopped { identity: local_identity_for_speaking.clone() });
                         }
                     }
                 }
@@ -530,7 +559,7 @@ pub async fn join_voice_channel(
         let voice = state.voice.lock().await;
         if let Some(ch) = &voice.channel {
             let _ = ch.send(VoiceEvent::ParticipantJoined {
-                identity: format!("voice-{user_id}"),
+                identity: local_identity.clone(),
                 name: display_name.clone(),
                 is_muted: false,
                 avatar_url: local_avatar_url,
@@ -550,6 +579,9 @@ pub async fn join_voice_channel(
     let voice_arc = Arc::clone(&state.voice);
     let state_for_room = Arc::clone(state);
     let apm_rate_for_room = mic_rate;
+    // Captured for the self-hear filter on TrackSubscribed: audio published by
+    // this user's *other* devices must not be played back locally (#140).
+    let local_user_id = user_id.clone();
     let room_task = tokio::spawn(async move {
         while let Some(event) = events.recv().await {
             match event {
@@ -587,6 +619,19 @@ pub async fn join_voice_channel(
                 RoomEvent::TrackSubscribed { track, publication: _, participant } => {
                     match track {
                         RemoteTrack::Audio(audio_track) => {
+                            let participant_identity = participant.identity().to_string();
+                            // Self-hear mute (#140): never attach a playback
+                            // stream for audio published by our own user's other
+                            // devices. The participant still shows in the UI (its
+                            // ParticipantConnected event already fired) — we just
+                            // don't route its mic back into our speakers, which
+                            // would otherwise echo us to ourselves.
+                            if user_id_from_voice_identity(&participant_identity) == local_user_id {
+                                eprintln!(
+                                    "[voice] skipping own-device audio track for self-hear mute: {participant_identity}"
+                                );
+                                continue;
+                            }
                             let track_key = format!("{}-{}", participant.identity(), audio_track.sid());
                             eprintln!("[voice] track subscribed: {track_key}");
                             register_remote_track(
@@ -660,6 +705,15 @@ pub async fn join_voice_channel(
                         }
                     }
                     crate::commands::screenshare::on_room_disconnected(&state_for_room).await;
+                    // Tear down our own Rust-side resources on a server-initiated
+                    // disconnect (network drop, duplicate identity, room close).
+                    // Previously this branch only emitted the event and broke,
+                    // leaking VoiceState.room + the cpal mic stream until the
+                    // user manually left or quit. Pass abort_room_task=false:
+                    // we ARE room_task and `break` right after, so it ends on
+                    // its own. The frontend's reconciler may also call
+                    // leave_voice_channel; release_voice_resources is idempotent.
+                    let _ = release_voice_resources(&state_for_room, false).await;
                     break;
                 }
                 RoomEvent::ConnectionStateChanged(conn_state) => {
@@ -740,26 +794,37 @@ pub async fn get_last_join_timings(
 }
 
 /// Disconnect from the current voice room and release all audio resources.
-pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
-    // Stop any active screen share first. We abort room_task below, so the
-    // RoomEvent::Disconnected -> on_room_disconnected path never fires on an
-    // explicit leave; without this, the share keeps capturing after the call
-    // ends. Done before we take/close the room so the track unpublishes
-    // gracefully while the connection is still alive. No-ops cheaply (the
-    // had_session guard) when nothing is being shared.
-    crate::commands::screenshare::stop_screen_share(state).await.ok();
-
+/// Tear down all live voice resources and return the room handle (if any) for
+/// the caller to close. Stops the mic frame feed, takes the cpal input/output
+/// streams and drops them on a blocking thread (CoreAudio dispose must not run
+/// on a tokio worker — see the macOS mic-indicator note below), and clears the
+/// playback + e2ee state while holding the lock only briefly.
+///
+/// `abort_room_task` controls whether the room event-loop task is aborted.
+/// `leave_voice_channel` passes `true`. The `RoomEvent::Disconnected` handler
+/// — which runs *inside* that task and is about to `break` on its own — passes
+/// `false` so it doesn't abort itself mid-teardown.
+///
+/// Idempotent: a second call after teardown is a cheap no-op (every field is
+/// already `None`), so the Disconnected path and a racing `leave_voice_channel`
+/// can both run without harm.
+async fn release_voice_resources(
+    state: &Arc<AppState>,
+    abort_room_task: bool,
+) -> Option<Arc<Room>> {
     // Extract everything that needs cleanup while holding the lock, then release
-    // the lock before awaiting room.close(). If the network is broken (e.g. VPN
-    // dropped), room.close() hangs sending a disconnect signal — holding the lock
-    // during that await deadlocks every subsequent command that needs voice state.
+    // the lock before awaiting. If the network is broken (e.g. VPN dropped),
+    // room.close() (in the caller) hangs sending a disconnect signal — holding
+    // the lock across that await would deadlock every subsequent voice command.
     let (room, input_stream, output_stream) = {
         let mut voice = state.voice.lock().await;
 
         // Kill the frame feed first so no more frames are pushed into the
         // audio source / room while we tear them down.
         if let Some(t) = voice.frame_task.take() { t.abort(); }
-        if let Some(t) = voice.room_task.take() { t.abort(); }
+        if abort_room_task {
+            if let Some(t) = voice.room_task.take() { t.abort(); }
+        }
 
         // Take the cpal output stream out of playback state so we can drop
         // it on a blocking thread (CoreAudio dispose isn't safe to run on a
@@ -803,6 +868,21 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
         })
         .await;
     }
+
+    room
+}
+
+pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
+    // Stop any active screen share first. We abort room_task in
+    // release_voice_resources below, so the RoomEvent::Disconnected ->
+    // on_room_disconnected path never fires on an explicit leave; without this,
+    // the share keeps capturing after the call ends. Done before we take/close
+    // the room so the track unpublishes gracefully while the connection is
+    // still alive. No-ops cheaply (the had_session guard) when nothing is
+    // being shared.
+    crate::commands::screenshare::stop_screen_share(state).await.ok();
+
+    let room = release_voice_resources(state, true).await;
 
     // Close outside the lock with a timeout so a broken connection (dropped VPN,
     // network change) can't stall a reconnect attempt indefinitely.
@@ -1066,4 +1146,45 @@ pub async fn set_voice_audio_processing(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voice_identity_includes_device_suffix() {
+        assert_eq!(voice_identity("u1", Some("dev-a")), "voice-u1:dev-a");
+    }
+
+    #[test]
+    fn voice_identity_falls_back_without_device() {
+        // Legacy / pre-login shape — no `:device_id` suffix.
+        assert_eq!(voice_identity("u1", None), "voice-u1");
+    }
+
+    #[test]
+    fn identity_round_trips_back_to_user_id() {
+        // The minted identity must parse back to the bare user_id with the
+        // same helper the playback/volume paths use, both with and without a
+        // device suffix.
+        for id in [voice_identity("u1", Some("dev-a")), voice_identity("u1", None)] {
+            assert_eq!(user_id_from_voice_identity(&id), "u1");
+        }
+    }
+
+    #[test]
+    fn self_hear_predicate_matches_sibling_device_only() {
+        // The self-hear filter compares the *parsed* user_id of an inbound
+        // track's participant against the local user_id. A second device of
+        // the same user must match (→ skip playback); a different user must
+        // not (→ play normally).
+        let local_user_id = "u1";
+
+        let sibling_device = voice_identity("u1", Some("dev-b"));
+        assert_eq!(user_id_from_voice_identity(&sibling_device), local_user_id);
+
+        let other_user = voice_identity("u2", Some("dev-x"));
+        assert_ne!(user_id_from_voice_identity(&other_user), local_user_id);
+    }
 }
