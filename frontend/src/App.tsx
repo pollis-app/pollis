@@ -141,6 +141,19 @@ function MainApp() {
 
       const session = await api.getSession();
       if (session) {
+        // If this device was revoked while offline it never received the
+        // realtime "device_revoked" nudge — confirm registration on startup
+        // and sign out if its row is gone. Errors (offline) fall through, so a
+        // transient blip never signs anyone out.
+        const stillRegistered = await api
+          .isCurrentDeviceRegistered(session.user.id)
+          .catch(() => true);
+        if (!stillRegistered) {
+          await api.logout(false).catch(() => {});
+          useAppStore.getState().logout();
+          return;
+        }
+
         if (session.enrollmentRequired) {
           // Returning device that has never been enrolled (e.g. user
           // signed in once before the enrollment system shipped, or the

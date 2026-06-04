@@ -496,6 +496,38 @@ pub async fn process_pending_commits_inner(
     process_pending_commits_locked(state, mls_group_id, user_id).await
 }
 
+/// Whether this device's `user_device` row still exists remotely. Gates the
+/// external-join *recovery* paths so a revoked device (row deleted by
+/// `revoke_device`) can't auto-rejoin a group it was removed from — which would
+/// squat an epoch and wedge the group under the UNIQUE(conversation_id, epoch)
+/// constraint.
+///
+/// Fails OPEN (returns true) on a missing device_id or any query error: a
+/// transient inability to check must never lock a legitimate device out of
+/// recovery. The authoritative, fail-closed control is the inbound self-add
+/// rejection in `process_pending_commits_locked`; this is the cooperative
+/// "don't even try to climb back in" half.
+async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
+    let device_id = match state.device_id.lock().await.clone() {
+        Some(d) => d,
+        None => return true,
+    };
+    let conn = match state.remote_db.conn().await {
+        Ok(c) => c,
+        Err(_) => return true,
+    };
+    match conn
+        .query(
+            "SELECT 1 FROM user_device WHERE user_id = ?1 AND device_id = ?2",
+            libsql::params![user_id, device_id],
+        )
+        .await
+    {
+        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
+        Err(_) => true,
+    }
+}
+
 /// Body of [`process_pending_commits_inner`]. Assumes the caller already holds
 /// the per-conversation MLS lock (`state.mls_group_lock`).
 pub(crate) async fn process_pending_commits_locked(
@@ -519,10 +551,18 @@ pub(crate) async fn process_pending_commits_locked(
     let initial_epoch = match has_group {
         Some(epoch) => epoch,
         None => {
-            // No local group — external-join to create one. Lock already held
-            // by the wrapper, so call the unlocked inner variant.
-            if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
-                eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
+            // No local group — external-join to create one, UNLESS this
+            // device has been revoked (its `user_device` row is gone). A
+            // revoked device must not climb back in: doing so squats an epoch
+            // and, under the UNIQUE(conversation_id, epoch) constraint, would
+            // wedge the group. Lock already held by the wrapper, so call the
+            // unlocked inner variant.
+            if local_device_registered(state, user_id).await {
+                if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
+                    eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
+                }
+            } else {
+                eprintln!("[mls] process_pending_commits: device for {user_id} is no longer registered — not external-joining {mls_group_id} (revoked)");
             }
             return Ok(());
         }
@@ -535,7 +575,7 @@ pub(crate) async fn process_pending_commits_locked(
     //    local-DB await below.
     let conn = state.remote_db.conn().await?;
     let mut rows = conn.query(
-        "SELECT epoch, commit_data, added_user_id, added_device_ids \
+        "SELECT seq, epoch, commit_data, added_user_id, added_device_ids, sender_id \
          FROM mls_commit_log \
          WHERE conversation_id = ?1 AND epoch >= ?2 \
          ORDER BY epoch ASC, seq ASC",
@@ -544,18 +584,22 @@ pub(crate) async fn process_pending_commits_locked(
 
     #[derive(Debug)]
     struct PendingCommit {
+        seq: i64,
         epoch: i64,
         commit_data: Vec<u8>,
         added_user_id: Option<String>,
         added_device_ids: Vec<String>,
+        sender_id: Option<String>,
     }
 
     let mut pending: Vec<PendingCommit> = Vec::new();
     while let Some(row) = rows.next().await? {
-        let epoch: i64 = row.get(0)?;
-        let data: Vec<u8> = row.get(1)?;
-        let added_user_id: Option<String> = row.get::<Option<String>>(2).ok().flatten();
-        let ids_csv: Option<String> = row.get::<Option<String>>(3).ok().flatten();
+        let seq: i64 = row.get(0)?;
+        let epoch: i64 = row.get(1)?;
+        let data: Vec<u8> = row.get(2)?;
+        let added_user_id: Option<String> = row.get::<Option<String>>(3).ok().flatten();
+        let ids_csv: Option<String> = row.get::<Option<String>>(4).ok().flatten();
+        let sender_id: Option<String> = row.get::<Option<String>>(5).ok().flatten();
         let added_device_ids: Vec<String> = ids_csv
             .as_deref()
             .map(|s| {
@@ -566,10 +610,12 @@ pub(crate) async fn process_pending_commits_locked(
             })
             .unwrap_or_default();
         pending.push(PendingCommit {
+            seq,
             epoch,
             commit_data: data,
             added_user_id,
             added_device_ids,
+            sender_id,
         });
     }
     drop(rows);
@@ -590,30 +636,67 @@ pub(crate) async fn process_pending_commits_locked(
             break;
         }
 
-        // ── Inbound cert verification (advisory) ─────────────────
-        // Log a warning if cross-signing verification fails, but still
-        // process the commit. Blocking here causes epoch divergence
-        // because the commit was already applied by the sender.
+        // ── Inbound cert verification ────────────────────────────
         if let Some(ref added_user_id) = commit.added_user_id {
-            let ok = verify_added_devices(
+            let verified = match verify_added_devices(
                 &conn,
                 added_user_id,
                 &commit.added_device_ids,
             )
-            .await;
-            match ok {
-                Ok(true) => {}
-                Ok(false) => {
-                    eprintln!(
-                        "[mls] process_pending_commits: WARN cross-signing verification failed for {added_user_id} at epoch {} in {mls_group_id} — processing anyway",
-                        commit.epoch
-                    );
-                }
+            .await
+            {
+                Ok(v) => v,
                 Err(e) => {
                     eprintln!(
-                        "[mls] process_pending_commits: WARN cert verification error for {mls_group_id}: {e} — processing anyway"
+                        "[mls] process_pending_commits: cert verification error for {mls_group_id}: {e}"
                     );
+                    false
                 }
+            };
+
+            if !verified {
+                // A *self-add* (the committer adding its own device via an
+                // external commit) that fails cross-signing verification is the
+                // unambiguous "revoked device re-adding itself" shape: its
+                // `user_device` row is gone, so verification cannot pass.
+                // Reject it — do NOT apply — AND delete the squatting commit
+                // row, because under the UNIQUE(conversation_id, epoch)
+                // constraint a left-in-place poison row permanently wedges every
+                // future commit at this epoch. Deleting by `seq` is precise and
+                // idempotent across honest members. Honest first-joins and
+                // legitimate external-join recoveries keep their `user_device`
+                // row, so they verify and never hit this branch.
+                let is_self_add = commit
+                    .sender_id
+                    .as_deref()
+                    .map_or(false, |s| s == added_user_id.as_str());
+                if is_self_add {
+                    eprintln!(
+                        "[mls] process_pending_commits: REJECTING unverified self-add by {added_user_id} at epoch {} in {mls_group_id} (revoked device?) — dropping commit seq {}",
+                        commit.epoch, commit.seq
+                    );
+                    if let Err(e) = conn
+                        .execute(
+                            "DELETE FROM mls_commit_log WHERE seq = ?1",
+                            libsql::params![commit.seq],
+                        )
+                        .await
+                    {
+                        eprintln!(
+                            "[mls] process_pending_commits: failed to delete rejected self-add seq {}: {e}",
+                            commit.seq
+                        );
+                    }
+                    break;
+                }
+                // A third-party add (an admin/inviter adding someone else) that
+                // fails verification stays ADVISORY: the sender already merged
+                // it, so blocking would diverge us from the rest of the group.
+                // Only the self-add shape above is safe to hard-reject.
+                eprintln!(
+                    "[mls] process_pending_commits: WARN cross-signing verification failed for {added_user_id} at epoch {} in {mls_group_id} — processing anyway (third-party add)",
+                    commit.epoch
+                );
             }
         }
 
@@ -726,10 +809,18 @@ pub(crate) async fn process_pending_commits_locked(
         })
     };
     if !group_exists {
-        eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
-        // Lock already held by the wrapper, so call the unlocked inner variant.
-        if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
-            eprintln!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
+        // Recover by external-join — UNLESS this device was revoked (its
+        // `user_device` row is gone), in which case it must stay out rather
+        // than squatting an epoch to climb back in. A legitimately-forked or
+        // freshly-wiped device keeps its row and recovers normally.
+        if local_device_registered(state, user_id).await {
+            eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
+            // Lock already held by the wrapper, so call the unlocked inner variant.
+            if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
+                eprintln!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
+            }
+        } else {
+            eprintln!("[mls] process_pending_commits: group {mls_group_id} deleted and device for {user_id} is no longer registered — staying out (revoked)");
         }
     }
 

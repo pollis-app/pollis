@@ -25,6 +25,7 @@ pub async fn dispatch(
         "wipe_local_data" => Some(wipe_local_data(args).await),
         "list_user_devices" => Some(list_user_devices(args).await),
         "revoke_device" => Some(revoke_device(args).await),
+        "is_current_device_registered" => Some(is_current_device_registered(args).await),
         _ => None,
     }
 }
@@ -198,4 +199,17 @@ async fn revoke_device(args: &serde_json::Value) -> Result<serde_json::Value> {
         .await
         .map_err(core_err)?;
     Ok(serde_json::Value::Null)
+}
+
+async fn is_current_device_registered(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        user_id: String,
+    }
+    let Args { user_id } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    let out = pollis_core::commands::auth::is_current_device_registered(&state, user_id)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(out).map_err(json_err)
 }

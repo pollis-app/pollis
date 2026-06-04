@@ -1105,7 +1105,47 @@ pub async fn revoke_device(
         }
     }
 
+    // Cooperative "you've been signed out" nudge. The inbox is per-user, so
+    // this reaches every device; each one re-checks its own registration via
+    // `is_current_device_registered` and only the revoked device logs out.
+    // Advisory UX only — a hostile/offline device that ignores this is still
+    // evicted at the MLS layer (honest members reject its self-add). Non-fatal.
+    let payload = serde_json::json!({
+        "type": "device_revoked",
+        "device_id": device_id,
+        "user_id": user_id,
+    });
+    if let Err(e) =
+        crate::commands::livekit::publish_to_user_inbox(&state.config, &user_id, payload).await
+    {
+        eprintln!("[revoke_device] inbox nudge failed (non-fatal): {e}");
+    }
+
     Ok(())
+}
+
+/// Whether the current device (`state.device_id`) is still registered in
+/// `user_device` for `user_id`. `false` means this device was revoked and the
+/// caller should log out. Authoritative + spoof-resistant: a forged
+/// `device_revoked` inbox nudge cannot force a logout unless the device's row
+/// is genuinely gone. Returns `true` when the device id isn't known yet (early
+/// boot) so it never logs out a device that simply hasn't initialized.
+pub async fn is_current_device_registered(
+    state: &Arc<AppState>,
+    user_id: String,
+) -> Result<bool> {
+    let device_id = match state.device_id.lock().await.clone() {
+        Some(d) => d,
+        None => return Ok(true),
+    };
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM user_device WHERE user_id = ?1 AND device_id = ?2",
+            libsql::params![user_id, device_id],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
 }
 
 #[cfg(test)]
