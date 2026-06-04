@@ -206,6 +206,13 @@ export async function revokeDevice(userId: string, deviceId: string): Promise<vo
   await invoke('revoke_device', { userId, deviceId });
 }
 
+// Whether this device is still registered for `userId`. `false` means it was
+// revoked and the caller should sign out. Spoof-resistant: confirmed against
+// the backend rather than a (forgeable) realtime nudge.
+export async function isCurrentDeviceRegistered(userId: string): Promise<boolean> {
+  return invoke('is_current_device_registered', { userId });
+}
+
 // ── User ───────────────────────────────────────────────────────────────────
 
 export interface UserProfileData {

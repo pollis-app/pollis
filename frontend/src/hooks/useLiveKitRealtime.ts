@@ -40,6 +40,14 @@ type RealtimeEvent =
     sender_username: string | null;
   }
   | {
+    // Sent to every device on the user's inbox when one of their devices is
+    // revoked. Each device re-checks its own registration and only the
+    // revoked one signs out.
+    type: 'device_revoked';
+    device_id: string;
+    user_id: string;
+  }
+  | {
     type: 'dm_created';
     conversation_id: string;
   }
@@ -550,6 +558,34 @@ export function useLiveKitRealtime() {
         } else {
           useTypingStore.getState().clearTyping(roomKey, event.user_id);
         }
+        return;
+      }
+
+      // One of this user's devices was revoked. The inbox is per-user, so this
+      // reaches every device; authoritatively confirm with the backend whether
+      // it's THIS device that's gone (spoof-safe — a forged nudge can't sign
+      // out a still-valid device) and only then sign out. Errors (offline) are
+      // treated as "still registered" so we never sign out on a transient blip.
+      if (event.type === 'device_revoked') {
+        const userId = currentUserIdRef.current;
+        if (!userId) {
+          return;
+        }
+        // The handler is sync, so chain rather than await.
+        invoke<boolean>('is_current_device_registered', { userId })
+          .then((stillRegistered) => {
+            if (stillRegistered) {
+              return;
+            }
+            console.warn('[realtime] this device was revoked — signing out');
+            return invoke('logout', { deleteData: false })
+              .catch(() => {})
+              .then(() => {
+                useAppStore.getState().logout();
+              });
+          })
+          // Offline / transient error — never sign out on a blip.
+          .catch(() => {});
         return;
       }
 
