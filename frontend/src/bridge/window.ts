@@ -96,7 +96,72 @@ function electronWindow(): WindowProxy {
     scaleFactor: () => e.windowGetScaleFactor(),
     onResized: async (cb) => e.windowOnResized(cb),
     onMoved: async (cb) => e.windowOnMoved(cb),
-    onDragDropEvent: async (cb) => e.windowOnDragDropEvent(cb),
+    // Unlike Tauri (whose runtime intercepts OS drag-drop and pushes native
+    // paths over an event), Electron delivers file drops to the renderer as
+    // standard DOM drag events — main never emits the `window:dragdrop`
+    // channel. So we translate DOM drag events into the same DragDropPayload
+    // AppShell consumes. Crucially we preventDefault dragover/drop: without
+    // it Chromium's default action navigates the window to the dropped
+    // `file://` path (the "file opens in a blank window" regression). Only
+    // file drags trigger the overlay — text/selection drags pass through so
+    // normal in-app text dragging still works.
+    onDragDropEvent: async (cb) => {
+      const isFileDrag = (ev: DragEvent) =>
+        !!ev.dataTransfer && Array.from(ev.dataTransfer.types).includes("Files");
+      const emit = (type: DragDropPayload["type"], paths: string[] = []) =>
+        cb({ payload: { type, paths } });
+
+      // dragenter/dragleave fire for every child element crossed; track a
+      // depth counter so the overlay shows once on real window-enter and
+      // hides once on real window-leave instead of flickering per element.
+      let depth = 0;
+
+      const onEnter = (ev: DragEvent) => {
+        if (!isFileDrag(ev)) { return; }
+        ev.preventDefault();
+        depth += 1;
+        if (depth === 1) { emit("enter"); }
+      };
+      const onOver = (ev: DragEvent) => {
+        if (!isFileDrag(ev)) { return; }
+        // Must preventDefault on EVERY dragover or the subsequent drop is
+        // rejected and Chromium falls back to navigation.
+        ev.preventDefault();
+        if (ev.dataTransfer) { ev.dataTransfer.dropEffect = "copy"; }
+        emit("over");
+      };
+      const onLeave = (ev: DragEvent) => {
+        if (!isFileDrag(ev)) { return; }
+        ev.preventDefault();
+        depth = Math.max(0, depth - 1);
+        if (depth === 0) { emit("leave"); }
+      };
+      const onDrop = (ev: DragEvent) => {
+        if (!isFileDrag(ev)) { return; }
+        ev.preventDefault();
+        depth = 0;
+        const files = ev.dataTransfer?.files;
+        const paths: string[] = [];
+        if (files) {
+          for (let i = 0; i < files.length; i++) {
+            const p = e.getPathForFile(files[i]);
+            if (p) { paths.push(p); }
+          }
+        }
+        emit("drop", paths);
+      };
+
+      window.addEventListener("dragenter", onEnter);
+      window.addEventListener("dragover", onOver);
+      window.addEventListener("dragleave", onLeave);
+      window.addEventListener("drop", onDrop);
+      return () => {
+        window.removeEventListener("dragenter", onEnter);
+        window.removeEventListener("dragover", onOver);
+        window.removeEventListener("dragleave", onLeave);
+        window.removeEventListener("drop", onDrop);
+      };
+    },
     setBadgeCount: (n) => e.windowSetBadgeCount(n ?? null),
     setIcon: async (img) => {
       if (img.bytes) {

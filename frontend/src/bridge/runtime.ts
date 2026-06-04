@@ -95,6 +95,11 @@ export interface ElectronAPI {
   // ── File URL conversion (sync) ─────────────────────────────────────────
   convertFileSrc: (path: string) => string;
 
+  // Resolve the absolute filesystem path of a dropped/selected File. Electron
+  // 32+ removed the non-standard `File.path`; `webUtils.getPathForFile` is the
+  // replacement. Sync, mirrors Tauri's native-path drag-drop payload.
+  getPathForFile: (file: File) => string;
+
   // ── Clipboard ──────────────────────────────────────────────────────────
   clipboardReadFiles: () => Promise<string[]>;
   clipboardReadImageToTemp: () => Promise<string | null>;

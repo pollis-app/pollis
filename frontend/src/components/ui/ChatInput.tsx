@@ -11,6 +11,7 @@ import {
 import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize } from "../../utils/format";
+import { useDropTargetStore } from "../../stores/dropTargetStore";
 import { getDraft, setDraft } from "../../utils/drafts";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
@@ -435,7 +436,17 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     focus: () => { textareaRef.current?.focus(); },
   }), [handleBrowserFile]);
 
-  // Global drop zone — AppShell fires this when Tauri intercepts an OS file drop.
+  // Register as the active file-drop target while mounted, so AppShell only
+  // shows the drag overlay on views that can actually receive a file (not,
+  // e.g., the voice/stream view where there's no input).
+  useEffect(() => {
+    const { register, unregister } = useDropTargetStore.getState();
+    register();
+    return unregister;
+  }, []);
+
+  // Global drop zone — AppShell fires this when an OS file drop lands while a
+  // ChatInput is mounted.
   useEffect(() => {
     const handler = (e: Event) => {
       const paths: string[] = (e as CustomEvent<{ paths: string[] }>).detail.paths;
