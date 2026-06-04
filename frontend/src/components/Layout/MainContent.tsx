@@ -713,6 +713,17 @@ export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = nul
             onSend={handleSend}
             onValueChange={typing.notify}
             autoFocus
+            draftKey={
+              // Prefix with the room kind so the rare case of a channel id
+              // and a DM conversation id colliding still routes to separate
+              // draft slots. Falls back to null when nothing is selected —
+              // ChatInput then skips draft persistence entirely.
+              selectedChannelId
+                ? `channel:${selectedChannelId}`
+                : selectedConversationId
+                  ? `conv:${selectedConversationId}`
+                  : null
+            }
           />
         </div>
       )}

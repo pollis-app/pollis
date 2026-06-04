@@ -33,6 +33,13 @@ type RealtimeEvent =
     sender_username: string | null;
   }
   | {
+    type: 'all_mention';
+    group_id: string;
+    channel_id: string;
+    sender_id: string;
+    sender_username: string | null;
+  }
+  | {
     type: 'dm_created';
     conversation_id: string;
   }
@@ -543,6 +550,27 @@ export function useLiveKitRealtime() {
         } else {
           useTypingStore.getState().clearTyping(roomKey, event.user_id);
         }
+        return;
+      }
+
+      // @all mention in a group. Arrives on the per-user inbox room (so it
+      // reaches members even when they're not in the group's LiveKit room),
+      // separate from the new_message event. Fires an OS ping that normal
+      // channel messages don't — notify() still suppresses it if the user has
+      // notifications off. Skip our own @all; the notifications-off pref and
+      // cooldown are enforced in notify().
+      if (event.type === 'all_mention') {
+        if (event.sender_id === currentUserIdRef.current) {
+          return;
+        }
+        const senderUsername = event.sender_username ?? 'Someone';
+        const title = roomNameMapRef.current.get(event.channel_id) ?? 'New mention';
+        notify('all_mention', {
+          roomId: event.channel_id,
+          title,
+          body: `${senderUsername} mentioned @all`,
+          senderUsername,
+        });
         return;
       }
 

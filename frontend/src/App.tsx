@@ -26,6 +26,7 @@ import { LoadingSpinner } from "./components/ui/LoaderSpinner";
 import { Button } from "./components/ui/Button";
 import { useQueryClient } from "@tanstack/react-query";
 import { installTrayVoiceBridge, installVoiceBridge } from "./voice";
+import { clearAllDrafts } from "./utils/drafts";
 
 type AppState =
   | "initializing"
@@ -246,6 +247,15 @@ function MainApp() {
       setAppState("email-auth");
     }
   }, [appState, currentUser]);
+
+  // Drop every in-memory message draft on any transition of the active user
+  // id — login (null → id), logout (id → null), account switch (id → other
+  // id). Drafts are intentionally not persisted, so this is the only thing
+  // a second user logging in on the same machine ever sees: an empty
+  // composer in every channel, including ones both users are members of.
+  useEffect(() => {
+    clearAllDrafts();
+  }, [currentUser?.id]);
 
   const handleAuthSuccess = useCallback(async (result: api.AuthResult) => {
     // Branch 1: first-device signup. Show the Secret Key screen and gate

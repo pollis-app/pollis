@@ -2,6 +2,7 @@
   "name": "pollis",
   "version": "1.1.0",
   "private": true,
+  "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "dev": "pnpm build:pollis-node:debug && concurrently -k -n vite,electron \"pnpm --filter frontend dev\" \"wait-on -t 30000 tcp:5173 && pnpm --filter @pollis/electron start\"",
     "dev:frontend": "pnpm --filter frontend dev",

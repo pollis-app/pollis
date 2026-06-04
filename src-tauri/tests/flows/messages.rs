@@ -883,3 +883,140 @@ async fn envelope_cleanup_ttl_or_watermark() {
     drop(alice);
     drop(bob);
 }
+
+/// Count distinct commit blobs at a given epoch for a conversation. Used to
+/// confirm the fork precondition (two competing commits at one epoch) was
+/// actually produced — diagnostic only, not an invariant.
+async fn distinct_commits_at_epoch(
+    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    conversation_id: &str,
+    epoch: i64,
+) -> i64 {
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(DISTINCT hex(commit_data)) FROM mls_commit_log \
+             WHERE conversation_id = ?1 AND epoch = ?2",
+            libsql::params![conversation_id.to_string(), epoch],
+        )
+        .await
+        .expect("distinct commit query");
+    let row = rows.next().await.expect("row").expect("some row");
+    row.get::<i64>(0).expect("count")
+}
+
+/// Reproduces the Bluestone production fork (prod group `01KQYX89...`).
+///
+/// Two admins commit from the SAME MLS epoch before either has processed the
+/// other's commit. Both commits are posted to `mls_commit_log` at the same
+/// epoch — and because the log has no uniqueness on `(conversation_id, epoch)`,
+/// BOTH land. Every member then processes `ORDER BY epoch ASC, seq ASC` and
+/// applies the lower-`seq` commit (branch A), advancing past it. The author of
+/// the higher-`seq` commit already merged its OWN commit (branch B) locally,
+/// so it sits on a divergent epoch-N tree and can never apply branch A's later
+/// commits — it is permanently forked.
+///
+/// Symptom (matches the prod report): the forked member and the branch-A
+/// members cannot decrypt each other's messages, even though group membership
+/// never changed.
+///
+/// This asserts the product invariant — every CURRENT member can message every
+/// other current member — so it FAILS on today's forking code and should PASS
+/// once two commits racing for the same epoch are resolved by a
+/// compare-and-swap (only one wins; the loser rolls back its local merge and
+/// re-applies the winner before retrying).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+    let mut erin = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+    let erin_p = erin.sign_up("erin@test.local").await;
+
+    // alice creates the group and adds bob; both settle at the same epoch
+    // with the same tree {alice, bob}.
+    let group_id = alice.create_group("Fork").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    alice.invite(&group_id, &bob_p.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("bob invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    alice.process_commits_for(&channel_id).await;
+    bob.process_commits_for(&channel_id).await;
+
+    // bob must be an admin to invite (mirrors Bluestone: all members admin).
+    alice
+        .set_member_role(&group_id, bob.user_id(), "admin")
+        .await;
+
+    // ── Concurrent commits from the same epoch ──
+    // alice invites dave: alice reconciles and commits (add dave) from the
+    // current epoch → branch A. This merges locally and gets the lower seq.
+    alice.invite(&group_id, &dave_p.username).await;
+    // bob has NOT processed alice's commit, so bob is still at the prior
+    // epoch. bob invites erin: bob reconciles and commits from that SAME
+    // epoch → branch B, higher seq. Two distinct commits now occupy one epoch.
+    bob.invite(&group_id, &erin_p.username).await;
+
+    // Precondition sanity (diagnostic): the fork was actually produced. The
+    // add-bob commit was epoch 0, so the concurrent adds race for epoch 1.
+    let remote = alice.state.remote_db.clone();
+    let distinct = distinct_commits_at_epoch(&remote, &group_id, 1).await;
+    eprintln!("[test] distinct commits at epoch 1 = {distinct} (fork iff > 1)");
+
+    // Membership never shrank — bob is still a current member.
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        members.contains(&bob.user_id().to_string()),
+        "precondition: bob must still be a current group member, got: {members:?}"
+    );
+
+    // alice sends from branch A.
+    alice.send_channel_message(&channel_id, "from-alice").await;
+
+    // INVARIANT: bob, a current member, must be able to read alice's message.
+    // On the forking code bob is stranded on branch B and cannot — its content
+    // comes back null.
+    bob.process_commits_for(&channel_id).await;
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_contents: Vec<&str> = bob_msgs
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert!(
+        bob_contents.contains(&"from-alice"),
+        "FORK: bob (a current member) cannot decrypt alice's message — two \
+         commits landed at the same epoch and forked bob onto a divergent \
+         tree. got: {bob_msgs:#?}"
+    );
+
+    // And the reverse: bob sends, alice (branch A) must read it.
+    bob.send_channel_message(&channel_id, "from-bob").await;
+    let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
+    let alice_contents: Vec<&str> = alice_msgs
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert!(
+        alice_contents.contains(&"from-bob"),
+        "FORK: alice cannot decrypt current member bob's message. got: {alice_msgs:#?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(dave);
+    drop(erin);
+}
