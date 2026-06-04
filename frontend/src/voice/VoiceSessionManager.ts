@@ -82,6 +82,10 @@ export interface LeftEvent {
   groupId: string | null;
   userId: string;
   displayName: string;
+  /** Our full per-device voice identity (`voice-{userId}:{deviceId}`) for this
+   *  session, so observers can drop exactly this device — not the user's other
+   *  devices that may still be in the room. */
+  identity: string;
 }
 
 type ManagerEventMap = {
@@ -165,6 +169,22 @@ class VoiceSessionManager {
 
   /** True after we've called `subscribe_voice_events` for this process. */
   private eventsAttached = false;
+  /**
+   * This device's stable `device_id`, used to build the per-device voice
+   * identity `voice-{userId}:{deviceId}` (#140) so we can tell which
+   * participant is ourselves. Lazily fetched once via `get_device_id`; stays
+   * null (→ legacy `voice-{userId}` identity) only if the backend can't supply
+   * one yet.
+   */
+  private deviceId: string | null = null;
+  /**
+   * Our own full voice identity (`voice-{userId}:{deviceId}`) for the active
+   * session. Set in `executeJoin` *before* `invoke('join_voice_channel')` so
+   * that `handleEvent` can flag the local participant `isLocal` even when the
+   * backend's seed `ParticipantJoined` arrives mid-join — i.e. before
+   * `this.current` is populated. Cleared when the session ends.
+   */
+  private localIdentity: string | null = null;
   /** Optional preferences source; lets the manager read APM config + user volumes. */
   private preferencesProvider: (() => PreferencesData | undefined) | null = null;
 
@@ -245,7 +265,7 @@ class VoiceSessionManager {
     }
     try {
       const muted = await invoke<boolean>('toggle_voice_mute');
-      const localIdentity = this.current ? `voice-${this.current.userId}` : null;
+      const localIdentity = this.localIdentity;
       const participants = localIdentity
         ? this.state.participants.map((p) =>
             p.identity === localIdentity ? { ...p, isMuted: muted } : p,
@@ -342,10 +362,17 @@ class VoiceSessionManager {
     }
     const userId = user.id;
     const displayName = user.username ?? user.id;
-    const localIdentity = `voice-${userId}`;
     const avatarKey = store.userAvatarUrl ?? null;
 
     await this.ensureEventsChannel();
+    // Resolve our device id before building the optimistic local participant
+    // so its identity matches the device-suffixed one the backend will emit —
+    // otherwise the seed ParticipantJoined would land as a second tile.
+    await this.ensureDeviceId();
+    const localIdentity = this.localVoiceIdentity(userId);
+    // Record it now, before the seed ParticipantJoined events can arrive, so
+    // `handleEvent` resolves `isLocal` correctly during the join window.
+    this.localIdentity = localIdentity;
 
     const intentTs = this.intentTs ?? performance.now();
     this.intentTs = null;
@@ -390,6 +417,7 @@ class VoiceSessionManager {
       // Best-effort cleanup in case the Rust side partially set up state
       // before failing.
       invoke('leave_voice_channel').catch(() => {});
+      this.localIdentity = null;
       this.setState({
         phase: 'idle',
         channelId: null,
@@ -413,6 +441,7 @@ class VoiceSessionManager {
       } catch {
         // Swallow — we're already on a transition path.
       }
+      this.localIdentity = null;
       this.setState({
         phase: 'idle',
         channelId: null,
@@ -477,6 +506,7 @@ class VoiceSessionManager {
     }
 
     this.current = null;
+    this.localIdentity = null;
     this.setState({
       phase: 'idle',
       channelId: null,
@@ -494,11 +524,39 @@ class VoiceSessionManager {
         groupId: left.intent.groupId,
         userId: left.userId,
         displayName: left.displayName,
+        identity: this.localVoiceIdentity(left.userId),
       });
     }
   }
 
   // ── Voice-event channel ───────────────────────────────────────────────────
+
+  /**
+   * Build this device's voice identity: `voice-{userId}:{deviceId}` once the
+   * device id is known, else the legacy `voice-{userId}`. Must match exactly
+   * what the Rust side mints (`voice/lifecycle.rs::voice_identity`) so the
+   * local participant's events resolve as `isLocal`.
+   */
+  private localVoiceIdentity(userId: string): string {
+    return this.deviceId ? `voice-${userId}:${this.deviceId}` : `voice-${userId}`;
+  }
+
+  /**
+   * Fetch and cache this device's `device_id`. Retries on a null/failed result
+   * (device_id is stable once login completes, so a non-null value is cached
+   * for the process); cheap enough to call before every join.
+   */
+  private async ensureDeviceId(): Promise<void> {
+    if (this.deviceId) {
+      return;
+    }
+    try {
+      this.deviceId = (await invoke<string | null>('get_device_id')) ?? null;
+    } catch (e) {
+      console.warn('[voice] get_device_id failed; using user-scoped voice identity:', e);
+      this.deviceId = null;
+    }
+  }
 
   private async ensureEventsChannel(): Promise<void> {
     if (this.eventsAttached) {
@@ -511,7 +569,10 @@ class VoiceSessionManager {
   }
 
   private handleEvent(event: VoiceEvent): void {
-    const localIdentity = this.current ? `voice-${this.current.userId}` : null;
+    // Read the cached local identity (set at join time) rather than deriving it
+    // from `this.current`, which isn't populated until the join resolves — the
+    // seed ParticipantJoined for ourselves arrives before that.
+    const localIdentity = this.localIdentity;
 
     switch (event.type) {
       case 'participant_joined': {

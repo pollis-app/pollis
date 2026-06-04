@@ -6,6 +6,8 @@ import { VoiceMemberTile } from "./VoiceMemberTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 import { ScreenSharePicker } from "./ScreenSharePicker";
 import { shareOf } from "../../types/voice-state";
+import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
+import { voiceUserKey } from "../../voice/identity";
 
 export const VoiceChannelView: React.FC = () => {
   const {
@@ -13,14 +15,15 @@ export const VoiceChannelView: React.FC = () => {
     voiceActiveSpeakerIds,
     voiceState,
     screenShareRemotes,
-    currentUser,
     setViewingScreenShareTrackKey,
   } = useAppStore();
-  const localIdentity = currentUser ? `voice-${currentUser.id}` : null;
   const share = shareOf(voiceState);
   const shareActive = share.kind === 'active';
   const shareLocalDims = shareActive ? share.dimensions : null;
   const isJoining = voiceState.kind === 'joining';
+  // Suffix duplicate display names (`name`, `name (1)`, …) so two devices of
+  // the same user are distinguishable in the grid (#140). Presentational only.
+  const displayNames = disambiguateVoiceNames(voiceParticipants);
 
   // Navigating away from the voice/call view drops any fullscreen stream.
   // The viewer lives in AppShell (global overlay) so it would otherwise stay
@@ -60,19 +63,21 @@ export const VoiceChannelView: React.FC = () => {
         minCellWidth={180}
         maxCellWidth={240}
         onActivate={(p) => {
-          const isLocal = p.identity === localIdentity;
+          const isLocal = p.isLocal;
           // Enter activates the streaming user's tile → open fullscreen.
           if (isLocal && shareActive) {
             setViewingScreenShareTrackKey(LOCAL_PREVIEW_KEY);
             return;
           }
-          const share = screenShareRemotes[p.identity];
+          // screenShareRemotes is keyed by the publisher's user (voice-{userId}),
+          // not their specific device, so collapse the device suffix to match.
+          const share = screenShareRemotes[voiceUserKey(p.identity)];
           if (share) {
             setViewingScreenShareTrackKey(share.trackKey);
           }
         }}
         renderCell={(p, { focused }) => {
-          const isLocal = p.identity === localIdentity;
+          const isLocal = p.isLocal;
           // Resolve which (if any) stream this participant is publishing
           // and pass it down as a unified shape so the tile doesn't care
           // whether it's our own preview track or a remote's.
@@ -84,7 +89,7 @@ export const VoiceChannelView: React.FC = () => {
             streamWidth = shareLocalDims?.width;
             streamHeight = shareLocalDims?.height;
           } else if (!isLocal) {
-            const remote = screenShareRemotes[p.identity];
+            const remote = screenShareRemotes[voiceUserKey(p.identity)];
             if (remote) {
               streamTrackKey = remote.trackKey;
               streamWidth = remote.width;
@@ -94,7 +99,7 @@ export const VoiceChannelView: React.FC = () => {
           return (
             <VoiceMemberTile
               identity={p.identity}
-              name={p.name}
+              name={displayNames.get(p.identity) ?? p.name}
               avatarKey={p.avatarKey ?? null}
               isMuted={p.isMuted}
               isLocal={isLocal}

@@ -78,18 +78,9 @@ export interface PreferencesData {
   shortcut_overrides?: { [commandId: string]: string };
 }
 
-/**
- * Strip the LiveKit voice-channel identity wrapper down to the bare
- * `user_id`. Mirrors `user_id_from_voice_identity` in the Rust voice
- * module — keep the two in sync.
- */
-export function userIdFromVoiceIdentity(identity: string): string {
-  const stripped = identity.startsWith("voice-")
-    ? identity.slice("voice-".length)
-    : identity;
-  const colon = stripped.indexOf(":");
-  return colon >= 0 ? stripped.slice(0, colon) : stripped;
-}
+// Voice-identity parsing (`userIdFromVoiceIdentity`) lives in
+// `voice/identity.ts` — the canonical home shared with the rest of the voice
+// layer. Import it from there.
 
 /** Volume slider range used by the per-remote-user output volume control. */
 export const REMOTE_USER_VOLUME_MIN = 0.0;

@@ -10,6 +10,7 @@ The path in each section header below points at the implementation in `pollis-co
 - `request_otp(email)` — send OTP code to email
 - `verify_otp(email, code)` → `AuthResult` — verify OTP, register the device. Does **not** open the local DB; `set_pin` (signup) or `unlock` (resume) does.
 - `get_session()` → `AuthResult | null` — rebuild profile from `accounts.json`. Does not open the local DB.
+- `get_device_id()` → `string | null` — this device's stable `device_id` (or null pre-registration). Used by the frontend to build its per-device voice identity (`voice-{user_id}:{device_id}`) so it can tell which voice participant is itself (#140).
 - `logout(delete_data)` — clear session, optionally delete local data
 - `delete_account(user_id)` — delete account from Turso + local
 - `wipe_local_data()` — delete all local databases and keystore entries
@@ -98,7 +99,8 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `connect_rooms(room_ids, user_id, username)`
 
 ## voice (`commands/voice.rs`)
-- `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Mints + caches a LiveKit token and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
+**Participant identity** is per-device: `voice-{user_id}:{device_id}` (device_id from `AppState.device_id`; falls back to legacy `voice-{user_id}` pre-login). This lets two devices of the same user coexist in one room instead of colliding on the SFU (#140) — mirrors the realtime/inbox scheme in `livekit/realtime.rs`. Parse the user back out with `voice::user_id_from_voice_identity` (Rust) / `voice/identity.ts` (frontend). The voice event loop **does not play back** audio tracks whose parsed user_id is the local user's (self-hear mute) but still shows them as participants. `RoomEvent::Disconnected` now fully tears down the room + mic stream via `release_voice_resources` (previously leaked).
+- `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Mints + caches a LiveKit token (with the per-device identity, so it matches the join) and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
 - `join_voice_channel(channel_id, user_id, display_name, input_device, output_device, audio_processing)` — connect to LiveKit and publish the local mic. `audio_processing` is the `ApmConfig` struct (AGC + NS + AEC settings) — see [Audio Processing](./audio-processing.md). Consumes a fresh warmup if present and runs `Room::connect` + cpal mic init concurrently to minimise cold-start latency.
 - `leave_voice_channel()`
 - `toggle_voice_mute()`

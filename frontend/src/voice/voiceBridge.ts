@@ -92,11 +92,11 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
 
     // Optimistically remove ourselves from the cached observer list so the UI
     // drops us immediately instead of waiting for the LiveKit RoomService
-    // refetch to round-trip.
-    const localIdentity = `voice-${event.userId}`;
+    // refetch to round-trip. event.identity is our full per-device identity, so
+    // a sibling device of ours still in the room is left in place.
     queryClient.setQueryData<Array<{ identity: string; name: string }>>(
       ['voice-participants', event.channelId],
-      (prev) => (prev ? prev.filter((p) => p.identity !== localIdentity) : prev),
+      (prev) => (prev ? prev.filter((p) => p.identity !== event.identity) : prev),
     );
 
     if (event.groupId) {

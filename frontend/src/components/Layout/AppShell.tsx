@@ -22,6 +22,7 @@ import { startUpdatePolling, stopUpdatePolling } from "../../services/updatePoll
 import { loadDeviceCallRingtone } from "../../utils/notify";
 import { usePreferences } from "../../hooks/queries/usePreferences";
 import { voiceSession } from "../../voice";
+import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { useGlobalShortcut } from "../../keyboard";
 import type { RouterContext } from "../../types/router";
 
@@ -437,7 +438,7 @@ export const AppShell: React.FC = () => {
           : null;
       if (peerId) {
         const peer = voiceParticipants.find(
-          (p) => p.identity === `voice-${peerId}`,
+          (p) => userIdFromVoiceIdentity(p.identity) === peerId,
         );
         if (peer?.name) {
           return peer.name;
