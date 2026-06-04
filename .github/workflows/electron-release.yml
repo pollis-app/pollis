@@ -50,9 +50,14 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      # The workspace lives at the repo root (root Cargo.toml lists
+      # pollis-node as a member), so `napi build` from pollis-node/ still
+      # writes outputs to ./target/. An earlier `workspaces: pollis-node`
+      # value pointed the action at a non-existent target dir and silently
+      # cached nothing useful. Default `.` keys on root Cargo.lock and
+      # caches the actual target dir; sccache still wraps individual
+      # rustc calls on top.
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: pollis-node
 
       # sccache wraps rustc so individual compile units are cached across
       # branches, not just whole-target-dir keyed on Cargo.lock. Wins big
@@ -187,9 +192,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # See macOS job for why this is `.` rather than `pollis-node`.
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: pollis-node
 
       - name: Run sccache
         uses: mozilla-actions/sccache-action@v0.0.10
@@ -340,9 +344,8 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # See macOS job for why this is `.` rather than `pollis-node`.
       - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: pollis-node
 
       - name: Run sccache
         uses: mozilla-actions/sccache-action@v0.0.10

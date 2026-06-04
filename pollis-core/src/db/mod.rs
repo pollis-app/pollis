@@ -20,6 +20,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "index_gm_user_and_channels_group",
         include_str!("migrations/000002_index_gm_user_and_channels_group.sql"),
     ),
+    (
+        3,
+        "mls_commit_log_unique_epoch",
+        include_str!("migrations/000003_mls_commit_log_unique_epoch.sql"),
+    ),
 ];
 
 pub mod queries {

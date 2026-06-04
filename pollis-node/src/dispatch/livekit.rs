@@ -33,6 +33,7 @@ pub async fn dispatch(
         "list_voice_room_counts" => Some(list_voice_room_counts(args).await),
         "start_call" => Some(start_call(args).await),
         "cancel_call" => Some(cancel_call(args).await),
+        "dismiss_call_on_my_devices" => Some(dismiss_call_on_my_devices(args).await),
         _ => None,
     }
 }
@@ -277,6 +278,20 @@ async fn cancel_call(args: &serde_json::Value) -> Result<serde_json::Value> {
     } = serde_json::from_value(args.clone()).map_err(json_err)?;
     let state = ensure_state().await?;
     pollis_core::commands::livekit::cancel_call(other_user_id, call_id, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn dismiss_call_on_my_devices(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        user_id: String,
+        call_id: String,
+    }
+    let Args { user_id, call_id } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::livekit::dismiss_call_on_my_devices(user_id, call_id, &state)
         .await
         .map_err(core_err)?;
     Ok(serde_json::Value::Null)

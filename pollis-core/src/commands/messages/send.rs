@@ -166,6 +166,42 @@ pub async fn send_message(
         }
     }
 
+    // @all mention: group messages don't raise OS notifications for every
+    // new message, but an explicit `@all` pings every group member's inbox so
+    // they get one. Per-user "notifications off" is enforced client-side in
+    // notify.ts. Inbox publish (one per member) is fire-and-forget; failures
+    // are logged, never fatal to the send. Only meaningful for group channels.
+    if is_channel && mentions_all(&content) {
+        let member_ids: Vec<String> = {
+            let conn = state.remote_db.conn().await?;
+            let mut rows = conn.query(
+                "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id <> ?2",
+                libsql::params![mls_group_id.clone(), sender_id.clone()],
+            ).await?;
+            let mut ids = Vec::new();
+            while let Some(row) = rows.next().await? {
+                ids.push(row.get::<String>(0)?);
+            }
+            ids
+        };
+        let payload = serde_json::json!({
+            "type": "all_mention",
+            "group_id": mls_group_id,
+            "channel_id": conversation_id,
+            "sender_id": sender_id,
+            "sender_username": sender_username,
+        });
+        for uid in member_ids {
+            if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
+                &state.config,
+                &uid,
+                payload.clone(),
+            ).await {
+                eprintln!("[realtime] send_message: @all inbox publish to {uid}: {e}");
+            }
+        }
+    }
+
     Ok(Message {
         id,
         conversation_id,
@@ -173,5 +209,15 @@ pub async fn send_message(
         content: Some(content),
         reply_to_id,
         sent_at: now,
+    })
+}
+
+/// True when `content` contains an `@all` mention as a standalone token —
+/// i.e. whitespace-delimited and ignoring trailing punctuation, so "@all" and
+/// "@all," match but "@allison" and "email@allcorp" do not. Case-insensitive.
+fn mentions_all(content: &str) -> bool {
+    content.split_whitespace().any(|w| {
+        w.trim_end_matches(|c: char| !c.is_alphanumeric() && c != '@')
+            .eq_ignore_ascii_case("@all")
     })
 }

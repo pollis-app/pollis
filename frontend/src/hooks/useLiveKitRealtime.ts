@@ -18,13 +18,24 @@ import { useKeyChangeStore } from '../stores/keyChangeStore';
 import { useRosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
 
-// Mirrors the RealtimeEvent enum in src-tauri/src/realtime.rs.
+// Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
+// (When the same UX outcome already exists as a variant, reuse it — e.g.
+// "dismiss call on my other devices" reuses `call_canceled` because the
+// renderer-side handling is identical. Don't split logic just because the
+// trigger is different.)
 type RealtimeEvent =
   | {
     type: 'new_message';
     channel_id: string | null;
     conversation_id: string | null;
+    sender_id: string;
+    sender_username: string | null;
+  }
+  | {
+    type: 'all_mention';
+    group_id: string;
+    channel_id: string;
     sender_id: string;
     sender_username: string | null;
   }
@@ -539,6 +550,27 @@ export function useLiveKitRealtime() {
         } else {
           useTypingStore.getState().clearTyping(roomKey, event.user_id);
         }
+        return;
+      }
+
+      // @all mention in a group. Arrives on the per-user inbox room (so it
+      // reaches members even when they're not in the group's LiveKit room),
+      // separate from the new_message event. Fires an OS ping that normal
+      // channel messages don't — notify() still suppresses it if the user has
+      // notifications off. Skip our own @all; the notifications-off pref and
+      // cooldown are enforced in notify().
+      if (event.type === 'all_mention') {
+        if (event.sender_id === currentUserIdRef.current) {
+          return;
+        }
+        const senderUsername = event.sender_username ?? 'Someone';
+        const title = roomNameMapRef.current.get(event.channel_id) ?? 'New mention';
+        notify('all_mention', {
+          roomId: event.channel_id,
+          title,
+          body: `${senderUsername} mentioned @all`,
+          senderUsername,
+        });
         return;
       }
 

@@ -66,6 +66,7 @@ export const AppShell: React.FC = () => {
     setGroups,
     setChannels,
     voiceState,
+    voiceParticipants,
     statusBarAlert,
     setStatusBarAlert,
     voiceError,
@@ -429,7 +430,25 @@ export const AppShell: React.FC = () => {
       return "voice";
     }
     if (activeVoiceChannelId.startsWith("call-")) {
-      return "call";
+      // 1:1 DM call — show the other person's name, not a generic "call".
+      const peerId =
+        voiceState.kind === "joined" || voiceState.kind === "joining"
+          ? voiceState.counterpartyUserId
+          : null;
+      if (peerId) {
+        const peer = voiceParticipants.find(
+          (p) => p.identity === `voice-${peerId}`,
+        );
+        if (peer?.name) {
+          return peer.name;
+        }
+        // Peer hasn't joined the room yet (outgoing ring) — fall back to the
+        // caller name from the incoming-call slot when it's the same person.
+        if (incomingCall && incomingCall.callerId === peerId) {
+          return incomingCall.callerUsername;
+        }
+      }
+      return "Call";
     }
     for (const g of groupsWithChannels ?? []) {
       const ch = g.channels.find((c) => c.id === activeVoiceChannelId);
@@ -438,7 +457,7 @@ export const AppShell: React.FC = () => {
       }
     }
     return "voice";
-  }, [activeVoiceChannelId, groupsWithChannels]);
+  }, [activeVoiceChannelId, groupsWithChannels, voiceState, voiceParticipants, incomingCall]);
 
   return (
     <div
@@ -579,13 +598,25 @@ export const AppShell: React.FC = () => {
                 // before activeVoiceChannelId flips and any in-flight Call
                 // page useEffect tries to bounce off a transient mismatch),
                 // then swap the voice room, then clear the alert.
-                router.navigate({ to: "/call/$callId", params: { callId: incomingCall.callId } });
+                const callId = incomingCall.callId;
+                router.navigate({ to: "/call/$callId", params: { callId } });
                 voiceSession.setIntent({
                   channelId: incomingCall.roomName,
                   groupId: null,
                   counterpartyUserId: incomingCall.callerId,
                 });
                 setIncomingCall(null);
+                // Stop ringing on this user's other devices. The renderer's
+                // own `call_canceled` handler is idempotent (no-ops when the
+                // local incomingCall is null) so re-receiving our own
+                // dismissal here is safe; every other device clears within
+                // the data-packet RTT.
+                if (currentUser) {
+                  invoke("dismiss_call_on_my_devices", {
+                    userId: currentUser.id,
+                    callId,
+                  }).catch(() => {});
+                }
               }}
               aria-label={`Answer call from @${incomingCall.callerUsername}`}
             >
@@ -600,6 +631,14 @@ export const AppShell: React.FC = () => {
                 const callId = incomingCall.callId;
                 setIncomingCall(null);
                 invoke("cancel_call", { otherUserId: callerId, callId }).catch(() => {});
+                // Stop ringing on this user's other devices — same idempotent
+                // path the answer button uses; see comment there.
+                if (currentUser) {
+                  invoke("dismiss_call_on_my_devices", {
+                    userId: currentUser.id,
+                    callId,
+                  }).catch(() => {});
+                }
               }}
               aria-label="Decline call"
             >

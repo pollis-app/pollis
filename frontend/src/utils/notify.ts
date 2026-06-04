@@ -12,7 +12,8 @@ export type Category =
   | 'dm_request'
   | 'group_invite'
   | 'enrollment'
-  | 'incoming_call';
+  | 'incoming_call'
+  | 'all_mention';
 
 type CategoryConfig = {
   sound?: 'ping' | 'join' | 'leave';
@@ -50,6 +51,10 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   group_invite:      { sound: 'ping',  osNotif: true                                              },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
   incoming_call:     {                  osNotif: true,                            honorsRingtonePref: true },
+  // @all in a group: the one channel event that DOES raise an OS ping (unlike
+  // channel_message). Badge is left to the accompanying new_message event so a
+  // connected client doesn't double-count unread.
+  all_mention:       { sound: 'ping',  osNotif: true,                            cooldownMs: 2500 },
 };
 
 export type NotifyPayload = {

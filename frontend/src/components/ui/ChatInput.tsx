@@ -12,6 +12,7 @@ import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize } from "../../utils/format";
 import { useDropTargetStore } from "../../stores/dropTargetStore";
+import { getDraft, setDraft } from "../../utils/drafts";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
 // no bytes-over-IPC bottleneck, no size limit.
@@ -42,6 +43,14 @@ interface ChatInputProps {
   // to drive the typing indicator publisher; it stays optional so simpler
   // call sites that don't need it can ignore it entirely.
   onValueChange?: (value: string) => void;
+  // Stable key for the in-memory draft store (`utils/drafts.ts`). When
+  // present, the initial textarea value is seeded from the draft for this
+  // key, every keystroke writes back, and a successful send clears the
+  // entry. When undefined or null, the component behaves exactly as before
+  // (no draft persistence between mounts). Pass `null` rather than omitting
+  // the prop while the parent's room id is still loading — the component
+  // re-syncs whenever this value changes within the same mount.
+  draftKey?: string | null;
 }
 
 function mimeFromName(name: string): string {
@@ -205,8 +214,20 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   className = "",
   maxAttachments = 10,
   onValueChange,
+  draftKey = null,
 }, ref) => {
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState(() => getDraft(draftKey));
+  // Re-sync message when draftKey changes within the same mount (e.g. the
+  // user navigates from #general to #random without unmounting MainContent).
+  // Done during render via the "store previous prop in state" pattern so
+  // the textarea never shows a stale value for a frame — a useEffect would
+  // run after paint and produce a visible flash. Cheap: the compare is one
+  // string === and the setState bails out when values match.
+  const [prevDraftKey, setPrevDraftKey] = useState(draftKey);
+  if (draftKey !== prevDraftKey) {
+    setPrevDraftKey(draftKey);
+    setMessage(getDraft(draftKey));
+  }
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isFocused, setIsFocused] = useState(false);
   // Lightbox for previewing attachments before send.
@@ -450,6 +471,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
     if (hasLoadingAttachments) { return; }
     onSend(message.trim(), attachments);
     setMessage("");
+    setDraft(draftKey, "");
     // Reset signals to "no longer typing" — covers the typing indicator
     // publisher in the parent so the receiver doesn't keep us in the
     // "still typing" state until TTL.
@@ -554,6 +576,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
           onChange={(e) => {
             const next = e.target.value;
             setMessage(next);
+            setDraft(draftKey, next);
             onValueChange?.(next);
           }}
           onFocus={() => setIsFocused(true)}
