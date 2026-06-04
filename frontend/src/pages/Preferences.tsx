@@ -17,7 +17,8 @@ import { Button } from "../components/ui/Button";
 import { useAppStore } from "../stores/appStore";
 import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
 import { electron, hasElectron } from "../bridge/runtime";
-import { isMac, shortcutLabel } from "../utils/platform";
+import { isMac } from "../utils/platform";
+import { useShortcutLabel } from "../keyboard";
 
 function getRootVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -30,6 +31,7 @@ function isValidHex(val: string): boolean {
 export const Preferences: React.FC = () => {
   const navigate = useNavigate();
   const currentUser = useAppStore((state) => state.currentUser);
+  const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
   const [bgHue, setBgHue] = useState<number>(38);
@@ -462,7 +464,7 @@ export const Preferences: React.FC = () => {
                 onChange={handleSidebarOpenByDefault}
               />
               <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
-                Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {shortcutLabel("B")}.
+                Controls whether the left sidebar is open when the app starts. Toggle ad-hoc with {toggleSidebarLabel}.
               </p>
             </div>
             {!isMac && (

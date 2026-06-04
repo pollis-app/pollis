@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, Search as SearchIcon, Settings as SettingsIcon } from "lucide-react";
-import { shortcutLabel } from "../../utils/platform";
+import { useShortcutLabel } from "../../keyboard";
 import { useAppStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
@@ -23,6 +23,7 @@ export const BreadcrumbNav: React.FC = () => {
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
   const channels = useAppStore((s) => s.channels);
+  const searchLabel = useShortcutLabel("app.toggleSearch");
 
   const segments = useMemo<Segment[]>(() => {
     const out: Segment[] = [{ label: "Home", to: "/" }];
@@ -212,8 +213,8 @@ export const BreadcrumbNav: React.FC = () => {
       <button
         data-testid="breadcrumb-search-button"
         onClick={() => window.dispatchEvent(new CustomEvent("pollis:open-search"))}
-        aria-label={`Search (${shortcutLabel("K")})`}
-        title={`Search (${shortcutLabel("K")})`}
+        aria-label={`Search (${searchLabel})`}
+        title={`Search (${searchLabel})`}
         className="flex items-center gap-1.5 transition-colors text-[var(--c-text)] hover:text-[var(--c-accent)]"
         style={{
           height: 20,
@@ -236,7 +237,7 @@ export const BreadcrumbNav: React.FC = () => {
             lineHeight: 1.2,
           }}
         >
-          {shortcutLabel("K")}
+          {searchLabel}
         </kbd>
       </button>
       <button
