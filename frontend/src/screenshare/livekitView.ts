@@ -81,15 +81,30 @@ interface E2eeKeyInfo {
 // ── Identity helpers ─────────────────────────────────────────────────────────
 
 /** Derive the voice identity that other parts of the app key on
- *  (`voice-{userId}`) from a view participant identity (`{userId}:view`).
+ *  (`voice-{userId}`) from a view participant identity. Accepts both
+ *  shapes:
+ *    - `{userId}:view` — legacy (single device per user)
+ *    - `{userId}:{deviceId}:view` — per-device, mirroring the
+ *      `voice-{userId}:{deviceId}` voice path (#140). Required because
+ *      LiveKit enforces unique participant identities per room; two
+ *      devices of the same user sharing `{userId}:view` end up in a
+ *      reconnect storm as LiveKit kicks each new joiner.
  *  Returns null for any other shape so we don't accidentally surface
  *  tracks from rooms / clients that aren't using the view scheme. */
 function voiceIdentityFromView(identity: string): string | null {
-  const idx = identity.lastIndexOf(':view');
-  if (idx === -1 || idx + ':view'.length !== identity.length) {
+  if (!identity.endsWith(':view')) {
     return null;
   }
-  const userId = identity.slice(0, idx);
+  const head = identity.slice(0, identity.length - ':view'.length);
+  if (!head) {
+    return null;
+  }
+  // `head` is either `{userId}` (legacy) or `{userId}:{deviceId}` (per-
+  // device). The user-scoped key drops any device suffix — screenshare
+  // tiles match against `voice-{userId}` regardless of which of the
+  // user's devices is sharing.
+  const colon = head.indexOf(':');
+  const userId = colon === -1 ? head : head.slice(0, colon);
   if (!userId) {
     return null;
   }
@@ -128,6 +143,14 @@ class LiveKitView {
    *  ignore rotation events for unrelated groups (the Rust side filters
    *  too, but this is cheap and keeps the renderer honest). */
   private currentE2eeMlsGroupId: string | null = null;
+  /** This device's stable `device_id`, used to build the per-device view
+   *  identity `{userId}:{deviceId}:view` so two devices of the same user
+   *  don't collide on LiveKit's per-room identity uniqueness check —
+   *  same reason `VoiceSessionManager` carries its own deviceId field
+   *  (#140). Lazily fetched once; stays null only if the backend can't
+   *  supply one, in which case we fall back to the legacy `{userId}:view`
+   *  identity (single-device user). */
+  private deviceId: string | null = null;
 
   private tracks = new Map<string, MediaStreamTrack>();
   /** Width × height per active remote track. Pushed into the Zustand
@@ -398,7 +421,20 @@ class LiveKitView {
   }
 
   private async executeJoin(target: ViewIntent): Promise<boolean> {
-    const identity = `${target.userId}:view`;
+    // Lazy-fetch device_id once per process (it's stable after login).
+    // Without this, two devices of the same user join the LiveKit view
+    // room as `{userId}:view` and kick each other out in a reconnect
+    // storm — the audit case the user hit cross-machine on PR #371.
+    if (!this.deviceId) {
+      try {
+        this.deviceId = (await invoke<string | null>('get_device_id')) ?? null;
+      } catch (e) {
+        console.warn('[livekit-view] get_device_id failed (using legacy identity):', e);
+      }
+    }
+    const identity = this.deviceId
+      ? `${target.userId}:${this.deviceId}:view`
+      : `${target.userId}:view`;
     let token: string;
     let url: string;
     try {
