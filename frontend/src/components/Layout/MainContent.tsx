@@ -713,6 +713,9 @@ export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = nul
             onSend={handleSend}
             onValueChange={typing.notify}
             autoFocus
+            // @all fans out a notification only in group channels (DMs don't),
+            // so the live "@all notifies everyone" hint is gated on one.
+            canNotifyAll={!!selectedChannelId}
             draftKey={
               // Prefix with the room kind so the rare case of a channel id
               // and a DM conversation id colliding still routes to separate
