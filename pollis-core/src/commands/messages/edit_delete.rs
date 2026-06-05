@@ -397,6 +397,27 @@ pub async fn edit_message(
         }
     };
 
+    // Catch up MLS state before encrypting. Without this, an edit can be
+    // emitted at a stale epoch — recipients at the current epoch will fail
+    // to decrypt it. send_message does the same two-step catch-up here
+    // (poll_mls_welcomes + process_pending_commits) and edit_message was
+    // missing it. See issue #371 scenario 2.
+    {
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(ref did) = device_id {
+            if let Err(e) =
+                crate::commands::mls::poll_mls_welcomes_inner(state, &user_id, did).await
+            {
+                eprintln!("[messages] edit_message: poll_mls_welcomes for {mls_group_id}: {e}");
+            }
+        }
+    }
+    if let Err(e) =
+        crate::commands::mls::process_pending_commits_inner(state, &mls_group_id, &user_id).await
+    {
+        eprintln!("[messages] edit_message: process_pending_commits for {mls_group_id}: {e}");
+    }
+
     // Encrypt the new content with MLS and update local cache atomically.
     // First attempt — if the group is missing (e.g. local DB was wiped),
     // transparently repair and retry.

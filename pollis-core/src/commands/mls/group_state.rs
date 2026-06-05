@@ -12,7 +12,7 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::device::{load_or_create_device_signer, verify_added_devices};
+use super::device::{load_or_create_device_signer, verify_added_devices, VerifyOutcome};
 use super::provider::{make_credential, PollisProvider, CS};
 
 // ── GroupInfo publishing ─────────────────────────────────────────────────────
@@ -518,7 +518,8 @@ async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
     };
     match conn
         .query(
-            "SELECT 1 FROM user_device WHERE user_id = ?1 AND device_id = ?2",
+            "SELECT 1 FROM user_device \
+             WHERE user_id = ?1 AND device_id = ?2 AND revoked_at IS NULL",
             libsql::params![user_id, device_id],
         )
         .await
@@ -638,65 +639,96 @@ pub(crate) async fn process_pending_commits_locked(
 
         // ── Inbound cert verification ────────────────────────────
         if let Some(ref added_user_id) = commit.added_user_id {
-            let verified = match verify_added_devices(
+            let outcome = match verify_added_devices(
                 &conn,
                 added_user_id,
                 &commit.added_device_ids,
             )
             .await
             {
-                Ok(v) => v,
+                Ok(o) => o,
                 Err(e) => {
                     eprintln!(
-                        "[mls] process_pending_commits: cert verification error for {mls_group_id}: {e}"
+                        "[mls] process_pending_commits: cert verification error for {mls_group_id}: {e} — treating as AbsentRetry"
                     );
-                    false
+                    VerifyOutcome::AbsentRetry
                 }
             };
 
-            if !verified {
-                // A *self-add* (the committer adding its own device via an
-                // external commit) that fails cross-signing verification is the
-                // unambiguous "revoked device re-adding itself" shape: its
-                // `user_device` row is gone, so verification cannot pass.
-                // Reject it — do NOT apply — AND delete the squatting commit
-                // row, because under the UNIQUE(conversation_id, epoch)
-                // constraint a left-in-place poison row permanently wedges every
-                // future commit at this epoch. Deleting by `seq` is precise and
-                // idempotent across honest members. Honest first-joins and
-                // legitimate external-join recoveries keep their `user_device`
-                // row, so they verify and never hit this branch.
-                let is_self_add = commit
-                    .sender_id
-                    .as_deref()
-                    .map_or(false, |s| s == added_user_id.as_str());
-                if is_self_add {
-                    eprintln!(
-                        "[mls] process_pending_commits: REJECTING unverified self-add by {added_user_id} at epoch {} in {mls_group_id} (revoked device?) — dropping commit seq {}",
-                        commit.epoch, commit.seq
-                    );
-                    if let Err(e) = conn
-                        .execute(
-                            "DELETE FROM mls_commit_log WHERE seq = ?1",
-                            libsql::params![commit.seq],
-                        )
-                        .await
-                    {
+            match outcome {
+                VerifyOutcome::Verified => {}
+                VerifyOutcome::Revoked => {
+                    // Confirmed-illegitimate self-add (revoked tombstone OR
+                    // bad cert chain). Drop the squatting `mls_commit_log`
+                    // row so the UNIQUE(conversation_id, epoch) slot is
+                    // freed for a legit commit — that's the wedge the
+                    // delete protects against. Honest first-joins keep
+                    // their tombstone-free `user_device` row and never
+                    // hit this branch.
+                    let is_self_add = commit
+                        .sender_id
+                        .as_deref()
+                        .map_or(false, |s| s == added_user_id.as_str());
+                    if is_self_add {
                         eprintln!(
-                            "[mls] process_pending_commits: failed to delete rejected self-add seq {}: {e}",
-                            commit.seq
+                            "[mls] process_pending_commits: REJECTING REVOKED self-add by {added_user_id} at epoch {} in {mls_group_id} — dropping commit seq {}",
+                            commit.epoch, commit.seq
                         );
+                        if let Err(e) = conn
+                            .execute(
+                                "DELETE FROM mls_commit_log WHERE seq = ?1",
+                                libsql::params![commit.seq],
+                            )
+                            .await
+                        {
+                            eprintln!(
+                                "[mls] process_pending_commits: failed to delete rejected self-add seq {}: {e}",
+                                commit.seq
+                            );
+                        }
+                        break;
                     }
-                    break;
+                    // Third-party REVOKED add (an admin adding someone
+                    // who's already been revoked) — sender already merged
+                    // it on their side, so we apply it locally to stay in
+                    // sync rather than diverging from the group.
+                    eprintln!(
+                        "[mls] process_pending_commits: WARN revoked third-party add for {added_user_id} at epoch {} in {mls_group_id} — processing anyway",
+                        commit.epoch
+                    );
                 }
-                // A third-party add (an admin/inviter adding someone else) that
-                // fails verification stays ADVISORY: the sender already merged
-                // it, so blocking would diverge us from the rest of the group.
-                // Only the self-add shape above is safe to hard-reject.
-                eprintln!(
-                    "[mls] process_pending_commits: WARN cross-signing verification failed for {added_user_id} at epoch {} in {mls_group_id} — processing anyway (third-party add)",
-                    commit.epoch
-                );
+                VerifyOutcome::AbsentRetry => {
+                    // Race / replication-lag: the added device's row hasn't
+                    // reached our view of Turso yet (issue #372). Do NOT
+                    // delete the commit row.
+                    //
+                    // Self-add: defer — the sender claims they're adding
+                    // themselves, but we can't see their row to confirm.
+                    // Stop processing here; next catch-up retries.
+                    //
+                    // Third-party add (admin/inviter adding someone else):
+                    // the sender already merged this on their side and
+                    // it's already in `mls_commit_log` past the epoch
+                    // CAS. Stalling would diverge us from the rest of the
+                    // group. Process the commit advisory — same fallback
+                    // the pre-#372 code took for any unverified third-
+                    // party add.
+                    let is_self_add = commit
+                        .sender_id
+                        .as_deref()
+                        .map_or(false, |s| s == added_user_id.as_str());
+                    if is_self_add {
+                        eprintln!(
+                            "[mls] process_pending_commits: deferring self-add seq {} epoch {} for {mls_group_id} — added device {added_user_id} not yet visible (issue #372)",
+                            commit.seq, commit.epoch
+                        );
+                        break;
+                    }
+                    eprintln!(
+                        "[mls] process_pending_commits: WARN third-party add for {added_user_id} at epoch {} in {mls_group_id} not yet verifiable — processing anyway",
+                        commit.epoch
+                    );
+                }
             }
         }
 

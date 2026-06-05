@@ -1,0 +1,20 @@
+-- Tombstone column for device revocation. Refs issue #372.
+--
+-- Background: process_pending_commits_locked uses verify_added_devices to
+-- check the added device's cross-signing cert against user_device. Today
+-- "row absent" can mean either (a) the device was hard-deleted by
+-- revoke_device, or (b) the row hasn't replicated to this client's view yet
+-- (race / write lag). Both return Ok(false), and the caller hard-deletes
+-- the commit row from mls_commit_log to keep the UNIQUE(conversation_id,
+-- epoch) slot free. When (b) happens to a legitimate commit, that commit
+-- gets permanently erased and lagging devices can never catch up via the
+-- commit log.
+--
+-- Fix: revoke_device sets revoked_at instead of hard-deleting; verify_added_
+-- devices treats "row present with revoked_at IS NOT NULL" as a confirmed
+-- revoke (delete commit OK) and "row absent" as a race/lag (do NOT delete
+-- commit, retry on next process_pending_commits). Hard-deletes that happen
+-- outside the revocation path (e.g. logout, account reset) remain hard
+-- deletes for now — those don't generate a "verify failed" event for other
+-- peers because the device isn't trying to add itself, it's just leaving.
+ALTER TABLE user_device ADD COLUMN revoked_at TEXT;

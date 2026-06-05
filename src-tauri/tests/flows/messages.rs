@@ -1079,16 +1079,19 @@ async fn revoked_device_cannot_rejoin_group() {
         );
     }
 
-    // Revoke bob's device: delete its `user_device` row so cross-signing
-    // verification can no longer pass for it (the revoked-device state).
+    // Revoke bob's device: tombstone its `user_device` row (issue #372) so
+    // verify_added_devices distinguishes "revoked" (delete the squatting
+    // commit OK) from "absent because not replicated yet" (don't delete).
+    // Pre-#372 this was a hard DELETE; the migration to tombstones changed
+    // revoke_device to set revoked_at, and this test mirrors that path.
     {
         let conn = alice.state.remote_db.conn().await.expect("remote conn");
         conn.execute(
-            "DELETE FROM user_device WHERE user_id = ?1",
+            "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
             libsql::params![bob_p.id.clone()],
         )
         .await
-        .expect("delete bob user_device");
+        .expect("tombstone bob user_device");
     }
 
     // Remove bob from the group — reconcile prunes his leaf.

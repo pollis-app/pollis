@@ -25,6 +25,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "mls_commit_log_unique_epoch",
         include_str!("migrations/000003_mls_commit_log_unique_epoch.sql"),
     ),
+    (
+        4,
+        "user_device_revoked_at",
+        include_str!("migrations/000004_user_device_revoked_at.sql"),
+    ),
 ];
 
 pub mod queries {

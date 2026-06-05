@@ -1008,7 +1008,9 @@ pub async fn list_user_devices(
     let current_device_id = state.device_id.lock().await.clone();
     let conn = state.remote_db.conn().await?;
     let mut rows = conn.query(
-        "SELECT device_id, device_name, created_at, last_seen FROM user_device WHERE user_id = ?1 ORDER BY created_at ASC",
+        "SELECT device_id, device_name, created_at, last_seen FROM user_device \
+         WHERE user_id = ?1 AND revoked_at IS NULL \
+         ORDER BY created_at ASC",
         libsql::params![user_id],
     ).await?;
 
@@ -1063,15 +1065,23 @@ pub async fn revoke_device(
         )));
     }
 
-    // Drop the device row and its unclaimed key packages. Reconcile
-    // detects the missing row and prunes the leaf from each tree.
+    // Drop unclaimed key packages — these are one-time-use and useless
+    // for a revoked device.
     conn.execute(
         "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
         libsql::params![user_id.clone(), device_id.clone()],
     )
     .await?;
+    // Tombstone the device instead of hard-deleting (issue #372). Other
+    // members' `verify_added_devices` must be able to distinguish "this
+    // device was revoked — drop any rejoin attempt" from "this device
+    // is just lagging — don't destroy commits about it." A hard-delete
+    // makes those two cases indistinguishable; the tombstone makes the
+    // revocation observable AND keeps the row available for later cert
+    // verification of historical commits.
     conn.execute(
-        "DELETE FROM user_device WHERE device_id = ?1 AND user_id = ?2",
+        "UPDATE user_device SET revoked_at = datetime('now') \
+         WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
         libsql::params![device_id.clone(), user_id.clone()],
     )
     .await?;
