@@ -209,6 +209,38 @@ Linux helpers never send `MSG_SOURCES` and never read `MSG_SELECT`.
 The same opcodes are reserved in the proto crate so both helpers
 share one wire format definition.
 
+## Electron publish-path codec policy
+
+Under Electron, capture + encode + publish all happen in Chromium
+(`screenShareSession.ts` → `livekitView.publishScreenShare`), bypassing
+the Rust helper pipeline above. The codec is chosen **per-machine at
+publish time** by `frontend/src/screenshare/codecPolicy.ts`:
+
+- **Hardware H.264 when present.** `pickScreenShareCodec()` scans
+  `RTCRtpSender.getCapabilities('video')` for an H.264 entry whose
+  `profile-level-id` does **not** end in `1f` (level > 3.1). Software
+  OpenH264 only advertises baseline Level 3.1, so any higher-level entry
+  (e.g. High/5.2 `640034`) is itself proof a hardware encoder
+  (VideoToolbox / Media Foundation / VAAPI) is registered. When found,
+  that exact capability is pinned first via `setPreferredVideoCodec()` in
+  `sdpMunger.ts`, so SDP negotiation offers it ahead of baseline 3.1 and
+  Chromium engages the hardware encoder at high resolution/framerate
+  ("uncap the negotiation").
+- **Software VP8 fallback.** If only baseline `…1f` H.264 entries exist
+  (typical on GPU-less Windows/VMs and most Linux), publish VP8 — it has
+  no level cap and we control its bitrate/framerate, a better fallback
+  than baseline-3.1 H.264 (which can't do 1080p).
+
+Cross-platform: macOS always gets HW H.264 (VideoToolbox); Windows
+usually does (any GPU machine); Linux often falls back to VP8. Decode is
+never a problem — every Pollis client is the same Chromium with H.264
+bundled, so any client decodes any other's stream regardless of platform.
+
+The pin reorders **within** the AV1-stripped codec list `sdpMunger.ts`
+already enforces, so the PT=35 BUNDLE collision that originally forced
+VP8 stays closed. `VITE_POLLIS_SCREENSHARE_CODEC` = `h264` | `vp8`
+overrides the auto-detection for A/B testing. See issue #364.
+
 ## Parent-side pipeline (unchanged, shared by all paths)
 
 `pollis-core/src/commands/screenshare.rs`:

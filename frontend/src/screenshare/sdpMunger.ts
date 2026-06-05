@@ -23,6 +23,24 @@ const DROPPED_CODECS = new Set(["AV1"]);
 
 let installed = false;
 
+// When set, video transceivers pin this exact codec capability FIRST in
+// their preference list (after AV1 stripping) so SDP negotiation selects
+// it. Used to force the hardware H.264 high-profile entry for screen-share
+// publish (see codecPolicy.ts / issue #364). Null → default Chromium order
+// (VP8-first), the software fallback. It's a module-level flag rather than
+// a per-call argument because livekit-client funnels every track through
+// the patched addTransceiver internally — the publish site sets the flag,
+// then the patch reads it when the transceiver is created.
+let preferredVideoCodec: RTCRtpCodec | null = null;
+
+/** Set (or clear, with null) the video codec to pin first on subsequent
+ *  video transceiver creation / renegotiation. */
+export function setPreferredVideoCodec(
+  codec: RTCRtpCodec | null,
+): void {
+  preferredVideoCodec = codec;
+}
+
 export function installAv1Stripper(): void {
   if (installed || typeof RTCPeerConnection === "undefined") {
     return;
@@ -89,8 +107,30 @@ function pinNonAv1Preferences(
     if (filtered.length === 0) {
       return; // never call setCodecPreferences([]) — spec-invalid
     }
-    transceiver.setCodecPreferences(filtered);
+    transceiver.setCodecPreferences(reorderPreferred(filtered));
   } catch (e) {
     console.warn("[av1-stripper] setCodecPreferences failed:", e);
   }
+}
+
+/** Move the pinned `preferredVideoCodec` (matched by mimeType + fmtp line)
+ *  to the front of an already-filtered codec list so SDP negotiation picks
+ *  it. No-op when nothing is pinned or the pinned codec isn't present in
+ *  this PC's capabilities. */
+function reorderPreferred(
+  codecs: RTCRtpCodec[],
+): RTCRtpCodec[] {
+  const preferred = preferredVideoCodec;
+  if (!preferred) {
+    return codecs;
+  }
+  const matches = (c: RTCRtpCodec): boolean =>
+    c.mimeType.toLowerCase() === preferred.mimeType.toLowerCase() &&
+    (c.sdpFmtpLine ?? "") === (preferred.sdpFmtpLine ?? "");
+  const head = codecs.filter(matches);
+  if (head.length === 0) {
+    return codecs;
+  }
+  const tail = codecs.filter((c) => !matches(c));
+  return [...head, ...tail];
 }

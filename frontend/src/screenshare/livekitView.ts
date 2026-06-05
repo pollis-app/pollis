@@ -41,7 +41,8 @@ import type {
 
 import { invoke } from '../bridge';
 import { hasElectron } from '../bridge/runtime';
-import { installAv1Stripper } from './sdpMunger';
+import { pickScreenShareCodec } from './codecPolicy';
+import { installAv1Stripper, setPreferredVideoCodec } from './sdpMunger';
 
 // Install the Chromium-130 PT=35 BUNDLE-collision workaround at module
 // load — before any livekit-client code constructs a PeerConnection. See
@@ -263,22 +264,37 @@ class LiveKitView {
       // browser releases the capture handle.
       await this.unpublishScreenShare();
     }
+    // Per-machine codec choice (issue #364): hardware H.264 pinned to its
+    // advertised high level when a HW encoder is present, else software
+    // VP8. Push the highest quality the sender's hardware can produce and
+    // let SDP negotiation stay uncapped; deal with "too much" reactively
+    // via a future bitrate toggle (#300), not by pre-throttling.
+    //
+    // The AV1 stripper already keeps the PT=35 BUNDLE collision clean by
+    // filtering AV1 out of every video transceiver's preferences; pinning
+    // H.264 first reorders within that already-AV1-free list, so the
+    // collision that originally forced VP8 stays closed.
+    const { codec, h264Capability } = pickScreenShareCodec();
+    // When publishing H.264, pin the high-level capability first so
+    // Chromium offers it ahead of baseline 3.1 and engages the hardware
+    // encoder. Clear the pin for VP8 so we keep the default order.
+    setPreferredVideoCodec(codec === 'h264' ? h264Capability : null);
     console.info('[livekit-view] publishScreenShare: calling publishTrack', {
       trackId: track.id,
       trackKind: track.kind,
       trackLabel: track.label,
       settings: track.getSettings(),
+      codec,
+      h264ProfileLevelId: h264Capability?.sdpFmtpLine ?? null,
     });
     const t0 = performance.now();
     const publication = await room.localParticipant.publishTrack(track, {
       source: Track.Source.ScreenShare,
-      // Force VP8 to avoid a Chromium SDP collision on payload_type 35
-      // when AV1 and H.264 are both offered with the same dynamic PT
-      // ("A BUNDLE group contains a codec collision for
-      // payload_type='35'"). VP8 is the universally supported screen-
-      // share codec and has no PT conflict. Switch to vp9/av1 later
-      // once Chromium's PT allocator settles.
-      videoCodec: 'vp8',
+      // Hardware H.264 (high level) when available, else software VP8 —
+      // decided per-machine above. H.264's level is pinned via
+      // setPreferredVideoCodec so negotiation never caps resolution /
+      // framerate; VP8 has no level cap and we control its ceilings below.
+      videoCodec: codec,
       // Disable simulcast for screen-share — high-bitrate single layer
       // matches text legibility better than scaled-down spatial layers.
       simulcast: false,
@@ -286,8 +302,8 @@ class LiveKitView {
       // ramps up toward these when the link sustains it, ramps down on
       // packet loss. Default LiveKit screenshare cap is 15 fps; bumping to
       // 60 covers the game-stream-to-lobby use case. Bitrate ceiling of
-      // 8 Mbps is comfortable for 1080p60 VP8 and headroom for the
-      // power-user case; the estimator will hold back on slower links.
+      // 8 Mbps is comfortable for 1080p60 (H.264 high or VP8) and headroom
+      // for the power-user case; the estimator will hold back on slower links.
       // maintain-framerate biases toward smoother motion over crisper
       // text when the encoder has to give something up under pressure.
       videoEncoding: {
@@ -342,6 +358,9 @@ class LiveKitView {
     const localTrack = this.localTrack;
     this.localPublication = null;
     this.localTrack = null;
+    // Drop the H.264 pin so a later renegotiation (e.g. subscribing to a
+    // new remote share) reverts to the default codec order.
+    setPreferredVideoCodec(null);
     if (room && localTrack) {
       try {
         await room.localParticipant.unpublishTrack(localTrack, true);
