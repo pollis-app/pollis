@@ -292,7 +292,7 @@ export function useLiveKitRealtime() {
         });
     };
 
-    channel.onmessage = (event) => {
+    channel.onmessage = async (event) => {
       if (event.type === 'dm_created') {
         queryClientRef.current.invalidateQueries({
           queryKey: messageQueryKeys.dmConversations(currentUser.id),
@@ -327,16 +327,24 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: ['group-invites'] });
         // Same as dm_created: a membership change may have added us to an
         // MLS group, so pull the Welcome and catch up on commits immediately.
-        invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+        // Awaited (not fire-and-forget) so any user action that follows the
+        // event handler returning runs against caught-up MLS state — issue
+        // #371 scenario 3 had these as `.catch` with no `await`, which let
+        // sends/edits race into encrypt at the prior epoch.
+        try {
+          await invoke('poll_mls_welcomes', { userId: currentUser.id });
+        } catch (err) {
           console.warn('[realtime] membership_changed: poll_mls_welcomes failed:', err);
-        });
+        }
         if (event.conversation_id) {
-          invoke('process_pending_commits', {
-            conversationId: event.conversation_id,
-            userId: currentUser.id,
-          }).catch((err) => {
+          try {
+            await invoke('process_pending_commits', {
+              conversationId: event.conversation_id,
+              userId: currentUser.id,
+            });
+          } catch (err) {
             console.warn('[realtime] membership_changed: process_pending_commits failed:', err);
-          });
+          }
         }
         // Only invites raise a user-facing notification. Approvals and
         // generic reconciles are silent — query invalidation handles them.
@@ -397,12 +405,31 @@ export function useLiveKitRealtime() {
         // Wipe stale presence for the reconnected room — Rust will re-emit
         // a fresh participant snapshot right after.
         presenceStore.resetRoom(event.room_id);
-        // Catch up on welcomes that may have arrived during the outage so
-        // new-group invites apply without waiting for the user to open a
-        // channel from one of those groups.
-        invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
+        // Catch up on welcomes AND pending commits that may have arrived
+        // during the outage. Issue #371 scenario 4: this handler previously
+        // only polled welcomes, missing every commit posted to existing
+        // groups while the realtime channel was disconnected, which left
+        // the device stuck at a stale epoch until the next action-triggered
+        // catch-up (or, with #372 in play, possibly forever).
+        // `room_id` for group/DM rooms IS the MLS group id (group rooms
+        // use the group_id; DM rooms use the dm_channel_id which is also
+        // the MLS group id). Inbox rooms (`inbox-<userId>`) have no MLS
+        // group, so skip the per-room commit processing for those.
+        try {
+          await invoke('poll_mls_welcomes', { userId: currentUser.id });
+        } catch (err) {
           console.warn('[realtime] reconnect: poll_mls_welcomes failed:', err);
-        });
+        }
+        if (!event.room_id.startsWith('inbox-')) {
+          try {
+            await invoke('process_pending_commits', {
+              conversationId: event.room_id,
+              userId: currentUser.id,
+            });
+          } catch (err) {
+            console.warn('[realtime] reconnect: process_pending_commits failed:', err);
+          }
+        }
         return;
       }
 
