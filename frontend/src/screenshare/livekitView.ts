@@ -41,12 +41,6 @@ import type {
 
 import { invoke } from '../bridge';
 import { hasElectron } from '../bridge/runtime';
-import { installAv1Stripper } from './sdpMunger';
-
-// Install the Chromium-130 PT=35 BUNDLE-collision workaround at module
-// load — before any livekit-client code constructs a PeerConnection. See
-// sdpMunger.ts for the full diagnosis.
-installAv1Stripper();
 import { autorun } from 'mobx';
 import { appStore } from '../stores/appStore';
 import { LOCAL_PREVIEW_KEY } from './screenShareSession';
