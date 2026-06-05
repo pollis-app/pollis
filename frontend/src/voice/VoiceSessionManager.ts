@@ -25,6 +25,13 @@ export type VoiceEvent =
   | { type: 'speaking_started'; identity: string }
   | { type: 'speaking_stopped'; identity: string }
   | { type: 'connection_quality_changed'; identity: string; quality: VoiceConnectionQuality }
+  | {
+      type: 'voice_e2ee_key_rotated';
+      key: number[];
+      key_index: number;
+      epoch: number;
+      mls_group_id: string;
+    }
   | { type: 'disconnected' };
 
 /** Mirrors `JoinTimings` in `pollis-core/src/commands/voice.rs`. */
@@ -644,6 +651,18 @@ class VoiceSessionManager {
         const participants = this.state.participants.slice();
         participants[idx] = { ...participants[idx], connectionQuality: event.quality };
         this.setState({ participants });
+        break;
+      }
+      case 'voice_e2ee_key_rotated': {
+        // MLS epoch advanced on the Rust side; rotate the screen-share
+        // view client's ExternalE2EEKeyProvider so its encryption stays
+        // aligned with the audio path. Lazy import so the Tauri build
+        // doesn't pull in livekit-client when it'd never use it.
+        const key = new Uint8Array(event.key);
+        const mlsGroupId = event.mls_group_id;
+        void import('../screenshare/livekitView').then(({ livekitView }) => {
+          void livekitView.rotateE2eeKey(key, mlsGroupId);
+        });
         break;
       }
       case 'disconnected': {

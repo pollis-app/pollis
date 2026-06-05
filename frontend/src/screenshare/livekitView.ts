@@ -41,12 +41,6 @@ import type {
 
 import { invoke } from '../bridge';
 import { hasElectron } from '../bridge/runtime';
-import { installAv1Stripper } from './sdpMunger';
-
-// Install the Chromium-130 PT=35 BUNDLE-collision workaround at module
-// load — before any livekit-client code constructs a PeerConnection. See
-// sdpMunger.ts for the full diagnosis.
-installAv1Stripper();
 import { autorun } from 'mobx';
 import { appStore } from '../stores/appStore';
 import { LOCAL_PREVIEW_KEY } from './screenShareSession';
@@ -125,6 +119,15 @@ class LiveKitView {
   private current: ViewIntent | null = null;
   private currentRoom: Room | null = null;
   private reconciling = false;
+  /** Active E2EE key provider for the current room, so the epoch-rotation
+   *  hook (driven by the Rust `voice_e2ee_key_rotated` event) can call
+   *  `setKey` on it when MLS commits advance the group epoch. Null when
+   *  no room is connected or when the room was joined unencrypted. */
+  private currentKeyProvider: ExternalE2EEKeyProvider | null = null;
+  /** MLS group whose exporter secret backs `currentKeyProvider`. Used to
+   *  ignore rotation events for unrelated groups (the Rust side filters
+   *  too, but this is cheap and keeps the renderer honest). */
+  private currentE2eeMlsGroupId: string | null = null;
 
   private tracks = new Map<string, MediaStreamTrack>();
   /** Width × height per active remote track. Pushed into the Zustand
@@ -272,25 +275,19 @@ class LiveKitView {
     const t0 = performance.now();
     const publication = await room.localParticipant.publishTrack(track, {
       source: Track.Source.ScreenShare,
-      // Force VP8 to avoid a Chromium SDP collision on payload_type 35
-      // when AV1 and H.264 are both offered with the same dynamic PT
-      // ("A BUNDLE group contains a codec collision for
-      // payload_type='35'"). VP8 is the universally supported screen-
-      // share codec and has no PT conflict. Switch to vp9/av1 later
-      // once Chromium's PT allocator settles.
-      videoCodec: 'vp8',
       // Disable simulcast for screen-share — high-bitrate single layer
       // matches text legibility better than scaled-down spatial layers.
       simulcast: false,
-      // Encoder ceilings — not targets. WebRTC's TWCC bandwidth estimator
-      // ramps up toward these when the link sustains it, ramps down on
-      // packet loss. Default LiveKit screenshare cap is 15 fps; bumping to
-      // 60 covers the game-stream-to-lobby use case. Bitrate ceiling of
-      // 8 Mbps is comfortable for 1080p60 VP8 and headroom for the
-      // power-user case; the estimator will hold back on slower links.
-      // maintain-framerate biases toward smoother motion over crisper
-      // text when the encoder has to give something up under pressure.
-      videoEncoding: {
+      // CRITICAL: screen-share reads `screenShareEncoding`, NOT
+      // `videoEncoding` — livekit-client's computeVideoEncodings() swaps to
+      // the screenShareEncoding field whenever the source is ScreenShare.
+      // Setting videoEncoding here is silently ignored, leaving the default
+      // `h1080fps15` preset (1080p @ 15fps) — that was the cross-platform
+      // 15fps cap. These are ceilings, not targets: TWCC ramps toward them
+      // when the link sustains it and backs off on loss. 8 Mbps is
+      // comfortable for 1080p60. maintain-framerate biases toward smooth
+      // motion over crisp text under pressure.
+      screenShareEncoding: {
         maxFramerate: 60,
         maxBitrate: 8_000_000,
         priority: 'high',
@@ -303,7 +300,6 @@ class LiveKitView {
       source: publication.source,
     });
     this.localPublication = publication;
-    // The publication wraps the MediaStreamTrack as a LocalVideoTrack.
     const localTrack = publication.track as LocalVideoTrack | undefined;
     if (localTrack) {
       this.localTrack = localTrack;
@@ -453,6 +449,8 @@ class LiveKitView {
         epoch: keyInfo.epoch,
         key_index: keyInfo.key_index,
       });
+      this.currentKeyProvider = keyProvider;
+      this.currentE2eeMlsGroupId = keyInfo.mls_group_id;
     } catch (e) {
       console.warn(
         '[livekit-view] e2ee key fetch failed — screen-share will NOT be end-to-end encrypted:',
@@ -533,10 +531,39 @@ class LiveKitView {
     return true;
   }
 
+  /** Rotate the E2EE key on the active screen-share view client. Called
+   *  from VoiceSessionManager when the Rust side emits
+   *  `voice_e2ee_key_rotated` after an MLS commit. No-op if no view
+   *  client is connected or if the rotation is for a different group. */
+  async rotateE2eeKey(
+    key: Uint8Array,
+    mlsGroupId: string,
+  ): Promise<void> {
+    const provider = this.currentKeyProvider;
+    const activeGroup = this.currentE2eeMlsGroupId;
+    if (!provider || activeGroup !== mlsGroupId) {
+      return;
+    }
+    try {
+      // Copy into a fresh ArrayBuffer (the source may be a view into a
+      // larger buffer or a SharedArrayBuffer); setKey wants ArrayBuffer.
+      const buf = new ArrayBuffer(key.byteLength);
+      new Uint8Array(buf).set(key);
+      await provider.setKey(buf);
+      console.info('[livekit-view] e2ee key rotated', {
+        mls_group: mlsGroupId,
+      });
+    } catch (e) {
+      console.warn('[livekit-view] e2ee key rotation failed:', e);
+    }
+  }
+
   private async executeLeave(): Promise<void> {
     const room = this.currentRoom;
     this.currentRoom = null;
     this.current = null;
+    this.currentKeyProvider = null;
+    this.currentE2eeMlsGroupId = null;
     // Unpublish before disconnect so the SDK has a chance to stop the
     // capture cleanly (frees the OS capture handle, removes the system
     // "you're sharing" indicator immediately).
@@ -604,6 +631,8 @@ class LiveKitView {
       this.trackDims.clear();
       this.current = null;
       this.currentRoom = null;
+      this.currentKeyProvider = null;
+      this.currentE2eeMlsGroupId = null;
       if (hadAny) {
         this.emit();
       }

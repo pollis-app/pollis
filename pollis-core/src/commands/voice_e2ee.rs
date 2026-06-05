@@ -111,8 +111,221 @@ pub async fn derive_voice_key(
 ) -> Result<(Vec<u8>, i32, u64, String)> {
     let mls_group_id =
         resolve_mls_group_id(state, channel_id, self_user_id, counterparty_user_id).await?;
-    let (key, idx, epoch) = derive_voice_key_for_group(state, &mls_group_id).await?;
+    // Catch up local MLS state before exporting the key. Without this, the
+    // two peers race: whichever one joined voice first holds a stale epoch
+    // and derives a key the other peer can't decrypt — black tile on the
+    // receiver, "InvalidKey: Decryption failed" in livekit-client.
+    //
+    // `process_pending_commits` alone isn't enough — commits live in
+    // `message_envelope` rows on Turso that this client may not have
+    // pulled yet. We have to do a real ingest of the conversations
+    // backing this MLS group so any unprocessed commits get applied.
+    let epoch_before = derive_voice_key_for_group(state, &mls_group_id)
+        .await
+        .map(|(_, _, e)| e)
+        .unwrap_or(u64::MAX);
+    catch_up_mls_group(state, &mls_group_id, self_user_id).await;
+    let (mut key, mut idx, mut epoch) = derive_voice_key_for_group(state, &mls_group_id).await?;
+    eprintln!(
+        "[voice-e2ee] catch-up: {mls_group_id} epoch {epoch_before} → {epoch}"
+    );
+
+    // If the catch-up couldn't bring us level with the published GroupInfo,
+    // we're stranded behind commits that are no longer in `mls_commit_log`
+    // (e.g. the rejection-and-delete path in `process_pending_commits_locked`
+    // wiped them — see issue #371). External-join rebuilds local state at
+    // the current epoch from the published GroupInfo, which is how `process_
+    // pending_commits` already recovers when there's no local group at all.
+    if let Some(remote_epoch) =
+        published_group_epoch(state, &mls_group_id).await
+    {
+        if epoch < remote_epoch {
+            eprintln!(
+                "[voice-e2ee] catch-up: local epoch {epoch} < published {remote_epoch} for {mls_group_id} — external-join recovery"
+            );
+            match crate::commands::mls::external_join_group(
+                state,
+                &mls_group_id,
+                self_user_id,
+            )
+            .await
+            {
+                Ok(()) => {
+                    let (k2, i2, e2) =
+                        derive_voice_key_for_group(state, &mls_group_id).await?;
+                    eprintln!(
+                        "[voice-e2ee] external-join recovery: {mls_group_id} epoch {epoch} → {e2}"
+                    );
+                    key = k2;
+                    idx = i2;
+                    epoch = e2;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[voice-e2ee] external-join recovery failed for {mls_group_id}: {e}"
+                    );
+                }
+            }
+        }
+    }
+
     Ok((key, idx, epoch, mls_group_id))
+}
+
+/// Look up the highest epoch we've seen published in `mls_group_info` for
+/// this MLS group. None on any query failure (treated as "can't tell —
+/// don't trigger recovery"), so a transient Turso blip never forces an
+/// unnecessary external-join.
+async fn published_group_epoch(state: &Arc<AppState>, mls_group_id: &str) -> Option<u64> {
+    let conn = state.remote_db.conn().await.ok()?;
+    let mut rows = conn
+        .query(
+            "SELECT epoch FROM mls_group_info WHERE conversation_id = ?1",
+            libsql::params![mls_group_id.to_string()],
+        )
+        .await
+        .ok()?;
+    let row = rows.next().await.ok()??;
+    row.get::<i64>(0).ok().map(|v| v as u64)
+}
+
+/// Pull and process any unread envelopes for every conversation backed by
+/// this MLS group so the local epoch matches whoever sent the most recent
+/// commit. Best-effort: ingest failures are logged and ignored so a
+/// transient network blip doesn't block the voice join.
+async fn catch_up_mls_group(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) {
+    // Look up the conversations that share this MLS group. Two shapes:
+    //   1. `mls_group_id` IS a DM channel id — the DM table is keyed by it.
+    //   2. `mls_group_id` is a group id — fan out across every `channels.id`
+    //      where `group_id = mls_group_id`.
+    let conn = match state.remote_db.conn().await {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[voice-e2ee] catch-up: remote_db conn failed: {e}");
+            return;
+        }
+    };
+
+    let is_dm = match conn
+        .query(
+            "SELECT 1 FROM dm_channel WHERE id = ?1 LIMIT 1",
+            libsql::params![mls_group_id.to_string()],
+        )
+        .await
+    {
+        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
+        Err(e) => {
+            eprintln!("[voice-e2ee] catch-up: dm_channel probe failed: {e}");
+            false
+        }
+    };
+
+    if is_dm {
+        eprintln!("[voice-e2ee] catch-up: ingesting DM {mls_group_id}");
+        match crate::commands::messages::ingest_dm_envelopes_inner(
+            state,
+            user_id,
+            mls_group_id,
+        )
+        .await
+        {
+            Ok(()) => eprintln!("[voice-e2ee] catch-up: DM ingest OK {mls_group_id}"),
+            Err(e) => {
+                eprintln!("[voice-e2ee] catch-up ingest_dm for {mls_group_id}: {e}")
+            }
+        }
+        return;
+    }
+
+    let channel_ids: Vec<String> = match conn
+        .query(
+            "SELECT id FROM channels WHERE group_id = ?1",
+            libsql::params![mls_group_id.to_string()],
+        )
+        .await
+    {
+        Ok(mut rows) => {
+            let mut out = Vec::new();
+            loop {
+                match rows.next().await {
+                    Ok(Some(row)) => match row.get::<String>(0) {
+                        Ok(id) => out.push(id),
+                        Err(e) => {
+                            eprintln!("[voice-e2ee] catch-up: channel row decode: {e}");
+                            break;
+                        }
+                    },
+                    Ok(None) => break,
+                    Err(e) => {
+                        eprintln!("[voice-e2ee] catch-up: channel row read: {e}");
+                        break;
+                    }
+                }
+            }
+            out
+        }
+        Err(e) => {
+            eprintln!("[voice-e2ee] catch-up: channels query failed for {mls_group_id}: {e}");
+            return;
+        }
+    };
+
+    eprintln!(
+        "[voice-e2ee] catch-up: group {mls_group_id} → {} channel(s)",
+        channel_ids.len()
+    );
+    // Diagnostic: dump what's in `mls_commit_log` for this MLS group on
+    // Turso. process_pending_commits filters by `epoch >= local_epoch`, so
+    // if the rows we'd need (e.g. epochs 5..N for a local at epoch 4) are
+    // missing, advancement is impossible regardless of how many times we
+    // ingest. Lists at most ~20 rows so the log stays manageable.
+    match conn
+        .query(
+            "SELECT seq, epoch, sender_id, added_user_id \
+             FROM mls_commit_log \
+             WHERE conversation_id = ?1 \
+             ORDER BY epoch ASC, seq ASC \
+             LIMIT 20",
+            libsql::params![mls_group_id.to_string()],
+        )
+        .await
+    {
+        Ok(mut rows) => {
+            let mut lines: Vec<String> = Vec::new();
+            while let Ok(Some(row)) = rows.next().await {
+                let seq: i64 = row.get(0).unwrap_or(-1);
+                let epoch: i64 = row.get(1).unwrap_or(-1);
+                let sender_id: Option<String> = row.get(2).ok().flatten();
+                let added: Option<String> = row.get(3).ok().flatten();
+                lines.push(format!(
+                    "seq={seq} epoch={epoch} sender={} added={}",
+                    sender_id.as_deref().unwrap_or("-"),
+                    added.as_deref().unwrap_or("-")
+                ));
+            }
+            eprintln!(
+                "[voice-e2ee] catch-up: mls_commit_log for {mls_group_id} ({} rows): {}",
+                lines.len(),
+                if lines.is_empty() {
+                    "<empty>".to_string()
+                } else {
+                    lines.join(" | ")
+                }
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "[voice-e2ee] catch-up: mls_commit_log query for {mls_group_id} failed: {e}"
+            );
+        }
+    }
+    for ch in channel_ids {
+        match crate::commands::messages::ingest_channel_envelopes_inner(state, user_id, &ch).await
+        {
+            Ok(()) => eprintln!("[voice-e2ee] catch-up: channel ingest OK {ch}"),
+            Err(e) => eprintln!("[voice-e2ee] catch-up ingest_channel for {ch}: {e}"),
+        }
+    }
 }
 
 /// JSON-serializable wrapper around the derived key for the napi command.
@@ -226,10 +439,27 @@ pub async fn on_mls_epoch_changed(state: &Arc<AppState>, mls_group_id: &str) {
         return;
     }
 
-    provider.set_shared_key(key, key_index);
+    provider.set_shared_key(key.clone(), key_index);
 
-    let mut voice = state.voice.lock().await;
-    voice.e2ee_epoch = epoch;
+    let channel = {
+        let mut voice = state.voice.lock().await;
+        voice.e2ee_epoch = epoch;
+        voice.channel.clone()
+    };
+
+    // Notify the renderer so the screen-share view client's
+    // ExternalE2EEKeyProvider can rotate too. Without this, the JS-side
+    // key stays at its connect-time epoch and decrypt fails on every
+    // remote video frame after a commit.
+    if let Some(ch) = channel {
+        let _ = ch.send(crate::commands::voice::VoiceEvent::VoiceE2eeKeyRotated {
+            key,
+            key_index,
+            epoch,
+            mls_group_id: mls_group_id.to_string(),
+        });
+    }
+
     eprintln!(
         "[voice-e2ee] rotated key for {mls_group_id} to epoch {epoch} (idx {key_index})"
     );
