@@ -18,6 +18,8 @@
 // (see app/_layout.tsx) which calls Rust's `initPollis()` with config
 // and then swaps in `pollisNativeBridge`.
 
+import { Platform } from "react-native";
+import * as FileSystem from "expo-file-system/legacy";
 import * as pollisNative from "pollis-native";
 
 export interface NativeBridge {
@@ -115,9 +117,19 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
   if (initialized) {
     return;
   }
+  // Android's rustls-native-certs (pulled transitively by libsql) reads
+  // /etc/ssl/certs which is empty on Android. Rust ships a Mozilla CA
+  // bundle and writes it under `data_dir`; we need to hand it a writable
+  // path. Expo's documentDirectory comes back as a `file://` URL — strip
+  // the scheme for Rust's PathBuf.
+  const dataDir =
+    Platform.OS === "android" && FileSystem.documentDirectory
+      ? FileSystem.documentDirectory.replace(/^file:\/\//, "")
+      : undefined;
   const configJson = JSON.stringify({
     turso_url: config.tursoUrl,
     turso_token: config.tursoToken,
+    data_dir: dataDir,
     r2_endpoint: config.r2Endpoint ?? "",
     r2_access_key_id: config.r2AccessKeyId ?? "",
     r2_secret_access_key: config.r2SecretAccessKey ?? "",

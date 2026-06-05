@@ -54,6 +54,14 @@ impl From<anyhow::Error> for BridgeError {
 struct InitConfig {
     turso_url: String,
     turso_token: String,
+    /// Absolute path of a writable directory the bridge can park per-app
+    /// state in. Required on Android (we drop the CA bundle there and
+    /// scope `POLLIS_DATA_DIR` to it); optional everywhere else, where
+    /// the platform already gives the binary a sensible default via
+    /// `db::dirs_path()`.
+    #[serde(default)]
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    data_dir: Option<String>,
     #[serde(default)]
     r2_endpoint: String,
     #[serde(default)]
@@ -84,6 +92,8 @@ pub async fn init_pollis(config_json: String) -> Result<(), BridgeError> {
     APP_STATE
         .get_or_try_init(|| async {
             let parsed: InitConfig = serde_json::from_str(&config_json)?;
+            #[cfg(target_os = "android")]
+            android_bootstrap(parsed.data_dir.as_deref())?;
             let config = Config {
                 turso_url: parsed.turso_url,
                 turso_token: parsed.turso_token,
@@ -101,6 +111,26 @@ pub async fn init_pollis(config_json: String) -> Result<(), BridgeError> {
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))
         })
         .await?;
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn android_bootstrap(data_dir: Option<&str>) -> Result<(), BridgeError> {
+    let dir = data_dir.ok_or_else(|| {
+        BridgeError::Bridge(
+            "init_pollis on Android needs `data_dir` set to a writable sandbox \
+             path (Expo's FileSystem.documentDirectory)"
+                .into(),
+        )
+    })?;
+    let path = std::path::PathBuf::from(dir);
+    crate::android_tls::install(&path).map_err(|e| {
+        BridgeError::Bridge(format!("android_tls install at {}: {e}", path.display()))
+    })?;
+    // SAFETY: see `android_tls::set_env`.
+    unsafe {
+        std::env::set_var("POLLIS_DATA_DIR", &path);
+    }
     Ok(())
 }
 
