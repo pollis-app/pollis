@@ -1,6 +1,7 @@
 import { Channel, invoke } from '../bridge';
 
-import { useAppStore } from '../stores/appStore';
+import { reaction } from 'mobx';
+import { appStore } from '../stores/appStore';
 import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
@@ -347,7 +348,7 @@ class VoiceSessionManager {
   }
 
   private guardsPass(): boolean {
-    const store = useAppStore.getState();
+    const store = appStore;
     if (!store.currentUser) {
       return false;
     }
@@ -355,7 +356,7 @@ class VoiceSessionManager {
   }
 
   private async executeJoin(target: VoiceIntent): Promise<boolean> {
-    const store = useAppStore.getState();
+    const store = appStore;
     const user = store.currentUser;
     if (!user) {
       return false;
@@ -762,7 +763,7 @@ export const voiceSession = new VoiceSessionManager();
  */
 voiceSession.subscribe(() => {
   const s = voiceSession.getSnapshot();
-  const store = useAppStore.getState();
+  const store = appStore;
   const v = store.voiceState;
 
   // Lifecycle transitions — drive the union via semantic methods. The
@@ -803,7 +804,7 @@ voiceSession.subscribe(() => {
         store.voiceJoined();
       }
       // Mic-mute mirror.
-      const after = useAppStore.getState().voiceState;
+      const after = appStore.voiceState;
       if (after.kind === 'joined' && after.micMuted !== s.isMuted) {
         store.voiceSetMicMuted(s.isMuted);
       }
@@ -817,28 +818,30 @@ voiceSession.subscribe(() => {
     }
   }
 
-  // Collection / derived fields stay as direct sets.
+  // Collection / derived fields stay as direct sets through store actions.
   if (store.voiceParticipants !== s.participants) {
-    useAppStore.setState({ voiceParticipants: s.participants });
+    store.setVoiceParticipants(s.participants);
   }
   if (store.voiceActiveSpeakerIds !== s.activeSpeakerIds) {
-    useAppStore.setState({ voiceActiveSpeakerIds: s.activeSpeakerIds });
+    store.setVoiceActiveSpeakerIds(s.activeSpeakerIds);
   }
   if (store.isLocalSpeaking !== s.isLocalSpeaking) {
-    useAppStore.setState({ isLocalSpeaking: s.isLocalSpeaking });
+    store.setIsLocalSpeaking(s.isLocalSpeaking);
   }
   // Join errors mirror through the store's separate voiceError field;
   // the union's idle state doesn't carry the error itself.
   if (store.voiceError !== s.error) {
-    useAppStore.setState({ voiceError: s.error });
+    store.setVoiceError(s.error);
   }
 });
 
 // React to currentUser changes by re-running reconciliation.
 // Logging out should tear down any active voice session without each caller
-// having to remember to.
-useAppStore.subscribe((state, prev) => {
-  if (state.currentUser !== prev.currentUser) {
+// having to remember to. `reaction` fires only when currentUser actually
+// changes, so the previous explicit `!==` guard is implicit.
+reaction(
+  () => appStore.currentUser,
+  () => {
     voiceSession.refresh();
-  }
-});
+  },
+);

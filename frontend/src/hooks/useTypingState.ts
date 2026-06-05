@@ -1,5 +1,6 @@
 import { useEffect } from "react";
-import { useTypingStore, TYPING_TTL_MS, typingRoomKey } from "../stores/typingStore";
+import { useObserver } from "mobx-react-lite";
+import { typingStore, TYPING_TTL_MS, typingRoomKey } from "../stores/typingStore";
 
 /**
  * Returns the list of usernames currently typing in the named room, sorted
@@ -14,8 +15,8 @@ export function useTypingState(args: {
   const { channelId, conversationId } = args;
   const roomKey = typingRoomKey(channelId, conversationId);
 
-  const room = useTypingStore((s) => (roomKey ? s.byRoom[roomKey] : undefined));
-  const pruneExpired = useTypingStore((s) => s.pruneExpired);
+  const room = useObserver(() => (roomKey ? typingStore.byRoom[roomKey] : undefined));
+  const pruneExpired = typingStore.pruneExpired;
 
   // Drive the prune on a coarse interval — finer than TTL but cheap. The
   // store no-ops when nothing actually expired.

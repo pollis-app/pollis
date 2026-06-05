@@ -3,22 +3,23 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { Pencil, Trash2 } from "lucide-react";
 import { MainContent } from "../components/Layout/MainContent";
 import { useUserGroupsWithChannels } from "../hooks/queries/useGroups";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export const ChannelPage: React.FC = () => {
+export const ChannelPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/channels/$channelId" });
-  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
-  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
-  const markRead = useAppStore((s) => s.markRead);
-  const pendingDeleteChannelId = useAppStore((s) => s.pendingDeleteChannelId);
-  const setPendingDeleteChannelId = useAppStore((s) => s.setPendingDeleteChannelId);
+  const setSelectedChannelId = appStore.setSelectedChannelId;
+  const setSelectedGroupId = appStore.setSelectedGroupId;
+  const markRead = appStore.markRead;
+  const pendingDeleteChannelId = appStore.pendingDeleteChannelId;
+  const setPendingDeleteChannelId = appStore.setPendingDeleteChannelId;
 
   useEffect(() => {
     // selectedGroupId drives the LiveKit room id used by the typing
     // publisher; without it, this client's typing events never go out.
     // setSelectedGroupId also nulls channelId, so set the group first.
-    if (useAppStore.getState().selectedGroupId !== groupId) {
+    if (appStore.selectedGroupId !== groupId) {
       setSelectedGroupId(groupId);
     }
     setSelectedChannelId(channelId);
@@ -77,4 +78,4 @@ export const ChannelPage: React.FC = () => {
       </div>
     </div>
   );
-};
+});

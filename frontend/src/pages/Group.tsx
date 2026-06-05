@@ -2,16 +2,17 @@ import React, { useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Hash, Plus, Volume2, Users, UserPlus, Inbox, LogOut, Pencil } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useUserGroupsWithChannels, useGroupJoinRequests } from "../hooks/queries/useGroups";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { useVoiceRoomCounts } from "../hooks/queries/useVoiceParticipants";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 
-export const GroupPage: React.FC = () => {
+export const GroupPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId" });
-  const { setSelectedGroupId, setSelectedChannelId, markRead, unreadCounts } = useAppStore();
+  const { setSelectedGroupId, setSelectedChannelId, markRead, unreadCounts } = appStore;
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
   const group = groupsWithChannels?.find((g) => g.id === groupId);
@@ -166,4 +167,4 @@ export const GroupPage: React.FC = () => {
       onEsc={() => navigate({ to: "/groups" })}
     />
   );
-};
+});

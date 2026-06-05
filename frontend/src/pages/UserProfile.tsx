@@ -13,12 +13,13 @@ import {
 import { Button } from "../components/ui/Button";
 import { useBlockUser } from "../hooks/queries";
 import { useCreateOrGetDMConversation } from "../hooks/queries/useMessages";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export const UserProfilePage: React.FC = () => {
+export const UserProfilePage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { userId } = useParams({ from: "/user/$userId" });
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
 
   const { data: profile, isLoading } = useOtherUserProfile(userId);
   const { data: safety } = useSafetyNumber(userId);
@@ -251,4 +252,4 @@ export const UserProfilePage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});

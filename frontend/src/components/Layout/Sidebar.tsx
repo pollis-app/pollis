@@ -19,7 +19,8 @@ import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
 import { usePeerVerifications } from "../../hooks/queries/useUserProfile";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import { usePresenceStatus, type PresenceStatus } from "../../stores/presenceStore";
 import { useShortcutLabel } from "../../keyboard";
 
@@ -45,7 +46,7 @@ interface SidebarProps {
   onToggle: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
+export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) => {
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
@@ -66,7 +67,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
     }
     return map;
   }, [peerVerifications]);
-  const unreadCounts = useAppStore((s) => s.unreadCounts);
+  const unreadCounts = appStore.unreadCounts;
 
   // Stable list of voice channel ids across all groups; powers the live
   // "users connected" badge on voice channel rows. Realtime voice events
@@ -339,7 +340,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onToggle }) => {
       </button>
     </aside>
   );
-};
+});
 
 interface SectionHeaderProps {
   label: string;
@@ -509,7 +510,7 @@ const PRESENCE_COLORS: Record<PresenceStatus, string> = {
   offline: "var(--c-bg)",
 };
 
-const PresenceDot: React.FC<{ userId: string | null }> = ({ userId }) => {
+const PresenceDot: React.FC<{ userId: string | null }> = observer(({ userId }) => {
   const status = usePresenceStatus(userId);
   return (
     <span
@@ -527,4 +528,4 @@ const PresenceDot: React.FC<{ userId: string | null }> = ({ userId }) => {
       }}
     />
   );
-};
+});

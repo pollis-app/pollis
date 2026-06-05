@@ -12,7 +12,8 @@ import { screenShareSession } from "../../screenshare/screenShareSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
 import { TerminalView } from "../TerminalView";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import { isDropTargetActive } from "../../stores/dropTargetStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useLiveKitRealtime } from "../../hooks/useLiveKitRealtime";
@@ -33,7 +34,7 @@ import type { RouterContext } from "../../types/router";
  */
 const SIDEBAR_DEFAULT_LS_KEY = "pollis.sidebar_open_by_default";
 
-export const AppShell: React.FC = () => {
+export const AppShell: React.FC = observer(() => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -79,7 +80,7 @@ export const AppShell: React.FC = () => {
     setViewingScreenShareTrackKey,
     shareStopped,
     availableUpdateVersion,
-  } = useAppStore();
+  } = appStore;
   // Channel id derives from the union. Replaces the standalone
   // activeVoiceChannelId field that used to be stored separately.
   const activeVoiceChannelId =
@@ -107,7 +108,7 @@ export const AppShell: React.FC = () => {
     }
   }, [sidebarDefault]);
 
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
 
   // Drive the looping ringtone off the incomingCall slot. Rust owns the
   // playback thread (`start_ring` / `stop_ring`) so the loop survives any
@@ -715,4 +716,4 @@ export const AppShell: React.FC = () => {
       </div>
     </div>
   );
-};
+});

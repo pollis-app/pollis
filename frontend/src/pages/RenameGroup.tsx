@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useUpdateGroup, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
@@ -10,8 +11,8 @@ interface RenameGroupProps {
   onSuccess?: () => void;
 }
 
-export const RenameGroup: React.FC<RenameGroupProps> = ({ groupId, onSuccess }) => {
-  const { currentUser } = useAppStore();
+export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSuccess }) => {
+  const { currentUser } = appStore;
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const updateGroup = useUpdateGroup();
 
@@ -132,4 +133,4 @@ export const RenameGroup: React.FC<RenameGroupProps> = ({ groupId, onSuccess }) 
       </div>
     </div>
   );
-};
+});

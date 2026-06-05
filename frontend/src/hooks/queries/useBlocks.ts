@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import type { BlockedUser, DmChannel } from "../../types";
 
 export const blocksQueryKeys = {
@@ -10,7 +11,7 @@ export const blocksQueryKeys = {
 
 // Query: inbound DM requests awaiting accept/decline.
 export function useDMRequests() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: blocksQueryKeys.dmRequests(currentUser?.id ?? null),
@@ -31,7 +32,7 @@ export function useDMRequests() {
 // Mutation: accept a pending DM request, moving it into the conversations list.
 export function useAcceptDMRequest() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (dmChannelId: string): Promise<void> => {
@@ -56,7 +57,7 @@ export function useAcceptDMRequest() {
 // disappear from the conversations list on next refetch.
 export function useBlockUser() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (blockedId: string): Promise<void> => {
@@ -80,7 +81,7 @@ export function useBlockUser() {
 // Mutation: unblock a user.
 export function useUnblockUser() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (blockedId: string): Promise<void> => {
@@ -103,7 +104,7 @@ export function useUnblockUser() {
 
 // Query: users the current user has blocked.
 export function useBlockedUsers() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: blocksQueryKeys.blockedUsers(currentUser?.id ?? null),

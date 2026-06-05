@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { invoke } from "../bridge";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import { TYPING_REFRESH_MS } from "../stores/typingStore";
 
 /**
@@ -20,7 +21,7 @@ export function useTypingPublisher(args: {
   conversationId: string | null;
 }) {
   const { roomId, channelId, conversationId } = args;
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   // We avoid hammering publish_typing on every keystroke by tracking the
   // last-sent timestamp and only re-emitting once the throttle window has

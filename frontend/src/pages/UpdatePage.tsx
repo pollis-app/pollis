@@ -6,15 +6,16 @@ import {
 } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import type { ManagedInstallInfo } from "../types";
 
 type Status = "checking" | "available" | "none" | "error" | "managed";
 
-export const UpdatePage: React.FC = () => {
-  const setUpdateRequired = useAppStore((s) => s.setUpdateRequired);
-  const cachedAvailable = useAppStore((s) => s.availableUpdateVersion);
-  const setAvailableUpdateVersion = useAppStore((s) => s.setAvailableUpdateVersion);
+export const UpdatePage: React.FC = observer(() => {
+  const setUpdateRequired = appStore.setUpdateRequired;
+  const cachedAvailable = appStore.availableUpdateVersion;
+  const setAvailableUpdateVersion = appStore.setAvailableUpdateVersion;
 
   const [appVersion, setAppVersion] = useState<string>("");
   const [status, setStatus] = useState<Status>(cachedAvailable ? "available" : "checking");
@@ -217,4 +218,4 @@ export const UpdatePage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});

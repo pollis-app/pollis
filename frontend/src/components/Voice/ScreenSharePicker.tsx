@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Monitor, Square, X } from "lucide-react";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import {
   friendlyScreenShareError,
   screenShareSession,
@@ -18,18 +19,17 @@ import { Card } from "../ui/Card";
  *  helper subprocess. Selecting a source sends `Selection` to the
  *  parked helper, which builds an `SCContentFilter` and starts the
  *  `SCStream`. Industry-standard pattern — what Slack/Discord/Zoom do. */
-export const ScreenSharePicker: React.FC = () => {
+export const ScreenSharePicker: React.FC = observer(() => {
   // Picker only renders when shareState.kind === 'picking', so sources are
   // guaranteed present. Narrowed via the union; bail to null defensively
   // for the brief frame where state may have transitioned away.
-  const sources = useAppStore((s) =>
-    s.voiceState.kind === 'joined' && s.voiceState.share.kind === 'picking'
-      ? s.voiceState.share.sources
-      : null,
-  );
-  const shareCancelPicker = useAppStore((s) => s.shareCancelPicker);
-  const shareStartStarting = useAppStore((s) => s.shareStartStarting);
-  const shareFailed = useAppStore((s) => s.shareFailed);
+  const sources =
+    appStore.voiceState.kind === 'joined' && appStore.voiceState.share.kind === 'picking'
+      ? appStore.voiceState.share.sources
+      : null;
+  const shareCancelPicker = appStore.shareCancelPicker;
+  const shareStartStarting = appStore.shareStartStarting;
+  const shareFailed = appStore.shareFailed;
   const [busy, setBusy] = useState(false);
 
   // Tab between Displays and Windows. Default to Displays — most
@@ -170,7 +170,7 @@ export const ScreenSharePicker: React.FC = () => {
       </div>
     </div>
   );
-};
+});
 
 interface SourceCardProps {
   disabled: boolean;

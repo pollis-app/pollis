@@ -1,13 +1,14 @@
 import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { CreateChannel } from "./CreateChannel";
 
-export const CreateChannelPage: React.FC = () => {
+export const CreateChannelPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId/channels/new" });
-  const { setSelectedChannelId } = useAppStore();
+  const { setSelectedChannelId } = appStore;
 
   return (
     <PageShell title="New Channel" scrollable>
@@ -23,4 +24,4 @@ export const CreateChannelPage: React.FC = () => {
       />
     </PageShell>
   );
-};
+});

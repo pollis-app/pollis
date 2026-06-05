@@ -14,7 +14,8 @@ import {
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
 import { electron, hasElectron } from "../bridge/runtime";
 import { isMac } from "../utils/platform";
@@ -28,9 +29,9 @@ function isValidHex(val: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(val);
 }
 
-export const Preferences: React.FC = () => {
+export const Preferences: React.FC = observer(() => {
   const navigate = useNavigate();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = appStore.currentUser;
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
@@ -536,4 +537,4 @@ export const Preferences: React.FC = () => {
       </div>
     </div>
   );
-};
+});

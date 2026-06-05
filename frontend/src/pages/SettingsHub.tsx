@@ -5,11 +5,12 @@ import { PageShell } from "../components/Layout/PageShell";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
 import { useUserProfile } from "../hooks/queries";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export const SettingsHubPage: React.FC = () => {
+export const SettingsHubPage: React.FC = observer(() => {
   const navigate = useNavigate();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
   const { data: profile } = useUserProfile();
 
   const headlineName =
@@ -100,4 +101,4 @@ export const SettingsHubPage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});

@@ -3,7 +3,8 @@ import { useMemo } from "react";
 import { invoke } from "../../bridge";
 import * as api from "../../services/api";
 import type { GroupWithChannels } from "../../services/api";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import type { Group, Channel, GroupMember } from "../../types";
 
 export const groupQueryKeys = {
@@ -20,7 +21,7 @@ export const groupQueryKeys = {
 };
 
 export function useUserGroupsWithChannels() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
@@ -37,7 +38,7 @@ export function useUserGroupsWithChannels() {
 }
 
 export function useUserGroups() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
@@ -70,8 +71,8 @@ export function useGroupChannels(groupId: string | null) {
 
 export function useCreateGroup() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
-  const setGroups = useAppStore((state) => state.setGroups);
+  const currentUser = useObserver(() => appStore.currentUser);
+  const setGroups = appStore.setGroups;
 
   return useMutation({
     mutationFn: async ({
@@ -121,7 +122,7 @@ export function useCreateGroup() {
 
 export function useJoinGroup() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (groupId: string) => {
@@ -142,7 +143,7 @@ export function useJoinGroup() {
 
 export function useUpdateGroup() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({
@@ -178,8 +179,8 @@ export function useUpdateGroup() {
 
 export function useUpdateGroupIcon() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
-  const setGroups = useAppStore((state) => state.setGroups);
+  const currentUser = useObserver(() => appStore.currentUser);
+  const setGroups = appStore.setGroups;
 
   return useMutation({
     mutationFn: async ({ groupId, iconUrl }: { groupId: string; iconUrl: string }) => {
@@ -210,8 +211,8 @@ export function useUpdateGroupIcon() {
 
 export function useCreateChannel() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
-  const setChannels = useAppStore((state) => state.setChannels);
+  const currentUser = useObserver(() => appStore.currentUser);
+  const setChannels = appStore.setChannels;
 
   return useMutation({
     mutationFn: async ({
@@ -268,7 +269,7 @@ export function useCreateChannel() {
 
 export function useUpdateChannel() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({
@@ -304,7 +305,7 @@ export function useUpdateChannel() {
 
 export function useDeleteChannel() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({ channelId }: { groupId: string; channelId: string }) => {
@@ -326,7 +327,7 @@ export function useDeleteChannel() {
 
 export function useLeaveGroup() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (groupId: string) => {
@@ -365,7 +366,7 @@ export type JoinRequest = {
 };
 
 export function usePendingInvites() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: groupQueryKeys.pendingInvites(currentUser?.id ?? null),
@@ -383,7 +384,7 @@ export function usePendingInvites() {
 
 export function useAcceptInvite() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (inviteId: string) => {
@@ -406,7 +407,7 @@ export function useAcceptInvite() {
 
 export function useDeclineInvite() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (inviteId: string) => {
@@ -482,7 +483,7 @@ export function useGroupMembers(groupId: string | null) {
 
 export function useSetMemberRole() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({ groupId, userId, role }: { groupId: string; userId: string; role: 'admin' | 'member' }) => {
@@ -500,7 +501,7 @@ export function useSetMemberRole() {
 
 export function useKickMember() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({ groupId, userId }: { groupId: string; userId: string }) => {
@@ -518,7 +519,7 @@ export function useKickMember() {
 }
 
 export function useRequestGroupAccess() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (groupId: string) => {
@@ -531,7 +532,7 @@ export function useRequestGroupAccess() {
 }
 
 export function useMyJoinRequest(groupId: string | undefined) {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: groupQueryKeys.myJoinRequest(groupId, currentUser?.id ?? null),
@@ -551,7 +552,7 @@ export function useMyJoinRequest(groupId: string | undefined) {
 }
 
 export function useSendGroupInvite() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({ groupId, inviteeIdentifier }: { groupId: string; inviteeIdentifier: string }) => {
@@ -564,7 +565,7 @@ export function useSendGroupInvite() {
 }
 
 export function useGroupJoinRequests(groupId: string | null) {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: groupQueryKeys.joinRequests(groupId ?? ''),
@@ -582,7 +583,7 @@ export function useGroupJoinRequests(groupId: string | null) {
 
 export function useApproveJoinRequest() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({ requestId, groupId }: { requestId: string; groupId: string }) => {
@@ -601,7 +602,7 @@ export function useApproveJoinRequest() {
 
 export function useRejectJoinRequest() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({ requestId, groupId }: { requestId: string; groupId: string }) => {
@@ -619,7 +620,7 @@ export function useRejectJoinRequest() {
 }
 
 export function useAllPendingJoinRequests() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
 
   const adminGroupIds = useMemo(() => {

@@ -1,7 +1,8 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ShieldAlert, X } from "lucide-react";
-import { useKeyChangeStore } from "../../stores/keyChangeStore";
+import { observer } from "mobx-react-lite";
+import { keyChangeStore } from "../../stores/keyChangeStore";
 
 interface KeyChangeBannerProps {
   /// User id of the peer whose key has changed. Pass the DM's `user2_id`
@@ -19,13 +20,13 @@ interface KeyChangeBannerProps {
 /// to re-verify out-of-band via the profile page.
 ///
 /// Not a modal — this is an inline banner inside the conversation chrome.
-export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = ({
+export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = observer(({
   peerUserId,
   peerLabel,
 }) => {
   const navigate = useNavigate();
-  const flagged = useKeyChangeStore((s) => (peerUserId ? s.flagged[peerUserId] : undefined));
-  const acknowledge = useKeyChangeStore((s) => s.acknowledge);
+  const flagged = peerUserId ? keyChangeStore.flagged[peerUserId] : undefined;
+  const acknowledge = keyChangeStore.acknowledge;
 
   if (!peerUserId || !flagged) {
     return null;
@@ -83,4 +84,4 @@ export const KeyChangeBanner: React.FC<KeyChangeBannerProps> = ({
       </button>
     </div>
   );
-};
+});

@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { makeAutoObservable } from "mobx";
 
 /// Per-peer "their identity key just changed" signal. Pushed by the
 /// `key_changed` realtime event the backend emits whenever
@@ -10,38 +10,43 @@ import { create } from "zustand";
 /// to re-verify out-of-band. Acknowledging the banner only dismisses it
 /// from the UI — the verified flag in the local DB stays cleared until
 /// the user explicitly re-verifies on the profile page.
-interface KeyChangeStore {
+interface KeyChangeFlag {
+  peerIdentityVersion: number;
+  observedAt: number;
+}
+
+class KeyChangeStore {
   // peerUserId → version observed at the time of the change. We key by
   // peerUserId (not conversation_id) because the same peer may be in
   // several DMs and the warning is per-identity, not per-conversation.
-  flagged: Record<string, { peerIdentityVersion: number; observedAt: number }>;
-  flagChanged: (peerUserId: string, peerIdentityVersion: number) => void;
-  acknowledge: (peerUserId: string) => void;
-  clearAll: () => void;
+  flagged: Record<string, KeyChangeFlag> = {};
+
+  constructor() {
+    makeAutoObservable(this, {}, { autoBind: true });
+  }
+
+  flagChanged(peerUserId: string, peerIdentityVersion: number) {
+    this.flagged = {
+      ...this.flagged,
+      [peerUserId]: {
+        peerIdentityVersion,
+        observedAt: Date.now(),
+      },
+    };
+  }
+
+  acknowledge(peerUserId: string) {
+    if (!(peerUserId in this.flagged)) {
+      return;
+    }
+    const next = { ...this.flagged };
+    delete next[peerUserId];
+    this.flagged = next;
+  }
+
+  clearAll() {
+    this.flagged = {};
+  }
 }
 
-export const useKeyChangeStore = create<KeyChangeStore>((set) => ({
-  flagged: {},
-  flagChanged: (peerUserId, peerIdentityVersion) => {
-    set((state) => ({
-      flagged: {
-        ...state.flagged,
-        [peerUserId]: {
-          peerIdentityVersion,
-          observedAt: Date.now(),
-        },
-      },
-    }));
-  },
-  acknowledge: (peerUserId) => {
-    set((state) => {
-      if (!(peerUserId in state.flagged)) {
-        return state;
-      }
-      const next = { ...state.flagged };
-      delete next[peerUserId];
-      return { flagged: next };
-    });
-  },
-  clearAll: () => set({ flagged: {} }),
-}));
+export const keyChangeStore = new KeyChangeStore();

@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { makeAutoObservable } from "mobx";
 
 // Tracks whether a file-drop target (a mounted ChatInput) currently exists, so
 // the global drag-over overlay in AppShell only appears on views that can
@@ -9,20 +9,29 @@ import { create } from "zustand";
 // Ref-counted rather than a plain boolean so transient double-mounts (React
 // StrictMode) and any future layout with more than one input don't clear the
 // flag prematurely.
-interface DropTargetStore {
-  count: number;
-  register: () => void;
-  unregister: () => void;
+class DropTargetStore {
+  count = 0;
+
+  constructor() {
+    makeAutoObservable(this, {}, { autoBind: true });
+  }
+
+  register() {
+    this.count += 1;
+  }
+
+  unregister() {
+    this.count = Math.max(0, this.count - 1);
+  }
+
+  get active(): boolean {
+    return this.count > 0;
+  }
 }
 
-export const useDropTargetStore = create<DropTargetStore>((set) => ({
-  count: 0,
-  register: () => set((s) => ({ count: s.count + 1 })),
-  unregister: () => set((s) => ({ count: Math.max(0, s.count - 1) })),
-}));
+export const dropTargetStore = new DropTargetStore();
 
 // Read the current value outside React (e.g. inside the AppShell drag-event
 // callback, which is registered once and would otherwise close over a stale
 // value).
-export const isDropTargetActive = (): boolean =>
-  useDropTargetStore.getState().count > 0;
+export const isDropTargetActive = (): boolean => dropTargetStore.active;

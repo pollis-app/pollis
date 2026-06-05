@@ -47,7 +47,8 @@ import { installAv1Stripper } from './sdpMunger';
 // load — before any livekit-client code constructs a PeerConnection. See
 // sdpMunger.ts for the full diagnosis.
 installAv1Stripper();
-import { useAppStore } from '../stores/appStore';
+import { autorun } from 'mobx';
+import { appStore } from '../stores/appStore';
 import { LOCAL_PREVIEW_KEY } from './screenShareSession';
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -313,7 +314,7 @@ class LiveKitView {
     track.addEventListener('ended', () => {
       void this.unpublishScreenShare();
       // Notify the store so VoiceMemberTile flips back to the avatar.
-      useAppStore.getState().shareStopped();
+      appStore.shareStopped();
     });
     this.tracks.set(LOCAL_PREVIEW_KEY, track);
     const settings = track.getSettings();
@@ -551,7 +552,7 @@ class LiveKitView {
     // it's gone too — but call shareStopped() first to be explicit while
     // we're still in `joined`, in case the consumer flow handles
     // share-stopped and voice-left as distinct UI events.
-    useAppStore.getState().shareStopped();
+    appStore.shareStopped();
     if (room) {
       try {
         await room.disconnect();
@@ -680,7 +681,7 @@ class LiveKitView {
     this.snapshot = new Map(this.tracks);
     // Mirror remote keys into the store. Local preview is driven by the
     // existing `screenShareLocalActive` field — don't duplicate it here.
-    const store = useAppStore.getState();
+    const store = appStore;
     const desired: Record<
       string,
       { trackKey: string; width: number; height: number }
@@ -713,7 +714,7 @@ class LiveKitView {
       }
     }
     if (changed) {
-      useAppStore.setState({ screenShareRemotes: desired });
+      store.setScreenShareRemotes(desired);
     }
     for (const listener of this.listeners) {
       try {
@@ -741,7 +742,7 @@ if (typeof window !== 'undefined') {
     if (!hasElectron()) {
       return null;
     }
-    const s = useAppStore.getState();
+    const s = appStore;
     if (s.voiceState.kind !== 'joined') {
       return null;
     }
@@ -756,17 +757,10 @@ if (typeof window !== 'undefined') {
     };
   };
 
-  // Apply once at module load in case voice was already joined when this
-  // file is imported (it isn't, today, but the call is cheap and
-  // future-proofs against import-order churn).
-  livekitView.setIntent(computeIntent());
-
-  useAppStore.subscribe((state, prev) => {
-    if (
-      state.voiceState !== prev.voiceState ||
-      state.currentUser !== prev.currentUser
-    ) {
-      livekitView.setIntent(computeIntent());
-    }
+  // `autorun` applies once immediately (covering the case where voice was
+  // already joined when this file is imported) and re-runs whenever the voice
+  // state or current user that `computeIntent` reads changes.
+  autorun(() => {
+    livekitView.setIntent(computeIntent());
   });
 }

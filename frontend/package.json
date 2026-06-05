@@ -28,10 +28,11 @@
     "blurhash": "^2.0.5",
     "livekit-client": "^2.19.0",
     "lucide-react": "^0.344.0",
+    "mobx": "^6.16.0",
+    "mobx-react-lite": "^4.1.1",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "zustand": "^4.5.0"
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",

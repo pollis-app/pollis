@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { invoke } from '../bridge';
 
 import { notify } from '../utils/notify';
-import { useAppStore } from '../stores/appStore';
+import { appStore } from '../stores/appStore';
 import { voiceSession, type JoinedEvent, type LeftEvent } from './VoiceSessionManager';
 
 interface VoiceBridgeOptions {
@@ -83,10 +83,10 @@ export function installVoiceBridge(opts: VoiceBridgeOptions): BridgeHandle {
     // If this client initiated a 1:1 call and the callee never picked up
     // (outgoingCall still set when we leave the matching room), notify the
     // callee to stop ringing. Mirrors the decline path in AppShell.
-    const outgoing = useAppStore.getState().outgoingCall;
+    const outgoing = appStore.outgoingCall;
     if (outgoing && event.channelId === `call-${outgoing.callId}`) {
       const { callId, calleeId } = outgoing;
-      useAppStore.getState().setOutgoingCall(null);
+      appStore.setOutgoingCall(null);
       invoke('cancel_call', { otherUserId: calleeId, callId }).catch(() => {});
     }
 

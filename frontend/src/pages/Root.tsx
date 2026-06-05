@@ -3,13 +3,14 @@ import { useNavigate, useRouter } from "@tanstack/react-router";
 import { exit } from "../bridge";
 import { Users, MessageCircle, Mail, UserPlus, LogOut, Power } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { usePendingInvites, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import type { RouterContext } from "../types/router";
 
-export const RootPage: React.FC = () => {
-  const { unreadCounts } = useAppStore();
+export const RootPage: React.FC = observer(() => {
+  const { unreadCounts } = appStore;
   const navigate = useNavigate();
   const router = useRouter();
   const { onLogout } = router.options.context as RouterContext;
@@ -78,4 +79,4 @@ export const RootPage: React.FC = () => {
   ];
 
   return <TerminalMenu items={items} />;
-};
+});

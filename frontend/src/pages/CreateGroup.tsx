@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
 import { deriveSlug } from "../utils/urlRouting";
@@ -13,8 +14,8 @@ interface CreateGroupProps {
   onSuccess?: (groupId: string) => void;
 }
 
-export const CreateGroup: React.FC<CreateGroupProps> = ({ onSuccess }) => {
-  const { currentUser, addGroup, setSelectedGroupId } = useAppStore();
+export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) => {
+  const { currentUser, addGroup, setSelectedGroupId } = appStore;
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -166,4 +167,4 @@ export const CreateGroup: React.FC<CreateGroupProps> = ({ onSuccess }) => {
       </div>
     </div>
   );
-};
+});

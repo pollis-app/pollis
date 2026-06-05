@@ -28,7 +28,7 @@ RealtimeEvent (Rust → JS Channel)         Local action (e.g. self voice join)
                               │       │       │       │       │
                               ▼       ▼       ▼       ▼       ▼
                           play_sfx  notify  badge   alert   overlay
-                          (Rust)   (Rust)   (Zustand) (Zustand) (Zustand)
+                          (Rust)   (Rust)   (MobX)    (MobX)    (MobX)
 ```
 
 There is **no parallel dispatcher in Rust**. All decisions happen in JS. Rust is just the transport for LiveKit events (pushed through `pollis-node`'s Rust → Node `ThreadsafeFunction`, forwarded by the Electron main process via `webContents.send("channel:<id>", payload)` to the renderer's `channelOn` subscriber) and the executor for sound (`play_sfx` rodio command). OS notifications fire through the bridge — the renderer calls `window.electronAPI.notify({ title, body, icon })`, which the main process implements via Electron's native `Notification` API.
@@ -165,7 +165,7 @@ Cooldown is keyed by `${category}:${roomId ?? '_global'}`. It applies only to so
 | `frontend/src/utils/sfx.ts` | `playSfx()` wrapper around `play_sfx` Rust command |
 | `frontend/src/hooks/useLiveKitRealtime.ts` | Categorizes incoming Rust events, calls `notify(...)`, owns pref + permission sync |
 | `frontend/src/hooks/useVoiceChannel.ts` | Calls `notify('voice_self_join'/'voice_self_leave')` for local actions |
-| `frontend/src/hooks/useBadge.ts` | Reads `unreadCounts` from Zustand, applies dock/taskbar badge |
+| `frontend/src/hooks/useBadge.ts` | Reads `unreadCounts` from the MobX store, applies dock/taskbar badge |
 | `pollis-core/src/realtime.rs` | `RealtimeEvent` enum (Rust → JS wire format) |
 | `pollis-core/src/commands/livekit.rs` | `dispatch_data()` parses payloads, sends typed events to JS |
 | `pollis-core/src/commands/sfx.rs` | `play_sfx` rodio implementation |

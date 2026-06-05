@@ -8,19 +8,20 @@
 import React from "react";
 import { X } from "lucide-react";
 
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import { RemoteVideoTile } from "./RemoteVideoTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 import { shareOf } from "../../types/voice-state";
 
-export const ScreenShareViewer: React.FC = () => {
+export const ScreenShareViewer: React.FC = observer(() => {
   const {
     viewingScreenShareTrackKey,
     screenShareRemotes,
     voiceState,
     currentUser,
     setViewingScreenShareTrackKey,
-  } = useAppStore();
+  } = appStore;
   const share = shareOf(voiceState);
   const screenShareLocalActive = share.kind === 'active';
   const screenShareLocalDimensions = share.kind === 'active' ? share.dimensions : null;
@@ -123,4 +124,4 @@ export const ScreenShareViewer: React.FC = () => {
       </div>
     </div>
   );
-};
+});

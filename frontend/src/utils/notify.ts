@@ -1,6 +1,6 @@
 import { sendNotification } from '../bridge';
 import { playSfx } from './sfx';
-import { useAppStore } from '../stores/appStore';
+import { appStore } from '../stores/appStore';
 
 export type Category =
   | 'direct_message'
@@ -148,18 +148,18 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
   }
 
   if (config.badge && payload.roomId) {
-    useAppStore.getState().incrementUnread(payload.roomId);
+    appStore.incrementUnread(payload.roomId);
   }
 
   if (config.alert && payload.roomId && payload.senderUsername) {
-    useAppStore.getState().setStatusBarAlert({
+    appStore.setStatusBarAlert({
       senderUsername: payload.senderUsername,
       roomId: payload.roomId,
     });
   }
 
   if (config.overlay && payload.enrollment) {
-    useAppStore.getState().setPendingEnrollmentApproval(payload.enrollment);
+    appStore.setPendingEnrollmentApproval(payload.enrollment);
   }
 
   if (config.cooldownMs !== undefined && fired) {

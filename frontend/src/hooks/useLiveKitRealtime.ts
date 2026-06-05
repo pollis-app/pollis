@@ -6,16 +6,17 @@ import {
   requestPermission,
 } from '../bridge';
 import { useQueryClient } from '@tanstack/react-query';
-import { useAppStore } from '../stores/appStore';
+import { useObserver } from 'mobx-react-lite';
+import { appStore } from '../stores/appStore';
 import { useTauriReady } from './useTauriReady';
 import { messageQueryKeys, useDMConversations, markIngested } from './queries/useMessages';
 import { usePreferences } from './queries/usePreferences';
 import { groupQueryKeys, useUserGroupsWithChannels } from './queries/useGroups';
 import { notify, setNotifyPrefs, loadDeviceCallRingtone } from '../utils/notify';
-import { useTypingStore, typingRoomKey } from '../stores/typingStore';
-import { usePresenceStore } from '../stores/presenceStore';
-import { useKeyChangeStore } from '../stores/keyChangeStore';
-import { useRosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
+import { typingStore, typingRoomKey } from '../stores/typingStore';
+import { presenceStore } from '../stores/presenceStore';
+import { keyChangeStore } from '../stores/keyChangeStore';
+import { rosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
 
 // Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
@@ -142,11 +143,13 @@ type RealtimeEvent =
 export function useLiveKitRealtime() {
   const { isReady: isTauriReady } = useTauriReady();
   const queryClient = useQueryClient();
-  const {
-    selectedChannelId,
-    selectedConversationId,
-    currentUser,
-  } = useAppStore();
+  const { selectedChannelId, selectedConversationId, currentUser } = useObserver(
+    () => ({
+      selectedChannelId: appStore.selectedChannelId,
+      selectedConversationId: appStore.selectedConversationId,
+      currentUser: appStore.currentUser,
+    }),
+  );
 
   const { query: prefsQuery } = usePreferences();
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
@@ -215,8 +218,8 @@ export function useLiveKitRealtime() {
 
   // Track the voice room the user is currently connected to so we only play
   // join/leave cues for rooms they can actually hear.
-  const activeVoiceChannelId = useAppStore((s) =>
-    s.voiceState.kind === 'idle' ? null : s.voiceState.channelId,
+  const activeVoiceChannelId = useObserver(() =>
+    appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId,
   );
   const activeVoiceChannelIdRef = useRef<string | null>(activeVoiceChannelId);
   useEffect(() => { activeVoiceChannelIdRef.current = activeVoiceChannelId; }, [activeVoiceChannelId]);
@@ -393,7 +396,7 @@ export function useLiveKitRealtime() {
         queryClientRef.current.invalidateQueries({ queryKey: ['voice-participants'] });
         // Wipe stale presence for the reconnected room — Rust will re-emit
         // a fresh participant snapshot right after.
-        usePresenceStore.getState().resetRoom(event.room_id);
+        presenceStore.resetRoom(event.room_id);
         // Catch up on welcomes that may have arrived during the outage so
         // new-group invites apply without waiting for the user to open a
         // channel from one of those groups.
@@ -421,7 +424,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'call_invite') {
-        useAppStore.getState().setIncomingCall({
+        appStore.setIncomingCall({
           callId: event.call_id,
           roomName: event.room_name,
           callerId: event.caller_id,
@@ -437,7 +440,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'call_canceled') {
-        const store = useAppStore.getState();
+        const store = appStore;
         // Callee receives this when the caller hangs up before pickup —
         // dismiss the ring UI immediately.
         const incoming = store.incomingCall;
@@ -455,9 +458,7 @@ export function useLiveKitRealtime() {
       }
 
       if (event.type === 'presence_changed') {
-        usePresenceStore
-          .getState()
-          .setPresent(event.user_id, event.room_id, event.present);
+        presenceStore.setPresent(event.user_id, event.room_id, event.present);
         return;
       }
 
@@ -514,7 +515,7 @@ export function useLiveKitRealtime() {
             payload: { kind: "device_removed", user_id, device_id },
           });
         }
-        useRosterChangeStore.getState().push(event.conversation_id, banners);
+        rosterChangeStore.push(event.conversation_id, banners);
         // Refresh the member list so the sidebar / member roster picks
         // up the change without waiting for the next periodic refetch.
         queryClientRef.current.invalidateQueries({
@@ -526,9 +527,7 @@ export function useLiveKitRealtime() {
       if (event.type === 'key_changed') {
         // Signal-style "safety number changed" — surface inline so the
         // user re-verifies out-of-band. Advisory; sends are unaffected.
-        useKeyChangeStore
-          .getState()
-          .flagChanged(event.peer_user_id, event.peer_identity_version);
+        keyChangeStore.flagChanged(event.peer_user_id, event.peer_identity_version);
         // Refresh the shield-badge query so DM/contact lists drop the
         // verified badge for this peer immediately, and the open profile
         // recomputes its "Changed — re-verify" state.
@@ -552,11 +551,9 @@ export function useLiveKitRealtime() {
           return;
         }
         if (event.is_typing) {
-          useTypingStore
-            .getState()
-            .setTyping(roomKey, event.user_id, event.username ?? event.user_id);
+          typingStore.setTyping(roomKey, event.user_id, event.username ?? event.user_id);
         } else {
-          useTypingStore.getState().clearTyping(roomKey, event.user_id);
+          typingStore.clearTyping(roomKey, event.user_id);
         }
         return;
       }
@@ -581,7 +578,7 @@ export function useLiveKitRealtime() {
             return invoke('logout', { deleteData: false })
               .catch(() => {})
               .then(() => {
-                useAppStore.getState().logout();
+                appStore.logout();
               });
           })
           // Offline / transient error — never sign out on a blip.

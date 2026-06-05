@@ -5,7 +5,8 @@ import React, {
   useRef,
 } from "react";
 import { invoke } from "./bridge";
-import { useAppStore } from "./stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "./stores/appStore";
 import { LoginScreen } from "./components/Auth/LoginScreen";
 import { SaveSecretKeyScreen } from "./components/Auth/SaveSecretKeyScreen";
 import { PinCreateScreen } from "./components/Auth/PinCreateScreen";
@@ -61,8 +62,8 @@ function MainApp() {
     setCurrentUser,
     pendingEnrollmentApproval,
     setPendingEnrollmentApproval,
-  } = useAppStore();
-  const updateRequired = useAppStore((s) => s.updateRequired);
+  } = appStore;
+  const updateRequired = appStore.updateRequired;
 
   const [appState, setAppState] = useState<AppState>("initializing");
   const [knownAccounts, setKnownAccounts] = useState<AccountInfo[]>([]);
@@ -150,7 +151,7 @@ function MainApp() {
           .catch(() => true);
         if (!stillRegistered) {
           await api.logout(false).catch(() => {});
-          useAppStore.getState().logout();
+          appStore.logout();
           return;
         }
 
@@ -382,7 +383,7 @@ function MainApp() {
     } catch (err) {
       console.error("[App] logout during pin switch-account failed:", err);
     }
-    useAppStore.getState().logout();
+    appStore.logout();
     try {
       const index = await api.listKnownAccounts();
       setKnownAccounts(index.accounts);
@@ -400,7 +401,7 @@ function MainApp() {
     } catch (err) {
       console.error("[App] logout during enrollment cancel failed:", err);
     }
-    useAppStore.getState().logout();
+    appStore.logout();
     try {
       const index = await api.listKnownAccounts();
       setKnownAccounts(index.accounts);
@@ -443,7 +444,7 @@ function MainApp() {
     } catch (error) {
       console.error("Failed to logout:", error);
     }
-    useAppStore.getState().logout();
+    appStore.logout();
     // Re-fetch known accounts so the login screen shows the switcher
     try {
       const index = await api.listKnownAccounts();
@@ -674,4 +675,4 @@ function MainApp() {
   );
 }
 
-export default MainApp;
+export default observer(MainApp);

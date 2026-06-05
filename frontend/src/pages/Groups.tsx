@@ -2,12 +2,13 @@ import React, { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Users, Plus, Search } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useUserGroupsWithChannels, useAllPendingJoinRequests } from "../hooks/queries/useGroups";
 
-export const GroupsPage: React.FC = () => {
+export const GroupsPage: React.FC = observer(() => {
   const navigate = useNavigate();
-  const { setSelectedGroupId, unreadCounts } = useAppStore();
+  const { setSelectedGroupId, unreadCounts } = appStore;
 
   const { data: groupsWithChannels, isLoading: groupsLoading, error: groupsError } = useUserGroupsWithChannels();
   const { data: allJoinRequests = [] } = useAllPendingJoinRequests();
@@ -94,4 +95,4 @@ export const GroupsPage: React.FC = () => {
       onEsc={() => navigate({ to: "/" })}
     />
   );
-};
+});

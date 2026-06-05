@@ -1,14 +1,15 @@
 import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useLeaveGroup, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { Button } from "../components/ui/Button";
 import { PageShell } from "../components/Layout/PageShell";
 
-export const LeaveGroupPage: React.FC = () => {
+export const LeaveGroupPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { groupId } = useParams({ from: "/groups/$groupId/leave" });
-  const { setSelectedGroupId, setSelectedChannelId } = useAppStore();
+  const { setSelectedGroupId, setSelectedChannelId } = appStore;
   const leaveGroupMutation = useLeaveGroup();
 
   const { data: groupsWithChannels, isLoading } = useUserGroupsWithChannels();
@@ -62,4 +63,4 @@ export const LeaveGroupPage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});

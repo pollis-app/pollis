@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Upload, User } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { uploadAvatar } from "../services/r2-upload";
 import { resizeImage } from "../utils/imageProcessing";
 import { useUserProfile, useUpdateProfile, useUpdateAvatar, useUserAvatar, userQueryKeys } from "../hooks/queries";
@@ -9,8 +10,8 @@ import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { convertFileSrc, invoke } from "../bridge";
 
-export const Settings: React.FC = () => {
-  const { currentUser } = useAppStore();
+export const Settings: React.FC = observer(() => {
+  const { currentUser } = appStore;
 
   const { data: userData, isLoading } = useUserProfile();
   const { data: avatarDownloadUrl } = useUserAvatar();
@@ -489,4 +490,4 @@ export const Settings: React.FC = () => {
       </div>
     </div>
   );
-};
+});

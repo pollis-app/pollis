@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import App from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
-import { useAppStore } from "./stores/appStore";
+import { appStore } from "./stores/appStore";
 
 // Tag <html> with the platform so CSS can opt out of features the OS
 // handles natively (e.g. corner rounding on macOS — the NSWindow
@@ -19,9 +19,10 @@ const platformTag = /Mac OS X/.test(ua)
       : "unknown";
 document.documentElement.dataset.platform = platformTag;
 
-// Expose Zustand store for Playwright tests so page.evaluate() can set state
+// Expose the MobX store singleton for Playwright tests so page.evaluate() can
+// read and mutate state (e.g. __pollisStore.setSelectedGroupId(...)).
 if (import.meta.env.VITE_PLAYWRIGHT === 'true') {
-  (window as any).__pollisStore = useAppStore;
+  (window as any).__pollisStore = appStore;
 }
 
 const container = document.getElementById("root");

@@ -1,5 +1,6 @@
 import React from "react";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import { NavigableGrid } from "../ui/NavigableGrid";
 import type { VoiceParticipant } from "../../types";
 import { VoiceMemberTile } from "./VoiceMemberTile";
@@ -9,14 +10,14 @@ import { shareOf } from "../../types/voice-state";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { voiceUserKey } from "../../voice/identity";
 
-export const VoiceChannelView: React.FC = () => {
+export const VoiceChannelView: React.FC = observer(() => {
   const {
     voiceParticipants,
     voiceActiveSpeakerIds,
     voiceState,
     screenShareRemotes,
     setViewingScreenShareTrackKey,
-  } = useAppStore();
+  } = appStore;
   const share = shareOf(voiceState);
   const shareActive = share.kind === 'active';
   const shareLocalDims = shareActive ? share.dimensions : null;
@@ -123,4 +124,4 @@ export const VoiceChannelView: React.FC = () => {
       />
     </div>
   );
-};
+});

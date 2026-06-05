@@ -2,8 +2,9 @@ import React, { useRef, useMemo, useState, useEffect } from "react";
 import { X } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { observer } from "mobx-react-lite";
 import { invoke } from "../../bridge";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
 import { MessageList } from "../Message/MessageList";
 import { ReplyPreview } from "../Message/ReplyPreview";
 import { MessageQueue } from "../Message/MessageQueue";
@@ -55,7 +56,7 @@ interface MainContentProps {
   pendingDmRequest?: PendingDmRequest | null;
 }
 
-export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = null }) => {
+export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequest = null }) => {
   const {
     selectedChannelId,
     selectedConversationId,
@@ -65,7 +66,7 @@ export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = nul
     currentUser,
     pendingDeleteChannelId,
     setPendingDeleteChannelId,
-  } = useAppStore();
+  } = appStore;
   const acceptDmRequestMutation = useAcceptDMRequest();
   const blockUserMutation = useBlockUser();
   const navigate = useNavigate();
@@ -732,4 +733,4 @@ export const MainContent: React.FC<MainContentProps> = ({ pendingDmRequest = nul
       )}
     </div>
   );
-};
+});

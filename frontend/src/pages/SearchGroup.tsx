@@ -2,16 +2,17 @@ import React, { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useRequestGroupAccess, useMyJoinRequest, useUserGroupsWithChannels, groupQueryKeys } from "../hooks/queries";
 import { deriveSlug } from "../utils/urlRouting";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 
-export const SearchGroup: React.FC = () => {
+export const SearchGroup: React.FC = observer(() => {
   const navigate = useNavigate();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = appStore.currentUser;
   const queryClient = useQueryClient();
   const { data: userGroups } = useUserGroupsWithChannels();
   const [slug, setSlug] = useState("");
@@ -160,4 +161,4 @@ export const SearchGroup: React.FC = () => {
       </div>
     </div>
   );
-};
+});

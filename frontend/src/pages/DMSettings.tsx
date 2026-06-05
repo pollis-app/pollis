@@ -1,14 +1,15 @@
 import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useLeaveDM } from "../hooks/queries/useMessages";
 import { Button } from "../components/ui/Button";
 import { PageShell } from "../components/Layout/PageShell";
 
-export const DMSettingsPage: React.FC = () => {
+export const DMSettingsPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId/settings" });
-  const { setSelectedConversationId } = useAppStore();
+  const { setSelectedConversationId } = appStore;
   const leaveDMMutation = useLeaveDM();
 
   return (
@@ -49,4 +50,4 @@ export const DMSettingsPage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});

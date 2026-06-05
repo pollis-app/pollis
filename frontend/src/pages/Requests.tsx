@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import {
   useDMRequests,
   useAcceptDMRequest,
@@ -28,9 +29,9 @@ const RequestPreview: React.FC<{ dmChannelId: string }> = ({ dmChannelId }) => {
   return <ScrambleText text={text} placeholderLength={28} typeSpeed={25} />;
 };
 
-export const Requests: React.FC = () => {
+export const Requests: React.FC = observer(() => {
   const navigate = useNavigate();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = appStore.currentUser;
   const { data: requests = [], isLoading } = useDMRequests();
   const acceptMutation = useAcceptDMRequest();
   const blockMutation = useBlockUser();
@@ -125,4 +126,4 @@ export const Requests: React.FC = () => {
       />
     </div>
   );
-};
+});

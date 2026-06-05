@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
@@ -17,12 +18,12 @@ interface VoiceBarProps {
   channelName: string;
 }
 
-export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) => {
+export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelName }) => {
   const {
     voiceParticipants,
     voiceState,
     voiceActiveSpeakerIds,
-  } = useAppStore();
+  } = appStore;
   const voiceIsMuted = voiceState.kind === 'joined' ? voiceState.micMuted : false;
   const share = shareOf(voiceState);
   const shareActive = share.kind === 'active';
@@ -116,7 +117,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
               .cancelPicker()
               .catch((e) => console.warn("[screenshare] cancel:", e))
               .finally(() => {
-                useAppStore.getState().shareCancelPicker();
+                appStore.shareCancelPicker();
               });
             return;
           }
@@ -140,10 +141,10 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
                 await screenShareSession.start();
                 return;
               }
-              useAppStore.getState().shareStartPicking(list);
+              appStore.shareStartPicking(list);
             } catch (e) {
               console.error("[screenshare] enumerate:", e);
-              useAppStore.getState().shareFailed(friendlyScreenShareError(String(e)));
+              appStore.shareFailed(friendlyScreenShareError(String(e)));
             }
           })();
         }}
@@ -222,4 +223,4 @@ export const VoiceBar: React.FC<VoiceBarProps> = ({ channelId, channelName }) =>
       </button>
     </div>
   );
-};
+});
