@@ -70,9 +70,14 @@ export const VoiceChannelView: React.FC = observer(() => {
             setViewingScreenShareTrackKey(LOCAL_PREVIEW_KEY);
             return;
           }
-          // screenShareRemotes is keyed by the publisher's user (voice-{userId}),
-          // not their specific device, so collapse the device suffix to match.
-          const share = screenShareRemotes[voiceUserKey(p.identity)];
+          // Per-device first (voice-{userId}:{deviceId}) so each device's
+          // tile shows only its own share when the same user is in the
+          // room from multiple devices. Fall back to the user-scoped key
+          // (voice-{userId}) for cross-version compat with any client
+          // still publishing under the legacy `{userId}:view` identity.
+          const share =
+            screenShareRemotes[p.identity] ??
+            screenShareRemotes[voiceUserKey(p.identity)];
           if (share) {
             setViewingScreenShareTrackKey(share.trackKey);
           }
@@ -90,7 +95,9 @@ export const VoiceChannelView: React.FC = observer(() => {
             streamWidth = shareLocalDims?.width;
             streamHeight = shareLocalDims?.height;
           } else if (!isLocal) {
-            const remote = screenShareRemotes[voiceUserKey(p.identity)];
+            const remote =
+              screenShareRemotes[p.identity] ??
+              screenShareRemotes[voiceUserKey(p.identity)];
             if (remote) {
               streamTrackKey = remote.trackKey;
               streamWidth = remote.width;

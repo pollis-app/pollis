@@ -80,17 +80,17 @@ interface E2eeKeyInfo {
 
 // ── Identity helpers ─────────────────────────────────────────────────────────
 
-/** Derive the voice identity that other parts of the app key on
- *  (`voice-{userId}`) from a view participant identity. Accepts both
- *  shapes:
- *    - `{userId}:view` — legacy (single device per user)
- *    - `{userId}:{deviceId}:view` — per-device, mirroring the
- *      `voice-{userId}:{deviceId}` voice path (#140). Required because
- *      LiveKit enforces unique participant identities per room; two
- *      devices of the same user sharing `{userId}:view` end up in a
- *      reconnect storm as LiveKit kicks each new joiner.
- *  Returns null for any other shape so we don't accidentally surface
- *  tracks from rooms / clients that aren't using the view scheme. */
+/** Derive the voice identity that other parts of the app key on from a
+ *  view participant identity. Accepts both shapes:
+ *    - `{userId}:view` — legacy (single device per user) → `voice-{userId}`
+ *    - `{userId}:{deviceId}:view` — per-device (#140) →
+ *      `voice-{userId}:{deviceId}`
+ *  The per-device shape carries the publishing device's id through so
+ *  the voice tile can match its specific share against
+ *  `screenShareRemotes[participant.identity]` directly — when the same
+ *  user has multiple devices in a room, each device's voice tile must
+ *  show only its own share, not a duplicate of a sibling device's
+ *  share. Returns null for any shape that doesn't end in `:view`. */
 function voiceIdentityFromView(identity: string): string | null {
   if (!identity.endsWith(':view')) {
     return null;
@@ -100,15 +100,9 @@ function voiceIdentityFromView(identity: string): string | null {
     return null;
   }
   // `head` is either `{userId}` (legacy) or `{userId}:{deviceId}` (per-
-  // device). The user-scoped key drops any device suffix — screenshare
-  // tiles match against `voice-{userId}` regardless of which of the
-  // user's devices is sharing.
-  const colon = head.indexOf(':');
-  const userId = colon === -1 ? head : head.slice(0, colon);
-  if (!userId) {
-    return null;
-  }
-  return `voice-${userId}`;
+  // device). Mirror the voice-identity scheme by carrying the whole
+  // head through with the `voice-` prefix.
+  return `voice-${head}`;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
