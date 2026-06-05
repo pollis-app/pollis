@@ -328,16 +328,43 @@ pub async fn resign_stale_device_certs(
 /// columns on `mls_commit_log` BEFORE handing the commit to
 /// `process_message`. This is the inbound complement to the outbound
 /// cert verification in `reconcile_group_mls_impl`.
+/// Outcome of verifying every device in a commit's added-devices list.
+///
+/// The three variants tell the caller (`process_pending_commits_locked`)
+/// whether the rejection-and-delete of the offending `mls_commit_log` row
+/// is safe. See issue #372 for the full rationale.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum VerifyOutcome {
+    /// Every added device verified — apply the commit normally.
+    Verified,
+    /// At least one added device is confirmed REVOKED (tombstoned via
+    /// `user_device.revoked_at`), OR the cert chain itself failed
+    /// verification (bad signature, wrong identity_version). Either way
+    /// the commit is illegitimate and the caller may delete it from
+    /// `mls_commit_log` so a legit commit can claim the same epoch.
+    Revoked,
+    /// At least one added device is ABSENT — the row doesn't exist
+    /// anywhere yet, or required cert columns are NULL. This is the
+    /// race / replication-lag case (#372): the device may be
+    /// legitimately joining but its `user_device` row hasn't reached
+    /// this client's view of Turso yet. The commit must NOT be
+    /// deleted; the caller should leave it in place so a later
+    /// catch-up can retry verification once the row appears.
+    AbsentRetry,
+}
+
 pub(super) async fn verify_added_devices(
     conn: &libsql::Connection,
     target_user_id: &str,
     device_ids: &[String],
-) -> crate::error::Result<bool> {
+) -> crate::error::Result<VerifyOutcome> {
     if device_ids.is_empty() {
-        return Ok(true);
+        return Ok(VerifyOutcome::Verified);
     }
 
-    // Fetch account_id_pub once.
+    // Fetch account_id_pub once. A missing `users` row or NULL
+    // account_id_pub falls into AbsentRetry: the row may simply not have
+    // replicated yet.
     let account_id_pub: Vec<u8> = {
         let mut rows = conn
             .query(
@@ -350,16 +377,16 @@ pub(super) async fn verify_added_devices(
                 Some(b) => b,
                 None => {
                     eprintln!(
-                        "[mls] verify_added_devices: {target_user_id} has no account_id_pub"
+                        "[mls] verify_added_devices: {target_user_id} has no account_id_pub — retry"
                     );
-                    return Ok(false);
+                    return Ok(VerifyOutcome::AbsentRetry);
                 }
             },
             None => {
                 eprintln!(
-                    "[mls] verify_added_devices: user {target_user_id} not found"
+                    "[mls] verify_added_devices: user {target_user_id} not found — retry"
                 );
-                return Ok(false);
+                return Ok(VerifyOutcome::AbsentRetry);
             }
         }
     };
@@ -367,7 +394,8 @@ pub(super) async fn verify_added_devices(
     for did in device_ids {
         let mut rows = conn
             .query(
-                "SELECT device_cert, cert_issued_at, cert_identity_version, mls_signature_pub \
+                "SELECT device_cert, cert_issued_at, cert_identity_version, \
+                        mls_signature_pub, revoked_at \
                  FROM user_device WHERE device_id = ?1 AND user_id = ?2",
                 libsql::params![did.as_str(), target_user_id],
             )
@@ -376,10 +404,14 @@ pub(super) async fn verify_added_devices(
         let row = match rows.next().await? {
             Some(r) => r,
             None => {
+                // Row absent. Could be (a) revoked + hard-deleted by an
+                // older app version (pre-#372 deployment), or (b) just not
+                // replicated yet. We can't tell, so default to the safer
+                // AbsentRetry — never destroy a commit on ambiguous state.
                 eprintln!(
-                    "[mls] verify_added_devices: device {did} not registered for {target_user_id}"
+                    "[mls] verify_added_devices: device {did} not registered for {target_user_id} — retry (issue #372)"
                 );
-                return Ok(false);
+                return Ok(VerifyOutcome::AbsentRetry);
             }
         };
 
@@ -387,26 +419,41 @@ pub(super) async fn verify_added_devices(
         let issued_at_str: Option<String> = row.get::<Option<String>>(1).ok().flatten();
         let cert_identity_version: Option<i64> = row.get::<Option<i64>>(2).ok().flatten();
         let mls_sig_pub: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(3).ok().flatten();
+        let revoked_at: Option<String> = row.get::<Option<String>>(4).ok().flatten();
         drop(rows);
+
+        // Tombstone wins — a revoked device is unambiguously not allowed
+        // to add itself, regardless of cert column state.
+        if revoked_at.is_some() {
+            eprintln!(
+                "[mls] verify_added_devices: device {did} is REVOKED (revoked_at={revoked_at:?})"
+            );
+            return Ok(VerifyOutcome::Revoked);
+        }
 
         let (cert, issued_at_str, cert_identity_version, mls_sig_pub) =
             match (cert, issued_at_str, cert_identity_version, mls_sig_pub) {
                 (Some(c), Some(t), Some(v), Some(p)) => (c, t, v, p),
                 _ => {
+                    // Cert columns NULL on a non-revoked row is the
+                    // "device row inserted but cert publish hasn't landed
+                    // yet" race. Same treatment as fully absent.
                     eprintln!(
-                        "[mls] verify_added_devices: device {did} has no cert columns populated"
+                        "[mls] verify_added_devices: device {did} has no cert columns populated — retry"
                     );
-                    return Ok(false);
+                    return Ok(VerifyOutcome::AbsentRetry);
                 }
             };
 
         let issued_at: u64 = match issued_at_str.parse() {
             Ok(v) => v,
             Err(e) => {
+                // Malformed timestamp is a hard format error, not a race —
+                // treat as Revoked so the bad row gets cleaned up.
                 eprintln!(
                     "[mls] verify_added_devices: device {did} cert_issued_at unparseable '{issued_at_str}': {e}"
                 );
-                return Ok(false);
+                return Ok(VerifyOutcome::Revoked);
             }
         };
 
@@ -418,12 +465,13 @@ pub(super) async fn verify_added_devices(
             issued_at,
             &cert,
         ) {
+            // Cert chain itself failed — unambiguous bad data, not a race.
             eprintln!(
                 "[mls] verify_added_devices: device {did} cert verification failed: {e}"
             );
-            return Ok(false);
+            return Ok(VerifyOutcome::Revoked);
         }
     }
 
-    Ok(true)
+    Ok(VerifyOutcome::Verified)
 }
