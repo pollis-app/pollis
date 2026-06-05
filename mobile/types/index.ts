@@ -48,6 +48,28 @@ export interface DMConversation {
   updated_at: number;
 }
 
+// A file attached to a message. Mirrors `MessageAttachment` in
+// `frontend/src/types/index.ts` and the Rust struct in `pollis-core`.
+// `object_key` + `content_hash` are what the media transport (see
+// `lib/media`) needs to fetch + decrypt the bytes.
+export interface MessageAttachment {
+  id: string;
+  // R2 object key — empty string while an upload is still in progress.
+  object_key: string;
+  // SHA-256(plaintext) hex — used to derive the decryption key via HKDF.
+  content_hash: string;
+  filename: string;
+  content_type: string;
+  file_size: number;
+  uploaded_at: number;
+  blurhash?: string;
+  width?: number;
+  height?: number;
+  // Local `file://` preview for optimistic display before upload — never
+  // persisted or sent to the server.
+  localPreviewUri?: string;
+}
+
 export interface MessageQueueItem {
   id: string;
   message_id: string;
