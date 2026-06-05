@@ -298,15 +298,16 @@ class LiveKitView {
       // Disable simulcast for screen-share — high-bitrate single layer
       // matches text legibility better than scaled-down spatial layers.
       simulcast: false,
-      // Encoder ceilings — not targets. WebRTC's TWCC bandwidth estimator
-      // ramps up toward these when the link sustains it, ramps down on
-      // packet loss. Default LiveKit screenshare cap is 15 fps; bumping to
-      // 60 covers the game-stream-to-lobby use case. Bitrate ceiling of
-      // 8 Mbps is comfortable for 1080p60 (H.264 high or VP8) and headroom
-      // for the power-user case; the estimator will hold back on slower links.
-      // maintain-framerate biases toward smoother motion over crisper
-      // text when the encoder has to give something up under pressure.
-      videoEncoding: {
+      // CRITICAL: screen-share reads `screenShareEncoding`, NOT
+      // `videoEncoding` — livekit-client's computeVideoEncodings() swaps to
+      // the screenShareEncoding field whenever the source is ScreenShare.
+      // Setting videoEncoding here is silently ignored, leaving the default
+      // `h1080fps15` preset (1080p @ 15fps) — that was the cross-platform
+      // 15fps cap. These are ceilings, not targets: TWCC ramps toward them
+      // when the link sustains it and backs off on loss. 8 Mbps is
+      // comfortable for 1080p60 (VP8 or H.264). maintain-framerate biases
+      // toward smooth motion over crisp text under pressure.
+      screenShareEncoding: {
         maxFramerate: 60,
         maxBitrate: 8_000_000,
         priority: 'high',
@@ -323,6 +324,46 @@ class LiveKitView {
     const localTrack = publication.track as LocalVideoTrack | undefined;
     if (localTrack) {
       this.localTrack = localTrack;
+    }
+    // TEMP DEBUG (#364 framerate investigation) — sample the sender's RTC
+    // stats a few seconds after publish so we can see CAPTURE fps (into the
+    // encoder) vs SENT fps (out the wire), what's limiting it, and which
+    // encoder engaged. Remove once the 60→15 drop is understood. Uses fixed
+    // one-shot timeouts (not a recurring poll) so it doesn't violate the
+    // no-periodic-polling rule.
+    if (import.meta.env.DEV && localTrack) {
+      const sample = async (label: string): Promise<void> => {
+        const sender = localTrack.sender;
+        if (!sender) {
+          console.warn(`[ss-stats ${label}] no sender on local track`);
+          return;
+        }
+        const report = await sender.getStats();
+        report.forEach((r) => {
+          if (r.type === 'media-source' && r.kind === 'video') {
+            console.info(`[ss-stats ${label}] CAPTURE`, {
+              fps: r.framesPerSecond,
+              res: `${r.width}x${r.height}`,
+            });
+          }
+          if (r.type === 'outbound-rtp' && r.kind === 'video') {
+            console.info(`[ss-stats ${label}] SENT`, {
+              fps: r.framesPerSecond,
+              res: `${r.frameWidth}x${r.frameHeight}`,
+              encoder: r.encoderImplementation,
+              limitedBy: r.qualityLimitationReason,
+              limitDurations: r.qualityLimitationDurations,
+              targetBitrate: r.targetBitrate,
+              framesEncoded: r.framesEncoded,
+              framesSent: r.framesSent,
+            });
+          }
+        });
+      };
+      // Steady-state needs a subscriber + a few seconds for TWCC to settle.
+      setTimeout(() => void sample('t+4s'), 4000);
+      setTimeout(() => void sample('t+8s'), 8000);
+      setTimeout(() => void sample('t+15s'), 15000);
     }
     // Surface the local track under LOCAL_PREVIEW_KEY so the in-tile
     // preview renders. The browser will stop the track if the user clicks

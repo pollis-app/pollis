@@ -429,6 +429,16 @@ class ScreenShareSession {
           mandatory: {
             chromeMediaSource: "desktop",
             chromeMediaSourceId: electronSourceId,
+            // Cap to 1440p. Software VP8 cannot encode a 4K (or dual-4K,
+            // 7680×2160) surface in real time — it collapses to ~1fps and
+            // crashes. Chromium scales the captured surface down to fit
+            // (crop-and-scale), so a huge desktop becomes an encodable
+            // stream; a smaller source stays native. 1440p is the quality
+            // ceiling; under encoder pressure `degradationPreference:
+            // maintain-framerate` trades resolution for a smooth 60fps.
+            // Matches what Slack/Discord/Zoom do for screen-share.
+            maxWidth: 2560,
+            maxHeight: 1440,
             maxFrameRate: 60,
           },
         } as unknown as MediaTrackConstraints,
@@ -442,6 +452,9 @@ class ScreenShareSession {
     if (!track) {
       store.shareFailed("Screen share returned no video track.");
       throw new Error("getDisplayMedia returned no video track");
+    }
+    if (import.meta.env.DEV) {
+      console.info("[ss-probe] capture settings", track.getSettings());
     }
     console.info("[screenshare] getDisplayMedia returned, handing track to livekitView", {
       trackId: track.id,
