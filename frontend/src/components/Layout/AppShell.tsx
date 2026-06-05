@@ -185,14 +185,36 @@ export const AppShell: React.FC = observer(() => {
     };
   }, []);
 
-  // On startup, apply any MLS Welcome messages that arrived while offline.
+  // Cold-launch MLS sweep: poll Welcomes that arrived while offline AND
+  // process pending commits for every group + DM the user is in, so the
+  // first MLS-powered action after launch (send_message, edit_message,
+  // voice/screen-share join) runs against caught-up state. Closes the
+  // cold-launch window flagged in issue #371 scenario 5 — previously this
+  // hook only polled Welcomes and didn't process commits.
+  //
+  // `isSyncing` is set to true during the sweep so the bottom status bar
+  // shows the same "Syncing…" indicator the manual sync shortcut uses;
+  // stateful actions (send/edit/voice) can read it to defer until the
+  // sweep finishes. Cancelled flag handles unmount mid-sweep so the next
+  // user doesn't see a stale syncing state after sign-out.
   useEffect(() => {
     if (!currentUser) {
       return;
     }
-    invoke('poll_mls_welcomes', { userId: currentUser.id }).catch((err) => {
-      console.warn('[mls] poll_mls_welcomes failed:', err);
-    });
+    let cancelled = false;
+    setIsSyncing(true);
+    invoke('catch_up_all_mls_groups', { userId: currentUser.id })
+      .catch((err) => {
+        console.warn('[mls] catch_up_all_mls_groups failed:', err);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsSyncing(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [currentUser?.id]);
 
   // Once authenticated, hook up the screen-share event + frame Channels.

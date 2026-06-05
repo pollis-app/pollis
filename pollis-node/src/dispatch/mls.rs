@@ -21,6 +21,7 @@ pub async fn dispatch(
         "poll_mls_welcomes" => Some(poll_mls_welcomes(args).await),
         "reconcile_group_mls" => Some(reconcile_group_mls(args).await),
         "process_pending_commits" => Some(process_pending_commits(args).await),
+        "catch_up_all_mls_groups" => Some(catch_up_all_mls_groups(args).await),
         _ => None,
     }
 }
@@ -147,6 +148,19 @@ async fn process_pending_commits(args: &serde_json::Value) -> Result<serde_json:
     } = serde_json::from_value(args.clone()).map_err(json_err)?;
     let state = ensure_state().await?;
     pollis_core::commands::mls::process_pending_commits(&state, conversation_id, user_id)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn catch_up_all_mls_groups(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        user_id: String,
+    }
+    let Args { user_id } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::mls::catch_up_all_mls_groups(&state, &user_id)
         .await
         .map_err(core_err)?;
     Ok(serde_json::Value::Null)

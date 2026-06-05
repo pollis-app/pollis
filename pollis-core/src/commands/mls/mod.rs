@@ -8,6 +8,7 @@ mod group_state;
 mod key_packages;
 mod provider;
 mod reconcile;
+mod sweep;
 mod welcomes;
 
 // ── Provider / credential helpers ────────────────────────────────────────────
@@ -33,6 +34,9 @@ pub use group_state::{
     init_mls_group, process_pending_commits, process_pending_commits_inner, publish_group_info,
     try_mls_decrypt, try_mls_encrypt,
 };
+
+// ── Cold-launch / post-reconnect sweep ──────────────────────────────────────
+pub use sweep::catch_up_all_mls_groups;
 
 // ── Reconcile + self-repair ──────────────────────────────────────────────────
 pub use reconcile::{
