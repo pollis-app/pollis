@@ -13,6 +13,7 @@ import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize } from "../../utils/format";
 import { useDropTargetStore } from "../../stores/dropTargetStore";
 import { getDraft, setDraft } from "../../utils/drafts";
+import { mentionsAll } from "../../utils/mentions";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
 // no bytes-over-IPC bottleneck, no size limit.
@@ -51,6 +52,11 @@ interface ChatInputProps {
   // the prop while the parent's room id is still loading — the component
   // re-syncs whenever this value changes within the same mount.
   draftKey?: string | null;
+  // True when a standalone `@all` in the message will actually notify every
+  // member — i.e. this is a group channel (DMs and other surfaces don't fan
+  // out an `all_mention`). Gates the live "@all notifies everyone" composer
+  // hint so it only appears where the mention does something.
+  canNotifyAll?: boolean;
 }
 
 function mimeFromName(name: string): string {
@@ -215,6 +221,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   maxAttachments = 10,
   onValueChange,
   draftKey = null,
+  canNotifyAll = false,
 }, ref) => {
   const [message, setMessage] = useState(() => getDraft(draftKey));
   // Re-sync message when draftKey changes within the same mount (e.g. the
@@ -466,6 +473,11 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
 
   const hasLoadingAttachments = attachments.some((a) => a.loading);
 
+  // Live signal that the message, as typed, will ping every channel member.
+  // Mirrors the backend's `mentions_all()` so the sender sees the hint exactly
+  // when the send will fan out an `all_mention`.
+  const willNotifyEveryone = canNotifyAll && mentionsAll(message);
+
   const handleSend = () => {
     if (!message.trim() && attachments.length === 0) { return; }
     if (hasLoadingAttachments) { return; }
@@ -554,6 +566,21 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
               onExpand={(url, type) => setExpandedPreview({ url, type })}
             />
           ))}
+        </div>
+      )}
+
+      {/* @all hint — appears live while the message contains a standalone
+          @all in a group channel, telling the sender the send will ping
+          everyone. Not a modal: an inline row in the composer. */}
+      {willNotifyEveryone && (
+        <div
+          className="px-3 py-1 flex items-center gap-1.5 text-xs font-mono"
+          style={{ color: "var(--c-accent)", borderBottom: "1px solid var(--c-border)" }}
+        >
+          <span style={{ fontWeight: 600 }}>@all</span>
+          <span style={{ color: "var(--c-text-muted)" }}>
+            notifies everyone in this channel
+          </span>
         </div>
       )}
 
