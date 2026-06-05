@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import type { Message, DMConversation } from "../../types";
 
 // Per-conversation timestamp of the last background ingest. Used to debounce
@@ -147,7 +148,7 @@ type MessagesQueryResult = {
 };
 
 export function useMessages(channelId: string | null, conversationId: string | null) {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
   const isChannel = !!channelId;
   const queryKey = isChannel
@@ -243,7 +244,7 @@ export function useConversationMessages(conversationId: string | null) {
 
 export function useSendMessage() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({
@@ -303,7 +304,7 @@ export function useSendMessage() {
 }
 
 export function useDMConversations() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null),
@@ -332,7 +333,7 @@ export function useDMConversations() {
 }
 
 export function useLastMessage(channelId: string | null, conversationId: string | null) {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const isChannel = !!channelId;
   const queryKey = isChannel
     ? (["last-message", "channel", channelId] as const)
@@ -367,7 +368,7 @@ export function useLastMessage(channelId: string | null, conversationId: string 
 
 export function useLeaveDM() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (conversationId: string): Promise<void> => {
@@ -389,7 +390,7 @@ export function useLeaveDM() {
 
 export function useCreateOrGetDMConversation() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (identifier: string): Promise<{ id: string }> => {
@@ -419,7 +420,7 @@ export function useCreateOrGetDMConversation() {
 
 export function useDeleteMessage() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async ({ messageId }: { messageId: string }) => {
@@ -453,7 +454,7 @@ type EditMessageContext = {
 
 export function useEditMessage() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation<void, Error, EditMessageVars, EditMessageContext>({
     mutationFn: async ({ conversationId, messageId, newContent }) => {

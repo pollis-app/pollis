@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { Hash, MessageCircle, UserPlus, Mail } from "lucide-react";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useAllPendingJoinRequests, usePendingInvites } from "../../hooks/queries/useGroups";
@@ -59,8 +60,8 @@ interface StatusBarSummaryProps {
  * join requests you need to act on. Zeros render as blank space so the
  * row doesn't jitter as counts change.
  */
-export const StatusBarSummary: React.FC<StatusBarSummaryProps> = ({ color }) => {
-  const unreadCounts = useAppStore((s) => s.unreadCounts);
+export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ color }) => {
+  const unreadCounts = appStore.unreadCounts;
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
   const { data: pendingJoinRequests = [] } = useAllPendingJoinRequests();
@@ -123,4 +124,4 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = ({ color }) => 
       />
     </div>
   );
-};
+});

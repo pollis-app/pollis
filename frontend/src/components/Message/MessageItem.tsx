@@ -4,7 +4,8 @@ import { dialogSave, writeFile } from "../../bridge";
 import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize, formatDuration } from "../../utils/format";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia, getMediaUrl } from "../../services/r2-upload";
 import { LinkifiedText } from "../ui/LinkifiedText";
 import { MediaLinkUnfurl } from "./MediaLinkUnfurl";
@@ -40,7 +41,7 @@ const formatFullTimestamp = (timestamp: number): string => {
   return new Date(tsMs).toLocaleString([], { dateStyle: "full", timeStyle: "short" });
 };
 
-export const MessageItem: React.FC<MessageItemProps> = ({
+export const MessageItem: React.FC<MessageItemProps> = observer(({
   message,
   allMessages = [],
   authorUsername = "unknown",
@@ -51,7 +52,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
   onDelete,
   onScrollToReply,
 }) => {
-  const { currentUser } = useAppStore();
+  const { currentUser } = appStore;
   const isOwn = message.sender_id === currentUser?.id;
   const isLightBg = useBackgroundIsLight();
 
@@ -252,7 +253,7 @@ export const MessageItem: React.FC<MessageItemProps> = ({
       {/* <MessageReactions messageId={message.id} /> */}
     </div>
   );
-};
+});
 
 // Co-located: only used by AttachmentDisplay.
 const BlurhashCanvas: React.FC<{ hash: string; width: number; height: number }> = ({

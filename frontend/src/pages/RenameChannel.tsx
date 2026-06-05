@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useUpdateChannel, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
@@ -11,8 +12,8 @@ interface RenameChannelProps {
   onSuccess?: () => void;
 }
 
-export const RenameChannel: React.FC<RenameChannelProps> = ({ groupId, channelId, onSuccess }) => {
-  const { currentUser } = useAppStore();
+export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, channelId, onSuccess }) => {
+  const { currentUser } = appStore;
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const updateChannel = useUpdateChannel();
 
@@ -135,4 +136,4 @@ export const RenameChannel: React.FC<RenameChannelProps> = ({ groupId, channelId
       </div>
     </div>
   );
-};
+});

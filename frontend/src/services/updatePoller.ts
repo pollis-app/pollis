@@ -1,5 +1,5 @@
 import { check as checkForUpdate } from "../bridge";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
 
 // The update poller lives outside React on purpose: a singleton timer is
 // resilient to StrictMode double-mounts, route changes, and component
@@ -20,7 +20,7 @@ let started = false;
 async function runCheck(): Promise<void> {
   try {
     const update = await checkForUpdate();
-    const setAvailable = useAppStore.getState().setAvailableUpdateVersion;
+    const setAvailable = appStore.setAvailableUpdateVersion;
     setAvailable(update ? update.version : null);
   } catch (err) {
     // Network blips are expected; log once and move on. Don't clear an

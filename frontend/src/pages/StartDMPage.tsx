@@ -1,12 +1,13 @@
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { StartDM } from "./StartDM";
 
-export const StartDMPage: React.FC = () => {
+export const StartDMPage: React.FC = observer(() => {
   const navigate = useNavigate();
-  const { setSelectedConversationId } = useAppStore();
+  const { setSelectedConversationId } = appStore;
 
   return (
     <PageShell title="New Message">
@@ -18,4 +19,4 @@ export const StartDMPage: React.FC = () => {
       />
     </PageShell>
   );
-};
+});

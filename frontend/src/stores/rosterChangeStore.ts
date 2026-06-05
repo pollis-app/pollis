@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { makeAutoObservable } from "mobx";
 
 // Per-conversation queue of roster-change banners (member joined, member
 // left, device added, device removed). Pushed by the `roster_changed`
@@ -31,49 +31,47 @@ export interface RosterBanner extends Record<string, unknown> {
   payload: RosterBannerKind;
 }
 
-interface RosterChangeStore {
-  /** conversation_id → list of banners, oldest first. */
-  byConversation: Record<string, RosterBanner[]>;
-  push: (conversation_id: string, banners: RosterBanner[]) => void;
-  clearConversation: (conversation_id: string) => void;
-  clearAll: () => void;
-}
-
 // Cap per-conversation history so a noisy reconcile loop can't pin
 // arbitrary memory. 200 is well above any realistic single-session
 // roster churn; older banners drop off the front.
 const MAX_PER_CONVERSATION = 200;
 
-export const useRosterChangeStore = create<RosterChangeStore>((set) => ({
-  byConversation: {},
-  push: (conversation_id, banners) => {
+class RosterChangeStore {
+  /** conversation_id → list of banners, oldest first. */
+  byConversation: Record<string, RosterBanner[]> = {};
+
+  constructor() {
+    makeAutoObservable(this, {}, { autoBind: true });
+  }
+
+  push(conversation_id: string, banners: RosterBanner[]) {
     if (banners.length === 0) {
       return;
     }
-    set((state) => {
-      const existing = state.byConversation[conversation_id] ?? [];
-      const next = [...existing, ...banners];
-      const trimmed =
-        next.length > MAX_PER_CONVERSATION
-          ? next.slice(next.length - MAX_PER_CONVERSATION)
-          : next;
-      return {
-        byConversation: {
-          ...state.byConversation,
-          [conversation_id]: trimmed,
-        },
-      };
-    });
-  },
-  clearConversation: (conversation_id) => {
-    set((state) => {
-      if (!(conversation_id in state.byConversation)) {
-        return state;
-      }
-      const next = { ...state.byConversation };
-      delete next[conversation_id];
-      return { byConversation: next };
-    });
-  },
-  clearAll: () => set({ byConversation: {} }),
-}));
+    const existing = this.byConversation[conversation_id] ?? [];
+    const next = [...existing, ...banners];
+    const trimmed =
+      next.length > MAX_PER_CONVERSATION
+        ? next.slice(next.length - MAX_PER_CONVERSATION)
+        : next;
+    this.byConversation = {
+      ...this.byConversation,
+      [conversation_id]: trimmed,
+    };
+  }
+
+  clearConversation(conversation_id: string) {
+    if (!(conversation_id in this.byConversation)) {
+      return;
+    }
+    const next = { ...this.byConversation };
+    delete next[conversation_id];
+    this.byConversation = next;
+  }
+
+  clearAll() {
+    this.byConversation = {};
+  }
+}
+
+export const rosterChangeStore = new RosterChangeStore();

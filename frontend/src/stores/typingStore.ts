@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { makeAutoObservable } from "mobx";
 
 // Receiver-side TTL: a typing entry that hasn't been refreshed within this
 // many ms ages out, even without an explicit `is_typing: false`. Covers the
@@ -16,67 +16,65 @@ interface TypingEntry {
   expiresAt: number;
 }
 
-interface TypingStore {
+class TypingStore {
   // roomKey → userId → entry. Two-level map so typing in one channel doesn't
   // leak into another and lookups stay O(1).
-  byRoom: Record<string, Record<string, TypingEntry>>;
-  setTyping: (roomKey: TypingRoomKey, userId: string, username: string) => void;
-  clearTyping: (roomKey: TypingRoomKey, userId: string) => void;
+  byRoom: Record<string, Record<string, TypingEntry>> = {};
+
+  constructor() {
+    makeAutoObservable(this, {}, { autoBind: true });
+  }
+
+  setTyping(roomKey: TypingRoomKey, userId: string, username: string) {
+    const room = { ...(this.byRoom[roomKey] ?? {}) };
+    room[userId] = { username, expiresAt: Date.now() + TYPING_TTL_MS };
+    this.byRoom = { ...this.byRoom, [roomKey]: room };
+  }
+
+  clearTyping(roomKey: TypingRoomKey, userId: string) {
+    const room = this.byRoom[roomKey];
+    if (!room || !(userId in room)) {
+      return;
+    }
+    const next = { ...room };
+    delete next[userId];
+    const byRoom = { ...this.byRoom };
+    if (Object.keys(next).length === 0) {
+      delete byRoom[roomKey];
+    } else {
+      byRoom[roomKey] = next;
+    }
+    this.byRoom = byRoom;
+  }
+
   // Drop expired entries; called from a polling effect so the UI re-renders
   // when a typing indicator times out without an explicit clear.
-  pruneExpired: () => void;
-}
-
-export const useTypingStore = create<TypingStore>((set) => ({
-  byRoom: {},
-  setTyping: (roomKey, userId, username) => {
-    set((state) => {
-      const room = { ...(state.byRoom[roomKey] ?? {}) };
-      room[userId] = { username, expiresAt: Date.now() + TYPING_TTL_MS };
-      return { byRoom: { ...state.byRoom, [roomKey]: room } };
-    });
-  },
-  clearTyping: (roomKey, userId) => {
-    set((state) => {
-      const room = state.byRoom[roomKey];
-      if (!room || !(userId in room)) {
-        return state;
-      }
-      const next = { ...room };
-      delete next[userId];
-      const byRoom = { ...state.byRoom };
-      if (Object.keys(next).length === 0) {
-        delete byRoom[roomKey];
-      } else {
-        byRoom[roomKey] = next;
-      }
-      return { byRoom };
-    });
-  },
-  pruneExpired: () => {
-    set((state) => {
-      const now = Date.now();
-      let changed = false;
-      const byRoom: Record<string, Record<string, TypingEntry>> = {};
-      for (const [roomKey, room] of Object.entries(state.byRoom)) {
-        const live: Record<string, TypingEntry> = {};
-        for (const [userId, entry] of Object.entries(room)) {
-          if (entry.expiresAt > now) {
-            live[userId] = entry;
-          } else {
-            changed = true;
-          }
-        }
-        if (Object.keys(live).length > 0) {
-          byRoom[roomKey] = live;
-        } else if (Object.keys(room).length > 0) {
+  pruneExpired() {
+    const now = Date.now();
+    let changed = false;
+    const byRoom: Record<string, Record<string, TypingEntry>> = {};
+    for (const [roomKey, room] of Object.entries(this.byRoom)) {
+      const live: Record<string, TypingEntry> = {};
+      for (const [userId, entry] of Object.entries(room)) {
+        if (entry.expiresAt > now) {
+          live[userId] = entry;
+        } else {
           changed = true;
         }
       }
-      return changed ? { byRoom } : state;
-    });
-  },
-}));
+      if (Object.keys(live).length > 0) {
+        byRoom[roomKey] = live;
+      } else if (Object.keys(room).length > 0) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.byRoom = byRoom;
+    }
+  }
+}
+
+export const typingStore = new TypingStore();
 
 export function typingRoomKey(
   channelId: string | null | undefined,

@@ -1,5 +1,5 @@
 import { invoke } from "../bridge";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
 
 // Issue #176: pre-warm DNS / TLS / token mint to LiveKit on user "intent"
 // (hover, route entry) so the actual `join_voice_channel` only pays the
@@ -25,7 +25,7 @@ export function warmVoiceChannel(channelId: string | null | undefined): void {
   if (!channelId) {
     return;
   }
-  const { currentUser } = useAppStore.getState();
+  const { currentUser } = appStore;
   if (!currentUser) {
     return;
   }

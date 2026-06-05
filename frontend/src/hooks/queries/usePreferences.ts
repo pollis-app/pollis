@@ -2,7 +2,8 @@ import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { electron, hasElectron } from "../../bridge/runtime";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import {
   applyAccentColor,
   applyBackgroundColor,
@@ -231,7 +232,7 @@ function scheduleSave(
 }
 
 export function usePreferences() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
 
   const query = useQuery({
@@ -350,7 +351,7 @@ export function applyDeviceFontSize(
  */
 export function useApplyPreferences(): void {
   const { query } = usePreferences();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const data = query.data;
   // Stringify the override map so the effect re-runs when any override
   // changes (a React Query refetch returns a new object reference, and we

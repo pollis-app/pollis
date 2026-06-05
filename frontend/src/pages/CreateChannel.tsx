@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
 import { useQueryClient } from "@tanstack/react-query";
 import { deriveSlug } from "../utils/urlRouting";
@@ -13,8 +14,8 @@ interface CreateChannelProps {
   onSuccess?: (channelId: string, channelType: "text" | "voice") => void;
 }
 
-export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
-  const { selectedGroupId, currentUser, addChannel, channels, groups, setSelectedChannelId } = useAppStore();
+export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess }) => {
+  const { selectedGroupId, currentUser, addChannel, channels, groups, setSelectedChannelId } = appStore;
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -188,4 +189,4 @@ export const CreateChannel: React.FC<CreateChannelProps> = ({ onSuccess }) => {
       </div>
     </div>
   );
-};
+});

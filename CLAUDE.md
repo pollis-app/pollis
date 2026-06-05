@@ -106,9 +106,9 @@ useSendMessage()                    // invoke("send_message", ...)
 
 Never import directly from `@tauri-apps/*` — always go through `../bridge`. That way command call sites don't care which runtime is hosting them.
 
-**React Query is the source of truth** for remote data — don't duplicate in Zustand.
+**React Query is the source of truth** for remote data — don't duplicate in the MobX store.
 
-**Zustand store**: Only holds UI state (selected group/channel), current user reference, temporary session data.
+**MobX store**: Only holds UI state (selected group/channel), current user reference, temporary session data. Stores in `frontend/src/stores/` are MobX class singletons (`makeAutoObservable(this, …, { autoBind: true })`) — import the singleton (e.g. `import { appStore } from '../stores/appStore'`) and read fields directly inside an `observer()`-wrapped component. Non-React managers read the singleton directly and react to changes with `autorun`/`reaction`; React hooks that must stay reactive outside an `observer` use `useObserver(() => store.x)`.
 
 ### Backend Commands
 
@@ -240,7 +240,7 @@ Concrete implications:
 
 - **Rust backend (in the Electron main process) connects DIRECTLY to Turso** — no server middleman for CRUD
 - **All backend calls from the renderer go through the bridge** — `import { invoke } from "../bridge"`, never `@tauri-apps/api/core` directly, and never `fetch()` to a local server
-- **React Query is the source of truth** for remote data — don't duplicate in Zustand
+- **React Query is the source of truth** for remote data — don't duplicate in the MobX store
 - **Local DB should NOT have users/groups/channels tables** — those come from remote Turso
 - **TypeScript types should match Rust structs** — keep them synchronized
 - **Remote schema changes go in numbered migration files** in `pollis-core/src/db/migrations/` (e.g. `000019_my_change.sql`). `000000_baseline.sql` is the frozen canonical snapshot — never edit it. Dev: run new migrations by hand against your dev Turso. Prod: `.github/workflows/electron-release.yml` runs `scripts/db-apply.sh` after all builds succeed; migration failure aborts the release. Nobody applies to prod by hand. The runner records the `schema_migrations` row automatically — do **not** put an `INSERT INTO schema_migrations` in the migration file.

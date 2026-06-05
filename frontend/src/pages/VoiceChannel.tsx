@@ -1,7 +1,8 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft, Pencil, Trash2, Volume2, X } from "lucide-react";
-import { useAppStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../stores/appStore";
 import { useDeleteChannel, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { VoiceMemberTile } from "../components/Voice/VoiceMemberTile";
@@ -15,14 +16,14 @@ import { voiceSession } from "../voice";
 
 
 
-export const VoiceChannelPage: React.FC = () => {
+export const VoiceChannelPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { groupId, channelId } = useParams({ from: "/groups/$groupId/voice/$channelId" });
   const {
     voiceState,
     pendingDeleteChannelId,
     setPendingDeleteChannelId,
-  } = useAppStore();
+  } = appStore;
   const activeVoiceChannelId =
     voiceState.kind === 'idle' ? null : voiceState.channelId;
 
@@ -240,4 +241,4 @@ export const VoiceChannelPage: React.FC = () => {
       )}
     </div>
   );
-};
+});

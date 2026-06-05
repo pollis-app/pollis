@@ -4,7 +4,8 @@ import { PageShell } from "../components/Layout/PageShell";
 import { Button } from "../components/ui/Button";
 import { TextInput } from "../components/ui/TextInput";
 import { NavigableList } from "../components/ui/NavigableList";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import type { RouterContext } from "../types/router";
 import * as api from "../services/api";
 
@@ -69,11 +70,11 @@ const sectionHeaderStyle: React.CSSProperties = {
   borderColor: "var(--c-border)",
 };
 
-export const SecurityPage: React.FC = () => {
+export const SecurityPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const router = useRouter();
   const { onDeleteAccount } = router.options.context as RouterContext;
-  const { currentUser } = useAppStore();
+  const { currentUser } = appStore;
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -162,7 +163,7 @@ export const SecurityPage: React.FC = () => {
       await api.deleteAccount(currentUser.id);
       // Clear local state immediately so the user is logged out even if the
       // callback chain from the router context is broken.
-      useAppStore.getState().logout();
+      appStore.logout();
       if (onDeleteAccount) {
         onDeleteAccount();
       } else {
@@ -393,4 +394,4 @@ export const SecurityPage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});

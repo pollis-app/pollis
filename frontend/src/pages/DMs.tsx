@@ -2,16 +2,17 @@ import React, { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Inbox, Ban, Plus, ShieldCheck, ShieldAlert } from "lucide-react";
 import { TerminalMenu, type TerminalMenuItem } from "../components/ui/TerminalMenu";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
 import { usePeerVerifications } from "../hooks/queries/useUserProfile";
 import { LastMessagePreview } from "../components/Message/LastMessagePreview";
 import { PresenceAvatar } from "../components/ui/PresenceAvatar";
 
-export const DMsPage: React.FC = () => {
+export const DMsPage: React.FC = observer(() => {
   const navigate = useNavigate();
-  const { setSelectedConversationId, markRead, unreadCounts } = useAppStore();
+  const { setSelectedConversationId, markRead, unreadCounts } = appStore;
 
   const { data: conversations = [] } = useDMConversations();
   const { data: requests = [] } = useDMRequests();
@@ -121,4 +122,4 @@ export const DMsPage: React.FC = () => {
       onEsc={() => navigate({ to: "/" })}
     />
   );
-};
+});

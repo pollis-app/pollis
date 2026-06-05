@@ -11,7 +11,8 @@ import {
 import { ChevronRight, Plus, X, Film, Music } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
 import { formatFileSize } from "../../utils/format";
-import { useDropTargetStore } from "../../stores/dropTargetStore";
+import { observer } from "mobx-react-lite";
+import { dropTargetStore } from "../../stores/dropTargetStore";
 import { getDraft, setDraft } from "../../utils/drafts";
 
 // Attachment carries a filesystem path so Rust can read the file directly —
@@ -206,7 +207,7 @@ const AttachmentPreview: React.FC<{
   );
 };
 
-export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
+const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputProps> = ({
   onSend,
   placeholder = "Type a message…",
   disabled = false,
@@ -440,7 +441,7 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
   // shows the drag overlay on views that can actually receive a file (not,
   // e.g., the voice/stream view where there's no input).
   useEffect(() => {
-    const { register, unregister } = useDropTargetStore.getState();
+    const { register, unregister } = dropTargetStore;
     register();
     return unregister;
   }, []);
@@ -662,4 +663,6 @@ export const ChatInput = React.forwardRef<ChatInputHandle, ChatInputProps>(({
       )}
     </div>
   );
-});
+};
+
+export const ChatInput = observer(React.forwardRef(ChatInputInner));

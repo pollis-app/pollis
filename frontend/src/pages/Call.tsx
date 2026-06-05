@@ -1,8 +1,9 @@
 import React, { useEffect } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { PhoneOff } from "lucide-react";
+import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
 import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
 import { voiceSession } from "../voice";
 
@@ -31,16 +32,15 @@ const RINGING_TIMEOUT_MS = 30_000;
 const DEFER_CANCEL_MS = 200;
 const pendingCancels = new Map<string, ReturnType<typeof setTimeout>>();
 
-export const CallPage: React.FC = () => {
+export const CallPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { callId } = useParams({ from: "/call/$callId" });
   const roomName = `call-${callId}`;
-  const activeVoiceChannelId = useAppStore((s) =>
-    s.voiceState.kind === 'idle' ? null : s.voiceState.channelId,
-  );
-  const voiceParticipants = useAppStore((s) => s.voiceParticipants);
-  const outgoingCall = useAppStore((s) => s.outgoingCall);
-  const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
+  const activeVoiceChannelId =
+    appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId;
+  const voiceParticipants = appStore.voiceParticipants;
+  const outgoingCall = appStore.outgoingCall;
+  const setOutgoingCall = appStore.setOutgoingCall;
 
   // Bounce-back guard. Three cases:
   //   1. Voice is our room → stay.
@@ -64,7 +64,7 @@ export const CallPage: React.FC = () => {
       return;
     }
     const timer = setTimeout(() => {
-      const cur = useAppStore.getState().voiceState;
+      const cur = appStore.voiceState;
       const curChannel = cur.kind === 'idle' ? null : cur.channelId;
       if (curChannel !== roomName) {
         navigate({ to: "/dms" });
@@ -115,10 +115,10 @@ export const CallPage: React.FC = () => {
     return () => {
       const timer = setTimeout(() => {
         pendingCancels.delete(callId);
-        const pending = useAppStore.getState().outgoingCall;
+        const pending = appStore.outgoingCall;
         if (pending && pending.callId === callId) {
           const calleeId = pending.calleeId;
-          useAppStore.getState().setOutgoingCall(null);
+          appStore.setOutgoingCall(null);
           invoke("cancel_call", { otherUserId: calleeId, callId }).catch(() => {});
         }
       }, DEFER_CANCEL_MS);
@@ -167,4 +167,4 @@ export const CallPage: React.FC = () => {
       </div>
     </div>
   );
-};
+});

@@ -1,5 +1,6 @@
+import { autorun } from "mobx";
 import { electron, hasElectron } from "../bridge/runtime";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
 import { voiceSession } from "./VoiceSessionManager";
 
 interface BridgeHandle {
@@ -26,7 +27,7 @@ export function installTrayVoiceBridge(): BridgeHandle {
   const api = electron();
 
   const pushState = (): void => {
-    const vs = useAppStore.getState().voiceState;
+    const vs = appStore.voiceState;
     const inCall = vs.kind === "joined";
     const muted = inCall ? vs.micMuted : false;
     void api.traySetVoiceState(inCall, muted).catch((err) => {
@@ -34,11 +35,10 @@ export function installTrayVoiceBridge(): BridgeHandle {
     });
   };
 
-  // Push initial state, then on every store change. The selector returns a
-  // fresh object reference on every set; we re-derive inCall+muted inside
-  // pushState so subscription churn doesn't matter for correctness.
-  pushState();
-  const unsubStore = useAppStore.subscribe(pushState);
+  // `autorun` pushes once immediately and re-runs whenever the voice state it
+  // reads changes. We re-derive inCall+muted inside pushState each run so
+  // reactivity churn doesn't matter for correctness.
+  const unsubStore = autorun(pushState);
 
   const unsubToggle = api.trayOnRequestToggleMute(() => {
     void voiceSession.toggleMute();

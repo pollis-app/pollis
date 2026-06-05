@@ -26,7 +26,7 @@ React component
 
 The dispatch layer in `pollis-node/src/dispatch/<module>.rs` is mechanical — one match arm per command, deserialising the JSON args and calling the corresponding `pollis_core::commands::…` function. Real logic lives in the `pollis-core` workspace crate so other front-ends — a CLI, a TUI, mobile via uniffi — can consume it without any shell-runtime dependency. Legacy `#[tauri::command]` shims under `src-tauri/src/commands/` are preserved for rollback.
 
-**React Query** is the source of truth for remote data. **Zustand** holds only UI state (current user ref, transient session data).
+**React Query** is the source of truth for remote data. **MobX** holds only UI state (current user ref, transient session data).
 
 ## Frontend Routing
 
@@ -82,7 +82,7 @@ frontend/src/
   hooks/queries/     # React Query hooks (useGroups, useMessages, usePreferences, ...)
   pages/             # Route pages
   services/          # api.ts (invoke wrappers), r2-upload.ts
-  stores/            # Zustand (appStore.ts)
+  stores/            # MobX class singletons (appStore.ts)
   types/             # TypeScript types
 
 website/             # Static marketing site (Cloudflare Pages, not part of the app)

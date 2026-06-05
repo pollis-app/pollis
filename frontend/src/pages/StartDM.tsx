@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useCreateOrGetDMConversation } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
 import { Button } from "../components/ui/Button";
@@ -8,11 +9,9 @@ interface StartDMProps {
   onSuccess?: (conversationId: string) => void;
 }
 
-export const StartDM: React.FC<StartDMProps> = ({ onSuccess }) => {
-  const currentUser = useAppStore((state) => state.currentUser);
-  const setSelectedConversationId = useAppStore(
-    (state) => state.setSelectedConversationId
-  );
+export const StartDM: React.FC<StartDMProps> = observer(({ onSuccess }) => {
+  const currentUser = appStore.currentUser;
+  const setSelectedConversationId = appStore.setSelectedConversationId;
   const [identifier, setIdentifier] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -86,4 +85,4 @@ export const StartDM: React.FC<StartDMProps> = ({ onSuccess }) => {
       </div>
     </div>
   );
-};
+});

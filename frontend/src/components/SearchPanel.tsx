@@ -4,7 +4,8 @@ import { Hash, Search, ArrowUp, ArrowDown, Volume2, Settings as SettingsIcon } f
 import { PresenceAvatar } from "./ui/PresenceAvatar";
 import { useUserGroupsWithChannels, useAllGroupMembers, type GroupMemberWithGroup } from "../hooks/queries/useGroups";
 import { useDMConversations } from "../hooks/queries/useMessages";
-import { useAppStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../stores/appStore";
 import type { GroupWithChannels } from "../services/api";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 
@@ -218,7 +219,7 @@ function filterResults(
 
 // ─── SearchPanel ─────────────────────────────────────────────────────────────
 
-export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => {
+export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClose }) => {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -229,10 +230,9 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations } = useDMConversations();
   const { members: allGroupMembers } = useAllGroupMembers();
-  const activeVoiceChannelId = useAppStore((s) =>
-    s.voiceState.kind === 'idle' ? null : s.voiceState.channelId,
-  );
-  const currentUserId = useAppStore((s) => s.currentUser?.id ?? null);
+  const activeVoiceChannelId =
+    appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId;
+  const currentUserId = appStore.currentUser?.id ?? null;
 
   // Build the full list of searchable items, active voice channel sorted to top
   const allItems = useMemo(() => {
@@ -570,4 +570,4 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose }) => 
       </div>
     </div>
   );
-};
+});

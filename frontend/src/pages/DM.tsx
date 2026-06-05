@@ -5,7 +5,8 @@ import { MainContent } from "../components/Layout/MainContent";
 import type { PendingDmRequest } from "../components/Layout/MainContent";
 import { useDMConversations } from "../hooks/queries/useMessages";
 import { useDMRequests } from "../hooks/queries";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { usePresenceStatus } from "../stores/presenceStore";
 import { invoke } from "../bridge";
 import { voiceSession } from "../voice";
@@ -15,14 +16,14 @@ import { warmVoiceChannel } from "../utils/voiceWarmup";
 type RawDmMember = { user_id: string; username?: string; accepted_at?: string | null };
 type RawDmChannel = { id: string; members: RawDmMember[] };
 
-export const DMPage: React.FC = () => {
+export const DMPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { conversationId } = useParams({ from: "/dms/$conversationId" });
-  const setSelectedConversationId = useAppStore((s) => s.setSelectedConversationId);
-  const markRead = useAppStore((s) => s.markRead);
-  const currentUser = useAppStore((s) => s.currentUser);
-  const setOutgoingCall = useAppStore((s) => s.setOutgoingCall);
-  const outgoingCall = useAppStore((s) => s.outgoingCall);
+  const setSelectedConversationId = appStore.setSelectedConversationId;
+  const markRead = appStore.markRead;
+  const currentUser = appStore.currentUser;
+  const setOutgoingCall = appStore.setOutgoingCall;
+  const outgoingCall = appStore.outgoingCall;
 
   const [otherUserId, setOtherUserId] = React.useState<string | null>(null);
   const [memberCount, setMemberCount] = React.useState<number>(0);
@@ -232,4 +233,4 @@ export const DMPage: React.FC = () => {
       </div>
     </div>
   );
-};
+});

@@ -1,4 +1,5 @@
 import React from "react";
+import { observer } from "mobx-react-lite";
 import { Avatar } from "./Avatar";
 import { usePresenceStatus } from "../../stores/presenceStore";
 
@@ -17,7 +18,7 @@ interface PresenceAvatarProps {
  * the dot sit silent when `userId` is null — the underlying Avatar handles
  * the no-presence case.
  */
-export const PresenceAvatar: React.FC<PresenceAvatarProps> = ({
+export const PresenceAvatar: React.FC<PresenceAvatarProps> = observer(({
   userId,
   avatarKey,
   size,
@@ -36,4 +37,4 @@ export const PresenceAvatar: React.FC<PresenceAvatarProps> = ({
       presence={userId ? status : undefined}
     />
   );
-};
+});

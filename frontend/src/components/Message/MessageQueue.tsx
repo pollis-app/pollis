@@ -1,14 +1,15 @@
 import React from 'react';
 import { X, Clock, Send, AlertCircle } from 'lucide-react';
-import { useAppStore } from '../../stores/appStore';
+import { observer } from 'mobx-react-lite';
+import { appStore } from '../../stores/appStore';
 import { Button } from '../ui/Button';
 
-export const MessageQueue: React.FC = () => {
+export const MessageQueue: React.FC = observer(() => {
   const {
     messageQueue,
     removeFromMessageQueue,
     updateMessageQueueItem,
-  } = useAppStore();
+  } = appStore;
 
   const pendingMessages = messageQueue.filter(
     (item) => item.status === 'pending' || item.status === 'sending'
@@ -121,4 +122,4 @@ export const MessageQueue: React.FC = () => {
       </div>
     </div>
   );
-};
+});

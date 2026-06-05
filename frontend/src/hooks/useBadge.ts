@@ -1,7 +1,8 @@
 import { useEffect } from 'react';
 import { getCurrentWindow, Image, type PollisImage } from '../bridge';
 import { electron, hasElectron } from '../bridge/runtime';
-import { useAppStore } from '../stores/appStore';
+import { appStore } from '../stores/appStore';
+import { useObserver } from 'mobx-react-lite';
 import { useTauriReady } from './useTauriReady';
 import { isMac, isWindows } from '../utils/platform';
 
@@ -42,7 +43,7 @@ async function getWindowsNotifIcon(): Promise<PollisImage> {
  */
 export function useBadge() {
   const { isReady } = useTauriReady();
-  const unreadCounts = useAppStore((s) => s.unreadCounts);
+  const unreadCounts = useObserver(() => appStore.unreadCounts);
 
   const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
 

@@ -1,8 +1,9 @@
 import React, { useMemo } from "react";
 import { useRouter, useRouterState } from "@tanstack/react-router";
 import { ChevronLeft, Search as SearchIcon, Settings as SettingsIcon } from "lucide-react";
+import { observer } from "mobx-react-lite";
 import { useShortcutLabel } from "../../keyboard";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 
@@ -17,12 +18,12 @@ interface Segment {
  * breadcrumb hierarchy (not browser-history back) plus the breadcrumb
  * trail itself ("Home / Direct Messages / @someone").
  */
-export const BreadcrumbNav: React.FC = () => {
+export const BreadcrumbNav: React.FC = observer(() => {
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
-  const channels = useAppStore((s) => s.channels);
+  const channels = appStore.channels;
   const searchLabel = useShortcutLabel("app.toggleSearch");
 
   const segments = useMemo<Segment[]>(() => {
@@ -258,4 +259,4 @@ export const BreadcrumbNav: React.FC = () => {
       </button>
     </div>
   );
-};
+});

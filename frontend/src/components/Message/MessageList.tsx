@@ -2,7 +2,8 @@ import React, { useEffect, useLayoutEffect, useRef, useMemo } from "react";
 import { MessageItem } from "./MessageItem";
 import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers } from "../../hooks/queries/useGroups";
-import { useRosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
+import { observer } from "mobx-react-lite";
+import { rosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
 import type { Message } from "../../types";
 
 const toMs = (timestamp: number): number =>
@@ -111,7 +112,7 @@ interface MessageListProps {
   onLoadMore?: () => void;
 }
 
-export const MessageList: React.FC<MessageListProps> = ({
+export const MessageList: React.FC<MessageListProps> = observer(({
   messages,
   conversationId,
   groupIdForNames,
@@ -161,9 +162,8 @@ export const MessageList: React.FC<MessageListProps> = ({
   // for display-name resolution: groupIdForNames === conversationId for
   // group MLS, so this read is normally cached by the same query the
   // member list page uses.
-  const rosterBanners = useRosterChangeStore(
-    (s) => (conversationId ? s.byConversation[conversationId] : undefined) ?? [],
-  );
+  const rosterBanners =
+    (conversationId ? rosterChangeStore.byConversation[conversationId] : undefined) ?? [];
   const { data: groupMembers = [] } = useGroupMembers(groupIdForNames ?? null);
   const usernameByUserId = useMemo(() => {
     const map = new Map<string, string>();
@@ -361,4 +361,4 @@ export const MessageList: React.FC<MessageListProps> = ({
       <div ref={bottomRef} />
     </div>
   );
-};
+});

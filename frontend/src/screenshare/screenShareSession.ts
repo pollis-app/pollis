@@ -13,7 +13,7 @@
 
 import { Channel, hasMediaDevices, invoke } from "../bridge";
 
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
 import { playSfx, SFX } from "../utils/sfx";
 
 /** Capturable display reported by `enumerate_screen_sources`.
@@ -378,7 +378,7 @@ class ScreenShareSession {
     // which silently captures the primary display and was the symptom
     // we just fixed. Fail loudly instead.
     if (!selection) {
-      const store = useAppStore.getState();
+      const store = appStore;
       const msg = "Screen share requires a picked source.";
       store.shareFailed(msg);
       throw new Error(msg);
@@ -387,7 +387,7 @@ class ScreenShareSession {
       `${selection.kind}:${selection.id}`,
     );
     if (!electronSourceId) {
-      const store = useAppStore.getState();
+      const store = appStore;
       const msg = "Screen share selection no longer available — re-open the picker.";
       store.shareFailed(msg);
       throw new Error(msg);
@@ -398,7 +398,7 @@ class ScreenShareSession {
     // ordinarily do this for us, but the dynamic import makes it
     // explicit and survives any future Vite config quirks.)
     const { livekitView } = await import("./livekitView");
-    const store = useAppStore.getState();
+    const store = appStore;
     store.shareStartStarting();
     let stream: MediaStream;
     try {
@@ -497,7 +497,7 @@ class ScreenShareSession {
     if (hasMediaDevices()) {
       const { livekitView } = await import("./livekitView");
       await livekitView.unpublishScreenShare();
-      const store = useAppStore.getState();
+      const store = appStore;
       store.shareStopped();
       playSfx(SFX.ping);
       return;
@@ -506,7 +506,7 @@ class ScreenShareSession {
   }
 
   private handleEvent(ev: ScreenShareEvent) {
-    const store = useAppStore.getState();
+    const store = appStore;
     switch (ev.type) {
       case "local_started":
         // Tauri path: backend signals the start after its capture helper

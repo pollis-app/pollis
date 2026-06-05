@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import * as api from "../../services/api";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import { messageQueryKeys } from "./useMessages";
 import { groupQueryKeys } from "./useGroups";
 
@@ -68,7 +69,7 @@ export const peerVerificationKeys = {
 /// sidebar / DM list and for the inline key-changed banner. Invalidated
 /// on the `KeyChanged` realtime event and after `set_contact_verified`.
 export function usePeerVerifications() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: peerVerificationKeys.all,
     queryFn: async (): Promise<PeerVerificationEntry[]> => {
@@ -84,7 +85,7 @@ export const safetyQueryKeys = {
 };
 
 export function useSafetyNumber(peerUserId: string | null | undefined) {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: safetyQueryKeys.number(peerUserId ?? null),
     queryFn: async (): Promise<SafetyNumberInfo> => {
@@ -116,7 +117,7 @@ export function useSetContactVerified(peerUserId: string | null | undefined) {
 }
 
 export function useUserProfile() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: userQueryKeys.profile(currentUser?.id ?? null),
@@ -148,8 +149,8 @@ export function useUserProfile() {
 
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
-  const setUsername = useAppStore((state) => state.setUsername);
+  const currentUser = useObserver(() => appStore.currentUser);
+  const setUsername = appStore.setUsername;
 
   return useMutation({
     mutationFn: async ({ username, preferredName, phone }: { username: string; preferredName?: string; phone?: string }) => {
@@ -182,7 +183,7 @@ export function useUpdateProfile() {
 
 export function useUserAvatar() {
   const { data: userProfile } = useUserProfile();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: ["user", "avatar", currentUser?.id, userProfile?.avatar_url],
@@ -219,8 +220,8 @@ export function useAvatarBlobUrl(avatarKey: string | null | undefined) {
 
 export function useUpdateAvatar() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
-  const setUserAvatarUrl = useAppStore((state) => state.setUserAvatarUrl);
+  const currentUser = useObserver(() => appStore.currentUser);
+  const setUserAvatarUrl = appStore.setUserAvatarUrl;
 
   return useMutation({
     mutationFn: async (avatarUrl: string) => {

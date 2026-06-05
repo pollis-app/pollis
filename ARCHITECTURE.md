@@ -11,7 +11,7 @@ For deeper, file-anchored documentation see `.codesight/wiki/index.md`. For the 
 | Layer | Tech |
 |---|---|
 | Desktop shell | Electron 33 (Node + Chromium renderer + preload bridge) |
-| Frontend | React 19 + TypeScript, Vite, TailwindCSS, TanStack Router (memory history), TanStack Query, Zustand (UI state only) |
+| Frontend | React 19 + TypeScript, Vite, TailwindCSS, TanStack Router (memory history), TanStack Query, MobX (UI state only) |
 | Backend | Rust split into `pollis-core` (reusable crate; also exposed to mobile via uniffi) and `pollis-node` (napi-rs binding loaded into Electron's main process), invoked from the renderer via `window.electronAPI.invoke(cmd, args)` |
 | End-to-end encryption | MLS (RFC 9420) via OpenMLS 0.8 for messages and files; AES-128-GCM frame-level encryption via libwebrtc's `FrameCryptor` for voice, keyed by the MLS group's exporter secret |
 | Remote DB | Turso (libSQL) via `libsql` 0.6, native Hrana/HTTP2 protocol over TLS |
@@ -150,7 +150,7 @@ React component
 
 The renderer never imports `@tauri-apps/*` or Electron APIs directly. It imports `invoke` / `Channel` / window / dialog / fs / shell / app / updater from `frontend/src/bridge`, a thin runtime-host bridge that resolves to `window.electronAPI` under Electron and retains a legacy Tauri fallback. Real business logic lives in `pollis-core`, which has no shell-runtime dependency and is also consumed by uniffi-generated mobile bindings.
 
-**TanStack Query is the source of truth** for remote data. Components read through hooks in `frontend/src/hooks/queries/`. **Zustand** holds only UI state — selected group/channel, transient session data, current user reference. There is no parallel client-side store for remote data.
+**TanStack Query is the source of truth** for remote data. Components read through hooks in `frontend/src/hooks/queries/`. **MobX** holds only UI state — selected group/channel, transient session data, current user reference. There is no parallel client-side store for remote data. The stores in `frontend/src/stores/` are MobX class singletons; components read them inside `observer()` wrappers.
 
 Routing uses TanStack Router with **memory history** (no browser URL bar in a desktop app). `AppShell` is the root route; key routes are documented in `.codesight/wiki/overview.md`.
 
@@ -233,7 +233,7 @@ frontend/                 # React app
     pages/                # Route pages
     hooks/queries/        # TanStack Query hooks
     services/             # Frontend-side helpers (R2 upload, etc.)
-    stores/               # Zustand (UI state only)
+    stores/               # MobX (UI state only)
     types/                # TypeScript types — kept aligned with Rust structs
     router.tsx, main.tsx  # TanStack Router setup, app entry
 

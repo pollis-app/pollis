@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useReactions, useAddReaction, useRemoveReaction } from "../../hooks/queries/useReactions";
-import { useAppStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
+import { appStore } from "../../stores/appStore";
 
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥", "🎉", "👀"];
 
@@ -8,8 +9,8 @@ interface MessageReactionsProps {
   messageId: string;
 }
 
-export const MessageReactions: React.FC<MessageReactionsProps> = ({ messageId }) => {
-  const { currentUser } = useAppStore();
+export const MessageReactions: React.FC<MessageReactionsProps> = observer(({ messageId }) => {
+  const { currentUser } = appStore;
   const { data: reactions = [] } = useReactions(messageId);
   const addReaction = useAddReaction();
   const removeReaction = useRemoveReaction();
@@ -142,4 +143,4 @@ export const MessageReactions: React.FC<MessageReactionsProps> = ({ messageId })
       </div>
     </div>
   );
-};
+});

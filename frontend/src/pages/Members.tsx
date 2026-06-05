@@ -1,7 +1,8 @@
 import React, { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ShieldCheck, ShieldAlert } from "lucide-react";
-import { useAppStore } from "../stores/appStore";
+import { appStore } from "../stores/appStore";
+import { observer } from "mobx-react-lite";
 import { useGroupMembers, useSetMemberRole } from "../hooks/queries/useGroups";
 import { usePeerVerifications } from "../hooks/queries/useUserProfile";
 import { Switch } from "../components/ui/Switch";
@@ -13,9 +14,9 @@ interface MembersProps {
   isAdmin: boolean;
 }
 
-export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
+export const Members: React.FC<MembersProps> = observer(({ groupId, isAdmin }) => {
   const navigate = useNavigate();
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = appStore.currentUser;
   const { data: members = [], isLoading } = useGroupMembers(groupId);
   const setRoleMutation = useSetMemberRole();
   const { data: peerVerifications = [] } = usePeerVerifications();
@@ -130,4 +131,4 @@ export const Members: React.FC<MembersProps> = ({ groupId, isAdmin }) => {
       }}
     />
   );
-};
+});
