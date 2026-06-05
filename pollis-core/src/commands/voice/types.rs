@@ -98,6 +98,19 @@ pub enum VoiceEvent {
         identity: String,
         quality: String,
     },
+    /// Voice MLS epoch advanced and a fresh E2EE key was derived. The Rust
+    /// voice path's `KeyProvider` is already updated; this event lets the
+    /// renderer's screen-share view client (which holds its own
+    /// `ExternalE2EEKeyProvider`) rotate to the new key. Without it the
+    /// view client keeps encrypting/decrypting with the key from its
+    /// connect-time epoch and drifts out of sync with the audio path on
+    /// any commit.
+    VoiceE2eeKeyRotated {
+        key: Vec<u8>,
+        key_index: i32,
+        epoch: u64,
+        mls_group_id: String,
+    },
     Disconnected,
 }
 

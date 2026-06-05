@@ -453,9 +453,6 @@ class ScreenShareSession {
       store.shareFailed("Screen share returned no video track.");
       throw new Error("getDisplayMedia returned no video track");
     }
-    if (import.meta.env.DEV) {
-      console.info("[ss-probe] capture settings", track.getSettings());
-    }
     console.info("[screenshare] getDisplayMedia returned, handing track to livekitView", {
       trackId: track.id,
       label: track.label,

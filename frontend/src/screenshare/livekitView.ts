@@ -41,8 +41,7 @@ import type {
 
 import { invoke } from '../bridge';
 import { hasElectron } from '../bridge/runtime';
-import { pickScreenShareCodec } from './codecPolicy';
-import { installAv1Stripper, setPreferredVideoCodec } from './sdpMunger';
+import { installAv1Stripper } from './sdpMunger';
 
 // Install the Chromium-130 PT=35 BUNDLE-collision workaround at module
 // load — before any livekit-client code constructs a PeerConnection. See
@@ -126,6 +125,15 @@ class LiveKitView {
   private current: ViewIntent | null = null;
   private currentRoom: Room | null = null;
   private reconciling = false;
+  /** Active E2EE key provider for the current room, so the epoch-rotation
+   *  hook (driven by the Rust `voice_e2ee_key_rotated` event) can call
+   *  `setKey` on it when MLS commits advance the group epoch. Null when
+   *  no room is connected or when the room was joined unencrypted. */
+  private currentKeyProvider: ExternalE2EEKeyProvider | null = null;
+  /** MLS group whose exporter secret backs `currentKeyProvider`. Used to
+   *  ignore rotation events for unrelated groups (the Rust side filters
+   *  too, but this is cheap and keeps the renderer honest). */
+  private currentE2eeMlsGroupId: string | null = null;
 
   private tracks = new Map<string, MediaStreamTrack>();
   /** Width × height per active remote track. Pushed into the Zustand
@@ -264,37 +272,15 @@ class LiveKitView {
       // browser releases the capture handle.
       await this.unpublishScreenShare();
     }
-    // Per-machine codec choice (issue #364): hardware H.264 pinned to its
-    // advertised high level when a HW encoder is present, else software
-    // VP8. Push the highest quality the sender's hardware can produce and
-    // let SDP negotiation stay uncapped; deal with "too much" reactively
-    // via a future bitrate toggle (#300), not by pre-throttling.
-    //
-    // The AV1 stripper already keeps the PT=35 BUNDLE collision clean by
-    // filtering AV1 out of every video transceiver's preferences; pinning
-    // H.264 first reorders within that already-AV1-free list, so the
-    // collision that originally forced VP8 stays closed.
-    const { codec, h264Capability } = pickScreenShareCodec();
-    // When publishing H.264, pin the high-level capability first so
-    // Chromium offers it ahead of baseline 3.1 and engages the hardware
-    // encoder. Clear the pin for VP8 so we keep the default order.
-    setPreferredVideoCodec(codec === 'h264' ? h264Capability : null);
     console.info('[livekit-view] publishScreenShare: calling publishTrack', {
       trackId: track.id,
       trackKind: track.kind,
       trackLabel: track.label,
       settings: track.getSettings(),
-      codec,
-      h264ProfileLevelId: h264Capability?.sdpFmtpLine ?? null,
     });
     const t0 = performance.now();
     const publication = await room.localParticipant.publishTrack(track, {
       source: Track.Source.ScreenShare,
-      // Hardware H.264 (high level) when available, else software VP8 —
-      // decided per-machine above. H.264's level is pinned via
-      // setPreferredVideoCodec so negotiation never caps resolution /
-      // framerate; VP8 has no level cap and we control its ceilings below.
-      videoCodec: codec,
       // Disable simulcast for screen-share — high-bitrate single layer
       // matches text legibility better than scaled-down spatial layers.
       simulcast: false,
@@ -305,8 +291,8 @@ class LiveKitView {
       // `h1080fps15` preset (1080p @ 15fps) — that was the cross-platform
       // 15fps cap. These are ceilings, not targets: TWCC ramps toward them
       // when the link sustains it and backs off on loss. 8 Mbps is
-      // comfortable for 1080p60 (VP8 or H.264). maintain-framerate biases
-      // toward smooth motion over crisp text under pressure.
+      // comfortable for 1080p60. maintain-framerate biases toward smooth
+      // motion over crisp text under pressure.
       screenShareEncoding: {
         maxFramerate: 60,
         maxBitrate: 8_000_000,
@@ -320,50 +306,9 @@ class LiveKitView {
       source: publication.source,
     });
     this.localPublication = publication;
-    // The publication wraps the MediaStreamTrack as a LocalVideoTrack.
     const localTrack = publication.track as LocalVideoTrack | undefined;
     if (localTrack) {
       this.localTrack = localTrack;
-    }
-    // TEMP DEBUG (#364 framerate investigation) — sample the sender's RTC
-    // stats a few seconds after publish so we can see CAPTURE fps (into the
-    // encoder) vs SENT fps (out the wire), what's limiting it, and which
-    // encoder engaged. Remove once the 60→15 drop is understood. Uses fixed
-    // one-shot timeouts (not a recurring poll) so it doesn't violate the
-    // no-periodic-polling rule.
-    if (import.meta.env.DEV && localTrack) {
-      const sample = async (label: string): Promise<void> => {
-        const sender = localTrack.sender;
-        if (!sender) {
-          console.warn(`[ss-stats ${label}] no sender on local track`);
-          return;
-        }
-        const report = await sender.getStats();
-        report.forEach((r) => {
-          if (r.type === 'media-source' && r.kind === 'video') {
-            console.info(`[ss-stats ${label}] CAPTURE`, {
-              fps: r.framesPerSecond,
-              res: `${r.width}x${r.height}`,
-            });
-          }
-          if (r.type === 'outbound-rtp' && r.kind === 'video') {
-            console.info(`[ss-stats ${label}] SENT`, {
-              fps: r.framesPerSecond,
-              res: `${r.frameWidth}x${r.frameHeight}`,
-              encoder: r.encoderImplementation,
-              limitedBy: r.qualityLimitationReason,
-              limitDurations: r.qualityLimitationDurations,
-              targetBitrate: r.targetBitrate,
-              framesEncoded: r.framesEncoded,
-              framesSent: r.framesSent,
-            });
-          }
-        });
-      };
-      // Steady-state needs a subscriber + a few seconds for TWCC to settle.
-      setTimeout(() => void sample('t+4s'), 4000);
-      setTimeout(() => void sample('t+8s'), 8000);
-      setTimeout(() => void sample('t+15s'), 15000);
     }
     // Surface the local track under LOCAL_PREVIEW_KEY so the in-tile
     // preview renders. The browser will stop the track if the user clicks
@@ -399,9 +344,6 @@ class LiveKitView {
     const localTrack = this.localTrack;
     this.localPublication = null;
     this.localTrack = null;
-    // Drop the H.264 pin so a later renegotiation (e.g. subscribing to a
-    // new remote share) reverts to the default codec order.
-    setPreferredVideoCodec(null);
     if (room && localTrack) {
       try {
         await room.localParticipant.unpublishTrack(localTrack, true);
@@ -513,6 +455,8 @@ class LiveKitView {
         epoch: keyInfo.epoch,
         key_index: keyInfo.key_index,
       });
+      this.currentKeyProvider = keyProvider;
+      this.currentE2eeMlsGroupId = keyInfo.mls_group_id;
     } catch (e) {
       console.warn(
         '[livekit-view] e2ee key fetch failed — screen-share will NOT be end-to-end encrypted:',
@@ -593,10 +537,39 @@ class LiveKitView {
     return true;
   }
 
+  /** Rotate the E2EE key on the active screen-share view client. Called
+   *  from VoiceSessionManager when the Rust side emits
+   *  `voice_e2ee_key_rotated` after an MLS commit. No-op if no view
+   *  client is connected or if the rotation is for a different group. */
+  async rotateE2eeKey(
+    key: Uint8Array,
+    mlsGroupId: string,
+  ): Promise<void> {
+    const provider = this.currentKeyProvider;
+    const activeGroup = this.currentE2eeMlsGroupId;
+    if (!provider || activeGroup !== mlsGroupId) {
+      return;
+    }
+    try {
+      // Copy into a fresh ArrayBuffer (the source may be a view into a
+      // larger buffer or a SharedArrayBuffer); setKey wants ArrayBuffer.
+      const buf = new ArrayBuffer(key.byteLength);
+      new Uint8Array(buf).set(key);
+      await provider.setKey(buf);
+      console.info('[livekit-view] e2ee key rotated', {
+        mls_group: mlsGroupId,
+      });
+    } catch (e) {
+      console.warn('[livekit-view] e2ee key rotation failed:', e);
+    }
+  }
+
   private async executeLeave(): Promise<void> {
     const room = this.currentRoom;
     this.currentRoom = null;
     this.current = null;
+    this.currentKeyProvider = null;
+    this.currentE2eeMlsGroupId = null;
     // Unpublish before disconnect so the SDK has a chance to stop the
     // capture cleanly (frees the OS capture handle, removes the system
     // "you're sharing" indicator immediately).
@@ -664,6 +637,8 @@ class LiveKitView {
       this.trackDims.clear();
       this.current = null;
       this.currentRoom = null;
+      this.currentKeyProvider = null;
+      this.currentE2eeMlsGroupId = null;
       if (hadAny) {
         this.emit();
       }
