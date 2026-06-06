@@ -287,3 +287,17 @@ checkStatus(); // Verify with backend
 // Verify with backend
 checkStatus();
 ```
+
+### Styling: Tailwind-first, token-backed
+
+Design tokens are CSS custom properties in `frontend/src/index.css` (`--c-*` colors, `--bar-h`, `--font-size-base`) — the single source of truth, themeable and font-scalable. They are surfaced as semantic Tailwind utilities in `tailwind.config.js`: `bg-bg`, `bg-surface[-raised|-high]`, `text-fg`/`text-dim`/`text-muted`, `text-accent`/`bg-accent`, `border-line`/`border-line-strong`, `hover:bg-hover`, `h-bar`. **Use these utilities** — do not write `[var(--c-…)]` arbitrary classes or inline `style={{ color: 'var(--c-…)' }}` for tokens that have a utility. If a token is missing a utility, add it to the Tailwind theme rather than reaching around it.
+
+Three idioms, in priority order:
+
+1. **Static styling → Tailwind utilities.** The default. Colors, spacing, borders, layout. No inline `style` for static values.
+2. **Runtime-dynamic values → inline `style`.** Only for values a static class cannot express: measured dimensions, dynamically-injected CSS variables (e.g. the voice meter's `--eqN`), a computed gradient stop. This is the sanctioned escape hatch.
+3. **Complex / stateful / repeated selectors → a co-located component CSS file** (e.g. `voice-stage.css`, prefixed classes) or `@layer components`. For pseudo-elements, `nth-child`, `::-webkit-scrollbar`, keyframes, descendant selectors — things utilities express badly.
+
+**Sizes that should track the user's font setting must be in `rem`** (Tailwind's scale is rem-native, so utilities scale for free; `--bar-h` is rem). Use `px` only for things that intentionally should *not* scale (1px hairlines). Never a `px` arbitrary class (`h-[28px]`) for a scalable dimension — use `rem` (`h-[1.75rem]`) or a token. Do **not** reintroduce per-file `px→rem` helpers.
+
+Bundle size is not a factor here — Tailwind's JIT only emits used classes (CSS is a rounding error next to the JS bundle); choose for consistency, not perf.
