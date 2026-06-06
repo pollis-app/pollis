@@ -1,0 +1,28 @@
+[package]
+name = "verifiable-log"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Generic, tenant-agnostic verifiable append-only Merkle log (RFC 6962 style) plus an offline verification CLI."
+
+[lib]
+name = "verifiable_log"
+path = "src/lib.rs"
+
+[[bin]]
+name = "monitor"
+path = "src/bin/monitor.rs"
+
+[dependencies]
+sha2 = "0.10"
+ed25519-dalek = "2.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+ed25519-dalek = "2.1"
+serde_json = "1"
+hex = "0.4"
