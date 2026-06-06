@@ -1,15 +1,13 @@
 import React, { useEffect, useRef } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, Pencil, Trash2, Volume2, X } from "lucide-react";
+import { Pencil, Trash2, X } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../stores/appStore";
 import { useDeleteChannel, useUserGroupsWithChannels } from "../hooks/queries/useGroups";
-import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
-import { VoiceMemberTile } from "../components/Voice/VoiceMemberTile";
+import { VoiceStage } from "../components/Voice/stage/VoiceStage";
 import { useVoiceParticipants } from "../hooks/queries/useVoiceParticipants";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import { Button } from "../components/ui/Button";
-import { NavigableGrid } from "../components/ui/NavigableGrid";
 import type { VoiceParticipant } from "../types";
 import { warmVoiceChannel } from "../utils/voiceWarmup";
 import { voiceSession } from "../voice";
@@ -93,152 +91,93 @@ export const VoiceChannelPage: React.FC = observer(() => {
   }, [preferences.query.data]);
 
 
-  return (
-    <div className="flex flex-col h-full font-mono text-xs">
-      {/* Header */}
-      <div
-        className="flex items-center px-4 py-2 flex-shrink-0"
-        style={{ borderBottom: "1px solid var(--c-border)", color: "var(--c-text-muted)" }}
-      >
+  // Admin rename/delete affordances live in the stage header, right of
+  // the pills and left of Join/Leave. Hidden while the delete bar is open.
+  const headerActions =
+    isAdmin && channel && !isPendingDelete ? (
+      <>
         <button
-          onClick={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
-          className="mr-3 inline-flex items-center gap-1 leading-none transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-accent)]"
+          data-testid="rename-channel-trigger"
+          onClick={() =>
+            navigate({
+              to: "/groups/$groupId/channels/$channelId/rename",
+              params: { groupId, channelId },
+            })
+          }
+          aria-label="Rename channel"
+          className="icon-btn-sm flex-shrink-0"
         >
-          <ArrowLeft size={12} />
+          <Pencil size={14} aria-hidden="true" />
         </button>
-        <span style={{ flex: 1, color: "var(--c-accent)" }} className="flex items-center gap-1.5">
-          <Volume2 size={12} />
-          {channelName}
-        </span>
-        {isAdmin && channel && !isPendingDelete && (
-          <div className="flex items-center gap-2">
-            <button
-              data-testid="rename-channel-trigger"
-              onClick={() => navigate({ to: "/groups/$groupId/channels/$channelId/rename", params: { groupId, channelId } })}
-              aria-label="Rename channel"
-              className="icon-btn-sm flex-shrink-0"
-            >
-              <Pencil size={14} aria-hidden="true" />
-            </button>
-            <button
-              data-testid="delete-channel-trigger"
-              onClick={() => setPendingDeleteChannelId(channelId)}
-              aria-label="Delete channel"
-              className="icon-btn-sm flex-shrink-0"
-            >
-              <Trash2 size={14} aria-hidden="true" />
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Join / Leave button */}
-      <div className="px-4 pt-4 pb-4 flex-shrink-0">
-        <Button
-          data-testid="voice-join-leave-button"
-          variant={isInCall ? "danger" : "primary"}
-          autoFocus
-          onClick={() => isInCall ? voiceSession.leave() : voiceSession.setIntent({ channelId, groupId })}
+        <button
+          data-testid="delete-channel-trigger"
+          onClick={() => setPendingDeleteChannelId(channelId)}
+          aria-label="Delete channel"
+          className="icon-btn-sm flex-shrink-0"
         >
-          {isInCall ? "Leave" : "Join"}
+          <Trash2 size={14} aria-hidden="true" />
+        </button>
+      </>
+    ) : null;
+
+  // The pending-delete confirmation replaces the stage footer, following
+  // the established replace-the-bar pattern (no modal).
+  const deleteFooter = isPendingDelete ? (
+    <div data-testid="delete-channel-bar">
+      <div
+        className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
+        style={{ borderTop: "1px solid var(--c-border)", background: "var(--c-surface)" }}
+      >
+        <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: "var(--c-text-muted)" }}>
+          delete channel
+        </span>
+        <button
+          data-testid="delete-channel-cancel"
+          onClick={() => setPendingDeleteChannelId(null)}
+          aria-label="Cancel delete"
+          className="icon-btn-sm flex-shrink-0"
+        >
+          <X size={20} aria-hidden="true" />
+        </button>
+      </div>
+      <div
+        className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
+        style={{ background: "var(--c-surface)" }}
+      >
+        <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
+          This voice channel and any in-call state will be permanently deleted. This cannot be undone.
+        </p>
+        <Button
+          data-testid="delete-channel-confirm"
+          variant="danger"
+          onClick={handleConfirmDelete}
+          isLoading={deleteChannelMutation.isPending}
+          loadingText="Deleting…"
+          autoFocus
+        >
+          Delete
         </Button>
       </div>
-
-      {/* Participant list. When the user is IN the call we show the live
-          VoiceChannelView (active speakers, screenshare streams,
-          connection quality). When they're a bystander we show the same
-          tile grid in an inert variant — no speaking indicators, no
-          stream rendering — so the layout is identical the moment they
-          hit Join. */}
-      {isInCall ? (
-        <VoiceChannelView />
-      ) : (
-        <div
-          className="flex-1 flex flex-col font-mono text-xs min-h-0"
-          style={{
-            borderTop: "1px solid var(--c-border)",
-            borderBottom: "1px solid var(--c-border)",
-          }}
-        >
-          <NavigableGrid<VoiceParticipant>
-            items={observerParticipants.map((p): VoiceParticipant => ({
-              identity: p.identity,
-              name: p.name,
-              avatarKey: p.avatar_url ?? null,
-              isMuted: false,
-              isLocal: false,
-            }))}
-            getKey={(p) => p.identity}
-            testId="voice-channel-observers"
-            emptyLabel="No one in this channel"
-            autoFocus={false}
-            minCellWidth={180}
-            maxCellWidth={240}
-            renderCell={(p, { focused }) => (
-              <VoiceMemberTile
-                identity={p.identity}
-                name={p.name}
-                avatarKey={p.avatarKey ?? null}
-                isMuted={false}
-                isLocal={false}
-                isSpeaking={false}
-                focused={focused}
-                // No stream props in the inert preview, so onView is
-                // never reachable — `isStreaming ? () => onView(...) : undefined`
-                // in VoiceMemberTile.tsx:192 short-circuits to undefined.
-                onView={() => {}}
-              />
-            )}
-          />
-        </div>
-      )}
-
-      {/* Voice settings link, replaced by the delete-confirm bar when an
-          admin has triggered channel deletion. */}
-      {isPendingDelete ? (
-        <div data-testid="delete-channel-bar">
-          <div
-            className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0"
-            style={{ borderTop: "1px solid var(--c-border)", background: "var(--c-surface)" }}
-          >
-            <span className="flex-1 text-2xs font-mono uppercase tracking-widest" style={{ color: "var(--c-text-muted)" }}>
-              delete channel
-            </span>
-            <button
-              data-testid="delete-channel-cancel"
-              onClick={() => setPendingDeleteChannelId(null)}
-              aria-label="Cancel delete"
-              className="icon-btn-sm flex-shrink-0"
-            >
-              <X size={20} aria-hidden="true" />
-            </button>
-          </div>
-          <div
-            className="flex items-center justify-between gap-4 px-4 pb-3 pt-2"
-            style={{ background: "var(--c-surface)" }}
-          >
-            <p className="text-xs font-mono" style={{ color: "var(--c-text-dim)" }}>
-              This voice channel and any in-call state will be permanently deleted. This cannot be undone.
-            </p>
-            <Button
-              data-testid="delete-channel-confirm"
-              variant="danger"
-              onClick={handleConfirmDelete}
-              isLoading={deleteChannelMutation.isPending}
-              loadingText="Deleting…"
-              autoFocus
-            >
-              Delete
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="px-4 py-3 flex-shrink-0">
-          <Button variant="secondary" onClick={() => navigate({ to: "/voice-settings" })}>
-            Voice Settings
-          </Button>
-        </div>
-      )}
     </div>
+  ) : undefined;
+
+  return (
+    <VoiceStage
+      channelName={channelName}
+      isInCall={isInCall}
+      observerParticipants={observerParticipants.map((p): VoiceParticipant => ({
+        identity: p.identity,
+        name: p.name,
+        avatarKey: p.avatar_url ?? null,
+        isMuted: false,
+        isLocal: false,
+      }))}
+      onJoin={() => voiceSession.setIntent({ channelId, groupId })}
+      onLeave={() => voiceSession.leave()}
+      onBack={() => navigate({ to: "/groups/$groupId", params: { groupId } })}
+      onOpenSettings={() => navigate({ to: "/voice-settings" })}
+      headerActions={headerActions}
+      footer={deleteFooter}
+    />
   );
 });

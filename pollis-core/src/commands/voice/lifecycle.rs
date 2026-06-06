@@ -27,6 +27,7 @@ use crate::{
 };
 
 use super::devices::get_device;
+use super::levels::BandAnalyzer;
 use super::playback::{ensure_playback, register_remote_track};
 use super::streams::start_mic_stream;
 use super::types::{
@@ -446,6 +447,13 @@ pub async fn join_voice_channel(
         let mut onset_frames: u32 = 0; // consecutive above-threshold frames; 2 required to (re)trigger
         let mut is_speaking = false;
 
+        // Live multi-band meter for our own tile. Sink cloned once so the
+        // per-frame emit never re-locks the shared VoiceState mutex. Emit
+        // every 5 chunks (~10 ms each) ⇒ ~20 Hz.
+        let bands_sink = voice_arc_frame.lock().await.channel.clone();
+        let mut analyzer = BandAnalyzer::new(mic_rate);
+        let mut bands_ctr: u32 = 0;
+
         while let Some((samples, rate)) = frame_rx.recv().await {
             buf.extend_from_slice(&samples);
             while buf.len() >= chunk_size {
@@ -495,6 +503,21 @@ pub async fn join_voice_channel(
                         } else {
                             let _ = ch.send(VoiceEvent::SpeakingStopped { identity: local_identity_for_speaking.clone() });
                         }
+                    }
+                }
+
+                // Live band meter on the post-APM signal (same source as
+                // the speaking indicator, so the meter matches what others
+                // hear). Decimated to ~20 Hz.
+                analyzer.process(&chunk);
+                bands_ctr += 1;
+                if bands_ctr >= 5 {
+                    bands_ctr = 0;
+                    if let Some(ch) = &bands_sink {
+                        let _ = ch.send(VoiceEvent::AudioBands {
+                            identity: local_identity_for_speaking.clone(),
+                            bands: analyzer.levels(),
+                        });
                     }
                 }
 

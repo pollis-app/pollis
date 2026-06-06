@@ -4,6 +4,7 @@
 //! `voice_test.rs`) keeps resolving names at `pollis_core::commands::voice::*`.
 
 mod devices;
+mod levels;
 mod lifecycle;
 mod playback;
 mod streams;
