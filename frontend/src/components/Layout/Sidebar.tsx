@@ -21,25 +21,25 @@ import { useVoiceRoomCounts } from "../../hooks/queries/useVoiceParticipants";
 import { usePeerVerifications } from "../../hooks/queries/useUserProfile";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
-import { usePresenceStatus, type PresenceStatus } from "../../stores/presenceStore";
+import { usePresenceStatus } from "../../stores/presenceStore";
 import { useShortcutLabel } from "../../keyboard";
 
-const SIDEBAR_WIDTH = 220;
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
 
-// The sidebar chrome is sized in rem so it tracks the user's font-size
-// preference (`--font-size-base` on :root, which scales rem). Hardcoded px
-// would stay frozen while the rest of the app scales. Values are expressed
-// relative to the 15px default base; rem keeps them reactive to live
-// changes without needing a re-render.
-const BASE_FONT_PX = 15;
-const rem = (px: number): string => `${px / BASE_FONT_PX}rem`;
-// Shared lucide sizing: `size` seeds the SVG attribute, the rem width/height
-// override actually scales it with the font preference.
+// Sidebar chrome is sized in rem (via Tailwind's rem-based scale + a few
+// rem arbitrary values) so it tracks the user's font-size preference
+// (`--font-size-base` on :root). px would freeze while the app scales.
+// Shared lucide sizing: `size` seeds the SVG attribute; the rem `size-[…]`
+// class scales it with the font preference (CSS wins over the attribute).
 const iconProps = {
   size: 14,
-  style: { width: rem(14), height: rem(14), flexShrink: 0 },
+  className: "size-[0.933rem] shrink-0",
 } as const;
+
+// Per-depth left padding (10 + indent*16 px @ 15px base ⇒ rem, scalable).
+// indent is only ever 1 (group / dm / settings) or 2 (channel).
+const indentPadClass = (indent: number): string =>
+  indent >= 2 ? "pl-[2.8rem]" : "pl-[1.733rem]";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -151,17 +151,9 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   return (
     <aside
       data-testid="sidebar"
-      style={{
-        width: rem(SIDEBAR_WIDTH),
-        flexShrink: 0,
-        borderRight: "1px solid var(--c-border)",
-        background: "var(--c-surface)",
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "var(--font-mono, monospace)",
-      }}
+      className="flex w-[14.667rem] shrink-0 flex-col border-r border-line bg-surface font-mono"
     >
-      <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+      <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <SectionHeader
           label="groups"
           icon={<Users {...iconProps} />}
@@ -170,7 +162,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
           borderedBottom
         />
 
-        <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+        <ul>
           {groupsWithChannels.map((group) => {
             const isCollapsed = collapsedGroups.has(group.id);
             const groupUnread = group.channels.reduce(
@@ -241,7 +233,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
           bordered
         />
 
-        <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
+        <ul>
           {dmConversations.map((c) => {
             const unread = unreadCounts[c.id] ?? 0;
             const verification = c.user2_id ? verificationByPeer.get(c.user2_id) : undefined;
@@ -253,7 +245,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
               <span
                 data-testid={`dm-verification-changed-${c.id}`}
                 title="Identity key changed — re-verify"
-                style={{ display: "inline-flex", color: "#f0b429", flexShrink: 0 }}
+                className="inline-flex shrink-0 text-[#f0b429]"
               >
                 <ShieldAlert {...iconProps} />
               </span>
@@ -261,7 +253,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
               <span
                 data-testid={`dm-verification-verified-${c.id}`}
                 title="Verified contact"
-                style={{ display: "inline-flex", color: "var(--c-accent)", flexShrink: 0 }}
+                className="inline-flex shrink-0 text-accent"
               >
                 <ShieldCheck {...iconProps} />
               </span>
@@ -306,34 +298,12 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         onClick={onToggle}
         aria-label={`Close sidebar (${toggleSidebarLabel})`}
         title={`Close sidebar (${toggleSidebarLabel})`}
-        className="transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-text)]"
-        style={{
-          flexShrink: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: rem(8),
-          padding: `${rem(8)} ${rem(10)}`,
-          borderTop: "1px solid var(--c-border)",
-          background: "none",
-          fontFamily: "inherit",
-          fontSize: rem(13),
-          textAlign: "left",
-          cursor: "pointer",
-        }}
+        className="flex shrink-0 items-center gap-2 px-2.5 py-2 border-t border-line text-xs text-left cursor-pointer transition-colors text-muted hover:text-fg"
       >
-        <span style={{ flex: 1 }}>Close</span>
+        <span className="flex-1">Close</span>
         <kbd
           aria-hidden="true"
-          className="font-mono"
-          style={{
-            color: "inherit",
-            background: "var(--c-bg)",
-            padding: `${rem(1)} ${rem(5)}`,
-            borderRadius: 3,
-            border: "1px solid var(--c-border)",
-            fontSize: rem(11),
-            lineHeight: 1.2,
-          }}
+          className="font-mono bg-bg px-1.5 py-px rounded-[3px] border border-line text-2xs leading-[1.2]"
         >
           {toggleSidebarLabel}
         </kbd>
@@ -354,40 +324,30 @@ interface SectionHeaderProps {
   borderedBottom?: boolean;
 }
 
-const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, onClick, badge, bordered, borderedBottom }) => (
-  <button
-    type="button"
-    onClick={onClick}
-    className="bg-[var(--c-surface)] hover:bg-[var(--c-hover)]"
-    style={{
-      width: "100%",
-      display: "flex",
-      alignItems: "center",
-      gap: rem(6),
-      padding: `${rem(8)} ${rem(10)} ${rem(8)}`,
-      marginTop: bordered ? rem(4) : 0,
-      border: "none",
-      borderTop: bordered ? "1px solid var(--c-border)" : "none",
-      borderBottom: bordered || borderedBottom ? "1px solid var(--c-border)" : "none",
-      color: isActive ? "var(--c-accent)" : "var(--c-text-muted)",
-      letterSpacing: "0.08em",
-      textTransform: "uppercase",
-      cursor: "pointer",
-      textAlign: "left",
-      transition: "background 75ms",
-      position: "sticky",
-      top: 0,
-      zIndex: 1,
-      height: "var(--bar-h)",
-    }}
-    data-testId={`sidebar-row-${label.toLowerCase().replace(/\s+/g, "-")}`}
-
-  >
-    {icon}
-    <span style={{ flex: "1 1 0%", lineHeight: "100%", fontSize: "0.8rem" }}>{label}</span>
-    {badge != null && <UnreadBadge count={badge} muted />}
-  </button>
-);
+const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, onClick, badge, bordered, borderedBottom }) => {
+  const cls = [
+    "sticky top-0 z-[1] flex w-full h-bar items-center gap-1.5 px-2.5",
+    "uppercase tracking-[0.08em] text-left cursor-pointer",
+    "transition-colors duration-75 bg-surface hover:bg-hover",
+    isActive ? "text-accent" : "text-muted",
+    bordered ? "mt-1 border-t border-line" : "",
+    bordered || borderedBottom ? "border-b border-line" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cls}
+      data-testid={`sidebar-row-${label.toLowerCase().replace(/\s+/g, "-")}`}
+    >
+      {icon}
+      <span className="flex-1 leading-[100%] text-[0.8rem]">{label}</span>
+      {badge != null && <UnreadBadge count={badge} muted />}
+    </button>
+  );
+};
 
 interface RowChevron {
   isCollapsed: boolean;
@@ -412,14 +372,11 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
   return (
     <div
       data-active={isActive ? "true" : "false"}
-      className={`transition-colors ${isActive ? "bg-[var(--c-hover)]" : "bg-transparent hover:bg-[var(--c-hover)]"}`}
-      style={{
-        display: "flex",
-        alignItems: "stretch",
-        width: "100%",
-        borderLeft: isActive ? "2px solid var(--c-accent)" : "2px solid transparent",
-        color: isActive ? "var(--c-accent)" : "var(--c-text)",
-      }}
+      className={`flex w-full items-stretch border-l-2 transition-colors ${
+        isActive
+          ? "bg-hover border-accent text-accent"
+          : "bg-transparent border-transparent text-fg hover:bg-hover"
+      }`}
     >
       {chevron && (
         <button
@@ -430,18 +387,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
             chevron.onToggle();
           }}
           aria-label={chevron.ariaLabel}
-          style={{
-            background: "none",
-            border: "none",
-            padding: 0,
-            margin: 0,
-            paddingLeft: rem(10 + indent * 16),
-            paddingRight: 0,
-            display: "inline-flex",
-            alignItems: "center",
-            color: "inherit",
-            cursor: "pointer",
-          }}
+          className={`inline-flex items-center pr-0 cursor-pointer text-inherit ${indentPadClass(indent)}`}
         >
           {chevron.isCollapsed ? <ChevronRight {...iconProps} /> : <ChevronDown {...iconProps} />}
         </button>
@@ -449,38 +395,12 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
       <button
         type="button"
         onClick={onClick}
-        style={{
-          flex: 1,
-          minWidth: 0,
-          display: "flex",
-          alignItems: "center",
-          gap: rem(6),
-          paddingTop: rem(2),
-          paddingBottom: rem(2),
-          paddingLeft: chevron ? rem(6) : rem(10 + indent * 16),
-          paddingRight: rem(10),
-          background: "none",
-          border: "none",
-          color: "inherit",
-          fontSize: rem(15),
-          fontFamily: "inherit",
-          cursor: "pointer",
-          textAlign: "left",
-          lineHeight: rem(24),
-        }}
-
+        className={`flex flex-1 min-w-0 items-center gap-1.5 py-0.5 pr-2.5 text-base text-left cursor-pointer text-inherit ${
+          chevron ? "pl-[0.4rem]" : indentPadClass(indent)
+        }`}
       >
         {leading}
-        <span
-          style={{
-            flex: 1,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {label}
-        </span>
+        <span className="flex-1 truncate">{label}</span>
         {trailing}
         {badge != null && <UnreadBadge count={badge} />}
       </button>
@@ -490,45 +410,26 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
 
 const UnreadBadge: React.FC<{ count: number; muted?: boolean }> = ({ count, muted }) => (
   <span
-    style={{
-      fontSize: rem(11),
-      lineHeight: 1,
-      padding: `${rem(2)} ${rem(6)}`,
-      borderRadius: "0.25rem",
-      background: muted ? "var(--c-text-muted)" : "var(--c-accent)",
-      color: "var(--c-bg)",
-      flexShrink: 0,
-    }}
+    className={`shrink-0 rounded px-1.5 py-0.5 text-2xs leading-none text-bg ${
+      muted ? "bg-muted" : "bg-accent"
+    }`}
   >
     {count > 99 ? "99+" : count}
   </span>
 );
 
-// Standalone presence dot mirroring the styling on Avatar's overlay dot:
-// online uses the accent color, offline uses the bg color ringed in
-// accent-muted. Used in the sidebar DM list where there's no avatar behind
-// it to anchor the dot.
-const PRESENCE_COLORS: Record<PresenceStatus, string> = {
-  online: "var(--c-accent)",
-  offline: "var(--c-bg)",
-};
-
+// Standalone presence dot mirroring Avatar's overlay dot: online uses the
+// accent color, offline uses the bg color ringed in accent-muted. Used in
+// the sidebar DM list where there's no avatar behind it to anchor the dot.
 const PresenceDot: React.FC<{ userId: string | null }> = observer(({ userId }) => {
   const status = usePresenceStatus(userId);
   return (
     <span
       data-testid={userId ? `sidebar-presence-${userId}` : undefined}
       aria-label={`Presence: ${status}`}
-      style={{
-        display: "inline-block",
-        width: rem(8),
-        height: rem(8),
-        borderRadius: "50%",
-        background: PRESENCE_COLORS[status],
-        border: status === "offline" ? "1px solid var(--c-accent-muted)" : "1px solid var(--c-surface, var(--c-bg))",
-        boxSizing: "content-box",
-        flexShrink: 0,
-      }}
+      className={`inline-block size-2 rounded-full box-content shrink-0 border ${
+        status === "offline" ? "bg-bg border-accent-muted" : "bg-accent border-surface"
+      }`}
     />
   );
 });
