@@ -19,10 +19,14 @@ use crate::{
 };
 
 use super::devices::get_device;
+use super::levels::BandAnalyzer;
 use super::streams::start_speaker_stream;
 use super::types::{
     user_id_from_voice_identity, TrackBuffers, VoiceEvent, VoiceState, TRACK_BUFFER_CAP_SAMPLES,
 };
+
+/// Emit an AudioBands event every N drained frames (~10 ms each) ⇒ ~20 Hz.
+const BANDS_EMIT_EVERY: u32 = 5;
 
 // ── Mixer + per-track drain ───────────────────────────────────────────────
 
@@ -43,9 +47,29 @@ async fn run_drain_task(
     let mut speak_hold: u32 = 0;
     let mut is_speaking = false;
 
+    // Live multi-band meter. Clone the event sink once so the hot loop never
+    // has to re-lock the shared VoiceState mutex just to publish levels.
+    let event_sink = voice_arc.lock().await.channel.clone();
+    let mut analyzer = BandAnalyzer::new(sample_rate);
+    let mut bands_ctr: u32 = 0;
+
     eprintln!("[voice] remote drain task started for {track_key}");
     while let Some(frame) = audio_stream.next().await {
         let peak = frame.data.iter().map(|&s| s.abs()).max().unwrap_or(0);
+
+        // Feed the same PCM to the band analyzer and publish a decimated
+        // snapshot. Cheap, allocation-free until the (rare) emit.
+        analyzer.process(&frame.data);
+        bands_ctr += 1;
+        if bands_ctr >= BANDS_EMIT_EVERY {
+            bands_ctr = 0;
+            if let Some(ch) = &event_sink {
+                let _ = ch.send(VoiceEvent::AudioBands {
+                    identity: participant_identity.clone(),
+                    bands: analyzer.levels(),
+                });
+            }
+        }
 
         if peak > 1000 {
             onset_frames += 1;

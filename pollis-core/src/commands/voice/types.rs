@@ -90,6 +90,11 @@ pub enum VoiceEvent {
     Unmuted { identity: String },
     SpeakingStarted { identity: String },
     SpeakingStopped { identity: String },
+    /// Per-source multi-band audio levels (one 0..1 value per band),
+    /// emitted ~20 Hz while in a call to drive the participant tile's live
+    /// meter. Best-effort and purely cosmetic — drop freely. Band count is
+    /// fixed (`levels::BAND_COUNT`); keep the renderer in sync.
+    AudioBands { identity: String, bands: Vec<f32> },
     /// LiveKit's per-participant categorical connection quality. The Rust
     /// SDK doesn't expose RTT in ms here — this is the only signal it
     /// surfaces — so the UI shows a lagging-dot rather than a number.

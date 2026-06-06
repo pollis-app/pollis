@@ -12,6 +12,7 @@ import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { RemoteVideoTile } from "./RemoteVideoTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
+import { useScreenShareStats } from "../../screenshare/useScreenShareStats";
 import { shareOf } from "../../types/voice-state";
 
 export const ScreenShareViewer: React.FC = observer(() => {
@@ -25,6 +26,9 @@ export const ScreenShareViewer: React.FC = observer(() => {
   const share = shareOf(voiceState);
   const screenShareLocalActive = share.kind === 'active';
   const screenShareLocalDimensions = share.kind === 'active' ? share.dimensions : null;
+  // Live frame stats for the viewed track (fps + dimensions). Keyed by the
+  // same track key the tile uses; inert when nothing is being viewed.
+  const stats = useScreenShareStats(viewingScreenShareTrackKey);
   if (!viewingScreenShareTrackKey) {
     return null;
   }
@@ -56,6 +60,11 @@ export const ScreenShareViewer: React.FC = observer(() => {
     width = info.width;
     height = info.height;
   }
+  // Prefer the live stats dimensions/fps; fall back to the static hints.
+  const liveW = stats.dimensions?.width ?? width;
+  const liveH = stats.dimensions?.height ?? height;
+  const resLabel = liveW && liveH ? `${liveW}×${liveH}` : "";
+  const fpsLabel = stats.fps > 0 ? `${stats.fps}fps` : "";
   const close = () => setViewingScreenShareTrackKey(null);
   return (
     <div
@@ -80,7 +89,8 @@ export const ScreenShareViewer: React.FC = observer(() => {
       >
         <span>
           watching {label}
-          {width && height ? ` — ${width}×${height}` : ""}
+          {resLabel ? ` — ${resLabel}` : ""}
+          {fpsLabel ? ` · ${fpsLabel}` : ""}
         </span>
         <button
           data-testid="screenshare-viewer-close"

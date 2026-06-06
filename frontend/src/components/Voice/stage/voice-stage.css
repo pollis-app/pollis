@@ -1,0 +1,519 @@
+/* ============================================================
+   VoiceStage — flat amber-POSIX terminal styling.
+   Minimal motion (only when it carries information, e.g. the live audio
+   meter), no gradients, no glow, no frosted transparency.
+   Rounded corners + accent-with-opacity are the only liberties.
+
+   Ported from the design handoff but rewired onto the app's own
+   theme tokens (--c-*) so the stage tracks the user's accent/theme
+   instead of a hard-coded green. Only the red/amber status colors
+   are local constants (the app has no dedicated tokens for them).
+   ============================================================ */
+
+.vs-stage {
+   --vs-r: 10px;
+
+   --vs-bg: var(--c-bg);
+   --vs-panel: var(--c-surface);
+   --vs-panel-2: var(--c-surface-raised);
+   --vs-line: var(--c-border);
+   --vs-border: var(--c-border-active);
+
+   --vs-ink: var(--c-text);
+   --vs-ink-dim: var(--c-text-dim);
+   --vs-ink-faint: var(--c-text-muted);
+
+   --vs-red: hsl(0 70% 60%);
+   --vs-red-dim: hsl(0 70% 50% / 0.5);
+   --vs-amber: #f0c674;
+
+   /* Fixed footer height — keeps the tray row from shifting layout as it
+     swaps between the not-joined Join button and the in-call tray. */
+   --vs-foot-h: var(--bar-h);
+
+   flex: 1;
+   min-width: 0;
+   min-height: 0;
+   display: flex;
+   flex-direction: column;
+   background: var(--vs-bg);
+   color: var(--vs-ink);
+}
+
+/* Inherit the mono font + pointer cursor onto the stage's own bespoke
+   buttons WITHOUT clobbering the reused <Button> component's background /
+   border / color (which it sets via utility classes of equal specificity). */
+.vs-stage button {
+   font-family: inherit;
+   cursor: pointer;
+}
+
+/* ---------- body ---------- */
+.vs-body {
+   flex: 1 1 auto;
+   min-height: 0;
+   display: flex;
+   flex-direction: column;
+}
+
+/* spotlight mode */
+.vs-spotlight {
+   flex: 1;
+   min-height: 0;
+   display: flex;
+   flex-direction: column;
+   padding: 18px;
+   gap: 14px;
+}
+
+.vs-spot-main {
+   flex: 1 1 auto;
+   min-height: 0;
+   display: flex;
+}
+
+.vs-film {
+   flex: 0 0 auto;
+   display: flex;
+   gap: 12px;
+   overflow-x: auto;
+   padding: 2px;
+}
+
+.vs-film-cell {
+   flex: 0 0 208px;
+   width: 208px;
+   aspect-ratio: 16/10;
+}
+
+/* ---------- tile (flat outlined box) ----------
+   Width/height come from the parent (NavigableGrid cell, filmstrip cell,
+   or the spotlight main area). 2px border + 10px radius match the app's
+   existing card/Button treatment. */
+.vs-tile {
+   position: relative;
+   width: 100%;
+   height: 100%;
+   min-width: 0;
+   background: transparent;
+   border: 2px solid var(--vs-line);
+   border-radius: var(--vs-r);
+   overflow: hidden;
+   display: flex;
+   flex-direction: column;
+}
+
+.vs-tile.clickable {
+   cursor: pointer;
+}
+
+.vs-tile.clickable:hover {
+   border-color: var(--vs-border);
+}
+
+.vs-tile.focused {
+   border-color: var(--c-accent);
+}
+
+.vs-tile.speaking {
+   border-color: var(--c-accent);
+}
+
+/* solid border = speaking. no glow */
+.vs-empty {
+   display: grid;
+   place-items: center;
+   color: var(--vs-ink-faint);
+}
+
+.vs-tile-stage {
+   flex: 1 1 auto;
+   position: relative;
+   display: grid;
+   place-items: center;
+   min-height: 0;
+}
+
+.vs-tile-center {
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+}
+
+.vs-mark {
+   color: var(--c-accent);
+}
+
+/* live audio meter — BAND_COUNT bars driven by per-source levels via the
+   --eqN custom properties (set on the element by LiveWaveform). Falls back
+   to a fixed "glyph" shape until levels arrive. Minimal, informational
+   motion only: a short height transition smooths the ~20Hz updates. */
+.vs-eq {
+   display: flex;
+   align-items: flex-end;
+   gap: 3px;
+   height: 16px;
+   margin-top: 11px;
+}
+
+.vs-eq i {
+   width: 3px;
+   border-radius: 1px;
+   background: var(--vs-ink-faint);
+   transition: height 80ms linear;
+}
+
+.vs-tile.speaking .vs-eq i {
+   background: var(--c-accent);
+}
+
+.vs-eq i:nth-child(1) {
+   height: var(--eq0, 45%);
+}
+
+.vs-eq i:nth-child(2) {
+   height: var(--eq1, 100%);
+}
+
+.vs-eq i:nth-child(3) {
+   height: var(--eq2, 60%);
+}
+
+/* corner overlays */
+.vs-tl {
+   position: absolute;
+   top: 8px;
+   left: 8px;
+   z-index: 3;
+   display: flex;
+   align-items: center;
+   gap: 6px;
+   max-width: calc(100% - 16px);
+}
+
+.vs-tr {
+   position: absolute;
+   top: 8px;
+   right: 8px;
+   z-index: 3;
+   display: flex;
+   align-items: center;
+   gap: 6px;
+}
+
+.vs-bl {
+   position: absolute;
+   bottom: 8px;
+   left: 8px;
+   z-index: 3;
+   display: flex;
+   align-items: center;
+   gap: 6px;
+}
+
+.vs-br {
+   position: absolute;
+   bottom: 8px;
+   right: 8px;
+   z-index: 3;
+   display: flex;
+   align-items: center;
+   gap: 6px;
+}
+
+.vs-name {
+   display: inline-flex;
+   align-items: center;
+   gap: 6px;
+   background: var(--vs-panel-2);
+   border: 1px solid var(--vs-line);
+   border-radius: 6px;
+   padding: 3px 8px;
+   font-size: 12px;
+   color: var(--vs-ink);
+   max-width: 100%;
+}
+
+.vs-nm {
+   overflow: hidden;
+   text-overflow: ellipsis;
+   white-space: nowrap;
+}
+
+.vs-name.host {
+   color: var(--c-accent);
+   border-color: var(--vs-border);
+}
+
+.vs-ic {
+   display: grid;
+   place-items: center;
+   color: var(--vs-ink-dim);
+   flex-shrink: 0;
+}
+
+.vs-ic.accent {
+   color: var(--c-accent);
+}
+
+.vs-ic.danger {
+   color: var(--vs-red);
+}
+
+.vs-tag {
+   display: inline-flex;
+   align-items: center;
+   gap: 5px;
+   background: var(--vs-panel-2);
+   border: 1px solid var(--vs-line);
+   border-radius: 6px;
+   padding: 3px 7px;
+   font-size: 11px;
+   color: var(--vs-ink-dim);
+   letter-spacing: .02em;
+}
+
+.vs-pad6 {
+   padding: 3px 6px;
+}
+
+.vs-tag.live {
+   color: var(--vs-red);
+   border-color: var(--vs-red-dim);
+   font-weight: 600;
+   letter-spacing: .08em;
+}
+
+.vs-tag.res {
+   font-variant-numeric: tabular-nums;
+}
+
+/* connection bars (static) */
+.vs-sig {
+   display: flex;
+   align-items: flex-end;
+   gap: 2px;
+   height: 13px;
+}
+
+.vs-sig i {
+   width: 3px;
+   background: var(--vs-ink-faint);
+   border-radius: 1px;
+}
+
+.vs-sig i:nth-child(1) {
+   height: 35%;
+}
+
+.vs-sig i:nth-child(2) {
+   height: 60%;
+}
+
+.vs-sig i:nth-child(3) {
+   height: 85%;
+}
+
+.vs-sig i:nth-child(4) {
+   height: 110%;
+}
+
+.vs-sig.good i {
+   background: var(--c-accent);
+}
+
+.vs-sig.fair i:nth-child(1),
+.vs-sig.fair i:nth-child(2),
+.vs-sig.fair i:nth-child(3) {
+   background: var(--vs-amber);
+}
+
+.vs-sig.poor i:nth-child(1),
+.vs-sig.poor i:nth-child(2) {
+   background: var(--vs-red);
+}
+
+/* hover controls — opaque, instant (no scrim, no fade). Mouse-hover only. */
+.vs-hover {
+   position: absolute;
+   inset: 0;
+   z-index: 4;
+   display: none;
+   align-items: center;
+   justify-content: center;
+   gap: 10px;
+}
+
+.vs-tile:hover .vs-hover {
+   display: flex;
+}
+
+.vs-hbtn {
+   width: 38px;
+   height: 38px;
+   border-radius: 8px;
+   display: grid;
+   place-items: center;
+   background: var(--vs-panel-2);
+   border: 1px solid var(--vs-line);
+   color: var(--vs-ink);
+}
+
+.vs-hbtn:hover {
+   border-color: var(--vs-border);
+   color: var(--c-accent);
+}
+
+/* volume — opaque; persistent in preview, hover/keyboard-focus in-call */
+.vs-vol {
+   position: absolute;
+   left: 8px;
+   right: 8px;
+   bottom: 8px;
+   z-index: 4;
+   display: none;
+   align-items: center;
+   gap: 8px;
+   background: var(--vs-panel-2);
+   border: 1px solid var(--vs-line);
+   border-radius: 7px;
+   padding: 6px 9px;
+}
+
+.vs-tile:hover .vs-vol,
+.vs-tile.focused .vs-vol {
+   display: flex;
+}
+
+.vs-vol.always {
+   display: flex;
+   position: static;
+}
+
+/* ---------- footer call tray (fixed height) ----------
+   Compact 2.5rem bar — controls are sized to fit it (no 44px tiles). */
+.vs-foot {
+   flex: 0 0 auto;
+   height: calc(var(--vs-foot-h) - 1px);
+   display: flex;
+   align-items: center;
+   gap: 12px;
+   padding: 0 12px;
+   border-top: 1px solid var(--c-border);
+
+}
+
+.vs-foot-side {
+   flex: 1 1 0;
+   display: flex;
+   align-items: center;
+   min-width: 0;
+}
+
+.vs-foot-side.right {
+   justify-content: flex-end;
+}
+
+.vs-tray {
+   display: flex;
+   align-items: center;
+   gap: 6px;
+}
+
+.vs-tray-btn {
+   width: 28px;
+   height: 28px;
+   border-radius: 6px;
+   display: grid;
+   place-items: center;
+   background: var(--vs-panel);
+   border: 1px solid var(--vs-line);
+   color: var(--vs-ink);
+}
+
+.vs-tray-btn:hover {
+   border-color: var(--vs-border);
+   color: var(--c-accent);
+}
+
+.vs-tray-btn.on {
+   background: var(--c-accent);
+   color: var(--c-bg);
+   border-color: var(--c-accent);
+}
+
+.vs-tray-btn.danger.on {
+   background: var(--vs-red);
+   color: var(--c-bg);
+   border-color: var(--vs-red);
+}
+
+.vs-tray-leave {
+   display: inline-flex;
+   align-items: center;
+   gap: 6px;
+   height: 28px;
+   padding: 0 10px;
+   border-radius: 6px;
+   background: var(--vs-panel);
+   border: 1px solid var(--vs-red-dim);
+   color: var(--vs-red);
+   font-size: 12px;
+   font-weight: 600;
+   letter-spacing: .04em;
+}
+
+.vs-tray-leave:hover {
+   background: hsl(0 70% 50% / 0.12);
+   border-color: var(--vs-red);
+}
+
+.vs-tray-sep {
+   width: 1px;
+   height: 18px;
+   background: var(--vs-line);
+   margin: 0 2px;
+}
+
+/* ---------- preview (not joined) ---------- */
+.vs-preview {
+   flex: 1 1 auto;
+   min-height: 0;
+   display: flex;
+   flex-direction: column;
+}
+
+/* Empty state: "No one in this channel" + Join Voice centered together. */
+.vs-preview-empty {
+   flex: 1 1 auto;
+   min-height: 0;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   justify-content: center;
+   gap: 16px;
+}
+
+.vs-preview-empty-label {
+   font-size: 12px;
+   color: var(--vs-ink-dim);
+}
+
+.vs-preview-cta {
+   flex: 0 0 auto;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   padding: 16px;
+}
+
+/* scrollbars */
+.vs-film::-webkit-scrollbar {
+   width: 9px;
+   height: 9px;
+}
+
+.vs-film::-webkit-scrollbar-thumb {
+   background: var(--c-border);
+   border-radius: 5px;
+}

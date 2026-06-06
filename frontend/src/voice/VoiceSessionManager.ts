@@ -5,6 +5,7 @@ import { appStore } from '../stores/appStore';
 import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
+import { audioLevels } from './audioLevels';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -24,6 +25,7 @@ export type VoiceEvent =
   | { type: 'unmuted'; identity: string }
   | { type: 'speaking_started'; identity: string }
   | { type: 'speaking_stopped'; identity: string }
+  | { type: 'audio_bands'; identity: string; bands: number[] }
   | { type: 'connection_quality_changed'; identity: string; quality: VoiceConnectionQuality }
   | {
       type: 'voice_e2ee_key_rotated';
@@ -595,6 +597,7 @@ class VoiceSessionManager {
         break;
       }
       case 'participant_left': {
+        audioLevels.clear(event.identity);
         const participants = this.state.participants.filter((p) => p.identity !== event.identity);
         const wasSpeaker = this.state.activeSpeakerIds.includes(event.identity);
         const activeSpeakerIds = wasSpeaker
@@ -636,6 +639,13 @@ class VoiceSessionManager {
           isLocalSpeaking:
             event.identity === localIdentity ? false : this.state.isLocalSpeaking,
         });
+        break;
+      }
+      case 'audio_bands': {
+        // High-frequency cosmetic data — forward straight to the per-tile
+        // meter pub/sub, deliberately bypassing setState so it never
+        // triggers a React/MobX re-render. See `audioLevels.ts`.
+        audioLevels.push(event.identity, event.bands);
         break;
       }
       case 'connection_quality_changed': {

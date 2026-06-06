@@ -7,10 +7,7 @@ import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff 
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
-import {
-  friendlyScreenShareError,
-  screenShareSession,
-} from "../../screenshare/screenShareSession";
+import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { shareOf } from "../../types/voice-state";
 
 interface VoiceBarProps {
@@ -104,50 +101,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       <PillButton
         data-testid="voice-bar-screenshare-button"
         accent={shareInFlight ? "#ff6b6b" : "var(--c-accent)"}
-        onClick={() => {
-          if (shareActive) {
-            screenShareSession
-              .stop()
-              .catch((e) => console.error("[screenshare] stop", e));
-            return;
-          }
-          if (share.kind === "picking") {
-            // Button doubles as a cancel affordance while the picker is open.
-            screenShareSession
-              .cancelPicker()
-              .catch((e) => console.warn("[screenshare] cancel:", e))
-              .finally(() => {
-                appStore.shareCancelPicker();
-              });
-            return;
-          }
-          // Any other non-idle share state (e.g. 'starting' that wedged
-          // because publishTrack hung on a dead Wayland-portal track, or
-          // 'failed') — let the button recover by force-stopping.
-          // shareStopped() is safe from any joined-state.
-          if (shareInFlight) {
-            screenShareSession
-              .stop()
-              .catch((e) => console.warn("[screenshare] force-stop:", e));
-            return;
-          }
-          // Engage enumerate→pick→start. The backend returns an empty
-          // list on Linux/Windows; in that case we skip our picker and
-          // go straight to start() (system portal/WGC handles selection).
-          (async () => {
-            try {
-              const list = await screenShareSession.enumerate();
-              if (list.displays.length + list.windows.length === 0) {
-                await screenShareSession.start();
-                return;
-              }
-              appStore.shareStartPicking(list);
-            } catch (e) {
-              console.error("[screenshare] enumerate:", e);
-              appStore.shareFailed(friendlyScreenShareError(String(e)));
-            }
-          })();
-        }}
+        onClick={() => toggleScreenShare(share)}
         title={
           shareActive
             ? "Stop screen share"

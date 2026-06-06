@@ -157,8 +157,9 @@ export const TerminalMenu: React.FC<TerminalMenuProps> = ({
     >
       {/* Keyboard hints */}
       <div
-        className="flex items-center gap-1 px-4 py-2 text-xs font-mono flex-shrink-0"
+        className="flex items-center gap-1 px-4 text-xs font-mono flex-shrink-0"
         style={{
+          height: "var(--bar-h)",
           borderBottom: "1px solid var(--c-border)",
           color: "var(--c-text-muted)",
         }}

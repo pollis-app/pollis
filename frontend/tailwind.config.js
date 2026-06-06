@@ -6,23 +6,41 @@ export default {
   ],
   theme: {
     extend: {
+      // Design tokens live as CSS custom properties in index.css (single
+      // source of truth — themeable + font-scalable). Surface them as
+      // semantic Tailwind utilities so call sites write `text-muted` /
+      // `border-line` / `h-bar` instead of `[var(--c-text-muted)]` or an
+      // inline style. See CLAUDE.md → "Styling" for the convention.
       colors: {
-        accent: {
-          DEFAULT: 'var(--c-accent)',
-          bright:  'var(--c-accent-bright)',
-          dim:     'var(--c-accent-dim)',
-          muted:   'var(--c-accent-muted)',
-          ghost:   'var(--c-hover)',
-          subtle:  'var(--c-active)',
-          border:  'var(--c-border)',
-          active:  'var(--c-border-active)',
-        },
+        bg: 'var(--c-bg)',
         surface: {
           DEFAULT: 'var(--c-surface)',
           raised:  'var(--c-surface-raised)',
           high:    'var(--c-surface-high)',
         },
-        bg: 'var(--c-bg)',
+        accent: {
+          DEFAULT: 'var(--c-accent)',
+          bright:  'var(--c-accent-bright)',
+          dim:     'var(--c-accent-dim)',
+          muted:   'var(--c-accent-muted)',
+        },
+        // Foreground / text roles → `text-fg` `text-dim` `text-muted`.
+        fg:    'var(--c-text)',
+        dim:   'var(--c-text-dim)',
+        muted: 'var(--c-text-muted)',
+        // Hairline borders / dividers → `border-line` `border-line-strong`,
+        // also `bg-line` for the rare hairline fill (e.g. tray separator).
+        line: {
+          DEFAULT: 'var(--c-border)',
+          strong:  'var(--c-border-active)',
+        },
+        // Hover overlay (accent @ low alpha) → `hover:bg-hover`.
+        hover: 'var(--c-hover)',
+      },
+      // `--bar-h` is the shared chrome-bar height (rem ⇒ font-scalable).
+      // Exposed via spacing so `h-bar` / `min-h-bar` / `py-bar` all work.
+      spacing: {
+        bar: 'var(--bar-h)',
       },
       fontFamily: {
         mono: ['"DM Mono"', 'ui-monospace', 'monospace'],
