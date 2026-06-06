@@ -370,7 +370,6 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       borderTop: bordered ? "1px solid var(--c-border)" : "none",
       borderBottom: bordered || borderedBottom ? "1px solid var(--c-border)" : "none",
       color: isActive ? "var(--c-accent)" : "var(--c-text-muted)",
-      fontSize: rem(12),
       letterSpacing: "0.08em",
       textTransform: "uppercase",
       cursor: "pointer",
@@ -379,10 +378,13 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({ label, icon, isActive, on
       position: "sticky",
       top: 0,
       zIndex: 1,
+      height: "var(--bar-h)",
     }}
+    data-testId={`sidebar-row-${label.toLowerCase().replace(/\s+/g, "-")}`}
+
   >
     {icon}
-    <span style={{ flex: 1 }}>{label}</span>
+    <span style={{ flex: "1 1 0%", lineHeight: "100%", fontSize: "0.8rem" }}>{label}</span>
     {badge != null && <UnreadBadge count={badge} muted />}
   </button>
 );
@@ -466,6 +468,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
           textAlign: "left",
           lineHeight: rem(24),
         }}
+
       >
         {leading}
         <span

@@ -21,6 +21,8 @@
     /* background lightness */
     --font-size-base: 15px;
     /* base font size — scales all rem units */
+    --bar-h: 2.5rem;
+    /* shared chrome bar height — sidebar section headers, voice stage header/footer */
 
     /* ── Surfaces (dark, hue-tinted) ──────────────────────────────── */
     --c-bg: hsl(var(--bg-h) var(--bg-s) var(--bg-l));
