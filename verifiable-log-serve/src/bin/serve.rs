@@ -6,6 +6,9 @@
 //!   only; the real deployment is to drop the directory on a static host).
 //! * `verify-remote` — fetch the static API over HTTP and verify the log,
 //!   trusting only the published public key.
+//! * `verify-group` — fetch the static API and verify ONE conversation's commit
+//!   chain. This calls the exact same `verify_group` the backend HTTP endpoint
+//!   does, so the CLI and the server can never report different verdicts.
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -13,7 +16,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use verifiable_log_serve::error::Result;
-use verifiable_log_serve::{layout, remote, DevServer};
+use verifiable_log_serve::{group, layout, remote, DevServer};
 
 #[derive(Parser)]
 #[command(
@@ -50,6 +53,19 @@ enum Command {
         /// Base URL the static API is served at, e.g. http://127.0.0.1:8787
         base_url: String,
     },
+    /// Verify a single conversation's commit chain over HTTP. Exits non-zero if
+    /// the chain is not valid. Calls the same function the backend endpoint does.
+    VerifyGroup {
+        /// Base URL the static API is served at, e.g. http://127.0.0.1:8787
+        #[arg(long)]
+        base: String,
+        /// Conversation / group id to verify.
+        #[arg(long)]
+        group: String,
+        /// Print the GroupReport as JSON instead of a human report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -64,6 +80,11 @@ fn main() -> ExitCode {
             Err(e) => fail(e),
         },
         Command::VerifyRemote { base_url } => match run_verify_remote(&base_url) {
+            Ok(true) => ExitCode::SUCCESS,
+            Ok(false) => ExitCode::FAILURE,
+            Err(e) => fail(e),
+        },
+        Command::VerifyGroup { base, group, json } => match run_verify_group(&base, &group, json) {
             Ok(true) => ExitCode::SUCCESS,
             Ok(false) => ExitCode::FAILURE,
             Err(e) => fail(e),
@@ -99,6 +120,16 @@ fn run_verify_remote(base_url: &str) -> Result<bool> {
     let report = remote::verify_remote(base_url)?;
     report.print();
     Ok(report.ok)
+}
+
+fn run_verify_group(base: &str, group_id: &str, json: bool) -> Result<bool> {
+    let report = group::verify_group(base, group_id)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        report.print();
+    }
+    Ok(report.chain_valid)
 }
 
 fn fail(e: verifiable_log_serve::ServeError) -> ExitCode {

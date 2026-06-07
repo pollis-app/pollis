@@ -16,6 +16,10 @@ path = "src/bin/serve.rs"
 [dependencies]
 # Slice 1: Merkle/STH/proof core and its verifiers — depended on, never reimplemented.
 verifiable-log = { path = "../verifiable-log" }
+# Slice 2: the mls-commit-log tenant — reuse its CommitLeaf decoding and the
+# CommitLogInvariant (fork + epoch-regression) for per-group verification.
+# Never reimplement either here.
+verifiable-log-builder = { path = "../verifiable-log-builder" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 hex = "0.4"

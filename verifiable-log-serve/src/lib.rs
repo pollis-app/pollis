@@ -19,20 +19,25 @@
 //!
 //! * [`layout`] — generate the immutable `/v1/...` directory tree from a bundle.
 //! * [`server`] — a tiny dev/demo HTTP server over a generated tree (local
-//!   testing only; production is "serve the directory statically").
+//!   testing only; production is "serve the directory statically"). It also
+//!   exposes the dynamic `GET /verify/group/<id>` endpoint.
 //! * [`remote`] — fetch the static API over HTTP and verify the whole log
 //!   trusting only the public key, reusing slice 1's verifiers.
+//! * [`group`] — the one shared per-group verifier the CLI and the HTTP endpoint
+//!   both call, so server-side and command-line verdicts cannot diverge.
 //!
 //! The [`verifiable_log`] core stays dependency-pure: all HTTP lives here.
 
 pub mod bundle;
 pub mod error;
+pub mod group;
 pub mod layout;
 pub mod remote;
 pub mod server;
 
 pub use bundle::{Bundle, Manifest, PublicKeyDoc};
 pub use error::{Result, ServeError};
+pub use group::{verify_group, GroupCommit, GroupReport};
 pub use layout::{generate, load_bundle, API_VERSION};
 pub use remote::{verify_remote, Report};
 pub use server::DevServer;

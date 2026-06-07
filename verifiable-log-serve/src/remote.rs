@@ -65,9 +65,7 @@ impl Report {
 /// artifact yields `Ok(Report { ok: false, .. })` rather than an error.
 pub fn verify_remote(base_url: &str) -> Result<Report> {
     let base = base_url.trim_end_matches('/');
-    let agent = ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(30))
-        .build();
+    let agent = build_agent();
 
     let mut report = Report::new();
 
@@ -224,9 +222,17 @@ pub fn verify_remote(base_url: &str) -> Result<Report> {
     Ok(report)
 }
 
+/// A blocking HTTP agent with a sane timeout, shared by every fetch path. The
+/// serve layer only ever talks to a loopback static host, so no TLS is needed.
+pub(crate) fn build_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+}
+
 /// Blocking GET + JSON parse. A non-2xx status, transport error, or malformed
 /// body all map to [`ServeError::Http`].
-fn fetch_json<T: serde::de::DeserializeOwned>(agent: &ureq::Agent, url: &str) -> Result<T> {
+pub(crate) fn fetch_json<T: serde::de::DeserializeOwned>(agent: &ureq::Agent, url: &str) -> Result<T> {
     let body = agent
         .get(url)
         .call()

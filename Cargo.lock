@@ -9520,6 +9520,7 @@ dependencies = [
  "tiny_http",
  "ureq",
  "verifiable-log",
+ "verifiable-log-builder",
 ]
 
 [[package]]
