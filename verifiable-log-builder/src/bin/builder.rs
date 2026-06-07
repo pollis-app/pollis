@@ -1,0 +1,125 @@
+//! `builder` — reads `mls_commit_log` and emits a signed monitor bundle.
+//!
+//! Subcommands:
+//! * `build` — read the DB, append every commit, sign STHs, write the bundle.
+//! * `keygen` — mint a throwaway Ed25519 keypair (hex) for dev.
+//!
+//! The emitted bundle is verified with `monitor verify <bundle.json>` from the
+//! `verifiable-log` crate, unchanged.
+
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use clap::{Parser, Subcommand};
+
+use verifiable_log_builder::error::{BuilderError, Result};
+use verifiable_log_builder::{build_bundle, keys, source};
+
+#[derive(Parser)]
+#[command(
+    name = "builder",
+    about = "Build a signed verifiable-log monitor bundle from the MLS commit log."
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Read `mls_commit_log`, append every commit, and write a signed bundle.
+    Build {
+        /// Database source: a libSQL/Turso URL (uses `TURSO_AUTH_TOKEN`) or a
+        /// local SQLite file path. Falls back to `TURSO_DATABASE_URL` if omitted.
+        #[arg(long)]
+        db: Option<String>,
+
+        /// Output path for the JSON bundle.
+        #[arg(long)]
+        out: PathBuf,
+
+        /// STH timestamp, milliseconds since epoch. Supplied explicitly so the
+        /// output is deterministic (never read from the system clock).
+        #[arg(long)]
+        timestamp: u64,
+
+        /// Env var holding the 32-byte hex Ed25519 signing key.
+        #[arg(long, default_value = "VLOG_SIGNING_KEY")]
+        signing_key_env: String,
+
+        /// Optional file holding the 32-byte hex signing key (used if the env
+        /// var is unset).
+        #[arg(long)]
+        signing_key_file: Option<PathBuf>,
+    },
+    /// Mint a fresh Ed25519 keypair (hex) for dev/throwaway use.
+    Keygen,
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let result = match cli.command {
+        Command::Build {
+            db,
+            out,
+            timestamp,
+            signing_key_env,
+            signing_key_file,
+        } => run_build(db, out, timestamp, &signing_key_env, signing_key_file.as_deref()),
+        Command::Keygen => {
+            run_keygen();
+            Ok(())
+        }
+    };
+
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn run_build(
+    db: Option<String>,
+    out: PathBuf,
+    timestamp: u64,
+    signing_key_env: &str,
+    signing_key_file: Option<&std::path::Path>,
+) -> Result<()> {
+    let db = db
+        .or_else(|| std::env::var("TURSO_DATABASE_URL").ok())
+        .ok_or(BuilderError::NoDbSource)?;
+
+    // Resolve the signing key BEFORE touching the DB so a missing key fails fast.
+    let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
+
+    let conn = source::connect(&db).await?;
+    let rows = source::read_commit_log(&conn).await?;
+    source::ensure_non_empty(&rows)?;
+
+    let bundle = build_bundle(&rows, &signing_key, timestamp)?;
+
+    let json = serde_json::to_string_pretty(&bundle)?;
+    std::fs::write(&out, json)?;
+
+    // Never print the raw commit_data or the auth token — only safe metadata.
+    println!(
+        "wrote bundle: {} commits, {} STH(s), {} inclusion proof(s) -> {}",
+        rows.len(),
+        bundle.sths.len(),
+        bundle.inclusion.len(),
+        out.display()
+    );
+    println!("public_key: {}", bundle.public_key);
+    Ok(())
+}
+
+fn run_keygen() {
+    let g = keys::generate();
+    println!("# verifiable-log signing keypair (dev/throwaway — not for prod custody)");
+    println!("VLOG_SIGNING_KEY={}", g.secret_hex);
+    println!("public_key={}", g.public_hex);
+}

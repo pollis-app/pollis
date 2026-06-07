@@ -8,6 +8,7 @@ members = [
     "pollis-capture-macos",
     "pollis-node",
     "verifiable-log",
+    "verifiable-log-builder",
 ]
 
 [workspace.package]

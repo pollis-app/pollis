@@ -1,0 +1,30 @@
+[package]
+name = "verifiable-log-builder"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Reads real MLS commit-log rows from Turso/libSQL and emits a signed monitor bundle the verifiable-log `monitor` CLI verifies. Slice 2 of Key Transparency (#330)."
+
+[lib]
+name = "verifiable_log_builder"
+path = "src/lib.rs"
+
+[[bin]]
+name = "builder"
+path = "src/bin/builder.rs"
+
+[dependencies]
+verifiable-log = { path = "../verifiable-log" }
+libsql = { version = "0.9", features = ["remote"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+sha2 = "0.10"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
