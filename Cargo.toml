@@ -9,6 +9,7 @@ members = [
     "pollis-node",
     "verifiable-log",
     "verifiable-log-builder",
+    "verifiable-log-serve",
 ]
 
 [workspace.package]

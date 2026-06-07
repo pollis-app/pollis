@@ -1,0 +1,33 @@
+[package]
+name = "verifiable-log-serve"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Serve layer for the verifiable log (Key Transparency #330): turns a signed monitor bundle into an immutable static artifact tree, a dev HTTP server, and a fetch-over-HTTP remote verifier. Slice 3."
+
+[lib]
+name = "verifiable_log_serve"
+path = "src/lib.rs"
+
+[[bin]]
+name = "serve"
+path = "src/bin/serve.rs"
+
+[dependencies]
+# Slice 1: Merkle/STH/proof core and its verifiers — depended on, never reimplemented.
+verifiable-log = { path = "../verifiable-log" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hex = "0.4"
+thiserror = "1"
+clap = { version = "4", features = ["derive"] }
+# Tiny blocking HTTP server for the local dev/demo host.
+tiny_http = "0.12"
+# Blocking HTTP client for the remote verifier. Loopback HTTP only — no TLS.
+ureq = { version = "2", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+ed25519-dalek = "2.1"
+hex = "0.4"
+verifiable-log = { path = "../verifiable-log" }
