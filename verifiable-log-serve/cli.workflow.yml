@@ -1,0 +1,73 @@
+# >> Move this file to .github/workflows/cli.yml — the agent-box GitHub App lacks the
+# >> `workflows` permission, so it could not be pushed there directly. See chat.
+name: CLI
+
+# Builds and publishes the transparency CLI binaries (monitor / builder / serve),
+# INDEPENDENT of the desktop app, and ONLY when the verifiable-log crate sources
+# change (the path filters below). The desktop release pipelines are untouched.
+
+on:
+  push:
+    paths:
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/cli.yml'
+  pull_request:
+    paths:
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Real gate: the three crates' own tests (no desktop/media crates touched).
+      - name: Test
+        run: cargo test --release -p verifiable-log -p verifiable-log-builder -p verifiable-log-serve
+
+      - name: Build CLIs
+        run: cargo build --release --target ${{ matrix.target }} -p verifiable-log -p verifiable-log-builder -p verifiable-log-serve
+
+      - name: Stage binaries
+        shell: bash
+        run: |
+          mkdir -p dist
+          EXT=""
+          if [ "${{ runner.os }}" = "Windows" ]; then EXT=".exe"; fi
+          for b in monitor builder serve; do
+            cp "target/${{ matrix.target }}/release/${b}${EXT}" "dist/${b}${EXT}"
+          done
+
+      - name: Publish artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: transparency-cli-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
