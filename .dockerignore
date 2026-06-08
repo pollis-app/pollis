@@ -1,0 +1,14 @@
+# Keep the Docker build context small. Rust workspace member crates must stay
+# (cargo needs every member manifest to resolve the workspace) — only build
+# artifacts, JS deps, and non-Rust outputs are excluded.
+.git/
+target/
+**/node_modules/
+dist/
+**/dist/
+frontend/dist/
+electron/out/
+website/
+.codesight/
+*.log
+.DS_Store

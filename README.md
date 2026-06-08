@@ -29,6 +29,8 @@ Voice channels add a second layer of encryption on top of the standard DTLS-SRTP
 
 Forward secrecy is provided by MLS's key schedule: each epoch advance rotates the group key material, and each message uses a unique derived key so compromising one doesn't expose past or future messages.
 
+Every MLS commit is also published to an append-only **transparency log** so the server can't quietly fork, roll back, or rewrite a conversation's history without detection. You can verify it yourself, trusting only the log's signed public key — see [docs/transparency.md](docs/transparency.md) and the step-by-step [verify-it-yourself guide](docs/verify-transparency-log.md).
+
 ## Releases
 
 Builds for macOS, Windows, and Linux are published automatically on every version tag via GitHub Actions (`.github/workflows/electron-release.yml`). `electron-builder` produces DMG + ZIP (mac), NSIS + portable (win), and AppImage + deb + rpm (linux); the workflow uploads them as GitHub Release assets along with the `latest.yml` / `latest-mac.yml` / `latest-linux.yml` manifests that `electron-updater` reads at runtime. The same workflow mirrors a `latest.json` to R2 so the marketing site at [pollis.com](https://pollis.com) can always show the current download links. Auto-update trust is rooted in the OS code signature on each installer — Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows.

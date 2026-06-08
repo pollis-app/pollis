@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Key Transparency</title>
+  <meta name="description"
+    content="Verify that a Pollis conversation's commit history is append-only, fork-free, and committed to the public transparency log." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Key Transparency" />
+  <meta property="og:description"
+    content="Verify a conversation's commit history against Pollis's public transparency log." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <style>
+    .kt-main {
+      width: 100%;
+      max-width: 760px;
+      padding: 4rem 2rem 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .kt-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--c-text-muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      margin-bottom: 2rem;
+      transition: color 0.15s;
+    }
+
+    .kt-back:hover {
+      color: var(--c-accent);
+    }
+
+    .kt-header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .kt-title {
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      color: var(--c-accent);
+      margin-bottom: 0.75rem;
+    }
+
+    .kt-subtitle {
+      color: var(--c-accent);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .kt-explainer {
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+      font-size: 0.9rem;
+      line-height: 1.7;
+      color: var(--c-text);
+      background: #000;
+    }
+
+    .kt-explainer strong {
+      color: var(--c-text);
+    }
+
+    .kt-explainer a {
+      color: var(--c-accent);
+      text-decoration: underline;
+      text-decoration-color: rgba(253, 186, 116, 0.4);
+      text-underline-offset: 2px;
+    }
+
+    .kt-explainer a:hover {
+      text-decoration-color: var(--c-accent);
+    }
+
+    .kt-form {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 2rem;
+      background: #000;
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.25rem;
+    }
+
+    .kt-input {
+      flex: 1;
+      min-width: 220px;
+      padding: 0.75rem 1rem;
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.02);
+      color: var(--c-text);
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.9rem;
+      transition: border-color 0.15s;
+    }
+
+    .kt-input:focus {
+      outline: none;
+      border-color: var(--c-accent);
+    }
+
+    .kt-input::placeholder {
+      color: var(--c-text-muted);
+    }
+
+    /* ── Result panel ─────────────────────────────────────────── */
+    .kt-result {
+      display: none;
+    }
+
+    .kt-result.is-visible {
+      display: block;
+      background: #000;
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.5rem;
+    }
+
+    .kt-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.4rem 1rem;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 0.9rem;
+      border: 2px solid var(--c-border);
+      margin-bottom: 1.25rem;
+    }
+
+    /* Solid pass/fail styling — no glow, per the repo UI rules. */
+    .kt-badge--pass {
+      color: #0f1117;
+      background: #7bd88f;
+      border-color: #7bd88f;
+    }
+
+    .kt-badge--fail {
+      color: #0f1117;
+      background: #f1707b;
+      border-color: #f1707b;
+    }
+
+    .kt-badge--info {
+      color: var(--c-text);
+      background: transparent;
+      border-color: var(--c-border);
+    }
+
+    .kt-meta {
+      font-size: 0.8rem;
+      color: var(--c-text-muted);
+      margin-bottom: 1.5rem;
+      word-break: break-all;
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+    }
+
+    .kt-meta div {
+      margin-bottom: 0.25rem;
+    }
+
+    /* ── Commit timeline ──────────────────────────────────────── */
+    .kt-timeline {
+      list-style: none;
+      border-left: 2px solid var(--c-border);
+      margin: 0 0 1.5rem 0.5rem;
+      padding: 0;
+    }
+
+    .kt-commit {
+      position: relative;
+      padding: 0.75rem 0 0.75rem 1.5rem;
+    }
+
+    .kt-commit::before {
+      content: "";
+      position: absolute;
+      left: -7px;
+      top: 1.1rem;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--c-accent);
+      border: 2px solid var(--c-bg);
+    }
+
+    .kt-commit--missing::before {
+      background: #f1707b;
+    }
+
+    .kt-commit-head {
+      display: flex;
+      align-items: baseline;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      font-size: 0.9rem;
+    }
+
+    .kt-epoch {
+      font-weight: 700;
+      color: var(--c-text);
+    }
+
+    .kt-inc {
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+
+    .kt-inc--ok {
+      color: #7bd88f;
+    }
+
+    .kt-inc--no {
+      color: #f1707b;
+    }
+
+    .kt-commit-detail {
+      font-size: 0.75rem;
+      color: var(--c-text-muted);
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      margin-top: 0.25rem;
+      word-break: break-all;
+    }
+
+    /* ── Violations ───────────────────────────────────────────── */
+    .kt-violations {
+      border: 1px solid #f1707b;
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .kt-violations h3 {
+      font-size: 0.85rem;
+      color: #f1707b;
+      margin-bottom: 0.5rem;
+    }
+
+    .kt-violations ul {
+      margin: 0;
+      padding-left: 1.25rem;
+      font-size: 0.85rem;
+      color: var(--c-text-muted);
+      line-height: 1.6;
+    }
+
+    .kt-note {
+      font-size: 0.85rem;
+      color: var(--c-text-muted);
+      line-height: 1.6;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="kt-main">
+      <a href="index.html" class="kt-back">&larr; Back to Pollis</a>
+
+      <div class="kt-header">
+        <h1 class="kt-title">Key Transparency</h1>
+        <p class="kt-subtitle">
+          Pollis can prove your private conversations haven't been tampered with — that no one,
+          not even us, has secretly added, removed, or rewritten a conversation's history.
+          Enter a conversation ID below to see the proof for yourself.
+        </p>
+      </div>
+
+      <div class="kt-explainer">
+        This page is a <strong>live demonstration</strong>. You don't have to take our word for it —
+        you can check the same proof yourself: run our
+        <a href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
+          rel="noopener noreferrer">open-source command-line tool</a>, or query our
+        <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
+          rel="noopener noreferrer">public verification API</a> directly (rate limits apply).
+      </div>
+
+      <form class="kt-form" id="kt-form">
+        <input class="kt-input" id="kt-group" type="text" autocomplete="off" spellcheck="false"
+          placeholder="conversation id / slug" aria-label="Conversation id" />
+        <button class="btn btn-primary" type="submit" id="kt-submit">Verify</button>
+      </form>
+
+      <section class="kt-result" id="kt-result" aria-live="polite"></section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="faq.html" class="footer-link">FAQ</a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script src="transparency.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>

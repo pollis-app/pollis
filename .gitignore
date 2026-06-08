@@ -7,6 +7,10 @@
 bin/
 build/bin/
 pollis
+# Rust crates keep their CLI entrypoints under src/bin/ — those are source, not build output.
+!verifiable-log/src/bin/
+!verifiable-log-builder/src/bin/
+!verifiable-log-serve/src/bin/
 
 # Test binary
 *.test
