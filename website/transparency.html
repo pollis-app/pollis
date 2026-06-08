@@ -59,24 +59,35 @@
     }
 
     .kt-subtitle {
-      color: var(--c-text-muted);
+      color: var(--c-accent);
       font-size: 0.95rem;
       line-height: 1.6;
     }
 
     .kt-explainer {
-      border: 1px solid var(--c-border);
+      border: 2px solid var(--c-accent);
       border-radius: 8px;
       padding: 1.25rem 1.5rem;
       margin-bottom: 2rem;
       font-size: 0.9rem;
       line-height: 1.7;
-      color: var(--c-text-muted);
-      background: rgba(255, 255, 255, 0.02);
+      color: var(--c-text);
+      background: #000;
     }
 
     .kt-explainer strong {
       color: var(--c-text);
+    }
+
+    .kt-explainer a {
+      color: var(--c-accent);
+      text-decoration: underline;
+      text-decoration-color: rgba(253, 186, 116, 0.4);
+      text-underline-offset: 2px;
+    }
+
+    .kt-explainer a:hover {
+      text-decoration-color: var(--c-accent);
     }
 
     .kt-form {
@@ -84,6 +95,10 @@
       gap: 0.75rem;
       flex-wrap: wrap;
       margin-bottom: 2rem;
+      background: #000;
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.25rem;
     }
 
     .kt-input {
@@ -115,6 +130,10 @@
 
     .kt-result.is-visible {
       display: block;
+      background: #000;
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.5rem;
     }
 
     .kt-badge {
@@ -264,18 +283,19 @@
       <div class="kt-header">
         <h1 class="kt-title">Key Transparency</h1>
         <p class="kt-subtitle">
-          Every membership change in a Pollis conversation is committed to a public, append-only
-          transparency log. Enter a conversation id below to check that its history is intact —
-          append-only, fork-free, with no epoch ever rolled back.
+          Pollis can prove your private conversations haven't been tampered with — that no one,
+          not even us, has secretly added, removed, or rewritten a conversation's history.
+          Enter a conversation ID below to see the proof for yourself.
         </p>
       </div>
 
       <div class="kt-explainer">
-        This page is a <strong>convenience demo</strong>, not the trust anchor. The actual
-        verification runs <strong>server-side</strong>: it fetches the published log, verifies the
-        signed tree head, checks each commit's inclusion proof, and replays the conversation's
-        commit chain. The result you see is exactly what the <code>serve verify-group</code>
-        command-line tool computes — they call the same code, so they can never disagree.
+        This page is a <strong>live demonstration</strong>. You don't have to take our word for it —
+        you can check the same proof yourself: run our
+        <a href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
+          rel="noopener noreferrer">open-source command-line tool</a>, or query our
+        <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
+          rel="noopener noreferrer">public verification API</a> directly (rate limits apply).
       </div>
 
       <form class="kt-form" id="kt-form">
