@@ -186,7 +186,12 @@ impl LiveServer {
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| ServeError::Config(format!("failed to start async runtime: {e}")))?;
 
-        let server = Server::http(("127.0.0.1", port))
+        // Bind host defaults to loopback for safe local/dev use. Set
+        // `VLOG_BIND_HOST=0.0.0.0` to listen on all interfaces — required when
+        // running inside a container behind a reverse proxy (Docker's
+        // port-forward and sibling containers cannot reach a loopback bind).
+        let host = std::env::var("VLOG_BIND_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let server = Server::http((host.as_str(), port))
             .map_err(|e| ServeError::Http(format!("bind failed: {e}")))?;
         let addr = server
             .server_addr()
