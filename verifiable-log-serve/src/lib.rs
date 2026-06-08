@@ -17,14 +17,19 @@
 //!
 //! ## Layers
 //!
-//! * [`layout`] — generate the immutable `/v1/...` directory tree from a bundle.
-//! * [`server`] — a tiny dev/demo HTTP server over a generated tree (local
+//! * [`layout`] — generate the immutable `/v1/...` artifact tree from a bundle,
+//!   either to disk or as an in-memory map ([`layout::generate_artifacts`]).
+//! * [`server`] — a tiny dev/demo HTTP server over a generated directory (local
 //!   testing only; production is "serve the directory statically"). It also
 //!   exposes the dynamic `GET /verify/group/<id>` endpoint.
+//! * [`live`] — a live, lazily-refreshed server that reads the commit log
+//!   straight from Turso and rebuilds the same `/v1` surface in memory on demand
+//!   (single-flight, at most one DB pull per TTL). New commits appear within the
+//!   TTL with no idle DB load.
 //! * [`remote`] — fetch the static API over HTTP and verify the whole log
 //!   trusting only the public key, reusing slice 1's verifiers.
-//! * [`group`] — the one shared per-group verifier the CLI and the HTTP endpoint
-//!   both call, so server-side and command-line verdicts cannot diverge.
+//! * [`group`] — the one shared per-group verifier the CLI, the static endpoint,
+//!   and the live endpoint all call, so their verdicts cannot diverge.
 //!
 //! The [`verifiable_log`] core stays dependency-pure: all HTTP lives here.
 
@@ -32,12 +37,14 @@ pub mod bundle;
 pub mod error;
 pub mod group;
 pub mod layout;
+pub mod live;
 pub mod remote;
 pub mod server;
 
 pub use bundle::{Bundle, Manifest, PublicKeyDoc};
 pub use error::{Result, ServeError};
-pub use group::{verify_group, GroupCommit, GroupReport};
-pub use layout::{generate, load_bundle, API_VERSION};
+pub use group::{verify_group, verify_group_in_bundle, GroupCommit, GroupReport};
+pub use layout::{generate, generate_artifacts, load_bundle, API_VERSION};
+pub use live::LiveServer;
 pub use remote::{verify_remote, Report};
 pub use server::DevServer;

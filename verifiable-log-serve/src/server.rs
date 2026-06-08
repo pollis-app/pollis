@@ -33,11 +33,11 @@ use tiny_http::{Header, Method, Request, Response, Server};
 use crate::error::{Result, ServeError};
 use crate::group::verify_group;
 
-const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
-const SHORT_CACHE: &str = "no-cache";
+pub(crate) const IMMUTABLE_CACHE: &str = "public, max-age=31536000, immutable";
+pub(crate) const SHORT_CACHE: &str = "no-cache";
 
 /// Prefix of the dynamic per-group verification endpoint.
-const VERIFY_GROUP_PREFIX: &str = "/verify/group/";
+pub(crate) const VERIFY_GROUP_PREFIX: &str = "/verify/group/";
 
 /// Worker threads handling requests. The verify endpoint makes blocking HTTP
 /// calls back to this same server (to fetch the static artifacts it verifies),
@@ -142,12 +142,7 @@ fn handle_request(request: Request, root: &Path, base_url: &str) {
 
     // CORS preflight for the browser calling the verify endpoint cross-origin.
     if method == Method::Options {
-        let response = Response::empty(204)
-            .with_header(header("Access-Control-Allow-Origin", "*"))
-            .with_header(header("Access-Control-Allow-Methods", "GET, OPTIONS"))
-            .with_header(header("Access-Control-Allow-Headers", "*"))
-            .with_header(header("Access-Control-Max-Age", "86400"));
-        let _ = request.respond(response);
+        cors_preflight(request);
         return;
     }
 
@@ -220,9 +215,20 @@ fn handle_verify_group(request: Request, base_url: &str, encoded_id: &str) {
     }
 }
 
+/// Answer a CORS preflight (`OPTIONS`) so the static site can call the verify
+/// endpoint cross-origin.
+pub(crate) fn cors_preflight(request: Request) {
+    let response = Response::empty(204)
+        .with_header(header("Access-Control-Allow-Origin", "*"))
+        .with_header(header("Access-Control-Allow-Methods", "GET, OPTIONS"))
+        .with_header(header("Access-Control-Allow-Headers", "*"))
+        .with_header(header("Access-Control-Max-Age", "86400"));
+    let _ = request.respond(response);
+}
+
 /// The cache policy for a request path: short for the two documents that move,
 /// long-immutable for everything else.
-fn cache_control_for(path: &str) -> &'static str {
+pub(crate) fn cache_control_for(path: &str) -> &'static str {
     if path.ends_with("/latest.json") || path.ends_with("/index.json") {
         SHORT_CACHE
     } else {
@@ -232,7 +238,7 @@ fn cache_control_for(path: &str) -> &'static str {
 
 /// Respond with a JSON body, the cross-origin header (so the static site can
 /// read it), and `no-cache` (the verdict is computed, not immutable).
-fn respond_json(request: Request, status: u16, body: String) {
+pub(crate) fn respond_json(request: Request, status: u16, body: String) {
     let response = Response::from_string(body)
         .with_status_code(status)
         .with_header(header("Content-Type", "application/json"))
@@ -241,7 +247,7 @@ fn respond_json(request: Request, status: u16, body: String) {
     let _ = request.respond(response);
 }
 
-fn respond_status(request: Request, status: u16, message: &str) {
+pub(crate) fn respond_status(request: Request, status: u16, message: &str) {
     let body = format!("{{\"error\":\"{message}\"}}");
     let response = Response::from_string(body)
         .with_status_code(status)
@@ -253,7 +259,7 @@ fn respond_status(request: Request, status: u16, message: &str) {
 /// truncated escapes are passed through literally; invalid UTF-8 is replaced
 /// rather than panicking. (`+` is left as-is — it is a literal in a path, only
 /// a space in a query string.)
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
@@ -284,13 +290,13 @@ fn hex_nibble(b: u8) -> Option<u8> {
 }
 
 /// Minimal JSON string escaping for the small error messages we embed by hand.
-fn escape(s: &str) -> String {
+pub(crate) fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', " ")
 }
 
 /// Build a header, falling back silently if the static inputs ever fail to
 /// parse (they don't — both are valid header bytes).
-fn header(name: &str, value: &str) -> Header {
+pub(crate) fn header(name: &str, value: &str) -> Header {
     Header::from_bytes(name.as_bytes(), value.as_bytes())
         .unwrap_or_else(|_| Header::from_bytes(&b"X-Invalid"[..], &b"1"[..]).unwrap())
 }

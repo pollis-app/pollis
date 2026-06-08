@@ -20,6 +20,12 @@ pub enum ServeError {
 
     #[error("malformed bundle: {0}")]
     BadBundle(String),
+
+    #[error("configuration error: {0}")]
+    Config(String),
+
+    #[error("builder error: {0}")]
+    Builder(#[from] verifiable_log_builder::BuilderError),
 }
 
 pub type Result<T> = std::result::Result<T, ServeError>;

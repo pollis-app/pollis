@@ -22,12 +22,16 @@
 //! group is **not** an error — it yields a [`GroupReport`] with
 //! `chain_valid == false` and populated `violations`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
-use verifiable_log::{proof, verifying_key_from_hex, Entry, Sth, VerifiableLog};
+use verifiable_log::{
+    proof, verifying_key_from_hex, Entry, InclusionProof, Sth, VerifiableLog,
+};
 use verifiable_log_builder::{CommitLeaf, CommitLogInvariant, TENANT};
 
-use crate::bundle::PublicKeyDoc;
+use crate::bundle::{Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
 use crate::remote::{build_agent, fetch_json};
 
@@ -73,35 +77,107 @@ pub struct GroupReport {
 /// Verify a single conversation's commit chain against the static log served at
 /// `base_url` (e.g. `http://127.0.0.1:8787`), trusting only the published key.
 ///
-/// Returns `Err` only for transport/parse failures of the prerequisites
-/// (`public_key.json`, `sth/latest.json`, `entries.json`) — without them there
-/// is nothing to verify. Any *verification* failure (bad signature, a missing or
-/// forged inclusion proof, a fork, an epoch regression) is folded into the
-/// returned report as `chain_valid = false` with a `violations` entry; it never
-/// panics and never returns `Err`.
+/// This is a thin transport wrapper: it fetches the prerequisites
+/// (`public_key.json`, `sth/latest.json`, `entries.json`) and the inclusion
+/// proofs for this group's entries into an in-memory [`Bundle`], then hands them
+/// to [`verify_group_in_bundle`] — the one place the actual verdict is computed.
+/// The live server ([`crate::live`]) calls that same core against its in-memory
+/// bundle directly, so the URL-fetched and in-memory paths **cannot diverge**.
+///
+/// Returns `Err` only for transport/parse failures of the prerequisites —
+/// without them there is nothing to verify. Any *verification* failure (bad
+/// signature, a missing or forged inclusion proof, a fork, an epoch regression)
+/// is folded into the returned report as `chain_valid = false` with a
+/// `violations` entry; it never panics and never returns `Err` for those.
 pub fn verify_group(base_url: &str, conversation_id: &str) -> Result<GroupReport> {
     let base = base_url.trim_end_matches('/');
     let agent = build_agent();
 
-    // 1. Trust anchor: the published key and the latest signed head.
+    // Prerequisites: the published key, the latest signed head, and the full
+    // ordered entry list. Without these there is nothing to verify.
     let pk_doc: PublicKeyDoc = fetch_json(&agent, &format!("{base}/v1/public_key.json"))?;
-    let verifying_key = verifying_key_from_hex(&pk_doc.public_key)?;
     let sth: Sth = fetch_json(&agent, &format!("{base}/v1/sth/latest.json"))?;
+    let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/entries.json"))?;
 
+    // Plan which proofs to fetch: only this group's entries (decode + match).
+    // This selection is a fetch optimisation; the verdict-bearing selection is
+    // re-derived inside the shared core, so the two can't disagree.
+    let group_indices: Vec<usize> = entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.tenant == TENANT)
+        .filter_map(|(i, e)| CommitLeaf::decode(&e.data).ok().map(|leaf| (i, leaf)))
+        .filter(|(_, leaf)| leaf.conversation_id == conversation_id)
+        .map(|(i, _)| i)
+        .collect();
+
+    // Fetch each selected entry's inclusion proof against the latest STH. A
+    // failed fetch simply omits the proof — the core then marks that entry
+    // not-included, exactly as the old fetch-per-entry path did.
+    let mut inclusion: Vec<InclusionCheck> = Vec::with_capacity(group_indices.len());
+    for i in &group_indices {
+        let url = format!("{base}/v1/proof/inclusion/{}/{}.json", sth.tree_size, i);
+        if let Ok(proof) = fetch_json::<InclusionProof>(&agent, &url) {
+            if let Some(entry) = entries.get(*i) {
+                inclusion.push(InclusionCheck {
+                    entry: entry.clone(),
+                    proof,
+                    sth_index: 0,
+                });
+            }
+        }
+    }
+
+    let bundle = Bundle {
+        public_key: pk_doc.public_key,
+        sths: vec![sth],
+        entries,
+        enforce_unique: vec![TENANT.to_string()],
+        inclusion,
+        consistency: Vec::new(),
+    };
+
+    Ok(verify_group_in_bundle(&bundle, conversation_id))
+}
+
+/// Verify a single conversation's commit chain against an **already-loaded**
+/// [`Bundle`] — no IO. This is the shared verdict core: both the URL-based
+/// [`verify_group`] and the live server's `/verify/group/<id>` endpoint call it,
+/// so a group's verdict is identical no matter how the bundle was obtained.
+///
+/// The checks mirror the static read API exactly:
+///
+/// 1. **Trust anchor.** The newest STH's signature must verify under the
+///    bundle's published key. If not, the report still lists the group's commits
+///    but the verdict is doomed.
+/// 2. **Membership.** Select entries whose [`CommitLeaf`] decodes and whose
+///    `conversation_id` matches, in `seq` order.
+/// 3. **Inclusion.** Each selected entry must have an inclusion proof (against
+///    the newest STH) in the bundle that verifies.
+/// 4. **Invariant.** Replay the group's commits through slice 2's
+///    [`CommitLogInvariant`] (epoch strictly increasing, no fork).
+///
+/// Never panics; a tampered/forked/regressed group yields `chain_valid == false`
+/// with populated `violations` rather than an error.
+pub fn verify_group_in_bundle(bundle: &Bundle, conversation_id: &str) -> GroupReport {
     let mut violations: Vec<String> = Vec::new();
 
-    // Verify the STH signature first — it is the root of trust for everything
-    // below. If it does not check out we still build a report (so the caller
-    // sees the group's commits) but the verdict is doomed.
-    let sth_sig_ok = sth.verify(&verifying_key);
+    // 1. Trust anchor: the newest published head, verified under the log key.
+    let verifying_key = verifying_key_from_hex(&bundle.public_key).ok();
+    let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
+    let (sth_tree_size, root_hex, sth_sig_ok) = match (latest, &verifying_key) {
+        (Some(sth), Some(vk)) => (sth.tree_size, sth.root_hash.clone(), sth.verify(vk)),
+        (Some(sth), None) => (sth.tree_size, sth.root_hash.clone(), false),
+        (None, _) => (0, String::new(), false),
+    };
     if !sth_sig_ok {
         violations.push("STH signature is invalid — published head is not trustworthy".to_string());
     }
 
     // 2. Membership: every entry that decodes as a commit leaf for this group,
-    //    paired with its global leaf index (needed to fetch its proof).
-    let entries: Vec<Entry> = fetch_json(&agent, &format!("{base}/v1/entries.json"))?;
-    let mut selected: Vec<(usize, CommitLeaf)> = entries
+    //    paired with its global leaf index (used to locate its proof).
+    let mut selected: Vec<(usize, CommitLeaf)> = bundle
+        .entries
         .iter()
         .enumerate()
         .filter(|(_, e)| e.tenant == TENANT)
@@ -114,20 +190,28 @@ pub fn verify_group(base_url: &str, conversation_id: &str) -> Result<GroupReport
 
     let found = !selected.is_empty();
 
+    // Index the bundle's inclusion proofs by leaf index, keeping only those
+    // checked against the newest head — the one this report is anchored to.
+    let inclusion_by_index: BTreeMap<usize, &InclusionProof> = bundle
+        .inclusion
+        .iter()
+        .filter(|c| latest.is_some_and(|s| c.proof.tree_size == s.tree_size))
+        .map(|c| (c.proof.leaf_index as usize, &c.proof))
+        .collect();
+
     // 3. Inclusion: each selected entry must be committed by the latest STH.
     let mut commits: Vec<GroupCommit> = Vec::with_capacity(selected.len());
     let mut all_included = true;
     for (leaf_index, leaf) in &selected {
-        let url = format!(
-            "{base}/v1/proof/inclusion/{}/{}.json",
-            sth.tree_size, leaf_index
-        );
-        let included = match fetch_json::<proof::InclusionProof>(&agent, &url) {
-            Ok(p) => match entries.get(*leaf_index) {
-                Some(entry) => proof::verify_inclusion_proof(entry, &p, &sth),
-                None => false,
-            },
-            Err(_) => false,
+        let included = match (
+            inclusion_by_index.get(leaf_index),
+            latest,
+            bundle.entries.get(*leaf_index),
+        ) {
+            (Some(proof), Some(sth), Some(entry)) => {
+                proof::verify_inclusion_proof(entry, proof, sth)
+            }
+            _ => false,
         };
         if !included {
             all_included = false;
@@ -168,15 +252,15 @@ pub fn verify_group(base_url: &str, conversation_id: &str) -> Result<GroupReport
 
     let chain_valid = sth_sig_ok && all_included && invariant_ok;
 
-    Ok(GroupReport {
+    GroupReport {
         group_id: conversation_id.to_string(),
         found,
-        sth_tree_size: sth.tree_size,
-        root_hex: sth.root_hash.clone(),
+        sth_tree_size,
+        root_hex,
         commits,
         chain_valid,
         violations,
-    })
+    }
 }
 
 impl GroupReport {
