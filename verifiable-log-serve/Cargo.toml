@@ -13,6 +13,11 @@ path = "src/lib.rs"
 name = "serve"
 path = "src/bin/serve.rs"
 
+# Verification-only CLI shipped to auditors (operator commands live in `serve`).
+[[bin]]
+name = "pollis-verify"
+path = "src/bin/pollis-verify.rs"
+
 [dependencies]
 # Slice 1: Merkle/STH/proof core and its verifiers — depended on, never reimplemented.
 verifiable-log = { path = "../verifiable-log" }

@@ -54,13 +54,13 @@ jobs:
           key: verifier-${{ matrix.target }}
 
       - name: Build verifier
-        run: cargo build --release --locked -p verifiable-log-serve --bin serve --target ${{ matrix.target }}
+        run: cargo build --release --locked -p verifiable-log-serve --bin pollis-verify --target ${{ matrix.target }}
 
       - name: Package binary + checksum
         shell: bash
         run: |
           mkdir -p dist
-          cp "target/${{ matrix.target }}/release/serve" "dist/${{ matrix.asset }}"
+          cp "target/${{ matrix.target }}/release/pollis-verify" "dist/${{ matrix.asset }}"
           cd dist
           if command -v sha256sum >/dev/null 2>&1; then
             sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
@@ -92,14 +92,12 @@ jobs:
             ### Usage
             ```bash
             # verify the entire log (signatures, inclusion proofs, consistency)
-            ./pollis-verify-<platform> verify-remote https://verify.pollis.com
+            ./pollis-verify-<platform> remote https://verify.pollis.com
 
             # verify one conversation's commit chain (use a conversation id, not a name)
-            ./pollis-verify-<platform> verify-group \
-              --base https://verify.pollis.com \
-              --group <CONVERSATION_ID>
+            ./pollis-verify-<platform> group https://verify.pollis.com <CONVERSATION_ID>
             ```
             Exit code is non-zero if any check fails. Add `--json` to
-            `verify-group` for machine-readable output.
+            `group` for machine-readable output.
 
             Verify the download against the matching `*.sha256` file.
