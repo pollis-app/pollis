@@ -27,8 +27,10 @@ thiserror = "1"
 clap = { version = "4", features = ["derive"] }
 # Tiny blocking HTTP server for the local dev/demo host.
 tiny_http = "0.12"
-# Blocking HTTP client for the remote verifier. Loopback HTTP only — no TLS.
-ureq = { version = "2", default-features = false }
+# Blocking HTTP client for the remote verifier. The "tls" feature pulls in
+# rustls + webpki-roots so auditors can verify a live https:// URL (e.g.
+# https://verify.pollis.com), not just loopback http://.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 # Live mode: hold the Ed25519 signing key and drive the async libSQL read.
 ed25519-dalek = "2.1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
