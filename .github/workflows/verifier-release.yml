@@ -5,19 +5,20 @@ name: Transparency Verifier CLI
 # https://verify.pollis.com themselves, from their own machine.
 #
 # Trigger:
-#   * Tag push `verifier-v*` (e.g. `git tag verifier-v0.1.0 && git push origin
-#     verifier-v0.1.0`) — builds every target AND publishes a GitHub Release
-#     with the binaries + SHA256SUMS attached.
+#   * Tag push `pollis-verify-v*` (e.g. `git tag pollis-verify-v0.1.0 && git push
+#     origin pollis-verify-v0.1.0`) — builds every target AND publishes a GitHub
+#     Release with the binaries + SHA256SUMS attached.
 #   * workflow_dispatch — builds every target and uploads them as run artifacts
 #     (no Release), for testing the pipeline without cutting a tag.
 #
-# Tag prefix is `verifier-v*` so it never collides with the app's `v*` release
-# tags handled by electron-release.yml.
+# The tag prefix MUST NOT start with `v`: electron-release.yml triggers on the
+# tag glob `v[0-9]*`, and an earlier `verifier-v*` prefix also matched the
+# broader `v*` it used to use, firing the desktop release by mistake.
 
 on:
   push:
     tags:
-      - "verifier-v*"
+      - "pollis-verify-v*"
   workflow_dispatch:
 
 permissions:
@@ -75,7 +76,7 @@ jobs:
           path: dist/*
 
       - name: Publish to GitHub Release (tag pushes only)
-        if: startsWith(github.ref, 'refs/tags/verifier-v')
+        if: startsWith(github.ref, 'refs/tags/pollis-verify-v')
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
