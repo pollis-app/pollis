@@ -3,10 +3,10 @@
 // only fetches a server-computed verdict and visualizes it.
 
 // ── Configuration ──────────────────────────────────────────────────────────
-// Base URL of the backend verifier (the `serve` dev server's HTTP endpoint).
-// Defaults to the local dev server; in production this points at the deployed
-// verifier (e.g. https://transparency.pollis.com).
-const BACKEND_BASE = "http://127.0.0.1:8787";
+// Base URL of the backend verifier (the live read API / `serve` HTTP endpoint).
+// Production points at the deployed transparency verifier. For local dev against
+// a `serve`/`live` instance, change this to http://127.0.0.1:8787.
+const BACKEND_BASE = "https://verify.pollis.com";
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 const form = document.getElementById("kt-form");
