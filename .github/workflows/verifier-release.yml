@@ -12,8 +12,8 @@ name: Transparency Verifier CLI
 #     (no Release), for testing the pipeline without cutting a tag.
 #
 # The tag prefix MUST NOT start with `v`: electron-release.yml triggers on the
-# tag glob `v[0-9]*`, and an earlier `verifier-v*` prefix also matched the
-# broader `v*` it used to use, firing the desktop release by mistake.
+# tag glob `v*` (any tag starting with `v`), so an earlier `verifier-v*` prefix
+# matched it and fired the desktop release by mistake. `pollis-verify-*` can't.
 
 on:
   push:

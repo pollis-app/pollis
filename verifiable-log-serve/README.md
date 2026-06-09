@@ -83,10 +83,12 @@ cargo build -p verifiable-log-serve
 ./target/debug/serve serve --dir ./site --port 8787
 
 # 3. From anywhere, verify the log over HTTP — trusting only the public key.
-./target/debug/serve verify-remote http://127.0.0.1:8787
+#    `pollis-verify` is the auditor CLI; the `serve` binary carries the same
+#    verifiers for local dev.
+./target/debug/pollis-verify remote http://127.0.0.1:8787
 ```
 
-`verify-remote` fetches the public key and manifest, then every STH, the
+`pollis-verify remote` fetches the public key and manifest, then every STH, the
 entries, and all proofs, and runs slice 1's verifiers: STH signatures,
 equivocation, entry/STH-root replay (through the tenant invariants), inclusion,
 and consistency. It prints a per-check report and **exits non-zero** if anything
