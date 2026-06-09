@@ -69,12 +69,13 @@ Each has its own README with the full detail; this is the map.
 |-------|--------------|------|
 | **monitor** | [`verifiable-log`](../verifiable-log/README.md) | The Merkle-log core **and** the fully offline verifier CLI. Verifies a downloaded bundle with no network and no database. |
 | **builder** | [`verifiable-log-builder`](../verifiable-log-builder/README.md) | Reads the real `mls_commit_log` from Turso/libSQL and emits a **signed bundle** the monitor verifies byte-for-byte. Hashes each commit blob and drops the raw bytes — they are never stored or logged. |
-| **serve** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | Turns a signed bundle into the immutable static `/v1/...` read API, plus a dev HTTP server, a whole-log HTTP verifier (`verify-remote`), and a per-conversation verifier (`verify-group`). |
-| **website explorer** | [`website/transparency.html`](../website/transparency.html) | A browser convenience demo that calls the serve layer's `verify-group` endpoint and visualizes the result. It is **not** the trust anchor — the trustworthy path is running the tool yourself. |
+| **serve** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | Turns a signed bundle into the immutable static `/v1/...` read API, plus a dev HTTP server and the `/verify/group/<id>` endpoint the explorer calls. |
+| **pollis-verify** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | The auditor CLI shipped to security analysts: a whole-log HTTP verifier (`pollis-verify remote`) and a per-conversation verifier (`pollis-verify group`). |
+| **website explorer** | [`website/transparency.html`](../website/transparency.html) | A browser convenience demo that calls the serve layer's `/verify/group/<id>` endpoint and visualizes the result. It is **not** the trust anchor — the trustworthy path is running the tool yourself. |
 
 Data flows one direction: `mls_commit_log` → **builder** signs a bundle →
-**serve** generates the static tree → **monitor** / `verify-remote` /
-`verify-group` / the explorer check it. The core Merkle, proof, signature, and
+**serve** generates the static tree → **monitor** / **pollis-verify**
+(`remote` / `group`) / the explorer check it. The core Merkle, proof, signature, and
 invariant logic lives in `verifiable-log` and is **reused, never reimplemented**,
 by every layer — so the CLI, the HTTP endpoint, and the website can never reach
 different verdicts for the same input.

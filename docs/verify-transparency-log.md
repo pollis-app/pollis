@@ -11,62 +11,74 @@ The one rule that makes this meaningful:
 > not the host serving the files. If a single byte is tampered with, a signature
 > or proof check fails and the tool exits non-zero.
 
-Everywhere below, `<base-url>` is wherever the static log is published (in
-production, the deployed verifier; locally, a dev server you run yourself).
+Everywhere below, `<base-url>` is wherever the static log is published. In
+production that is **https://verify.pollis.com**; locally it is a dev server you
+run yourself.
 
-## 1. Get the verifier and build it
+## 1. Get the verifier
 
-You only need the repo and a Rust toolchain (`cargo`). Build the serve layer —
-which carries the whole-log and per-group HTTP verifiers — and the `monitor` (the
-fully offline verifier):
+The auditor CLI is **`pollis-verify`**. You can download a prebuilt binary or
+build it from source — it needs no credentials, since the read API is public.
+
+**Download (recommended).** Grab the binary for your platform from the
+[GitHub Releases](https://github.com/actuallydan/pollis/releases) page (tags
+`pollis-verify-v*`), then make it executable and verify its checksum:
 
 ```bash
-# The HTTP verifiers: `serve verify-remote` and `serve verify-group`.
+chmod +x pollis-verify-linux-x86_64
+sha256sum -c pollis-verify-linux-x86_64.sha256
+```
+
+**Build from source.** With a Rust toolchain (`cargo`):
+
+```bash
+# Builds the `pollis-verify` auditor CLI (and the operator `serve` binary).
 cargo build -p verifiable-log-serve --release
 
-# The offline verifier: `monitor verify <bundle.json>`.
+# For the fully offline path, also build the `monitor` bundle verifier.
 cargo build -p verifiable-log --release
 ```
 
 The binaries land in `target/release/`:
 
 ```
-target/release/serve      # generate / serve / verify-remote / verify-group
-target/release/monitor    # offline bundle verifier
+target/release/pollis-verify   # auditor CLI: remote + group
+target/release/monitor         # offline bundle verifier
 ```
 
-Everything in this guide uses only these two binaries. Neither needs any
-credentials — the read API is public and unauthenticated by design.
+This guide uses `pollis-verify` (assume it's on your `PATH`, or prefix
+`./target/release/`) and, for the offline path, `monitor`.
 
-## 2. Verify the whole log over HTTP — `serve verify-remote`
+## 2. Verify the whole log over HTTP — `pollis-verify remote`
 
-This fetches the entire public log over plain HTTP and verifies it end to end:
+This fetches the entire public log over HTTP(S) and verifies it end to end:
 every STH signature, equivocation across heads, that each entry replays to the
 signed root, every inclusion proof, and every consistency proof — trusting only
 the published public key.
 
 ```bash
-./target/release/serve verify-remote <base-url>
+pollis-verify remote <base-url>
 ```
 
 A passing run prints a `PASS` line per check and exits `0`:
 
 ```
-$ ./target/release/serve verify-remote https://transparency.pollis.com
-PASS  STH[3] tree_size matches its URL
-PASS  STH[3] signature
-PASS  STH[5] tree_size matches its URL
-PASS  STH[5] signature
+$ pollis-verify remote https://verify.pollis.com
+PASS  STH[24] tree_size matches its URL
+PASS  STH[24] signature
+PASS  STH[49] tree_size matches its URL
+PASS  STH[49] signature
 PASS  latest.json matches the newest STH
 PASS  latest.json signature
-PASS  no equivocation between size 3 and size 5
+PASS  no equivocation between size 24 and size 49
 PASS  entries.json count matches manifest
 PASS  per-entry files match entries.json
 PASS  all entries satisfy tenant invariants
-PASS  STH[3] root matches replayed entries
-PASS  STH[5] root matches replayed entries
-PASS  inclusion: leaf 1 in size 5
-PASS  consistency: size 3 -> size 5
+PASS  STH[24] root matches replayed entries
+PASS  STH[49] root matches replayed entries
+PASS  inclusion: leaf 0 in size 49
+…
+PASS  consistency: size 24 -> size 49
 
 OK: all checks passed
 ```
@@ -78,17 +90,19 @@ command **exits non-zero**. That exit code is the whole point: it is computed fr
 the signature and the proofs, not from anything the server told you to believe.
 
 ```bash
-./target/release/serve verify-remote <base-url> && echo "log is intact" || echo "VERIFICATION FAILED"
+pollis-verify remote <base-url> && echo "log is intact" || echo "VERIFICATION FAILED"
 ```
 
-## 3. Verify one conversation — `serve verify-group`
+## 3. Verify one conversation — `pollis-verify group`
 
 To check a single conversation's commit chain — that every one of its commits is
 provably included in the signed log, and that its epochs are append-only and
-fork-free — pass the conversation id:
+fork-free — pass the base URL and the conversation id. The id is an opaque MLS
+**conversation id** (a ULID like `01KP443BSBXS3W1SZNTV5MXQ9C`), **not** a group
+name or slug — the public log deliberately carries no human-readable names.
 
 ```bash
-./target/release/serve verify-group --base <base-url> --group <conversation-id>
+pollis-verify group <base-url> <conversation-id>
 ```
 
 It verifies the STH signature **first** (an unsigned head is worth nothing), then
@@ -96,48 +110,49 @@ selects that conversation's commits, checks each one's inclusion proof against t
 signed head, and replays them through the no-fork / no-epoch-regression invariant:
 
 ```
-$ ./target/release/serve verify-group --base https://transparency.pollis.com --group design-team
-Group:   design-team
+$ pollis-verify group https://verify.pollis.com 01KP443BSBXS3W1SZNTV5MXQ9C
+Group:   01KP443BSBXS3W1SZNTV5MXQ9C
 Found:   yes
-STH:     tree_size 4  root 6e36ea07b3096dbe64c3d0b0acb76c8ccfbe6c218346b754384cb423b7299f1e
+STH:     tree_size 49  root b3f0f8a8f675996002633a03c50a2dd733f66ba6c3fe95e39ee4f04935dbe25f
 Commits (seq order):
-  epoch 0    seq 1      sender alice        commit cbb029…05c3  [included ✓]
-  epoch 1    seq 2      sender bob          commit 8825a3…f5dd  [included ✓]
-  epoch 2    seq 3      sender alice        commit 012904…7b8a  [included ✓]
+  epoch 0    seq 14     sender 01KP43…GN5H  commit 79b6e5…cf7a  [included ✓]
+  epoch 1    seq 15     sender 01KP3G…02RF  commit 3beb61…ba37  [included ✓]
+  epoch 2    seq 16     sender 01KP3G…02RF  commit 42cf88…e057  [included ✓]
 
 PASS: group chain is valid
 ```
 
 A valid chain exits `0`; a missing inclusion proof, a fork, or an epoch regression
 lists the reason under `Violations:`, prints `FAIL: group chain is NOT valid`, and
-exits non-zero.
+exits non-zero. (A conversation id that isn't in the log reports `Found: no` with
+an empty — and therefore vacuously valid — chain.)
 
 Add `--json` to get the machine-readable `GroupReport` (the exact shape the HTTP
 endpoint and the website explorer consume):
 
 ```bash
-./target/release/serve verify-group --base <base-url> --group <conversation-id> --json
+pollis-verify group <base-url> <conversation-id> --json
 ```
 
 ```json
 {
-  "group_id": "design-team",
+  "group_id": "01KP443BSBXS3W1SZNTV5MXQ9C",
   "found": true,
-  "sth_tree_size": 4,
-  "root_hex": "6e36ea07b3096dbe64c3d0b0acb76c8ccfbe6c218346b754384cb423b7299f1e",
+  "sth_tree_size": 49,
+  "root_hex": "b3f0f8a8f675996002633a03c50a2dd733f66ba6c3fe95e39ee4f04935dbe25f",
   "commits": [
     {
       "epoch": 0,
-      "seq": 1,
-      "sender_id": "alice",
-      "commit_sha256": "cbb0293a499663eb04c789af7056dec01cd11cb6d53c09da3e234dea2e7d05c3",
+      "seq": 14,
+      "sender_id": "01KP43R2QK8N0M5VHE3WXGN5H",
+      "commit_sha256": "79b6e5…cf7a",
       "included": true
     },
     {
       "epoch": 1,
-      "seq": 2,
-      "sender_id": "bob",
-      "commit_sha256": "8825a34368a0a10051b2957bfc558fbefb2db74cb744e195a267e43db505f5dd",
+      "seq": 15,
+      "sender_id": "01KP3GRSY1QY760ZEC12R102RF",
+      "commit_sha256": "3beb61…ba37",
       "included": true
     }
   ],
@@ -148,7 +163,7 @@ endpoint and the website explorer consume):
 
 Field notes: `chain_valid` is the overall verdict (STH signature valid **and**
 every commit included **and** the invariant holds); `included` is per-commit;
-`sender_id` is recorded but **not** authorization-checked in this slice;
+`sender_id` is a user id, recorded but **not** authorization-checked in this slice;
 `violations` is empty exactly when `chain_valid` is true.
 
 ## 4. Fully offline — `monitor verify`
@@ -195,12 +210,12 @@ The page at [`website/transparency.html`](../website/transparency.html) lets you
 type a conversation id in a browser and see its commit chain rendered. It is a
 **demo for convenience only**: the browser does no verification itself — it calls
 the serve layer's `GET /verify/group/<id>` endpoint, which runs the *same*
-`verify-group` code you ran in step 3, and just visualizes the returned
+`group` verification code you ran in step 3, and just visualizes the returned
 `GroupReport`.
 
 That means the explorer is exactly as trustworthy as the server hosting it. The
-**trustworthy path is running the tool yourself** — `serve verify-remote`,
-`serve verify-group`, or `monitor verify` on your own machine — because only then
+**trustworthy path is running the tool yourself** — `pollis-verify remote`,
+`pollis-verify group`, or `monitor verify` on your own machine — because only then
 does the verdict rest on the signature and the proofs you checked locally, rather
 than on a server's word.
 
@@ -208,7 +223,8 @@ than on a server's word.
 
 You can stand up the whole pipeline yourself to see every step. The dev server is
 for **testing/demos only** — production is just a static host serving the
-generated directory.
+generated directory. Generating and serving use the operator `serve` binary;
+verifying uses `pollis-verify` exactly as above.
 
 ```bash
 # Generate the immutable static tree from a signed bundle.
@@ -218,8 +234,8 @@ generated directory.
 ./target/release/serve serve --dir ./site --port 8787
 
 # In another shell, verify it over HTTP — trusting only the public key.
-./target/release/serve verify-remote http://127.0.0.1:8787
-./target/release/serve verify-group --base http://127.0.0.1:8787 --group <conversation-id>
+pollis-verify remote http://127.0.0.1:8787
+pollis-verify group http://127.0.0.1:8787 <conversation-id>
 ```
 
 (The signed `bundle.json` itself is produced from the real `mls_commit_log` by the
