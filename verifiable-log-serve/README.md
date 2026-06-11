@@ -39,9 +39,23 @@ The file path under the output root mirrors the URL exactly (drop the leading
 | `/v1/entries/<index>.json`                            | one entry                           | immutable    |
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json`   | inclusion proof                     | immutable    |
 | `/v1/proof/consistency/<first>-<second>.json`         | consistency proof                   | immutable    |
+| `/verify/group/<conversation_id>`                     | precomputed per-group `GroupReport` | short        |
 
 All wire shapes (`Entry`, `Sth`, `InclusionProof`, `ConsistencyProof`) are the
 frozen contract documented in `verifiable-log/README.md`.
+
+### Precomputed per-group reports (`/verify/group/<id>`)
+
+`serve generate` also writes a precomputed report at
+`verify/group/<conversation_id>` (no extension — the file *is* the endpoint URL)
+for every conversation present in the bundle. The bytes are **byte-identical** to
+what the live `GET /verify/group/<id>` endpoint returns: both serialize the same
+`GroupReport` from the shared `verify_group_in_bundle` as compact JSON, so a
+static host serves the same verdict the live server would, with no server on the
+path. `index.json` lists every conversation that has a report so a client can
+enumerate them. These reports **move** as the log grows (a new head changes every
+group's `sth_tree_size` and inclusion), so they are short-cached like
+`latest.json` and `index.json`.
 
 ### Manifest (`/v1/index.json`)
 
@@ -62,14 +76,20 @@ So a monitor or explorer can discover everything available without guessing:
 
 ### Cache policy
 
-Every artifact is **write-once / immutable** except the two that move as the log
-grows — `sth/latest.json` and `index.json`. Hosts should serve them so:
+Every artifact is **write-once / immutable** except the ones that move as the log
+grows — `sth/latest.json`, `index.json`, and the `verify/group/*` reports. Hosts
+should serve them so:
 
-- immutable artifacts → `Cache-Control: public, max-age=31536000, immutable`
-- `latest.json` and `index.json` → `Cache-Control: no-cache`
+- immutable artifacts (`v1/sth/<size>.json`, `v1/entries*`, `v1/proof/**`,
+  `v1/public_key.json`) → `Cache-Control: public, max-age=31536000, immutable`
+- mutable artifacts (`v1/sth/latest.json`, `v1/index.json`, `verify/group/*`) →
+  `Cache-Control: public, max-age=300`
 
-The dev server below sets exactly these headers; a static host should be
-configured to match.
+The production publish (`.github/workflows/transparency-publish.yml`) applies
+exactly this split during the R2 sync — immutable files first, then the mutable
+head and reports — so a published head never points at a missing artifact. The
+dev server below sets short-cache headers on the moving documents and immutable
+on the rest.
 
 ## CLI (`serve`)
 
@@ -114,8 +134,18 @@ fixture bundle; (b) the dev server serves them and `verify_remote` verifies the
 whole log over HTTP end to end; (c) tampering with a served artifact (an entry,
 the entries list, or an STH signature) makes remote verification fail.
 
+## Production deployment
+
+The live read API at **https://verify.pollis.com** is this static tree on
+Cloudflare R2, rebuilt daily by `.github/workflows/transparency-publish.yml`
+(cron + `workflow_dispatch`): the workflow builds a signed bundle from
+`mls_commit_log`, runs `serve generate`, and syncs the output to R2 with the
+cache split above. There is **no server on the trust path** — the tree is signed
+in CI and served as static files. The STH timestamp makes staleness
+self-evident, and a malicious or compromised host can only serve stale or broken
+data *detectably*, never forge it.
+
 ## Out of scope (later slices)
 
-No specific cloud deployment config (Cloudflare/R2/Pages), no browser/WASM
-explorer (slice 4), no auth on the read API (intentionally public), no
-signing-key custody, no account-key tenant, no production DB access.
+No browser/WASM explorer (slice 4), no auth on the read API (intentionally
+public), no signing-key custody beyond the CI secret, no account-key tenant.
