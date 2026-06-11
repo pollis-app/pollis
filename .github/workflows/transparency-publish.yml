@@ -1,0 +1,174 @@
+name: Publish Transparency Log
+
+# Rebuilds the Key Transparency static read API and publishes it to Cloudflare R2
+# (served at https://verify.pollis.com). The tree is signed in CI and served as
+# static files — there is NO server on the trust path.
+#
+# What it does, daily (and on demand):
+#   1. Cheap early-exit BEFORE any Rust toolchain: compare the published head's
+#      tree_size against a live COUNT(*) of mls_commit_log. Equal => nothing new,
+#      exit success without building. (workflow_dispatch forces a rebuild — that
+#      is the "rebuild now" button; a fresh STH timestamp re-attests freshness.)
+#   2. Build a signed bundle from mls_commit_log (STH_SIGNING_KEY) and run
+#      `serve generate` to produce the immutable /v1 tree + precomputed
+#      verify/group/<id> reports.
+#   3. Sync to R2 in two passes with a cache split: immutable artifacts FIRST,
+#      then the mutable head + reports LAST, so a published head never references
+#      a missing artifact.
+#
+# Required repository secrets (names exact):
+#   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN  — read mls_commit_log
+#   STH_SIGNING_KEY                       — 32-byte hex Ed25519 log signing key
+#   R2_TRANSPARENCY_ACCESS_KEY_ID, R2_TRANSPARENCY_SECRET_ACCESS_KEY,
+#   R2_TRANSPARENCY_ENDPOINT, R2_TRANSPARENCY_BUCKET — R2 sync (namespaced:
+#   the bare R2_* names are account-wide creds owned by the release workflows)
+
+on:
+  schedule:
+    # 06:47 UTC daily (off the hour to dodge cron congestion).
+    - cron: "47 6 * * *"
+  workflow_dispatch:
+
+# Never let two publishes overlap — a half-synced tree must never race another.
+concurrency:
+  group: transparency-publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and publish to R2
+    runs-on: ubuntu-latest
+    env:
+      # R2 speaks the S3 API; the aws CLI reads creds from these standard vars.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_TRANSPARENCY_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_TRANSPARENCY_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      # Cloudflare R2 rejects the integrity checksums newer aws-cli v2 adds by
+      # default; only send/verify them when the operation actually requires it.
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+    steps:
+      # (a) Early-exit BEFORE any toolchain setup: is the published head already
+      #     current with the DB? If so we are done — no build, no sync.
+      - name: Decide whether a rebuild is needed
+        id: decide
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          # A manual dispatch is an explicit "rebuild now" — skip the comparison.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual dispatch — forcing a rebuild."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Published head's tree_size (empty if never published / unreachable).
+          published="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/sth/latest.json \
+            | jq -r '.tree_size' 2>/dev/null || echo "")"
+
+          # Live commit count via Turso's HTTP (Hrana) pipeline API. The DB URL is
+          # libsql://; the HTTP endpoint is the same host over https.
+          http_url="${TURSO_DATABASE_URL/libsql:\/\//https://}"
+          http_url="${http_url%/}"
+          count="$(curl -fsS --max-time 20 "${http_url}/v2/pipeline" \
+            -H "Authorization: Bearer ${TURSO_AUTH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"requests":[{"type":"execute","stmt":{"sql":"SELECT COUNT(*) FROM mls_commit_log"}},{"type":"close"}]}' \
+            | jq -r '.results[0].response.result.rows[0][0].value')"
+
+          echo "published tree_size: ${published:-<none>} | live commit count: ${count}"
+
+          if [ -n "${published}" ] && [ "${published}" = "${count}" ]; then
+            echo "Already up to date — nothing to publish."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # (b) Everything below runs only when a rebuild is actually needed.
+      - name: Checkout
+        if: steps.decide.outputs.build == 'true'
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        if: steps.decide.outputs.build == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build
+        if: steps.decide.outputs.build == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: transparency-publish
+
+      # (c) Build the signed bundle, then generate the static tree.
+      - name: Build builder + serve
+        if: steps.decide.outputs.build == 'true'
+        run: cargo build --release --locked -p verifiable-log-builder --bin builder -p verifiable-log-serve --bin serve
+
+      - name: Generate signed static tree
+        if: steps.decide.outputs.build == 'true'
+        env:
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          # The builder's default --signing-key-env. The key never leaves CI.
+          VLOG_SIGNING_KEY: ${{ secrets.STH_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          # STH timestamp is supplied explicitly (the builder never reads the clock).
+          ts="$(date +%s%3N)"
+          ./target/release/builder build --db "${TURSO_DATABASE_URL}" --out bundle.json --timestamp "${ts}"
+          ./target/release/serve generate --bundle bundle.json --out ./site
+          # The bundle carries hashed commit identities only — no plaintext — but
+          # remove it anyway so it can never be synced.
+          rm -f bundle.json
+
+      # (d) Two-pass R2 sync with the cache split. Immutable artifacts go up
+      #     first so the mutable head/reports published last never reference a
+      #     missing object. Append-only: never --delete (old immutable artifacts
+      #     stay valid forever).
+      - name: Configure aws CLI concurrency
+        if: steps.decide.outputs.build == 'true'
+        run: aws configure set default.s3.max_concurrent_requests 64
+
+      - name: Publish immutable artifacts (pass 1)
+        if: steps.decide.outputs.build == 'true'
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          set -euo pipefail
+          # --size-only: immutable artifacts have byte-stable content per path, so
+          # comparing size alone skips re-uploading ones already in R2.
+          aws s3 sync ./site "s3://${R2_BUCKET}/" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --only-show-errors \
+            --size-only \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "v1/sth/latest.json" \
+            --exclude "v1/index.json" \
+            --exclude "verify/group/*"
+
+      - name: Publish mutable head + reports (pass 2)
+        if: steps.decide.outputs.build == 'true'
+        env:
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          set -euo pipefail
+          # The moving documents last; --content-type so the extensionless
+          # verify/group/<id> files are still served as JSON.
+          aws s3 sync ./site "s3://${R2_BUCKET}/" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --only-show-errors \
+            --content-type "application/json" \
+            --cache-control "public, max-age=300" \
+            --exclude "*" \
+            --include "v1/sth/latest.json" \
+            --include "v1/index.json" \
+            --include "verify/group/*"

@@ -21,19 +21,36 @@
 //! | `/v1/entries/<index>.json`                            | one [`Entry`]                     | immutable |
 //! | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json`   | [`InclusionProof`]                | immutable |
 //! | `/v1/proof/consistency/<first>-<second>.json`         | [`ConsistencyProof`]              | immutable |
+//! | `/verify/group/<conversation_id>`                     | [`GroupReport`] (precomputed)     | short     |
 //!
 //! The file path under the output root mirrors the URL exactly (drop the
 //! leading `/`), so serving is a literal static-file mapping.
+//!
+//! ## Precomputed per-group reports (`/verify/group/<id>`)
+//!
+//! In addition to the immutable `/v1` surface, the generator emits a precomputed
+//! per-conversation report at `verify/group/<conversation_id>` (no extension —
+//! the file *is* the endpoint URL) for every conversation present in the bundle's
+//! commit-log entries. The bytes are **byte-identical** to what the live
+//! `GET /verify/group/<id>` endpoint returns, because both serialize the exact
+//! same [`GroupReport`] from the shared [`verify_group_in_bundle`] as compact
+//! JSON — the static host therefore serves the same verdict the live server
+//! would, with no server on the path. These reports move as the log grows (a new
+//! head changes every group's `sth_tree_size`/inclusion), so they are
+//! short-cached like `index.json` and `sth/latest.json`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::Serialize;
+
+use verifiable_log_builder::{CommitLeaf, TENANT};
 
 use crate::bundle::{
     Bundle, ConsistencyRef, InclusionRef, Manifest, PublicKeyDoc,
 };
 use crate::error::{Result, ServeError};
+use crate::group::verify_group_in_bundle;
 
 /// API version segment all artifacts live under.
 pub const API_VERSION: &str = "v1";
@@ -112,6 +129,32 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
         });
     }
 
+    // /verify/group/<conversation_id> — a precomputed per-conversation report
+    // for every distinct conversation in the bundle's commit-log entries. The
+    // bytes are compact JSON of the shared [`verify_group_in_bundle`] verdict,
+    // so they are byte-identical to the live `GET /verify/group/<id>` endpoint's
+    // response (which serializes the same `GroupReport` the same way). The file
+    // has no extension — its path is the endpoint URL verbatim.
+    let conversations: Vec<String> = bundle
+        .entries
+        .iter()
+        .filter(|e| e.tenant == TENANT)
+        .filter_map(|e| CommitLeaf::decode(&e.data).ok())
+        .map(|leaf| leaf.conversation_id)
+        // A report is one path segment under `verify/group/`; reject anything
+        // that could escape it. Real MLS conversation ids are ULID-shaped and
+        // always pass — this only guards against malformed source data.
+        .filter(|id| is_safe_segment(id))
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
+    for conv in &conversations {
+        let report = verify_group_in_bundle(bundle, conv);
+        // Compact (not pretty) to match the live endpoint's `to_string`.
+        let bytes = serde_json::to_vec(&report)?;
+        map.insert(format!("verify/group/{conv}"), bytes);
+    }
+
     // /v1/index.json — the discovery manifest. Built last so it only ever
     // advertises artifacts already present in the map.
     let manifest = Manifest {
@@ -123,6 +166,7 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
         inclusion: inclusion_refs,
         consistency: consistency_refs,
         enforce_unique: bundle.enforce_unique.clone(),
+        conversations,
     };
     insert_json(&mut map, format!("{API_VERSION}/index.json"), &manifest)?;
 
@@ -157,6 +201,13 @@ pub fn load_bundle(path: &Path) -> Result<Bundle> {
     let bundle: Bundle =
         serde_json::from_str(&raw).map_err(|e| ServeError::BadBundle(e.to_string()))?;
     Ok(bundle)
+}
+
+/// Is `id` safe to use as the single `verify/group/<id>` path segment? Rejects
+/// empty ids, `.`/`..`, and anything containing a path separator so a malformed
+/// conversation id can never write outside the output directory.
+fn is_safe_segment(id: &str) -> bool {
+    !id.is_empty() && id != "." && id != ".." && !id.contains('/') && !id.contains('\\')
 }
 
 /// Serialize `value` as pretty JSON and insert it into the artifact map at `rel`.

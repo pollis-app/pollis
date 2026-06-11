@@ -23,8 +23,8 @@ use ed25519_dalek::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
 use verifiable_log_builder::CommitLeaf;
 use verifiable_log_serve::bundle::{Bundle, ConsistencyCheck, InclusionCheck};
-use verifiable_log_serve::group::{verify_group, GroupReport};
-use verifiable_log_serve::{layout, DevServer};
+use verifiable_log_serve::group::{verify_group, verify_group_in_bundle, GroupReport};
+use verifiable_log_serve::{layout, DevServer, Manifest};
 
 const TS: u64 = 1_700_000_000_000;
 
@@ -247,6 +247,87 @@ fn cli_and_http_return_the_same_report() {
     }
 
     server.shutdown();
+}
+
+#[test]
+fn generate_emits_precomputed_group_reports() {
+    let dir = tempfile::tempdir().unwrap();
+    let bundle = build_tree(dir.path(), &mixed_leaves());
+
+    // Every distinct conversation in the bundle gets a precomputed report at
+    // verify/group/<id> — no `.json` suffix, the file path IS the endpoint URL.
+    for id in ["conv-a", "conv-b", "conv-c", "conv-d"] {
+        let path = dir.path().join("verify").join("group").join(id);
+        assert!(path.is_file(), "expected a precomputed report file for {id}");
+
+        let on_disk = std::fs::read(&path).unwrap();
+        // Byte-identical to the shared verifier's compact JSON — which is exactly
+        // what the live `GET /verify/group/<id>` endpoint serializes and returns.
+        let expected = serde_json::to_vec(&verify_group_in_bundle(&bundle, id)).unwrap();
+        assert_eq!(on_disk, expected, "report for {id} must be byte-identical to the shared verifier");
+
+        // And it round-trips back into the same report the endpoint would return.
+        let report: GroupReport = serde_json::from_slice(&on_disk).unwrap();
+        assert_eq!(report.group_id, id);
+    }
+
+    // The precomputed verdicts carry the right answer per group: healthy passes,
+    // forked/regressed fail — proving the report content, not just its presence.
+    let read = |id: &str| -> GroupReport {
+        serde_json::from_slice(&std::fs::read(dir.path().join("verify").join("group").join(id)).unwrap())
+            .unwrap()
+    };
+    assert!(read("conv-a").chain_valid, "healthy group's report must pass");
+    assert!(!read("conv-c").chain_valid, "forked group's report must fail");
+    assert!(!read("conv-d").chain_valid, "regressed group's report must fail");
+
+    // A conversation never present in the bundle gets no precomputed file (it is
+    // only ever answered dynamically).
+    assert!(!dir.path().join("verify").join("group").join("conv-missing").exists());
+}
+
+#[test]
+fn precomputed_report_matches_live_endpoint_byte_for_byte() {
+    let dir = tempfile::tempdir().unwrap();
+    build_tree(dir.path(), &mixed_leaves());
+
+    // The dynamic endpoint shadows the static file on the dev server, so fetch
+    // the live response and compare it to the precomputed file on disk: the
+    // static host (R2) serves this exact file, with no server on the path.
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+    for id in ["conv-a", "conv-c", "conv-d"] {
+        let live = ureq::get(&format!("{}/verify/group/{id}", server.base_url()))
+            .call()
+            .unwrap()
+            .into_string()
+            .unwrap();
+        let on_disk =
+            std::fs::read_to_string(dir.path().join("verify").join("group").join(id)).unwrap();
+        assert_eq!(on_disk, live, "precomputed file for {id} must match the live endpoint body");
+    }
+    server.shutdown();
+}
+
+#[test]
+fn index_advertises_the_conversation_list() {
+    let dir = tempfile::tempdir().unwrap();
+    build_tree(dir.path(), &mixed_leaves());
+
+    let manifest: Manifest =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("v1").join("index.json")).unwrap())
+            .unwrap();
+
+    // Distinct, sorted, one entry per conversation that has a report file.
+    assert_eq!(
+        manifest.conversations,
+        vec![
+            "conv-a".to_string(),
+            "conv-b".to_string(),
+            "conv-c".to_string(),
+            "conv-d".to_string(),
+        ],
+        "index.json must list every conversation with a precomputed report"
+    );
 }
 
 #[test]
