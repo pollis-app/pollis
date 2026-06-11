@@ -19,7 +19,9 @@ name: Publish Transparency Log
 # Required repository secrets (names exact):
 #   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN  — read mls_commit_log
 #   STH_SIGNING_KEY                       — 32-byte hex Ed25519 log signing key
-#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET — R2 sync
+#   R2_TRANSPARENCY_ACCESS_KEY_ID, R2_TRANSPARENCY_SECRET_ACCESS_KEY,
+#   R2_TRANSPARENCY_ENDPOINT, R2_TRANSPARENCY_BUCKET — R2 sync (namespaced:
+#   the bare R2_* names are account-wide creds owned by the release workflows)
 
 on:
   schedule:
@@ -41,8 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # R2 speaks the S3 API; the aws CLI reads creds from these standard vars.
-      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_TRANSPARENCY_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_TRANSPARENCY_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
       # Cloudflare R2 rejects the integrity checksums newer aws-cli v2 adds by
       # default; only send/verify them when the operation actually requires it.
@@ -137,8 +139,8 @@ jobs:
       - name: Publish immutable artifacts (pass 1)
         if: steps.decide.outputs.build == 'true'
         env:
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
         run: |
           set -euo pipefail
           # --size-only: immutable artifacts have byte-stable content per path, so
@@ -155,8 +157,8 @@ jobs:
       - name: Publish mutable head + reports (pass 2)
         if: steps.decide.outputs.build == 'true'
         env:
-          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
-          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
         run: |
           set -euo pipefail
           # The moving documents last; --content-type so the extensionless
