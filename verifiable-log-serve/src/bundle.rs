@@ -103,4 +103,11 @@ pub struct Manifest {
     pub consistency: Vec<ConsistencyRef>,
     /// Tenants whose uniqueness invariant a verifier enforces on replay.
     pub enforce_unique: Vec<String>,
+    /// Every conversation id with a precomputed `/verify/group/<id>` report,
+    /// sorted. Lets a client enumerate the per-conversation endpoints (and learn
+    /// how many conversations the log carries) without scraping every entry.
+    /// `#[serde(default)]` so an older `index.json` written before this field
+    /// existed still deserializes.
+    #[serde(default)]
+    pub conversations: Vec<String>,
 }

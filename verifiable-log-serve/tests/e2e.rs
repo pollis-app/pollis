@@ -127,6 +127,28 @@ fn layout_generator_writes_documented_files() {
 }
 
 #[test]
+fn non_commit_entries_emit_no_group_reports() {
+    // This fixture's entries are raw "commits"/"accounts" payloads, not encoded
+    // CommitLeafs, so none decode to a conversation: no per-group reports, and an
+    // empty conversation list in the manifest.
+    let dir = tempfile::tempdir().unwrap();
+    generate_into(dir.path());
+
+    let group_dir = dir.path().join("verify").join("group");
+    let empty = !group_dir.exists()
+        || std::fs::read_dir(&group_dir).unwrap().next().is_none();
+    assert!(empty, "non-commit entries must not produce any verify/group reports");
+
+    let manifest: verifiable_log_serve::Manifest =
+        serde_json::from_str(&std::fs::read_to_string(dir.path().join("v1").join("index.json")).unwrap())
+            .unwrap();
+    assert!(
+        manifest.conversations.is_empty(),
+        "no conversations should be advertised for non-commit entries"
+    );
+}
+
+#[test]
 fn fetch_over_http_and_verify_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
     generate_into(dir.path());

@@ -134,11 +134,12 @@ fn run_generate(bundle_path: &PathBuf, out: &PathBuf) -> Result<()> {
     let bundle = layout::load_bundle(bundle_path)?;
     let manifest = layout::generate(&bundle, out)?;
     println!(
-        "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s) -> {}",
+        "generated static tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s), {} group report(s) -> {}",
         manifest.entry_count,
         manifest.sth_sizes.len(),
         manifest.inclusion.len(),
         manifest.consistency.len(),
+        manifest.conversations.len(),
         out.join(layout::API_VERSION).display()
     );
     println!("public_key: {}", manifest.public_key);
