@@ -350,6 +350,11 @@ pub async fn start_screen_share(
     //    LiveKit source from here on; on EOF / error it just exits and
     //    relies on stop_screen_share for the rest of cleanup.
     let source_for_task = source.clone();
+    // Local self-preview now rides the same WebSocket broadcast the remote
+    // tiles use (spike/tauri-revival); without this the sharer's own preview
+    // tile stays black, since the frontend stopped listening to the IPC frame
+    // Channel when it switched to the WS transport.
+    let preview_tx = state.screenshare_frame_tx.clone();
     let (events_for_task, frames_for_task) = {
         let ss = state.screenshare.lock().await;
         (ss.events.clone(), ss.frames.clone())
@@ -378,16 +383,19 @@ pub async fn start_screen_share(
                     timestamp_us,
                     bgrx,
                 })) => {
-                    let preview = match &frames_for_task {
-                        Some(sink)
-                            if last_preview
-                                .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL) =>
-                        {
-                            last_preview = Some(std::time::Instant::now());
-                            Some(sink.as_ref())
-                        }
-                        _ => None,
+                    // Throttle self-preview to PREVIEW_MIN_INTERVAL; the same
+                    // gate feeds both the legacy RawSink and the WS broadcast.
+                    let show_preview = last_preview
+                        .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL);
+                    if show_preview {
+                        last_preview = Some(std::time::Instant::now());
+                    }
+                    let preview = if show_preview {
+                        frames_for_task.as_ref().map(|s| s.as_ref())
+                    } else {
+                        None
                     };
+                    let preview_ws = if show_preview { Some(&preview_tx) } else { None };
                     push_frame(
                         &source_for_task,
                         width,
@@ -396,6 +404,7 @@ pub async fn start_screen_share(
                         timestamp_us,
                         &bgrx,
                         preview,
+                        preview_ws,
                     );
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {
@@ -448,6 +457,7 @@ fn push_frame(
     timestamp_us: i64,
     bgrx: &[u8],
     preview: Option<&dyn RawSink>,
+    preview_ws: Option<&tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>>,
 ) {
     // libwebrtc + VP8 require even dimensions; libyuv I420 chroma
     // alignment does too. Crop down rather than ever publishing odd
@@ -466,7 +476,7 @@ fn push_frame(
         buffer,
     };
     source.capture_frame(&frame);
-    if let Some(sink) = preview {
+    if preview.is_some() || preview_ws.is_some() {
         let bytes = pack_frame_bytes(
             LOCAL_PREVIEW_KEY,
             out_w,
@@ -474,6 +484,12 @@ fn push_frame(
             timestamp_us,
             &frame.buffer,
         );
-        let _ = sink.send(bytes);
+        let bytes = std::sync::Arc::new(bytes);
+        if let Some(tx) = preview_ws {
+            let _ = tx.send(bytes.clone());
+        }
+        if let Some(sink) = preview {
+            let _ = sink.send((*bytes).clone());
+        }
     }
 }
