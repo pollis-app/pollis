@@ -64,7 +64,10 @@ mod unsupported;
 pub use commands::{
     screenshare_ws_url, subscribe_screen_share_events, subscribe_screen_share_frames,
 };
-pub use remote_video::{on_remote_video_subscribed, on_remote_video_unsubscribed, on_room_disconnected};
+pub use remote_video::{
+    on_participant_left, on_remote_video_subscribed, on_remote_video_unsubscribed,
+    on_room_disconnected,
+};
 pub use state::ScreenShareState;
 pub use stop::stop_screen_share;
 #[cfg(any(target_os = "linux", target_os = "macos"))]

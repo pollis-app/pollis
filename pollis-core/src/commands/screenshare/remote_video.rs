@@ -98,6 +98,37 @@ pub async fn on_remote_video_unsubscribed(
     }
 }
 
+/// Tear down any screenshare a participant was publishing when they leave the
+/// room. LiveKit doesn't reliably emit per-track `TrackUnsubscribed` on a
+/// `ParticipantDisconnected`, so without this the remote stream's drain task
+/// and the frontend's `screenShareRemotes` entry linger — and if the participant
+/// later rejoins (without resharing) their tile renders a dead, black canvas
+/// instead of falling back to the avatar. Track keys are `{identity}-{sid}`, so
+/// every key prefixed with this participant's identity is theirs.
+pub async fn on_participant_left(participant_identity: &str, state: &Arc<AppState>) {
+    let prefix = format!("{participant_identity}-");
+    let (events, stopped_keys) = {
+        let mut ss = state.screenshare.lock().await;
+        let keys: Vec<String> = ss
+            .remote_drain_tasks
+            .keys()
+            .filter(|k| k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for k in &keys {
+            if let Some(t) = ss.remote_drain_tasks.remove(k) {
+                t.abort();
+            }
+        }
+        (ss.events.clone(), keys)
+    };
+    if let Some(ev) = events {
+        for track_key in stopped_keys {
+            let _ = ev.send(ScreenShareEvent::RemoteStopped { track_key });
+        }
+    }
+}
+
 pub async fn on_room_disconnected(state: &Arc<AppState>) {
     let _ = stop_screen_share(state).await;
     let mut ss = state.screenshare.lock().await;

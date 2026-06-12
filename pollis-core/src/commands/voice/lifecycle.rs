@@ -634,6 +634,13 @@ pub async fn join_voice_channel(
                         continue;
                     }
                     eprintln!("[voice] participant left: {identity}");
+                    // Clear any screenshare they were publishing so a stale
+                    // black tile doesn't linger (esp. if they later rejoin).
+                    crate::commands::screenshare::on_participant_left(
+                        &identity,
+                        &state_for_room,
+                    )
+                    .await;
                     let voice = voice_arc.lock().await;
                     if let Some(ch) = &voice.channel {
                         let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
