@@ -8,11 +8,18 @@ fn main() {
     // path entirely, regardless of how the binary was launched.
     #[cfg(target_os = "linux")]
     {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-        // Disable the entire hardware compositing pipeline. DMABUF alone is not
-        // enough on some drivers (NVIDIA proprietary, certain VM GPU configs)
-        // where EGL compositing still aborts.
-        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        // spike/tauri-revival: the native screenshare render leg paints frames
+        // into a WebGL canvas, which wants the GPU compositing pipeline these
+        // two vars disable. The disable was added for a *transparent* window
+        // (EGL hard-abort on NVIDIA/VM EGL); pollis's window is opaque, so on
+        // GPUs with working EGL we want compositing ON. Opt in with
+        // POLLIS_ENABLE_COMPOSITING=1; default stays the conservative path.
+        if std::env::var("POLLIS_ENABLE_COMPOSITING").is_err() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+            // DMABUF alone isn't enough on some drivers (NVIDIA proprietary,
+            // certain VM GPU configs) where EGL compositing still aborts.
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
     }
 
     pollis_lib::run();

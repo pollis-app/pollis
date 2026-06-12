@@ -210,9 +210,22 @@ pub async fn start_screen_share(
             eprintln!("[screenshare] helper announced {}x{}", width, height);
             (width & !1, height & !1)
         }
-        Ok(Some(CaptureMsg::Frame { .. }))
-        | Ok(Some(CaptureMsg::Sources(_)))
-        | Ok(Some(CaptureMsg::Select(_))) => {
+        // The Linux pipewire helper can deliver a Frame ahead of (or
+        // instead of) the Format message: `param_changed` may fire first
+        // with a not-yet-negotiated zero size — skipping the Format send —
+        // while `process` then streams frames carrying real dimensions.
+        // Frames are self-describing, so treat a leading Frame as the
+        // format announcement and drop its single payload; the next frame
+        // (~1 refresh later) feeds the publish loop normally. (spike/
+        // tauri-revival — this path went unexercised through the Electron era.)
+        Ok(Some(CaptureMsg::Frame { width, height, .. })) => {
+            eprintln!(
+                "[screenshare] helper sent frame before format; deriving {}x{}",
+                width, height
+            );
+            (width & !1, height & !1)
+        }
+        Ok(Some(CaptureMsg::Sources(_))) | Ok(Some(CaptureMsg::Select(_))) => {
             eprintln!("[screenshare] helper sent unexpected message before format");
             stop_screen_share(state).await.ok();
             return Err(fail_capture(

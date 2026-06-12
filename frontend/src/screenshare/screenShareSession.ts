@@ -11,7 +11,7 @@
 //     through `invoke('start_screen_share', …)` as before, and the I420
 //     frame channel feeds the canvas tile.
 
-import { Channel, hasMediaDevices, invoke } from "../bridge";
+import { Channel, hasElectron, invoke } from "../bridge";
 
 import { appStore } from "../stores/appStore";
 import { playSfx, SFX } from "../utils/sfx";
@@ -203,7 +203,7 @@ class ScreenShareSession {
     }
     this.subscribed = true;
 
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       // Trigger the side-effect: importing livekitView installs its
       // store subscription, so the JS view client is ready to follow
       // voice phase changes.
@@ -339,7 +339,7 @@ class ScreenShareSession {
    *  `desktopCapturer.getSources()` over IPC and route them to the same
    *  in-app picker so the UX is identical on every platform. */
   async enumerate(): Promise<SourceList> {
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       const api = (window as Window & {
         electronAPI?: {
           desktopMediaEnumerate?: () => Promise<
@@ -403,7 +403,7 @@ class ScreenShareSession {
    *  picking a source. Under Electron there's no parked picker (Chromium
    *  drives selection inline). */
   async cancelPicker(): Promise<void> {
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       return;
     }
     await invoke("cancel_screen_share_picker");
@@ -416,7 +416,7 @@ class ScreenShareSession {
    *  on Linux/Windows it must be undefined so the system portal / WGC
    *  picker can show. */
   async start(selection?: Selection): Promise<void> {
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       await this.startElectron(selection);
       return;
     }
@@ -563,7 +563,7 @@ class ScreenShareSession {
   }
 
   async stop(): Promise<void> {
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       const { livekitView } = await import("./livekitView");
       await livekitView.unpublishScreenShare();
       const store = appStore;
