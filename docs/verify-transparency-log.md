@@ -166,7 +166,47 @@ every commit included **and** the invariant holds); `included` is per-commit;
 `sender_id` is a user id, recorded but **not** authorization-checked in this slice;
 `violations` is empty exactly when `chain_valid` is true.
 
-## 4. Fully offline — `monitor verify`
+## 4. Verify one user's account-key history — `pollis-verify account`
+
+Pollis publishes a second tree — the **account-key directory** — under
+`/v1/account-keys/...`, with one leaf per account identity-key version. To check
+a single user's key history — that every published version is provably included
+in the signed account tree, and that `identity_version` is append-only and never
+regresses (no silent key substitution) — pass the base URL and the opaque
+`user_id`:
+
+```bash
+pollis-verify account <base-url> <user-id>
+```
+
+It verifies the account STH signature **first** (under the account tree's own
+domain context — a commit-log head cannot stand in here), selects that user's
+key versions, checks each one's inclusion proof against the signed head, and
+replays them through the no-regression / no-duplicate-version invariant:
+
+```
+$ pollis-verify account https://verify.pollis.com 01KP43R2QK8N0M5VHE3WXGN5H
+User:    01KP43R2QK8N0M5VHE3WXGN5H
+Found:   yes
+STH:     tree_size 12  root 7c1f…b90a
+Key history (seq order):
+  v1    seq 3      key 9af2c1…7d4e  [included ✓]
+  v2    seq 9      key 41bb08…12ff  [included ✓]
+
+PASS: account key chain is valid
+```
+
+A valid chain exits `0`; a missing inclusion proof, a duplicate version, or a
+version regression lists the reason under `Violations:`, prints `FAIL: account
+key chain is NOT valid`, and exits non-zero. As with `group`, add `--json` for
+the machine-readable `AccountReport`. (A `user_id` not in the log reports
+`Found: no` with a vacuously-valid empty chain.)
+
+The Pollis app runs this same verifier internally — `self_audit_account_key`
+checks your own key, `audit_peer_account_key` checks a contact you've verified —
+so the desktop client and an independent auditor reach the identical verdict.
+
+## 5. Fully offline — `monitor verify`
 
 If you would rather not trust the network at all during verification, download the
 signed **bundle** once and verify it with zero further network access. The bundle

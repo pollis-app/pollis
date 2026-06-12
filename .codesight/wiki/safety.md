@@ -145,19 +145,77 @@ Renderer plumbing:
 
 | Attack | Detection | Action |
 |---|---|---|
-| Turso swaps a peer's `account_id_pub` | Next DM ingest OR next group reconcile via TOFU helper | Pin refreshed, verified cleared, KeyChanged event surfaces inline banner |
+| Turso swaps a peer's `account_id_pub` | Next DM ingest OR next group reconcile via TOFU helper; permanently visible in the account-key transparency log (#330) | Pin refreshed, verified cleared, KeyChanged event surfaces inline banner; swap is absent from / accountable in the published log (`pollis-verify account`, `audit_peer_account_key`) |
 | Turso adds a rogue device under an existing user (account-key unchanged) | Cross-signing check on inbound MLS commit (`mls.rs`) | Logs warning; commit currently proceeds (advisory — known gap, see whitepaper §13.2) |
 | Turso adds a rogue device under a *swapped* account-key | Both layers fire: TOFU detects the key swap; cross-sign detects the cert mismatch | Banner + warning |
 | Network MITM between two clients (no Turso write) | MLS cipher integrity (AES-128-GCM AEAD) | Decryption fails — cannot impersonate anyone |
 | Local DB tampering on attacker's own machine | Out of scope — that machine's user can do whatever they want to their own DB |
 
+## Key transparency (verifiable logs)
+
+Implemented in #330 (was the top Roadmap item below). Two append-only,
+Ed25519-signed Merkle trees (RFC 6962/9162) published at
+**https://verify.pollis.com**, domain-separated by STH context so a head for one
+tree can never stand in for the other:
+
+- **Commit-log tenant** (`pollis-verifiable-log:sth:v1`) — one leaf per MLS
+  commit. Closes server-side fork / epoch-regression / replay on the MLS commit
+  stream: replaying under its invariant proves no two commits share a
+  `(conversation_id, epoch)` and epochs only increase. See `docs/transparency.md`.
+- **Account-key tenant** (`pollis-verifiable-log:sth:v1:account-keys`) — one leaf
+  per account identity-key version, sourced from the append-only
+  `account_key_log` table (dual-written with `users.account_id_pub` at signup and
+  `reset_identity`). Closes selective targeting + key-history accountability: a
+  user's whole key history is publicly checkable and `identity_version` is proven
+  monotonic, so a server-swapped `account_id_pub` can no longer hide — it is
+  either absent from the published history (caught) or a visible, accountable
+  rotation.
+
+This is the scalable backstop the TOFU layer above always wanted: TOFU catches a
+swap only on the next message and only for keys *this* device has seen; the log
+makes every user's full history auditable by anyone.
+
+### Client integration
+
+`pollis-core/src/commands/transparency.rs`:
+
+- `self_audit_account_key` — verifies OWN published key history, reusing the same
+  `verifiable_log_serve::account::verify_account` the `pollis-verify` CLI runs
+  (no re-implementation), and compares the chain's latest version to this
+  device's current key.
+- `audit_peer_account_key` — the same against a TOFU-pinned peer's pinned key:
+  pinned key present in the published history → `ok` (notes a newer version as a
+  rotation); pinned key absent from a verifying history → `alarm` (the server
+  showed a key it never published).
+
+Statuses are `ok` / `pending` / `alarm` / `unavailable`. The log's public key is
+pinned in the client; a served key ≠ the pin is a hard `alarm` (any key can sign
+a self-consistent forged tree). All checks are **advisory** — they alert, they
+never block a send, the same policy as the key-change banner above.
+
+### Auditing infrastructure
+
+`pollis-verify account <user_id>` (released CLI), precomputed
+`/verify/account/<id>` reports, a CI post-publish self-audit, and an equivocation
+tripwire comparing each new head against the previously-published one.
+
+### Honest limits
+
+Daily publish lag (a rotation is invisible until the next build — `pending`, not
+alarm); advisory-only client checks; enumerable `user_id`s / keys (no VRF private
+lookups — keys are public by design; VRF is the upgrade path); single first-party
+log + auditor (anyone can run their own via the released `pollis-verify`);
+CI/GitHub in the publishing TCB (signing key in Actions secrets). Full
+threat-model writeup: whitepaper §6.9 / §13 item 10.
+
 ## Roadmap
 
-- **Key transparency** (CONIKS / Signal-KT style append-only log). The
-  scalable fix for an untrusted server swapping `account_id_pub` is an
-  auditable log that one or more auditors watch globally, so individual
-  users don't have to manually compare numbers. Tracked in #277 as a
-  separate piece of work, not a quick follow-up.
+- **VRF private lookups for key transparency.** The shipped log (#330, see "Key
+  transparency" above) is enumerable by design — `user_id`s and public keys are
+  listable, since the keys are public anyway. A CONIKS / Signal-KT-style
+  VRF-backed private-lookup layer would hide the user set and rotation cadence
+  while keeping the same auditability. This is the remaining future upgrade, not
+  a quick follow-up.
 - **Hard-block-on-mismatch policy.** Today's stance is advisory across
   the board. A user-configurable per-conversation "block sends until
   acknowledged" mode is an open product call — would make sense for
