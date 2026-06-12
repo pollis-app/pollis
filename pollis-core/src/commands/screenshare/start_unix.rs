@@ -383,8 +383,12 @@ pub async fn start_screen_share(
                     timestamp_us,
                     bgrx,
                 })) => {
-                    // Throttle self-preview to PREVIEW_MIN_INTERVAL; the same
-                    // gate feeds both the legacy RawSink and the WS broadcast.
+                    // Self-preview rides the WS broadcast at full capture rate
+                    // — the PoC showed the WS+WebGL path is cheap, so there's no
+                    // reason to throttle the sharer's own tile to 5fps. The
+                    // legacy RawSink (unused by the Tauri WS frontend) keeps its
+                    // PREVIEW_MIN_INTERVAL gate to bound IPC cost if anything
+                    // still listens on it.
                     let show_preview = last_preview
                         .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL);
                     if show_preview {
@@ -395,7 +399,7 @@ pub async fn start_screen_share(
                     } else {
                         None
                     };
-                    let preview_ws = if show_preview { Some(&preview_tx) } else { None };
+                    let preview_ws = Some(&preview_tx);
                     push_frame(
                         &source_for_task,
                         width,
