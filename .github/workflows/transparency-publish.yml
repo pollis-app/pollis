@@ -5,16 +5,23 @@ name: Publish Transparency Log
 # static files — there is NO server on the trust path.
 #
 # What it does, daily (and on demand):
-#   1. Cheap early-exit BEFORE any Rust toolchain: compare the published head's
-#      tree_size against a live COUNT(*) of mls_commit_log. Equal => nothing new,
-#      exit success without building. (workflow_dispatch forces a rebuild — that
-#      is the "rebuild now" button; a fresh STH timestamp re-attests freshness.)
-#   2. Build a signed bundle from mls_commit_log (STH_SIGNING_KEY) and run
-#      `serve generate` to produce the immutable /v1 tree + precomputed
-#      verify/group/<id> reports.
+#   1. Cheap early-exit BEFORE any Rust toolchain: compare each published head's
+#      tree_size against a live COUNT(*) — mls_commit_log vs the commit-log tree,
+#      AND account_key_log vs the account-key tree. Rebuild if EITHER differs (or
+#      the account head is absent). Both equal => nothing new, exit success
+#      without building. (workflow_dispatch forces a rebuild — that is the
+#      "rebuild now" button; a fresh STH timestamp re-attests freshness.)
+#   2. Build TWO signed bundles from mls_commit_log + account_key_log
+#      (STH_SIGNING_KEY) and run `serve generate` to produce the immutable /v1
+#      commit-log tree + the separate /v1/account-keys tree, each with its
+#      precomputed verify/{group,account}/<id> reports.
 #   3. Sync to R2 in two passes with a cache split: immutable artifacts FIRST,
-#      then the mutable head + reports LAST, so a published head never references
-#      a missing artifact.
+#      then the mutable heads + reports LAST, so a published head never
+#      references a missing artifact.
+#   4. Post-publish self-audit: build pollis-verify in-job and run it against the
+#      live domain so every publish verifies what is actually served, with an
+#      across-run STH consistency tripwire (cached via actions/cache) that fails
+#      loudly on equivocation.
 #
 # Required repository secrets (names exact):
 #   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN  — read mls_commit_log
@@ -68,24 +75,36 @@ jobs:
             exit 0
           fi
 
-          # Published head's tree_size (empty if never published / unreachable).
+          # Published head tree_sizes (empty if never published / unreachable).
+          # The account head 404s until this feature's first publish — an empty
+          # value therefore reads as "needs rebuild" below.
           published="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/sth/latest.json \
             | jq -r '.tree_size' 2>/dev/null || echo "")"
+          published_acct="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/account-keys/sth/latest.json \
+            | jq -r '.tree_size' 2>/dev/null || echo "")"
 
-          # Live commit count via Turso's HTTP (Hrana) pipeline API. The DB URL is
+          # Live counts via Turso's HTTP (Hrana) pipeline API. The DB URL is
           # libsql://; the HTTP endpoint is the same host over https.
           http_url="${TURSO_DATABASE_URL/libsql:\/\//https://}"
           http_url="${http_url%/}"
-          count="$(curl -fsS --max-time 20 "${http_url}/v2/pipeline" \
-            -H "Authorization: Bearer ${TURSO_AUTH_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -d '{"requests":[{"type":"execute","stmt":{"sql":"SELECT COUNT(*) FROM mls_commit_log"}},{"type":"close"}]}' \
-            | jq -r '.results[0].response.result.rows[0][0].value')"
+          query_count() {
+            curl -fsS --max-time 20 "${http_url}/v2/pipeline" \
+              -H "Authorization: Bearer ${TURSO_AUTH_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$1\"}},{\"type\":\"close\"}]}" \
+              | jq -r '.results[0].response.result.rows[0][0].value'
+          }
+          count="$(query_count 'SELECT COUNT(*) FROM mls_commit_log')"
+          acct_count="$(query_count 'SELECT COUNT(*) FROM account_key_log')"
 
-          echo "published tree_size: ${published:-<none>} | live commit count: ${count}"
+          echo "commit-log:  published ${published:-<none>} | live ${count}"
+          echo "account-key: published ${published_acct:-<none>} | live ${acct_count}"
 
-          if [ -n "${published}" ] && [ "${published}" = "${count}" ]; then
-            echo "Already up to date — nothing to publish."
+          # Rebuild if EITHER tree is behind (or absent). Both must be present
+          # AND equal to skip.
+          if [ -n "${published}" ] && [ "${published}" = "${count}" ] \
+             && [ -n "${published_acct}" ] && [ "${published_acct}" = "${acct_count}" ]; then
+            echo "Both trees already up to date — nothing to publish."
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -122,11 +141,18 @@ jobs:
           set -euo pipefail
           # STH timestamp is supplied explicitly (the builder never reads the clock).
           ts="$(date +%s%3N)"
-          ./target/release/builder build --db "${TURSO_DATABASE_URL}" --out bundle.json --timestamp "${ts}"
-          ./target/release/serve generate --bundle bundle.json --out ./site
-          # The bundle carries hashed commit identities only — no plaintext — but
-          # remove it anyway so it can never be synced.
-          rm -f bundle.json
+          # Build BOTH bundles: the commit log AND (via --account-out) the
+          # account-key directory — its own tree, signed under its own domain
+          # context with the same key.
+          ./target/release/builder build --db "${TURSO_DATABASE_URL}" \
+            --out bundle.json --account-out account-bundle.json --timestamp "${ts}"
+          # generate emits both trees into ./site (the account tree under
+          # v1/account-keys/ plus verify/account/<id> reports).
+          ./target/release/serve generate --bundle bundle.json \
+            --account-bundle account-bundle.json --out ./site
+          # The bundles carry hashed commit identities / public keys only — no
+          # plaintext — but remove them anyway so they can never be synced.
+          rm -f bundle.json account-bundle.json
 
       # (d) Two-pass R2 sync with the cache split. Immutable artifacts go up
       #     first so the mutable head/reports published last never reference a
@@ -152,7 +178,10 @@ jobs:
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "v1/sth/latest.json" \
             --exclude "v1/index.json" \
-            --exclude "verify/group/*"
+            --exclude "verify/group/*" \
+            --exclude "v1/account-keys/sth/latest.json" \
+            --exclude "v1/account-keys/index.json" \
+            --exclude "verify/account/*"
 
       - name: Publish mutable head + reports (pass 2)
         if: steps.decide.outputs.build == 'true'
@@ -171,4 +200,101 @@ jobs:
             --exclude "*" \
             --include "v1/sth/latest.json" \
             --include "v1/index.json" \
-            --include "verify/group/*"
+            --include "verify/group/*" \
+            --include "v1/account-keys/sth/latest.json" \
+            --include "v1/account-keys/index.json" \
+            --include "verify/account/*"
+
+      # (e) Post-publish self-audit: verify what is ACTUALLY served at the live
+      #     domain (both trees), and run an across-run equivocation tripwire. The
+      #     prior run's latest STH for each tree is restored from the cache; a
+      #     previously-published immutable STH that changed (or vanished) means
+      #     the server rewrote attested history — fail loudly.
+      - name: Restore prior published STHs (tripwire state)
+        if: steps.decide.outputs.build == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: .sth-prev
+          # A run-id key always misses; restore-keys then pulls the most recent
+          # prior run's cache (cache entries are immutable per key, so each run
+          # writes a fresh one and reads the latest older one).
+          key: transparency-sth-${{ github.run_id }}
+          restore-keys: |
+            transparency-sth-
+
+      - name: Build pollis-verify (auditor CLI, cargo already warm)
+        if: steps.decide.outputs.build == 'true'
+        run: cargo build --release --locked -p verifiable-log-serve --bin pollis-verify
+
+      - name: Self-audit the published log + equivocation tripwire
+        if: steps.decide.outputs.build == 'true'
+        run: |
+          set -euo pipefail
+          base="https://verify.pollis.com"
+
+          # (1) Verify what is actually served — BOTH trees. pollis-verify exits
+          #     non-zero on any failed signature/proof/consistency check; an
+          #     absent account tree is only a warning (won't fail this gate).
+          ./target/release/pollis-verify remote "${base}"
+
+          # (2) Across-run equivocation tripwire. Per-size STHs are immutable and
+          #     never deleted, so the STH the server published last run at size
+          #     S_old must STILL be byte-identical now. A changed root/signature
+          #     at S_old, a vanished S_old, or a shrinking latest size all mean
+          #     attested history was rewritten — append-only was violated.
+          check_tree() {
+            name="$1"; prev="$2"; sth_base="$3"; latest_url="$4"
+            if [ ! -f "${prev}" ]; then
+              echo "${name}: no prior STH cached (first run) — seeding tripwire."
+              return 0
+            fi
+            old_size="$(jq -r '.tree_size' "${prev}")"
+            old_root="$(jq -r '.root_hash' "${prev}")"
+            old_sig="$(jq -r '.signature' "${prev}")"
+
+            pinned="$(curl -fsS --max-time 20 "${sth_base}/${old_size}.json" || echo "")"
+            if [ -z "${pinned}" ]; then
+              echo "::error::${name}: previously-published STH at size ${old_size} is GONE — history dropped."
+              return 1
+            fi
+            pin_root="$(echo "${pinned}" | jq -r '.root_hash')"
+            pin_sig="$(echo "${pinned}" | jq -r '.signature')"
+            if [ "${pin_root}" != "${old_root}" ] || [ "${pin_sig}" != "${old_sig}" ]; then
+              echo "::error::${name}: EQUIVOCATION — STH at size ${old_size} changed since last run."
+              return 1
+            fi
+
+            cur_size="$(curl -fsS --max-time 20 "${latest_url}" | jq -r '.tree_size')"
+            if [ "${cur_size}" -lt "${old_size}" ]; then
+              echo "::error::${name}: latest tree_size shrank ${old_size} -> ${cur_size} — append-only violated."
+              return 1
+            fi
+            echo "${name}: consistent — size ${old_size} still pinned, latest ${cur_size}."
+            return 0
+          }
+
+          rc=0
+          check_tree "commit-log" ".sth-prev/commit-latest.json" \
+            "${base}/v1/sth" "${base}/v1/sth/latest.json" || rc=1
+          # The account tree may be brand-new this publish; only tripwire if a
+          # prior STH was cached.
+          check_tree "account-key" ".sth-prev/account-latest.json" \
+            "${base}/v1/account-keys/sth" "${base}/v1/account-keys/sth/latest.json" || rc=1
+          if [ "${rc}" -ne 0 ]; then
+            echo "Equivocation tripwire FAILED."
+            exit 1
+          fi
+
+          # (3) Refresh the cached latest STHs for the next run's tripwire.
+          mkdir -p .sth-prev
+          curl -fsS --max-time 20 "${base}/v1/sth/latest.json" -o .sth-prev/commit-latest.json
+          curl -fsS --max-time 20 "${base}/v1/account-keys/sth/latest.json" \
+            -o .sth-prev/account-latest.json \
+            || echo "account latest not yet visible — will seed next run"
+
+      - name: Save published STHs for next run's tripwire
+        if: steps.decide.outputs.build == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .sth-prev
+          key: transparency-sth-${{ github.run_id }}

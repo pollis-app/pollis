@@ -8,7 +8,7 @@
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
-use verifiable_log_serve::{group, remote, ServeError};
+use verifiable_log_serve::{account, group, remote, ServeError};
 
 #[derive(Parser)]
 #[command(
@@ -24,7 +24,9 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Verify the whole log: every STH signature, all inclusion proofs, and
-    /// consistency between tree sizes. Trusts only the pinned public key.
+    /// consistency between tree sizes — for BOTH the commit-log tree and the
+    /// account-key tree. Trusts only the pinned public key. If the account-key
+    /// tree is absent it prints a warning and still verifies the commit log.
     Remote {
         /// Base URL of the transparency log, e.g. https://verify.pollis.com
         base_url: String,
@@ -36,6 +38,18 @@ enum Command {
         base_url: String,
         /// Conversation id to verify.
         conversation_id: String,
+        /// Print the report as JSON instead of a human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Verify a single user's account-key history chain: that every published
+    /// identity-key version is provably included in the signed account tree and
+    /// the versions are strictly increasing. Exits non-zero if invalid.
+    Account {
+        /// Base URL of the transparency log, e.g. https://verify.pollis.com
+        base_url: String,
+        /// User id to verify.
+        user_id: String,
         /// Print the report as JSON instead of a human-readable summary.
         #[arg(long)]
         json: bool,
@@ -55,6 +69,19 @@ fn run() -> Result<bool, ServeError> {
             json,
         } => {
             let report = group::verify_group(&base_url, &conversation_id)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                report.print();
+            }
+            Ok(report.chain_valid)
+        }
+        Command::Account {
+            base_url,
+            user_id,
+            json,
+        } => {
+            let report = account::verify_account(&base_url, &user_id)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {

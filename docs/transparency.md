@@ -57,8 +57,29 @@ published in multiple places. Trust rests on the signature and the proofs — ne
 on the server that hands them to you.
 
 > **Scope note.** This document describes the verifiable-log tooling shipped under
-> issue #330. The broader account-key directory tenant and the end-to-end
-> threat-model writeup live elsewhere and are out of scope here.
+> issue #330, now covering **both** published trees (the MLS commit log and the
+> account-key directory — see below). The end-to-end threat-model writeup lives
+> elsewhere and is out of scope here.
+
+## Two domain-separated trees
+
+The log actually publishes **two independent Merkle trees**, each with its own
+entries, its own Signed Tree Heads, and its own append-only history:
+
+- **the MLS commit log** — every membership/key-change commit, the tree described
+  throughout this document; and
+- **the account-key directory** — one leaf per account identity-key version
+  (`user_id`, `identity_version`, the Ed25519 account public key), so anyone can
+  audit that a user's published key history is append-only and that
+  `identity_version` only ever increases (no silent key substitution, no replay
+  of a revoked key).
+
+The two trees are **never interleaved**. They are signed by the same Ed25519 key
+but under **different domain-separation contexts** (`…:sth:v1` for the commit log,
+`…:sth:v1:account-keys` for the account keys), so an STH minted for one tree
+**cannot** be replayed as the other's — a verifier checks each head under its own
+context. The commit-log tree and every one of its `/v1/...` bytes are exactly as
+before; the account-key tree lives entirely under `/v1/account-keys/...`.
 
 ## The four pieces
 

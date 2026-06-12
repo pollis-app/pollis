@@ -23,6 +23,27 @@
 //! | `/v1/proof/consistency/<first>-<second>.json`         | [`ConsistencyProof`]              | immutable |
 //! | `/verify/group/<conversation_id>`                     | [`GroupReport`] (precomputed)     | short     |
 //!
+//! ### The account-key tree (`/v1/account-keys/...`)
+//!
+//! The account-key directory is a **fully separate** Merkle tree from the commit
+//! log — its own entries, its own STHs (signed under the domain-separated
+//! [`account_key::STH_CONTEXT`]), its own manifest. So it gets its own subtree,
+//! mirroring the commit-log layout one level down under `account-keys/`; the
+//! commit-log `/v1/...` paths above are never touched. The two trees only share
+//! the signing key and the `/verify/...` namespace.
+//!
+//! | URL                                                              | Contents                          | Cache     |
+//! |------------------------------------------------------------------|-----------------------------------|-----------|
+//! | `/v1/account-keys/public_key.json`                               | [`PublicKeyDoc`]                  | immutable |
+//! | `/v1/account-keys/index.json`                                    | [`AccountManifest`] (discovery)   | short     |
+//! | `/v1/account-keys/sth/latest.json`                               | newest account [`Sth`]            | short     |
+//! | `/v1/account-keys/sth/<tree_size>.json`                          | account [`Sth`] at that size      | immutable |
+//! | `/v1/account-keys/entries.json`                                  | full ordered `[Entry]`            | immutable |
+//! | `/v1/account-keys/entries/<index>.json`                          | one [`Entry`]                     | immutable |
+//! | `/v1/account-keys/proof/inclusion/<tree_size>/<leaf_index>.json` | [`InclusionProof`]                | immutable |
+//! | `/v1/account-keys/proof/consistency/<first>-<second>.json`       | [`ConsistencyProof`]              | immutable |
+//! | `/verify/account/<user_id>`                                      | [`AccountReport`] (precomputed)   | short     |
+//!
 //! The file path under the output root mirrors the URL exactly (drop the
 //! leading `/`), so serving is a literal static-file mapping.
 //!
@@ -37,23 +58,31 @@
 //! JSON — the static host therefore serves the same verdict the live server
 //! would, with no server on the path. These reports move as the log grows (a new
 //! head changes every group's `sth_tree_size`/inclusion), so they are
-//! short-cached like `index.json` and `sth/latest.json`.
+//! short-cached like `index.json` and `sth/latest.json`. The account-key tree's
+//! `/verify/account/<user_id>` reports are emitted the same way (see
+//! [`generate_account`]).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::Serialize;
 
+use verifiable_log_builder::account_key::AccountKeyLeaf;
 use verifiable_log_builder::{CommitLeaf, TENANT};
 
+use crate::account::{verify_account_in_bundle, ACCOUNT_TENANT};
 use crate::bundle::{
-    Bundle, ConsistencyRef, InclusionRef, Manifest, PublicKeyDoc,
+    AccountManifest, Bundle, ConsistencyRef, InclusionRef, Manifest, PublicKeyDoc,
 };
 use crate::error::{Result, ServeError};
 use crate::group::verify_group_in_bundle;
 
 /// API version segment all artifacts live under.
 pub const API_VERSION: &str = "v1";
+
+/// Path prefix the account-key tree's artifacts live under — the commit-log
+/// `/v1` surface one level down, in its own subtree.
+pub const ACCOUNT_API_PREFIX: &str = "v1/account-keys";
 
 /// The complete read API for a bundle as an in-memory map of
 /// **relative path → JSON bytes** (e.g. `"v1/sth/latest.json"`), exactly the
@@ -185,6 +214,148 @@ pub fn generate_artifacts(bundle: &Bundle) -> Result<(Manifest, BTreeMap<String,
 /// host and the live server serve byte-identical artifacts.
 pub fn generate(bundle: &Bundle, root: &Path) -> Result<Manifest> {
     let (manifest, artifacts) = generate_artifacts(bundle)?;
+    for (rel, bytes) in &artifacts {
+        let path = root.join(rel);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, bytes)?;
+    }
+    Ok(manifest)
+}
+
+/// The complete read API for the **account-key** tree as an in-memory map of
+/// **relative path → JSON bytes** (e.g. `"v1/account-keys/sth/latest.json"`),
+/// exactly the content the static subtree would write to disk.
+///
+/// This mirrors [`generate_artifacts`] one level down under
+/// [`ACCOUNT_API_PREFIX`]: the same immutable STH / entries / proofs surface,
+/// plus a precomputed `/verify/account/<user_id>` report for every user in the
+/// bundle. The artifact *bytes* are tenant-agnostic (an STH already carries its
+/// own signature, signed under the account context by the builder); only the
+/// path prefix, the per-user reports, and the manifest shape differ.
+pub fn generate_account_artifacts(
+    bundle: &Bundle,
+) -> Result<(AccountManifest, BTreeMap<String, Vec<u8>>)> {
+    let mut map: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+    let prefix = ACCOUNT_API_PREFIX;
+
+    // /v1/account-keys/public_key.json
+    insert_json(
+        &mut map,
+        format!("{prefix}/public_key.json"),
+        &PublicKeyDoc {
+            public_key: bundle.public_key.clone(),
+        },
+    )?;
+
+    // /v1/account-keys/sth/<size>.json for every head, plus latest.json.
+    let mut sth_sizes: Vec<u64> = Vec::with_capacity(bundle.sths.len());
+    for sth in &bundle.sths {
+        insert_json(&mut map, format!("{prefix}/sth/{}.json", sth.tree_size), sth)?;
+        sth_sizes.push(sth.tree_size);
+    }
+    sth_sizes.sort_unstable();
+    sth_sizes.dedup();
+
+    let latest = bundle.sths.iter().max_by_key(|s| s.tree_size);
+    if let Some(latest) = latest {
+        insert_json(&mut map, format!("{prefix}/sth/latest.json"), latest)?;
+    }
+
+    // /v1/account-keys/entries.json and /v1/account-keys/entries/<index>.json
+    insert_json(&mut map, format!("{prefix}/entries.json"), &bundle.entries)?;
+    for (i, entry) in bundle.entries.iter().enumerate() {
+        insert_json(&mut map, format!("{prefix}/entries/{i}.json"), entry)?;
+    }
+
+    // /v1/account-keys/proof/inclusion/<tree_size>/<leaf_index>.json
+    let mut inclusion_refs: Vec<InclusionRef> = Vec::with_capacity(bundle.inclusion.len());
+    for check in &bundle.inclusion {
+        let ts = check.proof.tree_size;
+        let li = check.proof.leaf_index;
+        insert_json(
+            &mut map,
+            format!("{prefix}/proof/inclusion/{ts}/{li}.json"),
+            &check.proof,
+        )?;
+        inclusion_refs.push(InclusionRef {
+            tree_size: ts,
+            leaf_index: li,
+        });
+    }
+
+    // /v1/account-keys/proof/consistency/<first>-<second>.json
+    let mut consistency_refs: Vec<ConsistencyRef> = Vec::with_capacity(bundle.consistency.len());
+    for check in &bundle.consistency {
+        let f = check.proof.first_size;
+        let s = check.proof.second_size;
+        insert_json(
+            &mut map,
+            format!("{prefix}/proof/consistency/{f}-{s}.json"),
+            &check.proof,
+        )?;
+        consistency_refs.push(ConsistencyRef {
+            first: f,
+            second: s,
+        });
+    }
+
+    // /verify/account/<user_id> — a precomputed report for every distinct user
+    // in the bundle's account-key entries. The bytes are compact JSON of the
+    // shared [`verify_account_in_bundle`] verdict, so a future live
+    // `GET /verify/account/<id>` endpoint serving the same core returns
+    // byte-identical responses. The file has no extension — its path is the
+    // endpoint URL verbatim.
+    let users: Vec<String> = bundle
+        .entries
+        .iter()
+        .filter(|e| e.tenant == ACCOUNT_TENANT)
+        .filter_map(|e| AccountKeyLeaf::decode(&e.data).ok())
+        .map(|leaf| leaf.user_id)
+        // A report is one path segment under `verify/account/`; reject anything
+        // that could escape it. Real user ids are ULID-shaped and always pass —
+        // this only guards against malformed source data.
+        .filter(|id| is_safe_segment(id))
+        .collect::<BTreeSet<String>>()
+        .into_iter()
+        .collect();
+    for user in &users {
+        let report = verify_account_in_bundle(bundle, user);
+        // Compact (not pretty) to match a live endpoint's `to_string`.
+        let bytes = serde_json::to_vec(&report)?;
+        map.insert(format!("verify/account/{user}"), bytes);
+    }
+
+    // /v1/account-keys/index.json — the discovery manifest, built last so it
+    // only ever advertises artifacts already present in the map.
+    let manifest = AccountManifest {
+        version: API_VERSION.to_string(),
+        public_key: bundle.public_key.clone(),
+        entry_count: bundle.entries.len() as u64,
+        latest_tree_size: latest.map(|s| s.tree_size),
+        sth_sizes,
+        inclusion: inclusion_refs,
+        consistency: consistency_refs,
+        enforce_unique: bundle.enforce_unique.clone(),
+        users,
+    };
+    insert_json(&mut map, format!("{prefix}/index.json"), &manifest)?;
+
+    Ok((manifest, map))
+}
+
+/// Write the account-key tree's static subtree for `account_bundle` under
+/// `root`, returning the [`AccountManifest`] published at
+/// `/v1/account-keys/index.json`.
+///
+/// `root` is the *same* output root as [`generate`] — the account subtree lives
+/// alongside the commit-log tree under it, never overlapping any commit-log
+/// path. Existing files are overwritten; like the commit-log tree every
+/// per-size artifact is content-addressed, so a larger bundle only ever adds
+/// files.
+pub fn generate_account(account_bundle: &Bundle, root: &Path) -> Result<AccountManifest> {
+    let (manifest, artifacts) = generate_account_artifacts(account_bundle)?;
     for (rel, bytes) in &artifacts {
         let path = root.join(rel);
         if let Some(parent) = path.parent() {

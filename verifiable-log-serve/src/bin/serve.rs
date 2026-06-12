@@ -37,9 +37,14 @@ struct Cli {
 enum Command {
     /// Generate the immutable static artifact tree from a signed bundle.
     Generate {
-        /// Path to the bundle JSON (output of `builder build`).
+        /// Path to the commit-log bundle JSON (output of `builder build`).
         #[arg(long)]
         bundle: PathBuf,
+        /// Optional path to the account-key bundle JSON (output of
+        /// `builder build --account-out`). When given, the account-key tree is
+        /// emitted under `/v1/account-keys/...` alongside the commit-log tree.
+        #[arg(long)]
+        account_bundle: Option<PathBuf>,
         /// Output directory root; the `/v1/...` tree is written under it.
         #[arg(long)]
         out: PathBuf,
@@ -99,7 +104,11 @@ enum Command {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
-        Command::Generate { bundle, out } => match run_generate(&bundle, &out) {
+        Command::Generate {
+            bundle,
+            account_bundle,
+            out,
+        } => match run_generate(&bundle, account_bundle.as_deref(), &out) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => fail(e),
         },
@@ -130,7 +139,11 @@ fn main() -> ExitCode {
     }
 }
 
-fn run_generate(bundle_path: &PathBuf, out: &PathBuf) -> Result<()> {
+fn run_generate(
+    bundle_path: &PathBuf,
+    account_bundle_path: Option<&std::path::Path>,
+    out: &PathBuf,
+) -> Result<()> {
     let bundle = layout::load_bundle(bundle_path)?;
     let manifest = layout::generate(&bundle, out)?;
     println!(
@@ -142,6 +155,22 @@ fn run_generate(bundle_path: &PathBuf, out: &PathBuf) -> Result<()> {
         manifest.conversations.len(),
         out.join(layout::API_VERSION).display()
     );
+
+    // Account-key tree (separate tree, domain-separated STH) — only when asked.
+    if let Some(account_path) = account_bundle_path {
+        let account_bundle = layout::load_bundle(account_path)?;
+        let account_manifest = layout::generate_account(&account_bundle, out)?;
+        println!(
+            "generated account-keys tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s), {} account report(s) -> {}",
+            account_manifest.entry_count,
+            account_manifest.sth_sizes.len(),
+            account_manifest.inclusion.len(),
+            account_manifest.consistency.len(),
+            account_manifest.users.len(),
+            out.join(layout::ACCOUNT_API_PREFIX).display()
+        );
+    }
+
     println!("public_key: {}", manifest.public_key);
     Ok(())
 }
