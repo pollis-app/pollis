@@ -193,6 +193,16 @@ pinned in the client; a served key ≠ the pin is a hard `alarm` (any key can si
 a self-consistent forged tree). All checks are **advisory** — they alert, they
 never block a send, the same policy as the key-change banner above.
 
+**UI surfacing.** Both commands are wrapped by React Query hooks in
+`frontend/src/hooks/queries/useTransparency.ts` (`useSelfAuditAccountKey`,
+`usePeerAuditAccountKey`) and rendered by the shared, deliberately quiet
+`components/Security/AccountKeyAuditLine.tsx` — a single advisory status line
+(no modal, no blocker), warning-toned only on `alarm` (amber, where it appends
+the report's reason). The **peer** audit shows on the user profile page
+(`pages/UserProfile.tsx`, `/user/$userId`) beside the safety number; the
+**self** audit shows in its own "Account key" section on the security page
+(`pages/SecurityPage.tsx`).
+
 ### Auditing infrastructure
 
 `pollis-verify account <user_id>` (released CLI), precomputed
