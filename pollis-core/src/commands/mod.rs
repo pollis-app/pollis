@@ -18,6 +18,7 @@ pub mod livekit;
 pub mod mls;
 pub mod r2;
 pub mod safety;
+pub mod transparency;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub mod sfx;
 // Terminal pane: real PTY backend on Unix desktop, Windows stub until

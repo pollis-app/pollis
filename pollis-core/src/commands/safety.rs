@@ -89,7 +89,7 @@ fn combined(my_fp: &str, peer_fp: &str) -> String {
 }
 
 /// Fetch a user's `account_id_pub` + `identity_version` from Turso.
-async fn fetch_account_key(
+pub(crate) async fn fetch_account_key(
     conn: &libsql::Connection,
     user_id: &str,
 ) -> Result<(Vec<u8>, i64)> {

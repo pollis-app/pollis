@@ -23,6 +23,7 @@ pub mod safety;
 pub mod screenshare;
 pub mod sfx;
 pub mod terminal;
+pub mod transparency;
 pub mod update;
 pub mod user;
 pub mod voice;
@@ -68,6 +69,7 @@ pub async fn route(cmd: &str, args: serde_json::Value) -> Result<serde_json::Val
     try_dispatch!(pin);
     try_dispatch!(device_enrollment);
     try_dispatch!(safety);
+    try_dispatch!(transparency);
     try_dispatch!(user);
     try_dispatch!(groups);
     try_dispatch!(dm);
