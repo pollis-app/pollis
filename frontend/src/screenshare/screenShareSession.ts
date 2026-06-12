@@ -11,6 +11,8 @@
 //     through `invoke('start_screen_share', …)` as before, and the I420
 //     frame channel feeds the canvas tile.
 
+import { reaction } from "mobx";
+
 import { Channel, hasElectron, invoke } from "../bridge";
 
 import { appStore } from "../stores/appStore";
@@ -190,6 +192,50 @@ class ScreenShareSession {
   // close it and the close handler can distinguish intentional vs dropped.
   private frameSocket: WebSocket | null = null;
   private frameSocketReconnect: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    // Tear down on logout. This singleton lives for the whole process, so
+    // its frame WebSocket + reconnect timer must not outlive a session: after
+    // logout the media-server token rotates, so a surviving socket 403s and
+    // the onclose→reconnect loop would spin forever. Non-React singletons
+    // react to store changes via a mobx reaction, per app convention. The
+    // reaction fires only on change (not initially), so the startup null →
+    // null is a no-op; login (user set) is ignored by the guard.
+    reaction(
+      () => appStore.currentUser,
+      (user) => {
+        if (!user) {
+          this.teardown();
+        }
+      },
+    );
+  }
+
+  /** Close the frame transport and reset subscription state. Idempotent;
+   *  safe to call when nothing is open. A subsequent `ensureSubscribed`
+   *  (after the next login) re-wires the event Channel + a fresh WebSocket. */
+  teardown(): void {
+    this.subscribed = false;
+    if (this.frameSocketReconnect !== null) {
+      clearTimeout(this.frameSocketReconnect);
+      this.frameSocketReconnect = null;
+    }
+    const ws = this.frameSocket;
+    // Null first so the socket's own onclose treats this as an intentional
+    // close and does NOT schedule a reconnect.
+    this.frameSocket = null;
+    if (ws) {
+      try {
+        ws.close();
+      } catch {
+        // already closing/closed
+      }
+    }
+    // Drop per-track stats caches so a new session starts clean.
+    this.fpsHistory.clear();
+    this.lastDims.clear();
+    this.lastBytes.clear();
+  }
 
   /** Idempotent. Call once after auth so the backend Channels are wired.
    *  Under Electron this is a no-op — the Rust event/frame channels are
