@@ -30,6 +30,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "user_device_revoked_at",
         include_str!("migrations/000004_user_device_revoked_at.sql"),
     ),
+    (
+        5,
+        "account_key_log",
+        include_str!("migrations/000005_account_key_log.sql"),
+    ),
 ];
 
 pub mod queries {

@@ -228,6 +228,16 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     )
     .await?;
 
+    // Append the version-1 row to the account-key transparency history. Kept in
+    // lock-step with the users UPDATE above; `?` propagation means the INSERT can
+    // never silently fail while the key change persists.
+    conn.execute(
+        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+         VALUES (?1, ?2, 1)",
+        libsql::params![user_id.to_string(), public_bytes.to_vec()],
+    )
+    .await?;
+
     conn.execute(
         "INSERT INTO account_recovery \
          (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
@@ -447,6 +457,16 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
             }
         }
     };
+
+    // Append the rotated key + new version to the account-key transparency
+    // history. Kept in lock-step with the users UPDATE above; `?` propagation
+    // means the INSERT can never silently fail while the rotation persists.
+    conn.execute(
+        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+         VALUES (?1, ?2, ?3)",
+        libsql::params![user_id.to_string(), public_bytes.to_vec(), new_version],
+    )
+    .await?;
 
     conn.execute(
         "INSERT INTO account_recovery \
@@ -905,5 +925,179 @@ mod tests {
 
         let ct = aes_gcm_encrypt(&wrap1, &nonce, b"secret").unwrap();
         assert!(aes_gcm_decrypt(&wrap2, &nonce, &ct).is_err());
+    }
+
+    /// Schema-level tests for the account_key_log history table (migration
+    /// 000005) and the dual-write contract. Like the rest of pollis-core's
+    /// unit tests, these drive an in-memory rusqlite DB and exercise the exact
+    /// SQL the async commands run — the command functions themselves need an
+    /// `AppState` + libsql + keystore and are covered by the flows harness.
+    mod account_key_log {
+        use rusqlite::Connection;
+
+        use crate::db::BASELINE_SQL as BASELINE;
+
+        /// The registered migration 000005 SQL — pulled from the runner's list
+        /// so this test also fails if the migration is never registered.
+        fn migration_sql() -> &'static str {
+            crate::db::POST_BASELINE_MIGRATIONS
+                .iter()
+                .find(|(version, _, _)| *version == 5)
+                .expect("migration 5 (account_key_log) must be registered")
+                .2
+        }
+
+        fn baseline_db() -> Connection {
+            let conn = Connection::open_in_memory().unwrap();
+            conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+            conn.execute_batch(BASELINE).unwrap();
+            conn
+        }
+
+        fn insert_user(conn: &Connection, id: &str) {
+            conn.execute(
+                "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
+                rusqlite::params![id, format!("{id}@x.com"), id],
+            )
+            .unwrap();
+        }
+
+        fn log_rows(conn: &Connection, user_id: &str) -> Vec<(i64, i64, Vec<u8>)> {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT seq, identity_version, account_id_pub \
+                     FROM account_key_log WHERE user_id = ?1 ORDER BY seq",
+                )
+                .unwrap();
+            stmt.query_map(rusqlite::params![user_id], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+            })
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+        }
+
+        // The dual-write the commands perform, replicated as SQL so the schema
+        // contract is tested directly.
+
+        fn signup_dual_write(conn: &Connection, user_id: &str, pubkey: &[u8]) {
+            conn.execute(
+                "UPDATE users SET account_id_pub = ?1, identity_version = 1 WHERE id = ?2",
+                rusqlite::params![pubkey, user_id],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+                 VALUES (?1, ?2, 1)",
+                rusqlite::params![user_id, pubkey],
+            )
+            .unwrap();
+        }
+
+        fn reset_dual_write(
+            conn: &Connection,
+            user_id: &str,
+            pubkey: &[u8],
+        ) -> rusqlite::Result<usize> {
+            conn.execute(
+                "UPDATE users \
+                 SET account_id_pub = ?1, identity_version = identity_version + 1 \
+                 WHERE id = ?2",
+                rusqlite::params![pubkey, user_id],
+            )
+            .unwrap();
+            let new_version: i64 = conn
+                .query_row(
+                    "SELECT identity_version FROM users WHERE id = ?1",
+                    rusqlite::params![user_id],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            conn.execute(
+                "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![user_id, pubkey, new_version],
+            )
+        }
+
+        #[test]
+        fn migration_backfills_existing_users_with_identity() {
+            let conn = baseline_db();
+
+            // alice already has an established identity at version 3.
+            insert_user(&conn, "alice");
+            let alice_key = vec![0xAAu8; 32];
+            conn.execute(
+                "UPDATE users SET account_id_pub = ?1, identity_version = 3 WHERE id = 'alice'",
+                rusqlite::params![alice_key],
+            )
+            .unwrap();
+            // bob has no identity yet (account_id_pub stays NULL).
+            insert_user(&conn, "bob");
+
+            conn.execute_batch(migration_sql()).unwrap();
+
+            // alice is backfilled at her current version; bob is not.
+            let alice = log_rows(&conn, "alice");
+            assert_eq!(alice.len(), 1);
+            assert_eq!(alice[0].1, 3);
+            assert_eq!(alice[0].2, alice_key);
+            assert!(log_rows(&conn, "bob").is_empty());
+        }
+
+        #[test]
+        fn signup_writes_version_1_row() {
+            let conn = baseline_db();
+            conn.execute_batch(migration_sql()).unwrap();
+
+            insert_user(&conn, "carol");
+            let key_v1 = vec![0x11u8; 32];
+            signup_dual_write(&conn, "carol", &key_v1);
+
+            let rows = log_rows(&conn, "carol");
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].1, 1);
+            assert_eq!(rows[0].2, key_v1);
+        }
+
+        #[test]
+        fn reset_appends_version_2_row() {
+            let conn = baseline_db();
+            conn.execute_batch(migration_sql()).unwrap();
+
+            insert_user(&conn, "dave");
+            let key_v1 = vec![0x11u8; 32];
+            let key_v2 = vec![0x22u8; 32];
+            signup_dual_write(&conn, "dave", &key_v1);
+            reset_dual_write(&conn, "dave", &key_v2).unwrap();
+
+            let rows = log_rows(&conn, "dave");
+            assert_eq!(rows.len(), 2);
+            // Append-only: both versions retained, in order.
+            assert_eq!(rows[0].1, 1);
+            assert_eq!(rows[0].2, key_v1);
+            assert_eq!(rows[1].1, 2);
+            assert_eq!(rows[1].2, key_v2);
+            assert!(rows[0].0 < rows[1].0, "seq must be monotonic");
+        }
+
+        #[test]
+        fn unique_constraint_rejects_duplicate_version() {
+            let conn = baseline_db();
+            conn.execute_batch(migration_sql()).unwrap();
+
+            insert_user(&conn, "erin");
+            let key = vec![0x33u8; 32];
+            signup_dual_write(&conn, "erin", &key);
+
+            // A second row for the same (user_id, identity_version) must conflict.
+            let dup = conn.execute(
+                "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+                 VALUES (?1, ?2, 1)",
+                rusqlite::params!["erin", key],
+            );
+            assert!(dup.is_err(), "duplicate (user_id, identity_version) must be rejected");
+            assert_eq!(log_rows(&conn, "erin").len(), 1);
+        }
     }
 }
