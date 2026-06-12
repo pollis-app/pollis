@@ -61,7 +61,9 @@ mod unsupported;
 
 // ── Public surface ───────────────────────────────────────────────────────
 
-pub use commands::{subscribe_screen_share_events, subscribe_screen_share_frames};
+pub use commands::{
+    screenshare_ws_url, subscribe_screen_share_events, subscribe_screen_share_frames,
+};
 pub use remote_video::{on_remote_video_subscribed, on_remote_video_unsubscribed, on_room_disconnected};
 pub use state::ScreenShareState;
 pub use stop::stop_screen_share;

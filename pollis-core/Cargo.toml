@@ -69,7 +69,10 @@ futures-util = "0.3"
 # `<img>/<audio>/<video>` element — replaces the bifurcated asset:// (images)
 # / IPC-bytes-to-Blob-URL (audio/video) pair. Keeps decryption in Rust and
 # gives `<video>` real Range support without pumping bytes through JSON IPC.
-axum = "0.7"
+# `ws` feature: the loopback server also carries decoded screenshare frames
+# over a WebSocket (`/screenshare/<token>`) for the Tauri/WebKitGTK WebGL
+# render path — see `media_server.rs` and `commands/screenshare/remote_video.rs`.
+axum = { version = "0.7", features = ["ws"] }
 openmls = "0.8"
 openmls_traits = "0.5"
 openmls_rust_crypto = "0.5"

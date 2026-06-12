@@ -27,6 +27,7 @@ pub async fn dispatch(
     match cmd {
         "subscribe_screen_share_events" => Some(subscribe_screen_share_events(args).await),
         "subscribe_screen_share_frames" => Some(subscribe_screen_share_frames(args).await),
+        "screenshare_ws_url" => Some(screenshare_ws_url(args).await),
         "start_screen_share" => Some(start_screen_share(args).await),
         "enumerate_screen_sources" => Some(enumerate_screen_sources(args).await),
         "cancel_screen_share_picker" => Some(cancel_screen_share_picker(args).await),
@@ -67,6 +68,14 @@ async fn subscribe_screen_share_frames(args: &serde_json::Value) -> Result<serde
         .await
         .map_err(core_err)?;
     Ok(serde_json::Value::Null)
+}
+
+async fn screenshare_ws_url(_args: &serde_json::Value) -> Result<serde_json::Value> {
+    let state = ensure_state().await?;
+    let out = pollis_core::commands::screenshare::screenshare_ws_url(&state)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(out).map_err(json_err)
 }
 
 async fn enumerate_screen_sources(_args: &serde_json::Value) -> Result<serde_json::Value> {

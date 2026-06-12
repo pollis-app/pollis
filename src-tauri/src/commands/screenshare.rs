@@ -34,6 +34,11 @@ pub async fn subscribe_screen_share_frames(
 }
 
 #[tauri::command]
+pub async fn screenshare_ws_url(state: State<'_, Arc<AppState>>) -> Result<Option<String>> {
+    Ok(pollis_core::commands::screenshare::screenshare_ws_url(&state).await?)
+}
+
+#[tauri::command]
 pub async fn enumerate_screen_sources(
     state: State<'_, Arc<AppState>>,
 ) -> Result<pollis_capture_proto::SourceList> {

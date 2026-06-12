@@ -23,6 +23,10 @@ pub async fn on_remote_video_subscribed(
         let ss = state.screenshare.lock().await;
         (ss.events.clone(), ss.frames.clone())
     };
+    // WebSocket fan-out for the Tauri/WebKitGTK render path (spike/tauri-revival).
+    // Cheap to clone (a broadcast Sender). The frontend reads these over the
+    // loopback media server's `/screenshare/<token>` route; see `media_server.rs`.
+    let frame_tx = state.screenshare_frame_tx.clone();
 
     let mut stream = NativeVideoStream::new(track.rtc_track());
     let track_key_for_task = track_key.clone();
@@ -52,7 +56,11 @@ pub async fn on_remote_video_subscribed(
                     });
                 }
             }
-            if let Some(sink) = &frames {
+            // Pack once. Broadcast to any WebSocket subscribers (Tauri render
+            // path) and, when a legacy Channel sink is still registered, mirror
+            // to it too. `frame_tx` has no active receivers when nobody's
+            // watching, in which case `send` is a cheap no-op (returns Err).
+            if frame_tx.receiver_count() > 0 || frames.is_some() {
                 let bytes = pack_frame_bytes(
                     &track_key_for_task,
                     w,
@@ -60,7 +68,11 @@ pub async fn on_remote_video_subscribed(
                     frame.timestamp_us,
                     &i420,
                 );
-                let _ = sink.send(bytes);
+                let bytes = std::sync::Arc::new(bytes);
+                let _ = frame_tx.send(bytes.clone());
+                if let Some(sink) = &frames {
+                    let _ = sink.send((*bytes).clone());
+                }
             }
         }
     });

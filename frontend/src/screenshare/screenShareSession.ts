@@ -184,6 +184,12 @@ class ScreenShareSession {
   // Cache the mapping each time enumerate() runs so start(selection) can
   // recover the right Electron id.
   private electronSourceIds = new Map<string, string>();
+  // Tauri frame transport: a loopback WebSocket to the Rust media server's
+  // `/ws/screenshare/<token>` route, replacing the per-frame IPC Channel that
+  // stalled WebKitGTK on V8 GC at 1080p (#305 Phase 1). Held so teardown can
+  // close it and the close handler can distinguish intentional vs dropped.
+  private frameSocket: WebSocket | null = null;
+  private frameSocketReconnect: ReturnType<typeof setTimeout> | null = null;
 
   /** Idempotent. Call once after auth so the backend Channels are wired.
    *  Under Electron this is a no-op — the Rust event/frame channels are
@@ -209,12 +215,65 @@ class ScreenShareSession {
     events.onmessage = (ev) => this.handleEvent(ev);
     await invoke("subscribe_screen_share_events", { onEvent: events });
 
-    // Frames Channel arrives as ArrayBuffer when the backend sends
-    // InvokeResponseBody::Raw. The TS type isn't ideal — `Channel<ArrayBuffer>`
-    // works at runtime but the type binding still says T = void.
-    const frames = new Channel<ArrayBuffer>();
-    frames.onmessage = (buf) => this.handleFrame(buf);
-    await invoke("subscribe_screen_share_frames", { onFrame: frames });
+    // Frame transport (spike/tauri-revival): a loopback WebSocket, not the
+    // per-frame IPC Channel. Same `pack_frame_bytes` wire format, so
+    // `handleFrame` is unchanged — only how the bytes arrive differs. The
+    // rustwebrtc PoC proved this path sustains 1080p60+ into the WebGL shader
+    // inside WebKitGTK, where Channel dispatch pegged a core on GC.
+    await this.connectFrameSocket();
+  }
+
+  /** Open (or reopen) the loopback frame WebSocket. The URL is `None` until
+   *  the media server is up and the session token is minted (post-unlock);
+   *  in that window we retry on the socket's own lifecycle events, never on a
+   *  timer poll. Binary messages are the packed-I420 frames `handleFrame`
+   *  already decodes. */
+  private async connectFrameSocket(): Promise<void> {
+    if (!this.subscribed) {
+      return;
+    }
+    const url = await invoke<string | null>("screenshare_ws_url");
+    if (!url) {
+      // Server/token not ready yet — try again shortly. One-shot, cleared on
+      // teardown; this is recovery keyed off a known-not-ready state, not a
+      // standing poll loop.
+      this.scheduleFrameSocketReconnect(500);
+      return;
+    }
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
+    this.frameSocket = ws;
+    ws.onmessage = (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        this.handleFrame(e.data);
+      }
+    };
+    ws.onclose = () => {
+      // Only reconnect if this is still the live socket and we're subscribed
+      // (i.e. not an intentional teardown that nulled frameSocket first).
+      if (this.frameSocket === ws && this.subscribed) {
+        this.frameSocket = null;
+        this.scheduleFrameSocketReconnect(1000);
+      }
+    };
+    ws.onerror = () => {
+      // onclose follows onerror; let it drive the reconnect.
+      try {
+        ws.close();
+      } catch {
+        // already closing
+      }
+    };
+  }
+
+  private scheduleFrameSocketReconnect(delayMs: number): void {
+    if (this.frameSocketReconnect !== null) {
+      return;
+    }
+    this.frameSocketReconnect = setTimeout(() => {
+      this.frameSocketReconnect = null;
+      void this.connectFrameSocket();
+    }, delayMs);
   }
 
   /** Subscribe a tile to its track's frame stream. Returns an unsubscribe fn. */
