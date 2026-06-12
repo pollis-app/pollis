@@ -192,6 +192,10 @@ class ScreenShareSession {
   // close it and the close handler can distinguish intentional vs dropped.
   private frameSocket: WebSocket | null = null;
   private frameSocketReconnect: ReturnType<typeof setTimeout> | null = null;
+  // The backend screenshare-event Channel (lifecycle events: remote
+  // started/stopped, local errors). Held so teardown can detach its handler
+  // on logout — otherwise a late event would mutate the just-reset store.
+  private eventsChannel: Channel<ScreenShareEvent> | null = null;
 
   constructor() {
     // Tear down on logout. This singleton lives for the whole process, so
@@ -216,6 +220,14 @@ class ScreenShareSession {
    *  (after the next login) re-wires the event Channel + a fresh WebSocket. */
   teardown(): void {
     this.subscribed = false;
+    // Detach the event Channel handler so a late screenshare event can't
+    // mutate the just-reset store. The Tauri Channel has no close(); dropping
+    // our handler + reference is the teardown, and the next ensureSubscribed
+    // re-subscribes a fresh Channel (the Rust sink is replaced on resubscribe).
+    if (this.eventsChannel) {
+      this.eventsChannel.onmessage = () => {};
+      this.eventsChannel = null;
+    }
     if (this.frameSocketReconnect !== null) {
       clearTimeout(this.frameSocketReconnect);
       this.frameSocketReconnect = null;
@@ -259,6 +271,7 @@ class ScreenShareSession {
 
     const events = new Channel<ScreenShareEvent>();
     events.onmessage = (ev) => this.handleEvent(ev);
+    this.eventsChannel = events;
     await invoke("subscribe_screen_share_events", { onEvent: events });
 
     // Frame transport (spike/tauri-revival): a loopback WebSocket, not the
