@@ -2,11 +2,12 @@
 // flow (and the stop / cancel / recover branches) from a single place so
 // the green VoiceBar and the in-call voice stage tray behave identically.
 //
-// On macOS we enumerate via SCShareableContent and route to our in-app
-// picker — the system picker (SCContentSharingPicker) has an upstream
-// crate bug that crashes on selection (#283). On Linux/Windows the helper
-// falls back to the system portal / WGC picker, signalled by an empty
-// source list from enumerate() — in that case we skip our picker and go
+// macOS and Windows both enumerate and route through the in-app picker
+// (macOS via SCShareableContent — the system SCContentSharingPicker has
+// an upstream crate bug that crashes on selection, #283; Windows via the
+// windows-rs Monitor/Window APIs with GDI thumbnails). Linux's
+// xdg-desktop-portal dialog IS the picker, signalled by an empty source
+// list from enumerate() — in that case we skip our picker and go
 // straight to start().
 
 import { appStore } from "../stores/appStore";
@@ -48,8 +49,8 @@ export function toggleScreenShare(share: ShareState): void {
   }
 
   // Engage enumerate → pick → start. The backend returns an empty list on
-  // Linux/Windows; in that case we skip our picker and go straight to
-  // start() (system portal/WGC handles selection).
+  // Linux; in that case we skip our picker and go straight to start()
+  // (the xdg-desktop-portal dialog handles selection).
   (async () => {
     try {
       const list = await screenShareSession.enumerate();

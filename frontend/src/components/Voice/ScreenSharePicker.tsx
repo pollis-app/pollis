@@ -12,13 +12,14 @@ import {
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 
-/** Inline in-app picker for macOS screen-share sources. Replaces the
- *  voice participant grid when `screenShareMode === 'picking'` — no
- *  modal, no overlay, just a full-pane takeover that gives the user a
- *  grid of displays + windows enumerated by `SCShareableContent` in the
- *  helper subprocess. Selecting a source sends `Selection` to the
- *  parked helper, which builds an `SCContentFilter` and starts the
- *  `SCStream`. Industry-standard pattern — what Slack/Discord/Zoom do. */
+/** Inline in-app picker for screen-share sources. Replaces the voice
+ *  participant grid when `share.kind === 'picking'` — no modal, no
+ *  overlay, just a full-pane takeover that gives the user a grid of
+ *  displays + windows. The source list comes from each platform's
+ *  enumerator (macOS: SCShareableContent in the helper subprocess;
+ *  Windows: windows-rs Monitor/Window enumeration + GDI thumbnails;
+ *  Electron: `desktopCapturer.getSources()`). Industry-standard pattern
+ *  — what Slack/Discord/Zoom do. */
 export const ScreenSharePicker: React.FC = observer(() => {
   // Picker only renders when shareState.kind === 'picking', so sources are
   // guaranteed present. Narrowed via the union; bail to null defensively
@@ -262,7 +263,7 @@ const DisplayCard: React.FC<{
         ? `${display.width} × ${display.height}`
         : undefined
     }
-    thumbnail={display.thumbnailDataUrl}
+    thumbnail={display.thumbnail_data_url}
     icon={<Monitor size={32} />}
   />
 );
@@ -288,7 +289,7 @@ const WindowCard: React.FC<{
       // thumbnail is the primary visual identifier, and the size is
       // only knowable after capture starts (via track.getSettings()).
       subtitle={secondary}
-      thumbnail={window.thumbnailDataUrl}
+      thumbnail={window.thumbnail_data_url}
       icon={<Square size={32} />}
     />
   );

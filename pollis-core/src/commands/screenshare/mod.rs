@@ -76,6 +76,8 @@ pub use state::HelperSession;
 pub use start_unix::{cancel_screen_share_picker, enumerate_screen_sources, start_screen_share};
 #[cfg(target_os = "windows")]
 pub use start_windows::{cancel_screen_share_picker, enumerate_screen_sources, start_screen_share};
+#[cfg(target_os = "windows")]
+pub(super) use start_windows::WindowsPickerCache;
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
 pub use unsupported::{cancel_screen_share_picker, enumerate_screen_sources, start_screen_share};
 

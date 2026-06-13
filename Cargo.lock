@@ -6150,6 +6150,7 @@ dependencies = [
  "ulid",
  "uniffi",
  "webrtc-audio-processing",
+ "windows 0.62.2",
  "windows-capture",
  "x25519-dalek",
  "zeroize",

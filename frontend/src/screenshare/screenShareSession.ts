@@ -26,24 +26,28 @@ import { playSfx, SFX } from "../utils/sfx";
 /** Capturable display reported by `enumerate_screen_sources`.
  *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration).
  *
- *  Under Electron, `thumbnailDataUrl` is a PNG data URL from
- *  `desktopCapturer.getSources({ thumbnailSize })`. Under the Tauri
- *  capture helper it is undefined (the protocol doesn't ship preview
- *  frames; the picker falls back to the icon). */
+ *  `thumbnail_data_url` is a PNG data URL when the source path produces
+ *  one — Electron via `desktopCapturer.getSources({ thumbnailSize })`,
+ *  Windows via GDI BitBlt of the monitor rect. Undefined under the macOS
+ *  capture helper, which doesn't ship preview frames. The picker tile
+ *  falls back to the lucide icon when the field is undefined. */
 export interface DisplaySource {
   id: number;
   width: number;
   height: number;
   name: string;
-  thumbnailDataUrl?: string;
+  thumbnail_data_url?: string;
 }
 
 /** Capturable on-screen window reported by `enumerate_screen_sources`.
- *  Mirrors `pollis_capture_proto::WindowSource`. Under Electron,
- *  `width`/`height` are 0 (desktopCapturer doesn't surface per-window
- *  dimensions without actually capturing), and `thumbnailDataUrl` is
- *  populated. Under Tauri the dimensions are real and there is no
- *  thumbnail. */
+ *  Mirrors `pollis_capture_proto::WindowSource`.
+ *
+ *  Under Electron, `width`/`height` are 0 (desktopCapturer doesn't surface
+ *  per-window dimensions without actually capturing), and
+ *  `thumbnail_data_url` is populated. Under Tauri-Windows, dimensions are
+ *  real and `thumbnail_data_url` is populated from a GDI PrintWindow
+ *  render. Under the Tauri macOS helper, dimensions are real but
+ *  `thumbnail_data_url` is undefined. */
 export interface WindowSource {
   id: number;
   width: number;
@@ -51,11 +55,12 @@ export interface WindowSource {
   title: string;
   app_name: string;
   bundle_id: string;
-  thumbnailDataUrl?: string;
+  thumbnail_data_url?: string;
 }
 
-/** What the helper offers when it enumerates. Empty on Linux/Windows —
- *  those platforms hand off selection to the system picker. */
+/** What the helper offers when it enumerates. Empty on Linux —
+ *  the system portal handles selection. macOS + Windows return real
+ *  lists for the in-app picker. */
 export interface SourceList {
   displays: DisplaySource[];
   windows: WindowSource[];
@@ -394,14 +399,19 @@ class ScreenShareSession {
     return Math.round(((hist.length - 1) / span) * 1000);
   }
 
-  /** Enumerate capturable displays + windows. On macOS (under Tauri) this
-   *  spawns the helper, parks it waiting for our selection, and returns
-   *  the list to render in our in-app picker. On Linux/Windows the system
-   *  portal / WGC picker handles selection — the Tauri backend returns an
-   *  empty list as a signal to skip the in-app picker and go straight to
-   *  `start()`. Under Electron, we enumerate sources through
-   *  `desktopCapturer.getSources()` over IPC and route them to the same
-   *  in-app picker so the UX is identical on every platform. */
+  /** Enumerate capturable displays + windows.
+   *  - macOS (Tauri): spawns the helper, parks it waiting for our
+   *    selection, returns the list to render in the in-app picker.
+   *  - Windows (Tauri): enumerates monitors + windows via the windows-rs
+   *    Monitor/Window APIs and captures GDI thumbnails (BitBlt for
+   *    monitors, PrintWindow for windows). Returns a real list — the
+   *    in-app picker renders consistently with macOS/Electron.
+   *  - Linux (Tauri): the xdg-desktop-portal dialog IS the picker, so
+   *    the backend returns an empty list as a signal to skip the in-app
+   *    picker and go straight to `start()`.
+   *  - Electron (any OS): enumerates via `desktopCapturer.getSources()`
+   *    over IPC and routes through the same in-app picker so the UX is
+   *    identical across runtimes. */
   async enumerate(): Promise<SourceList> {
     if (hasElectron()) {
       const api = (window as Window & {
@@ -438,7 +448,7 @@ class ScreenShareSession {
             width: s.width,
             height: s.height,
             name: s.name,
-            thumbnailDataUrl: s.thumbnailDataUrl,
+            thumbnail_data_url: s.thumbnailDataUrl,
           });
         } else {
           const id = windows.length;
@@ -454,7 +464,7 @@ class ScreenShareSession {
             title: s.name,
             app_name: "",
             bundle_id: "",
-            thumbnailDataUrl: s.thumbnailDataUrl,
+            thumbnail_data_url: s.thumbnailDataUrl,
           });
         }
       }
