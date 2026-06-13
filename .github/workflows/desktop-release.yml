@@ -1,20 +1,29 @@
-name: Desktop Release (Tauri — frozen)
+name: Desktop Release (Tauri)
 
-# Tauri pipeline. As of v1.1.0 the project ships from electron-release.yml.
-# This workflow no longer auto-fires on tag push so v1.1.0+ tags don't
-# republish the cdn.pollis.com/releases/update-*.json Tauri-format
-# manifests — leaving Tauri-side updaters pinned at v1.0.164 (the last
-# Tauri-built release). Old Tauri users keep polling, see no newer
-# version, and stay on what they have until they manually install the
-# Electron build. They can't pull an Electron .AppImage/.exe/.dmg via
-# the Tauri updater because Tauri verifies a minisign signature that the
-# Electron build doesn't carry — but more importantly, we just don't
-# advertise it to them.
+# Tauri pipeline — the active desktop release path again as of the
+# Electron→Tauri re-migration (#386). A tag push (`git tag v1.2.0 &&
+# git push --tags`) runs the full ceremony: signed macOS DMG/ZIP, Azure
+# Trusted-Signed Windows NSIS, Linux AppImage/.deb/.rpm, R2 upload, GitHub
+# release, AUR push, install.sh + latest.json refresh, and the Tauri-format
+# `cdn.pollis.com/releases/update-*.json` updater manifests (minisign-signed).
 #
-# `workflow_dispatch` is kept so a hotfix Tauri build can still be cut
-# manually if needed during the migration window.
+# electron-release.yml no longer fires on tags (it kept workflow_dispatch
+# only for emergency Electron rebuilds), so a tag triggers this pipeline
+# alone — no double db-apply / latest.json / AUR races.
+#
+# Cutover note: there is no in-place auto-update from an installed Electron
+# build to a Tauri build — electron-updater installs electron-builder
+# artifacts and Tauri verifies a minisign signature the Electron build
+# doesn't carry. Existing Electron installs must re-download once; every
+# release after that auto-updates through the Tauri updater normally.
 on:
   workflow_dispatch:
+  # Tag-driven release: `git tag v1.2.0 && git push --tags` is the entire
+  # ceremony. CI extracts the version from the tag and stamps every file
+  # before building.
+  push:
+    tags:
+      - "v*"
 
 jobs:
   build-macos:

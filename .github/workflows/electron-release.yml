@@ -1,20 +1,17 @@
-name: Electron Release
+name: Electron Release (frozen)
 
-# Full Electron release pipeline. Mirrors desktop-release.yml's capabilities
-# end-to-end: macOS signed + notarized DMG/ZIP, Windows Azure Trusted-Signed
-# NSIS + portable EXE, Linux AppImage + .deb + .rpm, R2 upload, GitHub
-# release, AUR push, install.sh + latest.json refresh.
+# Frozen Electron release pipeline. As of the Electron→Tauri re-migration
+# (#386) the project ships from desktop-release.yml (Tauri) again. This
+# workflow no longer fires on tag push — only desktop-release.yml does — so
+# a tag runs the Tauri ceremony alone without a double db-apply / latest.json
+# / AUR race.
 #
-# Trigger: tag push (`git tag v1.2.0 && git push --tags`) — the entire
-# release ceremony. workflow_dispatch is kept for ad-hoc rebuilds where
-# you want to test the pipeline without cutting a real tag (e.g.
-# v1.2.0-rc.3 from a non-tag branch).
-#
-# Coexists with desktop-release.yml during the migration window — both
-# fire on the same tag and produce distinct artifact sets (Tauri's
-# `pollis-*` vs Electron's `pollis-electron-*`). Either or both can be
-# the source of a given GH release. Once we cut over fully to Electron,
-# delete desktop-release.yml in the Phase 8 cleanup pass.
+# `workflow_dispatch` is kept so an emergency Electron build can still be cut
+# manually (e.g. if a Tauri regression needs a stopgap), via the optional
+# version_override input. Full capabilities are retained: macOS signed +
+# notarized DMG/ZIP, Windows Azure Trusted-Signed NSIS + portable EXE, Linux
+# AppImage + .deb + .rpm, R2 upload, GitHub release, AUR push, install.sh +
+# latest.json refresh.
 #
 # Artifact-name discipline: every uploaded artifact is prefixed
 # `pollis-electron-*` so it never collides with desktop-release.yml's
@@ -26,12 +23,6 @@ on:
       version_override:
         description: "Optional version override for ad-hoc rebuilds (e.g. 1.2.0-rc.3). Omit to use the tag-derived version when triggered by a tag push, or fail if neither is present."
         required: false
-  # Tag-driven release: `git tag v1.2.0 && git push --tags` is the entire
-  # ceremony. CI extracts the version from the tag and stamps every file
-  # via scripts/bump-version.sh before building.
-  push:
-    tags:
-      - "v*"
 
 jobs:
   build-macos:
