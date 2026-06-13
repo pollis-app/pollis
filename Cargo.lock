@@ -6149,6 +6149,7 @@ dependencies = [
  "tokio",
  "ulid",
  "uniffi",
+ "verifiable-log-serve",
  "webrtc-audio-processing",
  "windows 0.62.2",
  "windows-capture",

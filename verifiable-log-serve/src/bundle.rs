@@ -103,4 +103,48 @@ pub struct Manifest {
     pub consistency: Vec<ConsistencyRef>,
     /// Tenants whose uniqueness invariant a verifier enforces on replay.
     pub enforce_unique: Vec<String>,
+    /// Every conversation id with a precomputed `/verify/group/<id>` report,
+    /// sorted. Lets a client enumerate the per-conversation endpoints (and learn
+    /// how many conversations the log carries) without scraping every entry.
+    /// `#[serde(default)]` so an older `index.json` written before this field
+    /// existed still deserializes.
+    #[serde(default)]
+    pub conversations: Vec<String>,
+}
+
+/// The discovery manifest for the **account-key** tree, served at
+/// `/v1/account-keys/index.json`. It is the account tenant's analogue of
+/// [`Manifest`]: same artifact bookkeeping (STH sizes, entry count, proofs), but
+/// it enumerates `users` (each with a precomputed `/verify/account/<user_id>`
+/// report) instead of conversations. The account tree is a fully separate
+/// Merkle tree from the commit log, so it carries its own manifest under its own
+/// path — `/v1/index.json` is never touched.
+///
+/// Like [`Manifest`] it *moves* as the log grows, so it is served short-cache.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountManifest {
+    /// API version segment these artifacts live under (`"v1"`).
+    pub version: String,
+    /// Ed25519 log public key, lowercase hex. The same key signs both trees;
+    /// the account tree's STHs are domain-separated by signing context, not key.
+    pub public_key: String,
+    /// Number of account-key entries in the tree.
+    pub entry_count: u64,
+    /// Largest tree size with a published account STH, or `null` for an empty
+    /// tree.
+    pub latest_tree_size: Option<u64>,
+    /// Every tree size with a `/v1/account-keys/sth/<size>.json` artifact.
+    pub sth_sizes: Vec<u64>,
+    /// Every available inclusion proof.
+    pub inclusion: Vec<InclusionRef>,
+    /// Every available consistency proof.
+    pub consistency: Vec<ConsistencyRef>,
+    /// Tenants whose invariant a verifier enforces on replay (the account-key
+    /// tenant).
+    pub enforce_unique: Vec<String>,
+    /// Every user id with a precomputed `/verify/account/<user_id>` report,
+    /// sorted. Lets a client enumerate the per-user endpoints without scraping
+    /// every entry.
+    #[serde(default)]
+    pub users: Vec<String>,
 }

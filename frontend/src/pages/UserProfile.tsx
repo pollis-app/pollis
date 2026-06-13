@@ -11,7 +11,8 @@ import {
   useSetContactVerified,
 } from "../hooks/queries/useUserProfile";
 import { Button } from "../components/ui/Button";
-import { useBlockUser } from "../hooks/queries";
+import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
+import { useBlockUser, usePeerAuditAccountKey } from "../hooks/queries";
 import { useCreateOrGetDMConversation } from "../hooks/queries/useMessages";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -23,6 +24,7 @@ export const UserProfilePage: React.FC = observer(() => {
 
   const { data: profile, isLoading } = useOtherUserProfile(userId);
   const { data: safety } = useSafetyNumber(userId);
+  const { data: peerAudit } = usePeerAuditAccountKey(userId);
   const setVerified = useSetContactVerified(userId);
   const blockMutation = useBlockUser();
   const dmMutation = useCreateOrGetDMConversation();
@@ -241,6 +243,16 @@ export const UserProfilePage: React.FC = observer(() => {
                     </Button>
                   </div>
                 </div>
+              )}
+
+              {/* Account-key transparency: advisory audit of this peer's
+                  published identity key against the public log (#330). */}
+              {!isSelf && peerAudit && (
+                <AccountKeyAuditLine
+                  status={peerAudit.status}
+                  detail={peerAudit.detail}
+                  testId="peer-account-key-audit"
+                />
               )}
 
               <div style={{ borderTop: "1px solid var(--c-border)" }}>

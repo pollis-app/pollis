@@ -231,6 +231,19 @@ that class of bug.
 - `created_at` TEXT NOT NULL DEFAULT now
 - `metadata` TEXT
 
+### account_key_log _(migration 000005)_
+Append-only history of account identity keys — the data source for the
+account-key transparency tenant (#330). One row per key version per user, never
+updated or deleted; mirrors `mls_commit_log`'s shape (an AUTOINCREMENT `seq` for
+global ordering + a UNIQUE index enforcing the per-subject invariant).
+- `seq` INTEGER PK AUTOINCREMENT _(stable global ordering, the log leaf order)_
+- `user_id` TEXT NOT NULL
+- `account_id_pub` BLOB NOT NULL _(Ed25519 pub authoritative at this version)_
+- `identity_version` INTEGER NOT NULL
+- `created_at` TEXT NOT NULL DEFAULT now
+- UNIQUE INDEX `idx_account_key_log_user_version` on `(user_id, identity_version)` — one row per version per user; a duplicate INSERT conflicts rather than silently forking the history.
+- Dual-written in lock-step with `users.account_id_pub` by `generate_account_identity` (v1 at signup) and `reset_identity` (+1 per rotation). Migration backfills the current key of every user that already has an `account_id_pub`.
+
 ---
 
 ## Local Database (SQLite, per-user, encrypted)

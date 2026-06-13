@@ -13,7 +13,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use verifiable_log_builder::error::{BuilderError, Result};
-use verifiable_log_builder::{build_bundle, keys, source};
+use verifiable_log_builder::{build_account_bundle, build_bundle, keys, source};
 
 #[derive(Parser)]
 #[command(
@@ -34,14 +34,28 @@ enum Command {
         #[arg(long)]
         db: Option<String>,
 
-        /// Output path for the JSON bundle.
+        /// Output path for the commit-log JSON bundle.
         #[arg(long)]
         out: PathBuf,
+
+        /// Optional output path for the account-key JSON bundle. When given, the
+        /// `account_key_log` table is also read and a SECOND, independent bundle
+        /// (its own tree, its own domain-separated STH) is written here.
+        #[arg(long)]
+        account_out: Option<PathBuf>,
 
         /// STH timestamp, milliseconds since epoch. Supplied explicitly so the
         /// output is deterministic (never read from the system clock).
         #[arg(long)]
         timestamp: u64,
+
+        /// STH timestamp for the account-key tree, milliseconds since epoch.
+        /// Defaults to `--timestamp` when omitted. Supplied independently so an
+        /// unchanged tree can be re-emitted byte-identically (reusing its already
+        /// published, frozen timestamp) while the other tree advances — an STH
+        /// for a given (size, root) must stay stable across republishes.
+        #[arg(long)]
+        account_timestamp: Option<u64>,
 
         /// Env var holding the 32-byte hex Ed25519 signing key.
         #[arg(long, default_value = "VLOG_SIGNING_KEY")]
@@ -62,10 +76,20 @@ fn main() -> ExitCode {
         Command::Build {
             db,
             out,
+            account_out,
             timestamp,
+            account_timestamp,
             signing_key_env,
             signing_key_file,
-        } => run_build(db, out, timestamp, &signing_key_env, signing_key_file.as_deref()),
+        } => run_build(
+            db,
+            out,
+            account_out,
+            timestamp,
+            account_timestamp.unwrap_or(timestamp),
+            &signing_key_env,
+            signing_key_file.as_deref(),
+        ),
         Command::Keygen => {
             run_keygen();
             Ok(())
@@ -85,7 +109,9 @@ fn main() -> ExitCode {
 async fn run_build(
     db: Option<String>,
     out: PathBuf,
+    account_out: Option<PathBuf>,
     timestamp: u64,
+    account_timestamp: u64,
     signing_key_env: &str,
     signing_key_file: Option<&std::path::Path>,
 ) -> Result<()> {
@@ -97,6 +123,8 @@ async fn run_build(
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
     let conn = source::connect(&db).await?;
+
+    // Commit-log tenant (frozen contract): its own tree, default STH context.
     let rows = source::read_commit_log(&conn).await?;
     source::ensure_non_empty(&rows)?;
 
@@ -107,12 +135,31 @@ async fn run_build(
 
     // Never print the raw commit_data or the auth token — only safe metadata.
     println!(
-        "wrote bundle: {} commits, {} STH(s), {} inclusion proof(s) -> {}",
+        "wrote commit-log bundle: {} commits, {} STH(s), {} inclusion proof(s) -> {}",
         rows.len(),
         bundle.sths.len(),
         bundle.inclusion.len(),
         out.display()
     );
+
+    // Account-key tenant (separate tree, domain-separated STH) — only when asked.
+    if let Some(account_out) = account_out {
+        let account_rows = source::read_account_key_log(&conn).await?;
+        source::ensure_account_non_empty(&account_rows)?;
+
+        let account_bundle = build_account_bundle(&account_rows, &signing_key, account_timestamp)?;
+        let account_json = serde_json::to_string_pretty(&account_bundle)?;
+        std::fs::write(&account_out, account_json)?;
+
+        println!(
+            "wrote account-key bundle: {} keys, {} STH(s), {} inclusion proof(s) -> {}",
+            account_rows.len(),
+            account_bundle.sths.len(),
+            account_bundle.inclusion.len(),
+            account_out.display()
+        );
+    }
+
     println!("public_key: {}", bundle.public_key);
     Ok(())
 }

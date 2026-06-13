@@ -8,6 +8,8 @@ import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import type { RouterContext } from "../types/router";
 import * as api from "../services/api";
+import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
+import { useSelfAuditAccountKey } from "../hooks/queries";
 
 /// Human-readable summary for each `security_event.kind` the backend
 /// currently emits. Unknown kinds fall through to the raw string so we
@@ -75,6 +77,7 @@ export const SecurityPage: React.FC = observer(() => {
   const router = useRouter();
   const { onDeleteAccount } = router.options.context as RouterContext;
   const { currentUser } = appStore;
+  const { data: selfAudit } = useSelfAuditAccountKey();
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -182,6 +185,26 @@ export const SecurityPage: React.FC = observer(() => {
           className="flex flex-col gap-8 w-full max-w-md font-mono"
           data-testid="security-page"
         >
+          {/* Account key — advisory self-audit of your published identity key
+              against the public transparency log (#330). */}
+          <section className="flex flex-col gap-4 mb-12" data-testid="account-key-section">
+            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+              Account key
+            </h2>
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              Your identity key is published to a public, append-only log so
+              anyone can confirm contacts are talking to the real you. This
+              checks that the log agrees with the key on this device.
+            </p>
+            {selfAudit && (
+              <AccountKeyAuditLine
+                status={selfAudit.status}
+                detail={selfAudit.detail}
+                testId="self-account-key-audit"
+              />
+            )}
+          </section>
+
           {/* PIN */}
           <section className="flex flex-col gap-4 mb-12">
             <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>

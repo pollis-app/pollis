@@ -78,6 +78,11 @@ openmls_traits = "0.5"
 openmls_rust_crypto = "0.5"
 openmls_basic_credential = "0.5"
 gethostname = "1.1.0"
+# Account-key transparency: reuse the SAME shared URL-based verifier the
+# `pollis-verify` auditor CLI runs (account::verify_account), so the client's
+# self-audit / peer-audit can never reach a different verdict than the
+# published per-user reports. Path dep on the serve layer (#330, slice E).
+verifiable-log-serve = { path = "../verifiable-log-serve" }
 
 # Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us
 # end-to-end and tunable from Rust. The system pkg-config build branch wants
