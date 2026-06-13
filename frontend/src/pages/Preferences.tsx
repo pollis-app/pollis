@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { invoke, isPermissionGranted, requestPermission } from "../bridge";
+import {
+  invoke,
+  isPermissionGranted,
+  requestPermission,
+  setTrayCloseToTray,
+  setTrayEnabled,
+} from "../bridge";
 import { usePreferences, applyPreferences, applyDeviceFontSize } from "../hooks/queries/usePreferences";
 import {
   hslToHex,
@@ -17,7 +23,6 @@ import { Button } from "../components/ui/Button";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
 import { loadDeviceCallRingtone, saveDeviceCallRingtone } from "../utils/notify";
-import { electron, hasElectron } from "../bridge/runtime";
 import { isMac } from "../utils/platform";
 import { useShortcutLabel } from "../keyboard";
 
@@ -181,11 +186,9 @@ export const Preferences: React.FC = observer(() => {
     // Push immediately so the very next window close picks up the new
     // value (useApplyPreferences would also re-fire, but only after the
     // throttled save round-trips through the remote prefs query).
-    if (hasElectron()) {
-      void electron().traySetCloseToTray(val).catch((err) => {
-        console.warn("[tray] traySetCloseToTray failed:", err);
-      });
-    }
+    void setTrayCloseToTray(val).catch((err) => {
+      console.warn("[tray] setTrayCloseToTray failed:", err);
+    });
   };
 
   const handleMenubarIcon = (val: boolean) => {
@@ -194,11 +197,9 @@ export const Preferences: React.FC = observer(() => {
     // Same reasoning as handleCloseToTray: apply right away so the icon
     // appears/disappears the moment the toggle flips, without waiting
     // for the throttled prefs round-trip.
-    if (hasElectron()) {
-      void electron().traySetEnabled(val).catch((err) => {
-        console.warn("[tray] traySetEnabled failed:", err);
-      });
-    }
+    void setTrayEnabled(val).catch((err) => {
+      console.warn("[tray] setTrayEnabled failed:", err);
+    });
   };
 
   const handleAllowCallRingtone = (val: boolean) => {
@@ -481,7 +482,7 @@ export const Preferences: React.FC = observer(() => {
                 </p>
               </div>
             )}
-            {isMac && hasElectron() && (
+            {isMac && (
               <div className="flex flex-col gap-1.5">
                 <Switch
                   id="pref-menubar-icon"

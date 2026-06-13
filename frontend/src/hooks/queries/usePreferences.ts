@@ -1,7 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { invoke } from "../../bridge";
-import { electron, hasElectron } from "../../bridge/runtime";
+import { invoke, setTrayCloseToTray, setTrayEnabled } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import {
@@ -391,31 +390,25 @@ export function useApplyPreferences(): void {
     }
   }, [data?.accent_color, data?.background_color, data?.font_size, overridesKey, currentUser?.id]);
 
-  // Push close-to-tray to the Electron main process so the close handler
-  // can pick hide-vs-quit synchronously. macOS ignores this server-side
-  // (close already hides via the Dock path), but pushing is harmless and
-  // keeps the Linux/Windows path live.
+  // Push close-to-tray to the host so the close handler can pick
+  // hide-vs-quit synchronously. macOS ignores this (close already hides via
+  // the Dock path), but pushing is harmless and keeps the Linux/Windows
+  // path live.
   const closeToTray = data?.close_to_tray ?? true;
   useEffect(() => {
-    if (!hasElectron()) {
-      return;
-    }
-    void electron().traySetCloseToTray(closeToTray).catch((err) => {
-      console.warn("[tray] traySetCloseToTray failed:", err);
+    void setTrayCloseToTray(closeToTray).catch((err) => {
+      console.warn("[tray] setTrayCloseToTray failed:", err);
     });
   }, [closeToTray]);
 
   // macOS menu-bar icon. Linux/Windows ignore this on the main side;
-  // they have a tray unconditionally once setupTray succeeds. Default
+  // they have a tray unconditionally once setup succeeds. Default
   // is off, so the very first load on a fresh macOS install does NOT
   // claim a menu-bar slot until the user opts in.
   const menubarIcon = data?.menubar_icon ?? false;
   useEffect(() => {
-    if (!hasElectron()) {
-      return;
-    }
-    void electron().traySetEnabled(menubarIcon).catch((err) => {
-      console.warn("[tray] traySetEnabled failed:", err);
+    void setTrayEnabled(menubarIcon).catch((err) => {
+      console.warn("[tray] setTrayEnabled failed:", err);
     });
   }, [menubarIcon]);
 }

@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
-import { getCurrentWindow, Image, type PollisImage } from '../bridge';
-import { electron, hasElectron } from '../bridge/runtime';
+import { getCurrentWindow, Image, setTrayUnread, type PollisImage } from '../bridge';
 import { appStore } from '../stores/appStore';
 import { useObserver } from 'mobx-react-lite';
 import { useTauriReady } from './useTauriReady';
@@ -68,9 +67,9 @@ export function useBadge() {
 
     // Mirror the unread count into the system tray icon (Linux + Windows).
     // macOS has no tray; the dock badge above already covers that surface.
-    if (!isMac && hasElectron()) {
-      void electron().traySetUnread(total).catch((err) => {
-        console.warn('[tray] traySetUnread failed:', err);
+    if (!isMac) {
+      void setTrayUnread(total).catch((err) => {
+        console.warn('[tray] setTrayUnread failed:', err);
       });
     }
   }, [isReady, total]);

@@ -9,6 +9,7 @@ pub use pollis_core::sink as core_sink;
 pub use pollis_core::state;
 pub mod sink;
 pub mod commands;
+pub mod tray;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
@@ -309,6 +310,10 @@ pub fn run() {
 
             let config = Config::from_env().map_err(|e| e.to_string())?;
 
+            // Owned app handle captured before `app` is moved into the async
+            // block below — used to set up the system tray afterwards.
+            let tray_handle = app.handle().clone();
+
             // Capture the window handle before app is moved into the async block.
             #[cfg(target_os = "linux")]
             let main_window = app.get_webview_window("main");
@@ -362,6 +367,11 @@ pub fn run() {
                 Ok::<(), String>(())
             })?;
 
+            // System tray (Linux/Windows created now; macOS opt-in via the
+            // renderer's "Menu bar icon" preference → tray_set_enabled).
+            tray_handle.manage(tray::TrayState::default());
+            tray::setup(&tray_handle);
+
             // WebRTC is disabled by default in WebKitGTK and must be explicitly enabled.
             // Without this, RTCPeerConnection is undefined in the JS context on Linux.
             #[cfg(target_os = "linux")]
@@ -381,6 +391,10 @@ pub fn run() {
             hide_window,
             read_clipboard_files,
             read_clipboard_image_to_temp,
+            tray::tray_set_unread,
+            tray::tray_set_close_to_tray,
+            tray::tray_set_enabled,
+            tray::tray_set_voice_state,
             commands::auth::initialize_identity,
             commands::auth::get_identity,
             commands::auth::request_otp,
@@ -538,16 +552,23 @@ commands::livekit::get_livekit_token,
             if let tauri::WindowEvent::Focused(true) = _event {
                 pollis_core::commands::r2::enforce_cache_cap_now();
             }
-            // On Linux/Windows the user closing the window terminates
-            // the app — but Tauri runs CloseRequested before the
-            // ExitRequested cleanup above gets a chance, and the helper
-            // child can briefly outlive the parent (PR_SET_PDEATHSIG
-            // catches it eventually but the portal screencast indicator
-            // / red dot lingers). Stop the share synchronously here so
+            // On Linux/Windows closing the window either hides it to the
+            // tray (when "Close to tray" is on and a tray exists) or really
+            // quits. When it hides, the app keeps running — so we must NOT
+            // tear down the screen-share. When it really closes, Tauri runs
+            // CloseRequested before ExitRequested gets a chance, and the
+            // helper child can briefly outlive the parent (PR_SET_PDEATHSIG
+            // catches it eventually but the portal screencast indicator /
+            // red dot lingers). Stop the share synchronously in that case so
             // the user sees an immediate clean shutdown.
             #[cfg(not(target_os = "macos"))]
-            if let tauri::WindowEvent::CloseRequested { .. } = _event {
-                if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
+                if crate::tray::should_hide_on_close(_window.app_handle()) {
+                    api.prevent_close();
+                    let _ = _window.hide();
+                } else if let Some(state) =
+                    _window.app_handle().try_state::<Arc<AppState>>()
+                {
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
                         let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
