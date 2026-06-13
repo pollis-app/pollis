@@ -46,11 +46,19 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
 /// Apply rounded corners to an NSWindow using only public AppKit APIs.
 /// Technique: make the window non-opaque with a clear background, then set
 /// the contentView's CALayer cornerRadius + masksToBounds so the rendered
-/// content is clipped to a rounded rect. The window still has a real
-/// titlebar region; we hide its chrome so only the rounded content shows.
+/// content is clipped to a rounded rect.
+///
+/// Titlebar: we keep the macOS "hidden inset" style — a transparent,
+/// title-hidden titlebar with the native traffic lights visible, sitting over
+/// the full-size content view. This matches the Electron build
+/// (`titleBarStyle: "hidden"`) and the frontend `TitleBar`, which reserves a
+/// 68px slot at top-left for the native controls. The window config sets
+/// `decorations: false` (borderless, no buttons), so we re-add the
+/// titled/closable/miniaturizable/resizable masks here to bring the traffic
+/// lights back; without them the reserved 68px slot renders empty.
 #[cfg(target_os = "macos")]
 fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
-    use cocoa::appkit::{NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility};
+    use cocoa::appkit::{NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
     use cocoa::base::{id, NO, YES};
     use objc::{class, msg_send, sel, sel_impl};
 
@@ -59,23 +67,20 @@ fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
         Err(_) => return,
     };
     unsafe {
-        // Merge in FullSizeContentView so the webview paints under any
-        // titlebar region, and make the titlebar transparent + hide its
-        // title and standard window buttons. Together with clipping the
-        // contentView layer below, this produces a clean rounded window.
+        // Merge in FullSizeContentView so the webview paints under the
+        // titlebar region, and restore the titled/closable/miniaturizable/
+        // resizable masks so the native traffic lights exist (decorations:false
+        // strips them). The titlebar itself stays transparent + title-hidden,
+        // so only the three buttons show over the rounded content below.
         let mut mask = ns_window.styleMask();
-        mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
+        mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask
+            | NSWindowStyleMask::NSTitledWindowMask
+            | NSWindowStyleMask::NSClosableWindowMask
+            | NSWindowStyleMask::NSMiniaturizableWindowMask
+            | NSWindowStyleMask::NSResizableWindowMask;
         ns_window.setStyleMask_(mask);
         ns_window.setTitlebarAppearsTransparent_(YES);
         ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
-        let close_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowCloseButton);
-        let min_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowMiniaturizeButton);
-        let zoom_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowZoomButton);
-        for btn in [close_btn, min_btn, zoom_btn] {
-            if !btn.is_null() {
-                let _: () = msg_send![btn, setHidden: YES];
-            }
-        }
         let _: () = msg_send![ns_window, setOpaque: NO];
         let clear: id = msg_send![class!(NSColor), clearColor];
         let _: () = msg_send![ns_window, setBackgroundColor: clear];
