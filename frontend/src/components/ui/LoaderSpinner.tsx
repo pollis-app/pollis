@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 
 /**
  * Props for the LoadingSpinner component.
@@ -16,7 +16,7 @@ interface LoadingSpinnerProps {
  *
  * The LoadingSpinner component provides a visually appealing loading indicator:
  * - Animated spinner using Unicode braille characters
- * - Smooth frame-by-frame animation (80ms intervals)
+ * - Smooth frame-by-frame animation driven entirely by CSS (no JS timer)
  * - Multiple size variants for different contexts
  * - Consistent styling with the design system
  * - Lightweight implementation with minimal dependencies
@@ -64,33 +64,17 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
   size = "base",
   className = "",
 }) => {
-  const [frame, setFrame] = useState(0);
-
-  // Classic CLI spinner characters
-  const spinnerChars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setFrame((prev) => (prev + 1) % spinnerChars.length);
-    }, 80); // 80ms for smooth animation
-
-    return () => clearInterval(interval);
-  }, []);
-
   const sizeClasses = {
     sm: "text-xs",
     base: "text-2xl",
     lg: "text-5xl",
   };
 
-  const baseClasses = `inline-block font-mono ${sizeClasses[size]}`;
-
   return (
     <span
-      className={`${baseClasses} ${className}`}
+      className={`loader-spinner inline-block font-mono ${sizeClasses[size]} ${className}`}
       style={{ color: "var(--c-accent)" }}
-    >
-      {spinnerChars[frame]}
-    </span>
+      aria-label="Loading"
+    />
   );
 };

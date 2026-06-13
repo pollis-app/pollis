@@ -302,6 +302,54 @@ input[type="range"]::-moz-range-thumb {
   background: var(--c-accent-dim);
 }
 
+/* ── Loader spinner (pure-CSS braille animation, no JS timer) ────── */
+@keyframes loader-spinner-frames {
+  0% {
+    content: "⠋";
+  }
+
+  10% {
+    content: "⠙";
+  }
+
+  20% {
+    content: "⠹";
+  }
+
+  30% {
+    content: "⠸";
+  }
+
+  40% {
+    content: "⠼";
+  }
+
+  50% {
+    content: "⠴";
+  }
+
+  60% {
+    content: "⠦";
+  }
+
+  70% {
+    content: "⠧";
+  }
+
+  80% {
+    content: "⠇";
+  }
+
+  90% {
+    content: "⠏";
+  }
+}
+
+.loader-spinner::before {
+  content: "⠋";
+  animation: loader-spinner-frames 0.8s steps(10) infinite;
+}
+
 /* ── Status bar unread blink ─────────────────────────────────────── */
 @keyframes status-blink {
 
