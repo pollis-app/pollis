@@ -214,6 +214,33 @@ impl AppState {
                 }
                 handle.abort();
             }
+
+            // The voice room is held separately in `self.voice.room`, not in the
+            // `livekit.rooms` map above — so close it here too. Without this, a
+            // graceful quit (Cmd+Q / window close → pollis-node shutdown) leaves
+            // our participant in the room until LiveKit's server-side RTC timeout
+            // evicts us, which is the lingering "ghost card" other members see.
+            // Mirror `leave_voice_channel`: abort the room/frame tasks (so the
+            // Disconnected handler can't race the teardown), take the room, then
+            // close it outside the lock with a timeout so a dead connection can't
+            // stall the quit.
+            let room = {
+                let mut voice = self.voice.lock().await;
+                if let Some(t) = voice.frame_task.take() {
+                    t.abort();
+                }
+                if let Some(t) = voice.room_task.take() {
+                    t.abort();
+                }
+                voice.room.take()
+            };
+            if let Some(room) = room {
+                let _ = tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    room.close(),
+                )
+                .await;
+            }
         }
     }
 
