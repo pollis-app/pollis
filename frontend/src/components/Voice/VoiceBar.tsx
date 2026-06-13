@@ -7,6 +7,7 @@ import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff 
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
+import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
 import { shareOf } from "../../types/voice-state";
 
@@ -45,6 +46,15 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   const localIdentity = voiceParticipants.find((p) => p.isLocal)?.identity ?? null;
   const remoteActiveSpeakerIds = voiceActiveSpeakerIds.filter((id) => id !== localIdentity);
   const lastRemoteSpeakerId = remoteActiveSpeakerIds.at(-1);
+
+  // Count distinct *users*, not raw participant entries: a user joined from two
+  // devices (or mid-reconnect overlap) is one person, and voice + screenshare
+  // are two publications by the same identity, not two people. Dedupe by user
+  // id the same way VoiceStage merges device-identities into one tile, so this
+  // matches the sidebar's room count.
+  const participantCount = new Set(
+    voiceParticipants.map((p) => userIdFromVoiceIdentity(p.identity)),
+  ).size;
 
   return (
     <div
@@ -139,7 +149,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
 
       {/* Participant count */}
       <span data-testid="voice-bar-participant-count" style={{ color: "var(--c-text-dim)" }}>
-        {voiceParticipants.length} participant{voiceParticipants.length !== 1 ? "s" : ""}
+        {participantCount} participant{participantCount !== 1 ? "s" : ""}
       </span>
 
       {/* Security indicator — audio is transport-encrypted (TLS) but not E2EE for v1 */}
