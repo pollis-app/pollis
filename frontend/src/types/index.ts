@@ -5,7 +5,7 @@
 // - Local DB: ONLY encrypted messages, encryption keys, crypto state
 // - Everything else fetched from remote via React Query (network-first)
 //
-// This is Signal (e2e encryption) + Slack (group features)
+// This is MLS (e2e encryption) + Slack (group features)
 
 // Shape returned by the `detect_managed_install` command. Non-null means
 // the running binary is owned by a system package manager (AUR / .deb /
@@ -73,7 +73,7 @@ export interface Message {
   conversation_id?: string; // ULID (required - channel or DM conversation)
   sender_id: string; // user_id
   sender_username?: string; // resolved at fetch time from Turso JOIN
-  ciphertext: Uint8Array; // encrypted content (Signal protocol)
+  ciphertext: Uint8Array; // encrypted content (MLS protocol)
   nonce: Uint8Array; // nonce for encryption
   content_decrypted?: string; // Decrypted content (client-side only, never persisted)
   reply_to_message_id?: string; // ULID of message being replied to
