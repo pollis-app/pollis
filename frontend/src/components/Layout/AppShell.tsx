@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
 import { TitleBar } from "./TitleBar";
 import { BreadcrumbNav } from "./BreadcrumbNav";
+import { MigrationBanner } from "../MigrationBanner";
 import { Sidebar } from "./Sidebar";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
@@ -504,6 +505,9 @@ export const AppShell: React.FC = observer(() => {
 
       {/* Breadcrumb nav — appears on every authenticated page */}
       <BreadcrumbNav />
+
+      {/* End-of-life nudge — only renders in the legacy Electron build */}
+      <MigrationBanner />
 
       {/* Main content — sidebar + matched child route. The screen-share
           viewer mounts INSIDE this region so the TitleBar (drag handle),
