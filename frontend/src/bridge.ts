@@ -89,3 +89,12 @@ export {
 
 // Updater (Phase 7 stub).
 export { check, type PollisUpdate, type DownloadEvent } from "./bridge/updater";
+
+// System tray / menu-bar.
+export {
+  setTrayUnread,
+  setTrayCloseToTray,
+  setTrayEnabled,
+  setTrayVoiceState,
+  onTrayRequestToggleMute,
+} from "./bridge/tray";

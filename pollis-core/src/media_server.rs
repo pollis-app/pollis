@@ -22,7 +22,10 @@ use std::sync::Arc;
 
 use axum::{
     body::Body,
-    extract::{Path, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -49,6 +52,11 @@ pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
     let shutdown_signal = state.shutdown_signal.clone();
     let app = Router::new()
         .route("/:token/:hash", get(serve_media))
+        // Decoded remote screenshare frames for the Tauri/WebKitGTK WebGL
+        // render path (spike/tauri-revival). Token-gated like `serve_media`.
+        // 3 segments so it can't collide with the `/:token/:hash` media route
+        // (matchit panics on static-vs-param conflicts at the same position).
+        .route("/ws/screenshare/:token", get(ws_screenshare))
         .with_state(state);
 
     tokio::spawn(async move {
@@ -233,6 +241,57 @@ fn parse_single_range(range_str: &str, total: u64) -> Result<Option<(u64, u64)>,
     }
     let end = end.min(last);
     Ok(Some((start, end)))
+}
+
+/// `GET /ws/screenshare/<token>` — upgrades to a WebSocket that streams
+/// decoded remote screenshare frames (packed I420, the `pack_frame_bytes`
+/// wire format) as binary messages. This is the Tauri/WebKitGTK render
+/// transport (spike/tauri-revival): the renderer parses each message and
+/// uploads the Y/U/V planes into a WebGL YUV→RGB shader — the path the
+/// `rustwebrtc` PoC proved sustains 1080p60+ where per-frame Tauri IPC
+/// `Channel` dispatch stalled on V8 GC (#305 Phase 1).
+///
+/// One frame stream serves every track; the renderer dispatches by the
+/// `track_key` carried in each frame's header, exactly as the legacy
+/// `Channel` path did.
+async fn ws_screenshare(
+    State(state): State<Arc<AppState>>,
+    Path(token): Path<String>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    // Token gate — same secret as the media route, same 403-on-anything.
+    let expected = state.media_server_token.lock().await.clone();
+    let expected = match expected {
+        Some(t) => t,
+        None => return StatusCode::FORBIDDEN.into_response(),
+    };
+    if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    let rx = state.screenshare_frame_tx.subscribe();
+    ws.on_upgrade(move |socket| pump_frames(socket, rx))
+}
+
+/// Forward broadcast frames to one WebSocket client until either side
+/// closes. Lagged receivers (a stalled webview) drop the oldest frames
+/// rather than back-pressuring the decoder — latest-frame-wins.
+async fn pump_frames(
+    mut socket: WebSocket,
+    mut rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+    loop {
+        match rx.recv().await {
+            Ok(frame) => {
+                if socket.send(Message::Binary(frame.to_vec())).await.is_err() {
+                    break;
+                }
+            }
+            Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => break,
+        }
+    }
 }
 
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {

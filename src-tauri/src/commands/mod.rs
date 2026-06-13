@@ -15,6 +15,7 @@ pub mod safety;
 pub mod screenshare;
 pub mod sfx;
 pub mod terminal;
+pub mod transparency;
 pub mod update;
 pub mod user;
 pub mod voice;

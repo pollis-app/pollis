@@ -1,7 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { invoke } from "../../bridge";
-import { electron, hasElectron } from "../../bridge/runtime";
+import { invoke, setTrayCloseToTray, setTrayEnabled } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
 import {
@@ -44,6 +43,13 @@ export interface PreferencesData {
   echo_cancellation?: boolean;
   /** RNNoise click/keystroke suppression (separate from APM's spectral NS). */
   click_suppression?: boolean;
+  /**
+   * Screen-share capture/encode framerate ceiling, in fps. One of
+   * `SCREEN_SHARE_FPS_OPTIONS` (15 / 30 / 60). Read at share-start and passed
+   * to the publish path (Rust `start_screen_share` under Tauri, `getUserMedia`
+   * constraints under Electron). Absent → `SCREEN_SHARE_FPS_DEFAULT`.
+   */
+  screen_share_max_fps?: number;
   auto_join_voice?: boolean;
   /** Whether the left sidebar is open by default at app start. */
   sidebar_open_by_default?: boolean;
@@ -82,6 +88,23 @@ export interface PreferencesData {
 // Voice-identity parsing (`userIdFromVoiceIdentity`) lives in
 // `voice/identity.ts` — the canonical home shared with the rest of the voice
 // layer. Import it from there.
+
+/**
+ * Screen-share framerate presets, in fps. 15 = documents/browsing (cheapest,
+ * good for constrained machines/networks), 30 = standard, 60 = motion/gameplay.
+ */
+export const SCREEN_SHARE_FPS_OPTIONS = [15, 30, 60] as const;
+export const SCREEN_SHARE_FPS_DEFAULT = 30;
+
+/** Snap an arbitrary value to the nearest allowed preset; default if invalid. */
+export function clampScreenShareFps(v: number | undefined): number {
+  if (v === undefined || !Number.isFinite(v)) {
+    return SCREEN_SHARE_FPS_DEFAULT;
+  }
+  return SCREEN_SHARE_FPS_OPTIONS.reduce((best, opt) =>
+    Math.abs(opt - v) < Math.abs(best - v) ? opt : best,
+  );
+}
 
 /** Volume slider range used by the per-remote-user output volume control. */
 export const REMOTE_USER_VOLUME_MIN = 0.0;
@@ -258,6 +281,9 @@ export function usePreferences() {
         ),
         echo_cancellation: getPreference<boolean>(json, "echo_cancellation", APM_DEFAULTS.echo_cancellation),
         click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
+        screen_share_max_fps: clampScreenShareFps(
+          getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+        ),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
         close_to_tray: getPreference<boolean>(json, "close_to_tray", true),
@@ -364,31 +390,25 @@ export function useApplyPreferences(): void {
     }
   }, [data?.accent_color, data?.background_color, data?.font_size, overridesKey, currentUser?.id]);
 
-  // Push close-to-tray to the Electron main process so the close handler
-  // can pick hide-vs-quit synchronously. macOS ignores this server-side
-  // (close already hides via the Dock path), but pushing is harmless and
-  // keeps the Linux/Windows path live.
+  // Push close-to-tray to the host so the close handler can pick
+  // hide-vs-quit synchronously. macOS ignores this (close already hides via
+  // the Dock path), but pushing is harmless and keeps the Linux/Windows
+  // path live.
   const closeToTray = data?.close_to_tray ?? true;
   useEffect(() => {
-    if (!hasElectron()) {
-      return;
-    }
-    void electron().traySetCloseToTray(closeToTray).catch((err) => {
-      console.warn("[tray] traySetCloseToTray failed:", err);
+    void setTrayCloseToTray(closeToTray).catch((err) => {
+      console.warn("[tray] setTrayCloseToTray failed:", err);
     });
   }, [closeToTray]);
 
   // macOS menu-bar icon. Linux/Windows ignore this on the main side;
-  // they have a tray unconditionally once setupTray succeeds. Default
+  // they have a tray unconditionally once setup succeeds. Default
   // is off, so the very first load on a fresh macOS install does NOT
   // claim a menu-bar slot until the user opts in.
   const menubarIcon = data?.menubar_icon ?? false;
   useEffect(() => {
-    if (!hasElectron()) {
-      return;
-    }
-    void electron().traySetEnabled(menubarIcon).catch((err) => {
-      console.warn("[tray] traySetEnabled failed:", err);
+    void setTrayEnabled(menubarIcon).catch((err) => {
+      console.warn("[tray] setTrayEnabled failed:", err);
     });
   }, [menubarIcon]);
 }

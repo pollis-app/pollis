@@ -616,6 +616,19 @@ class VoiceSessionManager {
         if (event.identity === localIdentity) {
           patch.isMuted = isMuted;
         }
+        // A muted participant can't be an active speaker. Speaking is derived
+        // from audio frames, which simply stop on mute — so no SpeakingStopped
+        // arrives and the speaker would otherwise stay stuck in activeSpeakerIds
+        // (e.g. the voice bar's "current speaker"), only clearing when someone
+        // else overwrites it. Enforce the muted ⇒ not-speaking invariant here.
+        if (isMuted && this.state.activeSpeakerIds.includes(event.identity)) {
+          patch.activeSpeakerIds = this.state.activeSpeakerIds.filter(
+            (id) => id !== event.identity,
+          );
+          if (event.identity === localIdentity) {
+            patch.isLocalSpeaking = false;
+          }
+        }
         this.setState(patch);
         break;
       }

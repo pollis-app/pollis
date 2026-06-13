@@ -170,26 +170,6 @@ const RemoteVideoTileElectron: React.FC<Props> = ({
 /// every other pixel from every other row into a tightly-packed
 /// destination buffer. Allocated once and reused across frames (the
 /// caller owns the scratch) so the hot path stays allocation-free.
-function downsample2x(
-  src: Uint8Array,
-  srcW: number,
-  srcH: number,
-  scratch: Uint8Array | null,
-): { buf: Uint8Array; w: number; h: number } {
-  const dw = srcW >> 1;
-  const dh = srcH >> 1;
-  const need = dw * dh;
-  const dst = scratch && scratch.length >= need ? scratch : new Uint8Array(need);
-  for (let y = 0; y < dh; y++) {
-    const srcOff = y * 2 * srcW;
-    const dstOff = y * dw;
-    for (let x = 0; x < dw; x++) {
-      dst[dstOff + x] = src[srcOff + (x << 1)];
-    }
-  }
-  return { buf: dst, w: dw, h: dh };
-}
-
 const VERT_SRC = `
 attribute vec2 a_pos;
 varying vec2 v_uv;
@@ -341,11 +321,6 @@ const RemoteVideoTileTauri: React.FC<Props> = ({
   // skip scheduling the rAF when a frame arrives too soon — the
   // upcoming frame will check again.
   const lastPaintAtRef = useRef<number>(0);
-  // Preview-mode downsample scratches. Sized on first frame, reused
-  // across frames; reallocated only if the source resolution changes.
-  const yScratchRef = useRef<Uint8Array | null>(null);
-  const uScratchRef = useRef<Uint8Array | null>(null);
-  const vScratchRef = useRef<Uint8Array | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -380,31 +355,19 @@ const RemoteVideoTileTauri: React.FC<Props> = ({
       if (frame.yStride !== frame.width || frame.uStride !== cW || frame.vStride !== cW) {
         return;
       }
-      // Preview mode: 2× downsample Y/U/V before upload. Cuts texture
-      // bandwidth 4× and keeps a wall of small preview tiles cheap.
-      // Skipped in fullscreen so the viewer gets source-quality frames.
-      let yPlane = frame.y;
-      let uPlane = frame.u;
-      let vPlane = frame.v;
-      let yW = frame.width;
-      let yH = frame.height;
-      let uvW = cW;
-      let uvH = cH;
-      if (preview) {
-        const y2 = downsample2x(frame.y, frame.width, frame.height, yScratchRef.current);
-        const u2 = downsample2x(frame.u, cW, cH, uScratchRef.current);
-        const v2 = downsample2x(frame.v, cW, cH, vScratchRef.current);
-        yScratchRef.current = y2.buf;
-        uScratchRef.current = u2.buf;
-        vScratchRef.current = v2.buf;
-        yPlane = y2.buf;
-        uPlane = u2.buf;
-        vPlane = v2.buf;
-        yW = y2.w;
-        yH = y2.h;
-        uvW = u2.w;
-        uvH = u2.h;
-      }
+      // Upload the I420 planes at source resolution and let WebGL's LINEAR
+      // filter + the canvas's CSS box scale the thumbnail down. The earlier
+      // CPU 2× downsample (preview mode) is gone: it mis-positioned the tile
+      // image while fullscreen was correct, and the rustwebrtc PoC showed GPU
+      // paint is ~1ms p95 even at 1440p — there's no bandwidth win worth a
+      // separate, buggy code path. One path now renders both tile + fullscreen.
+      const yPlane = frame.y;
+      const uPlane = frame.u;
+      const vPlane = frame.v;
+      const yW = frame.width;
+      const yH = frame.height;
+      const uvW = cW;
+      const uvH = cH;
       // Resize backing store on dimension change. CSS sizing is
       // independent — the canvas's intrinsic dimensions drive
       // max-width:100%+max-height:100%+width:auto+height:auto sizing.
@@ -451,10 +414,6 @@ const RemoteVideoTileTauri: React.FC<Props> = ({
       // GL resources are tied to the canvas; dropping the canvas releases
       // them when the WebGL context is garbage collected.
       glRef.current = null;
-      // Drop preview scratches so a re-mount picks up fresh sizing.
-      yScratchRef.current = null;
-      uScratchRef.current = null;
-      vScratchRef.current = null;
     };
   }, [trackKey, initialWidth, initialHeight, preview]);
 

@@ -131,6 +131,14 @@ export function useUserProfile() {
         { userId: currentUser.id },
       );
 
+      // Hydrate the denormalized store avatar so the optimistic local voice
+      // participant (VoiceSessionManager builds its tile from
+      // `store.userAvatarUrl`) shows the user's avatar. Without this it stays
+      // null until an avatar *update*, so your own voice tile renders the
+      // placeholder. Remote tiles are unaffected — they get avatar_url from
+      // the backend voice presence (lookup_avatar_url).
+      appStore.setUserAvatarUrl(profile?.avatar_url ?? null);
+
       return {
         username: profile?.username || currentUser.username || '',
         preferred_name: profile?.preferred_name,

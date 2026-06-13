@@ -18,7 +18,7 @@ use libwebrtc::{
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
-    options::TrackPublishOptions,
+    options::{TrackPublishOptions, VideoEncoding},
     prelude::*,
     track::{LocalTrack, LocalVideoTrack},
 };
@@ -26,7 +26,7 @@ use livekit::{
 use crate::{error::Result, state::AppState};
 
 use super::{
-    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec},
+    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec, resolve_screenshare_encoding},
     fail_capture,
     helper_subprocess::spawn_and_accept_helper,
     stop::stop_screen_share,
@@ -116,6 +116,7 @@ pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
+    max_framerate: Option<u32>,
 ) -> Result<()> {
     use pollis_capture_proto::encode_select;
     use tokio::io::AsyncWriteExt;
@@ -210,9 +211,22 @@ pub async fn start_screen_share(
             eprintln!("[screenshare] helper announced {}x{}", width, height);
             (width & !1, height & !1)
         }
-        Ok(Some(CaptureMsg::Frame { .. }))
-        | Ok(Some(CaptureMsg::Sources(_)))
-        | Ok(Some(CaptureMsg::Select(_))) => {
+        // The Linux pipewire helper can deliver a Frame ahead of (or
+        // instead of) the Format message: `param_changed` may fire first
+        // with a not-yet-negotiated zero size — skipping the Format send —
+        // while `process` then streams frames carrying real dimensions.
+        // Frames are self-describing, so treat a leading Frame as the
+        // format announcement and drop its single payload; the next frame
+        // (~1 refresh later) feeds the publish loop normally. (spike/
+        // tauri-revival — this path went unexercised through the Electron era.)
+        Ok(Some(CaptureMsg::Frame { width, height, .. })) => {
+            eprintln!(
+                "[screenshare] helper sent frame before format; deriving {}x{}",
+                width, height
+            );
+            (width & !1, height & !1)
+        }
+        Ok(Some(CaptureMsg::Sources(_))) | Ok(Some(CaptureMsg::Select(_))) => {
             eprintln!("[screenshare] helper sent unexpected message before format");
             stop_screen_share(state).await.ok();
             return Err(fail_capture(
@@ -311,6 +325,14 @@ pub async fn start_screen_share(
         RtcVideoSource::Native(source.clone()),
     );
     eprintln!("[screenshare] publishing track {}x{}", width, height);
+    // Pin the encoding explicitly. With `video_encoding: None` the SDK
+    // auto-selects from its quality-optimized screenshare preset table, which
+    // caps any surface ≤1280px wide at 15fps (`H1080_FPS15`) — "optimized for
+    // quality, prefers to reduce FPS". That silently pinned every sub-1080p
+    // share to 15fps regardless of source rate. We instead honour the user's
+    // Screen Share framerate preference (defaulting to 30); the encoder treats
+    // max_framerate as a ceiling, so static content still costs nothing.
+    let (max_framerate, max_bitrate) = resolve_screenshare_encoding(max_framerate);
     if let Err(e) = room
         .local_participant()
         .publish_track(
@@ -318,6 +340,10 @@ pub async fn start_screen_share(
             TrackPublishOptions {
                 source: TrackSource::Screenshare,
                 video_codec: pick_screenshare_codec(),
+                video_encoding: Some(VideoEncoding {
+                    max_framerate,
+                    max_bitrate,
+                }),
                 ..Default::default()
             },
         )
@@ -337,6 +363,11 @@ pub async fn start_screen_share(
     //    LiveKit source from here on; on EOF / error it just exits and
     //    relies on stop_screen_share for the rest of cleanup.
     let source_for_task = source.clone();
+    // Local self-preview now rides the same WebSocket broadcast the remote
+    // tiles use (spike/tauri-revival); without this the sharer's own preview
+    // tile stays black, since the frontend stopped listening to the IPC frame
+    // Channel when it switched to the WS transport.
+    let preview_tx = state.screenshare_frame_tx.clone();
     let (events_for_task, frames_for_task) = {
         let ss = state.screenshare.lock().await;
         (ss.events.clone(), ss.frames.clone())
@@ -365,16 +396,23 @@ pub async fn start_screen_share(
                     timestamp_us,
                     bgrx,
                 })) => {
-                    let preview = match &frames_for_task {
-                        Some(sink)
-                            if last_preview
-                                .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL) =>
-                        {
-                            last_preview = Some(std::time::Instant::now());
-                            Some(sink.as_ref())
-                        }
-                        _ => None,
+                    // Self-preview rides the WS broadcast at full capture rate
+                    // — the PoC showed the WS+WebGL path is cheap, so there's no
+                    // reason to throttle the sharer's own tile to 5fps. The
+                    // legacy RawSink (unused by the Tauri WS frontend) keeps its
+                    // PREVIEW_MIN_INTERVAL gate to bound IPC cost if anything
+                    // still listens on it.
+                    let show_preview = last_preview
+                        .map_or(true, |t| t.elapsed() >= PREVIEW_MIN_INTERVAL);
+                    if show_preview {
+                        last_preview = Some(std::time::Instant::now());
+                    }
+                    let preview = if show_preview {
+                        frames_for_task.as_ref().map(|s| s.as_ref())
+                    } else {
+                        None
                     };
+                    let preview_ws = Some(&preview_tx);
                     push_frame(
                         &source_for_task,
                         width,
@@ -383,6 +421,7 @@ pub async fn start_screen_share(
                         timestamp_us,
                         &bgrx,
                         preview,
+                        preview_ws,
                     );
                 }
                 Ok(Some(CaptureMsg::Format { .. })) => {
@@ -435,6 +474,7 @@ fn push_frame(
     timestamp_us: i64,
     bgrx: &[u8],
     preview: Option<&dyn RawSink>,
+    preview_ws: Option<&tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>>,
 ) {
     // libwebrtc + VP8 require even dimensions; libyuv I420 chroma
     // alignment does too. Crop down rather than ever publishing odd
@@ -453,7 +493,7 @@ fn push_frame(
         buffer,
     };
     source.capture_frame(&frame);
-    if let Some(sink) = preview {
+    if preview.is_some() || preview_ws.is_some() {
         let bytes = pack_frame_bytes(
             LOCAL_PREVIEW_KEY,
             out_w,
@@ -461,6 +501,12 @@ fn push_frame(
             timestamp_us,
             &frame.buffer,
         );
-        let _ = sink.send(bytes);
+        let bytes = std::sync::Arc::new(bytes);
+        if let Some(tx) = preview_ws {
+            let _ = tx.send(bytes.clone());
+        }
+        if let Some(sink) = preview {
+            let _ = sink.send((*bytes).clone());
+        }
     }
 }

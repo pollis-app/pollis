@@ -264,6 +264,8 @@ fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
             // SCK doesn't expose a per-display human name; "Display N"
             // is what every other macOS app shows.
             name: format!("Display {}", i + 1),
+            // Helper doesn't render thumbnails; picker shows the icon.
+            thumbnail_data_url: None,
         })
         .collect();
 
@@ -323,6 +325,7 @@ fn enumerate_sources() -> Result<(SourceList, ContentCache)> {
                 title,
                 app_name,
                 bundle_id,
+                thumbnail_data_url: None,
             })
         })
         .collect();

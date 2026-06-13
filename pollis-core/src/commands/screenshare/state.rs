@@ -68,6 +68,15 @@ pub struct ScreenShareState {
     /// fresh Arc per session so a stale stop can't fence a newer one.
     #[cfg(target_os = "windows")]
     pub windows_active: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    /// Windows in-app picker phase: cached enumeration result from
+    /// `enumerate_screen_sources`. The frontend's in-app picker renders
+    /// these as tiles; `start_screen_share(Some(Selection))` then looks
+    /// up the chosen handle by its 0-based index. Dropped on the next
+    /// enumerate, `cancel_screen_share_picker`, or after a successful
+    /// start. Holding the bare `HMONITOR` / `HWND` is cheap — they're
+    /// just kernel handles, not COM objects.
+    #[cfg(target_os = "windows")]
+    pub windows_picker: Option<super::WindowsPickerCache>,
 
     /// Per-remote-track drain task. Key = "{identity}-{sid}".
     pub remote_drain_tasks: std::collections::HashMap<String, tokio::task::JoinHandle<()>>,
@@ -92,6 +101,8 @@ impl ScreenShareState {
             windows_thread: None,
             #[cfg(target_os = "windows")]
             windows_active: None,
+            #[cfg(target_os = "windows")]
+            windows_picker: None,
             remote_drain_tasks: std::collections::HashMap::new(),
         }
     }

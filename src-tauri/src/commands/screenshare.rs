@@ -34,6 +34,11 @@ pub async fn subscribe_screen_share_frames(
 }
 
 #[tauri::command]
+pub async fn screenshare_ws_url(state: State<'_, Arc<AppState>>) -> Result<Option<String>> {
+    Ok(pollis_core::commands::screenshare::screenshare_ws_url(&state).await?)
+}
+
+#[tauri::command]
 pub async fn enumerate_screen_sources(
     state: State<'_, Arc<AppState>>,
 ) -> Result<pollis_capture_proto::SourceList> {
@@ -49,8 +54,9 @@ pub async fn cancel_screen_share_picker(state: State<'_, Arc<AppState>>) -> Resu
 pub async fn start_screen_share(
     state: State<'_, Arc<AppState>>,
     selection: Option<pollis_capture_proto::Selection>,
+    max_framerate: Option<u32>,
 ) -> Result<()> {
-    pollis_core::commands::screenshare::start_screen_share(&state, selection).await
+    pollis_core::commands::screenshare::start_screen_share(&state, selection, max_framerate).await
 }
 
 #[tauri::command]

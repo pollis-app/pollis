@@ -11,32 +11,43 @@
 //     through `invoke('start_screen_share', …)` as before, and the I420
 //     frame channel feeds the canvas tile.
 
-import { Channel, hasMediaDevices, invoke } from "../bridge";
+import { reaction } from "mobx";
+
+import { Channel, hasElectron, invoke } from "../bridge";
 
 import { appStore } from "../stores/appStore";
+import {
+  clampScreenShareFps,
+  getPreference,
+  SCREEN_SHARE_FPS_DEFAULT,
+} from "../hooks/queries/usePreferences";
 import { playSfx, SFX } from "../utils/sfx";
 
 /** Capturable display reported by `enumerate_screen_sources`.
  *  Mirrors `pollis_capture_proto::DisplaySource` (helper enumeration).
  *
- *  Under Electron, `thumbnailDataUrl` is a PNG data URL from
- *  `desktopCapturer.getSources({ thumbnailSize })`. Under the Tauri
- *  capture helper it is undefined (the protocol doesn't ship preview
- *  frames; the picker falls back to the icon). */
+ *  `thumbnail_data_url` is a PNG data URL when the source path produces
+ *  one — Electron via `desktopCapturer.getSources({ thumbnailSize })`,
+ *  Windows via GDI BitBlt of the monitor rect. Undefined under the macOS
+ *  capture helper, which doesn't ship preview frames. The picker tile
+ *  falls back to the lucide icon when the field is undefined. */
 export interface DisplaySource {
   id: number;
   width: number;
   height: number;
   name: string;
-  thumbnailDataUrl?: string;
+  thumbnail_data_url?: string;
 }
 
 /** Capturable on-screen window reported by `enumerate_screen_sources`.
- *  Mirrors `pollis_capture_proto::WindowSource`. Under Electron,
- *  `width`/`height` are 0 (desktopCapturer doesn't surface per-window
- *  dimensions without actually capturing), and `thumbnailDataUrl` is
- *  populated. Under Tauri the dimensions are real and there is no
- *  thumbnail. */
+ *  Mirrors `pollis_capture_proto::WindowSource`.
+ *
+ *  Under Electron, `width`/`height` are 0 (desktopCapturer doesn't surface
+ *  per-window dimensions without actually capturing), and
+ *  `thumbnail_data_url` is populated. Under Tauri-Windows, dimensions are
+ *  real and `thumbnail_data_url` is populated from a GDI PrintWindow
+ *  render. Under the Tauri macOS helper, dimensions are real but
+ *  `thumbnail_data_url` is undefined. */
 export interface WindowSource {
   id: number;
   width: number;
@@ -44,11 +55,12 @@ export interface WindowSource {
   title: string;
   app_name: string;
   bundle_id: string;
-  thumbnailDataUrl?: string;
+  thumbnail_data_url?: string;
 }
 
-/** What the helper offers when it enumerates. Empty on Linux/Windows —
- *  those platforms hand off selection to the system picker. */
+/** What the helper offers when it enumerates. Empty on Linux —
+ *  the system portal handles selection. macOS + Windows return real
+ *  lists for the in-app picker. */
 export interface SourceList {
   displays: DisplaySource[];
   windows: WindowSource[];
@@ -184,6 +196,68 @@ class ScreenShareSession {
   // Cache the mapping each time enumerate() runs so start(selection) can
   // recover the right Electron id.
   private electronSourceIds = new Map<string, string>();
+  // Tauri frame transport: a loopback WebSocket to the Rust media server's
+  // `/ws/screenshare/<token>` route, replacing the per-frame IPC Channel that
+  // stalled WebKitGTK on V8 GC at 1080p (#305 Phase 1). Held so teardown can
+  // close it and the close handler can distinguish intentional vs dropped.
+  private frameSocket: WebSocket | null = null;
+  private frameSocketReconnect: ReturnType<typeof setTimeout> | null = null;
+  // The backend screenshare-event Channel (lifecycle events: remote
+  // started/stopped, local errors). Held so teardown can detach its handler
+  // on logout — otherwise a late event would mutate the just-reset store.
+  private eventsChannel: Channel<ScreenShareEvent> | null = null;
+
+  constructor() {
+    // Tear down on logout. This singleton lives for the whole process, so
+    // its frame WebSocket + reconnect timer must not outlive a session: after
+    // logout the media-server token rotates, so a surviving socket 403s and
+    // the onclose→reconnect loop would spin forever. Non-React singletons
+    // react to store changes via a mobx reaction, per app convention. The
+    // reaction fires only on change (not initially), so the startup null →
+    // null is a no-op; login (user set) is ignored by the guard.
+    reaction(
+      () => appStore.currentUser,
+      (user) => {
+        if (!user) {
+          this.teardown();
+        }
+      },
+    );
+  }
+
+  /** Close the frame transport and reset subscription state. Idempotent;
+   *  safe to call when nothing is open. A subsequent `ensureSubscribed`
+   *  (after the next login) re-wires the event Channel + a fresh WebSocket. */
+  teardown(): void {
+    this.subscribed = false;
+    // Detach the event Channel handler so a late screenshare event can't
+    // mutate the just-reset store. The Tauri Channel has no close(); dropping
+    // our handler + reference is the teardown, and the next ensureSubscribed
+    // re-subscribes a fresh Channel (the Rust sink is replaced on resubscribe).
+    if (this.eventsChannel) {
+      this.eventsChannel.onmessage = () => {};
+      this.eventsChannel = null;
+    }
+    if (this.frameSocketReconnect !== null) {
+      clearTimeout(this.frameSocketReconnect);
+      this.frameSocketReconnect = null;
+    }
+    const ws = this.frameSocket;
+    // Null first so the socket's own onclose treats this as an intentional
+    // close and does NOT schedule a reconnect.
+    this.frameSocket = null;
+    if (ws) {
+      try {
+        ws.close();
+      } catch {
+        // already closing/closed
+      }
+    }
+    // Drop per-track stats caches so a new session starts clean.
+    this.fpsHistory.clear();
+    this.lastDims.clear();
+    this.lastBytes.clear();
+  }
 
   /** Idempotent. Call once after auth so the backend Channels are wired.
    *  Under Electron this is a no-op — the Rust event/frame channels are
@@ -197,7 +271,7 @@ class ScreenShareSession {
     }
     this.subscribed = true;
 
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       // Trigger the side-effect: importing livekitView installs its
       // store subscription, so the JS view client is ready to follow
       // voice phase changes.
@@ -207,14 +281,68 @@ class ScreenShareSession {
 
     const events = new Channel<ScreenShareEvent>();
     events.onmessage = (ev) => this.handleEvent(ev);
+    this.eventsChannel = events;
     await invoke("subscribe_screen_share_events", { onEvent: events });
 
-    // Frames Channel arrives as ArrayBuffer when the backend sends
-    // InvokeResponseBody::Raw. The TS type isn't ideal — `Channel<ArrayBuffer>`
-    // works at runtime but the type binding still says T = void.
-    const frames = new Channel<ArrayBuffer>();
-    frames.onmessage = (buf) => this.handleFrame(buf);
-    await invoke("subscribe_screen_share_frames", { onFrame: frames });
+    // Frame transport (spike/tauri-revival): a loopback WebSocket, not the
+    // per-frame IPC Channel. Same `pack_frame_bytes` wire format, so
+    // `handleFrame` is unchanged — only how the bytes arrive differs. The
+    // rustwebrtc PoC proved this path sustains 1080p60+ into the WebGL shader
+    // inside WebKitGTK, where Channel dispatch pegged a core on GC.
+    await this.connectFrameSocket();
+  }
+
+  /** Open (or reopen) the loopback frame WebSocket. The URL is `None` until
+   *  the media server is up and the session token is minted (post-unlock);
+   *  in that window we retry on the socket's own lifecycle events, never on a
+   *  timer poll. Binary messages are the packed-I420 frames `handleFrame`
+   *  already decodes. */
+  private async connectFrameSocket(): Promise<void> {
+    if (!this.subscribed) {
+      return;
+    }
+    const url = await invoke<string | null>("screenshare_ws_url");
+    if (!url) {
+      // Server/token not ready yet — try again shortly. One-shot, cleared on
+      // teardown; this is recovery keyed off a known-not-ready state, not a
+      // standing poll loop.
+      this.scheduleFrameSocketReconnect(500);
+      return;
+    }
+    const ws = new WebSocket(url);
+    ws.binaryType = "arraybuffer";
+    this.frameSocket = ws;
+    ws.onmessage = (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        this.handleFrame(e.data);
+      }
+    };
+    ws.onclose = () => {
+      // Only reconnect if this is still the live socket and we're subscribed
+      // (i.e. not an intentional teardown that nulled frameSocket first).
+      if (this.frameSocket === ws && this.subscribed) {
+        this.frameSocket = null;
+        this.scheduleFrameSocketReconnect(1000);
+      }
+    };
+    ws.onerror = () => {
+      // onclose follows onerror; let it drive the reconnect.
+      try {
+        ws.close();
+      } catch {
+        // already closing
+      }
+    };
+  }
+
+  private scheduleFrameSocketReconnect(delayMs: number): void {
+    if (this.frameSocketReconnect !== null) {
+      return;
+    }
+    this.frameSocketReconnect = setTimeout(() => {
+      this.frameSocketReconnect = null;
+      void this.connectFrameSocket();
+    }, delayMs);
   }
 
   /** Subscribe a tile to its track's frame stream. Returns an unsubscribe fn. */
@@ -271,16 +399,21 @@ class ScreenShareSession {
     return Math.round(((hist.length - 1) / span) * 1000);
   }
 
-  /** Enumerate capturable displays + windows. On macOS (under Tauri) this
-   *  spawns the helper, parks it waiting for our selection, and returns
-   *  the list to render in our in-app picker. On Linux/Windows the system
-   *  portal / WGC picker handles selection — the Tauri backend returns an
-   *  empty list as a signal to skip the in-app picker and go straight to
-   *  `start()`. Under Electron, we enumerate sources through
-   *  `desktopCapturer.getSources()` over IPC and route them to the same
-   *  in-app picker so the UX is identical on every platform. */
+  /** Enumerate capturable displays + windows.
+   *  - macOS (Tauri): spawns the helper, parks it waiting for our
+   *    selection, returns the list to render in the in-app picker.
+   *  - Windows (Tauri): enumerates monitors + windows via the windows-rs
+   *    Monitor/Window APIs and captures GDI thumbnails (BitBlt for
+   *    monitors, PrintWindow for windows). Returns a real list — the
+   *    in-app picker renders consistently with macOS/Electron.
+   *  - Linux (Tauri): the xdg-desktop-portal dialog IS the picker, so
+   *    the backend returns an empty list as a signal to skip the in-app
+   *    picker and go straight to `start()`.
+   *  - Electron (any OS): enumerates via `desktopCapturer.getSources()`
+   *    over IPC and routes through the same in-app picker so the UX is
+   *    identical across runtimes. */
   async enumerate(): Promise<SourceList> {
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       const api = (window as Window & {
         electronAPI?: {
           desktopMediaEnumerate?: () => Promise<
@@ -315,7 +448,7 @@ class ScreenShareSession {
             width: s.width,
             height: s.height,
             name: s.name,
-            thumbnailDataUrl: s.thumbnailDataUrl,
+            thumbnail_data_url: s.thumbnailDataUrl,
           });
         } else {
           const id = windows.length;
@@ -331,7 +464,7 @@ class ScreenShareSession {
             title: s.name,
             app_name: "",
             bundle_id: "",
-            thumbnailDataUrl: s.thumbnailDataUrl,
+            thumbnail_data_url: s.thumbnailDataUrl,
           });
         }
       }
@@ -344,7 +477,7 @@ class ScreenShareSession {
    *  picking a source. Under Electron there's no parked picker (Chromium
    *  drives selection inline). */
   async cancelPicker(): Promise<void> {
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       return;
     }
     await invoke("cancel_screen_share_picker");
@@ -357,11 +490,34 @@ class ScreenShareSession {
    *  on Linux/Windows it must be undefined so the system portal / WGC
    *  picker can show. */
   async start(selection?: Selection): Promise<void> {
-    if (hasMediaDevices()) {
-      await this.startElectron(selection);
+    const maxFramerate = await this.resolveMaxFramerate();
+    if (hasElectron()) {
+      await this.startElectron(selection, maxFramerate);
       return;
     }
-    await invoke("start_screen_share", { selection: selection ?? null });
+    await invoke("start_screen_share", {
+      selection: selection ?? null,
+      maxFramerate,
+    });
+  }
+
+  /** Read the user's Screen Share framerate preference (fps). This is a
+   *  non-React singleton, so it can't use the `usePreferences` hook — it reads
+   *  the same backend blob directly. Falls back to the default on any error or
+   *  when signed out. */
+  private async resolveMaxFramerate(): Promise<number> {
+    const userId = appStore.currentUser?.id;
+    if (!userId) {
+      return SCREEN_SHARE_FPS_DEFAULT;
+    }
+    try {
+      const json = await invoke<string>("get_preferences", { userId });
+      return clampScreenShareFps(
+        getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+      );
+    } catch {
+      return SCREEN_SHARE_FPS_DEFAULT;
+    }
   }
 
   /** Renderer-side publish path. Captures the picked source via
@@ -369,7 +525,7 @@ class ScreenShareSession {
    *  livekit-client view connection, and mirrors the lifecycle into the
    *  Zustand store (so VoiceBar / VoiceMemberTile switch to the
    *  streaming state) without going through the Rust event channel. */
-  private async startElectron(selection?: Selection): Promise<void> {
+  private async startElectron(selection: Selection | undefined, maxFramerate: number): Promise<void> {
     // The in-app picker (ScreenSharePicker.tsx) always supplies a
     // selection on the Electron path; this is the safety net for any
     // future code path that forgets to enumerate first. We deliberately
@@ -414,10 +570,11 @@ class ScreenShareSession {
       // specific source directly. This is the same pattern Slack,
       // Discord, and VSCode use for their custom screenshare pickers.
       //
-      // frameRate ceiling: 60 fps. xdg-desktop-portal (Linux),
-      // ScreenCaptureKit (macOS), and WGC (Windows) all cap source
-      // capture at ~60 fps on the typical compositor, so asking for
-      // higher gets silently clamped to 60.
+      // frameRate ceiling: the user's Screen Share preference (15/30/60,
+      // resolved in `resolveMaxFramerate`). 60 is the practical max —
+      // xdg-desktop-portal (Linux), ScreenCaptureKit (macOS), and WGC
+      // (Windows) all cap source capture at ~60 fps on the typical
+      // compositor, so asking for higher gets silently clamped anyway.
       //
       // TS lib.dom.d.ts dropped the typing for the legacy `mandatory`
       // constraints bag; cast through `unknown` to a partial
@@ -439,7 +596,7 @@ class ScreenShareSession {
             // Matches what Slack/Discord/Zoom do for screen-share.
             maxWidth: 2560,
             maxHeight: 1440,
-            maxFrameRate: 60,
+            maxFrameRate: maxFramerate,
           },
         } as unknown as MediaTrackConstraints,
       });
@@ -504,7 +661,7 @@ class ScreenShareSession {
   }
 
   async stop(): Promise<void> {
-    if (hasMediaDevices()) {
+    if (hasElectron()) {
       const { livekitView } = await import("./livekitView");
       await livekitView.unpublishScreenShare();
       const store = appStore;

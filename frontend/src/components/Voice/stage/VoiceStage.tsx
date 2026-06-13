@@ -27,7 +27,7 @@ import { shareOf } from "../../../types/voice-state";
 import { LOCAL_PREVIEW_KEY } from "../../../screenshare/screenShareSession";
 import { toggleScreenShare } from "../../../screenshare/screenShareActions";
 import { disambiguateVoiceNames } from "../../../voice/disambiguateNames";
-import { voiceUserKey } from "../../../voice/identity";
+import { userIdFromVoiceIdentity, voiceUserKey } from "../../../voice/identity";
 import { voiceSession } from "../../../voice";
 import { Button } from "../../ui/Button";
 import { NavigableGrid } from "../../ui/NavigableGrid";
@@ -86,7 +86,41 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       return () => setViewingScreenShareTrackKey(null);
     }, [setViewingScreenShareTrackKey]);
 
-    const displayNames = disambiguateVoiceNames(voiceParticipants);
+    // Merge a user's multiple device-identities (voice-{user}:{deviceA},
+    // voice-{user}:{deviceB}) into one tile — Discord-style, one entry per
+    // user, not per device. Without this a multi-device user (or a brief
+    // reconnect overlap) renders as "ants" + "ants (1)". Prefer the local
+    // device, then whichever device is screensharing, then the first seen.
+    const mergedParticipants: VoiceParticipant[] = (() => {
+      const byUser = new Map<string, VoiceParticipant>();
+      const shares = (p: VoiceParticipant): boolean =>
+        !!(screenShareRemotes[p.identity] ?? screenShareRemotes[voiceUserKey(p.identity)]);
+      for (const p of voiceParticipants) {
+        const key = userIdFromVoiceIdentity(p.identity);
+        const prev = byUser.get(key);
+        if (!prev) {
+          byUser.set(key, p);
+          continue;
+        }
+        const keep = prev.isLocal
+          ? prev
+          : p.isLocal
+            ? p
+            : shares(prev)
+              ? prev
+              : shares(p)
+                ? p
+                : prev;
+        byUser.set(key, keep);
+      }
+      return Array.from(byUser.values());
+    })();
+
+    // Speaking is user-scoped so a merged tile lights up when ANY of the
+    // user's devices is the active speaker.
+    const speakingUsers = new Set(voiceActiveSpeakerIds.map(userIdFromVoiceIdentity));
+
+    const displayNames = disambiguateVoiceNames(mergedParticipants);
 
     // Map a live VoiceParticipant onto the tile's view model, resolving
     // whichever screenshare track (local preview or remote) it's publishing.
@@ -114,7 +148,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         avatarKey: p.avatarKey ?? null,
         isMuted: p.isMuted,
         isLocal: p.isLocal,
-        isSpeaking: voiceActiveSpeakerIds.includes(p.identity) && !p.isMuted,
+        isSpeaking: speakingUsers.has(userIdFromVoiceIdentity(p.identity)) && !p.isMuted,
         connectionQuality: p.connectionQuality,
         streamTrackKey,
         streamWidth,
@@ -123,7 +157,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       };
     };
 
-    const people = voiceParticipants.map(resolve);
+    const people = mergedParticipants.map(resolve);
     const streamers = people.filter((p) => p.streamTrackKey !== undefined);
     const spotlight = isInCall && streamers.length > 0;
     const focused =

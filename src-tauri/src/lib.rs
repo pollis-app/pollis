@@ -9,6 +9,7 @@ pub use pollis_core::sink as core_sink;
 pub use pollis_core::state;
 pub mod sink;
 pub mod commands;
+pub mod tray;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
@@ -46,11 +47,19 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
 /// Apply rounded corners to an NSWindow using only public AppKit APIs.
 /// Technique: make the window non-opaque with a clear background, then set
 /// the contentView's CALayer cornerRadius + masksToBounds so the rendered
-/// content is clipped to a rounded rect. The window still has a real
-/// titlebar region; we hide its chrome so only the rounded content shows.
+/// content is clipped to a rounded rect.
+///
+/// Titlebar: we keep the macOS "hidden inset" style — a transparent,
+/// title-hidden titlebar with the native traffic lights visible, sitting over
+/// the full-size content view. This matches the Electron build
+/// (`titleBarStyle: "hidden"`) and the frontend `TitleBar`, which reserves a
+/// 68px slot at top-left for the native controls. The window config sets
+/// `decorations: false` (borderless, no buttons), so we re-add the
+/// titled/closable/miniaturizable/resizable masks here to bring the traffic
+/// lights back; without them the reserved 68px slot renders empty.
 #[cfg(target_os = "macos")]
 fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
-    use cocoa::appkit::{NSWindow, NSWindowButton, NSWindowStyleMask, NSWindowTitleVisibility};
+    use cocoa::appkit::{NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
     use cocoa::base::{id, NO, YES};
     use objc::{class, msg_send, sel, sel_impl};
 
@@ -59,23 +68,20 @@ fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
         Err(_) => return,
     };
     unsafe {
-        // Merge in FullSizeContentView so the webview paints under any
-        // titlebar region, and make the titlebar transparent + hide its
-        // title and standard window buttons. Together with clipping the
-        // contentView layer below, this produces a clean rounded window.
+        // Merge in FullSizeContentView so the webview paints under the
+        // titlebar region, and restore the titled/closable/miniaturizable/
+        // resizable masks so the native traffic lights exist (decorations:false
+        // strips them). The titlebar itself stays transparent + title-hidden,
+        // so only the three buttons show over the rounded content below.
         let mut mask = ns_window.styleMask();
-        mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask;
+        mask |= NSWindowStyleMask::NSFullSizeContentViewWindowMask
+            | NSWindowStyleMask::NSTitledWindowMask
+            | NSWindowStyleMask::NSClosableWindowMask
+            | NSWindowStyleMask::NSMiniaturizableWindowMask
+            | NSWindowStyleMask::NSResizableWindowMask;
         ns_window.setStyleMask_(mask);
         ns_window.setTitlebarAppearsTransparent_(YES);
         ns_window.setTitleVisibility_(NSWindowTitleVisibility::NSWindowTitleHidden);
-        let close_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowCloseButton);
-        let min_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowMiniaturizeButton);
-        let zoom_btn: id = ns_window.standardWindowButton_(NSWindowButton::NSWindowZoomButton);
-        for btn in [close_btn, min_btn, zoom_btn] {
-            if !btn.is_null() {
-                let _: () = msg_send![btn, setHidden: YES];
-            }
-        }
         let _: () = msg_send![ns_window, setOpaque: NO];
         let clear: id = msg_send![class!(NSColor), clearColor];
         let _: () = msg_send![ns_window, setBackgroundColor: clear];
@@ -304,6 +310,10 @@ pub fn run() {
 
             let config = Config::from_env().map_err(|e| e.to_string())?;
 
+            // Owned app handle captured before `app` is moved into the async
+            // block below — used to set up the system tray afterwards.
+            let tray_handle = app.handle().clone();
+
             // Capture the window handle before app is moved into the async block.
             #[cfg(target_os = "linux")]
             let main_window = app.get_webview_window("main");
@@ -357,6 +367,11 @@ pub fn run() {
                 Ok::<(), String>(())
             })?;
 
+            // System tray (Linux/Windows created now; macOS opt-in via the
+            // renderer's "Menu bar icon" preference → tray_set_enabled).
+            tray_handle.manage(tray::TrayState::default());
+            tray::setup(&tray_handle);
+
             // WebRTC is disabled by default in WebKitGTK and must be explicitly enabled.
             // Without this, RTCPeerConnection is undefined in the JS context on Linux.
             #[cfg(target_os = "linux")]
@@ -376,6 +391,10 @@ pub fn run() {
             hide_window,
             read_clipboard_files,
             read_clipboard_image_to_temp,
+            tray::tray_set_unread,
+            tray::tray_set_close_to_tray,
+            tray::tray_set_enabled,
+            tray::tray_set_voice_state,
             commands::auth::initialize_identity,
             commands::auth::get_identity,
             commands::auth::request_otp,
@@ -406,6 +425,8 @@ pub fn run() {
             commands::safety::get_safety_number,
             commands::safety::set_contact_verified,
             commands::safety::list_peer_verifications,
+            commands::transparency::self_audit_account_key,
+            commands::transparency::audit_peer_account_key,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,
@@ -509,6 +530,7 @@ commands::livekit::get_livekit_token,
             commands::voice_test::stop_test_playback,
             commands::screenshare::subscribe_screen_share_events,
             commands::screenshare::subscribe_screen_share_frames,
+            commands::screenshare::screenshare_ws_url,
             commands::screenshare::enumerate_screen_sources,
             commands::screenshare::cancel_screen_share_picker,
             commands::screenshare::start_screen_share,
@@ -532,16 +554,23 @@ commands::livekit::get_livekit_token,
             if let tauri::WindowEvent::Focused(true) = _event {
                 pollis_core::commands::r2::enforce_cache_cap_now();
             }
-            // On Linux/Windows the user closing the window terminates
-            // the app — but Tauri runs CloseRequested before the
-            // ExitRequested cleanup above gets a chance, and the helper
-            // child can briefly outlive the parent (PR_SET_PDEATHSIG
-            // catches it eventually but the portal screencast indicator
-            // / red dot lingers). Stop the share synchronously here so
+            // On Linux/Windows closing the window either hides it to the
+            // tray (when "Close to tray" is on and a tray exists) or really
+            // quits. When it hides, the app keeps running — so we must NOT
+            // tear down the screen-share. When it really closes, Tauri runs
+            // CloseRequested before ExitRequested gets a chance, and the
+            // helper child can briefly outlive the parent (PR_SET_PDEATHSIG
+            // catches it eventually but the portal screencast indicator /
+            // red dot lingers). Stop the share synchronously in that case so
             // the user sees an immediate clean shutdown.
             #[cfg(not(target_os = "macos"))]
-            if let tauri::WindowEvent::CloseRequested { .. } = _event {
-                if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
+                if crate::tray::should_hide_on_close(_window.app_handle()) {
+                    api.prevent_close();
+                    let _ = _window.hide();
+                } else if let Some(state) =
+                    _window.app_handle().try_state::<Arc<AppState>>()
+                {
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
                         let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
@@ -575,6 +604,13 @@ commands::livekit::get_livekit_token,
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
                         let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                        // Close the LiveKit rooms (realtime + voice) so the
+                        // server evicts us immediately instead of waiting out its
+                        // RTC timeout — otherwise our voice card lingers as a
+                        // ghost for everyone still in the channel. The Electron
+                        // path gets this via pollis-node's before-quit shutdown;
+                        // Tauri has no equivalent, so call it explicitly here.
+                        state.shutdown().await;
                     });
                 }
             }

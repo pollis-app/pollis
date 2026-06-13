@@ -7,6 +7,8 @@ import { Switch } from "../components/ui/Switch";
 import { Button } from "../components/ui/Button";
 import {
   preferencesToApmConfig,
+  SCREEN_SHARE_FPS_DEFAULT,
+  SCREEN_SHARE_FPS_OPTIONS,
   usePreferences,
   type ApmConfig,
   type NoiseSuppressionLevel,
@@ -86,6 +88,43 @@ const NoiseSuppressionSelect: React.FC<NoiseSuppressionSelectProps> = ({ value, 
     <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
       Filters out background hum, fans, and traffic. Higher settings also strip away quieter speech,
       so leave at Moderate unless your room is noisy.
+    </span>
+  </div>
+);
+
+/** fps → one-line use-case hint shown under the framerate selector. */
+const SCREEN_SHARE_FPS_HINTS: Record<number, string> = {
+  15: "Documents & browsing",
+  30: "Standard",
+  60: "Motion & gameplay",
+};
+
+interface ScreenShareFpsSelectProps {
+  value: number;
+  onChange: (fps: number) => void;
+}
+
+const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onChange }) => (
+  <div className="flex flex-col gap-2" style={{ maxWidth: 320 }}>
+    <span style={{ color: "var(--c-text-muted)" }}>Capture Framerate</span>
+    <div className="flex gap-2">
+      {SCREEN_SHARE_FPS_OPTIONS.map((fps) => (
+        <Button
+          key={fps}
+          data-testid={`screenshare-fps-${fps}`}
+          variant={value === fps ? "primary" : "secondary"}
+          size="sm"
+          onClick={() => onChange(fps)}
+        >
+          {fps} fps
+        </Button>
+      ))}
+    </div>
+    <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+      {SCREEN_SHARE_FPS_HINTS[value] ?? "Standard"}. Higher is smoother for
+      video and gameplay but uses more CPU and bandwidth; drop to 15 fps for
+      documents or a constrained machine/network. Takes effect on your next
+      screen share.
     </span>
   </div>
 );
@@ -192,6 +231,11 @@ export const VoiceSettingsPage: React.FC = () => {
   const autoJoinVoice = preferences.query.data?.auto_join_voice ?? false;
   const handleAutoJoinVoice = (enabled: boolean) => {
     preferences.save({ ...preferences.query.data, auto_join_voice: enabled });
+  };
+
+  const screenShareFps = preferences.query.data?.screen_share_max_fps ?? SCREEN_SHARE_FPS_DEFAULT;
+  const handleScreenShareFps = (fps: number) => {
+    preferences.save({ ...preferences.query.data, screen_share_max_fps: fps });
   };
 
   return (
@@ -415,6 +459,16 @@ export const VoiceSettingsPage: React.FC = () => {
             onChange={(enabled) => savePrefsAndPushApm({ click_suppression: enabled })}
             description="A smarter noise filter that catches keyboard typing and mouse clicks the regular Noise Suppression misses. Uses about 5% of one CPU core. Tip: turn Noise Suppression down to Low or Off when this is on so they don't fight each other."
           />
+        </section>
+
+        <section className="flex flex-col gap-4 mb-12">
+          <h2
+            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+          >
+            Screen Share
+          </h2>
+          <ScreenShareFpsSelect value={screenShareFps} onChange={handleScreenShareFps} />
         </section>
 
         <section className="flex flex-col gap-4 mb-12">

@@ -92,20 +92,26 @@ pub enum CaptureMsg {
 /// A capturable display (whole monitor).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DisplaySource {
-    /// macOS `CGDirectDisplayID`. Stable across this helper's lifetime;
-    /// the parent passes it back verbatim in `Selection::Display`.
+    /// macOS `CGDirectDisplayID` (helper path) or 0-based Windows enum
+    /// index. The parent passes it back verbatim in `Selection::Display`.
     pub id: u32,
     pub width: u32,
     pub height: u32,
     /// Friendly label like "Built-in Retina Display" — for picker UI.
     pub name: String,
+    /// Base64 PNG data URL rendered as the picker tile preview. `None`
+    /// where the source path doesn't ship thumbnails (the macOS capture
+    /// helper). Skipped on wire when absent for forward-compat with
+    /// helpers built against the older proto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_data_url: Option<String>,
 }
 
 /// A capturable on-screen window.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WindowSource {
-    /// macOS `CGWindowID`. Stable for the window's lifetime; the parent
-    /// passes it back verbatim in `Selection::Window`.
+    /// macOS `CGWindowID` (helper path) or 0-based Windows enum index.
+    /// The parent passes it back verbatim in `Selection::Window`.
     pub id: u32,
     pub width: u32,
     pub height: u32,
@@ -115,8 +121,14 @@ pub struct WindowSource {
     /// the primary label when `title` is empty.
     pub app_name: String,
     /// Bundle identifier where known (e.g. "com.apple.Safari"). May be
-    /// empty for daemons / agent processes without a bundle.
+    /// empty for daemons / agent processes without a bundle. Always
+    /// empty on Windows (no analog).
     pub bundle_id: String,
+    /// Base64 PNG data URL rendered as the picker tile preview. `None`
+    /// where the source path doesn't ship thumbnails (the macOS capture
+    /// helper). Skipped on wire when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thumbnail_data_url: Option<String>,
 }
 
 /// The enumeration result sent helper → parent.
@@ -406,6 +418,7 @@ mod tests {
                 width: 3024,
                 height: 1964,
                 name: "Built-in Retina Display".into(),
+                thumbnail_data_url: None,
             }],
             windows: vec![WindowSource {
                 id: 42,
@@ -414,6 +427,7 @@ mod tests {
                 title: "claude-code — ghostty".into(),
                 app_name: "Ghostty".into(),
                 bundle_id: "com.mitchellh.ghostty".into(),
+                thumbnail_data_url: None,
             }],
         }))
         .await;

@@ -45,7 +45,7 @@ pollis-core = { path = "../pollis-core" }
 # sends/receives them via invoke()).
 pollis-capture-proto = { path = "../pollis-capture-proto" }
 
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
