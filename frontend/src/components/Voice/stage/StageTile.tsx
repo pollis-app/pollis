@@ -247,10 +247,13 @@ export const StageTile: React.FC<Props> = ({
         </div>
       )}
 
-      {/* volume — remote only; persistent in preview, hover/focus in-call */}
-      {!p.isLocal && (
+      {/* volume — remote only, and in-call only. While previewing the channel
+          (not joined) you're not listening to anyone, so a per-user output
+          volume control is meaningless; it appears on hover/focus once you've
+          joined. */}
+      {!p.isLocal && !preview && (
         <div
-          className={"vs-vol" + (preview ? " always" : "")}
+          className="vs-vol"
           data-testid={`voice-tile-volume-${p.identity}`}
           onClick={(e) => e.stopPropagation()}
         >
