@@ -1,10 +1,17 @@
-//! Turns read [`CommitRow`]s into a signed monitor bundle.
+//! Turns read [`CommitRow`]s (and [`AccountKeyRow`]s) into a signed monitor
+//! bundle.
 //!
 //! The output [`Bundle`] serialises to **exactly** the JSON schema that
 //! `verifiable-log`'s `monitor` CLI consumes (`public_key`, `sths`, `entries`,
 //! `enforce_unique`, `inclusion`, `consistency`) — see `verifiable-log/README.md`
 //! and `verifiable-log/fixtures/example.json`. No changes to the monitor are
 //! needed to verify what this produces.
+//!
+//! There are two tenants, each with its **own** tree and **own** bundle:
+//! [`build_bundle`] over the MLS commit log (default STH context) and
+//! [`build_account_bundle`] over the account-key directory (the domain-separated
+//! [`account_key::STH_CONTEXT`]). They share the STH/proof assembly ([`seal`])
+//! but never share a tree — see the account-key module for why.
 
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -12,9 +19,10 @@ use verifiable_log::{
     ConsistencyProof, Entry, InclusionProof, Sth, VerifiableLog,
 };
 
+use crate::account_key::{self, AccountKeyInvariant};
 use crate::commit_log::{CommitLogInvariant, TENANT};
 use crate::error::Result;
-use crate::source::CommitRow;
+use crate::source::{AccountKeyRow, CommitRow};
 
 /// Top-level monitor bundle. Field names and shapes match the frozen wire
 /// contract in `verifiable-log/README.md`.
@@ -81,7 +89,67 @@ pub fn build_bundle(
         entries.push(entry);
     }
 
+    // Default (commit-log) STH context — byte-identical to the frozen contract.
+    seal(log, entries, &[TENANT.to_string()], signing_key, timestamp, None)
+}
+
+/// Build a signed bundle from account-key rows (assumed already in `seq` order).
+///
+/// The account-key directory is a **separate** tenant with its **own** tree, so
+/// this builds an independent [`VerifiableLog`] with [`AccountKeyInvariant`]
+/// registered for [`account_key::TENANT`] — a duplicate or regressing
+/// `identity_version` aborts the build rather than producing a bundle that hides
+/// it. Crucially, its STHs are signed under the domain-separated
+/// [`account_key::STH_CONTEXT`] (not the commit-log context), so an account-key
+/// head can never be presented as a commit-log head even though the same key
+/// signs both.
+pub fn build_account_bundle(
+    rows: &[AccountKeyRow],
+    signing_key: &SigningKey,
+    timestamp: u64,
+) -> Result<Bundle> {
+    let mut log = VerifiableLog::new();
+    log.register_invariant(account_key::TENANT, Box::new(AccountKeyInvariant));
+
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        let entry = row.to_leaf().to_entry()?;
+        log.append(entry.clone())?;
+        entries.push(entry);
+    }
+
+    seal(
+        log,
+        entries,
+        &[account_key::TENANT.to_string()],
+        signing_key,
+        timestamp,
+        Some(account_key::STH_CONTEXT),
+    )
+}
+
+/// Shared bundle assembly over an already-populated [`VerifiableLog`]: emit a
+/// final STH (plus a midpoint STH + consistency proof when ≥2 entries), and an
+/// inclusion proof for every entry against the final STH.
+///
+/// `sth_context` selects the STH domain separation: `None` is the default
+/// commit-log context (frozen, byte-identical to the original path); `Some(ctx)`
+/// signs under `ctx` for a second tenant's tree. The two tenants differ in
+/// *which* context, nothing else — so the proof/STH shape stays identical.
+fn seal(
+    log: VerifiableLog,
+    entries: Vec<Entry>,
+    enforce_unique: &[String],
+    signing_key: &SigningKey,
+    timestamp: u64,
+    sth_context: Option<&[u8]>,
+) -> Result<Bundle> {
     let n = log.size();
+
+    let make_sth = |size: u64, root: verifiable_log::Hash| match sth_context {
+        Some(ctx) => Sth::create_with_context(signing_key, size, root, timestamp, ctx),
+        None => Sth::create(signing_key, size, root, timestamp),
+    };
 
     // STHs: a final head over the whole tree, plus a midpoint head when the
     // tree is big enough to carry a meaningful consistency proof.
@@ -91,9 +159,9 @@ pub fn build_bundle(
         let m = n / 2;
         midpoint = Some(m);
         let mid_root = log.root_at(m)?;
-        sths.push(Sth::create(signing_key, m as u64, mid_root, timestamp));
+        sths.push(make_sth(m as u64, mid_root));
     }
-    sths.push(log.signed_tree_head(signing_key, timestamp));
+    sths.push(make_sth(n as u64, log.root()));
     let final_index = sths.len() - 1;
 
     // Inclusion proof for every entry, checked against the final STH.
@@ -122,7 +190,7 @@ pub fn build_bundle(
         public_key,
         sths,
         entries,
-        enforce_unique: vec![TENANT.to_string()],
+        enforce_unique: enforce_unique.to_vec(),
         inclusion,
         consistency,
     })

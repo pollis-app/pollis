@@ -202,6 +202,59 @@ export interface UserAlias {
 
 export * from "./blocks";
 
+// ── Account-key transparency (issue #330) ──────────────────────────────────
+// Mirrors the Rust shapes returned by the `self_audit_account_key` and
+// `audit_peer_account_key` commands (pollis-core/src/commands/transparency.rs).
+// Verdicts come from the SAME shared verifier the `pollis-verify` auditor CLI
+// runs, so the client can never disagree with a third-party auditor. All
+// statuses are advisory — they alert, they never block sends.
+
+// One identity-key version in a user's published chain (from the log).
+export interface AccountKeyVersion {
+  identity_version: number;
+  seq: number;
+  account_id_pub: string; // lowercase hex
+  included: boolean; // did its inclusion proof verify against the signed head
+}
+
+// A verified per-user key-history report (the `/verify/account/<id>` shape).
+export interface AccountReport {
+  user_id: string;
+  found: boolean;
+  sth_tree_size: number;
+  root_hex: string;
+  keys: AccountKeyVersion[];
+  chain_valid: boolean;
+  violations: string[];
+}
+
+// Verdict of an account-key audit.
+//   ok          — chain verifies, published latest matches the local key
+//   pending     — local key/version not in the log yet (publishes daily); advisory
+//   alarm       — published chain disagrees at same-or-higher version, pinned-key
+//                 mismatch, or chain/proof verification failed
+//   unavailable — the log host was unreachable; "couldn't check", not "failed"
+export type AuditStatus = "ok" | "pending" | "alarm" | "unavailable";
+
+// Result of `self_audit_account_key`.
+export interface SelfAuditReport {
+  status: AuditStatus;
+  detail: string; // one-line, human-readable explanation
+  my_identity_version: number;
+  my_account_id_pub: string; // lowercase hex
+  report: AccountReport | null; // null when unavailable
+}
+
+// Result of `audit_peer_account_key`.
+export interface PeerAuditReport {
+  status: AuditStatus;
+  detail: string;
+  peer_user_id: string;
+  pinned_identity_version: number | null; // null if no local TOFU pin
+  key_rotated: boolean; // pinned key present AND a newer version published
+  report: AccountReport | null;
+}
+
 export interface AppState {
   // Current user
   currentUser: User | null;
