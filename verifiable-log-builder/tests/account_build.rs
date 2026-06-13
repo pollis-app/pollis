@@ -170,6 +170,45 @@ async fn valid_account_bundle_verifies_under_account_context() {
     assert!(monitor_verify_account(&reparsed));
 }
 
+/// The STH for a given (size, root) must be byte-stable across rebuilds so an
+/// unchanged tree can be republished to immutable storage without diverging from
+/// the already-published per-size head. The timestamp is the only time-varying
+/// input, so reusing the frozen timestamp must reproduce the bundle exactly,
+/// and a different timestamp must change it (proving the timestamp is what the
+/// publish workflow reuses to keep the head stable).
+#[tokio::test]
+async fn rebuild_is_byte_identical_for_a_reused_timestamp() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("stable.db");
+    let rows = vec![
+        row(1, "u-alice", 1, &[0xa1; 32]),
+        row(2, "u-bob", 1, &[0xb1; 32]),
+        row(3, "u-alice", 2, &[0xa2; 32]),
+    ];
+    seed_db(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_account_key_log(&conn).await.unwrap();
+
+    let first = serde_json::to_string(&build_account_bundle(&read, &signing_key(), TS).unwrap())
+        .unwrap();
+    let again = serde_json::to_string(&build_account_bundle(&read, &signing_key(), TS).unwrap())
+        .unwrap();
+    assert_eq!(
+        first, again,
+        "same rows + same timestamp must reproduce the bundle byte-for-byte"
+    );
+
+    let moved = serde_json::to_string(
+        &build_account_bundle(&read, &signing_key(), TS + 1).unwrap(),
+    )
+    .unwrap();
+    assert_ne!(
+        first, moved,
+        "a different timestamp must change the signed STH bytes"
+    );
+}
+
 #[tokio::test]
 async fn duplicate_version_is_rejected() {
     let dir = tempfile::tempdir().unwrap();

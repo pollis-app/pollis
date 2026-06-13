@@ -49,6 +49,14 @@ enum Command {
         #[arg(long)]
         timestamp: u64,
 
+        /// STH timestamp for the account-key tree, milliseconds since epoch.
+        /// Defaults to `--timestamp` when omitted. Supplied independently so an
+        /// unchanged tree can be re-emitted byte-identically (reusing its already
+        /// published, frozen timestamp) while the other tree advances — an STH
+        /// for a given (size, root) must stay stable across republishes.
+        #[arg(long)]
+        account_timestamp: Option<u64>,
+
         /// Env var holding the 32-byte hex Ed25519 signing key.
         #[arg(long, default_value = "VLOG_SIGNING_KEY")]
         signing_key_env: String,
@@ -70,6 +78,7 @@ fn main() -> ExitCode {
             out,
             account_out,
             timestamp,
+            account_timestamp,
             signing_key_env,
             signing_key_file,
         } => run_build(
@@ -77,6 +86,7 @@ fn main() -> ExitCode {
             out,
             account_out,
             timestamp,
+            account_timestamp.unwrap_or(timestamp),
             &signing_key_env,
             signing_key_file.as_deref(),
         ),
@@ -101,6 +111,7 @@ async fn run_build(
     out: PathBuf,
     account_out: Option<PathBuf>,
     timestamp: u64,
+    account_timestamp: u64,
     signing_key_env: &str,
     signing_key_file: Option<&std::path::Path>,
 ) -> Result<()> {
@@ -136,7 +147,7 @@ async fn run_build(
         let account_rows = source::read_account_key_log(&conn).await?;
         source::ensure_account_non_empty(&account_rows)?;
 
-        let account_bundle = build_account_bundle(&account_rows, &signing_key, timestamp)?;
+        let account_bundle = build_account_bundle(&account_rows, &signing_key, account_timestamp)?;
         let account_json = serde_json::to_string_pretty(&account_bundle)?;
         std::fs::write(&account_out, account_json)?;
 

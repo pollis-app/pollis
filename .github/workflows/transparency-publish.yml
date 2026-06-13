@@ -10,7 +10,9 @@ name: Publish Transparency Log
 #      AND account_key_log vs the account-key tree. Rebuild if EITHER differs (or
 #      the account head is absent). Both equal => nothing new, exit success
 #      without building. (workflow_dispatch forces a rebuild — that is the
-#      "rebuild now" button; a fresh STH timestamp re-attests freshness.)
+#      "rebuild now" button. A rebuild does NOT re-mint an unchanged tree's STH:
+#      each tree reuses the frozen timestamp from its published per-size head
+#      unless it has grown, so the head for a given size is byte-stable forever.)
 #   2. Build TWO signed bundles from mls_commit_log + account_key_log
 #      (STH_SIGNING_KEY) and run `serve generate` to produce the immutable /v1
 #      commit-log tree + the separate /v1/account-keys tree, each with its
@@ -139,13 +141,48 @@ jobs:
           VLOG_SIGNING_KEY: ${{ secrets.STH_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          # STH timestamp is supplied explicitly (the builder never reads the clock).
-          ts="$(date +%s%3N)"
+          base="https://verify.pollis.com"
+          now="$(date +%s%3N)"
+
+          # An STH for a given (size, root) must be byte-stable across republishes:
+          # the per-size head files are immutable, so re-minting them with a fresh
+          # timestamp would diverge from what is already published (and would read
+          # as two different signed heads for one size). So each tree gets a fresh
+          # timestamp ONLY when it has actually grown; an unchanged tree reuses the
+          # timestamp frozen in its already-published per-size head, reproducing it
+          # exactly. The two trees grow independently (e.g. a new signup advances
+          # the account tree while the commit log is unchanged), hence one
+          # timestamp each.
+          http_url="${TURSO_DATABASE_URL/libsql:\/\//https://}"; http_url="${http_url%/}"
+          live_count() {
+            curl -fsS --max-time 20 "${http_url}/v2/pipeline" \
+              -H "Authorization: Bearer ${TURSO_AUTH_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$1\"}},{\"type\":\"close\"}]}" \
+              | jq -r '.results[0].response.result.rows[0][0].value'
+          }
+          # Reuse the frozen timestamp from a tree's published per-size head when
+          # its live row count still matches that head's size; otherwise stamp now.
+          frozen_or_now() {
+            local size_url="$1" head_url_base="$2" live="$3"
+            local pub
+            pub="$(curl -fsS --max-time 20 "${size_url}" | jq -r '.tree_size' 2>/dev/null || echo "")"
+            if [ -n "${pub}" ] && [ "${pub}" = "${live}" ]; then
+              curl -fsS --max-time 20 "${head_url_base}/${pub}.json" | jq -r '.timestamp'
+            else
+              echo "${now}"
+            fi
+          }
+          commit_ts="$(frozen_or_now "${base}/v1/sth/latest.json" "${base}/v1/sth" "$(live_count 'SELECT COUNT(*) FROM mls_commit_log')")"
+          account_ts="$(frozen_or_now "${base}/v1/account-keys/sth/latest.json" "${base}/v1/account-keys/sth" "$(live_count 'SELECT COUNT(*) FROM account_key_log')")"
+          echo "commit-log STH ts=${commit_ts}  account-keys STH ts=${account_ts}  (now=${now})"
+
           # Build BOTH bundles: the commit log AND (via --account-out) the
           # account-key directory — its own tree, signed under its own domain
           # context with the same key.
           ./target/release/builder build --db "${TURSO_DATABASE_URL}" \
-            --out bundle.json --account-out account-bundle.json --timestamp "${ts}"
+            --out bundle.json --account-out account-bundle.json \
+            --timestamp "${commit_ts}" --account-timestamp "${account_ts}"
           # generate emits both trees into ./site (the account tree under
           # v1/account-keys/ plus verify/account/<id> reports).
           ./target/release/serve generate --bundle bundle.json \
