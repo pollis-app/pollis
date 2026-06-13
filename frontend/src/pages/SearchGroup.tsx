@@ -124,7 +124,7 @@ export const SearchGroup: React.FC = observer(() => {
                   <p
                     data-testid="request-rejected-indicator"
                     className="text-xs font-mono"
-                    style={{ color: '#ff6b6b' }}
+                    style={{ color: 'var(--c-danger)' }}
                   >
                     Your request was declined.
                   </p>
@@ -153,7 +153,7 @@ export const SearchGroup: React.FC = observer(() => {
           )}
 
           {searchError && (
-            <p data-testid="search-group-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+            <p data-testid="search-group-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
               {searchError}
             </p>
           )}

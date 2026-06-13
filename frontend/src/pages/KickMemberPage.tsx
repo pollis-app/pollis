@@ -20,7 +20,7 @@ export const KickMemberPage: React.FC = () => {
           They will need a new invite to rejoin.
         </p>
         {kickMutation.isError && (
-          <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+          <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
             {kickMutation.error instanceof Error
               ? kickMutation.error.message
               : "Failed to remove member"}

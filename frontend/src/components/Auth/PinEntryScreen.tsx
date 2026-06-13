@@ -94,7 +94,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
               <p
                 data-testid="pin-entry-error"
                 className="text-xs font-mono"
-                style={{ color: "#ff6b6b" }}
+                style={{ color: "var(--c-danger)" }}
               >
                 {error}
               </p>

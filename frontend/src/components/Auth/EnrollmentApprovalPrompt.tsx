@@ -83,14 +83,14 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
           style={{
             width: "100%",
             maxWidth: 480,
-            border: "2px solid #ff6b6b",
+            border: "2px solid var(--c-danger)",
           }}
         >
           <div className="flex flex-col gap-5">
             <div>
               <p
                 className="text-xs font-mono uppercase tracking-wider"
-                style={{ color: "#ff6b6b", letterSpacing: "0.15em" }}
+                style={{ color: "var(--c-danger)", letterSpacing: "0.15em" }}
               >
                 ⚠ Security request
               </p>
@@ -137,7 +137,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
               <p
                 data-testid="approval-error"
                 className="text-xs font-mono"
-                style={{ color: "#ff6b6b" }}
+                style={{ color: "var(--c-danger)" }}
               >
                 {error}
               </p>

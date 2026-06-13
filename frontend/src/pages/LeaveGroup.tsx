@@ -28,7 +28,7 @@ export const LeaveGroupPage: React.FC = observer(() => {
           You will need a new invite to rejoin.
         </p>
         {leaveGroupMutation.isError && (
-          <p className="text-xs font-mono" style={{ color: "#ff6b6b" }}>
+          <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
             {leaveGroupMutation.error instanceof Error ? leaveGroupMutation.error.message : "Failed to leave group"}
           </p>
         )}

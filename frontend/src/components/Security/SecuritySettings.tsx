@@ -70,7 +70,7 @@ export const SecuritySettings: React.FC<SecuritySettingsProps> = ({
   const importStrength = useMemo(() => strength(importPassword), [importPassword]);
 
   const strengthColor = (score: number) =>
-    score <= 1 ? '#ff6b6b' : score <= 2 ? '#f0b429' : score <= 3 ? 'var(--c-accent-dim)' : 'var(--c-accent)';
+    score <= 1 ? 'var(--c-danger)' : score <= 2 ? '#f0b429' : score <= 3 ? 'var(--c-accent-dim)' : 'var(--c-accent)';
 
   return (
     <div

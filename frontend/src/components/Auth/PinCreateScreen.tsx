@@ -112,7 +112,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
               <p
                 data-testid="pin-create-error"
                 className="text-xs font-mono"
-                style={{ color: "#ff6b6b" }}
+                style={{ color: "var(--c-danger)" }}
               >
                 {error}
               </p>

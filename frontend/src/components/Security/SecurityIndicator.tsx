@@ -23,7 +23,7 @@ const kindConfig: Record<IndicatorKind, { icon: React.ReactElement; text: string
   encrypted: { icon: <Lock size={14} aria-hidden="true" />, text: "Encrypted", color: 'var(--c-accent)' },
   verified: { icon: <ShieldCheck size={14} aria-hidden="true" />, text: "Verified", color: 'var(--c-accent)' },
   warning: { icon: <AlertTriangle size={14} aria-hidden="true" />, text: "Warning", color: '#f0b429' },
-  unverified: { icon: <ShieldAlert size={14} aria-hidden="true" />, text: "Unverified", color: '#ff6b6b' },
+  unverified: { icon: <ShieldAlert size={14} aria-hidden="true" />, text: "Unverified", color: 'var(--c-danger)' },
   "group-shield": { icon: <Shield size={14} aria-hidden="true" />, text: "Group protected", color: 'var(--c-accent-dim)' },
 };
 

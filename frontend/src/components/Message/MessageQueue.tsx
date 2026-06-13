@@ -93,8 +93,8 @@ export const MessageQueue: React.FC = observer(() => {
               data-testid={`queue-item-failed-${item.id}`}
               className="flex items-center gap-2"
             >
-              <AlertCircle size={14} aria-hidden="true" style={{ color: '#ff6b6b' }} />
-              <span className="text-2xs font-mono" style={{ color: '#ff6b6b' }}>
+              <AlertCircle size={14} aria-hidden="true" style={{ color: 'var(--c-danger)' }} />
+              <span className="text-2xs font-mono" style={{ color: 'var(--c-danger)' }}>
                 failed ×{item.retry_count}
               </span>
               <p className="text-xs font-mono flex-1 truncate" style={{ color: 'var(--c-text-dim)' }}>{snippet}</p>

@@ -46,7 +46,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 </h2>
                 <p
                   className="text-xs mt-2 font-mono"
-                  style={{ color: "#ff6b6b", lineHeight: 1.5 }}
+                  style={{ color: "var(--c-danger)", lineHeight: 1.5 }}
                 >
                   This will delete all local databases, keys, and saved
                   accounts on this device. Your remote account is not affected.
@@ -139,7 +139,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({
                 <button
                   data-testid="wipe-local-data-button"
                   onClick={() => setView("wipe")}
-                  className="text-xs font-mono self-center transition-colors text-[var(--c-text-muted)] hover:text-[#ff6b6b]"
+                  className="text-xs font-mono self-center transition-colors text-[var(--c-text-muted)] hover:text-[var(--c-danger)]"
                   style={{
                     background: "none",
                     border: "none",

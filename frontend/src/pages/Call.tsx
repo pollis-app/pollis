@@ -151,8 +151,8 @@ export const CallPage: React.FC = observer(() => {
           className="inline-flex items-center gap-2"
           style={{
             background: "transparent",
-            color: "#ff6b6b",
-            border: "2px solid #ff6b6b",
+            color: "var(--c-danger)",
+            border: "2px solid var(--c-danger)",
             padding: "6px 14px",
             borderRadius: "0.25rem",
             cursor: "pointer",

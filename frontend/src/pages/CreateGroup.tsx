@@ -149,7 +149,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           />
 
           {error && (
-            <p data-testid="create-group-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+            <p data-testid="create-group-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
               {error}
             </p>
           )}
