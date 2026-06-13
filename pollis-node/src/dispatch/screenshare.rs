@@ -41,10 +41,13 @@ async fn start_screen_share(args: &serde_json::Value) -> Result<serde_json::Valu
     struct Args {
         #[serde(default)]
         selection: Option<pollis_core::pollis_capture_proto::Selection>,
+        #[serde(default)]
+        max_framerate: Option<u32>,
     }
-    let Args { selection } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let Args { selection, max_framerate } =
+        serde_json::from_value(args.clone()).map_err(json_err)?;
     let state = ensure_state().await?;
-    pollis_core::commands::screenshare::start_screen_share(&state, selection)
+    pollis_core::commands::screenshare::start_screen_share(&state, selection, max_framerate)
         .await
         .map_err(core_err)?;
     Ok(serde_json::Value::Null)

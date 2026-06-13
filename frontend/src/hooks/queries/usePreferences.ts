@@ -44,6 +44,13 @@ export interface PreferencesData {
   echo_cancellation?: boolean;
   /** RNNoise click/keystroke suppression (separate from APM's spectral NS). */
   click_suppression?: boolean;
+  /**
+   * Screen-share capture/encode framerate ceiling, in fps. One of
+   * `SCREEN_SHARE_FPS_OPTIONS` (15 / 30 / 60). Read at share-start and passed
+   * to the publish path (Rust `start_screen_share` under Tauri, `getUserMedia`
+   * constraints under Electron). Absent → `SCREEN_SHARE_FPS_DEFAULT`.
+   */
+  screen_share_max_fps?: number;
   auto_join_voice?: boolean;
   /** Whether the left sidebar is open by default at app start. */
   sidebar_open_by_default?: boolean;
@@ -82,6 +89,23 @@ export interface PreferencesData {
 // Voice-identity parsing (`userIdFromVoiceIdentity`) lives in
 // `voice/identity.ts` — the canonical home shared with the rest of the voice
 // layer. Import it from there.
+
+/**
+ * Screen-share framerate presets, in fps. 15 = documents/browsing (cheapest,
+ * good for constrained machines/networks), 30 = standard, 60 = motion/gameplay.
+ */
+export const SCREEN_SHARE_FPS_OPTIONS = [15, 30, 60] as const;
+export const SCREEN_SHARE_FPS_DEFAULT = 30;
+
+/** Snap an arbitrary value to the nearest allowed preset; default if invalid. */
+export function clampScreenShareFps(v: number | undefined): number {
+  if (v === undefined || !Number.isFinite(v)) {
+    return SCREEN_SHARE_FPS_DEFAULT;
+  }
+  return SCREEN_SHARE_FPS_OPTIONS.reduce((best, opt) =>
+    Math.abs(opt - v) < Math.abs(best - v) ? opt : best,
+  );
+}
 
 /** Volume slider range used by the per-remote-user output volume control. */
 export const REMOTE_USER_VOLUME_MIN = 0.0;
@@ -258,6 +282,9 @@ export function usePreferences() {
         ),
         echo_cancellation: getPreference<boolean>(json, "echo_cancellation", APM_DEFAULTS.echo_cancellation),
         click_suppression: getPreference<boolean>(json, "click_suppression", APM_DEFAULTS.click_suppression),
+        screen_share_max_fps: clampScreenShareFps(
+          getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+        ),
         auto_join_voice: getPreference<boolean>(json, "auto_join_voice", false),
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
         close_to_tray: getPreference<boolean>(json, "close_to_tray", true),

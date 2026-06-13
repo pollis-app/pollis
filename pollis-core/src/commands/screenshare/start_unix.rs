@@ -18,7 +18,7 @@ use libwebrtc::{
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
-    options::TrackPublishOptions,
+    options::{TrackPublishOptions, VideoEncoding},
     prelude::*,
     track::{LocalTrack, LocalVideoTrack},
 };
@@ -26,7 +26,7 @@ use livekit::{
 use crate::{error::Result, state::AppState};
 
 use super::{
-    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec},
+    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec, resolve_screenshare_encoding},
     fail_capture,
     helper_subprocess::spawn_and_accept_helper,
     stop::stop_screen_share,
@@ -116,6 +116,7 @@ pub async fn cancel_screen_share_picker(state: &Arc<AppState>) -> Result<()> {
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     selection: Option<pollis_capture_proto::Selection>,
+    max_framerate: Option<u32>,
 ) -> Result<()> {
     use pollis_capture_proto::encode_select;
     use tokio::io::AsyncWriteExt;
@@ -324,6 +325,14 @@ pub async fn start_screen_share(
         RtcVideoSource::Native(source.clone()),
     );
     eprintln!("[screenshare] publishing track {}x{}", width, height);
+    // Pin the encoding explicitly. With `video_encoding: None` the SDK
+    // auto-selects from its quality-optimized screenshare preset table, which
+    // caps any surface ≤1280px wide at 15fps (`H1080_FPS15`) — "optimized for
+    // quality, prefers to reduce FPS". That silently pinned every sub-1080p
+    // share to 15fps regardless of source rate. We instead honour the user's
+    // Screen Share framerate preference (defaulting to 30); the encoder treats
+    // max_framerate as a ceiling, so static content still costs nothing.
+    let (max_framerate, max_bitrate) = resolve_screenshare_encoding(max_framerate);
     if let Err(e) = room
         .local_participant()
         .publish_track(
@@ -331,6 +340,10 @@ pub async fn start_screen_share(
             TrackPublishOptions {
                 source: TrackSource::Screenshare,
                 video_codec: pick_screenshare_codec(),
+                video_encoding: Some(VideoEncoding {
+                    max_framerate,
+                    max_bitrate,
+                }),
                 ..Default::default()
             },
         )

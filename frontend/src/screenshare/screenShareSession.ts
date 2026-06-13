@@ -16,6 +16,11 @@ import { reaction } from "mobx";
 import { Channel, hasElectron, invoke } from "../bridge";
 
 import { appStore } from "../stores/appStore";
+import {
+  clampScreenShareFps,
+  getPreference,
+  SCREEN_SHARE_FPS_DEFAULT,
+} from "../hooks/queries/usePreferences";
 import { playSfx, SFX } from "../utils/sfx";
 
 /** Capturable display reported by `enumerate_screen_sources`.
@@ -475,11 +480,34 @@ class ScreenShareSession {
    *  on Linux/Windows it must be undefined so the system portal / WGC
    *  picker can show. */
   async start(selection?: Selection): Promise<void> {
+    const maxFramerate = await this.resolveMaxFramerate();
     if (hasElectron()) {
-      await this.startElectron(selection);
+      await this.startElectron(selection, maxFramerate);
       return;
     }
-    await invoke("start_screen_share", { selection: selection ?? null });
+    await invoke("start_screen_share", {
+      selection: selection ?? null,
+      maxFramerate,
+    });
+  }
+
+  /** Read the user's Screen Share framerate preference (fps). This is a
+   *  non-React singleton, so it can't use the `usePreferences` hook — it reads
+   *  the same backend blob directly. Falls back to the default on any error or
+   *  when signed out. */
+  private async resolveMaxFramerate(): Promise<number> {
+    const userId = appStore.currentUser?.id;
+    if (!userId) {
+      return SCREEN_SHARE_FPS_DEFAULT;
+    }
+    try {
+      const json = await invoke<string>("get_preferences", { userId });
+      return clampScreenShareFps(
+        getPreference<number>(json, "screen_share_max_fps", SCREEN_SHARE_FPS_DEFAULT),
+      );
+    } catch {
+      return SCREEN_SHARE_FPS_DEFAULT;
+    }
   }
 
   /** Renderer-side publish path. Captures the picked source via
@@ -487,7 +515,7 @@ class ScreenShareSession {
    *  livekit-client view connection, and mirrors the lifecycle into the
    *  Zustand store (so VoiceBar / VoiceMemberTile switch to the
    *  streaming state) without going through the Rust event channel. */
-  private async startElectron(selection?: Selection): Promise<void> {
+  private async startElectron(selection: Selection | undefined, maxFramerate: number): Promise<void> {
     // The in-app picker (ScreenSharePicker.tsx) always supplies a
     // selection on the Electron path; this is the safety net for any
     // future code path that forgets to enumerate first. We deliberately
@@ -532,10 +560,11 @@ class ScreenShareSession {
       // specific source directly. This is the same pattern Slack,
       // Discord, and VSCode use for their custom screenshare pickers.
       //
-      // frameRate ceiling: 60 fps. xdg-desktop-portal (Linux),
-      // ScreenCaptureKit (macOS), and WGC (Windows) all cap source
-      // capture at ~60 fps on the typical compositor, so asking for
-      // higher gets silently clamped to 60.
+      // frameRate ceiling: the user's Screen Share preference (15/30/60,
+      // resolved in `resolveMaxFramerate`). 60 is the practical max —
+      // xdg-desktop-portal (Linux), ScreenCaptureKit (macOS), and WGC
+      // (Windows) all cap source capture at ~60 fps on the typical
+      // compositor, so asking for higher gets silently clamped anyway.
       //
       // TS lib.dom.d.ts dropped the typing for the legacy `mandatory`
       // constraints bag; cast through `unknown` to a partial
@@ -557,7 +586,7 @@ class ScreenShareSession {
             // Matches what Slack/Discord/Zoom do for screen-share.
             maxWidth: 2560,
             maxHeight: 1440,
-            maxFrameRate: 60,
+            maxFrameRate: maxFramerate,
           },
         } as unknown as MediaTrackConstraints,
       });

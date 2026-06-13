@@ -27,7 +27,7 @@ use libwebrtc::{
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
-    options::TrackPublishOptions,
+    options::{TrackPublishOptions, VideoEncoding},
     prelude::*,
     track::{LocalTrack, LocalVideoTrack},
 };
@@ -35,7 +35,7 @@ use livekit::{
 use crate::{error::Result, state::AppState};
 
 use super::{
-    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec},
+    codec::{convert_to_i420, pack_frame_bytes, pick_screenshare_codec, resolve_screenshare_encoding},
     fail_capture, RawSink, ScreenShareEvent, LOCAL_PREVIEW_KEY, PREVIEW_MIN_INTERVAL,
 };
 
@@ -58,6 +58,7 @@ pub async fn cancel_screen_share_picker(_state: &Arc<AppState>) -> Result<()> {
 pub async fn start_screen_share(
     state: &Arc<AppState>,
     _selection: Option<pollis_capture_proto::Selection>,
+    max_framerate: Option<u32>,
 ) -> Result<()> {
     use std::sync::atomic::AtomicBool;
 
@@ -94,6 +95,10 @@ pub async fn start_screen_share(
         "screenshare",
         RtcVideoSource::Native(source.clone()),
     );
+    // See start_unix.rs: `video_encoding: None` lets the SDK pick a 15fps
+    // screenshare preset for sub-1080p surfaces. Honour the user's Screen Share
+    // framerate preference (default 30) so the ceiling tracks the source.
+    let (max_framerate, max_bitrate) = resolve_screenshare_encoding(max_framerate);
     if let Err(e) = room
         .local_participant()
         .publish_track(
@@ -101,6 +106,10 @@ pub async fn start_screen_share(
             TrackPublishOptions {
                 source: TrackSource::Screenshare,
                 video_codec: pick_screenshare_codec(),
+                video_encoding: Some(VideoEncoding {
+                    max_framerate,
+                    max_bitrate,
+                }),
                 ..Default::default()
             },
         )

@@ -41,6 +41,21 @@ pub(super) fn pick_screenshare_codec() -> VideoCodec {
     VideoCodec::VP8
 }
 
+/// Resolve the user's Screen Share framerate preference into the
+/// `(max_framerate, max_bitrate)` pair fed to `VideoEncoding` on publish.
+///
+/// `None` (preference unset) defaults to 30fps. The value is clamped to the
+/// 1..=60 band the picker exposes (15 = documents/browsing, 30 = standard,
+/// 60 = motion/gameplay) — letting the ceiling run higher let capture race
+/// ahead and tripped a tokio panic in the spike. Bitrate scales with the
+/// framerate so a 60fps share isn't starved of bits while a 15fps one
+/// doesn't over-spend. See #300 (the Preferences UI that sets this).
+pub(super) fn resolve_screenshare_encoding(max_framerate: Option<u32>) -> (f64, u64) {
+    let fps = max_framerate.unwrap_or(30).clamp(1, 60);
+    let max_bitrate = fps as u64 * 130_000;
+    (fps as f64, max_bitrate)
+}
+
 /// Apply `argb_to_i420` into a freshly-allocated I420 buffer at the
 /// source's native dimensions. No downscale: encoders are fed the
 /// full-res frame and VP8 (or whatever codec is selected) decides what
