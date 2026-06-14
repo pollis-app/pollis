@@ -300,6 +300,13 @@ impl AppState {
             }
         }
 
+        // Bounded local history: sweep messages older than the device-local
+        // retention window now that the DB is ready. Best-effort — a failed
+        // sweep must never block login.
+        if let Err(e) = crate::db::local::evict_old_messages(db.conn()) {
+            eprintln!("[state] startup message eviction failed (non-fatal): {e}");
+        }
+
         *self.local_db.lock().await = Some(db);
         // Scope the media cache to this user. Two clients on the same machine
         // (dev workflow) otherwise share `app_data_dir/media-cache` but each

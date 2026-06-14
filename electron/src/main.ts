@@ -332,6 +332,13 @@ function createWindow(): BrowserWindow {
   win.on("resized", () => sendToAllRenderers("window:resized"));
   win.on("moved", () => sendToAllRenderers("window:moved"));
 
+  // Bounded local history: evict messages past the device-local retention
+  // window on focus (cheap no-op when retention is "Forever" or no user DB is
+  // open yet). Mirrors the media-cache cap enforcement on the legacy path.
+  win.on("focus", () => {
+    void pollisNode.invoke("run_message_eviction", null).catch(() => {});
+  });
+
   // OS file drag-drop: Chromium delivers files to the renderer through the
   // standard DataTransfer API, so the producer is the renderer, not main.
   // The bridge's onDragDropEvent (frontend/src/bridge/window.ts) attaches DOM
