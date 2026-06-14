@@ -239,7 +239,7 @@ export const SecurityPage: React.FC = observer(() => {
               <p
                 data-testid="devices-error"
                 className="text-xs"
-                style={{ color: "#ff6b6b" }}
+                style={{ color: "var(--c-danger)" }}
               >
                 {devicesError}
               </p>
@@ -345,7 +345,7 @@ export const SecurityPage: React.FC = observer(() => {
               <p
                 data-testid="security-events-error"
                 className="text-xs"
-                style={{ color: "#ff6b6b" }}
+                style={{ color: "var(--c-danger)" }}
               >
                 {error}
               </p>

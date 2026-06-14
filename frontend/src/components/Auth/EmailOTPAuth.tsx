@@ -109,7 +109,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
           Code sent to <span style={{ color: 'var(--c-accent)' }}>{email}</span>
         </p>
         {error && (
-          <p data-testid="auth-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+          <p data-testid="auth-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
             {error}
           </p>
         )}
@@ -153,7 +153,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
   return (
     <div data-testid="email-form-container" className="flex flex-col gap-4">
       {error && (
-        <p data-testid="auth-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+        <p data-testid="auth-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
           {error}
         </p>
       )}

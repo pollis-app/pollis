@@ -486,7 +486,7 @@ const ResetConfirmPane: React.FC<{
       <div>
         <h2
           className="text-sm font-mono font-bold"
-          style={{ color: "#ff6b6b" }}
+          style={{ color: "var(--c-danger)" }}
         >
           Reset this account
         </h2>
@@ -566,7 +566,7 @@ const ResultPane: React.FC<{
     <div>
       <h2
         className="text-sm font-mono font-bold"
-        style={{ color: tone === "error" ? "#ff6b6b" : "var(--c-text)" }}
+        style={{ color: tone === "error" ? "var(--c-danger)" : "var(--c-text)" }}
       >
         {heading}
       </h2>

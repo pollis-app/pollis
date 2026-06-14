@@ -13,7 +13,38 @@ export type TypingRoomKey = `channel:${string}` | `dm:${string}`;
 
 interface TypingEntry {
   username: string;
-  expiresAt: number;
+}
+
+// Per-entry expiry timer handles, keyed by `${roomKey}:${userId}`. These live
+// OUTSIDE the observable store on purpose — a timer handle is not UI state, so
+// it must never be tracked by MobX or trigger a re-render.
+const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function timerKey(roomKey: TypingRoomKey, userId: string): string {
+  return `${roomKey}:${userId}`;
+}
+
+// Immutably drop a single user from a room map, removing the room key itself
+// when it empties. Pure: takes the current byRoom and returns the next one
+// (the same reference when there was nothing to remove).
+function removeEntry(
+  byRoom: Record<string, Record<string, TypingEntry>>,
+  roomKey: string,
+  userId: string,
+): Record<string, Record<string, TypingEntry>> {
+  const room = byRoom[roomKey];
+  if (!room || !(userId in room)) {
+    return byRoom;
+  }
+  const next = { ...room };
+  delete next[userId];
+  const result = { ...byRoom };
+  if (Object.keys(next).length === 0) {
+    delete result[roomKey];
+  } else {
+    result[roomKey] = next;
+  }
+  return result;
 }
 
 class TypingStore {
@@ -27,50 +58,35 @@ class TypingStore {
 
   setTyping(roomKey: TypingRoomKey, userId: string, username: string) {
     const room = { ...(this.byRoom[roomKey] ?? {}) };
-    room[userId] = { username, expiresAt: Date.now() + TYPING_TTL_MS };
+    room[userId] = { username };
     this.byRoom = { ...this.byRoom, [roomKey]: room };
+
+    // (Re)arm a per-entry expiry timer. A refresh resets the countdown, so an
+    // entry only ages out once TTL elapses with no further keystroke — and a
+    // sender that drops offline mid-keystroke is cleaned up exactly once,
+    // without any global polling.
+    const key = timerKey(roomKey, userId);
+    const existing = expiryTimers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+    }
+    expiryTimers.set(
+      key,
+      setTimeout(() => {
+        expiryTimers.delete(key);
+        this.byRoom = removeEntry(this.byRoom, roomKey, userId);
+      }, TYPING_TTL_MS),
+    );
   }
 
   clearTyping(roomKey: TypingRoomKey, userId: string) {
-    const room = this.byRoom[roomKey];
-    if (!room || !(userId in room)) {
-      return;
+    const key = timerKey(roomKey, userId);
+    const existing = expiryTimers.get(key);
+    if (existing) {
+      clearTimeout(existing);
+      expiryTimers.delete(key);
     }
-    const next = { ...room };
-    delete next[userId];
-    const byRoom = { ...this.byRoom };
-    if (Object.keys(next).length === 0) {
-      delete byRoom[roomKey];
-    } else {
-      byRoom[roomKey] = next;
-    }
-    this.byRoom = byRoom;
-  }
-
-  // Drop expired entries; called from a polling effect so the UI re-renders
-  // when a typing indicator times out without an explicit clear.
-  pruneExpired() {
-    const now = Date.now();
-    let changed = false;
-    const byRoom: Record<string, Record<string, TypingEntry>> = {};
-    for (const [roomKey, room] of Object.entries(this.byRoom)) {
-      const live: Record<string, TypingEntry> = {};
-      for (const [userId, entry] of Object.entries(room)) {
-        if (entry.expiresAt > now) {
-          live[userId] = entry;
-        } else {
-          changed = true;
-        }
-      }
-      if (Object.keys(live).length > 0) {
-        byRoom[roomKey] = live;
-      } else if (Object.keys(room).length > 0) {
-        changed = true;
-      }
-    }
-    if (changed) {
-      this.byRoom = byRoom;
-    }
+    this.byRoom = removeEntry(this.byRoom, roomKey, userId);
   }
 }
 

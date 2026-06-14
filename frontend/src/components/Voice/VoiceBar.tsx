@@ -92,7 +92,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       {/* Mute toggle */}
       <PillButton
         data-testid="voice-bar-mute-button"
-        accent={voiceIsMuted ? "#ff6b6b" : "var(--c-accent)"}
+        accent={voiceIsMuted ? "var(--c-danger)" : "var(--c-accent)"}
         onClick={toggleMute}
         title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
         aria-label={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
@@ -110,7 +110,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
           this by returning an empty source list from enumerate(). */}
       <PillButton
         data-testid="voice-bar-screenshare-button"
-        accent={shareInFlight ? "#ff6b6b" : "var(--c-accent)"}
+        accent={shareInFlight ? "var(--c-danger)" : "var(--c-accent)"}
         onClick={() => toggleScreenShare(share)}
         title={
           shareActive
@@ -136,7 +136,7 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
       {/* Leave button */}
       <PillButton
         data-testid="voice-bar-leave-button"
-        accent="#ff6b6b"
+        accent="var(--c-danger)"
         onClick={leave}
         title="Leave voice channel"
         aria-label="Leave voice channel"

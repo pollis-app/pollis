@@ -171,7 +171,7 @@ export const CreateChannel: React.FC<CreateChannelProps> = observer(({ onSuccess
           <input data-testid="create-channel-type-input" type="hidden" value={channelType} readOnly />
 
           {error && (
-            <p data-testid="create-channel-error" className="text-xs font-mono" style={{ color: '#ff6b6b' }}>
+            <p data-testid="create-channel-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
               {error}
             </p>
           )}
