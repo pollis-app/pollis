@@ -274,6 +274,10 @@ File path: `pollis_{user_id}.db`, encrypted with a key from the OS keystore.
 - `edited_at` TEXT
 - `deleted_at` TEXT
 
+The `message` table is bounded by a **device-local retention window** (#150). It
+is not unbounded history — old rows are evicted to cap disk use on this device.
+See [Local message retention](#local-message-retention) below.
+
 ### dm_conversation
 - `id` TEXT PK
 - `peer_user_id` TEXT NOT NULL UNIQUE
@@ -293,6 +297,33 @@ File path: `pollis_{user_id}.db`, encrypted with a key from the OS keystore.
 - `scope` TEXT NOT NULL
 - `key` BLOB NOT NULL
 - `value` BLOB NOT NULL
+
+---
+
+## Local message retention
+
+The local `message` table is **bounded by a device-local retention window** (#150),
+so message history on a device does not grow without limit.
+
+- **Setting:** stored in `ui_state` under the key `message_retention_days` — an
+  integer count of days. `0` means **Forever** (eviction disabled). The allowed
+  values are `0` / `30` / `90` / `365`, validated by the Rust core
+  (`set_message_retention`). This is **device-local** — it lives in the local
+  SQLite DB and is **never synced** to remote/Turso or to the user's other devices.
+- **Eviction:** the sweep (`run_message_eviction`, also fired immediately when the
+  setting changes) deletes `message` rows whose `received_at` is older than the
+  window. Eviction is keyed on `received_at` (when the row landed on this device),
+  not `sent_at`, so a backfilled-but-old message gets its full window locally.
+- **mls_kv is never evicted.** Only the `message` table is bounded; MLS group state
+  (`mls_kv`) is retained so the device stays a valid group member and can keep
+  decrypting and receiving *new* messages. Bounded history never breaks delivery.
+- **Reclaiming disk:** the DB runs with `auto_vacuum=INCREMENTAL`; after a sweep
+  deletes rows, `incremental_vacuum` returns the freed pages to the filesystem
+  rather than leaving the file pre-grown.
+
+This is purely a local storage cap. It does not affect other devices, other
+members, or delivery of new messages — see the "History is bounded, not flaky"
+product principle in `CLAUDE.md`.
 
 ---
 _Back to [index.md](./index.md)_

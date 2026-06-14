@@ -60,7 +60,7 @@
 - **LeaveGroupPage** — `frontend/src/pages/LeaveGroup.tsx`
 - **Members** — props: groupId, isAdmin — `frontend/src/pages/Members.tsx`
 - **MembersPage** — `frontend/src/pages/MembersPage.tsx`
-- **Preferences** — `frontend/src/pages/Preferences.tsx`
+- **Preferences** — includes the "Local message history" retention control (Forever / 1 year / 90 / 30 days), which is **device-local** — stored in the local `ui_state` table, not synced across the user's devices (see [database.md](./database.md#local-message-retention)) — `frontend/src/pages/Preferences.tsx`
 - **PreferencesPage** — `frontend/src/pages/PreferencesPage.tsx`
 - **RootPage** — `frontend/src/pages/Root.tsx`
 - **SearchPage** — `frontend/src/pages/Search.tsx`

@@ -29,6 +29,9 @@ pub async fn dispatch(
         "get_reactions" => Some(get_reactions(args).await),
         "delete_message" => Some(delete_message(args).await),
         "edit_message" => Some(edit_message(args).await),
+        "get_message_retention" => Some(get_message_retention().await),
+        "set_message_retention" => Some(set_message_retention(args).await),
+        "run_message_eviction" => Some(run_message_eviction().await),
         _ => None,
     }
 }
@@ -345,4 +348,33 @@ async fn edit_message(args: &serde_json::Value) -> Result<serde_json::Value> {
     .await
     .map_err(core_err)?;
     Ok(serde_json::Value::Null)
+}
+
+async fn get_message_retention() -> Result<serde_json::Value> {
+    let state = ensure_state().await?;
+    let days = pollis_core::commands::messages::get_message_retention(&state)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(days).map_err(json_err)
+}
+
+async fn set_message_retention(args: &serde_json::Value) -> Result<serde_json::Value> {
+    #[derive(serde::Deserialize)]
+    struct Args {
+        days: i64,
+    }
+    let Args { days } = serde_json::from_value(args.clone()).map_err(json_err)?;
+    let state = ensure_state().await?;
+    pollis_core::commands::messages::set_message_retention(days, &state)
+        .await
+        .map_err(core_err)?;
+    Ok(serde_json::Value::Null)
+}
+
+async fn run_message_eviction() -> Result<serde_json::Value> {
+    let state = ensure_state().await?;
+    let deleted = pollis_core::commands::messages::run_message_eviction(&state)
+        .await
+        .map_err(core_err)?;
+    serde_json::to_value(deleted).map_err(json_err)
 }

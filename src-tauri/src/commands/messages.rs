@@ -87,3 +87,18 @@ pub async fn delete_message(message_id: String, user_id: String, state: State<'_
 pub async fn edit_message(conversation_id: String, message_id: String, user_id: String, new_content: String, state: State<'_, Arc<AppState>>) -> Result<()> {
     pollis_core::commands::messages::edit_message(conversation_id, message_id, user_id, new_content, &state).await
 }
+
+#[tauri::command]
+pub async fn get_message_retention(state: State<'_, Arc<AppState>>) -> Result<i64> {
+    pollis_core::commands::messages::get_message_retention(&state).await
+}
+
+#[tauri::command]
+pub async fn set_message_retention(days: i64, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::messages::set_message_retention(days, &state).await
+}
+
+#[tauri::command]
+pub async fn run_message_eviction(state: State<'_, Arc<AppState>>) -> Result<usize> {
+    pollis_core::commands::messages::run_message_eviction(&state).await
+}

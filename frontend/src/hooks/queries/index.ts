@@ -9,3 +9,4 @@ export * from "./useSearchMessages";
 export * from "./useReactions";
 export * from "./useBlocks";
 export * from "./useTransparency";
+export * from "./useMessageRetention";

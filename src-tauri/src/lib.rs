@@ -482,6 +482,9 @@ pub fn run() {
             commands::messages::get_reactions,
             commands::messages::delete_message,
             commands::messages::edit_message,
+            commands::messages::get_message_retention,
+            commands::messages::set_message_retention,
+            commands::messages::run_message_eviction,
             commands::mls::generate_mls_key_package,
             commands::mls::publish_mls_key_package,
             commands::mls::fetch_mls_key_package,
@@ -553,6 +556,14 @@ commands::livekit::get_livekit_token,
             hide_on_close(_window, _event);
             if let tauri::WindowEvent::Focused(true) = _event {
                 pollis_core::commands::r2::enforce_cache_cap_now();
+                // Bounded local history: evict messages past the device-local
+                // retention window on focus, alongside the media-cache cap.
+                if let Some(state) = _window.app_handle().try_state::<Arc<AppState>>() {
+                    let state = state.inner().clone();
+                    tauri::async_runtime::block_on(async move {
+                        let _ = pollis_core::commands::messages::run_message_eviction(&state).await;
+                    });
+                }
             }
             // On Linux/Windows closing the window either hides it to the
             // tray (when "Close to tray" is on and a tray exists) or really

@@ -9,6 +9,11 @@ import {
 } from "../bridge";
 import { usePreferences, applyPreferences, applyDeviceFontSize } from "../hooks/queries/usePreferences";
 import {
+  useMessageRetention,
+  useSetMessageRetention,
+  MESSAGE_RETENTION_OPTIONS,
+} from "../hooks/queries/useMessageRetention";
+import {
   hslToHex,
   hexToHsl,
   applyAccentColor,
@@ -54,6 +59,12 @@ export const Preferences: React.FC = observer(() => {
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
   const { query, save: savePrefs } = usePreferences();
+
+  // Device-local message retention window (see useMessageRetention). Selecting
+  // an option fires the mutation immediately — the backend sweep is immediate.
+  const retentionQuery = useMessageRetention();
+  const setRetention = useSetMessageRetention();
+  const retentionDays = retentionQuery.data ?? MESSAGE_RETENTION_OPTIONS[0].days;
 
   // Apply saved preferences on first load
   useEffect(() => {
@@ -517,6 +528,49 @@ export const Preferences: React.FC = observer(() => {
               checked={allowSoundEffects}
               onChange={handleAllowSoundEffects}
             />
+          </section>
+
+          {/* Local message history (this device) — device-local retention
+              window stored in the local DB, not synced across the account. */}
+          <section className="flex flex-col gap-4 mb-12">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            >
+              Local message history
+            </h2>
+            <div
+              role="radiogroup"
+              aria-label="Local message history retention"
+              className="flex gap-2 flex-wrap"
+            >
+              {MESSAGE_RETENTION_OPTIONS.map((option) => {
+                const selected = retentionDays === option.days;
+                return (
+                  <Button
+                    key={option.days}
+                    variant={selected ? "primary" : "secondary"}
+                    size="sm"
+                    aria-label={option.label}
+                    data-testid={`pref-retention-${option.days}`}
+                    onClick={() => {
+                      if (selected) {
+                        return;
+                      }
+                      setRetention.mutate(option.days);
+                    }}
+                  >
+                    {option.label}
+                  </Button>
+                );
+              })}
+            </div>
+            <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+              Controls how much message history is kept on this device. Older
+              messages are deleted from local storage to save space. This does
+              not affect your other devices or the people you're talking to, and
+              you'll still receive new messages normally.
+            </p>
           </section>
 
           {/* Voice */}

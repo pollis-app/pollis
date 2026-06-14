@@ -8,6 +8,7 @@ mod edit_delete;
 mod ingest;
 mod reactions;
 mod read;
+mod retention;
 mod send;
 mod types;
 
@@ -37,6 +38,9 @@ pub use edit_delete::{delete_message, edit_message};
 
 // ── Reactions ────────────────────────────────────────────────────────────────
 pub use reactions::{add_reaction, get_reactions, remove_reaction, Reaction};
+
+// ── Retention / local eviction ───────────────────────────────────────────────
+pub use retention::{get_message_retention, run_message_eviction, set_message_retention};
 
 #[cfg(test)]
 mod tests;
