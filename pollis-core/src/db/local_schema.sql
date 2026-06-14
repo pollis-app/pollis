@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS message (
 
 CREATE INDEX IF NOT EXISTS idx_message_conversation ON message(conversation_id, sent_at);
 
+-- Eviction scan index: lookback/retention sweeps delete by received_at. Run on
+-- every open (this schema is re-applied each open) so existing DBs gain it
+-- without a schema-version bump (which would wipe history).
+CREATE INDEX IF NOT EXISTS idx_message_received_at ON message(received_at);
+
 CREATE TABLE IF NOT EXISTS dm_conversation (
     id TEXT PRIMARY KEY,
     peer_user_id TEXT NOT NULL UNIQUE,
