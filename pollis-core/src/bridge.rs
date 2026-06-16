@@ -714,6 +714,35 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             ok(dm::create_dm_channel(creator_id, member_ids, &state()?).await?)
         }
 
+        // ----- media -----
+        // Mobile can't run the desktop's loopback media server inside a
+        // sandboxed RN app, so instead of returning an http://127.0.0.1 URL
+        // we decrypt the R2 object straight to a file in the app's sandbox
+        // cache dir and hand back a `file://` path that expo-image can load.
+        // Reuses `download_media` (R2 fetch + AES-GCM decrypt) verbatim; the
+        // only mobile-specific bit is materialising plaintext to `destDir`.
+        // The JS side (mobile/lib/media/cache.ts) ref-counts and unlinks the
+        // file on last release, so plaintext never lingers past use.
+        "get_media_path" => {
+            let r2_key: String = arg(&args, "r2Key")?;
+            let content_hash: String = arg(&args, "contentHash")?;
+            let dest_dir: String = arg(&args, "destDir")?;
+            // expo's cacheDirectory comes through as a `file://` URI; Rust's
+            // PathBuf needs a bare path (same strip as init's data_dir).
+            let dir = dest_dir.strip_prefix("file://").unwrap_or(&dest_dir);
+            let bytes =
+                crate::commands::r2::download_media(r2_key, content_hash.clone(), &state()?)
+                    .await?;
+            tokio::fs::create_dir_all(dir)
+                .await
+                .map_err(|e| BridgeError::Bridge(format!("create media dir: {e}")))?;
+            let path = std::path::Path::new(dir).join(&content_hash);
+            tokio::fs::write(&path, &bytes)
+                .await
+                .map_err(|e| BridgeError::Bridge(format!("write media file: {e}")))?;
+            ok(format!("file://{}", path.display()))
+        }
+
         _ => Err(BridgeError::Bridge(format!(
             "unknown command: {cmd} (add it to pollis-core/src/bridge.rs)"
         ))),
