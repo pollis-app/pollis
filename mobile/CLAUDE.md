@@ -180,8 +180,12 @@ header button; sub-screens are stack pushes (pushed routes live outside
 
 ## Out-of-scope stubs (by design, not bugs)
 
-- **No voice.** VoiceChat / VoiceSettings screens and voice channels were
-  intentionally dropped — mobile does not need voice.
+- **Voice (in progress, #343).** Mobile takes the **JS LiveKit SDK** path
+  (`@livekit/react-native` + `@livekit/react-native-webrtc`) rather than
+  desktop's Rust media pipeline — see the architectural note in epic #342. The
+  libraries + Expo config plugins are installed and `registerGlobals()` runs at
+  app entry (`app/_layout.tsx`); the actual call UI / room logic is not built
+  yet. (The earlier "mobile does not need voice" stance is superseded.)
 - Auth is navigation-only: email/OTP/PIN don't validate; Initializing
   auto-advances after ~2.6s. Sign-out just routes back to `/(auth)/email` —
   no secure-store clearing.
