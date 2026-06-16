@@ -15,11 +15,12 @@ import {
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useUserProfile, useUpdateProfile } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export default function UserSettings() {
+function UserSettings() {
   const router = useRouter();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
   const { data: profile, isLoading } = useUserProfile();
   const updateProfile = useUpdateProfile();
 
@@ -188,3 +189,5 @@ export default function UserSettings() {
     </Screen>
   );
 }
+
+export default observer(UserSettings);

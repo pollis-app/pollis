@@ -24,7 +24,8 @@ import {
   useBlockUser,
   useUnblockUser,
 } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 interface RawProfile {
   id: string;
@@ -33,11 +34,11 @@ interface RawProfile {
   avatar_url?: string;
 }
 
-export default function UserProfile() {
+function UserProfile() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const peerId = id ?? null;
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
   const isSelf = currentUser?.id === peerId;
 
   const profile = useQuery({
@@ -302,3 +303,5 @@ export default function UserProfile() {
     </Screen>
   );
 }
+
+export default observer(UserProfile);

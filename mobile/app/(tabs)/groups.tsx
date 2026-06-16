@@ -18,16 +18,17 @@ import {
   useAcceptGroupInvite,
   useDeclineGroupInvite,
 } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export default function Groups() {
+function Groups() {
   const router = useRouter();
   const { data: groups = [], isLoading, isError } = useUserGroupsWithChannels();
   const { data: invites = [] } = usePendingGroupInvites();
   const acceptInvite = useAcceptGroupInvite();
   const declineInvite = useDeclineGroupInvite();
-  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
-  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
+  const setSelectedGroupId = appStore.setSelectedGroupId;
+  const setSelectedChannelId = appStore.setSelectedChannelId;
 
   const totalChannels = groups.reduce((acc, g) => acc + g.channels.length, 0);
 
@@ -159,3 +160,5 @@ export default function Groups() {
     </Screen>
   );
 }
+
+export default observer(Groups);

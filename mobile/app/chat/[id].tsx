@@ -14,7 +14,8 @@ import {
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
 
@@ -150,7 +151,7 @@ function Msg({
   );
 }
 
-export default function TextChat() {
+function TextChat() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
   const conversationId = params.id ?? null;
@@ -162,7 +163,7 @@ export default function TextChat() {
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const scrollRef = useRef<ScrollView>(null);
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
 
   const { data, isLoading, isError } = useMessages(conversationId, kind);
   const messages = data?.messages ?? [];
@@ -656,3 +657,5 @@ export default function TextChat() {
     </Screen>
   );
 }
+
+export default observer(TextChat);

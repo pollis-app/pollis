@@ -20,9 +20,10 @@ import {
   useLeaveGroup,
   useGroupJoinRequests,
 } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export default function GroupDetail() {
+function GroupDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const groupId = id ?? null;
@@ -39,8 +40,8 @@ export default function GroupDetail() {
   const { data: joinRequests = [] } = useGroupJoinRequests(groupId);
   const leaveGroup = useLeaveGroup();
 
-  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
-  const setSelectedChannelId = useAppStore((s) => s.setSelectedChannelId);
+  const setSelectedGroupId = appStore.setSelectedGroupId;
+  const setSelectedChannelId = appStore.setSelectedChannelId;
 
   const groupName = group?.name ?? "Group";
   const adminCount = members.filter(
@@ -230,3 +231,5 @@ export default function GroupDetail() {
     </Screen>
   );
 }
+
+export default observer(GroupDetail);

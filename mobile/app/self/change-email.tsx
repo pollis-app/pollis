@@ -14,14 +14,15 @@ import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 type Stage = "enter-email" | "enter-code";
 
-export default function ChangeEmail() {
+function ChangeEmail() {
   const router = useRouter();
-  const currentUser = useAppStore((s) => s.currentUser);
-  const setCurrentUser = useAppStore((s) => s.setCurrentUser);
+  const currentUser = appStore.currentUser;
+  const setCurrentUser = appStore.setCurrentUser;
   const [stage, setStage] = useState<Stage>("enter-email");
   const [newEmail, setNewEmail] = useState("");
   const [code, setCode] = useState("");
@@ -176,3 +177,5 @@ export default function ChangeEmail() {
     </Screen>
   );
 }
+
+export default observer(ChangeEmail);
