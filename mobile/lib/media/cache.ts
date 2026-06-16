@@ -64,17 +64,19 @@ let dirEnsured: Promise<void> | null = null;
 
 // Create the media cache dir once. Idempotent across the app lifetime.
 function ensureDir(): Promise<void> {
-  if (!dirEnsured) {
-    dirEnsured = FileSystem.makeDirectoryAsync(MEDIA_DIR, {
-      intermediates: true,
-    }).catch((err) => {
-      // Reset so a transient failure (e.g. storage pressure) can retry on
-      // the next resolve instead of being cached forever.
-      dirEnsured = null;
-      throw err;
-    });
+  if (dirEnsured) {
+    return dirEnsured;
   }
-  return dirEnsured;
+  const pending = FileSystem.makeDirectoryAsync(MEDIA_DIR, {
+    intermediates: true,
+  }).catch((err: unknown) => {
+    // Reset so a transient failure (e.g. storage pressure) can retry on
+    // the next resolve instead of being cached forever.
+    dirEnsured = null;
+    throw err;
+  });
+  dirEnsured = pending;
+  return pending;
 }
 
 // Resolve a media attachment to a local `file://` URI pointing at the
