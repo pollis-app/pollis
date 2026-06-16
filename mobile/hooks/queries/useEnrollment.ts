@@ -16,7 +16,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 
 export interface EnrollmentHandle {
   request_id: string;
@@ -43,7 +44,7 @@ export const enrollmentQueryKeys = {
 };
 
 export function useStartEnrollment() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (): Promise<EnrollmentHandle> => {
       if (!currentUser) {
@@ -81,7 +82,7 @@ export function useEnrollmentStatus(requestId: string | null) {
 }
 
 export function useFinalizeEnrollment() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async () => {
       if (!currentUser) {
@@ -93,7 +94,7 @@ export function useFinalizeEnrollment() {
 }
 
 export function useRecoverWithSecretKey() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (secretKey: string) => {
       if (!currentUser) {
@@ -108,7 +109,7 @@ export function useRecoverWithSecretKey() {
 }
 
 export function usePendingEnrollmentRequests() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: enrollmentQueryKeys.pending(currentUser?.id ?? null),
     queryFn: async (): Promise<PendingEnrollmentRequest[]> => {
@@ -127,7 +128,7 @@ export function usePendingEnrollmentRequests() {
 
 export function useApproveEnrollment() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (vars: { requestId: string; verificationCode: string }) => {
       await invoke("approve_device_enrollment", vars);
@@ -142,7 +143,7 @@ export function useApproveEnrollment() {
 
 export function useRejectEnrollment() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (requestId: string) => {
       await invoke("reject_device_enrollment", { requestId });

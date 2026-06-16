@@ -4,7 +4,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import { dmQueryKeys } from "./useDMChannels";
 
 export interface BlockedUser {
@@ -18,7 +19,7 @@ export const blockQueryKeys = {
 };
 
 export function useBlockedUsers() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: blockQueryKeys.list(currentUser?.id ?? null),
     queryFn: async (): Promise<BlockedUser[]> => {
@@ -36,7 +37,7 @@ export function useBlockedUsers() {
 
 export function useBlockUser() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (blockedId: string) => {
       if (!currentUser) {
@@ -60,7 +61,7 @@ export function useBlockUser() {
 
 export function useUnblockUser() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (blockedId: string) => {
       if (!currentUser) {

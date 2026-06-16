@@ -5,7 +5,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import { groupQueryKeys } from "./useUserGroups";
 
 export interface PendingInvite {
@@ -31,7 +32,7 @@ export const groupInviteQueryKeys = {
 };
 
 export function usePendingGroupInvites() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: groupInviteQueryKeys.pending(currentUser?.id ?? null),
     queryFn: async (): Promise<PendingInvite[]> => {
@@ -49,7 +50,7 @@ export function usePendingGroupInvites() {
 
 export function useAcceptGroupInvite() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (inviteId: string) => {
       if (!currentUser) {
@@ -82,7 +83,7 @@ export function useAcceptGroupInvite() {
 
 export function useDeclineGroupInvite() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (inviteId: string) => {
       if (!currentUser) {
@@ -99,7 +100,7 @@ export function useDeclineGroupInvite() {
 }
 
 export function useSendGroupInvite(groupId: string | null) {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (inviteeIdentifier: string) => {
       if (!currentUser || !groupId) {
@@ -130,7 +131,7 @@ export function useGroupMembers(groupId: string | null) {
 
 export function useUpdateGroup(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (vars: {
       name?: string;
@@ -161,7 +162,7 @@ export function useUpdateGroup(groupId: string | null) {
 
 export function useDeleteGroup() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (groupId: string) => {
       if (!currentUser) {
@@ -185,7 +186,7 @@ export function useDeleteGroup() {
 
 export function useUpdateChannel(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (vars: {
       channelId: string;
@@ -215,7 +216,7 @@ export function useUpdateChannel(groupId: string | null) {
 
 export function useDeleteChannel(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (channelId: string) => {
       if (!currentUser) {
@@ -239,7 +240,7 @@ export function useDeleteChannel(groupId: string | null) {
 
 export function useRemoveMember(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (userId: string) => {
       if (!currentUser || !groupId) {
@@ -261,7 +262,7 @@ export function useRemoveMember(groupId: string | null) {
 
 export function useSetMemberRole(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (vars: { userId: string; role: "admin" | "member" }) => {
       if (!currentUser || !groupId) {
@@ -298,7 +299,7 @@ export const joinRequestQueryKeys = {
 };
 
 export function useGroupJoinRequests(groupId: string | null) {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: joinRequestQueryKeys.byGroup(groupId),
     queryFn: async (): Promise<JoinRequest[]> => {
@@ -316,7 +317,7 @@ export function useGroupJoinRequests(groupId: string | null) {
 }
 
 export function useMyJoinRequest(groupId: string | null) {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: joinRequestQueryKeys.mine(groupId, currentUser?.id ?? null),
     queryFn: async (): Promise<JoinRequest | null> => {
@@ -335,7 +336,7 @@ export function useMyJoinRequest(groupId: string | null) {
 
 export function useRequestGroupAccess() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (groupId: string) => {
       if (!currentUser) {
@@ -357,7 +358,7 @@ export function useRequestGroupAccess() {
 
 export function useApproveJoinRequest(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (requestId: string) => {
       if (!currentUser) {
@@ -381,7 +382,7 @@ export function useApproveJoinRequest(groupId: string | null) {
 
 export function useRejectJoinRequest(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (requestId: string) => {
       if (!currentUser) {
@@ -421,7 +422,7 @@ export function useGroupBySlug(slug: string | null) {
 
 export function useLeaveGroup() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (groupId: string) => {
       if (!currentUser) {

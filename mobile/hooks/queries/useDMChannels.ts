@@ -6,7 +6,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import type { DMConversation } from "../../types";
 
 interface RawDmMember {
@@ -45,7 +46,7 @@ function transform(
 }
 
 export function useDMChannels() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: dmQueryKeys.channels(currentUser?.id ?? null),
@@ -65,7 +66,7 @@ export function useDMChannels() {
 
 export function useAcceptDMRequest() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (dmChannelId: string) => {
       if (!currentUser) {
@@ -97,7 +98,7 @@ export function useAcceptDMRequest() {
 
 export function useLeaveDM() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (dmChannelId: string) => {
       if (!currentUser) {
@@ -118,7 +119,7 @@ export function useLeaveDM() {
 
 export function useCreateDM() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (vars: { memberIds: string[] }) => {
@@ -140,7 +141,7 @@ export function useCreateDM() {
 }
 
 export function useDMRequests() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: dmQueryKeys.requests(currentUser?.id ?? null),

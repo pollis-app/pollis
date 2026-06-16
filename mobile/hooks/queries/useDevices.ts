@@ -7,7 +7,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 
 export interface DeviceRow {
   device_id: string;
@@ -22,7 +23,7 @@ export const deviceQueryKeys = {
 };
 
 export function useUserDevices() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: deviceQueryKeys.list(currentUser?.id ?? null),
     queryFn: async (): Promise<DeviceRow[]> => {
@@ -39,7 +40,7 @@ export function useUserDevices() {
 }
 
 export function useRevokeDevice() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
 
   return useMutation({

@@ -17,7 +17,8 @@
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 
 export interface MobilePreferencesPatch {
   accent_hex?: string;
@@ -51,7 +52,7 @@ function parseBlob(raw: string | null | undefined): PreferencesBlob {
 }
 
 export function usePreferences() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
 
   const query = useQuery({

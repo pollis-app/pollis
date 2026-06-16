@@ -9,7 +9,8 @@
 import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 
 export type ConversationKind = "channel" | "dm";
 
@@ -100,7 +101,7 @@ export function useMessages(
   kind: ConversationKind | null,
   opts?: { limit?: number; refetchIntervalMs?: number | false },
 ) {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const limit = opts?.limit ?? 50;
   // No polling by default. Realtime push (a follow-on PR) will invalidate
   // this query when a new envelope arrives; until then the focus-effect
@@ -142,7 +143,7 @@ export function useSendMessage(
   kind: ConversationKind | null,
 ) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (vars: { content: string; replyToId?: string }) => {
@@ -224,7 +225,7 @@ export function useToggleReaction(
   kind: ConversationKind | null,
 ) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (vars: {
       messageId: string;
@@ -256,7 +257,7 @@ export function useEditMessage(
   kind: ConversationKind | null,
 ) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (vars: { messageId: string; newContent: string }) => {
       if (!currentUser || !conversationId) {
@@ -308,7 +309,7 @@ export function useDeleteMessage(
   kind: ConversationKind | null,
 ) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (messageId: string) => {
       if (!currentUser) {
@@ -356,7 +357,7 @@ export function useDeleteMessage(
  * interval in `useMessages` covers the steady-state polling.
  */
 export function useIngestConversation() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   const queryClient = useQueryClient();
 
   return useCallback(
