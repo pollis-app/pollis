@@ -16,8 +16,17 @@ import { palette } from "../theme/tokens";
 import { ThemeProvider } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge } from "../lib/native";
+import { usePushNotifications } from "../hooks/usePushNotifications";
 
 SplashScreen.preventAutoHideAsync();
+
+// Mounted under the providers so it has a QueryClient + router and only
+// renders after the bridge is ready. The hook is a no-op until a user is
+// signed in.
+function PushNotificationsGate() {
+  usePushNotifications();
+  return null;
+}
 
 export default function RootLayout() {
   const [loaded] = useFonts({
@@ -74,6 +83,7 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <StatusBar style="light" />
+            <PushNotificationsGate />
             <Stack
               screenOptions={{
                 headerShown: false,
