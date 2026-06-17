@@ -180,12 +180,16 @@ header button; sub-screens are stack pushes (pushed routes live outside
 
 ## Out-of-scope stubs (by design, not bugs)
 
-- **Voice (in progress, #343).** Mobile takes the **JS LiveKit SDK** path
-  (`@livekit/react-native` + `@livekit/react-native-webrtc`) rather than
-  desktop's Rust media pipeline — see the architectural note in epic #342. The
-  libraries + Expo config plugins are installed and `registerGlobals()` runs at
-  app entry (`app/_layout.tsx`); the actual call UI / room logic is not built
-  yet. (The earlier "mobile does not need voice" stance is superseded.)
+- **Voice — libraries installed, NOT activated (#343).** Mobile will take the
+  **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
+  rather than desktop's Rust media pipeline — see the architectural note in epic
+  #342. The npm packages are installed, but nothing is wired yet: **no** Expo
+  config plugins, **no** `registerGlobals()`, and deliberately **no microphone /
+  camera-for-voice permissions** (we do not want to request mic/video access from
+  users — not now, not speculatively). The `CAMERA` permission that exists is for
+  QR pairing only. When voice is actually built, add the LiveKit/webrtc Expo
+  config plugins, `registerGlobals()`, the permission declarations, and the call
+  UI together — all in one go, under #343.
 - Auth is navigation-only: email/OTP/PIN don't validate; Initializing
   auto-advances after ~2.6s. Sign-out just routes back to `/(auth)/email` —
   no secure-store clearing.

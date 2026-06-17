@@ -16,13 +16,6 @@ import { palette } from "../theme/tokens";
 import { ThemeProvider } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge } from "../lib/native";
-import { registerGlobals } from "@livekit/react-native";
-
-// LiveKit (mobile voice, #343) talks WebRTC through react-native-webrtc.
-// registerGlobals() installs the RTCPeerConnection / mediaDevices globals it
-// needs; it must run once before any LiveKit room connects, so do it at module
-// load. Harmless until a call actually starts.
-registerGlobals();
 
 SplashScreen.preventAutoHideAsync();
 

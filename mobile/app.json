@@ -16,8 +16,7 @@
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop.",
-        "NSMicrophoneUsageDescription": "Pollis needs your microphone for voice calls."
+        "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop."
       },
       "bundleIdentifier": "com.anonymous.mobile"
     },
@@ -30,8 +29,7 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.mobile",
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "android.permission.CAMERA"
       ]
     },
     "web": {
@@ -61,9 +59,7 @@
         {
           "color": "#e6b65a"
         }
-      ],
-      "@livekit/react-native-expo-plugin",
-      "@config-plugins/react-native-webrtc"
+      ]
     ]
   }
 }
