@@ -14,6 +14,7 @@ import {
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
+import { useConversationRealtime } from "../../hooks/useConversationRealtime";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -172,6 +173,14 @@ function TextChat() {
   const toggleReaction = useToggleReaction(conversationId, kind);
   const editMessage = useEditMessage(conversationId, kind);
   const deleteMessage = useDeleteMessage(conversationId, kind);
+
+  // Foreground realtime — supplements the focus ingest below with a live
+  // data-channel subscription so peer messages land without a refocus. The
+  // group room is named by group_id (set on the store when a channel was
+  // opened); DMs use the conversation_id directly. No-op when realtime is
+  // unavailable.
+  const groupId = kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined;
+  useConversationRealtime(conversationId, kind, groupId);
 
   // Trigger ingest on screen focus — covers the "returning to a chat after
   // the app was backgrounded" case where the periodic refetch hasn't fired

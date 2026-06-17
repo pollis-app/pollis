@@ -32,6 +32,7 @@
     "expo-secure-store": "^55.0.13",
     "expo-splash-screen": "~55.0.19",
     "expo-status-bar": "~55.0.5",
+    "livekit-client": "^2.19.0",
     "lucide-react-native": "^1.8.0",
     "mobx": "^6.16.1",
     "mobx-react-lite": "^4.1.1",
