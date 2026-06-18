@@ -60,7 +60,7 @@ pub(super) fn resolve_screenshare_encoding(max_framerate: Option<u32>) -> (f64, 
 /// source's native dimensions. No downscale: encoders are fed the
 /// full-res frame and VP8 (or whatever codec is selected) decides what
 /// to do with it. Shared by all three OS push paths.
-pub(super) fn convert_to_i420(
+pub(crate) fn convert_to_i420(
     width: i32,
     height: i32,
     src_stride: u32,

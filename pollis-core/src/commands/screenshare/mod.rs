@@ -45,10 +45,15 @@ use crate::state::AppState;
 
 // ── Submodules ───────────────────────────────────────────────────────────
 
-mod codec;
+// `codec` (convert_to_i420) and `helper_subprocess` (locate_capture_helper)
+// expose a few crate-visible primitives the sibling `camera` module reuses
+// so the two capture features share one frame-conversion + helper-location
+// implementation. Nothing behavioural is shared — camera owns its own
+// state, events, publish options, and lifecycle.
+pub(crate) mod codec;
 mod commands;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-mod helper_subprocess;
+pub(crate) mod helper_subprocess;
 mod remote_video;
 mod state;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
