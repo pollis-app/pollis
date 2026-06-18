@@ -6,11 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Pollis is a privacy-first desktop messaging app with end-to-end encryption using MLS (Message Layer Security). It's an Electron app with a Rust core: the renderer (React) calls into a native Rust backend loaded into Electron's main process as a Node addon (`pollis-node`, built with napi-rs over the reusable `pollis-core` crate). Strong group encryption with Slack-style channels. The server never sees message plaintext.
+Pollis is a privacy-first desktop messaging app with end-to-end encryption using MLS (Message Layer Security). It's a **Tauri** app with a Rust core: the renderer (React) calls into the native Rust backend via Tauri's `invoke`, dispatched to command handlers in `src-tauri/src/commands` backed by the reusable `pollis-core` crate. Strong group encryption with Slack-style channels. The server never sees message plaintext.
 
-**Stack**: Electron 33, React/TypeScript, Rust (`pollis-core` + `pollis-node`), Turso (libSQL), MLS
+> **Shell migration:** Pollis shipped on Electron through v1.x, then migrated back to Tauri (`spike/tauri-revival`, #386/#389). **Tauri is the shipping shell.** The Electron shell under `electron/` (renderer → preload `electronAPI` → `pollis-node` napi-rs addon → `pollis-core`) is **deprecated/legacy**: its release pipeline is disabled (commented out) and Pollis no longer builds or ships the Electron app — the directory is retained only as a source-level rollback reference. See `electron/DEPRECATED.md`. New work targets `src-tauri/`.
 
-**Key Architecture**: The Rust backend connects **directly** to Turso (1 hop) for all CRUD. No separate backend server. The renderer invokes commands through `window.electronAPI.invoke(cmd, args)` (defined by the preload bridge); the Electron main process dispatches into `pollis-node`, which calls the real implementation in `pollis-core`. Same JSON shape both ends.
+**Stack**: Tauri 2, React/TypeScript, Rust (`pollis-core` + `src-tauri`), Turso (libSQL), MLS
+
+**Key Architecture**: The Rust backend connects **directly** to Turso (1 hop) for all CRUD. No separate backend server. The renderer invokes commands through Tauri's `invoke(cmd, args)` (via the shell-agnostic bridge in `frontend/src/bridge/invoke.ts`); `src-tauri` dispatches into command handlers that call the real implementation in `pollis-core`. Same JSON shape both ends. (The legacy Electron shell routed the identical calls through `window.electronAPI.invoke` → preload → `pollis-node`.)
 
 ## Development Commands
 
@@ -19,30 +21,24 @@ Pollis is a privacy-first desktop messaging app with end-to-end encryption using
 pnpm install              # Install JS dependencies
 ```
 
-`.env.development` is loaded automatically in dev builds via `dotenvy::from_filename` in `pollis-node/src/lib.rs` (the napi-rs addon's `init` path). No manual sourcing needed.
+Credentials come from `.env.development` (copy `.env.example`); the `build:tauri*` scripts source it automatically. See `docs/run-it-yourself.md` for the full credential setup.
 
 ### Running
 ```bash
-pnpm dev                  # Builds pollis-node (debug), then runs Vite + Electron concurrently
-pnpm dev:frontend         # Frontend only, in the browser (no Electron main process, no Rust IPC)
+pnpm dev                  # Builds pollis-core, then runs Vite + the Tauri shell (current; alias: dev:tauri)
+pnpm dev:frontend         # Frontend only, in the browser (no Rust IPC)
+# pnpm dev:electron       # DEPRECATED — launches the legacy Electron shell
 ```
 
 ### Building
 ```bash
-# Build the Rust addon (release) and Electron main bundle
-pnpm build:pollis-node
-pnpm --filter @pollis/electron build
-
-# Package for the current platform
-pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml
-
-# Per-target
-pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml --mac
-pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml --win
-pnpm --filter @pollis/electron exec electron-builder --config build/electron-builder.yml --linux
+pnpm build:tauri          # Build + bundle the Tauri app for the current platform
+pnpm build:tauri:macos    # universal-apple-darwin
+pnpm build:tauri:windows  # x86_64-pc-windows-msvc
+pnpm build:tauri:linux    # x86_64-unknown-linux-gnu
 ```
 
-The packaging config lives at `electron/build/electron-builder.yml`; outputs are DMG + ZIP (mac), NSIS + portable (win), AppImage + deb + rpm (linux). Auto-update is electron-updater reading `latest.yml` / `latest-mac.yml` / `latest-linux.yml` from GitHub Releases; trust root is the OS code signature on the installer (Apple Developer ID, Azure Trusted Signing). The legacy `dev:tauri` / `build:tauri*` scripts in the root `package.json` still work but are not the active path.
+Bundle config lives in `src-tauri/tauri.conf.json` (`bundle.targets: "all"`); auto-update reads the `update-{{bundle_type}}.json` manifests from `cdn.pollis.com`, with the OS code signature on each installer as trust root (Apple Developer ID, Azure Trusted Signing). The **legacy** Electron build (`pnpm --filter @pollis/electron ...` + `electron-builder`, config at `electron/build/electron-builder.yml`) still exists for local rollback work, but its release pipeline (`.github/workflows/electron-release.yml`) is disabled (commented out, #386) and the Electron app is no longer built or shipped — see `electron/DEPRECATED.md`.
 
 ### Secrets Management
 
@@ -60,11 +56,11 @@ The integration harness (`src-tauri/tests/flows.rs`) drives the real command imp
 
 ### Network Architecture
 
-**Rust backend (in the Electron main process) → Turso (DIRECT libsql connection)**
+**Rust backend (in the Tauri host process) → Turso (DIRECT libsql connection)**
 - 1 network hop — simple and fast
 - The Rust core has the same DB access any server would
 
-**No separate gRPC/HTTP server** — that has been removed. All backend logic runs inside the Electron main process via `pollis-node`'s loaded `pollis-core`.
+**No separate gRPC/HTTP server** — that has been removed. All backend logic runs inside the Tauri host process, which calls `pollis-core` directly. (Under the legacy Electron shell the same core ran in the Electron main process via the `pollis-node` addon.)
 
 **The Rust core handles directly:**
 - User profile CRUD
@@ -93,7 +89,7 @@ The integration harness (`src-tauri/tests/flows.rs`) drives the real command imp
 
 ### Frontend Data Fetching
 
-All backend calls go through the host bridge — import `invoke` from `frontend/src/bridge` (which routes to `window.electronAPI.invoke` under Electron and retains a legacy Tauri fallback). Wrapped in React Query hooks:
+All backend calls go through the host bridge — import `invoke` from `frontend/src/bridge` (which routes to Tauri's `invoke` and retains a legacy Electron `electronAPI` fallback). Wrapped in React Query hooks:
 
 ```typescript
 // React Query hooks in frontend/src/hooks/queries/
@@ -112,9 +108,9 @@ Never import directly from `@tauri-apps/*` — always go through `../bridge`. Th
 
 ### Backend Commands
 
-Backend logic lives in `pollis-core/src/commands/` (a workspace crate with **no shell-runtime dependency** — reusable from a CLI / TUI / mobile binding). The active dispatch path is `pollis-node/src/dispatch/<module>.rs`: a one-line match arm per command that routes the JSON-shaped `invoke(cmd, args)` call from the Electron main process into `pollis_core::commands::*`. The Tauri shims in `src-tauri/src/commands/` are retained for rollback and remain wired through `src-tauri/src/lib.rs`, but they are not the active path.
+Backend logic lives in `pollis-core/src/commands/` (a workspace crate with **no shell-runtime dependency** — reusable from a CLI / TUI / mobile binding). The active dispatch path is `src-tauri/src/commands/<module>.rs`: a thin `#[tauri::command]` shim per command, registered in `src-tauri/src/lib.rs`'s `invoke_handler!`, that routes the JSON-shaped `invoke(cmd, args)` call from the renderer into `pollis_core::commands::*`. The legacy Electron dispatch arms in `pollis-node/src/dispatch/<module>.rs` are retained for rollback only and are not the active path.
 
-**Edit `pollis-core`, not the shims.** When adding a command: implement it in `pollis-core/src/commands/<module>.rs`, add a one-line dispatch arm in `pollis-node/src/dispatch/<module>.rs`, and register it in the test harness (`src-tauri/src/test_harness.rs`) if it's covered by integration tests. The Tauri shim is optional — only update it if you also want the rollback path to expose the new command.
+**Edit `pollis-core`, not the shims.** When adding a command: implement it in `pollis-core/src/commands/<module>.rs`, add a `#[tauri::command]` shim in `src-tauri/src/commands/<module>.rs` and register it in `src-tauri/src/lib.rs`, and register it in the test harness (`src-tauri/src/test_harness.rs`) if it's covered by integration tests. Updating the legacy `pollis-node/src/dispatch/` arm is optional — only do it if you also want the deprecated Electron rollback path to expose the new command.
 
 - **auth**: `initialize_identity`, `get_identity`, `request_otp`, `verify_otp`, `get_session`, `logout`
 - **user**: `get_user_profile`, `update_user_profile`, `search_user_by_username`
@@ -140,29 +136,29 @@ pollis-core/            # Reusable Rust backend (no shell-runtime dependency)
     accounts.rs         # accounts.json (atomic, crash-safe)
     error.rs            # Error / Result types
     lib.rs              # uniffi exports for mobile bindings
-pollis-node/            # napi-rs binding — loads pollis-core into Node
-  src/
-    lib.rs              # Addon entry; .env.development load; ThreadsafeFunction registration
-    state.rs            # Per-process AppState shared with pollis-core
-    events.rs           # Rust → Node event channel plumbing
-    dispatch/           # `invoke` dispatch arms per command module
-electron/               # Electron app
-  src/
-    main.ts             # Main process — loads pollis-node, registers ipcMain handlers, owns BrowserWindow
-    preload.ts          # Exposes window.electronAPI to the renderer (invoke, channelOn, window, dialog, fs, shell, app, notifications, clipboard, updater)
-  build/
-    electron-builder.yml  # Packaging config (DMG/ZIP/NSIS/AppImage/deb/rpm + signing hooks)
-    sign.js             # Windows signing hook (Azure Trusted Signing)
-src-tauri/              # Legacy Tauri desktop binary (retained for rollback; not the active path)
+src-tauri/              # Tauri desktop host — CURRENT shell
   src/
     commands/           # Thin #[tauri::command] shims forwarding to pollis_core
     sink.rs             # ChannelSink adapter (Tauri's ipc::Channel → EventSink)
     test_harness.rs     # Integration-test harness (gated on feature = "test-harness")
     lib.rs              # tauri::Builder, plugins, invoke_handler!, lifecycle
     main.rs             # Binary entry
+pollis-node/            # DEPRECATED — napi-rs binding that loaded pollis-core into Node (legacy Electron shell)
+  src/
+    lib.rs              # Addon entry; .env.development load; ThreadsafeFunction registration
+    state.rs            # Per-process AppState shared with pollis-core
+    events.rs           # Rust → Node event channel plumbing
+    dispatch/           # `invoke` dispatch arms per command module
+electron/               # DEPRECATED — legacy Electron app (rollback only; see electron/DEPRECATED.md)
+  src/
+    main.ts             # Main process — loads pollis-node, registers ipcMain handlers, owns BrowserWindow
+    preload.ts          # Exposes window.electronAPI to the renderer (invoke, channelOn, window, dialog, fs, shell, app, notifications, clipboard, updater)
+  build/
+    electron-builder.yml  # Packaging config (DMG/ZIP/NSIS/AppImage/deb/rpm + signing hooks)
+    sign.js             # Windows signing hook (Azure Trusted Signing)
 frontend/               # React app (Vite, TypeScript, TailwindCSS)
   src/
-    bridge/             # Runtime-host bridge — invoke/Channel/window/dialog/fs/shell/app/updater route through window.electronAPI under Electron; legacy Tauri fallback retained
+    bridge/             # Runtime-host bridge — invoke/Channel/window/dialog/fs/shell/app/updater route through Tauri's `invoke`; legacy Electron `electronAPI` fallback retained
     hooks/queries/      # React Query hooks
     types/              # TypeScript types
     components/         # React components
@@ -176,7 +172,7 @@ website/                # Static HTML marketing site (Cloudflare Pages)
 
 **Why Rust and not the renderer**: two reasons. First, **cross-platform parity** — the same media pipeline runs on desktop, and via uniffi the same `pollis-core` is consumed by mobile. One code path covers every target; the renderer's WebRTC stack would be desktop-only and would diverge from mobile's behavior on capture defaults, codec selection, and frame timing. Second, **predictable allocation** — multi-MB media buffers passed through the V8 heap create visible GC stutter; Rust's manual allocation does not. The renderer's Chromium does have full WebRTC available, but using it would mean re-implementing voice on mobile and re-introducing GC pauses. The Rust path is intentional.
 
-Frames are pushed to the renderer over IPC channels (`window.electronAPI.channelOn(id, handler)`) for UI purposes only — speaking indicators, participant events — never for rendering media itself.
+Frames are pushed to the renderer over IPC channels (the frontend bridge's `channelOn`, backed by Tauri's `ipc::Channel`) for UI purposes only — speaking indicators, participant events — never for rendering media itself.
 
 **Implication for future video**: video capture, publish, subscribe, and render are all expected to run in Rust for the same reasons. Pushing decoded frames over IPC is fine for small previews (avatars-during-call, picture-in-picture thumbnails), not for full video.
 
@@ -192,7 +188,7 @@ Don't reach for JS-side equivalents (Web Crypto, IndexedDB, browser-side caching
 
 ## Security Model
 
-**Trusted**: User's device, local database (encrypted at rest), the signed Electron application binary (main process + preload + `pollis-node`/`pollis-core` addon) at the installed version, OS keystore
+**Trusted**: User's device, local database (encrypted at rest), the signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the installed version, OS keystore
 
 **Untrusted**: Network, Turso database, server operators
 
@@ -223,27 +219,30 @@ Concrete implications:
 
 ## Key Files
 
-- `electron/src/main.ts` — Electron main process entry; loads `pollis-node`, registers `ipcMain` handlers, owns BrowserWindow + auto-updater lifecycle
-- `electron/src/preload.ts` — Exposes `window.electronAPI` to the renderer (invoke, channelOn, window controls, dialogs, fs, shell, app, notifications, clipboard, updater)
-- `pollis-node/src/lib.rs` — napi-rs addon entry; loads `.env.development`, wires the Rust → Node ThreadsafeFunction event channel
-- `pollis-node/src/dispatch/` — Active `invoke` dispatch — one arm per command, forwards into `pollis_core::commands::*`
+- `src-tauri/src/main.rs` / `src-tauri/src/lib.rs` — Tauri host entry (CURRENT shell); `tauri::Builder`, plugins, `invoke_handler!`, window/tray/lifecycle
+- `src-tauri/src/commands/` — Active `#[tauri::command]` dispatch — one shim per command, forwards into `pollis_core::commands::*`
 - `pollis-core/src/commands/` — Real command implementations (edit here)
+- `frontend/src/bridge/invoke.ts` — Shell-agnostic `invoke`/`Channel`/`listen` — prefers Tauri, falls back to Electron `electronAPI`
+- _DEPRECATED (legacy Electron shell — see `electron/DEPRECATED.md`):_
+  - `electron/src/main.ts` — Electron main process entry; loads `pollis-node`, registers `ipcMain` handlers, owns BrowserWindow + auto-updater lifecycle
+  - `electron/src/preload.ts` — Exposes `window.electronAPI` to the renderer (invoke, channelOn, window controls, dialogs, fs, shell, app, notifications, clipboard, updater)
+  - `pollis-node/src/lib.rs` — napi-rs addon entry; loads `.env.development`, wires the Rust → Node ThreadsafeFunction event channel
+  - `pollis-node/src/dispatch/` — `invoke` dispatch (legacy) — one arm per command, forwards into `pollis_core::commands::*`
 - `pollis-core/src/state.rs` — AppState shared across commands
 - `pollis-core/src/db/` — Turso + local SQLite + migrations
 - `frontend/src/bridge/` — Runtime-host bridge — all renderer code imports `invoke`/`Channel`/window/dialog/etc. from here
 - `frontend/src/main.tsx` — React app entry point
 - `frontend/src/hooks/queries/` — React Query hooks
-- `src-tauri/src/lib.rs` — Legacy Tauri app entry; preserved for rollback, not the active path
 - `ARCHITECTURE.md` — Detailed architecture documentation
 
 ## Important Notes
 
-- **Rust backend (in the Electron main process) connects DIRECTLY to Turso** — no server middleman for CRUD
+- **Rust backend (in the Tauri host process) connects DIRECTLY to Turso** — no server middleman for CRUD
 - **All backend calls from the renderer go through the bridge** — `import { invoke } from "../bridge"`, never `@tauri-apps/api/core` directly, and never `fetch()` to a local server
 - **React Query is the source of truth** for remote data — don't duplicate in the MobX store
 - **Local DB should NOT have users/groups/channels tables** — those come from remote Turso
 - **TypeScript types should match Rust structs** — keep them synchronized
-- **Remote schema changes go in numbered migration files** in `pollis-core/src/db/migrations/` (e.g. `000019_my_change.sql`). `000000_baseline.sql` is the frozen canonical snapshot — never edit it. Dev: run new migrations by hand against your dev Turso. Prod: `.github/workflows/electron-release.yml` runs `scripts/db-apply.sh` after all builds succeed; migration failure aborts the release. Nobody applies to prod by hand. The runner records the `schema_migrations` row automatically — do **not** put an `INSERT INTO schema_migrations` in the migration file.
+- **Remote schema changes go in numbered migration files** in `pollis-core/src/db/migrations/` (e.g. `000019_my_change.sql`). `000000_baseline.sql` is the frozen canonical snapshot — never edit it. Dev: run new migrations by hand against your dev Turso. Prod: `.github/workflows/desktop-release.yml` runs `scripts/db-apply.sh` (the `apply-migrations` job) after all builds succeed; migration failure aborts the release. Nobody applies to prod by hand. The runner records the `schema_migrations` row automatically — do **not** put an `INSERT INTO schema_migrations` in the migration file.
 - **Migrations must be additive and backward-compatible with the currently-shipped desktop app.** Desktop users update on their own schedule, so after any release there will be old + new app versions hitting prod for days or weeks. Safe: `CREATE TABLE`, `ADD COLUMN` (nullable or with DEFAULT), `CREATE INDEX`, CHECK constraints already satisfied by every existing row. Unsafe — require a multi-release dance (first ship an app that stops using the thing, wait for uptake, then drop): `DROP TABLE`, `DROP COLUMN`, `RENAME`, tightening nullability or CHECKs, or any change that would make the previous app's SQL fail.
 - **NEVER commit on the local `main` branch** — always create a `fix/*` or `feature/*` branch first, even if the user does not explicitly ask for one. This is absolute. If you find yourself on `main` with changes to commit, create and switch to a branch before committing.
 - **Prefer editing existing files** over creating new ones
