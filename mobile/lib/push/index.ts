@@ -132,6 +132,20 @@ export async function isPushAuthorized(): Promise<boolean> {
 }
 
 /**
+ * Current permission state for a Settings affordance: `granted` drives the
+ * on/off display, and `canAskAgain` decides whether tapping should fire the
+ * in-app OS prompt (still undetermined) or deep-link to system Settings
+ * (already answered — the prompt can't be shown again).
+ */
+export async function getPushPermissionInfo(): Promise<{
+  granted: boolean;
+  canAskAgain: boolean;
+}> {
+  const status = await Notifications.getPermissionsAsync();
+  return { granted: status.granted, canAskAgain: status.canAskAgain };
+}
+
+/**
  * Deep-link to this app's OS Settings page. Use when permission was denied
  * and `canAskAgain` is false — the in-app prompt can no longer be shown, so
  * re-enabling has to happen in Settings.
