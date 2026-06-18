@@ -15,7 +15,15 @@ pub mod livekit;
 #[cfg(any(target_os = "ios", target_os = "android"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
+// LiveKit access-token minting — pure jsonwebtoken, no native deps, so it
+// compiles on every target (unlike the `livekit` module above). Desktop's
+// `livekit/jwt.rs` re-exports from here; mobile's `get_livekit_token` bridge
+// arm calls it directly.
+pub mod livekit_jwt;
 pub mod mls;
+// Push-notification backend (#344): token registration + the content-free
+// send_message fanout. Pure libsql + reqwest, so it compiles on every target.
+pub mod push;
 pub mod r2;
 pub mod safety;
 pub mod transparency;

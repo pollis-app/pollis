@@ -1,4 +1,7 @@
+import { useCallback, useState } from "react";
 import { View, Text, Pressable } from "react-native";
+import { useFocusEffect } from "expo-router";
+import { useObserver } from "mobx-react-lite";
 import {
   Screen,
   Crumb,
@@ -13,6 +16,12 @@ import { Icon } from "../../components/icons";
 import { useTheme } from "../../components/theme";
 import { semantic, type as ty, r, DEFAULT_ACCENT_HEX } from "../../theme/tokens";
 import { usePreferences } from "../../hooks/queries";
+import { appStore } from "../../stores/appStore";
+import {
+  getPushPermissionInfo,
+  ensurePushRegistration,
+  openNotificationSettings,
+} from "../../lib/push";
 
 const SWATCHES = [
   { n: "Amber", c: DEFAULT_ACCENT_HEX },
@@ -33,6 +42,59 @@ const BEHAVIOR_KEYS = [
 
 const THEMES = ["Coal", "Paper", "System"] as const;
 const DENSITIES = ["Compact", "Comfortable"] as const;
+
+// Notification permission status + control. The OS permission is the source
+// of truth (we can't toggle it from JS), so this reflects it and routes the
+// tap correctly: fire the in-app OS prompt while it's still undetermined, else
+// deep-link to system Settings (where a prior allow/deny can be changed).
+function NotificationsSetting() {
+  const userId = useObserver(() => appStore.currentUser?.id ?? null);
+  const [info, setInfo] = useState<{
+    granted: boolean;
+    canAskAgain: boolean;
+  } | null>(null);
+
+  const refresh = useCallback(() => {
+    void getPushPermissionInfo()
+      .then(setInfo)
+      .catch(() => {});
+  }, []);
+
+  // Re-check on focus so returning from system Settings reflects the change.
+  useFocusEffect(refresh);
+
+  const granted = info?.granted ?? false;
+  const sub = granted
+    ? "On — new messages will notify you"
+    : info && !info.canAskAgain
+      ? "Off — enable in system Settings"
+      : "Off — tap to enable";
+
+  const onPress = () => {
+    void (async () => {
+      if (!granted && info?.canAskAgain && userId) {
+        // Still undetermined — fire the single in-app OS prompt.
+        await ensurePushRegistration(userId);
+      } else {
+        // Granted (manage / turn off there) or denied (only Settings can
+        // re-enable — the in-app prompt is spent).
+        await openNotificationSettings();
+      }
+      refresh();
+    })();
+  };
+
+  return (
+    <ListRow
+      minHeight={46}
+      name="Notifications"
+      nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
+      sub={sub}
+      onPress={onPress}
+      end={<Toggle on={granted} onPress={onPress} />}
+    />
+  );
+}
 
 export default function Preferences() {
   const { accentHex, setAccent } = useTheme();
@@ -153,6 +215,9 @@ export default function Preferences() {
             }
           />
         ))}
+
+        <SectionTitle>NOTIFICATIONS</SectionTitle>
+        <NotificationsSetting />
       </Body>
       <Ctx cr="SELF" name="Preferences" />
     </Screen>

@@ -6,7 +6,8 @@ import { Screen, Crumb, Card } from "../../components/ui";
 import { PollisMark } from "../../components/PollisMark";
 import { palette, semantic, type as ty } from "../../theme/tokens";
 import { useInitializeIdentity } from "../../hooks/queries/useAuth";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 interface Step {
   n: string;
@@ -37,9 +38,9 @@ function Corner({ pos }: { pos: "tl" | "tr" | "bl" | "br" }) {
   );
 }
 
-export default function Initializing() {
+function Initializing() {
   const router = useRouter();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
   const initIdentity = useInitializeIdentity();
   const [error, setError] = useState<string | null>(null);
 
@@ -241,3 +242,5 @@ export default function Initializing() {
     </Screen>
   );
 }
+
+export default observer(Initializing);

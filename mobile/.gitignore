@@ -30,7 +30,8 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files (.env holds real EXPO_PUBLIC_* secrets; .env.example is tracked)
+.env
 .env*.local
 
 # typescript

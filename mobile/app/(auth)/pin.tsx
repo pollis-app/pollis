@@ -9,15 +9,16 @@ import {
   useUnlock,
   useUnlockState,
 } from "../../hooks/queries/useAuth";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 const SUBS = ["", "ABC", "DEF", "GHI", "JKL", "MNO", "PQRS", "TUV", "WXYZ"];
 
 type Stage = "checking" | "create-first" | "create-confirm" | "unlock";
 
-export default function AuthPIN() {
+function AuthPIN() {
   const router = useRouter();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
   const [pin, setPin] = useState("");
   const [firstPin, setFirstPin] = useState("");
   const [stage, setStage] = useState<Stage>("checking");
@@ -104,7 +105,7 @@ export default function AuthPIN() {
             // the store by `verify_otp`. Show it before initializing so
             // the user can save it before we drop it from memory.
             const pendingSecretKey =
-              useAppStore.getState().pendingSecretKey;
+              appStore.pendingSecretKey;
             if (pendingSecretKey) {
               router.replace("/(auth)/emergency-kit");
             } else {
@@ -286,3 +287,5 @@ export default function AuthPIN() {
     </Screen>
   );
 }
+
+export default observer(AuthPIN);

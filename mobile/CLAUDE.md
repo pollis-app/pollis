@@ -79,6 +79,7 @@ TS-only changes are picked up by Metro hot-reload. No rebuild.
 
 ## Environment (gradle + cargo-ndk)
 
+**Arch Linux box:**
 ```
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 ANDROID_HOME=/opt/android-sdk
@@ -86,8 +87,21 @@ ANDROID_SDK_ROOT=/opt/android-sdk
 ANDROID_NDK_ROOT=/opt/android-ndk
 ANDROID_NDK_HOME=/opt/android-ndk
 ```
-
 Persisted in `~/.bashrc` and `.envrc`. If you're in a fresh shell and builds fail with "SDK location not found", these are missing.
+
+**macOS (Apple Silicon) — Android build verified here 2026-06-18.** `source
+mobile/android-env.sh` before any ubrn/gradle/adb command. Toolchain (all
+no-sudo): OpenJDK 17 via `brew install openjdk@17`; SDK at
+`~/Library/Android/sdk` (cmdline-tools unzipped to `cmdline-tools/latest/`);
+`sdkmanager` packages `platform-tools platforms;android-36 build-tools;36.0.0
+ndk;27.1.12297006 cmake;3.22.1`. A clean `gradlew assembleDebug` produces
+`android/app/build/outputs/apk/debug/app-debug.apk` with `libpollis-native.so`
+embedded for arm64-v8a / armeabi-v7a / x86_64.
+
+**iOS is NOT buildable on this Mac** — it's macOS 14.7 + Xcode 15.1, and Expo
+SDK 55 requires **Xcode 26 / macOS 26** (verified still true June 2026: SDK 54
+was the last to accept Xcode 16.x). Needs a macOS upgrade or a different
+machine; the iOS xcframework present locally is a stale prior artifact.
 
 ---
 
@@ -178,17 +192,108 @@ Navigation rules from the handoff: no header (every screen draws its own
 header button; sub-screens are stack pushes (pushed routes live outside
 `(tabs)` so the tab bar is replaced by `<Ctx>`/composer).
 
-## Out-of-scope stubs (by design, not bugs)
+## Backend integration — wired vs pending
 
-- **No voice.** VoiceChat / VoiceSettings screens and voice channels were
-  intentionally dropped — mobile does not need voice.
-- Auth is navigation-only: email/OTP/PIN don't validate; Initializing
-  auto-advances after ~2.6s. Sign-out just routes back to `/(auth)/email` —
-  no secure-store clearing.
-- All list/message/search data is hardcoded mock data.
-- The `pollis-native` Rust bridge is wired in the build but no commands are
-  called from the new UI yet (the old `version()` smoke-test screen is gone).
-- No real MLS, auth, or Pollis backend integration.
+Most of what older notes called "stubs" is now wired through the
+`pollis-core/src/bridge.rs` uniffi dispatcher (`invoke()` from `lib/native/`).
+Current state:
+
+- **Wired:** auth (email → OTP → PIN → initialize, real `invoke` calls + session
+  restore via `get_session`); every tab/group/DM/chat/self screen consumes real
+  React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
+  reactions / edit / delete; profile, devices, blocking, safety numbers,
+  preferences. `bridge.rs` covers ~every command the hooks call.
+- **Media:** `get_media_path` decrypts an R2 object to a sandbox `file://` for
+  `expo-image` — mobile can't run desktop's loopback media server. See `lib/media/`.
+- **Foreground realtime (scaffold):** mobile joins the same SFU rooms as desktop
+  via the JS LiveKit SDK in **data-only** mode (`lib/realtime/`;
+  `useConversationRealtime` for the open chat, `useInboxRealtime` for the
+  groups/DM lists). It ingests + invalidates on `new_message` / `dm_created` /
+  `membership_changed`. Graceful no-op until `get_livekit_token` exists on the
+  bridge.
+- **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
+  permission (asked on first conversation open, not at login), token registration
+  (`register_push_token`, best-effort), content-free tap/data handlers, and a
+  Notifications row in Preferences. Push covers backgrounded/closed delivery;
+  foreground delivery is the realtime path above.
+- **Voice — libraries installed, NOT activated (#343).** Mobile will take the
+  **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
+  rather than desktop's Rust media pipeline — see the architectural note in epic
+  #342. The npm packages are installed, but nothing is wired yet: **no** Expo
+  config plugins, **no** `registerGlobals()`, and deliberately **no microphone /
+  camera-for-voice permissions** (we do not want to request mic/video access from
+  users — not now, not speculatively). The `CAMERA` permission that exists is for
+  QR pairing only. When voice is actually built, add the LiveKit/webrtc Expo
+  config plugins, `registerGlobals()`, the permission declarations, and the call
+  UI together — all in one go, under #343.
+
+### Still pending (need the native build env to compile/verify)
+
+- ~~**`get_livekit_token` bridge command**~~ — **DONE.** The pure-JWT mint now
+  lives in the always-compiled `pollis-core/src/commands/livekit_jwt.rs`
+  (desktop's `livekit/jwt.rs` re-exports it); the `get_livekit_token` arm in
+  `bridge.rs` derives identity from the session (`{user_id}:{device_id}`,
+  matching desktop's `connect_rooms`) and mints the token. Compiles clean for
+  both host and `aarch64-apple-ios-sim`. Activates foreground realtime once
+  `EXPO_PUBLIC_LIVEKIT_URL` is set (#185). On-device verification still pending.
+- **Push backend (code DONE; credentials pending).** The Rust side is wired and
+  compiles for host + `aarch64-apple-ios-sim`:
+  - `push_token` Turso table — migration `000006_push_token.sql` (additive
+    `CREATE TABLE`/`CREATE INDEX`; ships to prod via the release pipeline's
+    `db-apply.sh`).
+  - `register_push_token` — `bridge.rs` arm → `commands::push::register_push_token`
+    (upsert keyed on the token, so a re-register reassigns ownership).
+  - Content-free fanout — `commands::push::notify_new_message`, spawned
+    fire-and-forget from `send_message` after the LiveKit publish. Resolves
+    conversation members (minus sender), looks up their tokens, and POSTs a
+    batched, **content-free** alert to Expo (`{conversationId, kind}` only —
+    no plaintext/sender; generic "New message" body). Desktop runs it too
+    (no tokens → no-op), which is what lets a desktop send wake a phone.
+  - **Still operational (need EAS, not code):** `eas init` to populate
+    `expo.extra.eas.projectId` in `app.json` (the JS degrades gracefully
+    without it), plus APNs key / FCM v1 service-account credentials in EAS.
+    On-device delivery test is the final gate (#344).
+- **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
+  so the data-only realtime path adds no voice/video permission.
+- **`device_revoked`** self-sign-out on the inbox connection (needs the local
+  device id + a sign-out path), and on-device testing of realtime + push.
+
+## ⚠️ Secrets architecture — KNOWN CRITICAL ISSUE (do before any public release)
+
+Local dev currently feeds real credentials to the Rust bridge via
+`EXPO_PUBLIC_*` env vars (`mobile/.env`, gitignored). **Expo inlines every
+`EXPO_PUBLIC_*` value into the JS bundle at build time**, so they ship inside
+the APK/IPA in plaintext — `unzip` + grep recovers them. This is fine for a dev
+build on a trusted device; it is **not shippable**. What leaks today:
+
+- **Turso token** — full read/write to the production DB (all users' metadata,
+  membership, message envelopes). The worst one.
+- **LiveKit API secret** — lets anyone mint a join token for any room.
+- **Resend key** — send email as Pollis.
+- (R2 keys too, once media is configured.)
+
+The fix is an **authorized-secrets broker** — a thin server-side endpoint (a
+Cloudflare Worker fits; CF is already in the stack) that holds the real secrets
+and never ships them to the client:
+
+1. **Bootstrap (pre-auth):** `POST /otp/request` + `/otp/verify` run server-side
+   (server calls Resend). The phone never holds the Resend key.
+2. **Post-auth, scoped + short-lived creds:**
+   - **Turso:** mint per-user, short-TTL **scoped** DB tokens (or proxy DB
+     access) instead of the master token — blast radius shrinks from "whole DB
+     forever" to "this user, for minutes".
+   - **LiveKit:** the server signs the room JWT (the API secret stays
+     server-side); the phone calls `/livekit/token?room=…` with its session and
+     gets back only the JWT. This moves `get_livekit_token`'s signing off-device.
+   - **R2:** server returns presigned URLs (already the right shape).
+
+Note the tension with the repo's "no backend server — Rust talks to Turso
+directly (1 hop)" principle (root `CLAUDE.md`). That model is tenable for a
+signed desktop binary (extraction is harder, though not impossible); it is
+**fundamentally incompatible** with keeping a DB token secret inside a client
+JS bundle. The broker reintroduces a minimal auth/credential service for the
+bootstrap + credential-minting paths only — the E2E model is untouched (the
+server still never sees message plaintext). Tracked in #393.
 
 ## Design tokens
 

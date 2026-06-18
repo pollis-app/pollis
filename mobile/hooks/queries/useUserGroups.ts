@@ -4,7 +4,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 import type { Channel, Group } from "../../types";
 
 export interface GroupWithChannels extends Group {
@@ -20,7 +21,7 @@ export const groupQueryKeys = {
 };
 
 export function useUserGroups() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: groupQueryKeys.userGroups(currentUser?.id ?? null),
@@ -38,7 +39,7 @@ export function useUserGroups() {
 }
 
 export function useUserGroupsWithChannels() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: groupQueryKeys.userGroupsWithChannels(currentUser?.id ?? null),
@@ -57,7 +58,7 @@ export function useUserGroupsWithChannels() {
 
 export function useCreateGroup() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (vars: {
@@ -90,7 +91,7 @@ export function useCreateGroup() {
 
 export function useCreateChannel(groupId: string | null) {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useMutation({
     mutationFn: async (vars: { name: string; description?: string }) => {

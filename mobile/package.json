@@ -10,15 +10,20 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@config-plugins/react-native-webrtc": "^15.0.1",
     "@expo-google-fonts/geist": "^0.4.1",
     "@expo-google-fonts/sora": "^0.4.2",
     "@gorhom/bottom-sheet": "^5.2.10",
+    "@livekit/react-native": "^2.11.0",
+    "@livekit/react-native-expo-plugin": "^1.0.2",
+    "@livekit/react-native-webrtc": "144.1.1-beta.0",
     "@tanstack/react-query": "^5.100.11",
     "expo": "~55.0.17",
     "expo-build-properties": "^55.0.14",
     "expo-camera": "^55.0.16",
     "expo-constants": "~55.0.15",
     "expo-dev-client": "^55.0.28",
+    "expo-file-system": "~55.0.22",
     "expo-font": "~55.0.6",
     "expo-image": "~55.0.9",
     "expo-linking": "~55.0.14",
@@ -27,7 +32,10 @@
     "expo-secure-store": "^55.0.13",
     "expo-splash-screen": "~55.0.19",
     "expo-status-bar": "~55.0.5",
+    "livekit-client": "^2.19.0",
     "lucide-react-native": "^1.8.0",
+    "mobx": "^6.16.1",
+    "mobx-react-lite": "^4.1.1",
     "pollis-native": "link:./modules/pollis-native",
     "react": "19.2.0",
     "react-dom": "^19.2.0",
@@ -38,8 +46,7 @@
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.23.0",
     "react-native-svg": "15.15.4",
-    "uniffi-bindgen-react-native": "0.31.0-2",
-    "zustand": "^5.0.2"
+    "uniffi-bindgen-react-native": "0.31.0-2"
   },
   "devDependencies": {
     "@types/react": "~19.2.14",

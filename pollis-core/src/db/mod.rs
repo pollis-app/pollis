@@ -35,6 +35,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "account_key_log",
         include_str!("migrations/000005_account_key_log.sql"),
     ),
+    (
+        6,
+        "push_token",
+        include_str!("migrations/000006_push_token.sql"),
+    ),
 ];
 
 pub mod queries {

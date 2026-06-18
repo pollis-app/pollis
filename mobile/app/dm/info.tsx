@@ -17,7 +17,8 @@ import { semantic, type as ty } from "../../theme/tokens";
 import { useQuery } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
 import { useLeaveDM } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 interface DmMember {
   user_id: string;
@@ -32,11 +33,11 @@ interface DmChannel {
   members: DmMember[];
 }
 
-export default function DMInfo() {
+function DMInfo() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
   const channelId = id ?? null;
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
   const [confirmLeave, setConfirmLeave] = useState(false);
 
   const channel = useQuery({
@@ -155,3 +156,5 @@ export default function DMInfo() {
     </Screen>
   );
 }
+
+export default observer(DMInfo);

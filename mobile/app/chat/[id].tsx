@@ -14,7 +14,10 @@ import {
   type ConversationKind,
   type Message,
 } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { useConversationRealtime } from "../../hooks/useConversationRealtime";
+import { ensurePushRegistration } from "../../lib/push";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 const QUICK_EMOJI = ["👍", "❤️", "😂", "🎉", "🔥", "🙏"];
 
@@ -150,7 +153,7 @@ function Msg({
   );
 }
 
-export default function TextChat() {
+function TextChat() {
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string; kind?: string }>();
   const conversationId = params.id ?? null;
@@ -162,7 +165,7 @@ export default function TextChat() {
   const [editTarget, setEditTarget] = useState<Message | null>(null);
   const [editDraft, setEditDraft] = useState("");
   const scrollRef = useRef<ScrollView>(null);
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
 
   const { data, isLoading, isError } = useMessages(conversationId, kind);
   const messages = data?.messages ?? [];
@@ -171,6 +174,26 @@ export default function TextChat() {
   const toggleReaction = useToggleReaction(conversationId, kind);
   const editMessage = useEditMessage(conversationId, kind);
   const deleteMessage = useDeleteMessage(conversationId, kind);
+
+  // Foreground realtime — supplements the focus ingest below with a live
+  // data-channel subscription so peer messages land without a refocus. The
+  // group room is named by group_id (set on the store when a channel was
+  // opened); DMs use the conversation_id directly. No-op when realtime is
+  // unavailable.
+  const groupId = kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined;
+  useConversationRealtime(conversationId, kind, groupId);
+
+  // Contextual notification permission: opening a conversation is the first
+  // moment notifications are obviously useful, so ask here rather than at
+  // login. Best-effort and one-shot per session — `ensurePushRegistration`
+  // pre-checks status and won't re-prompt once answered.
+  useEffect(() => {
+    const uid = currentUser?.id;
+    if (!uid) {
+      return;
+    }
+    void ensurePushRegistration(uid);
+  }, [currentUser?.id]);
 
   // Trigger ingest on screen focus — covers the "returning to a chat after
   // the app was backgrounded" case where the periodic refetch hasn't fired
@@ -656,3 +679,5 @@ export default function TextChat() {
     </Screen>
   );
 }
+
+export default observer(TextChat);

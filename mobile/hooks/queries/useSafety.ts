@@ -10,7 +10,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 
 export interface SafetyNumberInfo {
   my_fingerprint: string;
@@ -36,7 +37,7 @@ export const safetyQueryKeys = {
 };
 
 export function useSafetyNumber(peerUserId: string | null) {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: safetyQueryKeys.number(currentUser?.id ?? null, peerUserId),
     queryFn: async (): Promise<SafetyNumberInfo | null> => {
@@ -55,7 +56,7 @@ export function useSafetyNumber(peerUserId: string | null) {
 
 export function useSetContactVerified() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useMutation({
     mutationFn: async (vars: { peerUserId: string; verified: boolean }) => {
       await invoke("set_contact_verified", {
@@ -76,7 +77,7 @@ export function useSetContactVerified() {
 }
 
 export function usePeerVerifications() {
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
   return useQuery({
     queryKey: safetyQueryKeys.list(currentUser?.id ?? null),
     queryFn: async (): Promise<PeerVerification[]> => {

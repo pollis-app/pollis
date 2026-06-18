@@ -12,14 +12,15 @@ import {
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useCreateGroup } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export default function NewGroup() {
+function NewGroup() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const createGroup = useCreateGroup();
-  const setSelectedGroupId = useAppStore((s) => s.setSelectedGroupId);
+  const setSelectedGroupId = appStore.setSelectedGroupId;
 
   const onSubmit = () => {
     const trimmedName = name.trim();
@@ -113,3 +114,5 @@ export default function NewGroup() {
     </Screen>
   );
 }
+
+export default observer(NewGroup);

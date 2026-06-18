@@ -13,7 +13,8 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { useObserver } from "mobx-react-lite";
 
 export interface ServiceUserData {
   username: string;
@@ -28,7 +29,7 @@ export const userQueryKeys = {
 };
 
 export function useUserProfile() {
-  const currentUser = useAppStore((state) => state.currentUser);
+  const currentUser = useObserver(() => appStore.currentUser);
 
   return useQuery({
     queryKey: userQueryKeys.profile(currentUser?.id ?? null),
@@ -60,8 +61,8 @@ export function useUserProfile() {
 
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
-  const currentUser = useAppStore((state) => state.currentUser);
-  const setUsername = useAppStore((state) => state.setUsername);
+  const currentUser = useObserver(() => appStore.currentUser);
+  const setUsername = appStore.setUsername;
 
   return useMutation({
     mutationFn: async ({

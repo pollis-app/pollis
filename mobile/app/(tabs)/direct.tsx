@@ -18,16 +18,15 @@ import {
   useDMRequests,
   useAcceptDMRequest,
 } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export default function Direct() {
+function Direct() {
   const router = useRouter();
   const { data: dms = [], isLoading, isError } = useDMChannels();
   const { data: requests = [] } = useDMRequests();
   const acceptRequest = useAcceptDMRequest();
-  const setSelectedConversationId = useAppStore(
-    (s) => s.setSelectedConversationId,
-  );
+  const setSelectedConversationId = appStore.setSelectedConversationId;
 
   return (
     <Screen>
@@ -149,3 +148,5 @@ export default function Direct() {
     </Screen>
   );
 }
+
+export default observer(Direct);

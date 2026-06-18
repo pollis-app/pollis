@@ -6,7 +6,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
 import type { User } from "../../types";
 
 export interface RawUserProfile {
@@ -50,9 +50,9 @@ export function useRequestOtp() {
 }
 
 export function useVerifyOtp() {
-  const setCurrentUser = useAppStore((s) => s.setCurrentUser);
-  const setUsername = useAppStore((s) => s.setUsername);
-  const setPendingSecretKey = useAppStore((s) => s.setPendingSecretKey);
+  const setCurrentUser = appStore.setCurrentUser;
+  const setUsername = appStore.setUsername;
+  const setPendingSecretKey = appStore.setPendingSecretKey;
 
   return useMutation({
     mutationFn: async (vars: { email: string; code: string }) => {
@@ -117,8 +117,8 @@ export function useInitializeIdentity() {
 }
 
 export function useLogout() {
-  const setCurrentUser = useAppStore((s) => s.setCurrentUser);
-  const logoutStore = useAppStore((s) => s.logout);
+  const setCurrentUser = appStore.setCurrentUser;
+  const logoutStore = appStore.logout;
 
   return useMutation({
     mutationFn: async (vars: { deleteData?: boolean } | void) => {
@@ -142,7 +142,7 @@ export async function restoreSession(): Promise<RawUserProfile | null> {
   if (!profile) {
     return null;
   }
-  const { setCurrentUser, setUsername } = useAppStore.getState();
+  const { setCurrentUser, setUsername } = appStore;
   setCurrentUser(profileToUser(profile));
   setUsername(profile.username);
   return profile;

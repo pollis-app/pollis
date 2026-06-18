@@ -12,11 +12,12 @@ import {
 import { PollisMark } from "../../components/PollisMark";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts, r } from "../../theme/tokens";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
 /**
  * Emergency Kit — shown once, right after a brand-new account's PIN is set.
- * The recovery key emitted by `verify_otp` lives in the zustand store
+ * The recovery key emitted by `verify_otp` lives in the MobX store
  * (`pendingSecretKey`) for one screen-jump only. The user must explicitly
  * acknowledge they've saved it before we drop it from memory.
  *
@@ -24,10 +25,10 @@ import { useAppStore } from "../../stores/appStore";
  * returning user takes — so the rest of the launch sequence stays the
  * same regardless of whether this was a new account or not.
  */
-export default function EmergencyKit() {
+function EmergencyKit() {
   const router = useRouter();
-  const pendingSecretKey = useAppStore((s) => s.pendingSecretKey);
-  const setPendingSecretKey = useAppStore((s) => s.setPendingSecretKey);
+  const pendingSecretKey = appStore.pendingSecretKey;
+  const setPendingSecretKey = appStore.setPendingSecretKey;
   const [acknowledged, setAcknowledged] = useState(false);
 
   // Defensive: if someone deep-links here without a stashed key, just
@@ -154,3 +155,5 @@ export default function EmergencyKit() {
     </Screen>
   );
 }
+
+export default observer(EmergencyKit);

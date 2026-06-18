@@ -23,13 +23,14 @@ import {
   useDeleteChannel,
   useGroupMembers,
 } from "../../hooks/queries";
-import { useAppStore } from "../../stores/appStore";
+import { appStore } from "../../stores/appStore";
+import { observer } from "mobx-react-lite";
 
-export default function GroupSettings() {
+function GroupSettings() {
   const router = useRouter();
   const { groupId } = useLocalSearchParams<{ groupId?: string }>();
   const id = groupId ?? null;
-  const currentUser = useAppStore((s) => s.currentUser);
+  const currentUser = appStore.currentUser;
 
   const { data: groups = [] } = useUserGroupsWithChannels();
   const group = groups.find((g) => g.id === id);
@@ -239,3 +240,5 @@ export default function GroupSettings() {
     </Screen>
   );
 }
+
+export default observer(GroupSettings);
