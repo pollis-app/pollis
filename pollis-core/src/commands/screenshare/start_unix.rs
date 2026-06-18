@@ -226,7 +226,10 @@ pub async fn start_screen_share(
             );
             (width & !1, height & !1)
         }
-        Ok(Some(CaptureMsg::Sources(_))) | Ok(Some(CaptureMsg::Select(_))) => {
+        Ok(Some(CaptureMsg::Sources(_)))
+        | Ok(Some(CaptureMsg::Select(_)))
+        | Ok(Some(CaptureMsg::Cameras(_)))
+        | Ok(Some(CaptureMsg::SelectCamera(_))) => {
             eprintln!("[screenshare] helper sent unexpected message before format");
             stop_screen_share(state).await.ok();
             return Err(fail_capture(
@@ -430,7 +433,10 @@ pub async fn start_screen_share(
                     // the new dimensions; LiveKit's NativeVideoSource
                     // tolerates per-frame size changes.
                 }
-                Ok(Some(CaptureMsg::Sources(_))) | Ok(Some(CaptureMsg::Select(_))) => {
+                Ok(Some(CaptureMsg::Sources(_)))
+                | Ok(Some(CaptureMsg::Select(_)))
+                | Ok(Some(CaptureMsg::Cameras(_)))
+                | Ok(Some(CaptureMsg::SelectCamera(_))) => {
                     // Only valid during the picker handshake — should
                     // never appear once frames are flowing. Ignore.
                 }
