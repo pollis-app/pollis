@@ -178,8 +178,30 @@ Navigation rules from the handoff: no header (every screen draws its own
 header button; sub-screens are stack pushes (pushed routes live outside
 `(tabs)` so the tab bar is replaced by `<Ctx>`/composer).
 
-## Out-of-scope stubs (by design, not bugs)
+## Backend integration — wired vs pending
 
+Most of what older notes called "stubs" is now wired through the
+`pollis-core/src/bridge.rs` uniffi dispatcher (`invoke()` from `lib/native/`).
+Current state:
+
+- **Wired:** auth (email → OTP → PIN → initialize, real `invoke` calls + session
+  restore via `get_session`); every tab/group/DM/chat/self screen consumes real
+  React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
+  reactions / edit / delete; profile, devices, blocking, safety numbers,
+  preferences. `bridge.rs` covers ~every command the hooks call.
+- **Media:** `get_media_path` decrypts an R2 object to a sandbox `file://` for
+  `expo-image` — mobile can't run desktop's loopback media server. See `lib/media/`.
+- **Foreground realtime (scaffold):** mobile joins the same SFU rooms as desktop
+  via the JS LiveKit SDK in **data-only** mode (`lib/realtime/`;
+  `useConversationRealtime` for the open chat, `useInboxRealtime` for the
+  groups/DM lists). It ingests + invalidates on `new_message` / `dm_created` /
+  `membership_changed`. Graceful no-op until `get_livekit_token` exists on the
+  bridge.
+- **Push (client wired):** `lib/push/` + `usePushNotifications` — contextual
+  permission (asked on first conversation open, not at login), token registration
+  (`register_push_token`, best-effort), content-free tap/data handlers, and a
+  Notifications row in Preferences. Push covers backgrounded/closed delivery;
+  foreground delivery is the realtime path above.
 - **Voice — libraries installed, NOT activated (#343).** Mobile will take the
   **JS LiveKit SDK** path (`@livekit/react-native` + `@livekit/react-native-webrtc`)
   rather than desktop's Rust media pipeline — see the architectural note in epic
@@ -190,13 +212,18 @@ header button; sub-screens are stack pushes (pushed routes live outside
   QR pairing only. When voice is actually built, add the LiveKit/webrtc Expo
   config plugins, `registerGlobals()`, the permission declarations, and the call
   UI together — all in one go, under #343.
-- Auth is navigation-only: email/OTP/PIN don't validate; Initializing
-  auto-advances after ~2.6s. Sign-out just routes back to `/(auth)/email` —
-  no secure-store clearing.
-- All list/message/search data is hardcoded mock data.
-- The `pollis-native` Rust bridge is wired in the build but no commands are
-  called from the new UI yet (the old `version()` smoke-test screen is gone).
-- No real MLS, auth, or Pollis backend integration.
+
+### Still pending (need the native build env to compile/verify)
+
+- **`get_livekit_token` bridge command** — un-gate the pure-JWT mint so it
+  compiles on mobile; activates foreground realtime (#185).
+- **Push backend** — `push_token` Turso table + `register_push_token` + a
+  content-free Expo-push send in `send_message`; EAS credentials (APNs / FCM v1)
+  and `expo.extra.eas.projectId` (#344).
+- **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
+  so the data-only realtime path adds no voice/video permission.
+- **`device_revoked`** self-sign-out on the inbox connection (needs the local
+  device id + a sign-out path), and on-device testing of realtime + push.
 
 ## Design tokens
 
