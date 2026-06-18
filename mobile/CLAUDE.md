@@ -215,11 +215,30 @@ Current state:
 
 ### Still pending (need the native build env to compile/verify)
 
-- **`get_livekit_token` bridge command** — un-gate the pure-JWT mint so it
-  compiles on mobile; activates foreground realtime (#185).
-- **Push backend** — `push_token` Turso table + `register_push_token` + a
-  content-free Expo-push send in `send_message`; EAS credentials (APNs / FCM v1)
-  and `expo.extra.eas.projectId` (#344).
+- ~~**`get_livekit_token` bridge command**~~ — **DONE.** The pure-JWT mint now
+  lives in the always-compiled `pollis-core/src/commands/livekit_jwt.rs`
+  (desktop's `livekit/jwt.rs` re-exports it); the `get_livekit_token` arm in
+  `bridge.rs` derives identity from the session (`{user_id}:{device_id}`,
+  matching desktop's `connect_rooms`) and mints the token. Compiles clean for
+  both host and `aarch64-apple-ios-sim`. Activates foreground realtime once
+  `EXPO_PUBLIC_LIVEKIT_URL` is set (#185). On-device verification still pending.
+- **Push backend (code DONE; credentials pending).** The Rust side is wired and
+  compiles for host + `aarch64-apple-ios-sim`:
+  - `push_token` Turso table — migration `000006_push_token.sql` (additive
+    `CREATE TABLE`/`CREATE INDEX`; ships to prod via the release pipeline's
+    `db-apply.sh`).
+  - `register_push_token` — `bridge.rs` arm → `commands::push::register_push_token`
+    (upsert keyed on the token, so a re-register reassigns ownership).
+  - Content-free fanout — `commands::push::notify_new_message`, spawned
+    fire-and-forget from `send_message` after the LiveKit publish. Resolves
+    conversation members (minus sender), looks up their tokens, and POSTs a
+    batched, **content-free** alert to Expo (`{conversationId, kind}` only —
+    no plaintext/sender; generic "New message" body). Desktop runs it too
+    (no tokens → no-op), which is what lets a desktop send wake a phone.
+  - **Still operational (need EAS, not code):** `eas init` to populate
+    `expo.extra.eas.projectId` in `app.json` (the JS degrades gracefully
+    without it), plus APNs key / FCM v1 service-account credentials in EAS.
+    On-device delivery test is the final gate (#344).
 - **webrtc Expo config plugin** + an AndroidManifest mic/camera **removal** rule
   so the data-only realtime path adds no voice/video permission.
 - **`device_revoked`** self-sign-out on the inbox connection (needs the local

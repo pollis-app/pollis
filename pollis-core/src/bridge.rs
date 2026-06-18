@@ -714,6 +714,48 @@ pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeErro
             ok(dm::create_dm_channel(creator_id, member_ids, &state()?).await?)
         }
 
+        // ----- push notifications -----
+        // Mobile registers its Expo push token so senders can wake a
+        // backgrounded/closed app with a content-free notification. The send
+        // side lives in send_message's background fanout (commands::push).
+        "register_push_token" => {
+            let user_id: String = arg(&args, "userId")?;
+            let token: String = arg(&args, "token")?;
+            let platform: String = arg(&args, "platform")?;
+            crate::commands::push::register_push_token(user_id, token, platform, &state()?).await?;
+            ok(())
+        }
+
+        // ----- livekit (realtime token) -----
+        // Mobile joins the same SFU rooms as desktop via the JS LiveKit SDK
+        // (data-only, see mobile/lib/realtime/). It only passes the room name;
+        // identity + display name are derived from the session here so the
+        // participant identity matches desktop's `connect_rooms` scheme
+        // (`{user_id}:{device_id}`), letting multiple devices coexist.
+        "get_livekit_token" => {
+            let room: String = arg(&args, "room")?;
+            let st = state()?;
+            let profile = auth::get_session(&st).await?.ok_or_else(|| {
+                BridgeError::Bridge("get_livekit_token: not signed in".into())
+            })?;
+            let user_id = profile.id;
+            let display_name = if profile.username.is_empty() {
+                user_id.clone()
+            } else {
+                profile.username
+            };
+            let identity = match st.device_id.lock().await.clone() {
+                Some(did) => format!("{user_id}:{did}"),
+                None => user_id.clone(),
+            };
+            ok(crate::commands::livekit_jwt::make_token(
+                &st.config,
+                &room,
+                &identity,
+                &display_name,
+            )?)
+        }
+
         // ----- media -----
         // Mobile can't run the desktop's loopback media server inside a
         // sandboxed RN app, so instead of returning an http://127.0.0.1 URL

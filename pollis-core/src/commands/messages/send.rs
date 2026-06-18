@@ -202,6 +202,37 @@ pub async fn send_message(
         }
     }
 
+    // Content-free push to recipients' backgrounded/closed apps (#344).
+    // Fire-and-forget: a push relay hiccup must never block or fail the send,
+    // and foreground recipients already got the LiveKit realtime ping above.
+    // Desktop runs this too (its users just have no registered tokens), which
+    // is what lets a desktop-sent message wake a recipient's phone.
+    //
+    // Notification policy mirrors desktop: a DM always notifies its recipient,
+    // but a group channel message only notifies on an explicit `@all` (regular
+    // channel chatter would be far too noisy — desktop raises no per-message
+    // notification for it either; see the @all inbox-ping branch above).
+    let should_push = !is_channel || mentions_all(&content);
+    if should_push {
+        let state = Arc::clone(state);
+        let conversation_id = conversation_id.clone();
+        let mls_group_id = mls_group_id.clone();
+        let sender_id = sender_id.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::commands::push::notify_new_message(
+                &conversation_id,
+                &mls_group_id,
+                is_channel,
+                &sender_id,
+                &state,
+            )
+            .await
+            {
+                eprintln!("[push] send_message notify: {e}");
+            }
+        });
+    }
+
     Ok(Message {
         id,
         conversation_id,
