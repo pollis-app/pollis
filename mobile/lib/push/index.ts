@@ -12,7 +12,7 @@
 // command all resolve without throwing, leaving the app working exactly as
 // it does today.
 
-import { Platform } from "react-native";
+import { Platform, Linking } from "react-native";
 import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { invoke } from "../native";
@@ -30,19 +30,65 @@ Notifications.setNotificationHandler({
 });
 
 /**
- * Request notification permission and, if granted, mint an Expo push token
- * and register it with the backend against `userId`. Returns the token
- * string, or `null` if permission is denied, no EAS projectId is
- * configured, or token acquisition fails. The `register_push_token` bridge
- * command does not exist yet — registration is best-effort until it does.
+ * The Android notification channel notifications post to. Android 8+ silently
+ * drops any notification that has no channel, so this must exist before the
+ * first one arrives. Idempotent — safe to call repeatedly.
  */
-export async function registerForPushNotifications(
+async function ensureAndroidChannel(): Promise<void> {
+  if (Platform.OS !== "android") {
+    return;
+  }
+  await Notifications.setNotificationChannelAsync("default", {
+    name: "Messages",
+    importance: Notifications.AndroidImportance.DEFAULT,
+    // Content-free, in keeping with the privacy model — no custom sound.
+    showBadge: false,
+  });
+}
+
+// Registered-this-session guard so the whole flow (and the token POST) runs
+// at most once per signed-in user, even though we call it on every
+// conversation open.
+const registeredFor = new Set<string>();
+
+/**
+ * Contextual permission + registration. Call this at a moment where
+ * notifications are obviously useful — we trigger it the first time a
+ * conversation is opened — NOT at login.
+ *
+ * The OS permission prompt is one-shot: once a user answers, you can't show
+ * it again in-app. So we pre-check with `getPermissionsAsync` and only fire
+ * the prompt when the system still allows it (`undetermined`). If already
+ * granted we skip straight to registration; if denied we do nothing (turning
+ * it back on is a Settings trip — see `openNotificationSettings`).
+ *
+ * Returns the Expo push token, or null if not granted / already handled / no
+ * EAS projectId / the (not-yet-implemented) `register_push_token` command is
+ * absent. Best-effort throughout: never throws, never blocks the UI.
+ */
+export async function ensurePushRegistration(
   userId: string,
 ): Promise<string | null> {
-  const { granted } = await Notifications.requestPermissionsAsync();
-  if (!granted) {
+  // Already handled this session — re-entry on later conversation opens is a
+  // cheap no-op rather than a repeated token fetch.
+  if (registeredFor.has(userId)) {
     return null;
   }
+
+  const current = await Notifications.getPermissionsAsync();
+  let granted = current.granted;
+  // Only fire the one-shot OS prompt while the system says we still can
+  // (i.e. the user hasn't already answered).
+  if (!granted && current.canAskAgain) {
+    granted = (await Notifications.requestPermissionsAsync()).granted;
+  }
+  if (!granted) {
+    // Denied (or can't ask again). Don't mark as handled — a later Settings
+    // grant should still be picked up on the next conversation open.
+    return null;
+  }
+
+  await ensureAndroidChannel();
 
   // projectId is required to mint an Expo push token. In bare/dev builds
   // without EAS configured it's absent — degrade rather than throw.
@@ -72,7 +118,26 @@ export async function registerForPushNotifications(
     // No-op — falls back to focus/realtime ingest until the command lands.
   }
 
+  registeredFor.add(userId);
   return token.data;
+}
+
+/**
+ * Whether notifications are currently authorized — for a Settings screen to
+ * reflect state and decide whether to show an "enable in Settings" affordance.
+ */
+export async function isPushAuthorized(): Promise<boolean> {
+  const status = await Notifications.getPermissionsAsync();
+  return status.granted;
+}
+
+/**
+ * Deep-link to this app's OS Settings page. Use when permission was denied
+ * and `canAskAgain` is false — the in-app prompt can no longer be shown, so
+ * re-enabling has to happen in Settings.
+ */
+export function openNotificationSettings(): Promise<void> {
+  return Linking.openSettings();
 }
 
 export interface PushHandlers {

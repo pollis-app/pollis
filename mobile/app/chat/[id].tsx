@@ -15,6 +15,7 @@ import {
   type Message,
 } from "../../hooks/queries";
 import { useConversationRealtime } from "../../hooks/useConversationRealtime";
+import { ensurePushRegistration } from "../../lib/push";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
 
@@ -181,6 +182,18 @@ function TextChat() {
   // unavailable.
   const groupId = kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined;
   useConversationRealtime(conversationId, kind, groupId);
+
+  // Contextual notification permission: opening a conversation is the first
+  // moment notifications are obviously useful, so ask here rather than at
+  // login. Best-effort and one-shot per session — `ensurePushRegistration`
+  // pre-checks status and won't re-prompt once answered.
+  useEffect(() => {
+    const uid = currentUser?.id;
+    if (!uid) {
+      return;
+    }
+    void ensurePushRegistration(uid);
+  }, [currentUser?.id]);
 
   // Trigger ingest on screen focus — covers the "returning to a chat after
   // the app was backgrounded" case where the periodic refetch hasn't fired
