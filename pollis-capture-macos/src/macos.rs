@@ -19,14 +19,27 @@ struct Args {
     /// Closing this socket is the parent's signal to make us exit.
     #[arg(long)]
     socket: String,
+    /// What to capture. `screen` (default) drives ScreenCaptureKit;
+    /// `camera` drives an AVFoundation AVCaptureSession. Both speak the
+    /// same Format/Frame wire protocol — they differ only in their
+    /// enumeration/selection handshake.
+    #[arg(long, value_enum, default_value_t = Mode::Screen)]
+    mode: Mode,
 }
 
-/// Channel payload from SCK's dispatch queue (sync world) into the tokio
-/// task (async world) that owns the socket. We pre-serialize on the SCK
-/// queue so the async side just does socket writes — keeps the protocol
-/// bytes defined exactly once (`pollis-capture-proto`) and the hot path
-/// allocation-bounded.
-enum Wire {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Mode {
+    Screen,
+    Camera,
+}
+
+/// Channel payload from a capture callback's dispatch queue (sync world)
+/// into the tokio task (async world) that owns the socket. We
+/// pre-serialize on the capture queue so the async side just does socket
+/// writes — keeps the protocol bytes defined exactly once
+/// (`pollis-capture-proto`) and the hot path allocation-bounded. Shared
+/// by both the ScreenCaptureKit (screen) and AVFoundation (camera) paths.
+pub(crate) enum Wire {
     /// A fully-encoded protocol message ready to write verbatim.
     Bytes(Vec<u8>),
     /// A frame: encoded header + the BGRx payload, written as two
@@ -50,6 +63,7 @@ pub fn run() -> Result<()> {
     // (parent socket closed / capture done) it calls process::exit
     // and the kernel reaps both threads.
     let socket = args.socket;
+    let mode = args.mode;
     std::thread::Builder::new()
         .name("pollis-capture-tokio".into())
         .spawn(move || {
@@ -63,7 +77,7 @@ pub fn run() -> Result<()> {
                     std::process::exit(1);
                 }
             };
-            let result = rt.block_on(run_async(&socket));
+            let result = rt.block_on(run_async(&socket, mode));
             if let Err(e) = &result {
                 eprintln!("[capture-mac] {e}");
             }
@@ -100,19 +114,60 @@ fn run_main_loop() {
     app.run();
 }
 
-async fn run_async(socket_path: &str) -> Result<()> {
-    eprintln!("[capture-mac] connecting to parent socket {socket_path}");
+async fn run_async(socket_path: &str, mode: Mode) -> Result<()> {
+    eprintln!("[capture-mac] connecting to parent socket {socket_path} (mode={mode:?})");
     let sock = UnixStream::connect(socket_path)
         .await
         .with_context(|| format!("connect to {socket_path}"))?;
-    let (read_half, mut write_half) = sock.into_split();
+    let (read_half, write_half) = sock.into_split();
     eprintln!("[capture-mac] connected");
 
     // macOS has no PR_SET_PDEATHSIG. Poll getppid(): if the parent dies
     // it reparents to launchd (ppid becomes 1) — exit so we don't leak a
-    // live SCStream. Cheap, 1 s cadence.
+    // live capture session. Cheap, 1 s cadence.
     spawn_parent_death_watch();
 
+    match mode {
+        Mode::Screen => run_screen(read_half, write_half).await,
+        Mode::Camera => crate::camera::run_camera(read_half, write_half).await,
+    }
+}
+
+/// Drain the capture channel → socket. On any write error (EPIPE, parent
+/// gone) stop and return; the capture side observes `stop` on its next
+/// frame. Shared by the screen and camera paths.
+pub(crate) async fn drain_to_socket(
+    mut rx: mpsc::Receiver<Wire>,
+    mut sock: tokio::net::unix::OwnedWriteHalf,
+    stop: Arc<AtomicBool>,
+) {
+    while let Some(item) = rx.recv().await {
+        match item {
+            Wire::Bytes(b) => {
+                if let Err(e) = sock.write_all(&b).await {
+                    eprintln!("[capture-mac] socket write error: {e} — exiting");
+                    break;
+                }
+            }
+            Wire::Frame { header, bgrx } => {
+                if let Err(e) = sock.write_all(&header).await {
+                    eprintln!("[capture-mac] socket write error: {e} — exiting");
+                    break;
+                }
+                if let Err(e) = sock.write_all(&bgrx).await {
+                    eprintln!("[capture-mac] socket write error: {e} — exiting");
+                    break;
+                }
+            }
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+}
+
+async fn run_screen(
+    read_half: tokio::net::unix::OwnedReadHalf,
+    mut write_half: tokio::net::unix::OwnedWriteHalf,
+) -> Result<()> {
     // ── Phase 1: enumerate + send the source list ───────────────────────
     //
     // SCShareableContent is the API Slack/Discord/Zoom/OBS use to
@@ -172,7 +227,7 @@ async fn run_async(socket_path: &str) -> Result<()> {
     eprintln!("[capture-mac] received selection: {selection:?}");
 
     // ── Phase 3: build SCContentFilter + SCStream, stream frames ────────
-    let (tx, mut rx) = mpsc::channel::<Wire>(2);
+    let (tx, rx) = mpsc::channel::<Wire>(2);
     let stop = Arc::new(AtomicBool::new(false));
 
     // Start SCK on a dedicated blocking context: filter construction and
@@ -188,31 +243,8 @@ async fn run_async(socket_path: &str) -> Result<()> {
         }
     });
 
-    // Drain channel → socket. On any write error (EPIPE, parent gone)
-    // stop and exit; the SCK side observes `stop` on its next frame.
-    let mut sock = write_half;
-    while let Some(item) = rx.recv().await {
-        match item {
-            Wire::Bytes(b) => {
-                if let Err(e) = sock.write_all(&b).await {
-                    eprintln!("[capture-mac] socket write error: {e} — exiting");
-                    break;
-                }
-            }
-            Wire::Frame { header, bgrx } => {
-                if let Err(e) = sock.write_all(&header).await {
-                    eprintln!("[capture-mac] socket write error: {e} — exiting");
-                    break;
-                }
-                if let Err(e) = sock.write_all(&bgrx).await {
-                    eprintln!("[capture-mac] socket write error: {e} — exiting");
-                    break;
-                }
-            }
-        }
-    }
-
-    stop.store(true, Ordering::Relaxed);
+    // Drain channel → socket until the parent goes away.
+    drain_to_socket(rx, write_half, Arc::clone(&stop)).await;
     Ok(())
 }
 

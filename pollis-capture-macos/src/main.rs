@@ -1,15 +1,20 @@
 //! pollis-capture-macos
 //!
-//! Subprocess helper. Owns the ScreenCaptureKit surface — both
-//! `SCShareableContent` enumeration (for our in-app picker) and the
-//! `SCStream` + `SCStreamOutputTrait` capture pipeline — and talks to
-//! the main Pollis binary over a Unix socket whose path the parent
-//! passes on the command line. Mirrors `pollis-capture-linux`.
+//! Subprocess helper. Talks to the main Pollis binary over a Unix socket
+//! whose path the parent passes on the command line. Mirrors
+//! `pollis-capture-linux`. Runs in one of two modes (`--mode`):
 //!
-//! Wire protocol: `pollis-capture-proto`. macOS uses the full set:
-//! `0x03 Sources` (helper → parent enumeration) and `0x04 Select`
-//! (parent → helper user-pick) handshake, then `0x01 Format` /
-//! `0x02 Frame` / `0xFF Error` like every other helper.
+//! - **screen** (default, `macos.rs`): owns the ScreenCaptureKit surface
+//!   — both `SCShareableContent` enumeration (for our in-app picker) and
+//!   the `SCStream` + `SCStreamOutputTrait` capture pipeline.
+//! - **camera** (`camera.rs`): owns an AVFoundation `AVCaptureSession`
+//!   with an `AVCaptureVideoDataOutput`. ScreenCaptureKit can't capture
+//!   cameras, so the webcam path is AVFoundation end to end.
+//!
+//! Wire protocol: `pollis-capture-proto`. Screen mode uses `0x03 Sources`
+//! / `0x04 Select`; camera mode uses `0x05 Cameras` / `0x06 SelectCamera`.
+//! Both then stream `0x01 Format` / `0x02 Frame` / `0xFF Error` — the
+//! frame path is identical (32BGRA == the BGRx the parent expects).
 //!
 //! ## Why a subprocess
 //!
@@ -50,6 +55,8 @@ fn main() {
     std::process::exit(2);
 }
 
+#[cfg(target_os = "macos")]
+mod camera;
 #[cfg(target_os = "macos")]
 mod macos;
 
