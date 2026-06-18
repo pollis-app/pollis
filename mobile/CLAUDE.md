@@ -258,6 +258,43 @@ Current state:
 - **`device_revoked`** self-sign-out on the inbox connection (needs the local
   device id + a sign-out path), and on-device testing of realtime + push.
 
+## ⚠️ Secrets architecture — KNOWN CRITICAL ISSUE (do before any public release)
+
+Local dev currently feeds real credentials to the Rust bridge via
+`EXPO_PUBLIC_*` env vars (`mobile/.env`, gitignored). **Expo inlines every
+`EXPO_PUBLIC_*` value into the JS bundle at build time**, so they ship inside
+the APK/IPA in plaintext — `unzip` + grep recovers them. This is fine for a dev
+build on a trusted device; it is **not shippable**. What leaks today:
+
+- **Turso token** — full read/write to the production DB (all users' metadata,
+  membership, message envelopes). The worst one.
+- **LiveKit API secret** — lets anyone mint a join token for any room.
+- **Resend key** — send email as Pollis.
+- (R2 keys too, once media is configured.)
+
+The fix is an **authorized-secrets broker** — a thin server-side endpoint (a
+Cloudflare Worker fits; CF is already in the stack) that holds the real secrets
+and never ships them to the client:
+
+1. **Bootstrap (pre-auth):** `POST /otp/request` + `/otp/verify` run server-side
+   (server calls Resend). The phone never holds the Resend key.
+2. **Post-auth, scoped + short-lived creds:**
+   - **Turso:** mint per-user, short-TTL **scoped** DB tokens (or proxy DB
+     access) instead of the master token — blast radius shrinks from "whole DB
+     forever" to "this user, for minutes".
+   - **LiveKit:** the server signs the room JWT (the API secret stays
+     server-side); the phone calls `/livekit/token?room=…` with its session and
+     gets back only the JWT. This moves `get_livekit_token`'s signing off-device.
+   - **R2:** server returns presigned URLs (already the right shape).
+
+Note the tension with the repo's "no backend server — Rust talks to Turso
+directly (1 hop)" principle (root `CLAUDE.md`). That model is tenable for a
+signed desktop binary (extraction is harder, though not impossible); it is
+**fundamentally incompatible** with keeping a DB token secret inside a client
+JS bundle. The broker reintroduces a minimal auth/credential service for the
+bootstrap + credential-minting paths only — the E2E model is untouched (the
+server still never sees message plaintext). Tracked in #393.
+
 ## Design tokens
 
 Defined in `theme/tokens.ts`. One bg + one accent; everything else is a
