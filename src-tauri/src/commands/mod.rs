@@ -2,6 +2,7 @@
 // install_kind stays in src-tauri because it inspects Tauri's bundle metadata.
 pub mod auth;
 pub mod blocks;
+pub mod camera;
 pub mod device_enrollment;
 pub mod dm;
 pub mod groups;

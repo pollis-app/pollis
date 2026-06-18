@@ -911,6 +911,10 @@ pub async fn leave_voice_channel(state: &Arc<AppState>) -> Result<()> {
     // still alive. No-ops cheaply (the had_session guard) when nothing is
     // being shared.
     crate::commands::screenshare::stop_screen_share(state).await.ok();
+    // Same for any active webcam capture — it publishes into this same room,
+    // so it must be torn down before the room closes or its helper keeps
+    // capturing after the call ends. Idempotent (no-op when no camera live).
+    crate::commands::camera::stop_camera(state).await.ok();
 
     let room = release_voice_resources(state, true).await;
 
