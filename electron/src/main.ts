@@ -1,3 +1,9 @@
+// ⚠️ DEPRECATED — legacy Electron shell. Pollis ships on Tauri (`src-tauri/`).
+// This entrypoint is retained as a source-level rollback reference only; the
+// Electron release pipeline is disabled (#386) and the app is no longer built
+// or shipped. Do not add features here — see ../DEPRECATED.md. New shell work
+// belongs in `src-tauri/`.
+
 import {
   app,
   BrowserWindow,
