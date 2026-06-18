@@ -17,14 +17,17 @@ import { ThemeProvider } from "../components/theme";
 import { queryClient } from "../lib/queryClient";
 import { initializeNativeBridge } from "../lib/native";
 import { usePushNotifications } from "../hooks/usePushNotifications";
+import { useInboxRealtime } from "../hooks/useInboxRealtime";
 
 SplashScreen.preventAutoHideAsync();
 
-// Mounted under the providers so it has a QueryClient + router and only
-// renders after the bridge is ready. The hook is a no-op until a user is
-// signed in.
-function PushNotificationsGate() {
+// App-level signed-in services, mounted under the providers so they have a
+// QueryClient + router and only run after the bridge is ready. Each hook is a
+// no-op until a user is signed in: push installs notification listeners; inbox
+// realtime keeps the groups/DM lists live while foregrounded.
+function SignedInServicesGate() {
   usePushNotifications();
+  useInboxRealtime();
   return null;
 }
 
@@ -83,7 +86,7 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider>
             <StatusBar style="light" />
-            <PushNotificationsGate />
+            <SignedInServicesGate />
             <Stack
               screenOptions={{
                 headerShown: false,
