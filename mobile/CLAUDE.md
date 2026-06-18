@@ -79,6 +79,7 @@ TS-only changes are picked up by Metro hot-reload. No rebuild.
 
 ## Environment (gradle + cargo-ndk)
 
+**Arch Linux box:**
 ```
 JAVA_HOME=/usr/lib/jvm/java-17-openjdk
 ANDROID_HOME=/opt/android-sdk
@@ -86,8 +87,21 @@ ANDROID_SDK_ROOT=/opt/android-sdk
 ANDROID_NDK_ROOT=/opt/android-ndk
 ANDROID_NDK_HOME=/opt/android-ndk
 ```
-
 Persisted in `~/.bashrc` and `.envrc`. If you're in a fresh shell and builds fail with "SDK location not found", these are missing.
+
+**macOS (Apple Silicon) — Android build verified here 2026-06-18.** `source
+mobile/android-env.sh` before any ubrn/gradle/adb command. Toolchain (all
+no-sudo): OpenJDK 17 via `brew install openjdk@17`; SDK at
+`~/Library/Android/sdk` (cmdline-tools unzipped to `cmdline-tools/latest/`);
+`sdkmanager` packages `platform-tools platforms;android-36 build-tools;36.0.0
+ndk;27.1.12297006 cmake;3.22.1`. A clean `gradlew assembleDebug` produces
+`android/app/build/outputs/apk/debug/app-debug.apk` with `libpollis-native.so`
+embedded for arm64-v8a / armeabi-v7a / x86_64.
+
+**iOS is NOT buildable on this Mac** — it's macOS 14.7 + Xcode 15.1, and Expo
+SDK 55 requires **Xcode 26 / macOS 26** (verified still true June 2026: SDK 54
+was the last to accept Xcode 16.x). Needs a macOS upgrade or a different
+machine; the iOS xcframework present locally is a stale prior artifact.
 
 ---
 
