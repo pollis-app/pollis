@@ -10,8 +10,13 @@
 // connect failure all resolve to `null`, leaving the app behaving exactly
 // as it does today (focus-effect ingest only).
 
-import { Room, RoomEvent } from "livekit-client";
-import { registerGlobals } from "@livekit/react-native";
+// livekit-client + @livekit/react-native are imported LAZILY inside
+// connectRealtime (dynamic import), never at module load. Both eagerly touch
+// web globals Hermes lacks (DOMException, the webrtc stack) at module-eval, so
+// a static import throws during bundle evaluation and crashes app boot — even
+// though realtime is a runtime-gated no-op until EXPO_PUBLIC_LIVEKIT_URL is
+// set. `Room` stays a type-only import (erased at compile, no runtime eval).
+import type { Room } from "livekit-client";
 import { invoke } from "../native";
 import { decodeRealtimeEvent, type RealtimeEvent } from "./events";
 
@@ -21,9 +26,21 @@ import { decodeRealtimeEvent, type RealtimeEvent } from "./events";
 // this build — voice is installed-but-not-activated, see mobile/CLAUDE.md).
 // So we call it lazily on the first connect, guarded, and only once.
 let globalsRegistered = false;
-function ensureGlobals(): void {
+function ensureGlobals(registerGlobals: () => void): void {
   if (globalsRegistered) {
     return;
+  }
+  // Hermes has no DOMException, which livekit-client references at module-eval.
+  // Install a minimal polyfill before the webrtc globals so the lazy import in
+  // connectRealtime can't crash once realtime is actually activated.
+  const g = globalThis as Record<string, unknown>;
+  if (typeof g.DOMException === "undefined") {
+    g.DOMException = class DOMException extends Error {
+      constructor(message?: string, name = "Error") {
+        super(message);
+        this.name = name;
+      }
+    };
   }
   try {
     registerGlobals();
@@ -68,7 +85,11 @@ export async function connectRealtime(
     return null;
   }
 
-  ensureGlobals();
+  // Lazy-load the webrtc/livekit stack only now that realtime is actually in
+  // use — never at module load (see the import note at the top of this file).
+  const { registerGlobals } = await import("@livekit/react-native");
+  ensureGlobals(registerGlobals);
+  const { Room, RoomEvent } = await import("livekit-client");
 
   try {
     const room = new Room();
