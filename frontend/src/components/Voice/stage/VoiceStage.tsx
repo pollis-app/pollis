@@ -19,19 +19,22 @@
 
 import React, { useState } from "react";
 import { observer } from "mobx-react-lite";
-import { ArrowLeft, Volume2, Mic, MicOff, Monitor, MonitorOff, LogOut, Phone, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, Volume2, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, SlidersHorizontal } from "lucide-react";
 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
-import { shareOf } from "../../../types/voice-state";
+import { shareOf, cameraOf } from "../../../types/voice-state";
 import { LOCAL_PREVIEW_KEY } from "../../../screenshare/screenShareSession";
 import { toggleScreenShare } from "../../../screenshare/screenShareActions";
+import { LOCAL_CAMERA_PREVIEW_KEY } from "../../../camera/cameraSession";
+import { toggleCamera } from "../../../camera/cameraActions";
 import { disambiguateVoiceNames } from "../../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity, voiceUserKey } from "../../../voice/identity";
 import { voiceSession } from "../../../voice";
 import { Button } from "../../ui/Button";
 import { NavigableGrid } from "../../ui/NavigableGrid";
 import { ScreenSharePicker } from "../ScreenSharePicker";
+import { CameraPicker } from "../CameraPicker";
 import { StageTile, type StageParticipant } from "./StageTile";
 import "./voice-stage.css";
 
@@ -67,6 +70,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       voiceActiveSpeakerIds,
       voiceState,
       screenShareRemotes,
+      cameraRemotes,
       setViewingScreenShareTrackKey,
     } = appStore;
 
@@ -75,6 +79,13 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     const sharePicking = share.kind === "picking";
     const shareInFlight = share.kind !== "idle";
     const shareLocalDims = shareActive ? share.dimensions : null;
+
+    const camera = cameraOf(voiceState);
+    const cameraActive = camera.kind === "active";
+    const cameraPicking = camera.kind === "picking";
+    const cameraInFlight = camera.kind !== "idle";
+    const cameraLocalDims = cameraActive ? camera.dimensions : null;
+
     const isJoining = voiceState.kind === "joining";
     const micMuted = voiceState.kind === "joined" ? voiceState.micMuted : false;
 
@@ -128,11 +139,21 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       let streamTrackKey: string | undefined;
       let streamWidth: number | undefined;
       let streamHeight: number | undefined;
-      if (p.isLocal && shareActive) {
-        streamTrackKey = LOCAL_PREVIEW_KEY;
-        streamWidth = shareLocalDims?.width;
-        streamHeight = shareLocalDims?.height;
-      } else if (!p.isLocal) {
+      let cameraTrackKey: string | undefined;
+      let cameraWidth: number | undefined;
+      let cameraHeight: number | undefined;
+      if (p.isLocal) {
+        if (shareActive) {
+          streamTrackKey = LOCAL_PREVIEW_KEY;
+          streamWidth = shareLocalDims?.width;
+          streamHeight = shareLocalDims?.height;
+        }
+        if (cameraActive) {
+          cameraTrackKey = LOCAL_CAMERA_PREVIEW_KEY;
+          cameraWidth = cameraLocalDims?.width;
+          cameraHeight = cameraLocalDims?.height;
+        }
+      } else {
         const remote =
           screenShareRemotes[p.identity] ??
           screenShareRemotes[voiceUserKey(p.identity)];
@@ -140,6 +161,13 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           streamTrackKey = remote.trackKey;
           streamWidth = remote.width;
           streamHeight = remote.height;
+        }
+        const cam =
+          cameraRemotes[p.identity] ?? cameraRemotes[voiceUserKey(p.identity)];
+        if (cam) {
+          cameraTrackKey = cam.trackKey;
+          cameraWidth = cam.width;
+          cameraHeight = cam.height;
         }
       }
       return {
@@ -153,6 +181,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         streamTrackKey,
         streamWidth,
         streamHeight,
+        cameraTrackKey,
+        cameraWidth,
+        cameraHeight,
         isConnecting: p.isLocal && isJoining,
       };
     };
@@ -199,6 +230,8 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         <div className="vs-body">
           {sharePicking ? (
             <ScreenSharePicker />
+          ) : cameraPicking ? (
+            <CameraPicker />
           ) : !isInCall ? (
             <div className="vs-preview" data-testid="voice-channel-observers">
               {previewPeople.length === 0 ? (
@@ -290,6 +323,15 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     onClick={() => toggleScreenShare(share)}
                   >
                     {shareActive ? <MonitorOff size={15} /> : <Monitor size={15} />}
+                  </button>
+                  <button
+                    className={"vs-tray-btn" + (cameraActive ? " on" : "")}
+                    data-testid="voice-tray-camera"
+                    title={cameraActive ? "Turn off camera" : cameraPicking ? "Cancel" : cameraInFlight ? "Cancel (recover)" : "Turn on camera"}
+                    aria-label={cameraActive ? "Turn off camera" : "Turn on camera"}
+                    onClick={() => toggleCamera(camera)}
+                  >
+                    {cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
                   </button>
                   <div className="vs-tray-sep" />
                   <button

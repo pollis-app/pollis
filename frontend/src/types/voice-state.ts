@@ -16,6 +16,7 @@
 // xstate, no library, zero runtime cost.
 
 import type { SourceList } from '../screenshare/screenShareSession';
+import type { CameraSource } from '../camera/types';
 
 /** Top-level voice room lifecycle. Local-only — does not track remote
  *  participants (that's `voiceParticipants` in the store, kept separate
@@ -36,6 +37,7 @@ export type VoiceState =
       counterpartyUserId: string | null;
       micMuted: boolean;
       share: ShareState;
+      camera: CameraState;
     }
   | { kind: 'leaving'; channelId: string };
 
@@ -61,6 +63,22 @@ export type ShareState =
       kind: 'failed';
       error: string;
     };
+
+/** Local webcam lifecycle. Mirrors `ShareState` — only meaningful inside a
+ *  `joined` voice state, since a camera publishes into the active voice
+ *  room. Unlike screen share, the camera picker shows a real device list on
+ *  every platform (the OS enumerates capture devices), so `picking` always
+ *  carries `cameras`. */
+export type CameraState =
+  | { kind: 'idle' }
+  | { kind: 'picking'; cameras: CameraSource[] }
+  | { kind: 'starting'; startedAt: number }
+  | {
+      kind: 'active';
+      deviceId: string;
+      dimensions: { width: number; height: number } | null;
+    }
+  | { kind: 'failed'; error: string };
 
 /** Helpers — read-only narrowings that consumers reach for a lot. */
 
@@ -92,4 +110,12 @@ export function shareOf(s: VoiceState): ShareState {
 
 export function isShareActive(s: VoiceState): boolean {
   return s.kind === 'joined' && s.share.kind === 'active';
+}
+
+export function cameraOf(s: VoiceState): CameraState {
+  return s.kind === 'joined' ? s.camera : { kind: 'idle' };
+}
+
+export function isCameraActive(s: VoiceState): boolean {
+  return s.kind === 'joined' && s.camera.kind === 'active';
 }

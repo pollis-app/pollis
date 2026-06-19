@@ -10,6 +10,7 @@ import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
 import { ScreenShareViewer } from "../Voice/ScreenShareViewer";
 import { screenShareSession } from "../../screenshare/screenShareSession";
+import { cameraSession } from "../../camera/cameraSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
 import { TerminalView } from "../TerminalView";
@@ -226,6 +227,9 @@ export const AppShell: React.FC = observer(() => {
     }
     screenShareSession.ensureSubscribed().catch((err) => {
       console.warn('[screenshare] ensureSubscribed failed:', err);
+    });
+    cameraSession.ensureSubscribed().catch((err) => {
+      console.warn('[camera] ensureSubscribed failed:', err);
     });
   }, [currentUser?.id]);
 
