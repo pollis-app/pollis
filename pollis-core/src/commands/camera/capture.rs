@@ -1,14 +1,20 @@
-//! macOS webcam capture lifecycle: enumerate cameras, start a capture
-//! (publish a `TrackSource::Camera` track into the active voice room and
-//! spawn the reader-drain task), and stop. Mirrors the screen-share
-//! `start_unix` model, reusing the shared helper-location and
+//! Webcam capture lifecycle (the parent/host side): enumerate cameras,
+//! start a capture (publish a `TrackSource::Camera` track into the active
+//! voice room and spawn the reader-drain task), and stop. Mirrors the
+//! screen-share `start_unix` model, reusing the shared helper-location and
 //! `argb_to_i420` primitives — but with its own state, events, publish
 //! options, and a camera-tuned encoding.
+//!
+//! Platform-agnostic: this talks to the per-OS capture helper purely over
+//! the `pollis-capture-proto` Unix-socket protocol, so the same code drives
+//! `pollis-capture-macos --mode camera` (AVFoundation) and
+//! `pollis-capture-linux --mode camera` (V4L2). `locate_capture_helper`
+//! resolves the right helper binary per platform.
 
 use std::sync::Arc;
 
 use libwebrtc::{
-    prelude::{RtcVideoSource, VideoFrame, VideoRotation},
+    prelude::{RtcVideoSource, VideoBuffer, VideoFrame, VideoRotation},
     video_source::{native::NativeVideoSource, VideoResolution},
 };
 use livekit::{
@@ -18,11 +24,13 @@ use livekit::{
 };
 
 use crate::commands::screenshare::{
-    codec::convert_to_i420, helper_subprocess::locate_capture_helper, HelperSession,
+    codec::{convert_to_i420, pack_frame_bytes},
+    helper_subprocess::locate_capture_helper,
+    HelperSession,
 };
 use crate::{error::Result, state::AppState};
 
-use super::{fail_capture, CameraEvent};
+use super::{fail_capture, CameraEvent, CAMERA_PREVIEW_MIN_INTERVAL, LOCAL_CAMERA_PREVIEW_KEY};
 
 /// How long to wait for the helper's `Cameras` enumeration / `Format`.
 /// Generous to cover the macOS camera TCC permission prompt, which blocks
@@ -380,8 +388,14 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
     // Spawn the supervising reader task: drains frames off the helper
     // socket and feeds the LiveKit source. Owns the socket + source until
     // EOF / error; the rest of cleanup runs through `stop_camera`.
+    //
+    // The same broadcast channel screen share uses carries the local
+    // self-preview: each frame is mirrored (throttled) to the renderer
+    // under `LOCAL_CAMERA_PREVIEW_KEY` so the sharer sees their own webcam.
     let source_for_task = source.clone();
+    let preview_tx = state.screenshare_frame_tx.clone();
     let reader_task = tokio::spawn(async move {
+        let mut last_preview: Option<std::time::Instant> = None;
         loop {
             match read_msg(&mut reader).await {
                 Ok(Some(CaptureMsg::Frame {
@@ -391,7 +405,21 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                     timestamp_us,
                     bgrx,
                 })) => {
-                    push_frame(&source_for_task, width, height, stride, timestamp_us, &bgrx);
+                    let show_preview = last_preview
+                        .map(|t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL)
+                        .unwrap_or(true);
+                    if show_preview {
+                        last_preview = Some(std::time::Instant::now());
+                    }
+                    push_frame(
+                        &source_for_task,
+                        width,
+                        height,
+                        stride,
+                        timestamp_us,
+                        &bgrx,
+                        show_preview.then_some(&preview_tx),
+                    );
                 }
                 // Mid-stream renegotiation: harmless to ignore, the next
                 // frame carries the new dimensions (NativeVideoSource
@@ -509,6 +537,9 @@ fn push_frame(
     stride: u32,
     timestamp_us: i64,
     bgrx: &[u8],
+    // `Some` on the throttled frames that should also feed the sharer's
+    // local preview; `None` otherwise. Mirrors screen share's `preview_ws`.
+    preview: Option<&tokio::sync::broadcast::Sender<Arc<Vec<u8>>>>,
 ) {
     // libwebrtc + VP8 + libyuv I420 all require even dimensions.
     let w = (width & !1) as i32;
@@ -518,10 +549,25 @@ fn push_frame(
     }
     // BGRA (== little-endian ARGB) → I420 at native resolution.
     let buffer = convert_to_i420(w, h, stride, bgrx);
+    let (out_w, out_h) = (buffer.width(), buffer.height());
     let frame = VideoFrame {
         rotation: VideoRotation::VideoRotation0,
         timestamp_us,
         buffer,
     };
     source.capture_frame(&frame);
+
+    // Mirror to the renderer for the local self-preview, reusing the exact
+    // I420 buffer just published — same frame wire format + WebSocket
+    // transport as the remote tiles and screen-share preview.
+    if let Some(tx) = preview {
+        let bytes = pack_frame_bytes(
+            LOCAL_CAMERA_PREVIEW_KEY,
+            out_w,
+            out_h,
+            timestamp_us,
+            &frame.buffer,
+        );
+        let _ = tx.send(Arc::new(bytes));
+    }
 }

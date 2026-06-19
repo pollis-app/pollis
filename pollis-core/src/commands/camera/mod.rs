@@ -27,10 +27,20 @@
 //! those platforms the commands return a clean "not yet supported" error
 //! rather than spawning a helper that can't honour `--mode camera`.
 //!
-//! Remote camera frames need no new code here: every `RemoteTrack::Video`
-//! the voice room loop sees — screen-share or camera — already flows
-//! through the shared remote-video path. The renderer distinguishes the
-//! two by their LiveKit `TrackSource`.
+//! Remote camera frames reuse the shared remote-video path: every
+//! `RemoteTrack::Video` the voice room loop sees — screen-share or camera —
+//! flows through the same `on_remote_video_subscribed` drain and the same
+//! frame WebSocket. The Tauri renderer has no JS LiveKit client, so it
+//! can't read `TrackSource` itself; instead the voice loop reads the
+//! publication's `TrackSource` and tags the `RemoteStarted` event with a
+//! `source` (`screen` | `camera`), and the renderer routes the track_key's
+//! frames to a camera tile or a screenshare tile accordingly.
+//!
+//! Local self-preview: the capture reader task mirrors each outgoing webcam
+//! frame to the renderer over that same frame WebSocket under
+//! [`LOCAL_CAMERA_PREVIEW_KEY`] (throttled), exactly as screen share mirrors
+//! its own under `LOCAL_PREVIEW_KEY`. Distinct keys so sharing screen and
+//! webcam at once doesn't cross the two previews.
 
 use std::sync::Arc;
 
@@ -38,17 +48,31 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::Result, sink::EventSink, state::AppState};
 
+/// Reserved frame-WS track key the local outgoing webcam capture is
+/// mirrored under for the sharer's own preview (mirrors screen share's
+/// `LOCAL_PREVIEW_KEY`). Kept distinct so a simultaneous screen share +
+/// webcam don't collide in the renderer's per-key frame router.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub const LOCAL_CAMERA_PREVIEW_KEY: &str = "__local_camera_preview__";
+
+/// Minimum gap between mirrored self-preview frames. The webcam publishes
+/// to peers at full rate; the local preview only needs to look live, so
+/// throttle it to spare the renderer (matches screen share's cadence).
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+pub(crate) const CAMERA_PREVIEW_MIN_INTERVAL: std::time::Duration =
+    std::time::Duration::from_millis(100);
+
 mod state;
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 mod capture;
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 mod unsupported;
 
 pub use state::CameraState;
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use capture::{list_video_devices, start_camera, stop_camera};
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub use unsupported::{list_video_devices, start_camera, stop_camera};
 
 // ── Events to the frontend ────────────────────────────────────────────────
@@ -81,7 +105,7 @@ pub async fn subscribe_camera_events(
 /// `LocalError { message }` so the frontend reacts even when the failure
 /// happens after `start_camera` already returned, and return a structured
 /// human-readable error. Plain user cancellation does NOT go through here.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
 pub(super) async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Error {
     eprintln!("[camera] capture failed: {human}");
     let ev = {

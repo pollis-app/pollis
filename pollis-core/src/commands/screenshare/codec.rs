@@ -84,7 +84,11 @@ pub(crate) fn convert_to_i420(
 // [ u32 LE y_stride ][ u32 LE u_stride ][ u32 LE v_stride ]
 // [ i64 LE timestamp_us ]
 // [ Y plane bytes ][ U plane bytes ][ V plane bytes ]
-pub(super) fn pack_frame_bytes(
+//
+// `pub(crate)` (not `pub(super)`) so the sibling `camera` module reuses it
+// to mirror local webcam frames to the renderer for self-preview, exactly
+// like screen share does — the two share one frame wire format + transport.
+pub(crate) fn pack_frame_bytes(
     track_key: &str,
     width: u32,
     height: u32,
