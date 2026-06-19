@@ -65,14 +65,20 @@ pub(crate) const CAMERA_PREVIEW_MIN_INTERVAL: std::time::Duration =
 mod state;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod capture;
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+// Windows captures in-process via Media Foundation (no helper subprocess) —
+// the same divergence as screen share's WGC path. SCAFFOLD: see start_windows.
+#[cfg(target_os = "windows")]
+mod start_windows;
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 mod unsupported;
 
 pub use state::CameraState;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 pub use capture::{list_video_devices, start_camera, stop_camera};
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+#[cfg(target_os = "windows")]
+pub use start_windows::{list_video_devices, start_camera, stop_camera};
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
 pub use unsupported::{list_video_devices, start_camera, stop_camera};
 
 // ── Events to the frontend ────────────────────────────────────────────────
