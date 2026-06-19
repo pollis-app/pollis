@@ -93,6 +93,21 @@ pub use crate::sink::RawSink;
 
 // ── Events to the frontend ────────────────────────────────────────────────
 
+/// Which kind of video a remote `RemoteStarted` track carries. Every
+/// remote video track (screen share *or* webcam) flows through the one
+/// shared remote-video drain + frame WebSocket; this tag — read from the
+/// LiveKit publication's `TrackSource` in the voice room loop — is what
+/// lets the renderer route a track_key's frames to a screenshare tile vs a
+/// participant's camera tile. Defaults to `Screen` so an event from an
+/// older backend (no tag on the wire) still renders as a screen share.
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteVideoSource {
+    #[default]
+    Screen,
+    Camera,
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ScreenShareEvent {
@@ -111,6 +126,10 @@ pub enum ScreenShareEvent {
         identity: String,
         width: u32,
         height: u32,
+        /// Screen share vs webcam — see [`RemoteVideoSource`]. Defaulted
+        /// for forward/backward compatibility with serialized events.
+        #[serde(default)]
+        source: RemoteVideoSource,
     },
     RemoteStopped { track_key: String },
 }

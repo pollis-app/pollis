@@ -646,7 +646,7 @@ pub async fn join_voice_channel(
                         let _ = ch.send(VoiceEvent::ParticipantLeft { identity });
                     }
                 }
-                RoomEvent::TrackSubscribed { track, publication: _, participant } => {
+                RoomEvent::TrackSubscribed { track, publication, participant } => {
                     match track {
                         RemoteTrack::Audio(audio_track) => {
                             let participant_identity = participant.identity().to_string();
@@ -675,10 +675,21 @@ pub async fn join_voice_channel(
                         }
                         RemoteTrack::Video(video_track) => {
                             let track_key = format!("{}-{}", participant.identity(), video_track.sid());
-                            eprintln!("[voice] video track subscribed: {track_key}");
+                            // Screen share and webcam both arrive as remote
+                            // video; the publication's TrackSource is the only
+                            // thing that tells them apart, so the renderer can
+                            // route this track_key to the right kind of tile.
+                            let source = match publication.source() {
+                                livekit::track::TrackSource::Camera => {
+                                    crate::commands::screenshare::RemoteVideoSource::Camera
+                                }
+                                _ => crate::commands::screenshare::RemoteVideoSource::Screen,
+                            };
+                            eprintln!("[voice] video track subscribed: {track_key} (source={source:?})");
                             crate::commands::screenshare::on_remote_video_subscribed(
                                 video_track,
                                 participant.identity().to_string(),
+                                source,
                                 &state_for_room,
                             )
                             .await;
