@@ -36,6 +36,9 @@ fn main() {
 }
 
 #[cfg(target_os = "linux")]
+mod camera;
+
+#[cfg(target_os = "linux")]
 mod linux;
 
 #[cfg(target_os = "linux")]

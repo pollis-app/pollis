@@ -38,3 +38,12 @@ clap = { version = "4", features = ["derive"] }
 # root.
 xcb = { version = "1", features = ["shm", "randr"] }
 libc = "0.2"
+# Webcam capture (`--mode camera`). v4l2 default features drive the kernel
+# ioctl API directly — no libv4l C dependency. Display-server-agnostic:
+# V4L2 is a kernel API, so one path serves X11, Wayland, and headless
+# alike (unlike screen capture's portal/xcb split above).
+v4l = "0.14"
+# Most UVC webcams expose MJPG as their only HD format (some are MJPG-only),
+# so a JPEG decoder is mandatory. zune-jpeg is pure-Rust and already in the
+# workspace lockfile; the YUYV path skips it.
+zune-jpeg = "0.5"
