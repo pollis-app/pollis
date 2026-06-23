@@ -9,7 +9,6 @@ import {
   Button,
   BottomAction,
 } from "../../components/ui";
-import { PollisMark } from "../../components/PollisMark";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts, r } from "../../theme/tokens";
 import { appStore } from "../../stores/appStore";
@@ -50,7 +49,6 @@ function EmergencyKit() {
       />
       <Body>
         <ScrollView contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 18, gap: 18, paddingBottom: 24 }}>
-          <PollisMark />
           <View style={{ gap: 8 }}>
             <Text style={[ty.h1, { color: semantic.ink }]}>Save your recovery key</Text>
             <Text

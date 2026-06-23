@@ -2,7 +2,6 @@ import { useState } from "react";
 import { View, Text } from "react-native";
 import { useRouter } from "expo-router";
 import { Screen, Crumb, Field, Button, BottomAction } from "../../components/ui";
-import { PollisMark } from "../../components/PollisMark";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty } from "../../theme/tokens";
 import { useRequestOtp } from "../../hooks/queries/useAuth";
@@ -30,7 +29,6 @@ export default function AuthEmail() {
       <View
         style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 24 }}
       >
-        <PollisMark />
         <View style={{ marginTop: 14, gap: 8 }}>
           <Text style={[ty.h1, { color: semantic.ink }]}>Sign in</Text>
           <Text

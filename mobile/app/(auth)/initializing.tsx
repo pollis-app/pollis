@@ -3,7 +3,6 @@ import { View, Text, Pressable } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 import { useRouter } from "expo-router";
 import { Screen, Crumb, Card } from "../../components/ui";
-import { PollisMark } from "../../components/PollisMark";
 import { palette, semantic, type as ty } from "../../theme/tokens";
 import { useInitializeIdentity } from "../../hooks/queries/useAuth";
 import { appStore } from "../../stores/appStore";
@@ -137,9 +136,6 @@ function Initializing() {
             padding: 22,
           }}
         >
-          <View style={{ marginBottom: 18 }}>
-            <PollisMark />
-          </View>
           <Text
             style={{
               fontFamily: ty.h1.fontFamily,

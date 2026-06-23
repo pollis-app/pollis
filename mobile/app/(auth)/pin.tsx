@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { Screen, Crumb } from "../../components/ui";
-import { PollisMark } from "../../components/PollisMark";
 import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
 import {
   useSetPin,
@@ -149,7 +148,6 @@ function AuthPIN() {
         ]}
       />
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
-        <PollisMark />
         <View style={{ gap: 8 }}>
           <Text style={[ty.h1, { color: semantic.ink }]}>{headline}</Text>
           <Text
