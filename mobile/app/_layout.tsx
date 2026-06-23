@@ -91,12 +91,18 @@ export default function RootLayout() {
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: palette.bg },
-                animation: "fade",
+                // Drilling further into a route (tab → group → channel) pushes
+                // the new screen in from the right; back reverses it. Settings
+                // pages override this to slide up from the bottom (below).
+                animation: "slide_from_right",
               }}
             >
-              <Stack.Screen name="index" />
+              {/* Boot router and the tab container animate-in with nothing —
+                  there's no "drill" relationship there, and tab switches inside
+                  (tabs) are handled by the tab navigator (no animation). */}
+              <Stack.Screen name="index" options={{ animation: "none" }} />
               <Stack.Screen name="(auth)" />
-              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="(tabs)" options={{ animation: "none" }} />
               <Stack.Screen name="group/[id]" />
               <Stack.Screen name="group/new" />
               <Stack.Screen name="group/invite" />
@@ -108,11 +114,29 @@ export default function RootLayout() {
               <Stack.Screen name="dm/info" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="user/[id]" />
-              <Stack.Screen name="self/preferences" />
-              <Stack.Screen name="self/user-settings" />
-              <Stack.Screen name="self/security" />
-              <Stack.Screen name="self/blocked" />
-              <Stack.Screen name="self/change-email" />
+              {/* Personal settings pages pop up from the bottom (pushing the
+                  current screen off), and reverse on back — a full-screen push,
+                  not a bottom-sheet overlay. */}
+              <Stack.Screen
+                name="self/preferences"
+                options={{ animation: "slide_from_bottom" }}
+              />
+              <Stack.Screen
+                name="self/user-settings"
+                options={{ animation: "slide_from_bottom" }}
+              />
+              <Stack.Screen
+                name="self/security"
+                options={{ animation: "slide_from_bottom" }}
+              />
+              <Stack.Screen
+                name="self/blocked"
+                options={{ animation: "slide_from_bottom" }}
+              />
+              <Stack.Screen
+                name="self/change-email"
+                options={{ animation: "slide_from_bottom" }}
+              />
             </Stack>
           </ThemeProvider>
         </QueryClientProvider>
