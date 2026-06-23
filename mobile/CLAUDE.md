@@ -174,6 +174,27 @@ Prefer `pnpm expo install <pkg>` over `pnpm add <pkg>` for Expo-ecosystem packag
 cd mobile && rm -rf node_modules pnpm-lock.yaml && pnpm install --ignore-workspace
 ```
 
+### 9. Bridge commands MUST run off the JS thread (small-stack overflow)
+
+uniffi-bindgen-react-native polls exported `async` futures **directly on the
+JS/Hermes thread**, which has a small stack (~1 MB iOS, often less on Android).
+Some synchronous work we call into needs far more — notably libsql's recursive
+SQL parser (`yyParser::yy_reduce`), which runs client-side on **every** query.
+On the JS thread it overflows the guard page and hard-crashes the whole app
+with SIGBUS (`KERN_PROTECTION_FAILURE` at the stack guard region) on the first
+DB query. This bit us at `verify_otp` (the first query in the auth flow) and
+reproduced identically on iOS and Android. Desktop never hits it — Tauri runs
+commands on a multi-threaded Tokio runtime with generous worker stacks.
+
+Fix (in `pollis-core/src/bridge.rs`): `init_pollis` and `invoke` immediately
+hand off to `run_on_worker`, which spawns the real work on a dedicated
+multi-threaded Tokio runtime whose worker threads (named `pollis-bridge`) carry
+an 8 MB stack; the JS thread only `await`s the join handle. **Any new bridge
+entry point that does real work must go through `run_on_worker`** — don't run
+command bodies inline on the uniffi-exported future. To confirm the runtime is
+live at runtime: `sample <app-pid> 1 | grep pollis-bridge` (note `ps -M`
+truncates thread names and won't show them).
+
 ---
 
 ## App structure (expo-router)
