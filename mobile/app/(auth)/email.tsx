@@ -64,22 +64,6 @@ export default function AuthEmail() {
               "Couldn't send code. Check your connection and try again."}
           </Text>
         ) : null}
-        <View
-          style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
-        >
-          <Icon.shield color={semantic.mute} />
-          <Text
-            style={{
-              fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              letterSpacing: 0.6,
-              color: semantic.mute,
-              flex: 1,
-            }}
-          >
-            End-to-end encrypted. Your email is never sent in cleartext.
-          </Text>
-        </View>
       </View>
       <BottomAction>
         <Button
