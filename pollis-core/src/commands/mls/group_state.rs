@@ -629,11 +629,22 @@ pub(crate) async fn process_pending_commits_locked(
     let mut any_applied = false;
     for commit in pending {
         if commit.epoch as u64 != current_epoch {
+            // The commit that would bridge `current_epoch` -> next is missing
+            // from the log while a HIGHER epoch is present. The commit log is
+            // append-only and Turso reads are consistent, so a missing-but-
+            // surpassed epoch means that commit is permanently gone (historic
+            // bug that deleted a row, pruning, etc.) — there is nothing to
+            // replay and we'd wedge here forever. Drop the stale local group so
+            // the recovery block at the end external-joins us onto the current
+            // published epoch instead. forget only drops MLS crypto state, not
+            // decrypted message history (that lives in the local `message`
+            // table).
             eprintln!(
                 "[mls] process_pending_commits: epoch gap for {mls_group_id}: \
-                 expected {current_epoch}, got {} — stopping",
+                 expected {current_epoch}, got {} — dropping local group to recover via external join",
                 commit.epoch
             );
+            let _ = forget_local_mls_group(state, mls_group_id).await;
             break;
         }
 
@@ -658,42 +669,27 @@ pub(crate) async fn process_pending_commits_locked(
             match outcome {
                 VerifyOutcome::Verified => {}
                 VerifyOutcome::Revoked => {
-                    // Confirmed-illegitimate self-add (revoked tombstone OR
-                    // bad cert chain). Drop the squatting `mls_commit_log`
-                    // row so the UNIQUE(conversation_id, epoch) slot is
-                    // freed for a legit commit — that's the wedge the
-                    // delete protects against. Honest first-joins keep
-                    // their tombstone-free `user_device` row and never
-                    // hit this branch.
-                    let is_self_add = commit
-                        .sender_id
-                        .as_deref()
-                        .map_or(false, |s| s == added_user_id.as_str());
-                    if is_self_add {
-                        eprintln!(
-                            "[mls] process_pending_commits: REJECTING REVOKED self-add by {added_user_id} at epoch {} in {mls_group_id} — dropping commit seq {}",
-                            commit.epoch, commit.seq
-                        );
-                        if let Err(e) = conn
-                            .execute(
-                                "DELETE FROM mls_commit_log WHERE seq = ?1",
-                                libsql::params![commit.seq],
-                            )
-                            .await
-                        {
-                            eprintln!(
-                                "[mls] process_pending_commits: failed to delete rejected self-add seq {}: {e}",
-                                commit.seq
-                            );
-                        }
-                        break;
-                    }
-                    // Third-party REVOKED add (an admin adding someone
-                    // who's already been revoked) — sender already merged
-                    // it on their side, so we apply it locally to stay in
-                    // sync rather than diverging from the group.
+                    // The added device failed verification (revoked tombstone
+                    // OR bad cert chain). We used to DELETE the commit row for a
+                    // self-add to free the UNIQUE(conversation_id, epoch) slot —
+                    // but that broke the append-only invariant the entire MLS
+                    // replay depends on. A commit that won the epoch CAS is
+                    // canonical and immutable: a member who had already applied
+                    // it advanced past it, while a laggard reading the log AFTER
+                    // the delete saw a permanent hole and wedged forever (prod
+                    // incident: ELECTRON group, epoch 11 — dan applied it, ants
+                    // wedged). Deleting a commit that any member may have applied
+                    // forks the group; it is never safe.
+                    //
+                    // So we APPLY it (self-add and third-party alike) to stay on
+                    // the one canonical branch. The revoked device is then
+                    // evicted the MLS-native, append-only way: `reconcile`
+                    // already drops leaves whose `user_device` row is revoked,
+                    // via a normal remove commit on a later epoch. The device is
+                    // present for at most one epoch before that eviction lands —
+                    // the bounded, consistent trade for never wedging anyone.
                     eprintln!(
-                        "[mls] process_pending_commits: WARN revoked third-party add for {added_user_id} at epoch {} in {mls_group_id} — processing anyway",
+                        "[mls] process_pending_commits: revoked add for {added_user_id} at epoch {} in {mls_group_id} — applying to stay in sync (reconcile will evict the device)",
                         commit.epoch
                     );
                 }
