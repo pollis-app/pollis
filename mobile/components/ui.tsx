@@ -284,18 +284,26 @@ export function Button({
 
 /* ── Avatar ───────────────────────────────────────────────────────── */
 export function Avatar({
-  label,
   size = "md",
   variant = "default",
   style,
 }: {
-  label: string;
+  // `label` (initials) is still accepted so existing call sites typecheck, but
+  // it's no longer rendered: with no profile-image support yet, the avatar
+  // fallback is the lucide user icon per design.
+  label?: string;
   size?: "sm" | "md" | "lg";
   variant?: "default" | "amber" | "solid";
   style?: StyleProp<ViewStyle>;
 }) {
   const dim = size === "sm" ? 24 : size === "lg" ? 48 : 32;
-  const fs = size === "sm" ? 10 : size === "lg" ? 16 : 11;
+  const iconSize = Math.round(dim * 0.55);
+  const iconColor =
+    variant === "solid"
+      ? palette.bg
+      : variant === "amber"
+        ? semantic.accent
+        : semantic.ink2;
   return (
     <View
       style={[
@@ -314,20 +322,7 @@ export function Avatar({
         style,
       ]}
     >
-      <Text
-        style={{
-          fontFamily: ty.h1.fontFamily,
-          fontSize: fs,
-          color:
-            variant === "solid"
-              ? palette.bg
-              : variant === "amber"
-                ? semantic.accent
-                : semantic.ink2,
-        }}
-      >
-        {label}
-      </Text>
+      <Icon.user size={iconSize} color={iconColor} />
     </View>
   );
 }
