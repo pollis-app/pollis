@@ -272,15 +272,18 @@ function AuthPIN() {
             key={i}
             disabled={k === ""}
             onPress={() => (k === "bk" ? setPin(pin.slice(0, -1)) : push(k))}
-            style={{
+            // Subtle press feedback: the key briefly fills with the soft amber
+            // tier so a tap is acknowledged without anything flashy.
+            style={({ pressed }) => ({
               width: "33.333%",
-              backgroundColor: palette.bg,
+              backgroundColor:
+                pressed && k !== "" ? semantic.accentSoft : palette.bg,
               paddingVertical: 18,
               alignItems: "center",
               justifyContent: "center",
               gap: 2,
               marginBottom: 1,
-            }}
+            })}
           >
             <Text
               style={{
