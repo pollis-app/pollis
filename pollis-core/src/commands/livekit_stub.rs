@@ -26,6 +26,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::realtime::LiveKitState;
+use crate::state::AppState;
 
 type LiveKit = Arc<tokio::sync::Mutex<LiveKitState>>;
 
@@ -153,24 +154,38 @@ pub async fn publish_to_room_server(
     send_data_to_room(config, room_name.to_string(), payload).await
 }
 
-// ── Connected-room pushes — no-op on mobile ─────────────────────────────────
+/// Notify a conversation's room of a new message. Mobile has no Rust-side
+/// `Room` to publish through, but new_message is exactly the event a peer's
+/// open chat needs to refresh live — so we send it through the same
+/// server-side `SendData` path as inbox events (it delivers to whoever is in
+/// the room, e.g. a desktop client viewing the conversation). Without this a
+/// mobile-sent message only surfaces on the peer after a manual re-ingest.
+/// Mirrors the payload shape of desktop's `publish_new_message_to_room`.
+pub async fn publish_new_message_to_room(
+    state: &Arc<AppState>,
+    room_id: &str,
+    channel_id: Option<&str>,
+    conversation_id: Option<&str>,
+    sender_id: &str,
+    sender_username: Option<&str>,
+) -> Result<()> {
+    let payload = serde_json::json!({
+        "type": "new_message",
+        "channel_id": channel_id,
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "sender_username": sender_username,
+    });
+    send_data_to_room(&state.config, room_id.to_string(), payload).await
+}
+
+// ── Connected-room pushes — still no-op on mobile ───────────────────────────
 //
 // These ride a `Room` this process has already joined. Mobile holds no
-// Rust-side `Room` (its realtime is the JS SDK), so they stay no-ops; durable
-// delivery still flows through the Turso `message_envelope` path and
-// recipients fall back to polling. Realtime for these returns once the native
-// SDK side is wired in (#185).
-
-pub async fn publish_new_message_to_room(
-    _livekit: &LiveKit,
-    _room_id: &str,
-    _channel_id: Option<&str>,
-    _conversation_id: Option<&str>,
-    _sender_id: &str,
-    _sender_username: Option<&str>,
-) -> Result<()> {
-    Ok(())
-}
+// Rust-side `Room`, and (unlike new_message above) edits/deletes/membership
+// changes still propagate durably through Turso and refresh on the next
+// ingest — so they stay no-ops for now. They could move to the SendData path
+// too if live edit/delete propagation from mobile becomes a priority (#185).
 
 pub async fn publish_edited_message_to_room(
     _livekit: &LiveKit,

@@ -142,7 +142,7 @@ pub async fn send_message(
         // One LiveKit room per group covers all its channels.
         // Receivers filter by channel_id in the event payload.
         if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
-            &state.livekit,
+            state,
             &mls_group_id,
             Some(&conversation_id),
             None,
@@ -155,7 +155,7 @@ pub async fn send_message(
         // DM: publish directly to the shared DM room (conversation_id is the room name).
         // Both participants are connected to this room via connect_rooms.
         if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
-            &state.livekit,
+            state,
             &conversation_id,
             None,
             Some(&conversation_id),
