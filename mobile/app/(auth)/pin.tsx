@@ -237,17 +237,17 @@ function AuthPIN() {
             style={{
               flexDirection: "row",
               alignItems: "center",
-              alignSelf: "center",
+              alignSelf: "flex-start",
               gap: 8,
-              marginTop: 22,
+              marginTop: 40,
             }}
           >
-            <Icon.back color={semantic.mute} />
+            <Icon.back color={semantic.ink} />
             <Text
               style={{
                 fontFamily: ty.body.fontFamily,
-                fontSize: 12,
-                color: semantic.mute,
+                fontSize: 16,
+                color: semantic.ink,
               }}
             >
               Sign in again
