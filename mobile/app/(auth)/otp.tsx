@@ -137,20 +137,23 @@ export default function AuthOTP() {
 
         <Pressable
           onPress={() => router.back()}
-          style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            alignSelf: "flex-start",
+            gap: 8,
+          }}
         >
-          <Icon.mail color={semantic.mute} />
+          <Icon.back color={semantic.ink} />
           <Text
             style={{
-              flex: 1,
               fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
+              fontSize: 16,
+              color: semantic.ink,
             }}
           >
             Use a different email
           </Text>
-          <Icon.fwd color={semantic.mute} />
         </Pressable>
       </View>
 
