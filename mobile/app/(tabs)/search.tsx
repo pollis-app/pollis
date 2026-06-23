@@ -129,7 +129,7 @@ export default function Search() {
                 onPress={() =>
                   router.push({
                     pathname: "/chat/[id]",
-                    params: { id: c.id, kind: "channel" },
+                    params: { id: c.id, kind: "channel", name: c.name },
                   })
                 }
               />
