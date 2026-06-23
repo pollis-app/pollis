@@ -219,6 +219,7 @@ export function Button({
   icon,
   iconRight,
   disabled,
+  align = "center",
 }: {
   children: string;
   variant?: "default" | "primary" | "subtle" | "danger";
@@ -227,6 +228,7 @@ export function Button({
   icon?: React.ReactNode;
   iconRight?: React.ReactNode;
   disabled?: boolean;
+  align?: "center" | "left";
 }) {
   const primary = variant === "primary";
   const danger = variant === "danger";
@@ -239,7 +241,7 @@ export function Button({
         opacity: disabled ? 0.45 : 1,
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: align === "left" ? "flex-start" : "center",
         gap: space.sm,
         paddingVertical: full ? space.xl : space.lg,
         paddingHorizontal: space.xl,
