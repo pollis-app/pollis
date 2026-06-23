@@ -97,12 +97,13 @@ export default function RootLayout() {
                 animation: "slide_from_right",
               }}
             >
-              {/* Boot router and the tab container animate-in with nothing —
-                  there's no "drill" relationship there, and tab switches inside
-                  (tabs) are handled by the tab navigator (no animation). */}
+              {/* Boot router cuts in with nothing. Entering the tab container
+                  fades — this is the Initializing → app handoff (and cold-boot
+                  → app); tab switches *inside* (tabs) stay un-animated, handled
+                  by the tab navigator. */}
               <Stack.Screen name="index" options={{ animation: "none" }} />
               <Stack.Screen name="(auth)" />
-              <Stack.Screen name="(tabs)" options={{ animation: "none" }} />
+              <Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
               <Stack.Screen name="group/[id]" />
               <Stack.Screen name="group/new" />
               <Stack.Screen name="group/invite" />

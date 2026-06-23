@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import Svg, { Rect } from "react-native-svg";
 import { useRouter } from "expo-router";
@@ -44,16 +44,36 @@ function Initializing() {
   const [error, setError] = useState<string | null>(null);
 
   const ranRef = useState({ ran: false })[0];
+  const navTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Identity init often finishes in well under a frame. Navigating away the
+  // instant it's done made the "Setting up" screen flash for a few frames —
+  // too fast to read, so it registered as a glitch. Hold the screen for a
+  // minimum dwell, then fade through to the app (the fade lives on the root
+  // (tabs) screen).
+  const MIN_VISIBLE_MS = 900;
 
   useEffect(() => {
     if (!currentUser || ranRef.ran) {
       return;
     }
     ranRef.ran = true;
+    const startedAt = Date.now();
     initIdentity.mutate(currentUser.id, {
-      onSuccess: () => router.replace("/(tabs)/groups"),
+      onSuccess: () => {
+        const wait = Math.max(0, MIN_VISIBLE_MS - (Date.now() - startedAt));
+        navTimer.current = setTimeout(
+          () => router.replace("/(tabs)/groups"),
+          wait,
+        );
+      },
       onError: (e) => setError((e as Error).message || "Setup failed."),
     });
+    return () => {
+      if (navTimer.current) {
+        clearTimeout(navTimer.current);
+      }
+    };
     // initIdentity is a stable mutation ref; intentionally fire once when
     // currentUser becomes available.
     // eslint-disable-next-line react-hooks/exhaustive-deps
