@@ -119,6 +119,9 @@ the invariant that makes it unrepresentable.
 
 ## Roadmap (phased)
 
+> Tracked in **[#397](https://github.com/actuallydan/pollis/issues/397)**.
+
+
 - **Phase 0 (done):** stop the bleeding — append-only in code (`adfe518`: no
   more commit-log deletes) + auto-heal wedged members via external-join.
 - **Phase 1:** I1 — DB triggers making the commit log gapless/append-only/
