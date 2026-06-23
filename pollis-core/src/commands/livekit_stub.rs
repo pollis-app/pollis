@@ -122,12 +122,17 @@ async fn send_data_to_room(
         {
             Ok(resp) => {
                 let status = resp.status();
-                if !status.is_success() && status != reqwest::StatusCode::NOT_FOUND {
+                // Log every outcome (incl. 404 = room currently has no
+                // participants) with the room name, so realtime delivery can be
+                // diagnosed from the device log.
+                if status.is_success() {
+                    eprintln!("[realtime] SendData -> {room_name}: ok");
+                } else {
                     let body_text = resp.text().await.unwrap_or_default();
-                    eprintln!("[inbox] SendData {status}: {body_text}");
+                    eprintln!("[realtime] SendData -> {room_name}: {status} {body_text}");
                 }
             }
-            Err(e) => eprintln!("[inbox] SendData http error: {e}"),
+            Err(e) => eprintln!("[realtime] SendData -> {room_name}: http error: {e}"),
         }
     });
 
