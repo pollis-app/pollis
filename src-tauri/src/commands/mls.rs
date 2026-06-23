@@ -47,3 +47,8 @@ pub async fn reconcile_group_mls(state: State<'_, Arc<AppState>>, conversation_i
 pub async fn process_pending_commits(state: State<'_, Arc<AppState>>, conversation_id: String, user_id: String) -> crate::error::Result<()> {
     pollis_core::commands::mls::process_pending_commits(&state, conversation_id, user_id).await
 }
+
+#[tauri::command]
+pub async fn catch_up_all_mls_groups(state: State<'_, Arc<AppState>>, user_id: String) -> crate::error::Result<()> {
+    pollis_core::commands::mls::catch_up_all_mls_groups(&state, &user_id).await
+}
