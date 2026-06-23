@@ -47,9 +47,18 @@ export function useUserGroupsWithChannels() {
       if (!currentUser) {
         throw new Error("No current user");
       }
-      return await invoke<GroupWithChannels[]>("list_user_groups_with_channels", {
-        userId: currentUser.id,
-      });
+      const groups = await invoke<GroupWithChannels[]>(
+        "list_user_groups_with_channels",
+        { userId: currentUser.id },
+      );
+      // VOICE-CHANNEL FILTER: mobile has no voice UI yet (#185), so a voice
+      // channel can't be opened or used — drop them here so they never render
+      // in any channel list. This is the single source for that filtering on
+      // the groups-tab path; the per-group path filters in useGroupChannels.
+      return groups.map((g) => ({
+        ...g,
+        channels: g.channels.filter((c) => c.channel_type !== "voice"),
+      }));
     },
     enabled: !!currentUser,
     staleTime: 1000 * 60,
@@ -124,7 +133,13 @@ export function useGroupChannels(groupId: string | null) {
       if (!groupId) {
         throw new Error("No group ID provided");
       }
-      return await invoke<Channel[]>("list_group_channels", { groupId });
+      const channels = await invoke<Channel[]>("list_group_channels", {
+        groupId,
+      });
+      // VOICE-CHANNEL FILTER: mobile has no voice UI yet (#185) — never surface
+      // voice channels in the list. Mirrors the filter in
+      // useUserGroupsWithChannels.
+      return channels.filter((c) => c.channel_type !== "voice");
     },
     enabled: !!groupId,
     staleTime: 1000 * 60,

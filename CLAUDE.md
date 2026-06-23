@@ -198,6 +198,28 @@ Don't reach for JS-side equivalents (Web Crypto, IndexedDB, browser-side caching
 
 ## Product Principles
 
+### Backend core: invalid states are unrepresentable
+
+**The governing principle for all `pollis-core` / remote-schema / MLS / delivery
+/ retention work.** Model state so an invalid configuration *cannot be
+expressed*, enforced at the lowest layer possible: **DB constraint/trigger >
+Rust type > single protocol chokepoint > code discipline** (last resort, and
+only with a test that encodes the invariant). A correctness property defended
+only by "every caller remembers to do X" is a latent bug — if you're relying on
+discipline, you modeled the state wrong.
+
+The acceptance test we engineer for: *a member who joined a group 4 years and
+300 commits ago, through dozens of adds/removals, comes back and receives every
+message sent while they were a member, and catches their MLS state up to the
+current epoch.* The only history ever lost is (a) messages sent before you
+joined and (b) a brand-new device starting empty.
+
+When you touch commit logs, message delivery, MLS state, or retention, your
+change must make a class of bug *impossible*, and ship with a test that tries to
+create the invalid state and proves it can't. "The happy path works" is not
+coverage of the invariant. **Full design, failure taxonomy, and the phased
+roadmap: [`docs/backend-core-invariants.md`](docs/backend-core-invariants.md).**
+
 ### Messages must work. History is bounded, not flaky.
 
 Sending and receiving messages is the entire point of the app. Messages must not silently fail, get dropped, or become undeliverable under normal conditions. "We don't guarantee history" is **not** a license for sends to break, fail, or go invisible to a recipient who is a current member of the conversation. If something you're building can cause a message to be lost, dropped, or undecryptable for someone who was in the conversation when the message was sent, that is a bug — fix it.

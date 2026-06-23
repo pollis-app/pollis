@@ -117,7 +117,7 @@ function Direct() {
                 setSelectedConversationId(d.id);
                 router.push({
                   pathname: "/chat/[id]",
-                  params: { id: d.id, kind: "dm" },
+                  params: { id: d.id, kind: "dm", name: handle },
                 });
               }}
               glyph={<Avatar label={label} />}

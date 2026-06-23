@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { View, Text, TextInput, Pressable } from "react-native";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { Screen, Crumb, Button, BottomAction } from "../../components/ui";
-import { PollisMark } from "../../components/PollisMark";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, r } from "../../theme/tokens";
 import { useVerifyOtp } from "../../hooks/queries/useAuth";
@@ -43,7 +42,6 @@ export default function AuthOTP() {
         segs={[{ label: "AUTH" }, { label: "Verify email", leaf: true }]}
       />
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 22 }}>
-        <PollisMark />
         <View style={{ gap: 8 }}>
           <Text style={[ty.h1, { color: semantic.ink }]}>Check your email</Text>
           <Text
@@ -139,20 +137,23 @@ export default function AuthOTP() {
 
         <Pressable
           onPress={() => router.back()}
-          style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            alignSelf: "flex-start",
+            gap: 8,
+          }}
         >
-          <Icon.mail color={semantic.mute} />
+          <Icon.back color={semantic.ink} />
           <Text
             style={{
-              flex: 1,
               fontFamily: ty.body.fontFamily,
-              fontSize: 11,
-              color: semantic.mute,
+              fontSize: 16,
+              color: semantic.ink,
             }}
           >
             Use a different email
           </Text>
-          <Icon.fwd color={semantic.mute} />
         </Pressable>
       </View>
 

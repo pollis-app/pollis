@@ -122,7 +122,7 @@ pub async fn publish_to_room_server(
 /// is already connected to. Used by `send_message` to notify group channel members.
 /// Returns silently (non-fatal) if the room is not connected.
 pub async fn publish_new_message_to_room(
-    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    state: &Arc<AppState>,
     room_id: &str,
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
@@ -130,7 +130,7 @@ pub async fn publish_new_message_to_room(
     sender_username: Option<&str>,
 ) -> Result<()> {
     let room = {
-        let lk = livekit.lock().await;
+        let lk = state.livekit.lock().await;
         lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
     };
 

@@ -9,7 +9,6 @@ import {
   Button,
   BottomAction,
 } from "../../components/ui";
-import { PollisMark } from "../../components/PollisMark";
 import { Icon } from "../../components/icons";
 import { semantic, type as ty, fonts } from "../../theme/tokens";
 import {
@@ -82,7 +81,6 @@ export default function Enrollment() {
       <Crumb segs={[{ label: "AUTH" }, { label: "Pair device", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
-          <PollisMark />
           <View style={{ gap: 8 }}>
             <Text style={[ty.h1, { color: semantic.ink }]}>
               {mode === "polling"
@@ -111,6 +109,7 @@ export default function Enrollment() {
             <View style={{ gap: 10, paddingTop: 6 }}>
               <Button
                 full
+                align="left"
                 variant="primary"
                 onPress={onStart}
                 disabled={start.isPending}
@@ -120,6 +119,7 @@ export default function Enrollment() {
               </Button>
               <Button
                 full
+                align="left"
                 onPress={() => setMode("recovery")}
                 icon={<Icon.key color={semantic.ink} />}
               >
