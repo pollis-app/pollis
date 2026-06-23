@@ -98,10 +98,22 @@ ndk;27.1.12297006 cmake;3.22.1`. A clean `gradlew assembleDebug` produces
 `android/app/build/outputs/apk/debug/app-debug.apk` with `libpollis-native.so`
 embedded for arm64-v8a / armeabi-v7a / x86_64.
 
-**iOS is NOT buildable on this Mac** — it's macOS 14.7 + Xcode 15.1, and Expo
-SDK 55 requires **Xcode 26 / macOS 26** (verified still true June 2026: SDK 54
-was the last to accept Xcode 16.x). Needs a macOS upgrade or a different
-machine; the iOS xcframework present locally is a stale prior artifact.
+**iOS build verified on macOS 26.4.1 (Tahoe) + Xcode 26.4.1, 2026-06-22.** A
+clean run from a fresh checkout works end to end with no source changes: `ubrn
+build ios` → `PollisNativeFramework.xcframework` (device `ios-arm64` + universal
+`ios-arm64_x86_64-simulator` slices), `expo prebuild --platform ios` →
+`pod install`, then `pnpm expo run:ios` compiles RN-from-source and launches on
+the iPhone 17 Pro simulator; the bridge initializes against live Turso and the
+app reaches the auth screen. Toolchain (all no-sudo): the three iOS Rust targets
+(`rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`),
+`uniffi-bindgen-react-native` CLI pinned to `0.31.0-2`, and CocoaPods.
+
+**Expo SDK 55 requires Xcode 26 / macOS 26** (verified still true June 2026: SDK
+54 was the last to accept Xcode 16.x). On an older macOS/Xcode (e.g. macOS 14.7
++ Xcode 15.1) the build hits `@MainActor` parse errors in `expo-modules-core`
+([expo/expo#42525](https://github.com/expo/expo/issues/42525) — closed, won't
+fix); that machine needs a macOS/Xcode upgrade and any iOS xcframework it
+carries is a stale prior artifact.
 
 ---
 
