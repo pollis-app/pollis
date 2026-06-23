@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { Screen, Crumb } from "../../components/ui";
+import { Icon } from "../../components/icons";
 import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
 import {
   useSetPin,
@@ -227,6 +228,31 @@ function AuthPIN() {
               {error}
             </Text>
           ) : null}
+
+          {/* Always offer a way out of this screen — without it, an error
+              like "no key material to wrap; sign in again" strands the user
+              on the keypad with no path back to sign-in. */}
+          <Pressable
+            onPress={() => router.replace("/(auth)/email")}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              alignSelf: "center",
+              gap: 8,
+              marginTop: 22,
+            }}
+          >
+            <Icon.back color={semantic.mute} />
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 12,
+                color: semantic.mute,
+              }}
+            >
+              Sign in again
+            </Text>
+          </Pressable>
         </View>
       </View>
 
