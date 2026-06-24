@@ -43,6 +43,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # docker-container driver — required for the gha cache backend below
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push ${{ env.IMAGE }}
         uses: docker/build-push-action@v6
         with:
