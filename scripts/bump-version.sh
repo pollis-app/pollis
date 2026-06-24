@@ -17,13 +17,11 @@
 #
 # Locations updated:
 #   - Cargo.toml                           [workspace.package].version
-#                                          → pollis (src-tauri), pollis-core,
-#                                            pollis-node all inherit it via
+#                                          → pollis (src-tauri), pollis-core
+#                                            inherit it via
 #                                            `version.workspace = true`
 #   - package.json                         root npm workspace
 #   - frontend/package.json
-#   - electron/package.json
-#   - pollis-node/package.json             (npm-side; Cargo side inherits)
 #   - src-tauri/tauri.conf.json            "version"
 #
 # Validation: only accepts strict semver MAJOR.MINOR.PATCH with an
@@ -50,8 +48,8 @@ fi
 
 echo "Bumping to v${VERSION}"
 
-# Cargo workspace — pollis-core / pollis-node / src-tauri all inherit
-# via `version.workspace = true`, so this single line stamps three crates.
+# Cargo workspace — pollis-core / src-tauri inherit
+# via `version.workspace = true`, so this single line stamps them.
 sed -i.bak -E "/^\[workspace\.package\]/,/^\[/{
   s/^version = \".*\"/version = \"${VERSION}\"/
 }" Cargo.toml
@@ -60,7 +58,7 @@ rm -f Cargo.toml.bak
 # Every package.json — single-line "version" field at top level. Use jq
 # so we don't accidentally rewrite nested "version" fields in sub-trees
 # (e.g. dependencies pinned to a literal "version": "x").
-for pkg in package.json frontend/package.json electron/package.json pollis-node/package.json; do
+for pkg in package.json frontend/package.json; do
   jq --arg v "$VERSION" '.version = $v' "$pkg" > "$pkg.tmp"
   mv "$pkg.tmp" "$pkg"
 done
@@ -72,7 +70,7 @@ mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
 echo
 echo "Stamped ${VERSION} into:"
 grep -H '^version = ' Cargo.toml | sed 's/^/  /'
-for f in package.json frontend/package.json electron/package.json pollis-node/package.json src-tauri/tauri.conf.json; do
+for f in package.json frontend/package.json src-tauri/tauri.conf.json; do
   v="$(jq -r .version "$f")"
   printf '  %-40s %s\n' "$f" "$v"
 done

@@ -6,31 +6,17 @@
   "scripts": {
     "dev": "WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 pnpm tauri dev",
     "dev:tauri": "pnpm dev",
-    "dev:electron": "pnpm build:pollis-node:debug && concurrently -k -n vite,electron \"pnpm --filter frontend dev\" \"wait-on -t 30000 tcp:5173 && pnpm --filter @pollis/electron start\"",
     "dev:frontend": "pnpm --filter frontend dev",
-    "build:pollis-node": "pnpm --filter @pollis/pollis-node build",
-    "build:pollis-node:debug": "pnpm --filter @pollis/pollis-node build-debug",
-    "build:electron": "pnpm --filter @pollis/electron build",
     "lint": "pnpm --filter frontend lint",
     "clean": "pnpm --filter frontend clean && cargo clean",
     "build:tauri": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build'",
     "build:tauri:linux": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-unknown-linux-gnu'",
     "build:tauri:macos": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target universal-apple-darwin'",
-    "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'",
-    "test:e2e": "pnpm build:pollis-node:debug && pnpm build:electron && pnpm --filter frontend build && playwright test --project=tests",
-    "test:e2e:headed": "pnpm build:pollis-node:debug && pnpm build:electron && pnpm --filter frontend build && POLLIS_E2E_HEADED=1 playwright test --project=tests",
-    "test:e2e:screenshots": "pnpm build:pollis-node:debug && pnpm build:electron && pnpm --filter frontend build && playwright test --project=screenshots",
-    "test:e2e:ui": "pnpm build:pollis-node:debug && pnpm build:electron && pnpm --filter frontend build && POLLIS_E2E_HEADED=1 playwright test --ui"
+    "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'"
   },
   "devDependencies": {
-    "@libsql/client": "^0.14.0",
-    "@playwright/test": "^1.49.0",
     "@tauri-apps/cli": "^2",
     "@types/node": "^22.10.5",
-    "@types/pngjs": "^6.0.5",
-    "concurrently": "^9.1.2",
-    "pngjs": "^7.0.0",
-    "wait-on": "^8.0.1",
     "wrangler": "^4.76.0"
   },
   "packageManager": "pnpm@10.25.0",
@@ -42,7 +28,6 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "electron",
       "esbuild",
       "sharp",
       "workerd"

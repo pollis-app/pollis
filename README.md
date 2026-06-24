@@ -10,12 +10,12 @@ A desktop messaging app with end-to-end encryption. Think Slack, but nobody — 
 
 Messages are encrypted on your device using MLS (Messaging Layer Security) before they ever leave your machine. The Rust backend connects directly to Turso (libSQL) for group and channel metadata. There is no intermediate server — the desktop binary is the backend. Encrypted message envelopes are stored remotely for offline delivery, and decrypted message history lives in a local SQLite database encrypted at rest.
 
-The renderer calls into the Rust backend via a single IPC bridge: Tauri's `invoke(cmd, args)` (through the shell-agnostic wrapper at `frontend/src/bridge/invoke.ts`) → `src-tauri` command dispatch → real implementation in `pollis-core`. Same JSON shape on both ends. (The deprecated Electron shell routed the identical calls through `window.electronAPI.invoke` → preload → `pollis-node` napi-rs addon.)
+The renderer calls into the Rust backend via a single IPC bridge: Tauri's `invoke(cmd, args)` (through the shell-agnostic wrapper at `frontend/src/bridge/invoke.ts`) → `src-tauri` command dispatch → real implementation in `pollis-core`. Same JSON shape on both ends.
 
 **Stack**
-- **Desktop shell**: Tauri 2 (Rust host + system WebView renderer). _An Electron shell under `electron/` is deprecated/legacy — see [electron/DEPRECATED.md](electron/DEPRECATED.md)._
+- **Desktop shell**: Tauri 2 (Rust host + system WebView renderer)
 - **Frontend**: React 19, TypeScript, Vite, TailwindCSS
-- **Backend**: Rust split into `pollis-core` (reusable crate; also consumed by mobile via uniffi) and `src-tauri` (the Tauri host that exposes `pollis-core` to the renderer via `invoke`). The legacy Electron shell instead loaded a `pollis-node` napi-rs binding.
+- **Backend**: Rust split into `pollis-core` (reusable crate; also consumed by mobile via uniffi) and `src-tauri` (the Tauri host that exposes `pollis-core` to the renderer via `invoke`).
 - **Encryption**: MLS (Messaging Layer Security) for group channel encryption, AES-256-GCM. Voice channels are end-to-end encrypted too — per-frame AES-128-GCM via libwebrtc's `FrameCryptor`, keyed from the MLS group's exporter secret, so the LiveKit SFU forwards ciphertext only.
 - **Remote DB**: Turso (libSQL) — direct from the Rust core, no middleman
 - **Local DB**: SQLite via rusqlite (encrypted at rest, key in OS keystore)
@@ -35,7 +35,7 @@ Every MLS commit is also published to an append-only **transparency log** so the
 
 ## Releases
 
-Builds for macOS, Windows, and Linux are published automatically on every version tag via the Tauri release workflow (re-armed on tag push in #386). Tauri's bundler produces the platform installers and the `update-{{bundle_type}}.json` manifests that the in-app updater reads at runtime from `cdn.pollis.com`, so the marketing site at [pollis.com](https://pollis.com) always shows the current download links. Auto-update trust is rooted in the OS code signature on each installer — Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows. _(The legacy Electron release workflow, `.github/workflows/electron-release.yml`, is **disabled** — commented out and inert — since Pollis no longer builds or ships the Electron app. See [electron/DEPRECATED.md](electron/DEPRECATED.md).)_
+Builds for macOS, Windows, and Linux are published automatically on every version tag via the Tauri release workflow (re-armed on tag push in #386). Tauri's bundler produces the platform installers and the `update-{{bundle_type}}.json` manifests that the in-app updater reads at runtime from `cdn.pollis.com`, so the marketing site at [pollis.com](https://pollis.com) always shows the current download links. Auto-update trust is rooted in the OS code signature on each installer — Apple Developer ID + notarization on macOS, Azure Trusted Signing on Windows.
 
 ![Pollis UI](readme/new_app.png)
 
@@ -60,7 +60,6 @@ pnpm install          # Install JS dependencies
 ```bash
 pnpm dev              # Full desktop app — builds pollis-core, then runs Vite + the Tauri shell
 pnpm dev:frontend     # Frontend only, in the browser (no Rust IPC)
-# pnpm dev:electron   # DEPRECATED — the legacy Electron shell (see electron/DEPRECATED.md)
 ```
 
 `pnpm dev` (alias `pnpm dev:tauri`) starts the Vite dev server on `:5173` and the Tauri host in parallel; the host compiles `src-tauri` (and the `pollis-core` crates it depends on) on first run, which can take a few minutes, then is fast. The Linux invocation sets `WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11` for WebKitGTK compatibility (already baked into the script).
@@ -119,10 +118,6 @@ pnpm build:tauri:linux     # x86_64-unknown-linux-gnu
 
 The bundle config lives in `src-tauri/tauri.conf.json` (`bundle.targets: "all"`). The `build:tauri*` scripts source `.env.development` so the compiled-in credentials are present. Local builds skip code signing unless the platform signing env vars are set — CI sets all of them.
 
-#### Legacy Electron build (deprecated, rollback only)
-
-The Electron shell at `electron/` is retained as a source-level rollback reference, not a build target — its release pipeline (`.github/workflows/electron-release.yml`) is **disabled** (commented out, #386) and Pollis no longer builds or ships the Electron app. The `pnpm dev:electron` / `pnpm --filter @pollis/electron ...` + `electron-builder` scripts still exist for local rollback work, but Electron is **not** built or shipped. See [electron/DEPRECATED.md](electron/DEPRECATED.md).
-
 ### Testing
 
 | Command | What runs |
@@ -134,15 +129,35 @@ The Electron shell at `electron/` is retained as a source-level rollback referen
 
 The integration harness (`src-tauri/tests/flows.rs`) is gated behind the `test-harness` Cargo feature because it takes ~3–4 minutes, serializes on a process-wide mutex, and requires a disposable Turso database configured in `.env.test` at the repo root. See [`.codesight/wiki/testing.md`](./.codesight/wiki/testing.md) for the full architecture.
 
+## What this repo produces
+
+This is a monorepo. Despite the desktop app being the headline, it ships a number of distinct, independently-deployable artifacts:
+
+| Output | Lives in | What it is |
+|---|---|---|
+| **Desktop app** | `src-tauri/` + `frontend/` | The Tauri client, bundled for macOS / Windows / Linux |
+| **Mobile app** | `mobile/` | React Native / Expo client for iOS + Android (consumes `pollis-core` via uniffi; in development) |
+| **MLS Delivery Service** | `pollis-delivery/` | Dockerized axum service — the sole writer that serializes MLS commits server-side (`api.pollis.com`); crypto stays client-side |
+| **LiveKit stack** | `livekit/` | docker-compose + nginx config for the self-hostable voice/screenshare SFU |
+| **Transparency publisher** | `verifiable-log-serve/` | Dockerized builder/serve that publishes the signed append-only log to R2 (`verify.pollis.com`) |
+| **Website** | `website/` | Static marketing + docs site (Cloudflare Pages), including the transparency explorer |
+| **CLI tools** | `verifiable-log*/` | `pollis-verify` (public log verifier), plus the lower-level `monitor`, `builder`, and `serve` binaries |
+| **AUR package** | `aur/` | `PKGBUILD` for Arch Linux distribution of the desktop app |
+| **The transparency log itself** | _(scheduled output)_ | The daily signed Merkle log synced to R2 — the verifiable artifact the whole transparency system exists to produce |
+
+The reusable backend (`pollis-core`) is the shared spine: the desktop host, the mobile bindings, and the CLIs all build on it.
+
 ## Project layout
 
 ```
-pollis-core/  # Reusable Rust backend — commands, DB, MLS encryption, auth (no shell dependency; also exposed to mobile via uniffi)
-src-tauri/   # Tauri desktop host (current shell) — commands, tray, window lifecycle; exposes pollis-core via `invoke`
-frontend/    # React app — Vite, TypeScript, TailwindCSS, runtime-host bridge at src/bridge/
-pollis-node/  # DEPRECATED — napi-rs binding that loaded pollis-core into the Electron main process
-electron/     # DEPRECATED — legacy Electron shell (main process, preload bridge, electron-builder); see electron/DEPRECATED.md
-website/     # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
+pollis-core/      # Reusable Rust backend — commands, DB, MLS encryption, auth (no shell dependency; also exposed to mobile via uniffi)
+src-tauri/        # Tauri desktop host (current shell) — commands, tray, window lifecycle; exposes pollis-core via `invoke`
+frontend/         # React app — Vite, TypeScript, TailwindCSS, runtime-host bridge at src/bridge/
+mobile/           # React Native / Expo client (iOS + Android)
+pollis-delivery/  # MLS Delivery Service — axum, sole writer that serializes commits server-side
+verifiable-log*/  # Transparency log core, builder, serve, and the pollis-verify CLI
+livekit/          # Self-host config for the LiveKit SFU (docker-compose + nginx)
+website/          # Static marketing site — plain HTML/CSS/JS, deployed to Cloudflare Pages
 ```
 
 ## What's coming
