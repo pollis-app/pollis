@@ -428,7 +428,13 @@ pub async fn edit_message(
     };
 
     if needs_repair {
-        crate::commands::mls::repair_mls_group(state, &mls_group_id, &user_id).await?;
+        // Local MLS state is missing (e.g. a local DB wipe). Rejoin THIS device
+        // from the group's published GroupInfo — the same non-destructive
+        // recovery process_pending_commits uses. We must NEVER nuke the shared
+        // commit log to repair one device: deleting canonical history destroys
+        // every member's ability to decrypt past messages and can fork the
+        // group. See docs/mls-reconcile-hardening.md (INV-1/INV-4).
+        crate::commands::mls::external_join_group(state, &mls_group_id, &user_id).await?;
     }
 
     let ciphertext_remote = {

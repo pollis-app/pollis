@@ -1,191 +1,150 @@
-# MLS Reconcile Hardening — Runbook / Handoff Spec
+# MLS Hardening — Delivery Service Architecture (Runbook)
 
-> Self-contained spec to make Pollis's MLS group state **deterministic and
-> bulletproof** regardless of which users act, their network state, the order
-> things happen, or how long passes between actions. Written so another
-> session/machine can execute it without re-discovering context. Governed by
-> [`backend-core-invariants.md`](backend-core-invariants.md) ("invalid states
-> are unrepresentable"). Tracked in **#397**.
+> The plan for making Pollis's MLS group state **deterministic and bulletproof
+> regardless of which users act, network state, ordering, or time between
+> actions**. Self-contained so another session/machine can build it. Governed
+> by [`backend-core-invariants.md`](backend-core-invariants.md). Tracked in #397.
 
-## Goal (the property we must guarantee)
+## The decision
 
-For any conversation, across any number of clients/devices, **any** network
-ordering, **any** interleaving of actions, and **any** delay between them:
+Move MLS **commit ordering and all writes to MLS state** behind a small,
+self-hostable **Delivery Service (DS)**: a Dockerized Rust/axum service deployed
+**beside the LiveKit container** at `api.pollis.com`. The DS is the **sole
+writer** to the MLS control-plane tables and **serializes commits per
+conversation**, which makes forks and wedges *structurally impossible* — the
+race that caused them can't exist. **Crypto stays 100% client-side** (E2E
+preserved). Invariants live in **DS code**, not DB triggers.
 
-1. There is exactly **one** canonical MLS commit history (a gapless, linear
-   chain of epochs). No forks, ever.
-2. Every current member-device can **reach the head epoch** by replaying that
-   chain (or recovering to it), no matter how far behind it starts.
-3. Reconcile (membership add/remove, device add/remove, key rotation) is a
-   **pure function of observable server state** — running it from any client,
-   any number of times, in any order, converges to the same result.
+Why this shape:
+- The only problem that can't be solved with local logic is **distributed
+  agreement on commit order**. A single serialization point removes it.
+- E2E means a server can only **order opaque blobs**, never compute or read
+  them. This is precisely the MLS RFC 9420 **Delivery Service** role.
+- Cloudflare Durable Objects would also work, but they're **proprietary** —
+  that breaks the open-source / self-host / auditability story for a
+  load-bearing component. A **stateless axum service + a per-conversation
+  transactional conditional-insert** gives the *same* race-free property,
+  portably (Postgres/SQLite/Turso), auditably (our Rust), self-hostably
+  (`docker run` beside self-hosted LiveKit).
 
-Non-goal here (explicitly deferred — do NOT touch): message delivery,
-`conversation_watermark`, the 30-day envelope TTL, envelope GC / envelopes
-piling up. We may redesign delivery later. Crypto + commit-log correctness
-only. No new features — `pollis-core` fixes only.
+## Trust boundary
 
-## What is already done (Phase 0, in `main`)
+- **DS sees:** opaque commit / welcome / group-info / key-package blobs;
+  conversation / user / device IDs; epochs; ordering. (No more than Turso
+  already sees today.)
+- **DS never sees:** plaintext, group keys, private keys. It cannot decrypt and
+  cannot forge a commit (it holds no keys).
 
-- `adfe518` — **commit log is append-only in code**: removed the
-  `DELETE FROM mls_commit_log` "revoked self-add" path (it deleted canonical
-  commits and wedged laggards: ELECTRON epoch 11). Revoked adds are now
-  *applied* (stay on the canonical branch); reconcile evicts the device via an
-  append-only remove. Plus **auto-heal**: on an epoch gap,
-  `process_pending_commits` drops the stale local group so the existing
-  external-join recovery rejoins at the head epoch instead of stopping forever.
-- All 29 `flows` integration tests pass with this.
+## Responsibilities
 
-## Code map (where the logic lives)
+**Client — crypto, unchanged:**
+- Compute commits: `reconcile(current_tree, desired_roster) → add/remove
+  proposals → one commit`. Apply commits, encrypt/decrypt, derive keys. The
+  **deterministic reconcile *decision* stays here.**
+- Submit commits to the DS; fetch the contiguous log from the DS; apply in
+  order. On a submit-reject ("head moved"), re-base on the new head and
+  resubmit. (Replaces today's client-side CAS-retry / fork-recovery dance.)
 
-- `pollis-core/src/commands/mls/group_state.rs`
-  - `process_pending_commits_locked` — fetch `mls_commit_log` rows `epoch >=
-    local`, verify added-device certs, apply in order, advance epoch. Gap →
-    drop local group → external-join recovery (post-loop). **The hot path.**
-  - `external_join_group_inner` / `external_join_attempt` — rejoin via external
-    commit against published `mls_group_info`, CAS the target epoch
-    (`ON CONFLICT(conv,epoch) DO NOTHING`), discard + retry on lost race.
-  - `forget_local_mls_group`, `verify_added_devices` (→ `VerifyOutcome`).
-- `pollis-core/src/commands/mls/reconcile.rs` — `reconcile_group_mls_*`: roster
-  diff (group_member / dm_channel_member + pending invitees), TOFU-pin
-  `account_id_pub`, claim KPs for devices not in the tree, drop leaves whose
-  `user_device` row is revoked, stage commit, **post to Turso FIRST then merge
-  locally** (remote failure must not advance local epoch).
-- `pollis-core/src/commands/mls/sweep.rs` — `catch_up_all_mls_groups`: per-group
-  `process_pending_commits` on launch/reconnect.
-- Tables: `mls_commit_log` (`UNIQUE(conversation_id, epoch)` = the CAS that
-  serializes commits — **present and verified in prod**), `mls_group_info`
-  (external-join source), `mls_welcome`, `mls_key_package`, `user_device`
-  (`revoked_at` tombstone).
+**DS — the new service:**
+- **Sole writer** to `mls_commit_log`, `mls_welcome`, `mls_group_info`,
+  `mls_key_package` (the MLS control plane).
+- `submit_commit(conversation, based_on_epoch, commit_blob, welcomes[],
+  group_info)`: inside a **per-conversation transaction**, accept iff
+  `based_on_epoch == head`; assign epoch `head+1`; insert (append-only,
+  contiguous, one-per-epoch **by construction**); store welcomes + group_info.
+  Else reject with `{ head, missing_commits[] }` so the client re-bases.
+- `fetch_commits(conversation, since_epoch)` → contiguous list.
+  `fetch_welcomes(device)`, `publish_key_package` / `claim_key_package`,
+  `fetch_group_info(conversation)`.
+- **Structural validation only** (epoch linkage, blob sanity, submitter is a
+  current member per the roster). No decryption.
+- Also hosts the **auth / secrets broker** (OTP request/verify, mint scoped
+  short-TTL Turso creds, LiveKit token, R2 presign) — the same service that
+  removes the `EXPO_PUBLIC_*` secret-inlining problem.
 
-## Invariants to enforce (and where)
+## What becomes impossible (by construction, in DS code — not DB triggers)
 
-### INV-1 — commit log is gapless, append-only, immutable (DB-enforced)
-Code discipline (Phase 0) is not enough; make it physical:
-- `BEFORE INSERT` trigger: reject `NEW.epoch > COALESCE(MAX(epoch),-1)+1` per
-  conversation. (CAS-compatible: a stale committer inserts at `epoch <= max`
-  and is absorbed by the `UNIQUE` conflict; only forward gaps abort.)
-- `BEFORE DELETE` trigger: abort all deletes.
-- `BEFORE UPDATE` trigger: abort changes to `epoch` / `commit_data` /
-  `conversation_id`.
-- Ships as migration `000007_mls_commit_log_immutable.sql` (prod is at v5, v6
-  pending — **000007 is the correct next number, no collision**). Also add to
-  `POST_BASELINE_MIGRATIONS` in `pollis-core/src/db/mod.rs` so the test harness
-  gets it. → a gap/delete/rewrite becomes physically impossible.
+- **Forks** — per-conversation serialization → exactly one commit per epoch.
+- **Gaps** — DS assigns the epoch as `head+1` → always contiguous.
+- **Deleted / rewritten commits** — DS never deletes or updates; clients can't
+  write the tables at all.
+- **Malicious direct writes** — clients hold no write creds to the MLS tables.
 
-### INV-2 — verify-on-apply chain (type + protocol)
-MLS already chains epochs (confirmed transcript hash / confirmation tag);
-`process_message` rejects a commit that doesn't extend the local head. Make the
-reliance explicit and tested. Optionally persist the prior-epoch link and
-assert it on insert as defense in depth.
+## What stays a client concern (and still needs hardening)
 
-### INV-3 — reconcile is deterministic & idempotent
-- Pure function of `(roster, user_device, mls tree, key packages)` → a single
-  staged commit. Same inputs, same output; re-running is a no-op once the tree
-  matches the roster.
-- All mutations serialized per conversation by `state.mls_group_lock` (held for
-  the whole reconcile) — already the case; keep it.
-- Remote-first, merge-second ordering (already present) so a remote failure
-  never advances local epoch (no split-brain).
-- Lost-CAS-race → discard local staged commit, re-process the winner, retry
-  from the new head. Bounded retries.
+1. **Deterministic reconcile decision** — today a member whose key-package
+   isn't published *at that instant* is silently skipped and "repaired later",
+   so the output depends on transient state, not just the roster. The DS is now
+   the authority on roster + available KPs; have it report addability (or hold)
+   so the decision is a pure function of the roster. **This is gap #1.**
+2. **Applying the log** (crypto) — the DS guarantees contiguity, so client
+   catch-up simplifies: no gap-recovery; `external_join` is only for "I have no
+   local state → fetch group-info → join."
+3. **Recovery dead-ends** — `send` should self-heal (external-join) instead of
+   erroring; remove the "defer forever" path.
 
-### INV-4 — recovery is total
-Every way a device can fall off the canonical branch resolves to "external-join
-to head" (not "stop"): epoch gap (Phase 0 ✓), eviction (✓), apply-fail/fork
-(✓). Audit that there is **no** remaining `break`-without-recovery in
-`process_pending_commits_locked` (the `AbsentRetry` self-add defer is the one
-intentional non-recovery — see edge cases).
+## Mapping to work already done (this effort)
 
-## Edge-case matrix (each needs a test that creates the bad state and proves it can't persist)
+- **KEEP** — `adfe518` (merged): no commit deletes in code + external-join
+  recovery. Its spirit is enforced by the DS; the code is harmless defense.
+- **KEEP** — the **repair-nuke removal** (branch `mls/repair-and-ds-replan`):
+  `repair_mls_group` (re-create the group at epoch 0 + DELETE the commit log)
+  is replaced by `external_join` (rejoin this device from published
+  group-info). The DS would forbid that destructive write anyway; this is the
+  right client recovery regardless.
+- **DROP / reverted** — the DB-trigger migration `000007`, the `execute_batch`
+  migration-applier detour, and the INV-1 trigger test. Superseded: the DS owns
+  these invariants in code. (No DB triggers — your call, and the right one.)
+- **SUPERSEDE** — client-side CAS-retry / fork-recovery
+  (`external_join_attempt`'s `ON CONFLICT` dance) → becomes "submit to DS, on
+  reject re-base." Simpler and centralized.
 
-| Case | Required outcome |
-|---|---|
-| Two members commit at the same epoch (race) | UNIQUE CAS: one wins, the loser discards + re-applies winner. No fork. |
-| Stale committer (behind head) commits | Inserts at `epoch <= head` → conflict → catches up. No gap. |
-| Revoked device self-adds (malicious) | Applied (append-only), then evicted by reconcile remove. Brief presence, never a wedge. Full close = creds server (below). |
-| Device legit at commit, revoked later; a laggard re-evaluates | Laggard applies the canonical commit; later remove evicts. No delete, no wedge. (Phase 0 ✓ — keep the regression test.) |
-| Member 300 commits / N years behind comes back | Replays the full gapless chain to head, or external-joins to head. Reaches current epoch. |
-| Welcome never delivered before device acts | Device external-joins from `mls_group_info` (no Welcome needed). |
-| Out-of-order commit arrival | Apply strictly in `epoch ASC, seq ASC`; gap → recover. |
-| `mls_group_info` stale/absent during external-join | Retry with backoff; if absent, stay out cleanly (no squat). |
-| Concurrent reconcile on two devices | `mls_group_lock` + CAS serialize; one wins, other re-syncs. |
+## Phased build
 
-## Test plan (the doctrine: prove the invalid state can't persist)
+- **P1 — DS spine:** axum service + Dockerfile, deployed beside LiveKit at
+  `api.pollis.com`. `submit_commit` (transactional conditional-insert per
+  conversation) + `fetch_commits`. Sole writer to `mls_commit_log`. Client:
+  route the two commit-insert sites (`group_state` external-join, `reconcile`)
+  through the DS; replace CAS-retry with submit/reject/re-base.
+- **P2 — DS owns the rest of the control plane:** welcomes, group-info,
+  key-packages via the DS; structural + membership-authorization validation.
+- **P3 — client determinism + total recovery:** fix gap #1 (KP availability via
+  DS), close the recovery dead-ends, simplify catch-up (contiguous log).
+- **P4 — secrets broker in the same DS:** OTP, scoped Turso creds, LiveKit
+  token, R2 presign; remove `EXPO_PUBLIC_*` secrets from the client bundle.
+- **P5 — tests:** DS unit tests (concurrent submit → one winner, no fork);
+  refactor the `flows` harness to drive clients against an **in-process DS**;
+  add the **adversarial-ordering harness** (random interleavings → assert all
+  clients converge + reach head). Keep the 29 `flows` tests as regression.
 
-- Extend `src-tauri/tests/flows/` with multi-client scenarios for every row
-  above, driven through the real command path (no mocks).
-- **Adversarial ordering harness**: a helper that applies a generated sequence
-  of (client, action) steps in randomized/interleaved order and asserts
-  convergence + head-reachability for every client at the end. Seeded so
-  failures reproduce. This is what catches "any order, any timing."
-- Address the known harness limit (one local DB per `user_id` → true
-  intra-user multi-device is under-tested): give each device its own
-  `InMemoryKeystore` + local DB keyed by `(user_id, device_id)`.
-- Every fix lands with a test that *constructs the invalid state and asserts it
-  cannot persist* — happy-path coverage is not invariant coverage.
+## Open question to settle when building
 
-## Verification (use what we built)
+**Read path.** Do clients read the commit log directly (read-only DB access) or
+through the DS? Reads-via-DS → clients need *zero* direct DB access (cleanest;
+best for scoped creds), at the cost of the DS being on the read path. Recommend
+**reads-via-DS for the MLS control plane** (low volume); message envelopes stay
+direct (out of scope — delivery/retention deferred).
 
-- `cargo test --features test-harness --test flows` — the integration gate.
-- Wire/confirm a CI gh action runs the flows suite on PRs to `main` (the
-  release path is `desktop-release.yml`; the test gate should be its own action
-  on PR). `verifier-release.yml` + the `verifiable-log*` crates are the
-  account-key transparency auditor — orthogonal, but the same "verifiable,
-  append-only log" discipline applies to `mls_commit_log`.
+## Infra / repo facts to carry
 
-## Conditional: authorized-creds API server (the security close)
+- Service stack: **Rust/axum** (matches the existing `verifiable-log-serve`
+  crate). Storage: keep **Turso** initially (DS becomes the sole writer to the
+  MLS tables); portable to Postgres/SQLite.
+- Deploy: **Docker** container beside the LiveKit container; `api.pollis.com`.
+  Self-host story intact — `docker run` the DS + self-hosted LiveKit + your DB,
+  no proprietary primitives.
+- DBs: **prod** = `prod-actuallydan` (clean: migrations `0–5`, `push_token`=6
+  pending, deploys next release). **dev** = `dev-actuallydan` (messy old
+  lineage; disposable). **test** = `pollis-test`. `.env` files corrected so
+  `.env.production` → prod.
+- **Out of scope (deferred):** message delivery, `conversation_watermark`, the
+  30-day envelope TTL, envelope GC. Crypto + commit-log correctness only. No new
+  features.
 
-Strictly required only to fully close **malicious/revoked clients writing bad
-commits** (a custom binary holding the shared Turso write token can post forks /
-revoked self-adds; INV-1 stops gaps/forks structurally, but a malicious *valid*
-write is only stopped at the source). NOT required for determinism under honest
-clients. Build it if/when we want that close (the user OK'd ignoring the
-"no server" invariant for this):
+## Acceptance test (unchanged)
 
-- **What:** a tiny, fast credential broker. Holds the real secrets; clients
-  never do. Endpoints: `POST /otp/request` + `/otp/verify` (server calls
-  Resend), `GET /db/token` (mint **per-user, short-TTL, scoped** Turso creds —
-  blast radius shrinks from "whole DB forever" to "this user, minutes";
-  revoked device → no token → cannot write), `GET /livekit/token`,
-  `GET /r2/presign`.
-- **Where:** `api.pollis.com`. Deployed alongside but unrelated to the rtc
-  server. Cloudflare-native + tiny + Dockerized:
-  - Recommended: **Cloudflare Workers** (+ Durable Objects for OTP state, or
-    Workers KV) — smallest/fastest, no container needed; OR
-  - If a Docker artifact is mandated: a minimal Rust (axum) image deployed to a
-    Cloudflare **Container**, same code shape as `verifiable-log-serve`.
-- This also resolves the mobile `EXPO_PUBLIC_*` secret-inlining issue (the
-  Turso/LiveKit/Resend secrets currently ship in the JS bundle).
-
-## Infra facts to remember (discovered, easy to trip on)
-
-- **Two DBs:** `dev` = `libsql://dev-actuallydan…` (group `pollis-dev`, old
-  1–18 migration lineage, messy — disposable) and `prod` =
-  `libsql://prod-actuallydan…` (group `pollis-prod`, clean `0–5`, `push_token`
-  pending). `pollis-test` group has `test` + `pollis-test-actuallydan`.
-- **Both `.env.development` AND `.env.production` point at the `dev` DB**, and
-  `.env.production`'s `TURSO_TOKEN` is **malformed** (invalid `data_insert`
-  permission claim → Turso rejects it). Fix: point `.env.production` at
-  `prod-actuallydan` with a valid token (or rely on Doppler/GH secrets, which
-  already correctly drive `db-apply` against real prod).
-- Clients (mobile/desktop) currently use the **dev** DB via `.env`. The dev DB
-  is missing `account_key_log` and carries the old lineage; **prod is the
-  correct one.** Repoint clients at prod when you care about real data.
-- Prod DB writes / migrations: use the **turso CLI** (`turso db shell prod
-  "…"`) — it's authed; the `.env.production` token is not usable.
-- Release pipeline: `.github/workflows/desktop-release.yml` runs
-  `scripts/db-apply.sh` on tag push (Tauri). `electron-release.yml` is disabled.
-  `db-apply` already applied `0–5` to real prod; `push_token` deploys next
-  release.
-- **Next migration number is `000007`** (prod head is 5, 6 pending).
-
-## Execution order
-
-1. **INV-1** migration `000007` (commit-log immutability triggers) + add to
-   `POST_BASELINE_MIGRATIONS` + the apply-then-mutate / laggard regression test.
-2. **INV-4** audit + **INV-3** determinism/idempotency review + tests.
-3. **Adversarial ordering harness** + the full edge-case matrix as tests.
-4. **INV-2** explicit verify-on-apply (+ optional persisted chain link).
-5. Confirm CI gh action runs the flows gate on PRs.
-6. (Conditional) the `api.pollis.com` creds broker.
+A member who joined a group 4 years and 300 commits ago — through dozens of
+adds/removals — comes back, fetches the contiguous log from the DS, applies it
+to the head epoch with no gaps, and decrypts every message sent while they were
+a member. Only history ever lost: messages before they joined; a brand-new
+device starting empty.

@@ -41,7 +41,7 @@ pub use sweep::catch_up_all_mls_groups;
 // ── Reconcile + self-repair ──────────────────────────────────────────────────
 pub use reconcile::{
     reconcile_group_mls, reconcile_group_mls_core, reconcile_group_mls_core_staged,
-    reconcile_group_mls_impl, repair_mls_group, ReconcileCommitData, ReconcileOutcome,
+    reconcile_group_mls_impl, ReconcileCommitData, ReconcileOutcome,
 };
 
 #[cfg(test)]
