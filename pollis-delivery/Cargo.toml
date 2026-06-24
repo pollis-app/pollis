@@ -1,0 +1,32 @@
+[package]
+name = "pollis-delivery"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Pollis MLS Delivery Service: the sole writer to the MLS control-plane tables. Serializes commits per conversation (race-free, append-only by construction) and serves the contiguous commit log. Sees only opaque blobs — never plaintext or keys (RFC 9420 Delivery Service role)."
+
+[lib]
+name = "pollis_delivery"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pollis-delivery"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+# Sole-writer access to the MLS tables in Turso. `remote` for prod; local files
+# back the tests.
+libsql = { version = "0.9", features = ["remote"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+ulid = "1"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3"

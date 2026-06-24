@@ -10,6 +10,7 @@ members = [
     "verifiable-log",
     "verifiable-log-builder",
     "verifiable-log-serve",
+    "pollis-delivery",
 ]
 
 [workspace.package]
