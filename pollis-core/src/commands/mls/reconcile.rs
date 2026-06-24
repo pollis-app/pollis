@@ -15,7 +15,7 @@ use ulid::Ulid;
 
 use crate::state::AppState;
 
-use super::group_state::{init_mls_group, process_pending_commits_locked, publish_group_info};
+use super::group_state::{process_pending_commits_locked, publish_group_info};
 use super::provider::{parse_credential_device_id, parse_credential_user_id, PollisProvider, CS};
 
 /// Result of the compare-and-swap commit submission in `reconcile_group_mls_impl`.
@@ -26,49 +26,13 @@ enum SubmitOutcome {
     LostRace,
 }
 
-// ── Phase 4.5: MLS group self-repair ─────────────────────────────────────────
-
-/// Re-create the MLS group for a channel and re-add all current members.
-///
-/// Called transparently when `try_mls_encrypt` returns `None` (i.e. the local
-/// MLS state was lost — typically after a local DB schema bump wiped the file).
-/// The sender becomes the new group "creator"; fresh Welcome messages are
-/// generated for every other member using their latest key packages.
-///
-/// Members who haven't logged in since the wipe won't have key packages yet —
-/// they're silently skipped and will be repaired the next time *they* send.
-pub async fn repair_mls_group(
-    state: &Arc<AppState>,
-    mls_group_id: &str,
-    sender_id: &str,
-) -> crate::error::Result<()> {
-    eprintln!("[mls] repair: re-creating MLS group {mls_group_id}");
-
-    // 1. Create a fresh MLS group with the sender as sole member.
-    init_mls_group(state, mls_group_id, sender_id).await?;
-
-    // 2. Purge stale commit log and welcome entries so process_pending_commits
-    //    doesn't try to apply old-generation commits against the new group.
-    let conn = state.remote_db.conn().await?;
-    let _ = conn.execute(
-        "DELETE FROM mls_commit_log WHERE conversation_id = ?1",
-        libsql::params![mls_group_id],
-    ).await;
-    let _ = conn.execute(
-        "DELETE FROM mls_welcome WHERE conversation_id = ?1 AND delivered = 0",
-        libsql::params![mls_group_id],
-    ).await;
-    drop(conn);
-
-    // 3. Reconcile adds all roster members' available devices in one commit.
-    let outcome = reconcile_group_mls_impl(state, mls_group_id, sender_id).await?;
-    eprintln!(
-        "[mls] repair: done — {} devices added, {} removed",
-        outcome.added.len(),
-        outcome.removed.len(),
-    );
-    Ok(())
-}
+// NOTE: the former `repair_mls_group` (nuke-and-rebuild: re-create the group at
+// epoch 0 and DELETE the conversation's commit log) was removed. Deleting the
+// canonical commit log to repair a single device with missing local state
+// destroyed every member's history and could fork the group — the exact
+// append-only violation INV-1 forbids. The recovery for "my local MLS state is
+// missing" is now `external_join_group` (rejoin THIS device from the published
+// GroupInfo), wired at the `try_mls_encrypt` → None site in messages/edit_delete.
 
 // ── Declarative reconcile ────────────────────────────────────────────────────
 
