@@ -588,34 +588,29 @@ pub async fn reconcile_group_mls_impl(
         // from being our only attempt. On failure, roll back the local
         // pending commit before returning.
         let remote_result: crate::error::Result<SubmitOutcome> = async {
-            let write_conn = state.remote_db.conn().await?;
-            // Claim this epoch via compare-and-swap. If another member already
-            // committed `epoch_before`, the conflict makes this a no-op (0
-            // rows) and we report a lost race instead of forking. We must NOT
-            // write the welcomes in that case — they'd point at a branch no one
-            // adopts.
-            let affected = write_conn
-                .execute(
-                    "INSERT INTO mls_commit_log \
-                     (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-                     ON CONFLICT(conversation_id, epoch) DO NOTHING",
-                    libsql::params![
-                        conversation_id.clone(),
-                        outcome.epoch_before as i64,
-                        actor_user_id.clone(),
-                        data.commit_bytes,
-                        added_uid,
-                        added_dids
-                    ],
-                )
-                .await?;
-
-            if affected == 0 {
-                return Ok(SubmitOutcome::LostRace);
+            // Claim this epoch through the delivery seam (Direct today, the
+            // Delivery Service once POLLIS_DELIVERY_URL is set). LostRace →
+            // another member committed `epoch_before` first; report it (the
+            // caller rolls back the local pending commit) instead of forking.
+            // Welcomes are written ONLY on a win — they'd point at a doomed
+            // branch otherwise.
+            match super::delivery::submit_commit(
+                state,
+                &conversation_id,
+                outcome.epoch_before as i64,
+                &actor_user_id,
+                &data.commit_bytes,
+                added_uid.as_deref(),
+                added_dids.as_deref(),
+            )
+            .await?
+            {
+                super::delivery::SubmitResult::LostRace => return Ok(SubmitOutcome::LostRace),
+                super::delivery::SubmitResult::Committed => {}
             }
 
             if let Some(welcome_bytes) = data.welcome_bytes {
+                let write_conn = state.remote_db.conn().await?;
                 for (uid, did) in &outcome.added {
                     let welcome_id = Ulid::new().to_string();
                     write_conn.execute(
