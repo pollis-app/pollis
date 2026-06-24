@@ -1,0 +1,60 @@
+# Manual deploy of the Delivery Service to PROD.
+# Builds the pollis-delivery image on GitHub runners (off the VPS — no LiveKit
+# CPU contention), pushes it to GHCR as :prod, then pokes the token-gated
+# Watchtower endpoint on the VPS, which pulls the new digest and recreates the
+# `delivery` container in place (env/network/restart-policy preserved).
+#
+# Manual only — no push/tag trigger. See issue #406 (deploy-button pattern).
+name: Deploy Delivery (prod)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build (branch, tag, or SHA)
+        required: false
+        default: main
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: delivery-deploy-prod
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/actuallydan/pollis-delivery:prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: delivery-prod
+    steps:
+      - name: Checkout ${{ inputs.ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ env.IMAGE }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: pollis-delivery/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE }}
+          cache-from: type=gha,scope=pollis-delivery
+          cache-to: type=gha,scope=pollis-delivery,mode=max
+
+      - name: Trigger Watchtower (recreate prod container)
+        run: |
+          curl -fsS -G "${{ vars.WATCHTOWER_URL }}/v1/update" \
+            --data-urlencode "image=${IMAGE}" \
+            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}"
