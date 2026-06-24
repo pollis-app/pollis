@@ -3,6 +3,7 @@
 //! (Tauri shims, sibling `commands::*` modules, integration tests) keeps
 //! resolving names at `pollis_core::commands::mls::*`.
 
+mod delivery;
 mod device;
 mod group_state;
 mod key_packages;

@@ -281,26 +281,22 @@ async fn external_join_attempt(
     //    member already committed `stored_epoch`, the conflict makes this a
     //    no-op (0 rows) and we report a lost race — the branch we just built
     //    locally is doomed and the caller will discard it and retry.
-    let conn = state.remote_db.conn().await?;
-    let affected = conn
-        .execute(
-            "INSERT INTO mls_commit_log \
-             (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-             ON CONFLICT(conversation_id, epoch) DO NOTHING",
-            libsql::params![
-                conversation_id,
-                stored_epoch,
-                user_id,
-                commit_bytes,
-                user_id,
-                device_id.clone()
-            ],
-        )
-        .await?;
-
-    if affected == 0 {
-        return Ok(ExternalJoinResult::LostRace);
+    // Submit through the delivery seam (Direct today, the Delivery Service once
+    // POLLIS_DELIVERY_URL is set). LostRace → another member committed this
+    // epoch first; discard our doomed local branch and retry.
+    match super::delivery::submit_commit(
+        state,
+        conversation_id,
+        stored_epoch,
+        user_id,
+        &commit_bytes,
+        Some(user_id),
+        Some(&device_id),
+    )
+    .await?
+    {
+        super::delivery::SubmitResult::LostRace => return Ok(ExternalJoinResult::LostRace),
+        super::delivery::SubmitResult::Committed => {}
     }
 
     // 4. Refresh the stored GroupInfo at the new epoch so any NEXT
