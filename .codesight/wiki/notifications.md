@@ -31,7 +31,7 @@ RealtimeEvent (Rust → JS Channel)         Local action (e.g. self voice join)
                           (Rust)   (Rust)   (MobX)    (MobX)    (MobX)
 ```
 
-There is **no parallel dispatcher in Rust**. All decisions happen in JS. Rust is just the transport for LiveKit events (pushed through `pollis-node`'s Rust → Node `ThreadsafeFunction`, forwarded by the Electron main process via `webContents.send("channel:<id>", payload)` to the renderer's `channelOn` subscriber) and the executor for sound (`play_sfx` rodio command). OS notifications fire through the bridge — the renderer calls `window.electronAPI.notify({ title, body, icon })`, which the main process implements via Electron's native `Notification` API.
+There is **no parallel dispatcher in Rust**. All decisions happen in JS. Rust is just the transport for LiveKit events (pushed through the `EventSink`/`ChannelSink` over a `tauri::ipc::Channel` to the renderer's `channelOn` subscriber) and the executor for sound (`play_sfx` rodio command). OS notifications fire through the bridge — the renderer calls `sendNotification({ title, body, icon })`, which routes to `tauri-plugin-notification`.
 
 ## The category table
 
@@ -56,7 +56,7 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
 | Field | What it does | Pref gate | Notes |
 |---|---|---|---|
 | `sound` | Plays a sfx (`'ping'`/`'join'`/`'leave'`) via the `play_sfx` Rust command | `allow_sound_effects` | Cooldownable |
-| `osNotif` | Fires an OS notification banner via the bridge's `sendNotification` (→ `window.electronAPI.notify`) | `allow_desktop_notifications` + OS permission | Cooldownable |
+| `osNotif` | Fires an OS notification banner via the bridge's `sendNotification` (→ `tauri-plugin-notification`) | `allow_desktop_notifications` + OS permission | Cooldownable |
 | `badge` | Increments the per-room unread count (`useAppStore.incrementUnread`) | none | Drives dock/taskbar badge via `useBadge` |
 | `alert` | Sets the blinking status-bar alert (`useAppStore.setStatusBarAlert`) | none | Cleared on navigation |
 | `overlay` | Sets `pendingEnrollmentApproval` so the UI takes over | none | Used only by enrollment |
@@ -100,7 +100,7 @@ if (event.kind === 'invite') {
 `useLiveKitRealtime.ts` owns the React-side state and pushes it into `notify.ts` via `setNotifyPrefs(...)`. The effect re-runs whenever `allow_sound_effects` or `allow_desktop_notifications` changes:
 
 1. Read current prefs from `usePreferences()`.
-2. Call the bridge's `isPermissionGranted` (→ `window.electronAPI.notificationsPermissionGranted`) — if not granted *and* the user has notifications enabled, request permission via `requestPermission`.
+2. Call the bridge's `isPermissionGranted` (→ `tauri-plugin-notification`) — if not granted *and* the user has notifications enabled, request permission via `requestPermission`.
 3. Push `{ allowSound, allowOsNotif, osPermissionGranted }` into the dispatcher.
 
 Result: toggling notifications "on" in Preferences → granting the OS prompt → next event uses the new state, no restart needed.

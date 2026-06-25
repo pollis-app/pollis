@@ -14,7 +14,7 @@
 |---|---|
 | The user's device | Network (any path between the device and any remote service) |
 | The OS keystore (Keychain / Secret Service / Credential Manager) | Turso (libSQL) — the remote relational database |
-| The Electron application binary (renderer + preload + Rust sidecar `pollis-node`) at the version the user installed | Cloudflare R2 — object storage for attachments |
+| The signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the version the user installed | Cloudflare R2 — object storage for attachments |
 | The local SQLCipher database file | LiveKit — SFU and signalling for voice and realtime events |
 | The user-held Secret Key (printed once, expected to be stored offline) | Resend — outbound email transit for OTPs |
 | The user-held PIN (in the user's head) | Anyone with read access to a copy of `accounts.json` or the keystore who does not also have the PIN |
@@ -337,7 +337,7 @@ This is the same shape as MEGA's "Convergent Encrypted" layer (without its block
 
 R2 is reached over HTTPS with **AWS SigV4** (`sigv4_headers`): canonical request → string-to-sign → date-region-service-derived signing key (HMAC-SHA256) → signature in the `Authorization` header. The `R2_ACCESS_KEY_ID` and `R2_SECRET_KEY` are baked into the binary, like `TURSO_TOKEN`. Same shared-credential trust model (§8.1).
 
-The `upload_media` command reads files from disk by path inside the Rust sidecar, not over Electron IPC, so arbitrary-size attachments do not hit IPC framing limits.
+The `upload_media` command reads files from disk by path inside `pollis-core` (in the Tauri host process), rather than marshalling bytes across the `invoke` IPC boundary, so arbitrary-size attachments do not hit IPC framing limits.
 
 ### 9.4 Avatars and group icons
 
@@ -382,7 +382,7 @@ The MLS group used is the same group that protects the channel's text messages (
 
 ### 10.3 Audio pipeline (defensive context)
 
-Mic capture: `cpal` in 10 ms i16 mono frames → optional RNNoise (`nnnoiseless`) → WebRTC AudioProcessing module (AGC2 + NS + HPF + AEC, via `webrtc-audio-processing`) → LiveKit `NativeAudioSource.capture_frame` → SRTP. The entire pipeline runs in the Rust sidecar; audio never enters the renderer. This is a deliberate architecture choice (cross-platform parity with mobile, and predictable allocation that avoids V8 GC pressure on multi-MB media buffers), enforced by the surrounding code and described in `CLAUDE.md`.
+Mic capture: `cpal` in 10 ms i16 mono frames → optional RNNoise (`nnnoiseless`) → WebRTC AudioProcessing module (AGC2 + NS + HPF + AEC, via `webrtc-audio-processing`) → LiveKit `NativeAudioSource.capture_frame` → SRTP. The entire pipeline runs in the Rust core (the Tauri host process); audio never enters the renderer. This is a deliberate architecture choice (cross-platform parity with mobile, and predictable allocation that avoids JS-heap GC pressure on multi-MB media buffers), enforced by the surrounding code and described in `CLAUDE.md`.
 
 ### 10.4 Signalling channel
 

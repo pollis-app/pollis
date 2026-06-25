@@ -23,10 +23,9 @@ Start here. Navigate to the article you need.
 | Layer | Tech | Location |
 |-------|------|----------|
 | Frontend | React, TypeScript, Vite, TailwindCSS | `frontend/src/` |
-| Desktop shell | Electron 33 (main + preload + renderer) | `electron/src/` |
+| Desktop shell | Tauri 2 (Rust host + system WebView renderer) | `src-tauri/src/` |
 | Backend (logic) | Rust workspace crate `pollis-core` | `pollis-core/src/` |
-| Backend (host binding) | Rust napi-rs binding `pollis-node` loaded by the Electron main process | `pollis-node/src/` |
-| Backend (legacy shell, rollback only) | Rust, Tauri 2 — `#[tauri::command]` shims, plugins, lifecycle | `src-tauri/src/` |
+| Backend (host binding) | Tauri host — `#[tauri::command]` shims, plugins, `invoke_handler!`, lifecycle | `src-tauri/src/` |
 | Remote DB | Turso (libSQL) | `pollis-core/src/db/migrations/000000_baseline.sql` + `000*.sql` |
 | Local DB | SQLite (rusqlite) | `pollis-core/src/db/local_schema.sql` |
 | Encryption | OpenMLS (RFC 9420) | `pollis-core/src/commands/mls.rs` |
