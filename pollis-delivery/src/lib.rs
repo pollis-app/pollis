@@ -23,6 +23,7 @@ pub mod auth;
 pub mod commit;
 pub mod db;
 pub mod error;
+pub mod writes;
 
 use std::sync::Arc;
 
@@ -40,17 +41,37 @@ use crate::commit::{CommitsResponse, SubmitBody, SubmitResponse};
 use crate::db::Db;
 use crate::error::{AppError, AuthRejection};
 
-/// Shared handler state: the DB plus whether write auth is enforced.
+/// Shared handler state: the DBs plus whether write auth is enforced.
 #[derive(Clone)]
 pub struct AppState {
+    /// Main DB — user/device metadata (auth lookups live here).
     pub db: Arc<Db>,
+    /// Commit-log DB — the MLS control-plane tables (`mls_commit_log`,
+    /// `mls_group_info`, `mls_welcome`). The DS is its sole writer. Defaults to
+    /// the same handle as `db` when no separate log DB is configured.
+    pub log_db: Arc<Db>,
     /// When true, `POST /v1/commits` requires a valid device signature.
     pub require_auth: bool,
 }
 
 impl AppState {
+    /// Single-DB state: the commit log shares `db`.
     pub fn new(db: Arc<Db>, require_auth: bool) -> Self {
-        Self { db, require_auth }
+        let log_db = Arc::clone(&db);
+        Self {
+            db,
+            log_db,
+            require_auth,
+        }
+    }
+
+    /// State with a separate commit-log DB for the MLS control-plane tables.
+    pub fn new_with_log_db(db: Arc<Db>, log_db: Arc<Db>, require_auth: bool) -> Self {
+        Self {
+            db,
+            log_db,
+            require_auth,
+        }
     }
 }
 
@@ -64,8 +85,17 @@ pub fn require_auth_from_env() -> bool {
 }
 
 /// Build the HTTP router from a bare DB, reading the auth gate from the
-/// environment. Used by `main`; logs the enforcement state at startup.
+/// environment. Used by `main`; logs the enforcement state at startup. The
+/// commit log shares the single `db` (no separate log DB).
 pub fn build_router(db: Arc<Db>) -> Router {
+    let log_db = Arc::clone(&db);
+    build_router_with_log_db(db, log_db)
+}
+
+/// Like [`build_router`], but with a separate commit-log DB for the MLS
+/// control-plane tables. `log_db` may be the same handle as `db` (single-DB
+/// fallback). Reads the auth gate from the environment.
+pub fn build_router_with_log_db(db: Arc<Db>, log_db: Arc<Db>) -> Router {
     let require_auth = require_auth_from_env();
     tracing::info!(
         require_auth,
@@ -76,7 +106,7 @@ pub fn build_router(db: Arc<Db>) -> Router {
             "OFF (POLLIS_DS_REQUIRE_AUTH unset — writes accepted unauthenticated)"
         }
     );
-    build_router_with_state(AppState::new(db, require_auth))
+    build_router_with_state(AppState::new_with_log_db(db, log_db, require_auth))
 }
 
 /// Build the HTTP router from an explicit [`AppState`]. Exposed so tests can
@@ -86,6 +116,10 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/v1/commits", post(submit))
         .route("/v1/commits/:conversation_id", get(commits))
+        .route("/v1/group-info", post(writes::group_info))
+        .route("/v1/welcomes/ack", post(writes::welcomes_ack))
+        .route("/v1/welcomes/reset", post(writes::welcomes_reset))
+        .route("/v1/welcomes/purge", post(writes::welcomes_purge))
         .with_state(state)
 }
 
@@ -148,7 +182,9 @@ async fn submit(
         }
     }
 
-    let conn = state.db.conn()?;
+    // The MLS control-plane tables live on the commit-log DB (== main DB when no
+    // separate log DB is configured).
+    let conn = state.log_db.conn()?;
     let outcome = commit::submit_commit(&conn, &parsed).await?;
     let code = match &outcome {
         SubmitResponse::Accepted { .. } => StatusCode::OK,
@@ -170,7 +206,7 @@ async fn commits(
     Path(conversation_id): Path<String>,
     Query(q): Query<Since>,
 ) -> Result<impl IntoResponse, AppError> {
-    let conn = state.db.conn()?;
+    let conn = state.log_db.conn()?;
     let head = commit::head_epoch(&conn, &conversation_id).await?;
     let commits = commit::fetch_commits(&conn, &conversation_id, q.since).await?;
     Ok(Json(CommitsResponse { head, commits }))

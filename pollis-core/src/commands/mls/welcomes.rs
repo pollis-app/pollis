@@ -82,11 +82,14 @@ pub async fn process_welcome(
 ///
 /// Called on startup and from `poll_pending_messages`.
 pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, device_id: &str) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
+    // R6: read undelivered welcomes from the read-only log DB (falls back to
+    // remote_db when the log DB isn't configured). The delivered=1 write below
+    // no longer shares this connection — it routes through the DS (W5 seam).
+    let read_conn = state.log_db.conn().await?;
 
     // Fetch welcomes targeted at this specific device, plus legacy rows
     // (recipient_device_id IS NULL) from before multi-device was deployed.
-    let mut rows = conn.query(
+    let mut rows = read_conn.query(
         "SELECT id, welcome_data FROM mls_welcome \
          WHERE recipient_id = ?1 AND delivered = 0 \
          AND (recipient_device_id = ?2 OR recipient_device_id IS NULL) \
@@ -104,23 +107,50 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     drop(rows);
 
     let had_welcomes = !items.is_empty();
+    // IDs to mark delivered. We ack even apply failures — the private key for a
+    // failed Welcome was likely orphaned by a DB wipe and will never succeed;
+    // the repair mechanism generates a fresh Welcome. (Same semantics as before.)
+    let mut processed_ids: Vec<String> = Vec::new();
     for (id, bytes) in items {
         match apply_welcome(state, &bytes).await {
             Ok(()) => {
                 eprintln!("[mls] poll_mls_welcomes: applied welcome {id}");
             }
             Err(e) => {
-                // Mark as delivered even on failure — the private key for this
-                // Welcome was likely orphaned by a DB wipe and will never
-                // succeed. The repair mechanism will generate a new Welcome.
                 eprintln!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
             }
         }
+        processed_ids.push(id);
+    }
 
-        let _ = conn.execute(
-            "UPDATE mls_welcome SET delivered = 1 WHERE id = ?1",
-            libsql::params![id],
-        ).await;
+    // W5 seam: mark delivered=1 through the Delivery Service (sole writer) when
+    // configured; else direct UPDATE on remote_db (tests / pre-cutover).
+    if !processed_ids.is_empty() {
+        match state.config.pollis_delivery_url.as_deref() {
+            Some(_) => {
+                let body = serde_json::json!({ "welcome_ids": processed_ids });
+                match super::ds_client::ds_post(state, "/v1/welcomes/ack", &body).await {
+                    Ok(resp) if resp.status().is_success() => {}
+                    Ok(resp) => {
+                        let s = resp.status();
+                        let txt = resp.text().await.unwrap_or_default();
+                        eprintln!("[mls] poll_mls_welcomes: DS ack {s}: {txt}");
+                    }
+                    Err(e) => {
+                        eprintln!("[mls] poll_mls_welcomes: DS ack failed: {e}");
+                    }
+                }
+            }
+            None => {
+                let conn = state.remote_db.conn().await?;
+                for id in &processed_ids {
+                    let _ = conn.execute(
+                        "UPDATE mls_welcome SET delivered = 1 WHERE id = ?1",
+                        libsql::params![id.clone()],
+                    ).await;
+                }
+            }
+        }
     }
 
     // Each processed welcome consumed a KP — top back up to TARGET.

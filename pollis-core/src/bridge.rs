@@ -100,6 +100,12 @@ impl From<anyhow::Error> for BridgeError {
 struct InitConfig {
     turso_url: String,
     turso_token: String,
+    /// Optional read-only commit-log DB connection. Absent → log_db falls back
+    /// to the main remote DB.
+    #[serde(default)]
+    log_db_url: Option<String>,
+    #[serde(default)]
+    log_db_token: Option<String>,
     /// Absolute path of a writable directory the bridge can park per-app
     /// state in. Required on Android (we drop the CA bundle there and
     /// scope `POLLIS_DATA_DIR` to it); optional everywhere else, where
@@ -150,6 +156,8 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
             let config = Config {
                 turso_url: parsed.turso_url,
                 turso_token: parsed.turso_token,
+                log_db_url: parsed.log_db_url.filter(|s| !s.is_empty()),
+                log_db_token: parsed.log_db_token.filter(|s| !s.is_empty()),
                 r2_endpoint: parsed.r2_endpoint,
                 r2_access_key_id: parsed.r2_access_key_id,
                 r2_secret_access_key: parsed.r2_secret_access_key,

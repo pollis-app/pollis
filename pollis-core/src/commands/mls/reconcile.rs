@@ -39,7 +39,8 @@ pub(super) async fn our_commit_is_canonical(
     epoch: i64,
     our_commit: &[u8],
 ) -> bool {
-    let conn = match state.remote_db.conn().await {
+    // Read-only commit-log lookup → log_db (falls back to remote_db pre-cutover).
+    let conn = match state.log_db.conn().await {
         Ok(c) => c,
         Err(_) => return false,
     };

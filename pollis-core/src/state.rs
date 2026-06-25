@@ -28,6 +28,12 @@ pub struct AppState {
     /// None until a user logs in. Opened per-user as pollis_{user_id}.db.
     pub local_db: Arc<Mutex<Option<LocalDb>>>,
     pub remote_db: Arc<RemoteDb>,
+    /// Read-only connection to the commit-log DB (`mls_commit_log` /
+    /// `mls_welcome` / `mls_group_info`). Falls back to `remote_db` when the
+    /// log DB isn't configured (tests / pre-cutover), so repointing reads here
+    /// is behaviorally inert until `LOG_DB_*` is set. Reads only — writes to the
+    /// three MLS tables still go through `remote_db` (and, post-cutover, the DS).
+    pub log_db: Arc<RemoteDb>,
     /// Pluggable secret store. Production wires an [`OsKeystore`]; integration
     /// tests inject an [`InMemoryKeystore`] per simulated client so multiple
     /// users coexist in one test process without sharing session tokens or
@@ -116,10 +122,17 @@ pub struct AppState {
 
 impl AppState {
     pub async fn new(config: Config) -> crate::error::Result<Self> {
-        let remote_db = RemoteDb::connect(&config.turso_url, &config.turso_token).await?;
+        let remote_db = Arc::new(RemoteDb::connect(&config.turso_url, &config.turso_token).await?);
+        // Read-only commit-log DB when configured; otherwise reuse remote_db so
+        // behavior is unchanged pre-cutover.
+        let log_db = match (&config.log_db_url, &config.log_db_token) {
+            (Some(url), Some(token)) => Arc::new(RemoteDb::connect(url, token).await?),
+            _ => Arc::clone(&remote_db),
+        };
         Ok(Self::new_with_parts(
             config,
-            Arc::new(remote_db),
+            remote_db,
+            log_db,
             keystore::default_os_keystore(),
         ))
     }
@@ -130,12 +143,14 @@ impl AppState {
     pub fn new_with_parts(
         config: Config,
         remote_db: Arc<RemoteDb>,
+        log_db: Arc<RemoteDb>,
         keystore: Arc<dyn Keystore>,
     ) -> Self {
         Self {
             config,
             local_db: Arc::new(Mutex::new(None)),
             remote_db,
+            log_db,
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
@@ -277,6 +292,22 @@ impl AppState {
                 .flatten()
                 .and_then(|b| String::from_utf8(b).ok());
 
+            // W6/W7 seam: these welcome-delivery resets are intentionally kept
+            // on the direct `remote_db` path (NOT routed through the DS) — a
+            // deliberate exception to the sole-writer seam. Reason: this branch
+            // only fires when `mls_kv` is empty, i.e. the local DB was just
+            // created or wiped. In that exact state the device's stable MLS
+            // signing key (`load_or_create_device_signer`) has been regenerated
+            // locally and does NOT yet match the `mls_signature_pub` the server
+            // has on file, and `ensure_device_cert` (which republishes it) has
+            // not run yet at this point in startup. A signed DS call here would
+            // therefore be rejected (401). It is also awkward to sign from here:
+            // this is `&self`, not `&Arc<AppState>`, and the freshly-opened
+            // local DB isn't installed in `self.local_db` yet. So we write
+            // direct.
+            // TODO(#420): once the DS exposes an unauthenticated or
+            // device-cert-bootstrap reset path (or this reset moves to after
+            // `ensure_device_cert`), route W6/W7 through `/v1/welcomes/reset`.
             match self.remote_db.conn().await {
                 Ok(conn) => {
                     if let Some(ref did) = maybe_device_id {

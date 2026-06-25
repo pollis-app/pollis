@@ -58,9 +58,9 @@ pub async fn submit_commit(
     welcomes: &[WelcomeOut],
 ) -> Result<SubmitResult> {
     match state.config.pollis_delivery_url.as_deref() {
-        Some(base) => {
+        Some(_) => {
             http_submit(
-                base,
+                state,
                 conversation_id,
                 epoch,
                 sender_id,
@@ -169,7 +169,7 @@ async fn direct_submit(
 
 #[allow(clippy::too_many_arguments)]
 async fn http_submit(
-    base_url: &str,
+    state: &Arc<AppState>,
     conversation_id: &str,
     epoch: i64,
     sender_id: &str,
@@ -201,13 +201,10 @@ async fn http_submit(
         "group_info": group_info.map(b64),
         "welcomes": welcomes_json,
     });
-    let url = format!("{}/v1/commits", base_url.trim_end_matches('/'));
-    let resp = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| Error::Other(anyhow::anyhow!("delivery submit: {e}")))?;
+    // Signed POST: attaches the four `X-Pollis-*` auth headers. When the DS has
+    // auth disabled the headers are ignored, so behavior is identical to the
+    // previous unsigned submit.
+    let resp = super::ds_client::ds_post(state, "/v1/commits", &body).await?;
     match resp.status() {
         s if s.is_success() => Ok(SubmitResult::Committed),
         reqwest::StatusCode::CONFLICT => Ok(SubmitResult::LostRace),

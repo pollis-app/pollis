@@ -19,5 +19,7 @@ mod dms;
 mod groups;
 #[path = "flows/messages.rs"]
 mod messages;
+#[path = "flows/security.rs"]
+mod security;
 #[path = "flows/voice.rs"]
 mod voice;
