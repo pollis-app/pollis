@@ -31,7 +31,10 @@ pub use key_packages::{
 };
 
 // ── Welcomes ─────────────────────────────────────────────────────────────────
-pub use welcomes::{apply_welcome, poll_mls_welcomes, poll_mls_welcomes_inner, process_welcome};
+pub use welcomes::{
+    apply_welcome, poll_mls_welcomes, poll_mls_welcomes_inner, process_welcome,
+    reset_welcome_delivery,
+};
 
 // ── Group lifecycle / encrypt / decrypt / commit processing ──────────────────
 pub use group_state::{

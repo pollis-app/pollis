@@ -424,13 +424,23 @@ pub async fn set_pin(
     *state.media_server_token.lock().await =
         Some(crate::media_server::fresh_token());
 
-    state.load_user_db_with_key(&user_id, &db_key).await?;
+    let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
 
     if let Some(device_id) = state.device_id.lock().await.clone() {
         if let Err(e) =
             crate::commands::mls::ensure_device_cert(state, &user_id, &device_id).await
         {
             eprintln!("[pin] set_pin: ensure_device_cert failed (non-fatal): {e}");
+        }
+    }
+
+    // A freshly-created/wiped local DB: re-arm welcome delivery so
+    // `initialize_identity`'s poll re-processes Welcomes and restores MLS
+    // group memberships. Runs AFTER `ensure_device_cert` so the signed DS
+    // reset authenticates against the just-published device key. Best-effort.
+    if mls_was_empty {
+        if let Err(e) = crate::commands::mls::reset_welcome_delivery(state, &user_id).await {
+            eprintln!("[pin] set_pin: reset_welcome_delivery failed (non-fatal): {e}");
         }
     }
 
@@ -522,13 +532,22 @@ pub async fn unlock(
         .delete_for_user(ACCOUNT_ID_KEY_SLOT_LEGACY, &user_id)
         .await;
 
-    state.load_user_db_with_key(&user_id, &db_key).await?;
+    let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
 
     if let Some(device_id) = state.device_id.lock().await.clone() {
         if let Err(e) =
             crate::commands::mls::ensure_device_cert(state, &user_id, &device_id).await
         {
             eprintln!("[pin] unlock: ensure_device_cert failed (non-fatal): {e}");
+        }
+    }
+
+    // A freshly-created/wiped local DB: re-arm welcome delivery so the startup
+    // poll re-processes Welcomes and restores MLS group memberships. Runs AFTER
+    // `ensure_device_cert` so the signed DS reset authenticates. Best-effort.
+    if mls_was_empty {
+        if let Err(e) = crate::commands::mls::reset_welcome_delivery(state, &user_id).await {
+            eprintln!("[pin] unlock: reset_welcome_delivery failed (non-fatal): {e}");
         }
     }
 
