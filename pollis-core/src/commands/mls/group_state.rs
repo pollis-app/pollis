@@ -202,8 +202,11 @@ async fn external_join_attempt(
         }
     };
 
-    // 2. Run the external commit inside the local_db sync scope.
-    let commit_bytes: Vec<u8> = {
+    // 2. Run the external commit inside the local_db sync scope. Capture both
+    //    the commit and its resulting-epoch GroupInfo so they land atomically
+    //    through the delivery seam (Slice 1). Welcomes are empty — an external
+    //    join only adds self.
+    let (commit_bytes, new_group_info_bytes): (Vec<u8>, Option<Vec<u8>>) = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
@@ -262,6 +265,7 @@ async fn external_join_attempt(
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
                 "external commit load_psks: {e}"
             )))?
+            .create_group_info(true)
             .build(provider.rand(), provider.crypto(), &sig_keys, |_| true)
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
                 "external commit build: {e}"
@@ -271,10 +275,19 @@ async fn external_join_attempt(
                 "external commit finalize: {e}"
             )))?;
 
-        let (commit_msg, _welcome_msg, _new_group_info) = commit_bundle.into_contents();
-        commit_msg
+        let (commit_msg, _welcome_msg, new_group_info) = commit_bundle.into_contents();
+        let commit_bytes = commit_msg
             .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
+        let group_info_bytes = match new_group_info {
+            Some(gi) => Some(
+                gi.tls_serialize_detached().map_err(|e| {
+                    crate::error::Error::Other(anyhow::anyhow!("external commit group_info serialize: {e}"))
+                })?,
+            ),
+            None => None,
+        };
+        (commit_bytes, group_info_bytes)
     };
 
     // 3. Claim this epoch in mls_commit_log via compare-and-swap. If another
@@ -284,6 +297,11 @@ async fn external_join_attempt(
     // Submit through the delivery seam (Direct today, the Delivery Service once
     // POLLIS_DELIVERY_URL is set). LostRace → another member committed this
     // epoch first; discard our doomed local branch and retry.
+    // Resolve the outcome against the canonical log (issue #411). A network
+    // error may mean our external commit LANDED and only the response was lost,
+    // and a stale `LostRace` can be a retry of our own accepted commit — in both
+    // cases our exact commit bytes at `stored_epoch` prove we won and must keep
+    // the locally-finalized join, not discard it and wedge.
     match super::delivery::submit_commit(
         state,
         conversation_id,
@@ -292,11 +310,49 @@ async fn external_join_attempt(
         &commit_bytes,
         Some(user_id),
         Some(&device_id),
+        new_group_info_bytes.as_deref(),
+        // External join adds only self — no Welcomes to deliver.
+        &[],
     )
-    .await?
+    .await
     {
-        super::delivery::SubmitResult::LostRace => return Ok(ExternalJoinResult::LostRace),
-        super::delivery::SubmitResult::Committed => {}
+        Ok(super::delivery::SubmitResult::Committed) => {}
+        Ok(super::delivery::SubmitResult::LostRace) => {
+            if super::reconcile::our_commit_is_canonical(
+                state,
+                conversation_id,
+                stored_epoch,
+                &commit_bytes,
+            )
+            .await
+            {
+                eprintln!(
+                    "[mls] external_join: LostRace at epoch {stored_epoch} for {conversation_id} but our commit is canonical — adopting (lost success-response)"
+                );
+            } else {
+                return Ok(ExternalJoinResult::LostRace);
+            }
+        }
+        Err(e) => {
+            if super::reconcile::our_commit_is_canonical(
+                state,
+                conversation_id,
+                stored_epoch,
+                &commit_bytes,
+            )
+            .await
+            {
+                eprintln!(
+                    "[mls] external_join: submit errored but our commit is canonical at epoch {stored_epoch} for {conversation_id} — adopting (lost response): {e}"
+                );
+            } else {
+                // Genuine failure — discard the locally-finalized (orphaned)
+                // join group for symmetry with the LostRace path (the caller
+                // only forgets on LostRace), then surface the error.
+                let _ = forget_local_mls_group(state, conversation_id).await;
+                return Err(e);
+            }
+        }
     }
 
     // 4. Refresh the stored GroupInfo at the new epoch so any NEXT
@@ -770,38 +826,62 @@ pub(crate) async fn process_pending_commits_locked(
                 }
                 Err(e) => {
                     let msg = format!("{e}");
-                    // Two distinct recoverable failures, both handled by
-                    // dropping the local group so the external-rejoin below
-                    // rebuilds it from the latest published GroupInfo:
-                    //
-                    //   1. Eviction — we were removed; our keys can't open the
-                    //      commit. Re-join only if we're still a roster member
-                    //      (external_join no-ops cleanly if GroupInfo is gone).
-                    //
-                    //   2. Fork — the commit is at our CURRENT epoch (it passed
-                    //      the epoch-gap check above) yet still won't apply, so
-                    //      our local tree has diverged from the canonical
-                    //      branch. This is the residue of a historical
-                    //      concurrent-commit race (prod incident: group
-                    //      `01KQYX89…`); the UNIQUE(conversation_id, epoch)
-                    //      constraint stops new forks, but already-forked
-                    //      devices only heal by re-joining the live branch.
-                    //
-                    // Deleting drops only this device's MLS crypto state, not
-                    // its decrypted message history (that lives in the local
-                    // `message` table). The rejoin lands at the latest epoch,
-                    // so the next pass filters `epoch >= new_epoch` and can't
-                    // re-fail on the same commit — no recovery loop.
-                    if msg.contains("evicted") {
-                        eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
-                    } else {
+                    // Our OWN commit is canonical at this epoch — e.g. we
+                    // submitted it but a lost response made us converge instead
+                    // of merging (issue #411). openmls refuses to process its own
+                    // commit ("...created by this client"); the right move is to
+                    // ADOPT it by merging our pending commit, not delete the group
+                    // and try to re-join from a possibly-stale GroupInfo. This
+                    // advances us to the same epoch as everyone else.
+                    if msg.contains("created by this client") {
+                        if let Err(merge_err) = group.merge_pending_commit(&provider) {
+                            eprintln!(
+                                "[mls] process_pending_commits: own commit at epoch {} for {mls_group_id} but merge_pending failed ({merge_err}) — deleting to recover",
+                                commit.epoch
+                            );
+                            let _ = group.delete(provider.storage());
+                            break;
+                        }
                         eprintln!(
-                            "[mls] process_pending_commits: commit at epoch {} for {mls_group_id} failed to apply ({e}) — local state diverged from canonical branch; deleting local group to re-join",
+                            "[mls] process_pending_commits: adopted our own commit at epoch {} for {mls_group_id}",
                             commit.epoch
                         );
+                        // Fall through (no break) so this counts as applied and
+                        // the epoch advances.
+                    } else {
+                        // Two distinct recoverable failures, both handled by
+                        // dropping the local group so the external-rejoin below
+                        // rebuilds it from the latest published GroupInfo:
+                        //
+                        //   1. Eviction — we were removed; our keys can't open the
+                        //      commit. Re-join only if we're still a roster member
+                        //      (external_join no-ops cleanly if GroupInfo is gone).
+                        //
+                        //   2. Fork — the commit is at our CURRENT epoch (it passed
+                        //      the epoch-gap check above) yet still won't apply, so
+                        //      our local tree has diverged from the canonical
+                        //      branch. This is the residue of a historical
+                        //      concurrent-commit race (prod incident: group
+                        //      `01KQYX89…`); the UNIQUE(conversation_id, epoch)
+                        //      constraint stops new forks, but already-forked
+                        //      devices only heal by re-joining the live branch.
+                        //
+                        // Deleting drops only this device's MLS crypto state, not
+                        // its decrypted message history (that lives in the local
+                        // `message` table). The rejoin lands at the latest epoch,
+                        // so the next pass filters `epoch >= new_epoch` and can't
+                        // re-fail on the same commit — no recovery loop.
+                        if msg.contains("evicted") {
+                            eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
+                        } else {
+                            eprintln!(
+                                "[mls] process_pending_commits: commit at epoch {} for {mls_group_id} failed to apply ({e}) — local state diverged from canonical branch; deleting local group to re-join",
+                                commit.epoch
+                            );
+                        }
+                        let _ = group.delete(provider.storage());
+                        break;
                     }
-                    let _ = group.delete(provider.storage());
-                    break;
                 }
             }
 
@@ -811,6 +891,31 @@ pub(crate) async fn process_pending_commits_locked(
         if applied {
             current_epoch += 1;
             any_applied = true;
+        }
+    }
+
+    // Resolve any commit left DANGLING by an interrupted submit (a crash, or a
+    // `clear_pending_commit` that itself failed). If our commit had actually
+    // landed, the replay loop above would have adopted it (OwnCommit → merge),
+    // so a commit still pending here never made it into the canonical log.
+    // Clear it — otherwise a later blind `merge_pending_commit`
+    // (`load_group_with_signer` / reconcile) would advance us to a phantom epoch
+    // no other member can see, and our messages would become undecryptable to
+    // the group (issue #411 item 2). Safe even if it *had* landed: a future
+    // pass re-adopts it from the log.
+    {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            let provider = PollisProvider::new(db.conn());
+            let group_id = GroupId::from_slice(mls_group_id.as_bytes());
+            if let Ok(Some(mut group)) = MlsGroup::load(provider.storage(), &group_id) {
+                if group.pending_commit().is_some() {
+                    eprintln!(
+                        "[mls] process_pending_commits: clearing a dangling pending commit for {mls_group_id} (never landed) to avoid a phantom-epoch merge"
+                    );
+                    let _ = group.clear_pending_commit(provider.storage());
+                }
+            }
         }
     }
 

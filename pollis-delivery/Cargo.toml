@@ -23,6 +23,11 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
 ulid = "1"
+# Device-cert signature auth: verify the client's Ed25519 signature over a
+# canonical message that binds sha256(body). Same scheme/encoding pollis-core's
+# `verify_device_cert` uses (raw 32-byte pubkey, 64-byte PureEdDSA sig).
+ed25519-dalek = "2"
+sha2 = "0.10"
 anyhow = "1"
 thiserror = "1"
 tracing = "0.1"
@@ -30,3 +35,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Drive the real axum router in-process (tower::ServiceExt::oneshot) and mint
+# Ed25519 keypairs to sign test requests, mirroring pollis-core's device key.
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+rand_core = { version = "0.6", features = ["getrandom"] }

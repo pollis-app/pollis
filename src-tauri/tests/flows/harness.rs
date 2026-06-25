@@ -52,7 +52,7 @@ pub(crate) async fn world() -> &'static TestWorld {
     WORLD
         .get_or_init(|| async {
             // Loads .env.test and bypasses R2/LiveKit/Resend with placeholders.
-            let config = Config::for_test().expect("Config::for_test");
+            let mut config = Config::for_test().expect("Config::for_test");
 
             // Isolate local SQLCipher files to a process-unique temp dir so
             // stale `pollis_{user_id}.db` files can't leak between `cargo test`
@@ -82,9 +82,123 @@ pub(crate) async fn world() -> &'static TestWorld {
                 .await
                 .expect("bootstrap test turso schema");
 
+            // Spin up the real MLS Delivery Service in-process and route every
+            // client's commit submission through it. This exercises the deployed
+            // DS path (HTTP → pollis-delivery::commit::submit_commit) end to end
+            // in the flows suite instead of the Direct write path.
+            //
+            // Crucially the DS shares the harness's SAME `RemoteDb` handle rather
+            // than opening a second `Builder::new_local` against the file: two
+            // independent libsql `Database` instances on one local file don't
+            // share each other's WAL writes promptly, so a commit/Welcome/
+            // GroupInfo the DS wrote through a separate handle wouldn't be
+            // visible to the clients. Sharing the handle makes the DS the sole
+            // writer to the very rows the clients read — exactly like production,
+            // where the DS and the clients hit the same Turso. A single shared DS
+            // for the whole test run is fine.
+            let delivery_url = spawn_in_process_delivery(remote.clone()).await;
+            config.pollis_delivery_url = Some(delivery_url);
+
             TestWorld { remote, config }
         })
         .await
+}
+
+/// One-shot fault for the in-process DS: when armed, the next ACCEPTED commit is
+/// fully written (commit + GroupInfo + Welcomes land) but its success response
+/// is turned into a 500 — simulating a lost success-response. This exercises the
+/// client's idempotent adopt-on-lost-response path (issue #411) on the real DS
+/// (HTTP) path, which is the only path that can actually lose a response.
+pub(crate) static LOSE_NEXT_DS_RESPONSE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// The `/v1/commits` submit handler, driven against the SHARED `RemoteDb` so
+/// the DS writes land on the exact handle the clients read from. Mirrors
+/// `pollis_delivery::build_router`'s `submit` arm.
+async fn delivery_submit(
+    axum::extract::State(remote): axum::extract::State<Arc<RemoteDb>>,
+    axum::Json(body): axum::Json<pollis_delivery::commit::SubmitBody>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    use pollis_delivery::commit::SubmitResponse;
+    let conn = match remote.conn().await {
+        Ok(c) => c,
+        Err(e) => {
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                format!("conn: {e}"),
+            )
+                .into_response()
+        }
+    };
+    match pollis_delivery::commit::submit_commit(&conn, &body).await {
+        Ok(outcome) => {
+            // Lost-response fault: the commit + GroupInfo + Welcomes have already
+            // LANDED above; drop the success response so the client must recover
+            // by observing the commit is canonical and adopting it (issue #411).
+            if matches!(outcome, SubmitResponse::Accepted { .. })
+                && LOSE_NEXT_DS_RESPONSE.swap(false, std::sync::atomic::Ordering::SeqCst)
+            {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    "simulated lost submit response (test fault injection)",
+                )
+                    .into_response();
+            }
+            let code = match &outcome {
+                SubmitResponse::Accepted { .. } => axum::http::StatusCode::OK,
+                SubmitResponse::Rejected { .. } => axum::http::StatusCode::CONFLICT,
+            };
+            (code, axum::Json(outcome)).into_response()
+        }
+        Err(e) => (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("submit: {e}"),
+        )
+            .into_response(),
+    }
+}
+
+/// Boot an axum router exposing the DS's `/v1/commits` submit endpoint backed by
+/// the shared `RemoteDb`, bind it on a loopback port, and serve it on a
+/// DEDICATED OS thread with its own runtime so the server outlives every
+/// individual `#[tokio::test]` runtime.
+///
+/// Why a dedicated thread: each `#[tokio::test(flavor = "multi_thread")]` spins
+/// up and tears down its OWN Tokio runtime. If we spawned the server on the
+/// first test's runtime, it would die when that test finished, and every later
+/// test would hit a dead port (connection refused). Owning the server on a
+/// separate thread + runtime decouples its lifetime from the per-test runtimes,
+/// so the single shared DS stays up for the whole `cargo test` process.
+async fn spawn_in_process_delivery(remote: Arc<RemoteDb>) -> String {
+    use std::sync::mpsc;
+
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::Builder::new()
+        .name("in-process-delivery".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("delivery: build runtime");
+            rt.block_on(async move {
+                let router = axum::Router::new()
+                    .route("/v1/commits", axum::routing::post(delivery_submit))
+                    .with_state(remote);
+                // Bind :0 so the OS hands us a free port; read it back before serving.
+                let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                    .await
+                    .expect("delivery: bind loopback");
+                let addr = listener.local_addr().expect("delivery: local_addr");
+                tx.send(format!("http://{addr}")).expect("delivery: send url");
+                if let Err(e) = axum::serve(listener, router).await {
+                    eprintln!("[harness] in-process delivery service exited: {e}");
+                }
+            });
+        })
+        .expect("delivery: spawn thread");
+
+    rx.recv().expect("delivery: receive url")
 }
 
 pub(crate) async fn wipe() {
