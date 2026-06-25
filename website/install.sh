@@ -100,8 +100,8 @@ install_macos() {
     info "Mounting disk image..."
     mount_line=$(hdiutil attach "$dmg_path" -nobrowse -noautoopen | grep "/Volumes/")
     # `hdiutil attach` outputs tab-separated columns, and the volume path is
-    # the last column. electron-builder titles the DMG volume "Pollis <ver>"
-    # — the embedded space breaks `awk '{print $NF}'` (it returns just the
+    # the last column. The DMG volume title can contain a space (e.g.
+    # "Pollis 1.2.0"), which breaks `awk '{print $NF}'` (it returns just the
     # last whitespace-token). Strip everything up to the first `/Volumes/`
     # so the entire path, spaces and all, comes through.
     mount_point=$(echo "$mount_line" | sed -E 's|.*(/Volumes/.*)|\1|')
