@@ -1,10 +1,11 @@
 //! Client seam for submitting MLS commits to the log.
 //!
-//! Two paths, one decision:
-//! - **Direct** (default, when `POLLIS_DELIVERY_URL` is unset): the client
+//! Two paths, one decision, keyed on `config.pollis_delivery_url`
+//! (compile-time-baked from `POLLIS_DELIVERY_URL`, or runtime env in dev):
+//! - **Direct** (default, when it's `None`): the client
 //!   writes the commit straight to `mls_commit_log` — byte-for-byte the prior
 //!   behavior. Used in tests and until the Delivery Service is deployed.
-//! - **Http** (when `POLLIS_DELIVERY_URL` is set): submission routes through the
+//! - **Http** (when it's `Some(url)`): submission routes through the
 //!   deployed Delivery Service, which becomes the *sole writer* and serializes
 //!   commits per conversation authoritatively (race-free, gap-free, append-only
 //!   — see the `pollis-delivery` crate).
@@ -30,12 +31,6 @@ pub enum SubmitResult {
     LostRace,
 }
 
-fn delivery_base_url() -> Option<String> {
-    std::env::var("POLLIS_DELIVERY_URL")
-        .ok()
-        .filter(|s| !s.is_empty())
-}
-
 /// Submit one commit at `epoch` for `conversation_id`. See the module docs.
 pub async fn submit_commit(
     state: &Arc<AppState>,
@@ -46,9 +41,9 @@ pub async fn submit_commit(
     added_user_id: Option<&str>,
     added_device_ids: Option<&str>,
 ) -> Result<SubmitResult> {
-    match delivery_base_url() {
+    match state.config.pollis_delivery_url.as_deref() {
         Some(base) => {
-            http_submit(&base, conversation_id, epoch, sender_id, commit, added_user_id, added_device_ids).await
+            http_submit(base, conversation_id, epoch, sender_id, commit, added_user_id, added_device_ids).await
         }
         None => {
             direct_submit(state, conversation_id, epoch, sender_id, commit, added_user_id, added_device_ids).await

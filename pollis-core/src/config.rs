@@ -13,6 +13,10 @@ pub struct Config {
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
     pub resend_api_key: String,
+    /// Delivery Service base URL (e.g. `https://api.pollis.com`). When set, MLS
+    /// commit submission routes through the DS (serialized, race/gap-free);
+    /// when `None`, commits write direct to Turso. See `commands::mls::delivery`.
+    pub pollis_delivery_url: Option<String>,
 }
 
 impl Config {
@@ -44,6 +48,11 @@ impl Config {
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("LIVEKIT_API_SECRET").ok())
                 .unwrap_or_default(),
+            // Optional: absent → direct Turso writes; present → route through the DS.
+            pollis_delivery_url: option_env!("POLLIS_DELIVERY_URL")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("POLLIS_DELIVERY_URL").ok())
+                .filter(|s| !s.is_empty()),
         })
     }
 }
@@ -85,6 +94,8 @@ impl Config {
             livekit_api_key: String::new(),
             livekit_api_secret: String::new(),
             resend_api_key: String::new(),
+            // Integration tests exercise the direct write path.
+            pollis_delivery_url: None,
         })
     }
 }
