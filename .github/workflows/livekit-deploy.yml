@@ -1,0 +1,135 @@
+# Manual deploy of the LiveKit + nginx ingress stack to the VPS.
+#
+# Unlike the Delivery Service (built in CI, rolled by Watchtower — see
+# delivery-deploy-*.yml / #407), LiveKit and nginx run UPSTREAM images with
+# mounted config. Their deployable is config files, which Watchtower can't carry
+# and can't bootstrap a fresh box — so this uses Option B: SSH + `docker compose`
+# (#410). One-click from the Actions tab; the workflow SSHes to the box, syncs
+# the canonical `livekit/` config, renders the LiveKit keys from secrets, and
+# brings the stack up.
+#
+# Manual only — no push/tag trigger. See #406 (deploy-button pattern), #410.
+name: Deploy LiveKit + nginx
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [prod, dev]
+        default: prod
+      ref:
+        description: Git ref to deploy (branch, tag, or SHA)
+        required: false
+        default: main
+
+permissions:
+  contents: read
+
+# One deploy per environment at a time; never cancel an in-flight deploy.
+concurrency:
+  group: livekit-deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # GitHub Environment: optional manual-approval gate + audit trail, matching
+    # the delivery deploys. Create `livekit-prod` (and `livekit-dev` if used).
+    environment: livekit-${{ inputs.environment }}
+    env:
+      VPS_HOST: ${{ vars.VPS_HOST }}
+      VPS_USER: ${{ vars.VPS_USER }}
+      # Path to the canonical config dir on the box (bind-mount source).
+      REMOTE_DIR: /root/livekit
+    steps:
+      - name: Checkout ${{ inputs.ref }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Preflight — required secrets/vars present
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${VPS_HOST}" ] || missing+=("vars.VPS_HOST")
+          [ -n "${VPS_USER}" ] || missing+=("vars.VPS_USER")
+          [ -n "${{ secrets.VPS_SSH_KEY }}" ] || missing+=("secrets.VPS_SSH_KEY")
+          [ -n "${{ secrets.LIVEKIT_API_KEY }}" ] || missing+=("secrets.LIVEKIT_API_KEY")
+          [ -n "${{ secrets.LIVEKIT_API_SECRET }}" ] || missing+=("secrets.LIVEKIT_API_SECRET")
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Missing required config: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+      - name: Render LiveKit keys into livekit.yml
+        env:
+          LIVEKIT_API_KEY: ${{ secrets.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ secrets.LIVEKIT_API_SECRET }}
+        run: |
+          set -euo pipefail
+          # The committed livekit.yml has no `keys:` block by design; append it
+          # here so the secret only ever lives on the runner + the box, never git.
+          {
+            printf '\nkeys:\n'
+            printf '  %s: %s\n' "${LIVEKIT_API_KEY}" "${LIVEKIT_API_SECRET}"
+          } >> livekit/livekit.yml
+
+      - name: Set up SSH
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${VPS_HOST}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Sync config to the box (staging dir)
+        run: |
+          set -euo pipefail
+          SSH="ssh -i ~/.ssh/id_deploy"
+          $SSH "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}/.staging"
+          scp -i ~/.ssh/id_deploy \
+            livekit/nginx.conf livekit/livekit.yml livekit/docker-compose.yml \
+            "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/.staging/"
+
+      - name: Apply config + bring the stack up
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/id_deploy "${VPS_USER}@${VPS_HOST}" REMOTE_DIR="${REMOTE_DIR}" 'bash -seuo pipefail' <<'REMOTE'
+            cd "${REMOTE_DIR}"
+            # Apply bind-mounted files IN PLACE (cat >, not mv): nginx.conf and
+            # livekit.yml are bind-mounted by inode into the running containers
+            # (#405), so a rename would leave the container reading the old inode.
+            cat .staging/nginx.conf      > nginx.conf
+            cat .staging/livekit.yml     > livekit.yml
+            # The compose file is read by the CLI, not bind-mounted — plain copy.
+            cp .staging/docker-compose.yml docker-compose.yml
+            rm -rf .staging
+
+            # Pull pinned images + (re)create only what changed. NOT --remove-orphans:
+            # delivery/delivery-dev/watchtower are standalone (owned by #407) and
+            # must survive a LiveKit deploy.
+            docker compose -f docker-compose.yml up -d
+
+            # nginx.conf may have changed without the service def changing (bind
+            # mount, content-only) — validate then reload to pick it up gracefully.
+            docker compose exec -T nginx nginx -t
+            docker compose exec -T nginx nginx -s reload
+
+            # livekit reads its config only at start — restart to apply livekit.yml.
+            docker compose restart livekit
+
+            docker compose ps
+          REMOTE
+
+      - name: Validate — LiveKit up + delivery routing intact
+        run: |
+          set -euo pipefail
+          # LiveKit answers GET / with "OK".
+          echo "rtc.pollis.com:"
+          curl -fsS --max-time 20 https://rtc.pollis.com ; echo
+          # Regression check: the shared nginx still routes the delivery service
+          # after a LiveKit deploy (api.pollis.com -> delivery:8788).
+          echo "api.pollis.com/health:"
+          curl -fsS --max-time 20 https://api.pollis.com/health ; echo
