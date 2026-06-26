@@ -942,6 +942,84 @@ async fn delivery_dm_accept(
     }
 }
 
+/// `POST /v1/dm/add`.
+async fn delivery_dm_add(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::profile::AddDmMemberBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::profile::apply_add_dm_member(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("dm/add: {e}")),
+    }
+}
+
+/// `POST /v1/dm/remove`.
+async fn delivery_dm_remove(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::profile::RemoveDmMemberBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::profile::apply_remove_dm_member(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("dm/remove: {e}")),
+    }
+}
+
+/// `POST /v1/dm/leave`.
+async fn delivery_dm_leave(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::profile::LeaveDmBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::profile::apply_leave_dm(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("dm/leave: {e}")),
+    }
+}
+
 /// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
 /// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
 /// port, and serve it on a DEDICATED OS thread with its own runtime so the
@@ -1411,6 +1489,9 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     )
                     .route("/v1/dm/create", axum::routing::post(delivery_dm_create))
                     .route("/v1/dm/accept", axum::routing::post(delivery_dm_accept))
+                    .route("/v1/dm/add", axum::routing::post(delivery_dm_add))
+                    .route("/v1/dm/remove", axum::routing::post(delivery_dm_remove))
+                    .route("/v1/dm/leave", axum::routing::post(delivery_dm_leave))
                     // Domain D (#419) — all on the MAIN DB.
                     .route("/v1/key-packages", axum::routing::post(delivery_key_packages))
                     .route(

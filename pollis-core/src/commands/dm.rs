@@ -378,24 +378,42 @@ pub async fn add_user_to_dm_channel(
     added_by: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-    let now = chrono::Utc::now().to_rfc3339();
+    // DS seam: route the membership INSERT + watermark seeds through the
+    // Delivery Service when configured; else write Turso directly. The DS
+    // performs both writes in one transaction and re-derives the actor's DM
+    // membership server-side (a non-member cannot add anyone).
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let now = chrono::Utc::now().to_rfc3339();
+            let body = serde_json::json!({
+                "dm_channel_id": dm_channel_id,
+                "user_id": user_id,
+                "added_by": added_by,
+                "added_at": now,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/dm/add", &body).await?;
+        }
+        None => {
+            let conn = state.remote_db.conn().await?;
+            let now = chrono::Utc::now().to_rfc3339();
 
-    conn.execute(
-        "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at)
-         VALUES (?1, ?2, ?3, ?4)",
-        libsql::params![dm_channel_id.clone(), user_id.clone(), added_by.clone(), now],
-    ).await?;
+            conn.execute(
+                "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+                libsql::params![dm_channel_id.clone(), user_id.clone(), added_by.clone(), now],
+            ).await?;
 
-    // Initialize watermark for every device of the new member so pre-join
-    // messages don't block envelope cleanup indefinitely.
-    if let Err(e) = conn.execute(
-        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-         SELECT ?1, ?2, ud.device_id, datetime('now')
-         FROM user_device ud WHERE ud.user_id = ?2",
-        libsql::params![dm_channel_id.clone(), user_id.clone()],
-    ).await {
-        eprintln!("[watermark] add_user_to_dm_channel: watermark init failed: {e}");
+            // Initialize watermark for every device of the new member so pre-join
+            // messages don't block envelope cleanup indefinitely.
+            if let Err(e) = conn.execute(
+                "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                 SELECT ?1, ?2, ud.device_id, datetime('now')
+                 FROM user_device ud WHERE ud.user_id = ?2",
+                libsql::params![dm_channel_id.clone(), user_id.clone()],
+            ).await {
+                eprintln!("[watermark] add_user_to_dm_channel: watermark init failed: {e}");
+            }
+        }
     }
 
     // Reconcile adds the new member's devices to the MLS tree.
@@ -414,30 +432,46 @@ pub async fn remove_user_from_dm_channel(
     requester_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
+    // DS seam: route the membership DELETE through the Delivery Service when
+    // configured; else write Turso directly. The same authz rule (only the
+    // channel creator or the user themselves may remove a member) is enforced
+    // server-side on the DS path and inline here on the direct path.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "dm_channel_id": dm_channel_id,
+                "user_id": user_id,
+                "requester_id": requester_id,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/dm/remove", &body).await?;
+        }
+        None => {
+            let conn = state.remote_db.conn().await?;
 
-    // Only the channel creator or the user themselves can remove
-    let mut rows = conn.query(
-        "SELECT created_by FROM dm_channel WHERE id = ?1",
-        libsql::params![dm_channel_id.clone()],
-    ).await?;
+            // Only the channel creator or the user themselves can remove
+            let mut rows = conn.query(
+                "SELECT created_by FROM dm_channel WHERE id = ?1",
+                libsql::params![dm_channel_id.clone()],
+            ).await?;
 
-    let creator_id: String = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        return Err(Error::Other(anyhow::anyhow!("DM channel not found")));
-    };
+            let creator_id: String = if let Some(row) = rows.next().await? {
+                row.get(0)?
+            } else {
+                return Err(Error::Other(anyhow::anyhow!("DM channel not found")));
+            };
 
-    if requester_id != creator_id && requester_id != user_id {
-        return Err(Error::Other(anyhow::anyhow!(
-            "only the channel creator or the user themselves can remove a member"
-        )));
+            if requester_id != creator_id && requester_id != user_id {
+                return Err(Error::Other(anyhow::anyhow!(
+                    "only the channel creator or the user themselves can remove a member"
+                )));
+            }
+
+            conn.execute(
+                "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
+                libsql::params![dm_channel_id.clone(), user_id],
+            ).await?;
+        }
     }
-
-    conn.execute(
-        "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![dm_channel_id.clone(), user_id],
-    ).await?;
 
     // Reconcile removes the member's leaves from the MLS tree (was a security gap).
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -454,12 +488,45 @@ pub async fn leave_dm_channel(
     user_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
+    // DS seam: route the membership DELETE and the empty-channel teardown
+    // (envelopes + dm_channel) through the Delivery Service when configured; else
+    // write Turso directly. The DS does the member-delete + count + conditional
+    // teardown in ONE transaction so a DM never lingers half-deleted; authz binds
+    // the leave to the actor's own membership.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "dm_channel_id": dm_channel_id,
+                "user_id": user_id,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/dm/leave", &body).await?;
+        }
+        None => {
+            let conn = state.remote_db.conn().await?;
 
-    conn.execute(
-        "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![dm_channel_id.clone(), user_id.clone()],
-    ).await?;
+            conn.execute(
+                "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
+                libsql::params![dm_channel_id.clone(), user_id.clone()],
+            ).await?;
+
+            // If no members remain, clean up the channel and all associated data
+            let mut rows = conn.query(
+                "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
+                libsql::params![dm_channel_id.clone()],
+            ).await?;
+
+            let remaining: i64 = if let Some(row) = rows.next().await? {
+                row.get(0)?
+            } else {
+                0
+            };
+
+            if remaining == 0 {
+                conn.execute("DELETE FROM message_envelope WHERE conversation_id = ?1", libsql::params![dm_channel_id.clone()]).await?;
+                conn.execute("DELETE FROM dm_channel WHERE id = ?1", libsql::params![dm_channel_id.clone()]).await?;
+            }
+        }
+    }
 
     // Wipe local MLS state so the leaver can't decrypt future messages.
     match crate::commands::mls::forget_local_mls_group(state, &dm_channel_id).await {
@@ -474,23 +541,6 @@ pub async fn leave_dm_channel(
         serde_json::json!({"type": "membership_changed", "conversation_id": dm_channel_id}),
     ).await {
         eprintln!("[realtime] leave_dm_channel: notify room {dm_channel_id}: {e}");
-    }
-
-    // If no members remain, clean up the channel and all associated data
-    let mut rows = conn.query(
-        "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
-        libsql::params![dm_channel_id.clone()],
-    ).await?;
-
-    let remaining: i64 = if let Some(row) = rows.next().await? {
-        row.get(0)?
-    } else {
-        0
-    };
-
-    if remaining == 0 {
-        conn.execute("DELETE FROM message_envelope WHERE conversation_id = ?1", libsql::params![dm_channel_id.clone()]).await?;
-        conn.execute("DELETE FROM dm_channel WHERE id = ?1", libsql::params![dm_channel_id]).await?;
     }
 
     Ok(())
