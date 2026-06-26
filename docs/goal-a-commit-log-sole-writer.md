@@ -224,10 +224,14 @@ function no longer needs a same-conn write).
 | ~~S5 Dual-write + backfill~~ | ❎ cancelled (OD-2) | | fresh start, no backfill |
 | S6 Harness + tests | ✅ done (uncommitted) | working tree | In-process DS now serves ALL 5 routes (`/v1/commits` + W4–W8) with **auth always enforced** on the shared `RemoteDb` handle; reuses real `pollis_delivery::writes::*` + `auth::verify_request` (approach **b**: pure conn-level fns extracted in `writes.rs`). Commit handler keeps the #411 lost-response fault injection + adds the sig check. Harness flips `accounts.json` `last_active_user` to the acting client before each dispatch so signed DS writes attribute to the right user (multi-user-in-one-process). New `security::ds_rejects_unsigned_or_invalid_writes` acceptance test. **Fixed an S4a bug:** `writes::is_member` missed group-keyed MLS conversations (`group_member.group_id = conversation_id`) — every group GroupInfo republish 403'd. Full flows suite: **32 passed / 0 failed** with auth on. |
 | S7 Release CI + runbook | ✅ done (code) / ⏳ infra pending | working tree | `desktop-release.yml`: 2nd `db-apply.sh` step (log DB, `MIGRATIONS_DIR=migrations-log`, admin token) + RO-token injected into all 3 build jobs (admin token never in builds). `docs/goal-a-deploy-runbook.md` written. **Infra/human steps remain** (create Turso log DBs, mint tokens, Doppler→GH secrets, point DS at log DB, redeploy DS, ship release, flip RO token LAST). |
+| S9 Transparency reader repoint (#422) | ✅ done (uncommitted) | working tree | **Audit blind spot:** the `verifiable-log` builder/serve read `mls_commit_log` directly (source of verify.pollis.com's *group* transparency log) — cutover would freeze it. Fix: `source::connect_with_token` (per-DB token); builder reads `mls_commit_log` from the **log DB**, `account_key_log` from **main**; `serve live` repointed; `docker-entrypoint.sh` + `transparency-publish.yml` get `LOG_DB_URL`/`LOG_DB_AUTH_TOKEN` (fallback to main when unset). Makes the guarantee *stronger* — attests the DS-only-written copy. `cargo test -p verifiable-log-builder -p verifiable-log-serve` 47/0. **Must ship before prod cutover.** |
+
+### Provisioned (dev)
+- **`pollis-log-dev`** Turso DB created (group `pollis-dev`), migrated to v1 (only the 3 tables). RO + admin tokens minted (in session scratch). DS not yet repointed (Phase 2 paused pending S9 review).
 
 ### Remaining before #420 is fully shipped
-- **All code is done.** All 8 writes (W1–W8) route through the DS; the client makes no direct write to the three log-DB tables when the DS is configured.
-- **Infra cutover** per `docs/goal-a-deploy-runbook.md` (human/CI; not codeable here): create Turso log DBs, mint RO/RW tokens, Doppler→GH secrets, point the DS at the log DB + redeploy, ship a desktop release, flip the client RO token **last**.
+- **All code is done** (S1–S9). All 8 writes (W1–W8) route through the DS; the transparency builder/serve read the commit log from the log DB.
+- **Infra cutover** per `docs/goal-a-deploy-runbook.md` (human/CI): create Turso log DBs, mint RO/RW tokens, Doppler→GH secrets (incl. `LOG_DB_URL`/`LOG_DB_AUTH_TOKEN` for the transparency publisher), point DS at the log DB + redeploy, repoint the transparency publisher, ship a desktop release, flip the client RO token **last**.
 - Optional: turn `POLLIS_DS_REQUIRE_AUTH=true` in dev DS now that the harness proves signing works end-to-end.
 
 ---
@@ -243,3 +247,8 @@ function no longer needs a same-conn write).
 4. **Additive only.** Create tables in the log DB; never drop from the main DB in
    this phase.
 5. **Test WAL sharing.** Same log-DB handle for DS + clients in the harness.
+6. **Transparency publisher before/at cutover (#422).** The `verifiable-log`
+   builder/serve must be pointed at the log DB (`LOG_DB_URL`/`LOG_DB_AUTH_TOKEN`,
+   read token) before the DS starts writing commits there — else verify.pollis.com's
+   group/commit transparency log silently freezes at the cutover point.
+   `account_key_log` stays on the main DB. (Code: S9, done.)

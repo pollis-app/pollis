@@ -62,10 +62,19 @@ enum Command {
     /// same `/v1` artifacts and `/verify/group/<id>` endpoint as `serve`, but
     /// rebuilt in memory on demand (single-flight, at most one DB pull per TTL).
     Live {
-        /// Database source: a libSQL/Turso URL (uses `TURSO_AUTH_TOKEN`) or a
-        /// local SQLite file path. Falls back to `TURSO_DATABASE_URL` if omitted.
+        /// Main database source: a libSQL/Turso URL (uses `TURSO_AUTH_TOKEN`) or
+        /// a local SQLite file path. Falls back to `TURSO_DATABASE_URL` if
+        /// omitted. Used as the fallback log DB when `--log-db`/`LOG_DB_URL` are
+        /// unset.
         #[arg(long)]
         db: Option<String>,
+        /// Log database source for `mls_commit_log` (Goal A moves the commit log
+        /// into its own DB). A libSQL/Turso URL (uses `LOG_DB_AUTH_TOKEN`,
+        /// falling back to `TURSO_AUTH_TOKEN`) or a local SQLite file path.
+        /// Resolution order: this flag, then `LOG_DB_URL`, then `--db`. The live
+        /// server reads ONLY `mls_commit_log`, so it reads from the log DB.
+        #[arg(long)]
+        log_db: Option<String>,
         /// Port to bind on `127.0.0.1` (0 picks an ephemeral port).
         #[arg(long, default_value_t = 8787)]
         port: u16,
@@ -118,11 +127,19 @@ fn main() -> ExitCode {
         },
         Command::Live {
             db,
+            log_db,
             port,
             ttl_secs,
             signing_key_env,
             signing_key_file,
-        } => match run_live(db, port, ttl_secs, &signing_key_env, signing_key_file.as_deref()) {
+        } => match run_live(
+            db,
+            log_db,
+            port,
+            ttl_secs,
+            &signing_key_env,
+            signing_key_file.as_deref(),
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => fail(e),
         },
@@ -186,22 +203,44 @@ fn run_serve(dir: PathBuf, port: u16) -> Result<()> {
 
 fn run_live(
     db: Option<String>,
+    log_db: Option<String>,
     port: u16,
     ttl_secs: u64,
     signing_key_env: &str,
     signing_key_file: Option<&std::path::Path>,
 ) -> Result<()> {
-    let db = db
-        .or_else(|| std::env::var("TURSO_DATABASE_URL").ok())
+    let db = db.or_else(|| std::env::var("TURSO_DATABASE_URL").ok());
+
+    // The live server reads ONLY `mls_commit_log`, so it must read from the log
+    // DB. Resolve it from (1) --log-db, (2) LOG_DB_URL, (3) the main --db /
+    // TURSO_DATABASE_URL (single-DB / pre-cutover behaviour).
+    let log_db = log_db
+        .or_else(|| std::env::var("LOG_DB_URL").ok())
+        .or_else(|| db.clone())
         .ok_or_else(|| {
-            ServeError::Config("no database: pass --db <url-or-path> or set TURSO_DATABASE_URL".into())
+            ServeError::Config(
+                "no database: pass --log-db/--db <url-or-path> or set LOG_DB_URL/TURSO_DATABASE_URL"
+                    .into(),
+            )
         })?;
+    // The log DB has its own token; fall back to TURSO_AUTH_TOKEN so single-DB,
+    // tests, and pre-cutover all behave exactly as before. A local file path
+    // ignores the token entirely.
+    let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
+        .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
+        .unwrap_or_default();
 
     // Resolve the signing key BEFORE binding so a missing key fails fast — the
     // live server refuses to start without one (same loader as the builder).
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
-    let server = LiveServer::spawn(db, port, Duration::from_secs(ttl_secs), signing_key)?;
+    let server = LiveServer::spawn(
+        log_db,
+        log_token,
+        port,
+        Duration::from_secs(ttl_secs),
+        signing_key,
+    )?;
     println!(
         "serving LIVE read API at {}/v1/  (lazy refresh, ttl {ttl_secs}s)",
         server.base_url()

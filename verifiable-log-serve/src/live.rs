@@ -67,6 +67,9 @@ struct Cache {
 /// a tokio runtime for the async DB read, and the single-flight cache.
 struct Shared {
     db: String,
+    /// Auth token for the (log) DB. Empty for a local SQLite file path, which
+    /// ignores it. Each DB carries its own token after Goal A's cutover.
+    token: String,
     signing_key: SigningKey,
     ttl: Duration,
     runtime: tokio::runtime::Runtime,
@@ -136,7 +139,7 @@ impl Shared {
         // The libSQL read is async; drive it on the shared runtime. Single-flight
         // means at most one of these runs at a time.
         let rows = self.runtime.block_on(async {
-            let conn = source::connect(&self.db).await?;
+            let conn = source::connect_with_token(&self.db, &self.token).await?;
             source::read_commit_log(&conn).await
         })?;
 
@@ -174,11 +177,14 @@ impl LiveServer {
     /// **cold** — the first request triggers the first DB pull, so an idle server
     /// imposes no DB load.
     ///
-    /// `db` is a libSQL/Turso URL (auth via `TURSO_AUTH_TOKEN`) or a local SQLite
-    /// path. The caller must supply the signing key — the CLI loads it from env
-    /// or file and refuses to start without one.
+    /// `db` is a libSQL/Turso URL (authenticated with the supplied `token`) or a
+    /// local SQLite path (which ignores the token). After Goal A's cutover this
+    /// is the log DB holding `mls_commit_log`, with its own credentials. The
+    /// caller must supply the signing key — the CLI loads it from env or file and
+    /// refuses to start without one.
     pub fn spawn(
         db: String,
+        token: String,
         port: u16,
         ttl: Duration,
         signing_key: SigningKey,
@@ -200,6 +206,7 @@ impl LiveServer {
 
         let shared = Arc::new(Shared {
             db,
+            token,
             signing_key,
             ttl,
             runtime,
