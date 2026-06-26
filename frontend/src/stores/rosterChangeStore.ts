@@ -49,7 +49,19 @@ class RosterChangeStore {
       return;
     }
     const existing = this.byConversation[conversation_id] ?? [];
-    const next = [...existing, ...banners];
+    // De-dupe by the banner's stable id (conversation:epoch:kind:user[:device]).
+    // The reconciling client receives each roster change TWICE — once via the
+    // local EventSink and once via the room broadcast that same reconcile
+    // triggers (the server delivers the data packet to the publisher's own
+    // client too). Both carry the same id, so a single join would otherwise
+    // render two identical "X joined the group" banners. A genuine re-join
+    // lands at a new epoch → different id → still shown.
+    const seen = new Set(existing.map((b) => b.id));
+    const fresh = banners.filter((b) => !seen.has(b.id));
+    if (fresh.length === 0) {
+      return;
+    }
+    const next = [...existing, ...fresh];
     const trimmed =
       next.length > MAX_PER_CONVERSATION
         ? next.slice(next.length - MAX_PER_CONVERSATION)
