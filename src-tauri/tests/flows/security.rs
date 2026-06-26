@@ -167,3 +167,63 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
     drop(bob);
     drop(mallory);
 }
+
+/// Domain-D (#419) server-side AUTHORIZATION: every domain-D write is
+/// owner-scoped, so a *validly signed* request that names another user as the
+/// owner must be refused at 403 (not 401 — the signature is real). This proves a
+/// device cannot publish key packages or register a push token *under another
+/// user's identity*, which would let it impersonate that user in MLS adds or
+/// hijack their push delivery.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ds_rejects_domain_d_writes_for_another_user() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut mallory = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    // Mallory is fully enrolled (real device key) so the rejections below are
+    // "not your account" (403), never "unknown device" (401).
+    let _mallory = mallory.sign_up("mallory@test.local").await;
+
+    let mallory_device = mallory
+        .state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .expect("mallory device_id");
+
+    // (1) Mallory signs a key-package publish that attributes the rows to ALICE.
+    //     resolve_actor refuses the body's user_id ≠ signer → 403.
+    let kp_body = serde_json::to_vec(&json!({
+        "device_id": mallory_device,
+        "packages": [{ "ref_hash": "deadbeef", "key_package": "AA==" }],
+        "user_id": alice_profile.id,
+    }))
+    .expect("serialize key-package body");
+    let code = signed_post_status(&mallory, "/v1/key-packages", &kp_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed key-package publish naming ANOTHER user must be FORBIDDEN, got {code}"
+    );
+
+    // (2) Mallory signs a push-token registration under ALICE's user_id → 403,
+    //     so she can't redirect alice's background notifications to her device.
+    let push_body = serde_json::to_vec(&json!({
+        "token": "ExponentPushToken[mallory]",
+        "platform": "ios",
+        "updated_at": "2026-01-01T00:00:00+00:00",
+        "user_id": alice_profile.id,
+    }))
+    .expect("serialize push-token body");
+    let code = signed_post_status(&mallory, "/v1/push-tokens", &push_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed push-token register naming ANOTHER user must be FORBIDDEN, got {code}"
+    );
+
+    drop(alice);
+    drop(mallory);
+}
