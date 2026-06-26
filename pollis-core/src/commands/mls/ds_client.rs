@@ -60,9 +60,21 @@ fn now_unix() -> i64 {
         .unwrap_or(0)
 }
 
-/// The current signed-in user's id — the `last_active_user` in the local
-/// accounts index, the same identity every command treats as "me".
-fn current_user_id() -> Result<String> {
+/// The signing user's id for THIS `AppState`.
+///
+/// Prefer the instance's own authenticated session (`state.unlock`). Co-located
+/// clients (the supported "two clients on one machine" dev workflow) share the
+/// global `accounts.json`, so its `last_active_user` is whoever logged in last —
+/// not reliably *this* client's user. Signing a DS write under the wrong user
+/// makes the device-signature lookup miss its `user_device` row → 401. Fall back
+/// to the accounts index only before a session is unlocked (single-user installs
+/// / early startup).
+async fn current_user_id(state: &Arc<AppState>) -> Result<String> {
+    if let Some(u) = state.unlock.lock().await.as_ref() {
+        if !u.user_id.is_empty() {
+            return Ok(u.user_id.clone());
+        }
+    }
     let index = crate::accounts::read_accounts_index()?;
     index
         .last_active_user
@@ -88,7 +100,7 @@ pub async fn ds_post(
         .as_deref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("pollis_delivery_url not configured")))?;
 
-    let user_id = current_user_id()?;
+    let user_id = current_user_id(state).await?;
     let device_id = state
         .device_id
         .lock()
