@@ -973,8 +973,9 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
 
     // Precondition sanity (diagnostic): the fork was actually produced. The
     // add-bob commit was epoch 0, so the concurrent adds race for epoch 1.
-    let remote = alice.state.remote_db.clone();
-    let distinct = distinct_commits_at_epoch(&remote, &group_id, 1).await;
+    // The commit log lives on the LOG DB (split harness), so inspect it there.
+    let log = alice.state.log_db.clone();
+    let distinct = distinct_commits_at_epoch(&log, &group_id, 1).await;
     eprintln!("[test] distinct commits at epoch 1 = {distinct} (fork iff > 1)");
 
     // Membership never shrank — bob is still a current member.
@@ -1292,7 +1293,9 @@ async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
 
     let group_id = alice.create_group("Atomic").await;
     let channel_id = alice.general_channel_id(&group_id).await;
-    let remote = alice.state.remote_db.clone();
+    // The MLS control-plane tables (`mls_group_info`, `mls_welcome`) live on the
+    // LOG DB in the split harness — inspect them there, not on the main DB.
+    let remote = alice.state.log_db.clone();
 
     // Baseline GroupInfo: init_mls_group published the epoch-0 GroupInfo. The
     // MLS group is keyed by group_id (the channel's group), so that's the

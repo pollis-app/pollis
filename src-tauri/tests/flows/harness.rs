@@ -21,7 +21,10 @@ use pollis_lib::config::Config;
 use pollis_lib::db::remote::RemoteDb;
 use pollis_lib::keystore::{InMemoryKeystore, Keystore};
 use pollis_lib::state::AppState;
-use pollis_lib::test_harness::{bootstrap_schema, build_client_app, invoke, wipe_remote};
+use pollis_lib::test_harness::{
+    bootstrap_log_schema, bootstrap_schema, build_client_app, drop_log_tables_from_main, invoke,
+    wipe_remote,
+};
 use serde_json::json;
 use tauri::test::MockRuntime;
 use tauri::{App, WebviewWindow};
@@ -42,7 +45,15 @@ pub(crate) const TEST_PIN: &str = "0000";
 /// Construction is lazy + process-wide so integration tests share one
 /// backend file but still run serially (the wipe would race otherwise).
 pub(crate) struct TestWorld {
+    /// Main DB — users/devices/groups/channels/membership/messages, plus the
+    /// auth lookups (`user_device`) the DS verifies against.
     pub(crate) remote: Arc<RemoteDb>,
+    /// Commit-log DB — the three MLS control-plane tables (`mls_commit_log`,
+    /// `mls_welcome`, `mls_group_info`) and NOTHING else. A genuinely separate
+    /// libsql file so a misrouted query (a main read on the log handle, or a
+    /// log read on the main handle) fails with "no such table" instead of
+    /// silently succeeding on one shared file. Mirrors the #420 production split.
+    pub(crate) log: Arc<RemoteDb>,
     pub(crate) config: Config,
 }
 
@@ -69,8 +80,8 @@ pub(crate) async fn world() -> &'static TestWorld {
             // integration tests.
             std::env::set_var("DEV_OTP", DEV_OTP);
 
-            // Stand-in for "remote Turso" — a libsql file in the same temp
-            // dir as the per-user SQLCipher DBs. No network round-trip.
+            // Stand-in for "remote Turso" (the MAIN DB) — a libsql file in the
+            // same temp dir as the per-user SQLCipher DBs. No network round-trip.
             let remote_db_path = path.join("test_turso.db");
             let remote = Arc::new(
                 RemoteDb::connect_local(&remote_db_path)
@@ -82,24 +93,45 @@ pub(crate) async fn world() -> &'static TestWorld {
                 .await
                 .expect("bootstrap test turso schema");
 
+            // SECOND physical libsql file for the commit-log DB. This is the
+            // whole point of the split harness: the three MLS control-plane
+            // tables live ONLY here, so a query routed to the wrong connection
+            // hits "no such table" instead of silently finding every table on a
+            // single shared file (which masked the #420 cross-signing misroute,
+            // commit e4cfe9e).
+            let log_db_path = path.join("test_log.db");
+            let log = Arc::new(
+                RemoteDb::connect_local(&log_db_path)
+                    .await
+                    .expect("connect local log libsql"),
+            );
+            bootstrap_log_schema(&log)
+                .await
+                .expect("bootstrap log db schema");
+            // The baseline created the three MLS tables on MAIN too (for old
+            // shipped clients); drop them so main no longer has them and any
+            // stray main-side access fails loudly.
+            drop_log_tables_from_main(&remote)
+                .await
+                .expect("drop log tables from main");
+
             // Spin up the real MLS Delivery Service in-process and route every
             // client's commit submission through it. This exercises the deployed
             // DS path (HTTP → pollis-delivery::commit::submit_commit) end to end
             // in the flows suite instead of the Direct write path.
             //
-            // Crucially the DS shares the harness's SAME `RemoteDb` handle rather
-            // than opening a second `Builder::new_local` against the file: two
-            // independent libsql `Database` instances on one local file don't
-            // share each other's WAL writes promptly, so a commit/Welcome/
-            // GroupInfo the DS wrote through a separate handle wouldn't be
-            // visible to the clients. Sharing the handle makes the DS the sole
-            // writer to the very rows the clients read — exactly like production,
-            // where the DS and the clients hit the same Turso. A single shared DS
-            // for the whole test run is fine.
-            let delivery_url = spawn_in_process_delivery(remote.clone()).await;
+            // The DS gets BOTH handles, exactly mirroring production
+            // (`pollis-delivery`'s `AppState { db, log_db }`): it authenticates
+            // and checks membership on the MAIN handle, and writes/reads the
+            // commit log on the LOG handle. Sharing the harness's own handles
+            // (rather than opening second `Builder::new_local`s) makes the DS the
+            // sole writer to the very rows the clients read — two independent
+            // libsql `Database`s on one file don't share WAL writes promptly. A
+            // single shared DS for the whole test run is fine.
+            let delivery_url = spawn_in_process_delivery(remote.clone(), log.clone()).await;
             config.pollis_delivery_url = Some(delivery_url);
 
-            TestWorld { remote, config }
+            TestWorld { remote, log, config }
         })
         .await
 }
@@ -112,26 +144,111 @@ pub(crate) async fn world() -> &'static TestWorld {
 pub(crate) static LOSE_NEXT_DS_RESPONSE: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Two-handle state for the in-process DS, mirroring production
+/// `pollis_delivery::AppState { db, log_db }`: auth + membership lookups run on
+/// `main`, commit-log reads/writes run on `log`. Splitting them is what lets a
+/// misrouted query (a `users`/`user_device` read on the log handle, or an
+/// `mls_*` read on the main handle) fail loudly in the flows suite.
+#[derive(Clone)]
+struct DsState {
+    /// Main DB — `user_device` (auth) + group/DM membership (`is_member`).
+    main: Arc<RemoteDb>,
+    /// Commit-log DB — `mls_commit_log` / `mls_welcome` / `mls_group_info`.
+    log: Arc<RemoteDb>,
+}
+
+/// Shared auth gate for the in-process DS: verify the device signature over the
+/// RAW body (the signature binds `sha256(body)`, so we must hash the exact wire
+/// bytes) and return the authenticated `user_id`, or an auth-rejection response.
+///
+/// Auth is ALWAYS enforced here — the in-process DS mirrors production with
+/// `POLLIS_DS_REQUIRE_AUTH` on, so the flows suite exercises the signed write
+/// path end to end (this is #420 / #419 Step 1's acceptance: "auth on + clients
+/// signing → full flows suite still passes"). It reuses the real
+/// `pollis_delivery::auth::verify_request` against the MAIN DB — `user_device`
+/// (the auth lookup) lives there, not on the log DB.
+async fn ds_auth(
+    remote: &RemoteDb,
+    method: &axum::http::Method,
+    uri: &axum::http::Uri,
+    headers: &axum::http::HeaderMap,
+    body: &axum::body::Bytes,
+) -> Result<String, axum::response::Response> {
+    use axum::response::IntoResponse;
+    let conn = remote.conn().await.map_err(|e| {
+        (
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            format!("conn: {e}"),
+        )
+            .into_response()
+    })?;
+    pollis_delivery::auth::verify_request(
+        &conn,
+        headers,
+        method.as_str(),
+        uri.path(),
+        body,
+        pollis_delivery::auth::now_unix(),
+    )
+    .await
+    .map_err(|rej| rej.into_response())
+}
+
+fn ds_internal_error(msg: String) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg).into_response()
+}
+
+fn ds_bad_request() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (axum::http::StatusCode::BAD_REQUEST, "invalid body").into_response()
+}
+
+fn ds_ok() -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::OK,
+        axum::Json(serde_json::json!({ "status": "ok" })),
+    )
+        .into_response()
+}
+
 /// The `/v1/commits` submit handler, driven against the SHARED `RemoteDb` so
 /// the DS writes land on the exact handle the clients read from. Mirrors
-/// `pollis_delivery::build_router`'s `submit` arm.
+/// `pollis_delivery`'s real `submit` arm: verify the signature over the raw
+/// body, bind `sender_id` to the authenticated user, then submit — PLUS the
+/// harness-only lost-response fault injection the #411 test depends on.
 async fn delivery_submit(
-    axum::extract::State(remote): axum::extract::State<Arc<RemoteDb>>,
-    axum::Json(body): axum::Json<pollis_delivery::commit::SubmitBody>,
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    use pollis_delivery::commit::SubmitResponse;
-    let conn = match remote.conn().await {
-        Ok(c) => c,
-        Err(e) => {
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                format!("conn: {e}"),
-            )
-                .into_response()
-        }
+    use pollis_delivery::commit::{SubmitBody, SubmitResponse};
+
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
     };
-    match pollis_delivery::commit::submit_commit(&conn, &body).await {
+
+    let parsed: SubmitBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+
+    // Identity binding: a validly-signed request may only write as itself.
+    if parsed.sender_id != authed {
+        return pollis_delivery::error::AuthRejection::Forbidden.into_response();
+    }
+
+    // The commit log lives on the LOG DB.
+    let conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::commit::submit_commit(&conn, &parsed).await {
         Ok(outcome) => {
             // Lost-response fault: the commit + GroupInfo + Welcomes have already
             // LANDED above; drop the success response so the client must recover
@@ -151,18 +268,138 @@ async fn delivery_submit(
             };
             (code, axum::Json(outcome)).into_response()
         }
-        Err(e) => (
-            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-            format!("submit: {e}"),
-        )
-            .into_response(),
+        Err(e) => ds_internal_error(format!("submit: {e}")),
     }
 }
 
-/// Boot an axum router exposing the DS's `/v1/commits` submit endpoint backed by
-/// the shared `RemoteDb`, bind it on a loopback port, and serve it on a
-/// DEDICATED OS thread with its own runtime so the server outlives every
-/// individual `#[tokio::test]` runtime.
+/// `POST /v1/group-info` (W4) — republish GroupInfo, authed user must be a
+/// current member of the conversation. Reuses the real `pollis_delivery::writes`
+/// handlers against the shared connection.
+async fn delivery_group_info(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::writes::GroupInfoBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    // Membership is checked on the MAIN DB (group/DM membership lives there).
+    let main_conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::writes::is_member(&main_conn, &parsed.conversation_id, &authed).await {
+        Ok(true) => {}
+        Ok(false) => return pollis_delivery::error::AuthRejection::Forbidden.into_response(),
+        Err(e) => return ds_internal_error(format!("is_member: {e}")),
+    }
+    // The GroupInfo write lands on the LOG DB.
+    let log_conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::writes::apply_group_info(&log_conn, &parsed).await {
+        Ok(_) => ds_ok(),
+        Err(e) => ds_internal_error(format!("group_info: {e}")),
+    }
+}
+
+/// `POST /v1/welcomes/ack` (W5) — mark Welcomes delivered, scoped to the
+/// authenticated recipient.
+async fn delivery_welcomes_ack(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::writes::AckBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::writes::ack_welcomes(&conn, &authed, &parsed.welcome_ids).await {
+        Ok(_) => ds_ok(),
+        Err(e) => ds_internal_error(format!("welcomes_ack: {e}")),
+    }
+}
+
+/// `POST /v1/welcomes/reset` (W6/W7) — re-arm Welcomes for redelivery, scoped to
+/// the authenticated recipient.
+async fn delivery_welcomes_reset(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::writes::ResetBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::writes::reset_welcomes(&conn, &authed, parsed.device_id.as_deref()).await
+    {
+        Ok(_) => ds_ok(),
+        Err(e) => ds_internal_error(format!("welcomes_reset: {e}")),
+    }
+}
+
+/// `POST /v1/welcomes/purge` (W8) — delete all of the authenticated user's
+/// Welcomes. An empty body is valid (recipient comes from auth).
+async fn delivery_welcomes_purge(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    // Tolerate an empty body — the recipient is derived from auth.
+    if !body.is_empty() {
+        if serde_json::from_slice::<pollis_delivery::writes::PurgeBody>(&body).is_err() {
+            return ds_bad_request();
+        }
+    }
+    let conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::writes::purge_welcomes(&conn, &authed).await {
+        Ok(_) => ds_ok(),
+        Err(e) => ds_internal_error(format!("welcomes_purge: {e}")),
+    }
+}
+
+/// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
+/// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
+/// port, and serve it on a DEDICATED OS thread with its own runtime so the
+/// server outlives every individual `#[tokio::test]` runtime.
 ///
 /// Why a dedicated thread: each `#[tokio::test(flavor = "multi_thread")]` spins
 /// up and tears down its OWN Tokio runtime. If we spawned the server on the
@@ -170,9 +407,10 @@ async fn delivery_submit(
 /// test would hit a dead port (connection refused). Owning the server on a
 /// separate thread + runtime decouples its lifetime from the per-test runtimes,
 /// so the single shared DS stays up for the whole `cargo test` process.
-async fn spawn_in_process_delivery(remote: Arc<RemoteDb>) -> String {
+async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> String {
     use std::sync::mpsc;
 
+    let state = DsState { main, log };
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::Builder::new()
         .name("in-process-delivery".into())
@@ -184,7 +422,17 @@ async fn spawn_in_process_delivery(remote: Arc<RemoteDb>) -> String {
             rt.block_on(async move {
                 let router = axum::Router::new()
                     .route("/v1/commits", axum::routing::post(delivery_submit))
-                    .with_state(remote);
+                    .route("/v1/group-info", axum::routing::post(delivery_group_info))
+                    .route("/v1/welcomes/ack", axum::routing::post(delivery_welcomes_ack))
+                    .route(
+                        "/v1/welcomes/reset",
+                        axum::routing::post(delivery_welcomes_reset),
+                    )
+                    .route(
+                        "/v1/welcomes/purge",
+                        axum::routing::post(delivery_welcomes_purge),
+                    )
+                    .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
@@ -203,7 +451,61 @@ async fn spawn_in_process_delivery(remote: Arc<RemoteDb>) -> String {
 
 pub(crate) async fn wipe() {
     let w = world().await;
-    wipe_remote(&w.remote).await.expect("wipe test turso");
+    wipe_remote(&w.remote, &w.log)
+        .await
+        .expect("wipe test turso");
+}
+
+/// The in-process Delivery Service base URL (e.g. `http://127.0.0.1:NNNNN`).
+pub(crate) async fn delivery_url() -> String {
+    world()
+        .await
+        .config
+        .pollis_delivery_url
+        .clone()
+        .expect("in-process delivery URL configured")
+}
+
+/// Minimal, dependency-free HTTP/1.1 `POST` used only by the sole-writer
+/// acceptance test: send `body` to `{base}{path}` with the given extra headers
+/// and `Connection: close`, then return the numeric HTTP status code. We craft
+/// the request over a raw `TcpStream` rather than pull an HTTP-client crate into
+/// the test deps just to prove the DS rejects unsigned writes.
+pub(crate) async fn raw_post_status(
+    base: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &[u8],
+) -> u16 {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let addr = base.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(addr)
+        .await
+        .expect("connect to in-process DS");
+    let mut req = format!(
+        "POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        body.len()
+    );
+    for (k, v) in headers {
+        req.push_str(k);
+        req.push_str(": ");
+        req.push_str(v);
+        req.push_str("\r\n");
+    }
+    req.push_str("\r\n");
+    stream.write_all(req.as_bytes()).await.expect("write head");
+    stream.write_all(body).await.expect("write body");
+    stream.flush().await.expect("flush request");
+    let mut resp = Vec::new();
+    stream.read_to_end(&mut resp).await.expect("read response");
+    let text = String::from_utf8_lossy(&resp);
+    let status_line = text.lines().next().expect("HTTP status line");
+    // "HTTP/1.1 401 Unauthorized" → 401
+    status_line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse::<u16>().ok())
+        .unwrap_or_else(|| panic!("could not parse status from: {status_line:?}"))
 }
 
 // ─── Client ─────────────────────────────────────────────────────────────────
@@ -233,7 +535,11 @@ impl TestClient {
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
         let state = Arc::new(AppState::new_with_parts(
             w.config.clone(),
+            // Main DB.
             w.remote.clone(),
+            // Commit-log DB — a genuinely separate libsql file, so a query that
+            // should hit one DB but is routed to the other fails loudly.
+            w.log.clone(),
             keystore,
         ));
         let (app, webview) = build_client_app(state.clone()).expect("build client app");
@@ -291,7 +597,24 @@ impl TestClient {
         &self.profile.as_ref().expect("not signed in").id
     }
 
+    /// Point the process-global "active user" (`accounts.json`'s
+    /// `last_active_user`) at THIS client before it dispatches a command.
+    ///
+    /// Production runs exactly one active user per process, and the signed DS
+    /// write client (`ds_client::ds_post`) derives the `X-Pollis-User` signing
+    /// identity from that global. The harness runs many users in one process
+    /// sharing one `accounts.json`, so without this every signed DS write would
+    /// be attributed to whichever client signed up LAST and fail auth (401/403).
+    /// Tests are `#[serial]` and each command is fully awaited before the next,
+    /// so flipping the active user immediately before dispatch is race-free.
+    fn activate(&self) {
+        if let Some(p) = &self.profile {
+            let _ = pollis_lib::accounts::upsert_account(&p.id, &p.username, None, None);
+        }
+    }
+
     pub(crate) async fn invoke_json(&self, cmd: &str, args: serde_json::Value) -> serde_json::Value {
+        self.activate();
         invoke(&self.webview, cmd, args)
             .await
             .unwrap_or_else(|e| panic!("{cmd}: {e}"))
@@ -306,6 +629,7 @@ impl TestClient {
     /// harness drives it explicitly. Scoped to welcomes only — commits are
     /// per-channel (see [`process_commits_for`]).
     pub(crate) async fn poll(&self) {
+        self.activate();
         let _: serde_json::Value = invoke(
             &self.webview,
             "poll_mls_welcomes",
@@ -320,6 +644,7 @@ impl TestClient {
     /// corresponds 1:1 with a conversation (channel or DM).
     #[allow(dead_code)]
     pub(crate) async fn process_commits_for(&self, channel_id: &str) {
+        self.activate();
         let _: serde_json::Value = invoke(
             &self.webview,
             "process_pending_commits",
@@ -464,6 +789,17 @@ impl TestClient {
         .await;
     }
 
+    /// Voluntarily leave a group. Deletes this user's `group_member` row,
+    /// forgets local MLS state, and signals remaining members to reconcile
+    /// away the leaver's stale leaf.
+    pub(crate) async fn leave_group(&self, group_id: &str) {
+        self.invoke_json(
+            "leave_group",
+            json!({ "groupId": group_id, "userId": self.user_id() }),
+        )
+        .await;
+    }
+
     pub(crate) async fn remove_member(&self, group_id: &str, target_user_id: &str) {
         self.invoke_json(
             "remove_member_from_group",
@@ -523,6 +859,7 @@ impl TestClient {
         conversation_id: &str,
         content: &str,
     ) -> Result<serde_json::Value, String> {
+        self.activate();
         invoke(
             &self.webview,
             "send_message",

@@ -26,7 +26,10 @@ name: Publish Transparency Log
 #      loudly on equivocation.
 #
 # Required repository secrets (names exact):
-#   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN  — read mls_commit_log
+#   TURSO_DATABASE_URL, TURSO_AUTH_TOKEN  — main DB: read account_key_log
+#   LOG_DB_URL, LOG_DB_AUTH_TOKEN         — log DB: read mls_commit_log (Goal A
+#     moved the commit log into its own DB). Optional: when unset, both fall back
+#     to the main DB vars (single-DB / pre-cutover behaviour).
 #   STH_SIGNING_KEY                       — 32-byte hex Ed25519 log signing key
 #   R2_TRANSPARENCY_ACCESS_KEY_ID, R2_TRANSPARENCY_SECRET_ACCESS_KEY,
 #   R2_TRANSPARENCY_ENDPOINT, R2_TRANSPARENCY_BUCKET — R2 sync (namespaced:
@@ -67,6 +70,8 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          LOG_DB_URL: ${{ secrets.LOG_DB_URL }}
+          LOG_DB_AUTH_TOKEN: ${{ secrets.LOG_DB_AUTH_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -87,17 +92,25 @@ jobs:
 
           # Live counts via Turso's HTTP (Hrana) pipeline API. The DB URL is
           # libsql://; the HTTP endpoint is the same host over https.
-          http_url="${TURSO_DATABASE_URL/libsql:\/\//https://}"
-          http_url="${http_url%/}"
+          # Goal A split the data across two DBs: mls_commit_log lives in the log
+          # DB, account_key_log stays in the main DB. Each has its own token. When
+          # the LOG_DB_* vars are unset both resolve to the main DB (single-DB).
+          log_db_url="${LOG_DB_URL:-$TURSO_DATABASE_URL}"
+          log_db_token="${LOG_DB_AUTH_TOKEN:-$TURSO_AUTH_TOKEN}"
+          to_http() { local u="${1/libsql:\/\//https://}"; echo "${u%/}"; }
+          main_http="$(to_http "$TURSO_DATABASE_URL")"
+          log_http="$(to_http "$log_db_url")"
+          # query_count <http-url> <token> <sql>
           query_count() {
-            curl -fsS --max-time 20 "${http_url}/v2/pipeline" \
-              -H "Authorization: Bearer ${TURSO_AUTH_TOKEN}" \
+            curl -fsS --max-time 20 "$1/v2/pipeline" \
+              -H "Authorization: Bearer $2" \
               -H "Content-Type: application/json" \
-              -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$1\"}},{\"type\":\"close\"}]}" \
+              -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$3\"}},{\"type\":\"close\"}]}" \
               | jq -r '.results[0].response.result.rows[0][0].value'
           }
-          count="$(query_count 'SELECT COUNT(*) FROM mls_commit_log')"
-          acct_count="$(query_count 'SELECT COUNT(*) FROM account_key_log')"
+          # mls_commit_log → log DB; account_key_log → main DB.
+          count="$(query_count "$log_http" "$log_db_token" 'SELECT COUNT(*) FROM mls_commit_log')"
+          acct_count="$(query_count "$main_http" "$TURSO_AUTH_TOKEN" 'SELECT COUNT(*) FROM account_key_log')"
 
           echo "commit-log:  published ${published:-<none>} | live ${count}"
           echo "account-key: published ${published_acct:-<none>} | live ${acct_count}"
@@ -137,12 +150,20 @@ jobs:
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          LOG_DB_URL: ${{ secrets.LOG_DB_URL }}
+          LOG_DB_AUTH_TOKEN: ${{ secrets.LOG_DB_AUTH_TOKEN }}
           # The builder's default --signing-key-env. The key never leaves CI.
           VLOG_SIGNING_KEY: ${{ secrets.STH_SIGNING_KEY }}
         run: |
           set -euo pipefail
           base="https://verify.pollis.com"
           now="$(date +%s%3N)"
+
+          # Goal A split: mls_commit_log lives in the log DB (its own token),
+          # account_key_log stays in the main DB. Both fall back to the main DB
+          # vars when LOG_DB_* are unset (single-DB / pre-cutover).
+          log_db_url="${LOG_DB_URL:-$TURSO_DATABASE_URL}"
+          log_db_token="${LOG_DB_AUTH_TOKEN:-$TURSO_AUTH_TOKEN}"
 
           # An STH for a given (size, root) must be byte-stable across republishes:
           # the per-size head files are immutable, so re-minting them with a fresh
@@ -153,12 +174,15 @@ jobs:
           # exactly. The two trees grow independently (e.g. a new signup advances
           # the account tree while the commit log is unchanged), hence one
           # timestamp each.
-          http_url="${TURSO_DATABASE_URL/libsql:\/\//https://}"; http_url="${http_url%/}"
+          to_http() { local u="${1/libsql:\/\//https://}"; echo "${u%/}"; }
+          main_http="$(to_http "$TURSO_DATABASE_URL")"
+          log_http="$(to_http "$log_db_url")"
+          # live_count <http-url> <token> <sql>
           live_count() {
-            curl -fsS --max-time 20 "${http_url}/v2/pipeline" \
-              -H "Authorization: Bearer ${TURSO_AUTH_TOKEN}" \
+            curl -fsS --max-time 20 "$1/v2/pipeline" \
+              -H "Authorization: Bearer $2" \
               -H "Content-Type: application/json" \
-              -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$1\"}},{\"type\":\"close\"}]}" \
+              -d "{\"requests\":[{\"type\":\"execute\",\"stmt\":{\"sql\":\"$3\"}},{\"type\":\"close\"}]}" \
               | jq -r '.results[0].response.result.rows[0][0].value'
           }
           # Reuse the frozen timestamp from a tree's published per-size head when
@@ -173,14 +197,22 @@ jobs:
               echo "${now}"
             fi
           }
-          commit_ts="$(frozen_or_now "${base}/v1/sth/latest.json" "${base}/v1/sth" "$(live_count 'SELECT COUNT(*) FROM mls_commit_log')")"
-          account_ts="$(frozen_or_now "${base}/v1/account-keys/sth/latest.json" "${base}/v1/account-keys/sth" "$(live_count 'SELECT COUNT(*) FROM account_key_log')")"
+          # mls_commit_log → log DB; account_key_log → main DB.
+          commit_ts="$(frozen_or_now "${base}/v1/sth/latest.json" "${base}/v1/sth" "$(live_count "$log_http" "$log_db_token" 'SELECT COUNT(*) FROM mls_commit_log')")"
+          account_ts="$(frozen_or_now "${base}/v1/account-keys/sth/latest.json" "${base}/v1/account-keys/sth" "$(live_count "$main_http" "$TURSO_AUTH_TOKEN" 'SELECT COUNT(*) FROM account_key_log')")"
           echo "commit-log STH ts=${commit_ts}  account-keys STH ts=${account_ts}  (now=${now})"
 
           # Build BOTH bundles: the commit log AND (via --account-out) the
           # account-key directory — its own tree, signed under its own domain
-          # context with the same key.
-          ./target/release/builder build --db "${TURSO_DATABASE_URL}" \
+          # context with the same key. Goal A split: --log-db reads
+          # mls_commit_log from the log DB (authenticated by LOG_DB_AUTH_TOKEN,
+          # exported so connect_with_token picks it up), while --db keeps reading
+          # account_key_log from the main DB (TURSO_AUTH_TOKEN). Both default to
+          # the main DB when LOG_DB_* are unset.
+          export LOG_DB_AUTH_TOKEN="${log_db_token}"
+          ./target/release/builder build \
+            --db "${TURSO_DATABASE_URL}" \
+            --log-db "${log_db_url}" \
             --out bundle.json --account-out account-bundle.json \
             --timestamp "${commit_ts}" --account-timestamp "${account_ts}"
           # generate emits both trees into ./site (the account tree under

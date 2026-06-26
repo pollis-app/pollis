@@ -177,7 +177,8 @@ pub async fn derive_voice_key(
 /// don't trigger recovery"), so a transient Turso blip never forces an
 /// unnecessary external-join.
 async fn published_group_epoch(state: &Arc<AppState>, mls_group_id: &str) -> Option<u64> {
-    let conn = state.remote_db.conn().await.ok()?;
+    // Read-only GroupInfo epoch lookup → log_db (falls back to remote_db pre-cutover).
+    let conn = state.log_db.conn().await.ok()?;
     let mut rows = conn
         .query(
             "SELECT epoch FROM mls_group_info WHERE conversation_id = ?1",
@@ -279,6 +280,10 @@ async fn catch_up_mls_group(state: &Arc<AppState>, mls_group_id: &str, user_id: 
     // if the rows we'd need (e.g. epochs 5..N for a local at epoch 4) are
     // missing, advancement is impossible regardless of how many times we
     // ingest. Lists at most ~20 rows so the log stays manageable.
+    // The commit-log read targets the read-only log DB; fall back to the main
+    // connection (this `conn` already served the dm_channel/channels reads above,
+    // which live in the main DB, so shadowing it here is safe).
+    let conn = state.log_db.conn().await.unwrap_or(conn);
     match conn
         .query(
             "SELECT seq, epoch, sender_id, added_user_id \

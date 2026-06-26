@@ -29,10 +29,19 @@ struct Cli {
 enum Command {
     /// Read `mls_commit_log`, append every commit, and write a signed bundle.
     Build {
-        /// Database source: a libSQL/Turso URL (uses `TURSO_AUTH_TOKEN`) or a
-        /// local SQLite file path. Falls back to `TURSO_DATABASE_URL` if omitted.
+        /// Main database source: a libSQL/Turso URL (uses `TURSO_AUTH_TOKEN`) or
+        /// a local SQLite file path. Holds `account_key_log`. Falls back to
+        /// `TURSO_DATABASE_URL` if omitted.
         #[arg(long)]
         db: Option<String>,
+
+        /// Log database source for `mls_commit_log` (Goal A moves the commit log
+        /// into its own DB with its own credentials). A libSQL/Turso URL (uses
+        /// `LOG_DB_AUTH_TOKEN`, falling back to `TURSO_AUTH_TOKEN`) or a local
+        /// SQLite file path. Resolution order: this flag, then `LOG_DB_URL`, then
+        /// the main `--db` (single-DB / pre-cutover behaviour).
+        #[arg(long)]
+        log_db: Option<String>,
 
         /// Output path for the commit-log JSON bundle.
         #[arg(long)]
@@ -75,6 +84,7 @@ fn main() -> ExitCode {
     let result = match cli.command {
         Command::Build {
             db,
+            log_db,
             out,
             account_out,
             timestamp,
@@ -83,6 +93,7 @@ fn main() -> ExitCode {
             signing_key_file,
         } => run_build(
             db,
+            log_db,
             out,
             account_out,
             timestamp,
@@ -108,6 +119,7 @@ fn main() -> ExitCode {
 #[tokio::main(flavor = "current_thread")]
 async fn run_build(
     db: Option<String>,
+    log_db: Option<String>,
     out: PathBuf,
     account_out: Option<PathBuf>,
     timestamp: u64,
@@ -119,13 +131,23 @@ async fn run_build(
         .or_else(|| std::env::var("TURSO_DATABASE_URL").ok())
         .ok_or(BuilderError::NoDbSource)?;
 
+    // The commit log lives in its own DB after Goal A's cutover. Resolve it from
+    // (1) --log-db, (2) LOG_DB_URL, (3) the main DB (single-DB / pre-cutover).
+    let log_db = log_db
+        .or_else(|| std::env::var("LOG_DB_URL").ok())
+        .unwrap_or_else(|| db.clone());
+    // The log DB has its own token; fall back to TURSO_AUTH_TOKEN so single-DB,
+    // tests, and pre-cutover all behave exactly as before.
+    let log_token = std::env::var("LOG_DB_AUTH_TOKEN")
+        .or_else(|_| std::env::var("TURSO_AUTH_TOKEN"))
+        .unwrap_or_default();
+
     // Resolve the signing key BEFORE touching the DB so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
-    let conn = source::connect(&db).await?;
-
-    // Commit-log tenant (frozen contract): its own tree, default STH context.
-    let rows = source::read_commit_log(&conn).await?;
+    // Commit-log tenant (frozen contract): read from the LOG DB with its token.
+    let log_conn = source::connect_with_token(&log_db, &log_token).await?;
+    let rows = source::read_commit_log(&log_conn).await?;
     source::ensure_non_empty(&rows)?;
 
     let bundle = build_bundle(&rows, &signing_key, timestamp)?;
@@ -143,7 +165,9 @@ async fn run_build(
     );
 
     // Account-key tenant (separate tree, domain-separated STH) — only when asked.
+    // It stays in the MAIN DB (TURSO_AUTH_TOKEN), independent of the log DB.
     if let Some(account_out) = account_out {
+        let conn = source::connect(&db).await?;
         let account_rows = source::read_account_key_log(&conn).await?;
         source::ensure_account_non_empty(&account_rows)?;
 

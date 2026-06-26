@@ -4,6 +4,12 @@ use crate::error::{Error, Result};
 pub struct Config {
     pub turso_url: String,
     pub turso_token: String,
+    /// Optional read-only connection to the commit-log Turso DB (the future
+    /// home of `mls_commit_log` / `mls_welcome` / `mls_group_info`). When both
+    /// are set, `AppState.log_db` connects here; otherwise it falls back to
+    /// `remote_db` so behavior is unchanged pre-cutover. See `docs/goal-a-commit-log-sole-writer.md`.
+    pub log_db_url: Option<String>,
+    pub log_db_token: Option<String>,
     pub r2_endpoint: String,
     pub r2_access_key_id: String,
     pub r2_secret_access_key: String,
@@ -26,6 +32,15 @@ impl Config {
             // Falls back to std::env::var for dev builds loaded via dotenvy.
             turso_url:            require_env("TURSO_URL",        option_env!("TURSO_URL"))?,
             turso_token:          require_env("TURSO_TOKEN",      option_env!("TURSO_TOKEN"))?,
+            // Optional: absent → log_db falls back to remote_db (tests / pre-cutover).
+            log_db_url: option_env!("LOG_DB_URL")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("LOG_DB_URL").ok())
+                .filter(|s| !s.is_empty()),
+            log_db_token: option_env!("LOG_DB_TOKEN")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("LOG_DB_TOKEN").ok())
+                .filter(|s| !s.is_empty()),
             r2_endpoint:          require_env("R2_S3_ENDPOINT",   option_env!("R2_S3_ENDPOINT"))?,
             r2_access_key_id:     require_env("R2_ACCESS_KEY_ID", option_env!("R2_ACCESS_KEY_ID"))?,
             r2_secret_access_key: require_env("R2_SECRET_KEY",    option_env!("R2_SECRET_KEY"))?,
@@ -85,6 +100,9 @@ impl Config {
         Ok(Self {
             turso_url,
             turso_token,
+            // Tests use a single Turso instance; log_db falls back to remote_db.
+            log_db_url: None,
+            log_db_token: None,
             r2_endpoint: String::new(),
             r2_access_key_id: String::new(),
             r2_secret_access_key: String::new(),

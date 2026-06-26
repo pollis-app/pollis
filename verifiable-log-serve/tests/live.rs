@@ -246,6 +246,7 @@ fn live_serves_latest_and_group_over_http() {
     let key = signing_key();
     let server = LiveServer::spawn(
         db.to_str().unwrap().to_string(),
+        String::new(),
         0,
         Duration::from_secs(60),
         key.clone(),
@@ -289,8 +290,14 @@ fn within_ttl_does_not_rebuild_then_refreshes() {
     let db_url = db.to_str().unwrap().to_string();
 
     // Large TTL: the first request builds, the rest serve the cache.
-    let server =
-        LiveServer::spawn(db_url.clone(), 0, Duration::from_secs(3600), signing_key()).unwrap();
+    let server = LiveServer::spawn(
+        db_url.clone(),
+        String::new(),
+        0,
+        Duration::from_secs(3600),
+        signing_key(),
+    )
+    .unwrap();
     let base = server.base_url();
 
     let (_, _, first) = http_group(&base, "conv-a");
@@ -310,7 +317,8 @@ fn within_ttl_does_not_rebuild_then_refreshes() {
     server.shutdown();
 
     // A fresh server with ttl=0 rebuilds every request and sees the mutation.
-    let live0 = LiveServer::spawn(db_url, 0, Duration::ZERO, signing_key()).unwrap();
+    let live0 =
+        LiveServer::spawn(db_url, String::new(), 0, Duration::ZERO, signing_key()).unwrap();
     let (_, _, fresh) = http_group(&live0.base_url(), "conv-a");
     assert_eq!(fresh.commits.len(), 4, "ttl=0 reflects the added commit");
     let epochs: Vec<u64> = fresh.commits.iter().map(|c| c.epoch).collect();
@@ -333,6 +341,7 @@ fn concurrent_requests_trigger_exactly_one_rebuild() {
     // every other concurrent request must serve its result, not pull again.
     let server = LiveServer::spawn(
         db.to_str().unwrap().to_string(),
+        String::new(),
         0,
         Duration::from_secs(3600),
         signing_key(),
@@ -407,6 +416,7 @@ fn live_verify_group_has_cors() {
 
     let server = LiveServer::spawn(
         db.to_str().unwrap().to_string(),
+        String::new(),
         0,
         Duration::from_secs(60),
         signing_key(),

@@ -221,6 +221,13 @@ pub async fn publish_membership_changed_to_room(
     Ok(())
 }
 
+pub async fn publish_join_requests_changed_to_room(
+    _config: &Config,
+    _group_id: &str,
+) -> Result<()> {
+    Ok(())
+}
+
 pub async fn publish_member_role_changed_to_room(
     _livekit: &LiveKit,
     _group_id: &str,

@@ -73,20 +73,44 @@ pub async fn publish_group_info(
         return Ok(());
     };
 
-    let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO mls_group_info \
-         (conversation_id, epoch, group_info, updated_at, updated_by_device_id) \
-         VALUES (?1, ?2, ?3, datetime('now'), ?4) \
-         ON CONFLICT(conversation_id) DO UPDATE SET \
-             epoch = excluded.epoch, \
-             group_info = excluded.group_info, \
-             updated_at = datetime('now'), \
-             updated_by_device_id = excluded.updated_by_device_id \
-         WHERE excluded.epoch > mls_group_info.epoch",
-        libsql::params![conversation_id, epoch as i64, bytes, device_id],
-    )
-    .await?;
+    // W4 seam: route the GroupInfo republish through the Delivery Service (the
+    // sole writer of the log DB) when configured; else write direct (tests /
+    // pre-cutover). Mirrors `submit_commit`.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            use base64::Engine as _;
+            let body = serde_json::json!({
+                "conversation_id": conversation_id,
+                "epoch": epoch as i64,
+                "group_info": base64::engine::general_purpose::STANDARD.encode(&bytes),
+                "updated_by_device_id": device_id,
+            });
+            let resp = super::ds_client::ds_post(state, "/v1/group-info", &body).await?;
+            if !resp.status().is_success() {
+                let s = resp.status();
+                let txt = resp.text().await.unwrap_or_default();
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "publish_group_info DS {s}: {txt}"
+                )));
+            }
+        }
+        None => {
+            let conn = state.remote_db.conn().await?;
+            conn.execute(
+                "INSERT INTO mls_group_info \
+                 (conversation_id, epoch, group_info, updated_at, updated_by_device_id) \
+                 VALUES (?1, ?2, ?3, datetime('now'), ?4) \
+                 ON CONFLICT(conversation_id) DO UPDATE SET \
+                     epoch = excluded.epoch, \
+                     group_info = excluded.group_info, \
+                     updated_at = datetime('now'), \
+                     updated_by_device_id = excluded.updated_by_device_id \
+                 WHERE excluded.epoch > mls_group_info.epoch",
+                libsql::params![conversation_id, epoch as i64, bytes, device_id],
+            )
+            .await?;
+        }
+    }
 
     Ok(())
 }
@@ -185,7 +209,8 @@ async fn external_join_attempt(
 
     // 1. Fetch the stored GroupInfo for this conversation.
     let (group_info_bytes, stored_epoch): (Vec<u8>, i64) = {
-        let conn = state.remote_db.conn().await?;
+        // Read-only GroupInfo lookup → log_db (falls back to remote_db pre-cutover).
+        let conn = state.log_db.conn().await?;
         let mut rows = conn
             .query(
                 "SELECT group_info, epoch FROM mls_group_info WHERE conversation_id = ?1",
@@ -626,7 +651,8 @@ pub(crate) async fn process_pending_commits_locked(
     //    cross-signing certs BEFORE calling `process_message`. Collected
     //    into an owned Vec so the `rows` cursor is dropped before any
     //    local-DB await below.
-    let conn = state.remote_db.conn().await?;
+    // Read-only commit-log fetch → log_db (falls back to remote_db pre-cutover).
+    let conn = state.log_db.conn().await?;
     let mut rows = conn.query(
         "SELECT seq, epoch, commit_data, added_user_id, added_device_ids, sender_id \
          FROM mls_commit_log \
@@ -673,6 +699,13 @@ pub(crate) async fn process_pending_commits_locked(
     }
     drop(rows);
 
+    // Cross-signing cert verification (`verify_added_devices` below) reads
+    // `users` / `user_device` / `account_key_log` — all on the MAIN DB. `conn`
+    // above is the read-only commit-log DB, which has none of those tables (a
+    // verify against it fails with "no such table: users"). Open a main-DB
+    // connection for verification. Falls back to the same DB pre-cutover.
+    let verify_conn = state.remote_db.conn().await?;
+
     // 3. Apply each commit in epoch order. For any commit carrying add
     //    metadata, verify every added device's cross-signing cert
     //    against the user's account_id_pub BEFORE touching the group
@@ -703,7 +736,7 @@ pub(crate) async fn process_pending_commits_locked(
         // ── Inbound cert verification ────────────────────────────
         if let Some(ref added_user_id) = commit.added_user_id {
             let outcome = match verify_added_devices(
-                &conn,
+                &verify_conn,
                 added_user_id,
                 &commit.added_device_ids,
             )

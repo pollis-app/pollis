@@ -789,13 +789,35 @@ pub async fn reset_identity_and_recover(
             )
             .await;
 
-        // Delete pending MLS welcomes
-        let _ = conn
-            .execute(
-                "DELETE FROM mls_welcome WHERE recipient_id = ?1",
-                libsql::params![user_id.clone()],
-            )
-            .await;
+        // Delete pending MLS welcomes (W8 seam). Route through the Delivery
+        // Service (sole writer of the log DB) when configured; else direct
+        // DELETE on remote_db (tests / pre-cutover). The local device row +
+        // its `mls_signature_pub` still exist here (the wipe happens below), so
+        // the signed purge authenticates against the registered device key.
+        match state.config.pollis_delivery_url.as_deref() {
+            Some(_) => {
+                let body = serde_json::json!({});
+                match crate::commands::mls::ds_post(state, "/v1/welcomes/purge", &body).await {
+                    Ok(resp) if resp.status().is_success() => {}
+                    Ok(resp) => {
+                        let s = resp.status();
+                        let txt = resp.text().await.unwrap_or_default();
+                        eprintln!("[reset] DS welcomes purge {s}: {txt}");
+                    }
+                    Err(e) => {
+                        eprintln!("[reset] DS welcomes purge failed: {e}");
+                    }
+                }
+            }
+            None => {
+                let _ = conn
+                    .execute(
+                        "DELETE FROM mls_welcome WHERE recipient_id = ?1",
+                        libsql::params![user_id.clone()],
+                    )
+                    .await;
+            }
+        }
 
         // Delete other devices (they're orphaned by the identity rotation).
         // Keep the current device row since ensure_device_cert uses UPDATE.

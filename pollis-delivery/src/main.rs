@@ -1,9 +1,17 @@
 //! Pollis MLS Delivery Service entrypoint.
 //!
 //! Env:
-//!   TURSO_URL    libsql://… (required)
-//!   TURSO_TOKEN  scoped write token for the MLS tables (required)
-//!   PORT         listen port (default 8788)
+//!   TURSO_URL           libsql://… (required)
+//!   TURSO_TOKEN         scoped write token for the MLS tables (required)
+//!   LOG_DB_URL          libsql://… for the separate commit-log DB (optional)
+//!   LOG_DB_ADMIN_TOKEN  read-write token for the commit-log DB (optional)
+//!   PORT                listen port (default 8788)
+//!
+//! When both `LOG_DB_URL` and `LOG_DB_ADMIN_TOKEN` are set, the MLS
+//! control-plane tables (`mls_commit_log`, `mls_group_info`, `mls_welcome`) are
+//! written to/read from that separate "commit-log" database — the DS is its
+//! sole writer. When they're absent, the DS falls back to the single `TURSO_*`
+//! database (existing single-DB deploys and the test harness are unaffected).
 //!
 //! Terminate TLS at a reverse proxy in front (this serves plain HTTP), and run
 //! it beside the LiveKit container behind `api.pollis.com`.
@@ -11,7 +19,7 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use pollis_delivery::{build_router, db::Db};
+use pollis_delivery::{build_router_with_log_db, db::Db};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -34,7 +42,30 @@ async fn main() -> Result<()> {
             .await
             .context("connect to Turso")?,
     );
-    let app = build_router(db);
+
+    // Optional separate commit-log DB. When both vars are present, the DS writes
+    // the MLS control-plane tables there (it holds the read-write admin token and
+    // is the sole writer). Otherwise fall back to the single `db` above.
+    let log_url = std::env::var("LOG_DB_URL").ok().filter(|s| !s.is_empty());
+    let log_token = std::env::var("LOG_DB_ADMIN_TOKEN")
+        .ok()
+        .filter(|s| !s.is_empty());
+    let log_db = match (log_url, log_token) {
+        (Some(log_url), Some(log_token)) => {
+            tracing::info!("pollis-delivery: using separate commit-log DB (LOG_DB_URL)");
+            Arc::new(
+                Db::connect_remote(&log_url, &log_token)
+                    .await
+                    .context("connect to commit-log Turso")?,
+            )
+        }
+        _ => {
+            tracing::info!("pollis-delivery: LOG_DB_* unset — commit log shares the main TURSO DB");
+            Arc::clone(&db)
+        }
+    };
+
+    let app = build_router_with_log_db(db, log_db);
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await

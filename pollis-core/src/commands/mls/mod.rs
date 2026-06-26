@@ -5,6 +5,7 @@
 
 mod delivery;
 mod device;
+mod ds_client;
 mod group_state;
 mod key_packages;
 mod provider;
@@ -20,6 +21,9 @@ pub use provider::{
 // ── Per-device signing keys + cross-signing ──────────────────────────────────
 pub use device::{ensure_device_cert, load_or_create_device_signer, resign_stale_device_certs};
 
+// ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
+pub(crate) use ds_client::ds_post;
+
 // ── Key packages ─────────────────────────────────────────────────────────────
 pub use key_packages::{
     ensure_mls_key_package, fetch_mls_key_package, generate_mls_key_package,
@@ -27,7 +31,10 @@ pub use key_packages::{
 };
 
 // ── Welcomes ─────────────────────────────────────────────────────────────────
-pub use welcomes::{apply_welcome, poll_mls_welcomes, poll_mls_welcomes_inner, process_welcome};
+pub use welcomes::{
+    apply_welcome, poll_mls_welcomes, poll_mls_welcomes_inner, process_welcome,
+    reset_welcome_delivery,
+};
 
 // ── Group lifecycle / encrypt / decrypt / commit processing ──────────────────
 pub use group_state::{

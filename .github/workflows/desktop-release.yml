@@ -65,6 +65,12 @@ jobs:
           echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
+          # Commit-log DB: the client gets the URL + the READ-ONLY token only
+          # (option_env! bakes them into the binary). The READ-WRITE admin token
+          # (LOG_DB_ADMIN_TOKEN) is NEVER injected into a client build — it is
+          # migrations + the Delivery Service only. See docs/goal-a-deploy-runbook.md.
+          echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
+          echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       # webrtc-audio-processing-sys (vendored): meson + ninja drive the C++
@@ -147,6 +153,12 @@ jobs:
           echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
+          # Commit-log DB: the client gets the URL + the READ-ONLY token only
+          # (option_env! bakes them into the binary). The READ-WRITE admin token
+          # (LOG_DB_ADMIN_TOKEN) is NEVER injected into a client build — it is
+          # migrations + the Delivery Service only. See docs/goal-a-deploy-runbook.md.
+          echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
+          echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
@@ -361,6 +373,12 @@ jobs:
           echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
           echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
+          # Commit-log DB: the client gets the URL + the READ-ONLY token only
+          # (option_env! bakes them into the binary). The READ-WRITE admin token
+          # (LOG_DB_ADMIN_TOKEN) is NEVER injected into a client build — it is
+          # migrations + the Delivery Service only. See docs/goal-a-deploy-runbook.md.
+          echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
+          echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
       - name: Install dependencies
@@ -406,10 +424,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Apply pending DB migrations to production
+      - name: Apply pending DB migrations to production (main DB)
         env:
           TURSO_URL: ${{ secrets.TURSO_URL }}
           TURSO_TOKEN: ${{ secrets.TURSO_ADMIN_TOKEN }}
+        run: ./scripts/db-apply.sh
+
+      # Second apply, against the SEPARATE commit-log DB (issue #420, Goal A).
+      # Runs only if the main-DB apply above succeeded (steps are sequential and
+      # fail-fast). Uses the READ-WRITE admin token — migrations need writes.
+      #
+      # HAZARD — db-apply.sh applies EVERY *.sql in MIGRATIONS_DIR that the
+      # target DB hasn't recorded yet, then records each into that DB's own
+      # schema_migrations. The default dir (pollis-core/src/db/migrations) holds
+      # the whole MAIN schema (000000_baseline + 000001..000007). Pointing the
+      # *empty* log DB at that default dir would apply the ENTIRE main schema to
+      # the log DB — baseline would create users/groups/channels AND an
+      # FK-bearing mls_commit_log, after which 000007's `CREATE TABLE IF NOT
+      # EXISTS` is a no-op, so the log DB would end up with the FK-bearing tables
+      # the split is meant to avoid. Conversely, the main-DB apply above ALSO
+      # sees 000007 (it's in the default dir): the CREATE TABLE IF NOT EXISTS is
+      # a harmless no-op on main, but it still records v7 in main's
+      # schema_migrations — misleading, since 000007 is a log-DB-only schema.
+      #
+      # FIX (owned by the migrations stream, S2 — not changed here): MOVE
+      # 000007_commit_log_db.sql out of the shared dir into a dedicated log-DB
+      # migrations dir, renumbered as its own fresh sequence
+      # (e.g. pollis-core/src/db/migrations-log/000001_commit_log_db.sql). That
+      # keeps the main schema out of the log DB AND keeps the log schema out of
+      # the main DB's pending set. This step points MIGRATIONS_DIR at that
+      # dedicated dir; until S2 creates it the step safely no-ops
+      # ("No pending migrations"). See docs/goal-a-deploy-runbook.md §"000007 hazard".
+      - name: Apply pending DB migrations to production (commit-log DB)
+        env:
+          TURSO_URL: ${{ secrets.LOG_DB_URL }}
+          TURSO_TOKEN: ${{ secrets.LOG_DB_ADMIN_TOKEN }}
+          MIGRATIONS_DIR: pollis-core/src/db/migrations-log
         run: ./scripts/db-apply.sh
 
   release:
