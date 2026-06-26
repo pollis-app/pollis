@@ -33,7 +33,10 @@ use crate::AppState;
 
 /// The outcome of the shared auth gate: either an authenticated user (auth
 /// enforced + verified), or `None` (auth disabled — the no-auth path).
-type Authed = Option<String>;
+///
+/// `pub(crate)` so sibling write-domain modules (e.g. [`crate::messages`]) reuse
+/// the exact same gate type instead of re-declaring the no-auth contract.
+pub(crate) type Authed = Option<String>;
 
 /// Run the same auth gate as `submit`: when `require_auth` is on, verify the
 /// device signature over the raw body and return the authenticated `user_id`;
@@ -41,7 +44,11 @@ type Authed = Option<String>;
 ///
 /// Returns `Ok(Err(response))` when auth is enforced but the request is
 /// rejected — the caller forwards that response unchanged.
-async fn gate(
+///
+/// `pub(crate)` so every write-domain module (commits, welcomes, messages, …)
+/// shares ONE auth gate. Adding a new domain must not re-implement
+/// `auth::verify_request` plumbing — it calls this.
+pub(crate) async fn gate(
     state: &AppState,
     headers: &HeaderMap,
     method: &Method,
@@ -91,7 +98,7 @@ fn resolve_recipient(authed: Authed, body_user_id: Option<String>) -> Result<Str
     }
 }
 
-fn bad_request(msg: &str) -> Response {
+pub(crate) fn bad_request(msg: &str) -> Response {
     (
         StatusCode::BAD_REQUEST,
         Json(serde_json::json!({ "error": msg })),
@@ -99,7 +106,7 @@ fn bad_request(msg: &str) -> Response {
         .into_response()
 }
 
-fn ok_json(value: serde_json::Value) -> Response {
+pub(crate) fn ok_json(value: serde_json::Value) -> Response {
     (StatusCode::OK, Json(value)).into_response()
 }
 

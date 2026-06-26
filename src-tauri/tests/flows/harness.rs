@@ -213,6 +213,18 @@ fn ds_ok() -> axum::response::Response {
         .into_response()
 }
 
+/// Map a domain-A [`pollis_delivery::messages::WriteOutcome`] to a Response —
+/// 200 on success, 403 on a refused authz check.
+fn ds_outcome(outcome: pollis_delivery::messages::WriteOutcome) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    match outcome {
+        pollis_delivery::messages::WriteOutcome::Ok => ds_ok(),
+        pollis_delivery::messages::WriteOutcome::Forbidden => {
+            pollis_delivery::error::AuthRejection::Forbidden.into_response()
+        }
+    }
+}
+
 /// The `/v1/commits` submit handler, driven against the SHARED `RemoteDb` so
 /// the DS writes land on the exact handle the clients read from. Mirrors
 /// `pollis_delivery`'s real `submit` arm: verify the signature over the raw
@@ -396,6 +408,249 @@ async fn delivery_welcomes_purge(
     }
 }
 
+// ─── Domain A (#419) — messages / envelopes / watermarks / reactions ────────
+//
+// Every domain-A endpoint runs the SAME pure `apply_*` fn the production axum
+// handler runs, against the MAIN DB (these tables are not on the log DB). Auth
+// is always enforced here (`ds_auth` → `Some(authed)`), so the flows suite
+// exercises the signed write + server-side authz path end to end.
+
+/// `POST /v1/messages/send`.
+async fn delivery_messages_send(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::SendMessageBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_send_message(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("messages/send: {e}")),
+    }
+}
+
+/// `POST /v1/messages/edit`.
+async fn delivery_messages_edit(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::EditMessageBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_edit_message(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("messages/edit: {e}")),
+    }
+}
+
+/// `POST /v1/messages/delete`.
+async fn delivery_messages_delete(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::DeleteMessageBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_delete_message(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("messages/delete: {e}")),
+    }
+}
+
+/// `POST /v1/reactions/add`.
+async fn delivery_reactions_add(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::ReactionBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_add_reaction(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("reactions/add: {e}")),
+    }
+}
+
+/// `POST /v1/reactions/remove`.
+async fn delivery_reactions_remove(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::ReactionBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_remove_reaction(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("reactions/remove: {e}")),
+    }
+}
+
+/// `POST /v1/watermarks/advance`.
+async fn delivery_watermarks_advance(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::WatermarkBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_advance_watermark(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("watermarks/advance: {e}")),
+    }
+}
+
+/// `POST /v1/envelopes/gc`.
+async fn delivery_envelopes_gc(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::EnvelopeGcBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_envelope_gc(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("envelopes/gc: {e}")),
+    }
+}
+
+/// `POST /v1/attachments/register`.
+async fn delivery_attachments_register(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::AttachmentRegisterBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_register_attachment(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("attachments/register: {e}")),
+    }
+}
+
+/// `POST /v1/attachments/delete`.
+async fn delivery_attachments_delete(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::messages::AttachmentDeleteBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::messages::apply_delete_attachment(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("attachments/delete: {e}")),
+    }
+}
+
 /// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
 /// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
 /// port, and serve it on a DEDICATED OS thread with its own runtime so the
@@ -431,6 +686,31 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     .route(
                         "/v1/welcomes/purge",
                         axum::routing::post(delivery_welcomes_purge),
+                    )
+                    // Domain A (#419) — all on the MAIN DB.
+                    .route("/v1/messages/send", axum::routing::post(delivery_messages_send))
+                    .route("/v1/messages/edit", axum::routing::post(delivery_messages_edit))
+                    .route(
+                        "/v1/messages/delete",
+                        axum::routing::post(delivery_messages_delete),
+                    )
+                    .route("/v1/reactions/add", axum::routing::post(delivery_reactions_add))
+                    .route(
+                        "/v1/reactions/remove",
+                        axum::routing::post(delivery_reactions_remove),
+                    )
+                    .route(
+                        "/v1/watermarks/advance",
+                        axum::routing::post(delivery_watermarks_advance),
+                    )
+                    .route("/v1/envelopes/gc", axum::routing::post(delivery_envelopes_gc))
+                    .route(
+                        "/v1/attachments/register",
+                        axum::routing::post(delivery_attachments_register),
+                    )
+                    .route(
+                        "/v1/attachments/delete",
+                        axum::routing::post(delivery_attachments_delete),
                     )
                     .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.
@@ -506,6 +786,49 @@ pub(crate) async fn raw_post_status(
         .nth(1)
         .and_then(|c| c.parse::<u16>().ok())
         .unwrap_or_else(|| panic!("could not parse status from: {status_line:?}"))
+}
+
+/// Sign `body` with `client`'s stable device key — byte-for-byte as
+/// `ds_client::ds_post` does — and POST it to `{delivery_url}{path}`, returning
+/// the HTTP status. This is the ONLY way to drive a *validly signed* request as
+/// an arbitrary user, which is what the domain-A authorization tests need: a
+/// non-member / non-sender must get 403 (proved identity, lacking permission),
+/// not the 401 an unsigned/garbled request gets.
+pub(crate) async fn signed_post_status(client: &TestClient, path: &str, body: &[u8]) -> u16 {
+    use openmls_traits::signatures::Signer;
+
+    let base = delivery_url().await;
+    let user_id = client.user_id().to_string();
+    let device_id = client
+        .state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .expect("client device_id set");
+    let timestamp = pollis_delivery::auth::now_unix();
+    let message = pollis_delivery::auth::canonical_message("POST", path, timestamp, body);
+
+    let signature_b64 = {
+        let guard = client.state.local_db.lock().await;
+        let db = guard.as_ref().expect("client local db open");
+        let provider = pollis_lib::commands::mls::PollisProvider::new(db.conn());
+        let (signer, _pub) =
+            pollis_lib::commands::mls::load_or_create_device_signer(&provider, &user_id, &device_id)
+                .expect("load device signer");
+        let sig = signer.sign(&message).expect("sign request");
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(sig)
+    };
+
+    let ts_str = timestamp.to_string();
+    let headers = [
+        ("X-Pollis-User", user_id.as_str()),
+        ("X-Pollis-Device", device_id.as_str()),
+        ("X-Pollis-Timestamp", ts_str.as_str()),
+        ("X-Pollis-Signature", signature_b64.as_str()),
+    ];
+    raw_post_status(&base, path, &headers, body).await
 }
 
 // ─── Client ─────────────────────────────────────────────────────────────────

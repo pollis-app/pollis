@@ -23,6 +23,7 @@ pub mod auth;
 pub mod commit;
 pub mod db;
 pub mod error;
+pub mod messages;
 pub mod writes;
 
 use std::sync::Arc;
@@ -120,6 +121,17 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/welcomes/ack", post(writes::welcomes_ack))
         .route("/v1/welcomes/reset", post(writes::welcomes_reset))
         .route("/v1/welcomes/purge", post(writes::welcomes_purge))
+        // Domain A (#419) — messages / envelopes / watermarks / reactions /
+        // attachments. All land on the MAIN DB.
+        .route("/v1/messages/send", post(messages::send_message))
+        .route("/v1/messages/edit", post(messages::edit_message))
+        .route("/v1/messages/delete", post(messages::delete_message))
+        .route("/v1/reactions/add", post(messages::add_reaction))
+        .route("/v1/reactions/remove", post(messages::remove_reaction))
+        .route("/v1/watermarks/advance", post(messages::advance_watermark))
+        .route("/v1/envelopes/gc", post(messages::envelope_gc))
+        .route("/v1/attachments/register", post(messages::register_attachment))
+        .route("/v1/attachments/delete", post(messages::delete_attachment))
         .with_state(state)
 }
 
