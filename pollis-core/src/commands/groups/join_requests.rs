@@ -60,8 +60,20 @@ pub async fn request_group_access(
              id         = excluded.id,
              status     = 'pending',
              created_at = excluded.created_at",
-        libsql::params![id, group_id, requester_id],
+        libsql::params![id, group_id.clone(), requester_id],
     ).await.map_err(|e| db_err(e.into(), "Join request"))?;
+
+    // Notify the group's existing admins so the pending-request list (menu
+    // badge + bottom bar) refreshes live instead of waiting for a manual
+    // refetch. The requester isn't a member and isn't connected to the group's
+    // room, so this rides the server-side publish path. Best-effort — a flaky
+    // LiveKit blip must not fail the request.
+    if let Err(e) = crate::commands::livekit::publish_join_requests_changed_to_room(
+        &state.config,
+        &group_id,
+    ).await {
+        eprintln!("[realtime] request_group_access: notify group {group_id}: {e}");
+    }
 
     Ok(())
 }

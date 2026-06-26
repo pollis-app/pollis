@@ -54,6 +54,13 @@ pub enum RealtimeEvent {
     MemberRoleChanged {
         group_id: String,
     },
+    /// Sent to a group room when a new join request is created, so connected
+    /// admins refetch the pending join-request list (badge + bottom bar)
+    /// without a manual refresh. Distinct from `MembershipChanged` because the
+    /// frontend should invalidate the join-requests query, not the member list.
+    JoinRequestsChanged {
+        group_id: String,
+    },
     /// Sent to a group room (or DM room) when a message is edited, so recipients
     /// can invalidate their message cache without polling.
     EditedMessage {
