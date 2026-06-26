@@ -173,10 +173,6 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
 /// admin role is re-derived server-side from `group_member`, so a non-admin
 /// cannot remove another member or delete a channel even with a perfect device
 /// signature.
-///
-/// Two refusals, both 403 (the requests are correctly signed):
-///   1. a member-but-NON-admin signs `members/remove` targeting the admin;
-///   2. the same member signs `channels/delete` of the group's channel.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn ds_rejects_domain_b_admin_ops_lacking_authorization() {
@@ -204,9 +200,7 @@ async fn ds_rejects_domain_b_admin_ops_lacking_authorization() {
     bob.poll().await;
     alice.process_commits_for(&channel_id).await;
 
-    // (1) Non-admin tries to remove the admin → 403. Bob is a member, so the
-    //     request is well-formed and signed, but removing *another* member is
-    //     admin-only, and the server re-derives Bob's role as `member`.
+    // (1) Non-admin tries to remove the admin -> 403 (role re-derived as member).
     let remove_body = serde_json::to_vec(&json!({
         "group_id": group_id,
         "user_id": alice_profile.id,
@@ -219,8 +213,7 @@ async fn ds_rejects_domain_b_admin_ops_lacking_authorization() {
         "a non-admin removing another member must be FORBIDDEN, got {code}"
     );
 
-    // (2) Non-admin tries to delete a channel → 403. Destructive channel ops are
-    //     admin-only; Bob's re-derived role is `member`.
+    // (2) Non-admin tries to delete a channel -> 403 (destructive ops are admin-only).
     let delete_body = serde_json::to_vec(&json!({
         "channel_id": channel_id,
         "requester_id": bob.user_id(),
@@ -230,6 +223,49 @@ async fn ds_rejects_domain_b_admin_ops_lacking_authorization() {
     assert_eq!(
         code, 403,
         "a non-admin deleting a channel must be FORBIDDEN, got {code}"
+    );
+
+    drop(alice);
+    drop(bob);
+}
+
+/// Domain-C (#419) server-side AUTHORIZATION: a *validly signed* profile / block
+/// write must still be refused when the signer targets ANOTHER user's row. You
+/// may only edit your OWN profile and manage your OWN block list — the DS binds
+/// the actor in the body to the authenticated signer.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ds_rejects_domain_c_writes_lacking_authorization() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let _alice = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // (1) alice signs a profile edit for BOB's row -> 403 (actor binding refuses).
+    let profile_body = serde_json::to_vec(&json!({
+        "user_id": bob_profile.id,
+        "username": "hacked-by-alice",
+    }))
+    .expect("serialize profile body");
+    let code = signed_post_status(&alice, "/v1/profile/update", &profile_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed profile edit of someone else's row must be FORBIDDEN, got {code}"
+    );
+
+    // (2) alice signs a block AS BOB -> 403 (you manage only your own block list).
+    let block_body = serde_json::to_vec(&json!({
+        "blocker_id": bob_profile.id,
+        "blocked_id": alice.user_id(),
+    }))
+    .expect("serialize block body");
+    let code = signed_post_status(&alice, "/v1/blocks/add", &block_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed block on another user's behalf must be FORBIDDEN, got {code}"
     );
 
     drop(alice);
