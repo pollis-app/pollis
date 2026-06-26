@@ -6,6 +6,15 @@ pub mod remote;
 /// out-of-band migration step.
 pub const BASELINE_SQL: &str = include_str!("migrations/000000_baseline.sql");
 
+/// Schema for the SEPARATE commit-log DB (`LOG_DB_URL`): the three MLS
+/// control-plane tables (`mls_commit_log` / `mls_welcome` / `mls_group_info`)
+/// and their indexes, no FKs to the main DB. Embedded so the integration test
+/// harness can bootstrap a genuinely separate log DB — mirroring the #420
+/// production split — and so a misrouted query (a main-DB read on the log
+/// connection, or vice versa) fails loudly instead of silently finding every
+/// table on one shared file.
+pub const LOG_DB_SCHEMA: &str = include_str!("migrations-log/000001_commit_log_db.sql");
+
 /// Migrations applied on top of the baseline, in version order. CI's
 /// `db-apply.sh` is the production source of truth; this list mirrors it so
 /// the integration-test harness ends up with the same schema.
