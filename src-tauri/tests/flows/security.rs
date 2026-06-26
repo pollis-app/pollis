@@ -272,6 +272,77 @@ async fn ds_rejects_domain_c_writes_lacking_authorization() {
     drop(bob);
 }
 
+/// Goal-B STRAGGLERS (#419) server-side AUTHORIZATION: DM membership churn. A
+/// *validly signed* `dm/add` or `dm/remove` from a user who is NOT in the DM must
+/// be refused at 403 (not 401 — the signature is real). DM membership is
+/// re-derived server-side, so an outsider can neither pull a third party into a
+/// conversation it isn't part of, nor evict an existing member.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ds_rejects_dm_churn_by_non_member() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut mallory = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    // Mallory is fully enrolled (real device key) so the rejections below are
+    // "not a member" (403), never "unknown device" (401).
+    let _mallory = mallory.sign_up("mallory@test.local").await;
+
+    // Alice and Bob share a DM; Mallory is an outsider.
+    let dm_id = alice
+        .create_dm(&[alice_profile.id.as_str(), bob_profile.id.as_str()])
+        .await;
+
+    // (1) Mallory signs an add into alice+bob's DM → 403 (she isn't a member, so
+    //     she cannot add anyone — the actor membership check refuses it).
+    let add_body = serde_json::to_vec(&json!({
+        "dm_channel_id": dm_id,
+        "user_id": mallory.user_id(),
+        "added_by": mallory.user_id(),
+        "added_at": "2026-01-01T00:00:00+00:00",
+    }))
+    .expect("serialize dm/add body");
+    let code = signed_post_status(&mallory, "/v1/dm/add", &add_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed dm/add by a non-member must be FORBIDDEN, got {code}"
+    );
+
+    // (2) Mallory signs a removal of Bob from alice+bob's DM → 403 (she is neither
+    //     the removed user nor the channel creator).
+    let remove_body = serde_json::to_vec(&json!({
+        "dm_channel_id": dm_id,
+        "user_id": bob_profile.id,
+        "requester_id": mallory.user_id(),
+    }))
+    .expect("serialize dm/remove body");
+    let code = signed_post_status(&mallory, "/v1/dm/remove", &remove_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed dm/remove by a non-creator/non-self must be FORBIDDEN, got {code}"
+    );
+
+    // Bob is still a member — the rejected removal changed nothing.
+    let still_member = bob
+        .list_dm_requests()
+        .await
+        .iter()
+        .chain(bob.list_dms().await.iter())
+        .any(|dm| dm["id"].as_str() == Some(dm_id.as_str()));
+    assert!(
+        still_member,
+        "bob must remain a member after the forbidden removal"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(mallory);
+}
+
 /// Domain-D (#419) server-side AUTHORIZATION: every domain-D write is
 /// owner-scoped, so a *validly signed* request that names another user as the
 /// owner must be refused at 403 (not 401 — the signature is real). This proves a

@@ -462,3 +462,252 @@ pub async fn apply_accept_dm(
     .await?;
     Ok(WriteOutcome::Ok)
 }
+
+// ── Shared DM membership helper ──────────────────────────────────────────────
+
+/// True when `user_id` is a current member of DM channel `dm_channel_id`. A
+/// dedicated `dm_channel_member` lookup (NOT the broader `writes::is_member`,
+/// which also matches groups/channels) — DM churn only ever concerns the DM
+/// membership table.
+async fn is_dm_member(
+    conn: &Connection,
+    dm_channel_id: &str,
+    user_id: &str,
+) -> anyhow::Result<bool> {
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM dm_channel_member \
+             WHERE dm_channel_id = ?1 AND user_id = ?2 LIMIT 1",
+            libsql::params![dm_channel_id.to_string(), user_id.to_string()],
+        )
+        .await?;
+    Ok(rows.next().await?.is_some())
+}
+
+// ── POST /v1/dm/add ──────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct AddDmMemberBody {
+    pub dm_channel_id: String,
+    /// The user being added.
+    pub user_id: String,
+    /// The actor performing the add; when signed it must equal the authenticated
+    /// user, and that user must already be a member of the DM.
+    pub added_by: String,
+    pub added_at: String,
+}
+
+pub async fn add_dm_member(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: AddDmMemberBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    outcome_response(apply_add_dm_member(&conn, authed.as_deref(), &parsed).await?)
+}
+
+/// Insert a `dm_channel_member` row for `user_id` and seed that member's
+/// per-device watermarks, in one transaction. Authz: the actor (`added_by`) is
+/// the authenticated user AND a current member of the DM — a non-member cannot
+/// pull someone into a conversation it isn't part of. Membership is re-derived
+/// server-side; skipped only on the no-auth path (mirrors `apply_create_dm`'s
+/// block re-check).
+pub async fn apply_add_dm_member(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &AddDmMemberBody,
+) -> anyhow::Result<WriteOutcome> {
+    let actor = match resolve_actor(authed, Some(body.added_by.as_str())) {
+        Ok(a) => a,
+        Err(o) => return Ok(o),
+    };
+    // The actor must already belong to the DM to add anyone to it.
+    if authed.is_some() && !is_dm_member(conn, &body.dm_channel_id, &actor).await? {
+        return Ok(WriteOutcome::Forbidden);
+    }
+    let tx = conn.transaction().await?;
+    tx.execute(
+        "INSERT OR IGNORE INTO dm_channel_member (dm_channel_id, user_id, added_by, added_at) \
+         VALUES (?1, ?2, ?3, ?4)",
+        libsql::params![
+            body.dm_channel_id.clone(),
+            body.user_id.clone(),
+            actor.clone(),
+            body.added_at.clone()
+        ],
+    )
+    .await?;
+    // Seed a watermark for every device of the new member so pre-join messages
+    // don't block envelope cleanup indefinitely.
+    tx.execute(
+        "INSERT OR IGNORE INTO conversation_watermark \
+             (conversation_id, user_id, device_id, last_fetched_at) \
+         SELECT ?1, ?2, ud.device_id, datetime('now') \
+         FROM user_device ud WHERE ud.user_id = ?2",
+        libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
+    )
+    .await?;
+    tx.commit().await?;
+    Ok(WriteOutcome::Ok)
+}
+
+// ── POST /v1/dm/remove ───────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct RemoveDmMemberBody {
+    pub dm_channel_id: String,
+    /// The user being removed.
+    pub user_id: String,
+    /// The actor performing the removal; when signed it must equal the
+    /// authenticated user. Authz: the actor may remove only themselves OR (as the
+    /// channel creator) another member.
+    pub requester_id: String,
+}
+
+pub async fn remove_dm_member(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: RemoveDmMemberBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    outcome_response(apply_remove_dm_member(&conn, authed.as_deref(), &parsed).await?)
+}
+
+/// Delete a `dm_channel_member` row. Authz (replicates the client's current
+/// rule, server-side): the actor (`requester_id`, bound to the authenticated
+/// user) may remove only themselves, or — as the channel's creator — any member.
+/// The creator check is re-derived from `dm_channel.created_by`; skipped only on
+/// the no-auth path.
+pub async fn apply_remove_dm_member(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &RemoveDmMemberBody,
+) -> anyhow::Result<WriteOutcome> {
+    let actor = match resolve_actor(authed, Some(body.requester_id.as_str())) {
+        Ok(a) => a,
+        Err(o) => return Ok(o),
+    };
+    if authed.is_some() && actor != body.user_id {
+        // Not a self-removal — the actor must be the channel creator.
+        let mut rows = conn
+            .query(
+                "SELECT created_by FROM dm_channel WHERE id = ?1",
+                libsql::params![body.dm_channel_id.clone()],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => {
+                let creator: String = row.get(0)?;
+                if actor != creator {
+                    return Ok(WriteOutcome::Forbidden);
+                }
+            }
+            // Channel doesn't exist — nothing to remove; refuse rather than
+            // silently no-op a write the actor isn't entitled to.
+            None => return Ok(WriteOutcome::Forbidden),
+        }
+    }
+    conn.execute(
+        "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
+        libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
+    )
+    .await?;
+    Ok(WriteOutcome::Ok)
+}
+
+// ── POST /v1/dm/leave ────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LeaveDmBody {
+    pub dm_channel_id: String,
+    /// The leaving member; when signed it must equal the authenticated user
+    /// (you may only remove your OWN membership).
+    pub user_id: String,
+}
+
+pub async fn leave_dm(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: LeaveDmBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    outcome_response(apply_leave_dm(&conn, authed.as_deref(), &parsed).await?)
+}
+
+/// Remove the actor's own `dm_channel_member` row and, when the channel is left
+/// empty, tear it down (its envelopes + the `dm_channel` row) — all in one
+/// transaction so a DM never lingers half-deleted. Authz: self only — the actor
+/// (`user_id`, bound to the authenticated user) may leave only their own
+/// membership; `resolve_actor` already refuses any other `user_id`.
+pub async fn apply_leave_dm(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &LeaveDmBody,
+) -> anyhow::Result<WriteOutcome> {
+    let user = match resolve_actor(authed, Some(body.user_id.as_str())) {
+        Ok(u) => u,
+        Err(o) => return Ok(o),
+    };
+    let tx = conn.transaction().await?;
+    tx.execute(
+        "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
+        libsql::params![body.dm_channel_id.clone(), user],
+    )
+    .await?;
+    // If no members remain, clean up the channel and all associated data.
+    let mut rows = tx
+        .query(
+            "SELECT COUNT(*) FROM dm_channel_member WHERE dm_channel_id = ?1",
+            libsql::params![body.dm_channel_id.clone()],
+        )
+        .await?;
+    let remaining: i64 = match rows.next().await? {
+        Some(row) => row.get(0)?,
+        None => 0,
+    };
+    drop(rows);
+    if remaining == 0 {
+        tx.execute(
+            "DELETE FROM message_envelope WHERE conversation_id = ?1",
+            libsql::params![body.dm_channel_id.clone()],
+        )
+        .await?;
+        tx.execute(
+            "DELETE FROM dm_channel WHERE id = ?1",
+            libsql::params![body.dm_channel_id.clone()],
+        )
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(WriteOutcome::Ok)
+}

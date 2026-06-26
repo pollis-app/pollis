@@ -160,6 +160,9 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/blocks/remove", post(profile::unblock_user))
         .route("/v1/dm/create", post(profile::create_dm))
         .route("/v1/dm/accept", post(profile::accept_dm))
+        .route("/v1/dm/add", post(profile::add_dm_member))
+        .route("/v1/dm/remove", post(profile::remove_dm_member))
+        .route("/v1/dm/leave", post(profile::leave_dm))
         // Domain D (#419) — key-packages / device-cert re-sign / push tokens.
         // All land on the MAIN DB. Device registration + the FIRST cert publish
         // are bootstrap writes that stay on the client's direct path (see
