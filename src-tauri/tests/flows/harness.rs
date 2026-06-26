@@ -213,13 +213,13 @@ fn ds_ok() -> axum::response::Response {
         .into_response()
 }
 
-/// Map a domain-A [`pollis_delivery::messages::WriteOutcome`] to a Response —
+/// Map a domain-A [`pollis_delivery::writes::WriteOutcome`] to a Response —
 /// 200 on success, 403 on a refused authz check.
-fn ds_outcome(outcome: pollis_delivery::messages::WriteOutcome) -> axum::response::Response {
+fn ds_outcome(outcome: pollis_delivery::writes::WriteOutcome) -> axum::response::Response {
     use axum::response::IntoResponse;
     match outcome {
-        pollis_delivery::messages::WriteOutcome::Ok => ds_ok(),
-        pollis_delivery::messages::WriteOutcome::Forbidden => {
+        pollis_delivery::writes::WriteOutcome::Ok => ds_ok(),
+        pollis_delivery::writes::WriteOutcome::Forbidden => {
             pollis_delivery::error::AuthRejection::Forbidden.into_response()
         }
     }

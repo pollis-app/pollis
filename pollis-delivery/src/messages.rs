@@ -57,19 +57,11 @@ use libsql::Connection;
 use serde::Deserialize;
 use ulid::Ulid;
 
-use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, is_member, ok_json};
+use crate::error::AppError;
+use crate::writes::{
+    bad_request, gate, is_member, ok_json, outcome_response, resolve_actor, WriteOutcome,
+};
 use crate::AppState;
-
-/// The result of an authorized write: either it was applied, or the
-/// authenticated user was not allowed to make it (→ 403). A genuine failure
-/// (DB error, etc.) is an `Err` on the enclosing `anyhow::Result`, mapped to 500
-/// by the handler. Shared across every domain-A endpoint so the handler ⇆
-/// harness pair stays uniform; promote to a crate-level type if B/C/D want it.
-pub enum WriteOutcome {
-    Ok,
-    Forbidden,
-}
 
 // ── Envelope GC SQL (mirrors pollis-core's ingest.rs, byte-for-byte) ─────────
 //
@@ -130,22 +122,6 @@ DELETE FROM message_envelope
 ///     (`Forbidden`).
 ///   - auth OFF (`authed = None`) → the body's actor (the no-auth path has no
 ///     signed identity). Missing/empty → `Forbidden` (no actor at all).
-fn resolve_actor(
-    authed: Option<&str>,
-    body_actor: Option<&str>,
-) -> Result<String, WriteOutcome> {
-    match authed {
-        Some(u) => match body_actor {
-            Some(b) if b != u => Err(WriteOutcome::Forbidden),
-            _ => Ok(u.to_string()),
-        },
-        None => match body_actor {
-            Some(b) if !b.is_empty() => Ok(b.to_string()),
-            _ => Err(WriteOutcome::Forbidden),
-        },
-    }
-}
-
 /// The original sender of a `type='message'` envelope, if it's still present
 /// (it may have aged out via watermark/TTL GC).
 async fn original_sender(conn: &Connection, message_id: &str) -> anyhow::Result<Option<String>> {
@@ -810,15 +786,4 @@ pub async fn apply_delete_attachment(
     )
     .await?;
     Ok(WriteOutcome::Ok)
-}
-
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/// Map a [`WriteOutcome`] to the standard response: 200 on success, 403 on a
-/// refused authz check.
-fn outcome_response(outcome: WriteOutcome) -> Result<Response, AppError> {
-    Ok(match outcome {
-        WriteOutcome::Ok => ok_json(serde_json::json!({ "status": "ok" })),
-        WriteOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
-    })
 }

@@ -110,6 +110,55 @@ pub(crate) fn ok_json(value: serde_json::Value) -> Response {
     (StatusCode::OK, Json(value)).into_response()
 }
 
+// ── Shared write-result helpers (every domain reuses these) ──────────────────
+
+/// The result of an authorized write: either it was applied, or the
+/// authenticated user was not allowed to make it (→ 403). A genuine failure (DB
+/// error, etc.) is an `Err` on the enclosing `anyhow::Result`, mapped to 500 by
+/// the handler. Shared across every write-domain module so the handler ⇆ harness
+/// pair stays uniform.
+///
+/// `pub` (not `pub(crate)`) so the integration-test harness — an external crate —
+/// can match on it when driving the `apply_*` fns directly.
+pub enum WriteOutcome {
+    Ok,
+    Forbidden,
+}
+
+/// Map a [`WriteOutcome`] to the HTTP response (200 ok / 403 forbidden).
+pub(crate) fn outcome_response(outcome: WriteOutcome) -> Result<Response, AppError> {
+    Ok(match outcome {
+        WriteOutcome::Ok => ok_json(serde_json::json!({ "status": "ok" })),
+        WriteOutcome::Forbidden => AuthRejection::Forbidden.into_response(),
+    })
+}
+
+/// Resolve the actor a write is performed as.
+///
+///   - auth ON  → the authenticated user. If the body also carries an actor id,
+///                it must equal the authenticated user (else `Forbidden`).
+///   - auth OFF → the body's actor id (no signed identity on the no-auth path).
+///                Missing/empty → `Forbidden`.
+///
+/// Returns the actor or [`WriteOutcome::Forbidden`] so `apply_*` fns can `?`-bail
+/// uniformly. (Distinct from [`resolve_recipient`], which returns an HTTP
+/// response for the welcome endpoints' 400-on-missing contract.)
+pub(crate) fn resolve_actor(
+    authed: Option<&str>,
+    body_actor: Option<&str>,
+) -> Result<String, WriteOutcome> {
+    match authed {
+        Some(u) => match body_actor {
+            Some(b) if b != u => Err(WriteOutcome::Forbidden),
+            _ => Ok(u.to_string()),
+        },
+        None => match body_actor {
+            Some(b) if !b.is_empty() => Ok(b.to_string()),
+            _ => Err(WriteOutcome::Forbidden),
+        },
+    }
+}
+
 /// Membership check against the main DB: is `user_id` a current member of the
 /// MLS conversation `conversation_id`?
 ///
