@@ -178,20 +178,24 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(digest)
 }
 
-/// Guard against an empty source: building a bundle over zero commits is almost
-/// always a misconfiguration (wrong DB / wrong table), so surface it.
+/// Guard against an empty commit-log source. An empty table is a distinct
+/// condition from a missing `--db` argument: the DB connected fine, it just has
+/// no commits yet (e.g. immediately after Goal A's cutover). So it returns
+/// [`BuilderError::EmptyCommitLog`], never [`BuilderError::NoDbSource`] — the
+/// latter is reserved for the genuine missing-source case in `builder.rs`.
 pub fn ensure_non_empty(rows: &[CommitRow]) -> Result<()> {
     if rows.is_empty() {
-        return Err(BuilderError::NoDbSource);
+        return Err(BuilderError::EmptyCommitLog);
     }
     Ok(())
 }
 
 /// Guard against an empty account-key source. Separate from [`ensure_non_empty`]
-/// so the two tenants can be checked independently.
+/// so the two tenants can be checked independently — an empty account-key log
+/// returns its own [`BuilderError::EmptyAccountKeyLog`].
 pub fn ensure_account_non_empty(rows: &[AccountKeyRow]) -> Result<()> {
     if rows.is_empty() {
-        return Err(BuilderError::NoDbSource);
+        return Err(BuilderError::EmptyAccountKeyLog);
     }
     Ok(())
 }

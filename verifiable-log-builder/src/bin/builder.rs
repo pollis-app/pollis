@@ -145,13 +145,48 @@ async fn run_build(
     // Resolve the signing key BEFORE touching the DB so a missing key fails fast.
     let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
 
+    // The two tenants are INDEPENDENT: the commit log lives in the log DB and the
+    // account-key directory in the main DB, on separate Merkle trees. A transient
+    // empty commit log (e.g. right after Goal A's cutover) must NOT block the
+    // account-key bundle, and vice versa. So we read both first, then decide.
+
     // Commit-log tenant (frozen contract): read from the LOG DB with its token.
     let log_conn = source::connect_with_token(&log_db, &log_token).await?;
     let rows = source::read_commit_log(&log_conn).await?;
-    source::ensure_non_empty(&rows)?;
+    let commit_empty = rows.is_empty();
 
+    // Account-key tenant (separate tree, domain-separated STH) — only when asked.
+    // It stays in the MAIN DB (TURSO_AUTH_TOKEN), independent of the log DB.
+    let account_rows = if account_out.is_some() {
+        let conn = source::connect(&db).await?;
+        Some(source::read_account_key_log(&conn).await?)
+    } else {
+        None
+    };
+    // "Absent" (not requested) counts the same as "empty" for the all-empty check.
+    let account_empty = account_rows.as_ref().map_or(true, |r| r.is_empty());
+
+    // Only hard-fail when there is nothing to publish from EITHER tenant. With at
+    // least one non-empty source we go on to write a bundle for each — an empty
+    // source yields a valid empty/zero-length bundle (see below), never an abort.
+    if commit_empty && account_empty {
+        // The DB connected fine; the commit log is just empty. Surface that
+        // distinct condition (EmptyCommitLog), not the missing-source NoDbSource.
+        source::ensure_non_empty(&rows)?;
+    }
+
+    // Commit-log bundle. `build_bundle` over zero rows is well-defined — it emits
+    // a valid bundle with a single STH over tree size 0 and no entries — so we
+    // ALWAYS write `out`. That keeps the downstream `serve generate --bundle
+    // bundle.json` step working (the file always exists and parses) instead of
+    // crashing on a missing file when the commit log happens to be empty.
+    if commit_empty {
+        eprintln!(
+            "notice: commit log is empty (db connected OK) — writing an empty commit-log \
+             bundle so `serve generate` still runs; the account-key tree is built independently"
+        );
+    }
     let bundle = build_bundle(&rows, &signing_key, timestamp)?;
-
     let json = serde_json::to_string_pretty(&bundle)?;
     std::fs::write(&out, json)?;
 
@@ -164,13 +199,16 @@ async fn run_build(
         out.display()
     );
 
-    // Account-key tenant (separate tree, domain-separated STH) — only when asked.
-    // It stays in the MAIN DB (TURSO_AUTH_TOKEN), independent of the log DB.
-    if let Some(account_out) = account_out {
-        let conn = source::connect(&db).await?;
-        let account_rows = source::read_account_key_log(&conn).await?;
-        source::ensure_account_non_empty(&account_rows)?;
-
+    // Account-key bundle, written independently of the commit log's state. Like
+    // the commit bundle, a zero-row account log yields a valid empty bundle, so
+    // `serve generate --account-bundle ...` always has a file to read.
+    if let (Some(account_out), Some(account_rows)) = (account_out, account_rows) {
+        if account_rows.is_empty() {
+            eprintln!(
+                "notice: account-key log is empty (db connected OK) — writing an empty \
+                 account-key bundle"
+            );
+        }
         let account_bundle = build_account_bundle(&account_rows, &signing_key, account_timestamp)?;
         let account_json = serde_json::to_string_pretty(&account_bundle)?;
         std::fs::write(&account_out, account_json)?;
