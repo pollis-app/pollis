@@ -19,6 +19,7 @@
 //! That keeps existing unsigned clients and the integration harness working
 //! until a follow-up makes the pollis-core client sign + send the headers.
 
+pub mod account;
 pub mod auth;
 pub mod commit;
 pub mod db;
@@ -168,6 +169,18 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/key-packages/replenish", post(devices::replenish_key_packages))
         .route("/v1/devices/resign", post(devices::resign_device_certs))
         .route("/v1/push-tokens", post(devices::register_push_token))
+        // Domains E + G (#419) — account lifecycle / identity rotation /
+        // recovery / device-enrollment / security audit. All land on the MAIN
+        // DB. The account-identity bootstrap (signup version-1 establishment),
+        // device registration, the enrollment *request*, and logout device
+        // removal stay on the client's direct path (see `account` module docs).
+        .route("/v1/account/rotate-identity", post(account::rotate_identity))
+        .route("/v1/account/delete", post(account::delete_account))
+        .route("/v1/account/reset-recover", post(account::reset_recover))
+        .route("/v1/security-events", post(account::record_security_event))
+        .route("/v1/enrollment/approve", post(account::approve_enrollment))
+        .route("/v1/enrollment/reject", post(account::reject_enrollment))
+        .route("/v1/devices/revoke", post(account::revoke_device))
         .with_state(state)
 }
 

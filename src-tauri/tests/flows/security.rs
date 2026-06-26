@@ -331,3 +331,157 @@ async fn ds_rejects_domain_d_writes_for_another_user() {
     drop(alice);
     drop(mallory);
 }
+
+/// Domains E + G (#419) server-side AUTHORIZATION: every account-lifecycle op is
+/// SELF-scoped — a user rotates / deletes / recovers / audits / approves only
+/// THEIR OWN account. A *validly signed* request that names ANOTHER user as the
+/// target must be refused at 403 (not 401 — the signature is real). This proves a
+/// device cannot rotate another user's identity key (which would let it take over
+/// the account-key transparency log), delete their account, forge an audit event
+/// under their name, or approve a device onto their account.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ds_rejects_domain_eg_writes_for_another_user() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut mallory = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    // Mallory is fully enrolled (real device key) so the rejections below are
+    // "not your account" (403), never "unknown device" (401).
+    let _mallory = mallory.sign_up("mallory@test.local").await;
+
+    // (1) Mallory signs an identity rotation that names ALICE → 403. resolve_actor
+    //     refuses the body's user_id ≠ signer BEFORE any account_key_log touch, so
+    //     the transparency log is never even reached.
+    let rotate_body = serde_json::to_vec(&json!({
+        "based_on_version": 1,
+        "account_id_pub": "AA==",
+        "salt": "AA==",
+        "nonce": "AA==",
+        "wrapped_key": "AA==",
+        "user_id": alice_profile.id,
+    }))
+    .expect("serialize rotate body");
+    let code = signed_post_status(&mallory, "/v1/account/rotate-identity", &rotate_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed identity rotation of ANOTHER user must be FORBIDDEN, got {code}"
+    );
+
+    // (2) Mallory signs an account deletion naming ALICE → 403.
+    let delete_body = serde_json::to_vec(&json!({ "user_id": alice_profile.id }))
+        .expect("serialize delete body");
+    let code = signed_post_status(&mallory, "/v1/account/delete", &delete_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed account deletion of ANOTHER user must be FORBIDDEN, got {code}"
+    );
+
+    // (3) Mallory signs a security-event forging ALICE's audit log → 403.
+    let event_body = serde_json::to_vec(&json!({
+        "kind": "identity_reset",
+        "user_id": alice_profile.id,
+    }))
+    .expect("serialize event body");
+    let code = signed_post_status(&mallory, "/v1/security-events", &event_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed security-event under ANOTHER user's name must be FORBIDDEN, got {code}"
+    );
+
+    // (4) Mallory signs an enrollment approval naming ALICE → 403 (she may only
+    //     approve enrollments onto her OWN account).
+    let approve_body = serde_json::to_vec(&json!({
+        "request_id": "01TESTENROLLREQXXXXXXXXXXX",
+        "wrapped_account_key": "AA==",
+        "approved_by_device_id": "01TESTDEVICEXXXXXXXXXXXXXX",
+        "user_id": alice_profile.id,
+    }))
+    .expect("serialize approve body");
+    let code = signed_post_status(&mallory, "/v1/enrollment/approve", &approve_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed enrollment approval onto ANOTHER user's account must be FORBIDDEN, got {code}"
+    );
+
+    drop(alice);
+    drop(mallory);
+}
+
+/// Domain E (#419) `account_key_log` CAS — the transparency-log analogue of the
+/// commit-log fork test (`concurrent_commits_at_same_epoch_must_not_fork_a_member`).
+///
+/// `account_key_log` is an append-only, transparency-backed log keyed
+/// `UNIQUE (user_id, identity_version)`. If two rotations from the same head both
+/// landed, the published account-key tree would FORK. The CAS in
+/// `apply_rotate_identity` (`INSERT … WHERE based_on == current head … ON CONFLICT
+/// DO NOTHING`) must let exactly one win: the second rotation that names the SAME
+/// `based_on_version` after the first has advanced the head is rejected with 409,
+/// and the log keeps exactly ONE row at the new version.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn account_key_log_cas_rejects_second_rotation_at_same_version() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let _alice = alice.sign_up("alice@test.local").await;
+
+    // sign_up established alice's account identity at version 1 (the direct
+    // bootstrap write), so both rotations below claim the same head: version 1.
+    let rotate = |pubk: &str| {
+        serde_json::to_vec(&json!({
+            "based_on_version": 1,
+            "account_id_pub": pubk,
+            "salt": "AQ==",
+            "nonce": "Ag==",
+            "wrapped_key": "Aw==",
+        }))
+        .expect("serialize rotate body")
+    };
+
+    // First rotation from head=1 wins → 200, advancing the head to version 2.
+    let first = signed_post_status(&alice, "/v1/account/rotate-identity", &rotate("EAAA")).await;
+    assert_eq!(
+        first, 200,
+        "the first rotation from the current head must be ACCEPTED, got {first}"
+    );
+
+    // Second rotation ALSO claims head=1 (a stale/duplicate append, exactly the
+    // concurrent-fork shape). The CAS sees the head is now 2 ≠ 1 → 409. No fork.
+    let second = signed_post_status(&alice, "/v1/account/rotate-identity", &rotate("IAAA")).await;
+    assert_eq!(
+        second, 409,
+        "a second rotation from an already-consumed head must CONFLICT (no fork), got {second}"
+    );
+
+    // The append-only log holds exactly ONE row at version 2 — the winner's. A
+    // fork would show two distinct rows at the same (user_id, identity_version).
+    let conn = alice
+        .state
+        .remote_db
+        .conn()
+        .await
+        .expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM account_key_log WHERE user_id = ?1 AND identity_version = 2",
+            libsql::params![alice.user_id().to_string()],
+        )
+        .await
+        .expect("account_key_log count query");
+    let count: i64 = rows
+        .next()
+        .await
+        .expect("row")
+        .expect("some row")
+        .get(0)
+        .expect("count");
+    assert_eq!(
+        count, 1,
+        "account_key_log must hold exactly one row at version 2 (no fork), got {count}"
+    );
+
+    drop(alice);
+}
