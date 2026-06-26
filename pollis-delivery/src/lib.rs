@@ -24,6 +24,7 @@ pub mod commit;
 pub mod db;
 pub mod error;
 pub mod messages;
+pub mod profile;
 pub mod writes;
 
 use std::sync::Arc;
@@ -132,6 +133,14 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/envelopes/gc", post(messages::envelope_gc))
         .route("/v1/attachments/register", post(messages::register_attachment))
         .route("/v1/attachments/delete", post(messages::delete_attachment))
+        // Domain C (#419) — profile / preferences / blocks / DMs. All land on
+        // the MAIN DB.
+        .route("/v1/profile/update", post(profile::update_profile))
+        .route("/v1/profile/preferences", post(profile::save_preferences))
+        .route("/v1/blocks/add", post(profile::block_user))
+        .route("/v1/blocks/remove", post(profile::unblock_user))
+        .route("/v1/dm/create", post(profile::create_dm))
+        .route("/v1/dm/accept", post(profile::accept_dm))
         .with_state(state)
 }
 

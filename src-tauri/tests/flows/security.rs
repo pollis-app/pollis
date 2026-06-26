@@ -167,3 +167,53 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
     drop(bob);
     drop(mallory);
 }
+
+/// Domain-C (#419) server-side AUTHORIZATION: a *validly signed* profile / block
+/// write must still be refused when the signer targets ANOTHER user's row. You
+/// may only edit your OWN profile and manage your OWN block list — the DS binds
+/// the actor in the body to the authenticated signer, so a perfectly good device
+/// signature cannot be used to write as someone else.
+///
+/// Two refusals, both at 403 (not 401 — the requests are correctly signed):
+///   1. alice signs a `profile/update` whose `user_id` is BOB's;
+///   2. alice signs a `blocks/add` whose `blocker_id` is BOB's.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ds_rejects_domain_c_writes_lacking_authorization() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let _alice = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // (1) alice signs a profile edit for BOB's row → 403. The signature proves
+    //     she is alice; the body claims to edit bob, which the actor binding
+    //     refuses.
+    let profile_body = serde_json::to_vec(&json!({
+        "user_id": bob_profile.id,
+        "username": "hacked-by-alice",
+    }))
+    .expect("serialize profile body");
+    let code = signed_post_status(&alice, "/v1/profile/update", &profile_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed profile edit of someone else's row must be FORBIDDEN, got {code}"
+    );
+
+    // (2) alice signs a block AS BOB → 403. You manage only your own block list.
+    let block_body = serde_json::to_vec(&json!({
+        "blocker_id": bob_profile.id,
+        "blocked_id": alice.user_id(),
+    }))
+    .expect("serialize block body");
+    let code = signed_post_status(&alice, "/v1/blocks/add", &block_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed block on another user's behalf must be FORBIDDEN, got {code}"
+    );
+
+    drop(alice);
+    drop(bob);
+}
