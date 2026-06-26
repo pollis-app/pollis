@@ -180,6 +180,14 @@ pub async fn ensure_device_cert(
     // round-trip to u64 for signature verification later.
     let issued_at_str = issued_at.to_string();
 
+    // BOOTSTRAP — stays DIRECT, never routed through the DS (#419 domain D).
+    // This UPDATE sets `mls_signature_pub`, which is the exact column the DS
+    // reads to authenticate a signed request (`auth::verify_request`). Until it
+    // is populated this device cannot produce a signature the DS will accept, so
+    // the write that establishes the credential cannot be authenticated by that
+    // credential. Device cert (re)publish therefore writes Turso directly; every
+    // post-enrolment domain-D write (key packages, push tokens, cert re-sign) is
+    // signed and routed through the DS. See `pollis_delivery::devices` docs.
     conn.execute(
         "UPDATE user_device \
          SET device_cert = ?1, \
@@ -273,7 +281,11 @@ pub async fn resign_stale_device_certs(
         out
     };
 
-    let mut count = 0;
+    // Sign every stale device's cert with the account identity key (held only in
+    // the OS keystore) BEFORE any remote write, collecting the cert columns. The
+    // re-sign never touches `mls_signature_pub` — only the cert columns — so it
+    // cannot change a device's DS-auth credential.
+    let mut signed: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(devices.len());
     for (device_id, sig_pub_bytes) in devices {
         let issued_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -289,24 +301,51 @@ pub async fn resign_stale_device_certs(
             issued_at,
         )
         .await?;
+        signed.push((device_id, cert, issued_at.to_string()));
+    }
+    let count = signed.len();
 
-        let issued_at_str = issued_at.to_string();
-        conn.execute(
-            "UPDATE user_device \
-             SET device_cert = ?1, \
-                 cert_issued_at = ?2, \
-                 cert_identity_version = ?3 \
-             WHERE device_id = ?4 AND user_id = ?5",
-            libsql::params![
-                cert,
-                issued_at_str,
-                identity_version as i64,
-                device_id.clone(),
-                user_id
-            ],
-        )
-        .await?;
-        count += 1;
+    // DS seam: re-stamp the cert columns through the Delivery Service (the write
+    // API) when configured — user-scoped: the actor re-signs certs for any of
+    // THEIR OWN devices, never another user's — else UPDATE directly.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            if !signed.is_empty() {
+                use base64::Engine as _;
+                let certs: Vec<serde_json::Value> = signed
+                    .iter()
+                    .map(|(device_id, cert, issued_at_str)| {
+                        serde_json::json!({
+                            "device_id": device_id,
+                            "device_cert": base64::engine::general_purpose::STANDARD.encode(cert),
+                            "cert_issued_at": issued_at_str,
+                            "cert_identity_version": identity_version as i64,
+                        })
+                    })
+                    .collect();
+                let body = serde_json::json!({ "certs": certs, "user_id": user_id });
+                crate::commands::mls::ds_post_ok(state, "/v1/devices/resign", &body).await?;
+            }
+        }
+        None => {
+            for (device_id, cert, issued_at_str) in &signed {
+                conn.execute(
+                    "UPDATE user_device \
+                     SET device_cert = ?1, \
+                         cert_issued_at = ?2, \
+                         cert_identity_version = ?3 \
+                     WHERE device_id = ?4 AND user_id = ?5",
+                    libsql::params![
+                        cert.clone(),
+                        issued_at_str.clone(),
+                        identity_version as i64,
+                        device_id.clone(),
+                        user_id
+                    ],
+                )
+                .await?;
+            }
+        }
     }
 
     eprintln!(

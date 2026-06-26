@@ -22,6 +22,7 @@
 pub mod auth;
 pub mod commit;
 pub mod db;
+pub mod devices;
 pub mod error;
 pub mod groups;
 pub mod messages;
@@ -159,6 +160,14 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/blocks/remove", post(profile::unblock_user))
         .route("/v1/dm/create", post(profile::create_dm))
         .route("/v1/dm/accept", post(profile::accept_dm))
+        // Domain D (#419) — key-packages / device-cert re-sign / push tokens.
+        // All land on the MAIN DB. Device registration + the FIRST cert publish
+        // are bootstrap writes that stay on the client's direct path (see
+        // `devices` module docs).
+        .route("/v1/key-packages", post(devices::publish_key_packages))
+        .route("/v1/key-packages/replenish", post(devices::replenish_key_packages))
+        .route("/v1/devices/resign", post(devices::resign_device_certs))
+        .route("/v1/push-tokens", post(devices::register_push_token))
         .with_state(state)
 }
 

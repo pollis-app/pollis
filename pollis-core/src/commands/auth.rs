@@ -664,6 +664,13 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
 
     // COALESCE preserves any existing device_name — fills it in only if NULL,
     // so a user-set rename (future feature) is never overwritten on reconnect.
+    //
+    // BOOTSTRAP — stays DIRECT, never routed through the DS (#419 domain D).
+    // This creates the device's `user_device` row with `mls_signature_pub` still
+    // NULL; the row is what a later `ensure_device_cert` populates to make the
+    // device DS-authenticatable. A brand-new device has no registered key for the
+    // DS to verify against, so its first registration cannot be signature-authed
+    // and writes Turso directly. See `pollis_delivery::devices` docs.
     let conn = state.remote_db.conn().await?;
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \

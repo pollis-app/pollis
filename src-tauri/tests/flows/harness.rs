@@ -953,6 +953,135 @@ async fn delivery_dm_accept(
 /// test would hit a dead port (connection refused). Owning the server on a
 /// separate thread + runtime decouples its lifetime from the per-test runtimes,
 /// so the single shared DS stays up for the whole `cargo test` process.
+// ─── Domain D (#419) — key-packages / device-cert re-sign / push tokens ──────
+//
+// Every domain-D endpoint runs the SAME pure `apply_*` fn the production axum
+// handler runs, against the MAIN DB (these tables are not on the log DB). Auth
+// is always enforced here, so the flows suite exercises the signed write +
+// owner-scoped authz path end to end. `/v1/key-packages/replenish` runs in EVERY
+// test's `sign_up` (via `initialize_identity` → `ensure_mls_key_package`), so a
+// regression in the signed key-package path fails the whole suite immediately.
+
+/// `POST /v1/key-packages`.
+async fn delivery_key_packages(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::devices::PublishKeyPackagesBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::devices::apply_publish_key_packages(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("key-packages: {e}")),
+    }
+}
+
+/// `POST /v1/key-packages/replenish`.
+async fn delivery_key_packages_replenish(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::devices::ReplenishKeyPackagesBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::devices::apply_replenish_key_packages(&conn, Some(&authed), &parsed).await
+    {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("key-packages/replenish: {e}")),
+    }
+}
+
+/// `POST /v1/devices/resign`.
+async fn delivery_devices_resign(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::devices::ResignDeviceCertsBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::devices::apply_resign_device_certs(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("devices/resign: {e}")),
+    }
+}
+
+/// `POST /v1/push-tokens`.
+async fn delivery_push_tokens(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::devices::PushTokenBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::devices::apply_register_push_token(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("push-tokens: {e}")),
+    }
+}
+
+/// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
+/// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
+/// port, and serve it on a DEDICATED OS thread with its own runtime so the
+/// server outlives every individual `#[tokio::test]` runtime.
+///
+/// Why a dedicated thread: each `#[tokio::test(flavor = "multi_thread")]` spins
+/// up and tears down its OWN Tokio runtime. If we spawned the server on the
+/// first test's runtime, it would die when that test finished, and every later
+/// test would hit a dead port (connection refused). Owning the server on a
+/// separate thread + runtime decouples its lifetime from the per-test runtimes,
+/// so the single shared DS stays up for the whole `cargo test` process.
+
 async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> String {
     use std::sync::mpsc;
 
@@ -1066,6 +1195,14 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     )
                     .route("/v1/dm/create", axum::routing::post(delivery_dm_create))
                     .route("/v1/dm/accept", axum::routing::post(delivery_dm_accept))
+                    // Domain D (#419) — all on the MAIN DB.
+                    .route("/v1/key-packages", axum::routing::post(delivery_key_packages))
+                    .route(
+                        "/v1/key-packages/replenish",
+                        axum::routing::post(delivery_key_packages_replenish),
+                    )
+                    .route("/v1/devices/resign", axum::routing::post(delivery_devices_resign))
+                    .route("/v1/push-tokens", axum::routing::post(delivery_push_tokens))
                     .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
