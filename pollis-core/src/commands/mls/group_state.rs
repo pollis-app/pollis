@@ -699,6 +699,13 @@ pub(crate) async fn process_pending_commits_locked(
     }
     drop(rows);
 
+    // Cross-signing cert verification (`verify_added_devices` below) reads
+    // `users` / `user_device` / `account_key_log` — all on the MAIN DB. `conn`
+    // above is the read-only commit-log DB, which has none of those tables (a
+    // verify against it fails with "no such table: users"). Open a main-DB
+    // connection for verification. Falls back to the same DB pre-cutover.
+    let verify_conn = state.remote_db.conn().await?;
+
     // 3. Apply each commit in epoch order. For any commit carrying add
     //    metadata, verify every added device's cross-signing cert
     //    against the user's account_id_pub BEFORE touching the group
@@ -729,7 +736,7 @@ pub(crate) async fn process_pending_commits_locked(
         // ── Inbound cert verification ────────────────────────────
         if let Some(ref added_user_id) = commit.added_user_id {
             let outcome = match verify_added_devices(
-                &conn,
+                &verify_conn,
                 added_user_id,
                 &commit.added_device_ids,
             )
