@@ -23,6 +23,7 @@ pub mod auth;
 pub mod commit;
 pub mod db;
 pub mod error;
+pub mod groups;
 pub mod messages;
 pub mod writes;
 
@@ -132,6 +133,23 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/envelopes/gc", post(messages::envelope_gc))
         .route("/v1/attachments/register", post(messages::register_attachment))
         .route("/v1/attachments/delete", post(messages::delete_attachment))
+        // Domain B (#419) — groups / channels / membership / invites /
+        // join-requests. All land on the MAIN DB.
+        .route("/v1/groups/create", post(groups::create_group))
+        .route("/v1/groups/update", post(groups::update_group))
+        .route("/v1/groups/delete", post(groups::delete_group))
+        .route("/v1/groups/leave", post(groups::leave_group))
+        .route("/v1/channels/create", post(groups::create_channel))
+        .route("/v1/channels/update", post(groups::update_channel))
+        .route("/v1/channels/delete", post(groups::delete_channel))
+        .route("/v1/members/remove", post(groups::remove_member))
+        .route("/v1/members/role", post(groups::set_member_role))
+        .route("/v1/invites/create", post(groups::create_invite))
+        .route("/v1/invites/accept", post(groups::accept_invite))
+        .route("/v1/invites/decline", post(groups::decline_invite))
+        .route("/v1/join-requests/create", post(groups::create_join_request))
+        .route("/v1/join-requests/approve", post(groups::approve_join_request))
+        .route("/v1/join-requests/reject", post(groups::reject_join_request))
         .with_state(state)
 }
 

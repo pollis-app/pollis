@@ -651,6 +651,135 @@ async fn delivery_attachments_delete(
     }
 }
 
+// ─── Domain B (#419) — groups / channels / membership / invites / join-reqs ──
+//
+// Every domain-B endpoint runs the SAME pure `apply_*` fn the production axum
+// handler runs, against the MAIN DB. Auth is always enforced here, so the flows
+// suite exercises the signed write + server-side authz path end to end.
+
+/// Generate a domain-B delivery handler: gate → parse → run the `apply_*`
+/// against the MAIN DB → map the outcome. Collapses the otherwise-identical
+/// per-endpoint boilerplate the domain-A handlers spell out by hand.
+macro_rules! delivery_b {
+    ($name:ident, $body:ty, $apply:path, $label:literal) => {
+        async fn $name(
+            axum::extract::State(state): axum::extract::State<DsState>,
+            method: axum::http::Method,
+            uri: axum::http::Uri,
+            headers: axum::http::HeaderMap,
+            body: axum::body::Bytes,
+        ) -> axum::response::Response {
+            let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+                Ok(u) => u,
+                Err(resp) => return resp,
+            };
+            let parsed: $body = match serde_json::from_slice(&body) {
+                Ok(b) => b,
+                Err(_) => return ds_bad_request(),
+            };
+            let conn = match state.main.conn().await {
+                Ok(c) => c,
+                Err(e) => return ds_internal_error(format!("conn: {e}")),
+            };
+            match $apply(&conn, Some(&authed), &parsed).await {
+                Ok(o) => ds_outcome(o),
+                Err(e) => ds_internal_error(format!("{}: {e}", $label)),
+            }
+        }
+    };
+}
+
+delivery_b!(
+    delivery_groups_create,
+    pollis_delivery::groups::CreateGroupBody,
+    pollis_delivery::groups::apply_create_group,
+    "groups/create"
+);
+delivery_b!(
+    delivery_groups_update,
+    pollis_delivery::groups::UpdateGroupBody,
+    pollis_delivery::groups::apply_update_group,
+    "groups/update"
+);
+delivery_b!(
+    delivery_groups_delete,
+    pollis_delivery::groups::DeleteGroupBody,
+    pollis_delivery::groups::apply_delete_group,
+    "groups/delete"
+);
+delivery_b!(
+    delivery_groups_leave,
+    pollis_delivery::groups::LeaveGroupBody,
+    pollis_delivery::groups::apply_leave_group,
+    "groups/leave"
+);
+delivery_b!(
+    delivery_channels_create,
+    pollis_delivery::groups::CreateChannelBody,
+    pollis_delivery::groups::apply_create_channel,
+    "channels/create"
+);
+delivery_b!(
+    delivery_channels_update,
+    pollis_delivery::groups::UpdateChannelBody,
+    pollis_delivery::groups::apply_update_channel,
+    "channels/update"
+);
+delivery_b!(
+    delivery_channels_delete,
+    pollis_delivery::groups::DeleteChannelBody,
+    pollis_delivery::groups::apply_delete_channel,
+    "channels/delete"
+);
+delivery_b!(
+    delivery_members_remove,
+    pollis_delivery::groups::RemoveMemberBody,
+    pollis_delivery::groups::apply_remove_member,
+    "members/remove"
+);
+delivery_b!(
+    delivery_members_role,
+    pollis_delivery::groups::SetMemberRoleBody,
+    pollis_delivery::groups::apply_set_member_role,
+    "members/role"
+);
+delivery_b!(
+    delivery_invites_create,
+    pollis_delivery::groups::CreateInviteBody,
+    pollis_delivery::groups::apply_create_invite,
+    "invites/create"
+);
+delivery_b!(
+    delivery_invites_accept,
+    pollis_delivery::groups::AcceptInviteBody,
+    pollis_delivery::groups::apply_accept_invite,
+    "invites/accept"
+);
+delivery_b!(
+    delivery_invites_decline,
+    pollis_delivery::groups::DeclineInviteBody,
+    pollis_delivery::groups::apply_decline_invite,
+    "invites/decline"
+);
+delivery_b!(
+    delivery_join_requests_create,
+    pollis_delivery::groups::CreateJoinRequestBody,
+    pollis_delivery::groups::apply_create_join_request,
+    "join-requests/create"
+);
+delivery_b!(
+    delivery_join_requests_approve,
+    pollis_delivery::groups::ApproveJoinRequestBody,
+    pollis_delivery::groups::apply_approve_join_request,
+    "join-requests/approve"
+);
+delivery_b!(
+    delivery_join_requests_reject,
+    pollis_delivery::groups::RejectJoinRequestBody,
+    pollis_delivery::groups::apply_reject_join_request,
+    "join-requests/reject"
+);
+
 /// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
 /// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
 /// port, and serve it on a DEDICATED OS thread with its own runtime so the
@@ -711,6 +840,53 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     .route(
                         "/v1/attachments/delete",
                         axum::routing::post(delivery_attachments_delete),
+                    )
+                    // Domain B (#419) — groups / channels / membership / invites
+                    // / join-requests. All on the MAIN DB.
+                    .route("/v1/groups/create", axum::routing::post(delivery_groups_create))
+                    .route("/v1/groups/update", axum::routing::post(delivery_groups_update))
+                    .route("/v1/groups/delete", axum::routing::post(delivery_groups_delete))
+                    .route("/v1/groups/leave", axum::routing::post(delivery_groups_leave))
+                    .route(
+                        "/v1/channels/create",
+                        axum::routing::post(delivery_channels_create),
+                    )
+                    .route(
+                        "/v1/channels/update",
+                        axum::routing::post(delivery_channels_update),
+                    )
+                    .route(
+                        "/v1/channels/delete",
+                        axum::routing::post(delivery_channels_delete),
+                    )
+                    .route(
+                        "/v1/members/remove",
+                        axum::routing::post(delivery_members_remove),
+                    )
+                    .route("/v1/members/role", axum::routing::post(delivery_members_role))
+                    .route(
+                        "/v1/invites/create",
+                        axum::routing::post(delivery_invites_create),
+                    )
+                    .route(
+                        "/v1/invites/accept",
+                        axum::routing::post(delivery_invites_accept),
+                    )
+                    .route(
+                        "/v1/invites/decline",
+                        axum::routing::post(delivery_invites_decline),
+                    )
+                    .route(
+                        "/v1/join-requests/create",
+                        axum::routing::post(delivery_join_requests_create),
+                    )
+                    .route(
+                        "/v1/join-requests/approve",
+                        axum::routing::post(delivery_join_requests_approve),
+                    )
+                    .route(
+                        "/v1/join-requests/reject",
+                        axum::routing::post(delivery_join_requests_reject),
                     )
                     .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.

@@ -90,10 +90,24 @@ pub async fn remove_member_from_group(
         )));
     }
 
-    conn.execute(
-        "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), user_id.clone()],
-    ).await?;
+    // DS seam: route the member-row delete through the Delivery Service (which
+    // re-derives the admin/self rule server-side) when configured; else direct.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "group_id": group_id,
+                "user_id": user_id,
+                "requester_id": requester_id,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/members/remove", &body).await?;
+        }
+        None => {
+            conn.execute(
+                "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+                libsql::params![group_id.clone(), user_id.clone()],
+            ).await?;
+        }
+    }
 
     // Reconcile removes the member's leaves from the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -152,10 +166,24 @@ pub async fn leave_group(
     //     )));
     // }
 
-    conn.execute(
-        "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), user_id.clone()],
-    ).await?;
+    // DS seam: route the leaver's member-row delete (and, when the group empties,
+    // the group delete) through the Delivery Service — one server-authorized
+    // write scoped to the signer's own row — when configured; else direct.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "group_id": group_id,
+                "user_id": user_id,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/groups/leave", &body).await?;
+        }
+        None => {
+            conn.execute(
+                "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+                libsql::params![group_id.clone(), user_id.clone()],
+            ).await?;
+        }
+    }
 
     // A user cannot commit their own removal in MLS ("remove_members with self
     // as target" is rejected by the spec).  Instead, wipe the local group state
@@ -178,8 +206,10 @@ pub async fn leave_group(
         eprintln!("[realtime] leave_group: notify group {group_id}: {e}");
     }
 
-    // If no members remain, delete the group (cascades to channels, invites, etc.)
-    if member_count <= 1 {
+    // If no members remain, delete the group (cascades to channels, invites,
+    // etc.). On the DS path this is handled server-side inside the leave write,
+    // so only the direct path issues it here.
+    if state.config.pollis_delivery_url.is_none() && member_count <= 1 {
         conn.execute(
             "DELETE FROM groups WHERE id = ?1",
             libsql::params![group_id],
@@ -230,10 +260,26 @@ pub async fn set_member_role(
         return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
     }
 
-    conn.execute(
-        "UPDATE group_member SET role = ?1 WHERE group_id = ?2 AND user_id = ?3",
-        libsql::params![role, group_id.clone(), user_id],
-    ).await?;
+    // DS seam: route the role update through the Delivery Service (admin
+    // re-derived server-side, target-membership re-checked) when configured;
+    // else direct.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "group_id": group_id,
+                "user_id": user_id,
+                "role": role,
+                "requester_id": requester_id,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/members/role", &body).await?;
+        }
+        None => {
+            conn.execute(
+                "UPDATE group_member SET role = ?1 WHERE group_id = ?2 AND user_id = ?3",
+                libsql::params![role, group_id.clone(), user_id],
+            ).await?;
+        }
+    }
 
     // Notify other online group members so their members list refreshes.
     // Best-effort realtime push; routed through the livekit boundary so this

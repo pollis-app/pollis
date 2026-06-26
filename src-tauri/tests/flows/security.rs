@@ -167,3 +167,71 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
     drop(bob);
     drop(mallory);
 }
+
+/// Domain-B (#419) server-side AUTHORIZATION: a *validly signed* group/channel
+/// admin op must still be refused when the signer is only a plain member. The
+/// admin role is re-derived server-side from `group_member`, so a non-admin
+/// cannot remove another member or delete a channel even with a perfect device
+/// signature.
+///
+/// Two refusals, both 403 (the requests are correctly signed):
+///   1. a member-but-NON-admin signs `members/remove` targeting the admin;
+///   2. the same member signs `channels/delete` of the group's channel.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ds_rejects_domain_b_admin_ops_lacking_authorization() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // Alice owns the group (admin). Bob joins as a plain member.
+    let group_id = alice.create_group("Private").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("bob invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    alice.process_commits_for(&channel_id).await;
+
+    // (1) Non-admin tries to remove the admin → 403. Bob is a member, so the
+    //     request is well-formed and signed, but removing *another* member is
+    //     admin-only, and the server re-derives Bob's role as `member`.
+    let remove_body = serde_json::to_vec(&json!({
+        "group_id": group_id,
+        "user_id": alice_profile.id,
+        "requester_id": bob.user_id(),
+    }))
+    .expect("serialize remove body");
+    let code = signed_post_status(&bob, "/v1/members/remove", &remove_body).await;
+    assert_eq!(
+        code, 403,
+        "a non-admin removing another member must be FORBIDDEN, got {code}"
+    );
+
+    // (2) Non-admin tries to delete a channel → 403. Destructive channel ops are
+    //     admin-only; Bob's re-derived role is `member`.
+    let delete_body = serde_json::to_vec(&json!({
+        "channel_id": channel_id,
+        "requester_id": bob.user_id(),
+    }))
+    .expect("serialize delete body");
+    let code = signed_post_status(&bob, "/v1/channels/delete", &delete_body).await;
+    assert_eq!(
+        code, 403,
+        "a non-admin deleting a channel must be FORBIDDEN, got {code}"
+    );
+
+    drop(alice);
+    drop(bob);
+}
