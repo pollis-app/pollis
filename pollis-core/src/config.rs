@@ -18,7 +18,6 @@ pub struct Config {
     pub livekit_url: String,
     pub livekit_api_key: String,
     pub livekit_api_secret: String,
-    pub resend_api_key: String,
     /// Delivery Service base URL (e.g. `https://api.pollis.com`). When set, MLS
     /// commit submission routes through the DS (serialized, race/gap-free);
     /// when `None`, commits write direct to Turso. See `commands::mls::delivery`.
@@ -45,14 +44,6 @@ impl Config {
             r2_access_key_id:     require_env("R2_ACCESS_KEY_ID", option_env!("R2_ACCESS_KEY_ID"))?,
             r2_secret_access_key: require_env("R2_SECRET_KEY",    option_env!("R2_SECRET_KEY"))?,
             r2_public_url:        require_env("R2_PUBLIC_URL",    option_env!("R2_PUBLIC_URL"))?,
-            // Optional: OTP email is sent by the Delivery Service now (it holds
-            // RESEND_API_KEY in its env). The client only uses this on the no-DS
-            // direct fallback path, which never runs when pollis_delivery_url is
-            // set — so the read-only-token client build ships WITHOUT a Resend key.
-            resend_api_key: option_env!("RESEND_API_KEY")
-                .map(|s| s.to_string())
-                .or_else(|| std::env::var("RESEND_API_KEY").ok())
-                .unwrap_or_default(),
             // Cloudflare R2 uses "auto" as its S3-compatible region
             r2_region: option_env!("R2_REGION")
                 .map(|s| s.to_string())
@@ -91,9 +82,9 @@ impl Config {
     /// Build a Config for the integration-test harness. Loads `.env.test`
     /// (searching up from the workspace) with override semantics so any
     /// ambient `.env.development` values never leak into tests. R2 /
-    /// LiveKit / Resend fields are filled with placeholders — the harness
-    /// does not touch R2 or real-time media, and OTP delivery is bypassed
-    /// by `DEV_OTP`.
+    /// LiveKit fields are filled with placeholders — the harness does not
+    /// touch R2 or real-time media, and OTP delivery is routed through the
+    /// configured Delivery Service.
     pub fn for_test() -> Result<Self> {
         let env_path = find_env_test_file()?;
         dotenvy::from_filename_override(&env_path)
@@ -118,7 +109,6 @@ impl Config {
             livekit_url: String::new(),
             livekit_api_key: String::new(),
             livekit_api_secret: String::new(),
-            resend_api_key: String::new(),
             // Integration tests exercise the direct write path.
             pollis_delivery_url: None,
         })
