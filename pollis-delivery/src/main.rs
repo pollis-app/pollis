@@ -6,6 +6,14 @@
 //!   LOG_DB_URL          libsql://… for the separate commit-log DB (optional)
 //!   LOG_DB_ADMIN_TOKEN  read-write token for the commit-log DB (optional)
 //!   PORT                listen port (default 8788)
+//!   RESEND_API_KEY      Resend key for sending sign-in OTP emails (the client no
+//!                       longer ships this). Unset → OTP email is not sent.
+//!   DEV_OTP             dev/harness override — skip the email send and force this
+//!                       exact OTP code (optional).
+//!   OTP_TTL_SECS        OTP lifetime in seconds (optional, default 600).
+//!
+//! `RESEND_API_KEY` / `DEV_OTP` / `OTP_TTL_SECS` are read by
+//! `OtpConfig::from_env` inside `build_router_with_log_db`.
 //!
 //! When both `LOG_DB_URL` and `LOG_DB_ADMIN_TOKEN` are set, the MLS
 //! control-plane tables (`mls_commit_log`, `mls_group_info`, `mls_welcome`) are

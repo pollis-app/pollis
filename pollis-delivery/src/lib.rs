@@ -21,13 +21,17 @@
 
 pub mod account;
 pub mod auth;
+pub mod bootstrap;
+pub mod cert;
 pub mod commit;
 pub mod db;
 pub mod devices;
 pub mod error;
 pub mod groups;
 pub mod messages;
+pub mod otp;
 pub mod profile;
+pub mod session;
 pub mod writes;
 
 use std::sync::Arc;
@@ -57,17 +61,22 @@ pub struct AppState {
     pub log_db: Arc<Db>,
     /// When true, `POST /v1/commits` requires a valid device signature.
     pub require_auth: bool,
+    /// In-memory OTP store (request-otp / verify-otp). Shallow-`Clone` (shared
+    /// `Arc`), so every `AppState` clone sees the same codes.
+    pub otp: otp::OtpStore,
+    /// In-memory OTP-session store gating the bootstrap writes.
+    pub sessions: session::SessionStore,
+    /// OTP/session tunables + the Resend key (DS env).
+    pub otp_config: otp::OtpConfig,
 }
 
 impl AppState {
-    /// Single-DB state: the commit log shares `db`.
+    /// Single-DB state: the commit log shares `db`. OTP/session stores start
+    /// empty with a default config (no Resend key, no `DEV_OTP`) — `main` swaps
+    /// in [`otp::OtpConfig::from_env`].
     pub fn new(db: Arc<Db>, require_auth: bool) -> Self {
         let log_db = Arc::clone(&db);
-        Self {
-            db,
-            log_db,
-            require_auth,
-        }
+        Self::new_with_log_db(db, log_db, require_auth)
     }
 
     /// State with a separate commit-log DB for the MLS control-plane tables.
@@ -76,7 +85,17 @@ impl AppState {
             db,
             log_db,
             require_auth,
+            otp: otp::OtpStore::default(),
+            sessions: session::SessionStore::default(),
+            otp_config: otp::OtpConfig::default(),
         }
+    }
+
+    /// Override the OTP config (Resend key, `DEV_OTP`, TTLs). Builder so `main`
+    /// can thread DS env without widening the constructors.
+    pub fn with_otp_config(mut self, config: otp::OtpConfig) -> Self {
+        self.otp_config = config;
+        self
     }
 }
 
@@ -111,7 +130,9 @@ pub fn build_router_with_log_db(db: Arc<Db>, log_db: Arc<Db>) -> Router {
             "OFF (POLLIS_DS_REQUIRE_AUTH unset — writes accepted unauthenticated)"
         }
     );
-    build_router_with_state(AppState::new_with_log_db(db, log_db, require_auth))
+    let state = AppState::new_with_log_db(db, log_db, require_auth)
+        .with_otp_config(otp::OtpConfig::from_env());
+    build_router_with_state(state)
 }
 
 /// Build the HTTP router from an explicit [`AppState`]. Exposed so tests can
@@ -184,6 +205,16 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/enrollment/approve", post(account::approve_enrollment))
         .route("/v1/enrollment/reject", post(account::reject_enrollment))
         .route("/v1/devices/revoke", post(account::revoke_device))
+        // Server-side OTP + bootstrap (Goal B #419). request/verify-otp generate,
+        // validate, and email the OTP server-side and mint an OTP-session token;
+        // the three session-gated bootstrap writes establish the device's signing
+        // credential (which therefore cannot itself be device-signed). See
+        // `docs/otp-server-bootstrap-design.md`.
+        .route("/v1/auth/request-otp", post(otp::request_otp))
+        .route("/v1/auth/verify-otp", post(otp::verify_otp))
+        .route("/v1/auth/establish-identity", post(bootstrap::establish_identity))
+        .route("/v1/auth/register-device", post(bootstrap::register_device))
+        .route("/v1/auth/publish-device-cert", post(bootstrap::publish_device_cert))
         .with_state(state)
 }
 
