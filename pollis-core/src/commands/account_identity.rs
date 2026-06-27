@@ -201,6 +201,86 @@ pub fn unwrap_recovery_blob(
 /// Caller is responsible for ensuring the user has no existing identity
 /// (`users.account_id_pub IS NULL`) before invoking this.
 pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> Result<String> {
+    let (secret_key_display, material) =
+        generate_account_identity_material(state, user_id).await?;
+
+    // BOOTSTRAP — DIRECT path (no DS configured). This is the version-1
+    // account-identity establishment at signup. It runs inside `verify_otp`
+    // BEFORE `register_device` / `ensure_device_cert`, so no device signing key
+    // is enrolled yet (`user_device.mls_signature_pub` is NULL) and the local DB
+    // isn't even open — the device cannot produce a signature the DS would
+    // accept. It is single-device, single-shot, with no concurrency, so the
+    // `UNIQUE (user_id, identity_version)` index on `account_key_log` is a
+    // sufficient guard. When a DS IS configured, `verify_otp` instead splits this:
+    // it calls `generate_account_identity_material` (the crypto above) and sends
+    // the public/wrapped material to the session-gated `/v1/auth/establish-identity`
+    // endpoint (see `docs/otp-server-bootstrap-design.md`). Rotations (version ≥ 2)
+    // route through the CAS-guarded `/v1/account/rotate-identity`.
+    let conn = state.remote_db.conn().await?;
+
+    conn.execute(
+        "UPDATE users SET account_id_pub = ?1, identity_version = 1 WHERE id = ?2",
+        libsql::params![material.account_id_pub.to_vec(), user_id.to_string()],
+    )
+    .await?;
+
+    // Append the version-1 row to the account-key transparency history. Kept in
+    // lock-step with the users UPDATE above; `?` propagation means the INSERT can
+    // never silently fail while the key change persists.
+    conn.execute(
+        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+         VALUES (?1, ?2, 1)",
+        libsql::params![user_id.to_string(), material.account_id_pub.to_vec()],
+    )
+    .await?;
+
+    conn.execute(
+        "INSERT INTO account_recovery \
+         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
+         VALUES (?1, 1, ?2, ?3, ?4, datetime('now'), datetime('now'))",
+        libsql::params![
+            user_id.to_string(),
+            material.salt.to_vec(),
+            material.nonce.to_vec(),
+            material.wrapped_key.clone()
+        ],
+    )
+    .await?;
+
+    Ok(secret_key_display)
+}
+
+/// The public/wrapped material the server persists for a fresh account identity.
+/// Everything here is safe to send to the server — the private `account_id_key`
+/// is held only locally (in `AppState.unlock`) and on the server only as
+/// `wrapped_key`, sealed under the user-held Secret Key.
+pub struct AccountIdentityMaterial {
+    /// Ed25519 account identity public key (32 bytes).
+    pub account_id_pub: [u8; 32],
+    /// `account_recovery` salt (HKDF salt for the Secret-Key-derived wrap key).
+    pub salt: [u8; SALT_LEN],
+    /// AES-GCM nonce for the wrapped private key.
+    pub nonce: [u8; NONCE_LEN],
+    /// The account identity private key, AES-GCM-sealed under the wrap key.
+    pub wrapped_key: Vec<u8>,
+}
+
+/// Pure-crypto half of account-identity generation, with NO server write.
+///
+/// Generates the Ed25519 account keypair + a one-time Secret Key, wraps the
+/// private key under the Secret-Key-derived KEK, and installs the private key
+/// plus a fresh `db_key` into `AppState.unlock` (the only on-disk copy is the
+/// server-side `account_recovery` blob, which is wrapped under the Secret Key).
+///
+/// Returns the formatted Secret Key to show the user once, plus the
+/// [`AccountIdentityMaterial`] the caller persists — either via the direct DB
+/// writes in [`generate_account_identity`] (no DS) or by POSTing it to the
+/// session-gated `/v1/auth/establish-identity` (DS configured). The caller is
+/// responsible for ensuring the user has no existing identity first.
+pub async fn generate_account_identity_material(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<(String, AccountIdentityMaterial)> {
     let mut rng = OsRng;
 
     let signing_key = SigningKey::generate(&mut rng);
@@ -220,49 +300,17 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
-    // BOOTSTRAP — stays DIRECT, NOT routed through the DS (#419 domains E+G).
-    // This is the version-1 account-identity establishment at signup. It runs
-    // inside `verify_otp` BEFORE `register_device` / `ensure_device_cert`, so no
-    // device signing key is enrolled yet (`user_device.mls_signature_pub` is
-    // NULL) and the local DB isn't even open — the device cannot produce a
-    // signature the DS would accept. It is single-device, single-shot, with no
-    // concurrency, so the `UNIQUE (user_id, identity_version)` index on
-    // `account_key_log` is a sufficient guard. Rotations (version ≥ 2) DO route
-    // through the CAS-guarded `/v1/account/rotate-identity` (see `reset_identity`).
-    let conn = state.remote_db.conn().await?;
-
-    conn.execute(
-        "UPDATE users SET account_id_pub = ?1, identity_version = 1 WHERE id = ?2",
-        libsql::params![public_bytes.to_vec(), user_id.to_string()],
-    )
-    .await?;
-
-    // Append the version-1 row to the account-key transparency history. Kept in
-    // lock-step with the users UPDATE above; `?` propagation means the INSERT can
-    // never silently fail while the key change persists.
-    conn.execute(
-        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-         VALUES (?1, ?2, 1)",
-        libsql::params![user_id.to_string(), public_bytes.to_vec()],
-    )
-    .await?;
-
-    conn.execute(
-        "INSERT INTO account_recovery \
-         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
-         VALUES (?1, 1, ?2, ?3, ?4, datetime('now'), datetime('now'))",
-        libsql::params![
-            user_id.to_string(),
-            salt.to_vec(),
-            nonce.to_vec(),
-            wrapped
-        ],
-    )
-    .await?;
-
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
 
-    Ok(secret_key_display)
+    Ok((
+        secret_key_display,
+        AccountIdentityMaterial {
+            account_id_pub: public_bytes,
+            salt,
+            nonce,
+            wrapped_key: wrapped,
+        },
+    ))
 }
 
 /// Build an `UnlockState` carrying the supplied account identity

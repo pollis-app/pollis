@@ -552,23 +552,40 @@ pub async fn reconcile_group_mls_impl(
         .collect();
 
     // 4. Claim one KP per device that needs to be added.
+    //
+    // DS seam: a KP claim is a `claimed = 1` write on a *peer's* row, so under a
+    // read-only Turso token the direct `UPDATE … RETURNING` fails — route it
+    // through the Delivery Service when configured. Either path yields the SAME
+    // `key_package` bytes (the DS runs the identical SQL) and the SAME no-KP
+    // control flow: a target device with no unclaimed package is simply skipped
+    // (the DS replies 404 → `Ok(None)`, mirroring the direct path's empty
+    // `RETURNING`).
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
     for (uid, did) in &devices_to_claim {
-        let mut rows = conn
-            .query(
-                "UPDATE mls_key_package \
-                 SET claimed = 1 \
-                 WHERE ref_hash = ( \
-                     SELECT ref_hash FROM mls_key_package \
-                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
-                     ORDER BY created_at ASC LIMIT 1 \
-                 ) \
-                 RETURNING key_package",
-                libsql::params![uid.clone(), did.clone()],
-            )
-            .await?;
-        if let Some(row) = rows.next().await? {
-            kp_tuples.push((uid.clone(), did.clone(), row.get::<Vec<u8>>(0)?));
+        let claimed: Option<Vec<u8>> = match state.config.pollis_delivery_url.as_deref() {
+            Some(_) => crate::commands::mls::ds_claim_key_package(state, uid, Some(did)).await?,
+            None => {
+                let mut rows = conn
+                    .query(
+                        "UPDATE mls_key_package \
+                         SET claimed = 1 \
+                         WHERE ref_hash = ( \
+                             SELECT ref_hash FROM mls_key_package \
+                             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
+                             ORDER BY created_at ASC LIMIT 1 \
+                         ) \
+                         RETURNING key_package",
+                        libsql::params![uid.clone(), did.clone()],
+                    )
+                    .await?;
+                match rows.next().await? {
+                    Some(row) => Some(row.get::<Vec<u8>>(0)?),
+                    None => None,
+                }
+            }
+        };
+        if let Some(kp) = claimed {
+            kp_tuples.push((uid.clone(), did.clone(), kp));
         }
     }
 

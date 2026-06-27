@@ -54,13 +54,14 @@ jobs:
       - name: Load production secrets
         run: |
           echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
-          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          # Slice 3 (#419): the shipped client holds a READ-ONLY main-DB token — every
+          # write goes through the Delivery Service. The RW token never enters the binary.
+          echo "TURSO_TOKEN=${{ secrets.TURSO_RO_TOKEN }}" >> $GITHUB_ENV
           echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
           echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
           echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
           echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
-          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
@@ -142,13 +143,14 @@ jobs:
         shell: bash
         run: |
           echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
-          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          # Slice 3 (#419): the shipped client holds a READ-ONLY main-DB token — every
+          # write goes through the Delivery Service. The RW token never enters the binary.
+          echo "TURSO_TOKEN=${{ secrets.TURSO_RO_TOKEN }}" >> $GITHUB_ENV
           echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
           echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
           echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
           echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
-          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
@@ -362,13 +364,14 @@ jobs:
       - name: Load production secrets
         run: |
           echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
-          echo "TURSO_TOKEN=${{ secrets.TURSO_TOKEN }}" >> $GITHUB_ENV
+          # Slice 3 (#419): the shipped client holds a READ-ONLY main-DB token — every
+          # write goes through the Delivery Service. The RW token never enters the binary.
+          echo "TURSO_TOKEN=${{ secrets.TURSO_RO_TOKEN }}" >> $GITHUB_ENV
           echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
           echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
           echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
           echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
-          echo "RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
           echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV

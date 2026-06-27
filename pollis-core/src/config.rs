@@ -45,7 +45,14 @@ impl Config {
             r2_access_key_id:     require_env("R2_ACCESS_KEY_ID", option_env!("R2_ACCESS_KEY_ID"))?,
             r2_secret_access_key: require_env("R2_SECRET_KEY",    option_env!("R2_SECRET_KEY"))?,
             r2_public_url:        require_env("R2_PUBLIC_URL",    option_env!("R2_PUBLIC_URL"))?,
-            resend_api_key:       require_env("RESEND_API_KEY",   option_env!("RESEND_API_KEY"))?,
+            // Optional: OTP email is sent by the Delivery Service now (it holds
+            // RESEND_API_KEY in its env). The client only uses this on the no-DS
+            // direct fallback path, which never runs when pollis_delivery_url is
+            // set — so the read-only-token client build ships WITHOUT a Resend key.
+            resend_api_key: option_env!("RESEND_API_KEY")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("RESEND_API_KEY").ok())
+                .unwrap_or_default(),
             // Cloudflare R2 uses "auto" as its S3-compatible region
             r2_region: option_env!("R2_REGION")
                 .map(|s| s.to_string())

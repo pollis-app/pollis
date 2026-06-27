@@ -28,6 +28,11 @@ ulid = "1"
 # `verify_device_cert` uses (raw 32-byte pubkey, 64-byte PureEdDSA sig).
 ed25519-dalek = "2"
 sha2 = "0.10"
+# CSPRNG for OTP codes and 256-bit session tokens (OsRng).
+rand = "0.8"
+# Send the OTP email via Resend (server-side; the key lives in DS env now, not
+# the client build). rustls so we don't depend on the host's OpenSSL.
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 anyhow = "1"
 thiserror = "1"
 tracing = "0.1"

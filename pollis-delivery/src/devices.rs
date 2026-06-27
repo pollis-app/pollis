@@ -46,11 +46,15 @@
 //! is the prerequisite for flipping clients to a read-only Turso token, and is
 //! out of scope for this owner-scoped-signature slice.
 //!
-//! **Key-package CLAIM** (`fetch_mls_key_package`, the `claimed = 1` UPDATE on a
-//! *peer's* row) is likewise absent: it is not owner-scoped (you claim someone
-//! else's package while adding their device) and per the migration plan it folds
-//! into `/v1/commits` as a DS-side step of the add path, never a standalone
-//! client endpoint.
+//! **Key-package CLAIM** (`POST /v1/key-packages/claim`) is the one domain-D
+//! write that is NOT owner-scoped: you claim someone *else's* package while
+//! adding their device, so it cannot use [`resolve_actor`]. The gate only
+//! authenticates the claimer (any enrolled device may claim — claiming is how you
+//! add a member); the target comes from the body. It returns the claimed package
+//! bytes (not a [`WriteOutcome`]) so the caller can build the MLS Add commit, so
+//! it has its own [`ClaimOutcome`] / `claim_outcome_response`. It is a standalone
+//! endpoint (blocker C1, Goal B #419) rather than a DS-side step of `/v1/commits`
+//! because the client needs the bytes BEFORE it can build the commit it submits.
 
 use axum::{
     body::Bytes,
@@ -218,6 +222,146 @@ pub async fn apply_replenish_key_packages(
     }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
+}
+
+// ── POST /v1/key-packages/claim ──────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ClaimKeyPackageBody {
+    /// The user whose published key package is being claimed (the device being
+    /// added to the MLS group). NOT the caller — claiming a *peer's* package is
+    /// how you add them, so this is intentionally not bound to the signer.
+    pub target_user_id: String,
+    /// When present, narrow the claim to one of the target user's specific
+    /// devices (the live `reconcile` add path always supplies this). When absent,
+    /// any of the target user's unclaimed packages is eligible (the user-scoped
+    /// `fetch_mls_key_package` path).
+    #[serde(default)]
+    pub target_device_id: Option<String>,
+}
+
+/// The result of a key-package claim: either a package was claimed (carries the
+/// hash-ref + TLS bytes the caller builds the MLS Add from), or the target has no
+/// unclaimed package available. The latter is a normal control-flow outcome (the
+/// add path skips that device), NOT an error — it maps to 404, distinct from a
+/// 500 DB failure.
+pub enum ClaimOutcome {
+    Claimed { ref_hash: String, key_package: Vec<u8> },
+    NoKeyPackage,
+}
+
+/// POST /v1/key-packages/claim — atomically claim one of a TARGET user's
+/// (optionally a specific device's) unclaimed key packages and return its bytes,
+/// so the caller can build the MLS Add commit that brings that device into the
+/// group.
+///
+/// Authz: ANY authenticated user may claim ANY target's package — claiming is the
+/// protocol mechanism for adding someone, so it is inherently cross-account and
+/// binds nothing from the body to the signer (the device signature on the request
+/// IS the claimer's identity; `gate` having returned is the whole authorization).
+/// On the no-auth test path the claim proceeds unauthenticated, mirroring the
+/// other write handlers.
+///
+/// (KP exhaustion — a hostile peer draining a target's pool by claiming
+/// repeatedly — is a known concern tracked for #419, but is deliberately NOT
+/// rate-limited here.)
+pub async fn claim_key_package(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    // The gate authenticates the claimer; its returned user_id is intentionally
+    // unused — any authenticated caller may claim.
+    if let Err(resp) = gate(&state, &headers, &method, &uri, &body).await? {
+        return Ok(resp);
+    }
+    let parsed: ClaimKeyPackageBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    Ok(claim_outcome_response(apply_claim_key_package(&conn, &parsed).await?))
+}
+
+/// Map a [`ClaimOutcome`] to its HTTP response: 200 + `{ ref_hash, key_package }`
+/// (base64) on a claim, 404 + a typed error when the target has no unclaimed
+/// package. Shared by the production handler and the integration harness so both
+/// surface the same no-KP signal the client's control flow keys on.
+pub fn claim_outcome_response(outcome: ClaimOutcome) -> Response {
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use base64::Engine as _;
+    match outcome {
+        ClaimOutcome::Claimed { ref_hash, key_package } => {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(key_package);
+            crate::writes::ok_json(serde_json::json!({
+                "ref_hash": ref_hash,
+                "key_package": b64,
+            }))
+        }
+        ClaimOutcome::NoKeyPackage => (
+            StatusCode::NOT_FOUND,
+            axum::Json(serde_json::json!({ "error": "no_key_package" })),
+        )
+            .into_response(),
+    }
+}
+
+/// Atomically claim one unclaimed key package for the target and return its
+/// hash-ref + TLS bytes (or [`ClaimOutcome::NoKeyPackage`]). This is the exact
+/// `UPDATE … RETURNING` the client ran directly before the DS seam: it selects
+/// the OLDEST unclaimed package (`ORDER BY created_at ASC LIMIT 1`) matching the
+/// target — `user_id` only, or `user_id AND device_id` when a device is named —
+/// and flips its `claimed` flag in one statement.
+///
+/// Atomicity: the `WHERE claimed = 0` subquery is re-evaluated under the single
+/// libsql writer at statement-execution time, so two concurrent claims of the
+/// same one-package pool can never both win — the first sets `claimed = 1`, the
+/// second's subquery no longer sees an unclaimed row and `RETURNING` yields zero
+/// rows (→ `NoKeyPackage`). Exactly one winner per row.
+pub async fn apply_claim_key_package(
+    conn: &Connection,
+    body: &ClaimKeyPackageBody,
+) -> anyhow::Result<ClaimOutcome> {
+    let mut rows = match &body.target_device_id {
+        Some(device_id) => {
+            conn.query(
+                "UPDATE mls_key_package \
+                 SET claimed = 1 \
+                 WHERE ref_hash = ( \
+                     SELECT ref_hash FROM mls_key_package \
+                     WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
+                     ORDER BY created_at ASC LIMIT 1 \
+                 ) \
+                 RETURNING ref_hash, key_package",
+                libsql::params![body.target_user_id.clone(), device_id.clone()],
+            )
+            .await?
+        }
+        None => {
+            conn.query(
+                "UPDATE mls_key_package \
+                 SET claimed = 1 \
+                 WHERE ref_hash = ( \
+                     SELECT ref_hash FROM mls_key_package \
+                     WHERE user_id = ?1 AND claimed = 0 \
+                     ORDER BY created_at ASC LIMIT 1 \
+                 ) \
+                 RETURNING ref_hash, key_package",
+                libsql::params![body.target_user_id.clone()],
+            )
+            .await?
+        }
+    };
+    match rows.next().await? {
+        Some(row) => Ok(ClaimOutcome::Claimed {
+            ref_hash: row.get::<String>(0)?,
+            key_package: row.get::<Vec<u8>>(1)?,
+        }),
+        None => Ok(ClaimOutcome::NoKeyPackage),
+    }
 }
 
 // ── POST /v1/devices/resign ──────────────────────────────────────────────────

@@ -146,6 +146,51 @@ pub async fn ds_post(
     Ok(resp)
 }
 
+/// Claim one of `target_user_id`'s (optionally a specific device's) unclaimed
+/// MLS key packages through the DS (`POST /v1/key-packages/claim`) and return its
+/// TLS-serialized bytes. Returns `Ok(None)` when the target has no unclaimed
+/// package — the DS replies `404`, which is the EXACT counterpart of the direct
+/// `UPDATE … RETURNING` path's "no row" outcome, so the add path skips that
+/// device identically either way. Any other non-2xx is a hard error.
+///
+/// Device-signed via [`ds_post`]: the claimer is a fully-enrolled device, and the
+/// signature is the only thing the DS binds the claim to (any authenticated user
+/// may claim a peer's package — that is how you add them).
+pub async fn ds_claim_key_package(
+    state: &Arc<AppState>,
+    target_user_id: &str,
+    target_device_id: Option<&str>,
+) -> Result<Option<Vec<u8>>> {
+    let body = serde_json::json!({
+        "target_user_id": target_user_id,
+        "target_device_id": target_device_id,
+    });
+    let resp = ds_post(state, "/v1/key-packages/claim", &body).await?;
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "ds_claim_key_package {status}: {txt}"
+        )));
+    }
+    #[derive(serde::Deserialize)]
+    struct ClaimResp {
+        key_package: String,
+    }
+    let parsed: ClaimResp = resp
+        .json()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_claim_key_package decode: {e}")))?;
+    use base64::Engine as _;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&parsed.key_package)
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_claim_key_package base64: {e}")))?;
+    Ok(Some(bytes))
+}
+
 /// [`ds_post`] for writes that must NOT silently fail: any non-2xx becomes an
 /// `Err` carrying the status + body. Use this when the direct-write path it
 /// replaces propagated its error (`conn.execute(...).await?`). For best-effort
@@ -157,6 +202,79 @@ pub async fn ds_post_ok(state: &Arc<AppState>, path: &str, body: &serde_json::Va
         let s = resp.status();
         let txt = resp.text().await.unwrap_or_default();
         return Err(Error::Other(anyhow::anyhow!("ds_post {path} {s}: {txt}")));
+    }
+    Ok(())
+}
+
+/// Resolve the DS base URL or error if it isn't configured. Shared by the
+/// unauthenticated + session-bearer bootstrap clients below.
+fn delivery_base(state: &Arc<AppState>) -> Result<String> {
+    state
+        .config
+        .pollis_delivery_url
+        .as_deref()
+        .map(|s| s.trim_end_matches('/').to_string())
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("pollis_delivery_url not configured")))
+}
+
+/// POST `body` (JSON) to `{pollis_delivery_url}{path}` with NO auth headers — the
+/// pre-identity OTP endpoints (`request-otp` / `verify-otp`), which the DS gates
+/// by the OTP itself, not a device signature or a session. Returns the raw
+/// [`reqwest::Response`] so the caller reads the body / maps the status.
+pub async fn ds_post_plain(
+    state: &Arc<AppState>,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response> {
+    let url = format!("{}{}", delivery_base(state)?, path);
+    reqwest::Client::new()
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_plain {path}: {e}")))
+}
+
+/// Sign-free sibling of [`ds_post`] for the OTP-session-gated bootstrap writes
+/// (establish-identity / register-device / publish-device-cert). During bootstrap
+/// the device has no MLS signing key yet, so these carry the OTP-session bearer
+/// token in `X-Pollis-Session` instead of the four `X-Pollis-*` signature headers.
+/// Returns the raw [`reqwest::Response`] so the caller maps the status.
+pub async fn ds_post_session(
+    state: &Arc<AppState>,
+    path: &str,
+    session_token: &str,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response> {
+    let url = format!("{}{}", delivery_base(state)?, path);
+    let body_bytes = serde_json::to_vec(body)
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session serialize: {e}")))?;
+    reqwest::Client::new()
+        .post(&url)
+        .header("X-Pollis-Session", session_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body_bytes)
+        .send()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session {path}: {e}")))
+}
+
+/// [`ds_post_session`] for bootstrap writes that must NOT silently fail: any
+/// non-2xx becomes an `Err` carrying the status + body.
+pub async fn ds_post_session_ok(
+    state: &Arc<AppState>,
+    path: &str,
+    session_token: &str,
+    body: &serde_json::Value,
+) -> Result<()> {
+    let resp = ds_post_session(state, path, session_token, body).await?;
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "ds_post_session {path} {s}: {txt}"
+        )));
     }
     Ok(())
 }

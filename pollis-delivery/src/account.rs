@@ -74,9 +74,11 @@
 //!     *approval* / *rejection* (run on an already-enrolled sibling) DO route.
 //!   - **Secret-Key recovery security-event** (`recover_with_secret_key`) — runs
 //!     pre-finalize, before this device has published a cert.
-//!   - **Logout device removal** (`auth.rs` logout DELETE `user_device`) — by the
-//!     time it runs the local DB is unloaded and the in-memory session is
-//!     cleared, so there is no signing key available.
+//!
+//! Logout device removal USED to be on the direct path, but bucket-C C4 moved it
+//! to the DEVICE-SIGNED [`logout_device`] (`POST /v1/auth/logout`): the client now
+//! issues the signed DELETE BEFORE it unloads the local DB / clears the signing
+//! key, so a read-only Turso token no longer breaks logout.
 
 use axum::{
     body::Bytes,
@@ -518,6 +520,68 @@ pub async fn apply_revoke_device(
     )
     .await?;
     tx.commit().await?;
+    Ok(WriteOutcome::Ok)
+}
+
+// ── POST /v1/auth/logout ─────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LogoutDeviceBody {
+    /// The device logging out — in practice the signing device itself. Bound
+    /// `WHERE user_id = actor`, so a caller can only remove a device on THEIR OWN
+    /// account.
+    pub device_id: String,
+    /// Self-scope: when signed it must equal the authenticated user.
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
+/// POST /v1/auth/logout — DELETE the logging-out device's `user_device` row.
+/// DEVICE-SIGNED and self-scoped: the signer can only remove a device on their
+/// OWN account (`WHERE user_id = actor`).
+///
+/// Deliberately a DELETE, NOT the tombstone `/v1/devices/revoke` does: a
+/// `revoked_at` tombstone permanently fails the device-signature gate, but a
+/// logout-with-delete must re-register cleanly on the next sign-in. Removing the
+/// row outright lets `register_device` / re-enrollment recreate it. Mirrors
+/// pollis-core `auth::logout`'s direct `DELETE FROM user_device`.
+pub async fn logout_device(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+    let parsed: LogoutDeviceBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    let conn = state.db.conn()?;
+    outcome_response(apply_logout_device(&conn, authed.as_deref(), &parsed).await?)
+}
+
+/// DELETE the device row `WHERE device_id = ? AND user_id = actor`. The
+/// `user_id = actor` bind is the authz: a signer can only log out a device on
+/// THEIR OWN account. Idempotent — removing an already-gone device is a no-op
+/// `Ok` (a re-tried logout must never error).
+pub async fn apply_logout_device(
+    conn: &Connection,
+    authed: Option<&str>,
+    body: &LogoutDeviceBody,
+) -> anyhow::Result<WriteOutcome> {
+    let actor = match resolve_actor(authed, body.user_id.as_deref()) {
+        Ok(a) => a,
+        Err(o) => return Ok(o),
+    };
+    conn.execute(
+        "DELETE FROM user_device WHERE device_id = ?1 AND user_id = ?2",
+        libsql::params![body.device_id.clone(), actor],
+    )
+    .await?;
     Ok(WriteOutcome::Ok)
 }
 

@@ -181,38 +181,42 @@ pub async fn publish_mls_key_package(
 /// Atomically claim one unclaimed `KeyPackage` for `target_user_id` from the
 /// remote table and return its TLS bytes.  Returns `null` if none are available.
 ///
-/// NOT routed through the DS (#419 domain D). This claim mutates a *peer's* row
-/// (`claimed = 1` on `target_user_id`'s package) as the add path consumes it, so
-/// it is not owner-scoped and does not fit the owner-signature write pattern. Per
-/// the migration plan it folds into `/v1/commits` as a DS-side step of the add
-/// (the commit that adds the device), keeping claim + commit atomic — a later
-/// domain, never a standalone "claim someone else's KP" client endpoint.
+/// DS seam: the claim is a `claimed = 1` write on a *peer's* row, which a
+/// read-only Turso token cannot perform, so it routes through the Delivery
+/// Service when configured (no device is named here — any of the target's
+/// unclaimed packages is eligible). Both paths return the same bytes and the same
+/// `None`-on-empty signal.
 pub async fn fetch_mls_key_package(
     state: &Arc<AppState>,
     target_user_id: String,
 ) -> Result<Option<Vec<u8>>> {
-    let conn = state.remote_db.conn().await?;
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => crate::commands::mls::ds_claim_key_package(state, &target_user_id, None).await,
+        None => {
+            let conn = state.remote_db.conn().await?;
 
-    // Atomically claim the oldest unclaimed package.
-    let mut rows = conn.query(
-        "UPDATE mls_key_package
-         SET claimed = 1
-         WHERE ref_hash = (
-             SELECT ref_hash FROM mls_key_package
-             WHERE user_id = ?1 AND claimed = 0
-             ORDER BY created_at ASC
-             LIMIT 1
-         )
-         RETURNING key_package",
-        libsql::params![target_user_id],
-    ).await?;
+            // Atomically claim the oldest unclaimed package.
+            let mut rows = conn.query(
+                "UPDATE mls_key_package
+                 SET claimed = 1
+                 WHERE ref_hash = (
+                     SELECT ref_hash FROM mls_key_package
+                     WHERE user_id = ?1 AND claimed = 0
+                     ORDER BY created_at ASC
+                     LIMIT 1
+                 )
+                 RETURNING key_package",
+                libsql::params![target_user_id],
+            ).await?;
 
-    match rows.next().await? {
-        Some(row) => {
-            let bytes: Vec<u8> = row.get(0)?;
-            Ok(Some(bytes))
+            match rows.next().await? {
+                Some(row) => {
+                    let bytes: Vec<u8> = row.get(0)?;
+                    Ok(Some(bytes))
+                }
+                None => Ok(None),
+            }
         }
-        None => Ok(None),
     }
 }
 

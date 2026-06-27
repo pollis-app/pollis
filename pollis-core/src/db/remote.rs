@@ -1,19 +1,33 @@
 use libsql::{Builder, Database, Connection};
 use tokio::sync::RwLock;
 use std::path::PathBuf;
+use std::sync::Arc;
 use crate::error::Result;
 
 #[cfg(test)]
 const BASELINE: &str = include_str!("migrations/000000_baseline.sql");
 
+#[derive(Clone)]
 enum Backend {
     Remote { url: String, token: String },
     Local { path: PathBuf },
 }
 
 pub struct RemoteDb {
-    db: RwLock<Database>,
+    /// `Arc` so a [`query_only_view`](RemoteDb::query_only_view) can SHARE the
+    /// exact same underlying libsql `Database` — two independent `Database`s on
+    /// one local file don't share WAL writes promptly, so the view must wrap the
+    /// same handle to see the writer's committed rows with no lag.
+    db: Arc<RwLock<Database>>,
     backend: Backend,
+    /// When set, every connection returned by [`conn`](RemoteDb::conn) issues
+    /// `PRAGMA query_only=ON`, which rejects INSERT/UPDATE/DELETE — exactly like
+    /// a read-only Turso token. `query_only` is per-CONNECTION, not per-database,
+    /// so a writable `RemoteDb` and a `query_only_view` of it can share one
+    /// `Database` yet enforce different write permissions. Defaults to `false`;
+    /// production never sets it (the real read-only token enforces this server
+    /// side). Used by the flows harness to prove the client is read-only-safe.
+    query_only: bool,
 }
 
 impl RemoteDb {
@@ -24,11 +38,12 @@ impl RemoteDb {
             .build()
             .await?;
         Ok(Self {
-            db: RwLock::new(db),
+            db: Arc::new(RwLock::new(db)),
             backend: Backend::Remote {
                 url: url.to_string(),
                 token: token.to_string(),
             },
+            query_only: false,
         })
     }
 
@@ -50,9 +65,35 @@ impl RemoteDb {
         conn.query("PRAGMA journal_mode=WAL", ()).await?;
         conn.query("PRAGMA synchronous=NORMAL", ()).await?;
         Ok(Self {
-            db: RwLock::new(db),
+            db: Arc::new(RwLock::new(db)),
             backend: Backend::Local { path },
+            query_only: false,
         })
+    }
+
+    /// A read-only VIEW that shares the exact same underlying `Database` handle
+    /// as `self` but issues `PRAGMA query_only=ON` on every connection, so it
+    /// rejects writes while still seeing every row the writable handle commits.
+    ///
+    /// This mirrors the production read-only Turso token: in prod the client
+    /// holds a read-only token and every write goes through the Delivery
+    /// Service. The flows harness gives each `TestClient` a `query_only_view`
+    /// of the main DB while the in-process DS keeps the writable handle, so the
+    /// suite FAILS on any stray direct client write — the definitive gate for
+    /// flipping the client to a real read-only token.
+    ///
+    /// Sharing the `Arc<RwLock<Database>>` (rather than opening a second
+    /// `Database` on the same file) is required: independent libsql `Database`s
+    /// on one local file don't share WAL writes promptly, so a second handle
+    /// wouldn't see the DS's writes. `query_only` is per-connection, so flipping
+    /// it on the view alone is safe.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub fn query_only_view(&self) -> Self {
+        Self {
+            db: Arc::clone(&self.db),
+            backend: self.backend.clone(),
+            query_only: true,
+        }
     }
 
     pub async fn conn(&self) -> Result<Connection> {
@@ -65,6 +106,13 @@ impl RemoteDb {
             // `query` (not `execute`) — PRAGMA busy_timeout returns the
             // resulting value as a row.
             conn.query("PRAGMA busy_timeout=10000", ()).await?;
+        }
+        // Read-only view: reject INSERT/UPDATE/DELETE on this connection,
+        // exactly like a read-only Turso token. Per-connection, so it must be
+        // set on every fresh connection. `query` (not `execute`) — some libsql
+        // builds surface the PRAGMA's resulting value as a row.
+        if self.query_only {
+            conn.query("PRAGMA query_only=ON", ()).await?;
         }
         Ok(conn)
     }

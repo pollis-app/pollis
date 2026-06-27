@@ -155,6 +155,18 @@ struct DsState {
     main: Arc<RemoteDb>,
     /// Commit-log DB — `mls_commit_log` / `mls_welcome` / `mls_group_info`.
     log: Arc<RemoteDb>,
+    /// In-memory OTP store shared by request-otp / verify-otp (Goal B #419).
+    /// Shallow-`Clone` (shared `Arc`), so every cloned `DsState` — one per
+    /// request — sees the same codes.
+    otp: pollis_delivery::otp::OtpStore,
+    /// In-memory OTP-session store gating the three bootstrap writes.
+    sessions: pollis_delivery::session::SessionStore,
+    /// OTP/session tunables. DEV_OTP is forced so verify-otp accepts the fixed
+    /// harness code with no real email send.
+    otp_config: pollis_delivery::otp::OtpConfig,
+    /// Email-change OTP store + requester binding (device-signed). Separate from
+    /// `otp` so a signup OTP and an email-change to the same address can't collide.
+    email_change: pollis_delivery::email_change::EmailChangeStore,
 }
 
 /// Shared auth gate for the in-process DS: verify the device signature over the
@@ -211,6 +223,32 @@ fn ds_ok() -> axum::response::Response {
         axum::Json(serde_json::json!({ "status": "ok" })),
     )
         .into_response()
+}
+
+/// 409 with the DS's conflict envelope — the bootstrap CAS / out-of-order cases.
+fn ds_conflict(msg: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::CONFLICT,
+        axum::Json(serde_json::json!({ "status": "conflict", "error": msg })),
+    )
+        .into_response()
+}
+
+/// STANDARD base64 decode, `None` on malformed input — for the bootstrap
+/// endpoints' base64-encoded key/cert fields.
+fn b64d(s: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(s).ok()
+}
+
+/// Unix seconds as `u64` — the OTP/session stores' clock type (distinct from
+/// `pollis_delivery::auth::now_unix`'s `i64` signature-timestamp clock).
+fn now_u64() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Map a domain-A [`pollis_delivery::writes::WriteOutcome`] to a Response —
@@ -1067,6 +1105,37 @@ async fn delivery_key_packages(
     }
 }
 
+/// `POST /v1/key-packages/claim` — claim a TARGET user's (optionally a specific
+/// device's) unclaimed key package. NOT owner-scoped: the gate only authenticates
+/// the claimer; any authenticated user may claim a peer's package (claiming is how
+/// you add someone). Runs the SAME `apply_claim_key_package` the production handler
+/// runs, against the SHARED main DB so the claim and the subsequent add-commit see
+/// the same rows.
+async fn delivery_key_packages_claim(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    if let Err(resp) = ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        return resp;
+    }
+    let parsed: pollis_delivery::devices::ClaimKeyPackageBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::devices::apply_claim_key_package(&conn, &parsed).await {
+        Ok(o) => pollis_delivery::devices::claim_outcome_response(o),
+        Err(e) => ds_internal_error(format!("key-packages/claim: {e}")),
+    }
+}
+
 /// `POST /v1/key-packages/replenish`.
 async fn delivery_key_packages_replenish(
     axum::extract::State(state): axum::extract::State<DsState>,
@@ -1364,6 +1433,390 @@ async fn delivery_devices_revoke(
     }
 }
 
+/// `POST /v1/auth/logout` — bucket-C C4. DEVICE-SIGNED, self-scoped DELETE of the
+/// signer's OWN `user_device` row.
+async fn delivery_auth_logout(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::account::LogoutDeviceBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::account::apply_logout_device(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("auth/logout: {e}")),
+    }
+}
+
+// ─── Server-side OTP + bootstrap (Goal B #419) ──────────────────────────────
+//
+// These five run BEFORE the device has an MLS signing key, so they are NOT
+// device-signed: request/verify-otp are unauthenticated (the OTP is the proof),
+// and the three bootstrap writes are gated by the OTP-session token in
+// `X-Pollis-Session`. They drive the SAME `pollis_delivery::{otp,bootstrap}`
+// logic the production handlers do (the `process_*` / `apply_*` fns), against the
+// SHARED main handle (`state.main`) — the sole writer the clients read from —
+// plus the OTP + session stores held on `DsState`. With the client seam flipped,
+// every test's `sign_up` exercises this full DS bootstrap path end to end.
+
+/// `POST /v1/auth/request-otp` — unauthenticated; honors DEV_OTP so no email is
+/// sent and the fixed harness code verifies.
+async fn delivery_request_otp(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let parsed: pollis_delivery::otp::RequestOtpBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let email = parsed.email.trim().to_string();
+    if !email.is_empty() {
+        pollis_delivery::otp::process_request_otp(&state.otp, &state.otp_config, &email).await;
+    }
+    ds_ok()
+}
+
+/// `POST /v1/auth/verify-otp` — unauthenticated; validates the code, creates or
+/// loads the account on the MAIN DB, and mints an OTP-session token.
+async fn delivery_verify_otp(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let parsed: pollis_delivery::otp::VerifyOtpBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let email = parsed.email.trim().to_string();
+    let device_id = parsed.device_id.trim().to_string();
+    if email.is_empty() || device_id.is_empty() {
+        return ds_bad_request();
+    }
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::otp::apply_verify_otp(
+        &conn,
+        &state.otp,
+        &state.sessions,
+        &state.otp_config,
+        &email,
+        &parsed.code,
+        &device_id,
+    )
+    .await
+    {
+        Ok(result) => pollis_delivery::otp::verify_otp_response(result),
+        Err(e) => ds_internal_error(format!("verify-otp: {e}")),
+    }
+}
+
+/// `POST /v1/auth/establish-identity` — session-gated version-1 identity (CAS).
+async fn delivery_establish_identity(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let claims = match pollis_delivery::session::verify_session(
+        &headers,
+        &state.sessions,
+        now_u64(),
+    ) {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    let parsed: pollis_delivery::bootstrap::EstablishIdentityBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let (pub_bytes, salt, nonce, wrapped) = match (
+        b64d(&parsed.account_id_pub),
+        b64d(&parsed.salt),
+        b64d(&parsed.nonce),
+        b64d(&parsed.wrapped_key),
+    ) {
+        (Some(p), Some(s), Some(n), Some(w)) => (p, s, n, w),
+        _ => return ds_bad_request(),
+    };
+    if pub_bytes.len() != 32 {
+        return ds_bad_request();
+    }
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_establish_identity(
+        &conn,
+        &claims.user_id,
+        &pub_bytes,
+        &salt,
+        &nonce,
+        &wrapped,
+    )
+    .await
+    {
+        Ok(pollis_delivery::bootstrap::EstablishOutcome::Applied) => ds_ok(),
+        Ok(pollis_delivery::bootstrap::EstablishOutcome::Conflict) => {
+            ds_conflict("identity already established")
+        }
+        Err(e) => ds_internal_error(format!("establish-identity: {e}")),
+    }
+}
+
+/// `POST /v1/auth/register-device` — session-gated device row + watermarks.
+async fn delivery_register_device(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let claims = match pollis_delivery::session::verify_session(
+        &headers,
+        &state.sessions,
+        now_u64(),
+    ) {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    let parsed: pollis_delivery::bootstrap::RegisterDeviceBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    if parsed.device_id.trim().is_empty() || parsed.device_id != claims.device_id {
+        return pollis_delivery::error::AuthRejection::Forbidden.into_response();
+    }
+    let device_name = parsed
+        .device_name
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "device".to_string());
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_register_device(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &device_name,
+    )
+    .await
+    {
+        Ok(()) => ds_ok(),
+        Err(e) => ds_internal_error(format!("register-device: {e}")),
+    }
+}
+
+/// `POST /v1/auth/publish-device-cert` — the PIVOT. DUAL gate, mirroring the
+/// production handler: (a) session + cert-validity (first-device signup; session
+/// invalidated on success), or (b) cert-validity ALONE with the body `user_id`
+/// (subsequent device whose session may have expired during sibling approval).
+async fn delivery_publish_device_cert(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let now = now_u64();
+    let parsed: pollis_delivery::bootstrap::PublishCertBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let cert_bytes = match b64d(&parsed.device_cert) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
+    let mls_sig_pub = match b64d(&parsed.mls_signature_pub) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
+    if parsed.cert_issued_at < 0 {
+        return ds_bad_request();
+    }
+    let issued_at = parsed.cert_issued_at as u64;
+
+    // Gate selection: a live session (gate a) wins; else cert-validity-alone with
+    // the body user_id (gate b). A present-but-expired token falls through to (b).
+    let session_token = pollis_delivery::session::session_token(&headers)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string());
+    let session_claims = session_token
+        .as_ref()
+        .and_then(|t| state.sessions.resolve(t, now));
+    let (user_id, device_id, invalidate_token) = match session_claims {
+        Some(claims) => {
+            if parsed.device_id != claims.device_id {
+                return pollis_delivery::error::AuthRejection::Forbidden.into_response();
+            }
+            (claims.user_id, claims.device_id, session_token)
+        }
+        None => {
+            let uid = match parsed.user_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(u) => u.to_string(),
+                None => return pollis_delivery::error::AuthRejection::Unauthorized.into_response(),
+            };
+            (uid, parsed.device_id.clone(), None)
+        }
+    };
+
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_publish_device_cert(
+        &conn,
+        &user_id,
+        &device_id,
+        &cert_bytes,
+        issued_at,
+        parsed.cert_identity_version,
+        &mls_sig_pub,
+    )
+    .await
+    {
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::Applied) => {
+            if let Some(token) = invalidate_token {
+                state.sessions.invalidate(&token);
+            }
+            ds_ok()
+        }
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::IdentityNotEstablished) => {
+            ds_conflict("account identity not established")
+        }
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::CertInvalid) => {
+            pollis_delivery::error::AuthRejection::Unauthorized.into_response()
+        }
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::DeviceNotRegistered) => {
+            ds_conflict("device not registered for this user")
+        }
+        Err(e) => ds_internal_error(format!("publish-device-cert: {e}")),
+    }
+}
+
+/// `POST /v1/auth/enrollment-request` — session-gated INSERT of a pending
+/// `device_enrollment_request`, user + device bound from the session.
+async fn delivery_enrollment_request(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let claims = match pollis_delivery::session::verify_session(&headers, &state.sessions, now_u64())
+    {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    let parsed: pollis_delivery::bootstrap::EnrollmentRequestBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let ephemeral_pub = match b64d(&parsed.new_device_ephemeral_pub) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_enrollment_request(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &parsed.request_id,
+        &ephemeral_pub,
+        &parsed.verification_code,
+        &parsed.created_at,
+        &parsed.expires_at,
+    )
+    .await
+    {
+        Ok(()) => ds_ok(),
+        Err(e) => ds_internal_error(format!("enrollment-request: {e}")),
+    }
+}
+
+/// `POST /v1/auth/request-email-change-otp` — DEVICE-SIGNED. Record the
+/// authenticated requester for the new email and prepare+store the OTP (DEV_OTP,
+/// no send). Always 200.
+async fn delivery_request_email_change_otp(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::email_change::RequestEmailChangeBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let new_email = parsed.new_email.trim().to_string();
+    if !new_email.is_empty() {
+        state
+            .email_change
+            .request(&state.otp_config, &authed, &new_email)
+            .await;
+    }
+    ds_ok()
+}
+
+/// `POST /v1/auth/verify-email-change` — DEVICE-SIGNED. Validate the OTP +
+/// requester binding (authed == requester), then swap `users.email` on the MAIN
+/// DB. The authed user comes from the SIGNATURE, never the body.
+async fn delivery_verify_email_change(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::email_change::VerifyEmailChangeBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::email_change::apply_verify_email_change(
+        &conn,
+        &state.email_change,
+        &state.otp_config,
+        &authed,
+        &parsed.new_email,
+        &parsed.code,
+    )
+    .await
+    {
+        Ok(outcome) => pollis_delivery::email_change::email_change_response(outcome),
+        Err(e) => ds_internal_error(format!("verify-email-change: {e}")),
+    }
+}
+
 /// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
 /// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
 /// port, and serve it on a DEDICATED OS thread with its own runtime so the
@@ -1379,7 +1832,23 @@ async fn delivery_devices_revoke(
 async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> String {
     use std::sync::mpsc;
 
-    let state = DsState { main, log };
+    let state = DsState {
+        main,
+        log,
+        otp: pollis_delivery::otp::OtpStore::default(),
+        sessions: pollis_delivery::session::SessionStore::default(),
+        // DEV_OTP forces the fixed harness code and skips the email send; no
+        // resend throttle so back-to-back sign-ups in one test aren't blocked.
+        otp_config: pollis_delivery::otp::OtpConfig {
+            resend_api_key: None,
+            dev_otp: Some(DEV_OTP.to_string()),
+            ttl_secs: 600,
+            session_ttl_secs: 600,
+            resend_throttle_secs: 0,
+            max_attempts: 5,
+        },
+        email_change: pollis_delivery::email_change::EmailChangeStore::default(),
+    };
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::Builder::new()
         .name("in-process-delivery".into())
@@ -1495,6 +1964,10 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     // Domain D (#419) — all on the MAIN DB.
                     .route("/v1/key-packages", axum::routing::post(delivery_key_packages))
                     .route(
+                        "/v1/key-packages/claim",
+                        axum::routing::post(delivery_key_packages_claim),
+                    )
+                    .route(
                         "/v1/key-packages/replenish",
                         axum::routing::post(delivery_key_packages_replenish),
                     )
@@ -1523,6 +1996,39 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                         axum::routing::post(delivery_enrollment_reject),
                     )
                     .route("/v1/devices/revoke", axum::routing::post(delivery_devices_revoke))
+                    .route("/v1/auth/logout", axum::routing::post(delivery_auth_logout))
+                    // Server-side OTP + bootstrap (Goal B #419) — the first-device
+                    // signup path the client seam now routes through the DS.
+                    .route(
+                        "/v1/auth/request-otp",
+                        axum::routing::post(delivery_request_otp),
+                    )
+                    .route("/v1/auth/verify-otp", axum::routing::post(delivery_verify_otp))
+                    .route(
+                        "/v1/auth/establish-identity",
+                        axum::routing::post(delivery_establish_identity),
+                    )
+                    .route(
+                        "/v1/auth/register-device",
+                        axum::routing::post(delivery_register_device),
+                    )
+                    .route(
+                        "/v1/auth/publish-device-cert",
+                        axum::routing::post(delivery_publish_device_cert),
+                    )
+                    .route(
+                        "/v1/auth/enrollment-request",
+                        axum::routing::post(delivery_enrollment_request),
+                    )
+                    // Email change (Goal B #419 final piece) — device-signed.
+                    .route(
+                        "/v1/auth/request-email-change-otp",
+                        axum::routing::post(delivery_request_email_change_otp),
+                    )
+                    .route(
+                        "/v1/auth/verify-email-change",
+                        axum::routing::post(delivery_verify_email_change),
+                    )
                     .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
@@ -1545,6 +2051,20 @@ pub(crate) async fn wipe() {
     wipe_remote(&w.remote, &w.log)
         .await
         .expect("wipe test turso");
+}
+
+/// The WRITABLE main-DB handle — the very one the in-process DS writes through.
+///
+/// A client's `state.remote_db` is a READ-ONLY view (PRAGMA query_only=ON),
+/// mirroring the production read-only Turso token, so it rejects every direct
+/// write. Tests that must seed or mutate *server-side* state directly —
+/// backdating envelopes or clearing watermarks to set up an envelope-GC
+/// scenario, tombstoning a revoked device's `user_device` row — stand in for
+/// effects that happen server-side in prod (envelope GC, DS-driven device
+/// revocation), NOT for client writes. They use THIS handle, not a client's
+/// read-only one.
+pub(crate) async fn writable_remote() -> Arc<RemoteDb> {
+    world().await.remote.clone()
 }
 
 /// The in-process Delivery Service base URL (e.g. `http://127.0.0.1:NNNNN`).
@@ -1669,10 +2189,18 @@ impl TestClient {
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
         let state = Arc::new(AppState::new_with_parts(
             w.config.clone(),
-            // Main DB.
-            w.remote.clone(),
+            // Main DB — a READ-ONLY view (PRAGMA query_only=ON), mirroring the
+            // production read-only Turso token the client will hold. It SHARES
+            // the writable handle's underlying `Database` (so it sees every row
+            // the in-process DS writes with no WAL lag) but rejects any direct
+            // INSERT/UPDATE/DELETE. A stray client-side write that should have
+            // gone through the DS therefore fails the suite instead of silently
+            // passing — the definitive gate for the prod read-only-token flip.
+            Arc::new(w.remote.query_only_view()),
             // Commit-log DB — a genuinely separate libsql file, so a query that
-            // should hit one DB but is routed to the other fails loudly.
+            // should hit one DB but is routed to the other fails loudly. Goal A
+            // already made this read-only-ish (the client only reads the log;
+            // the DS is the sole writer), so it keeps the shared handle.
             w.log.clone(),
             keystore,
         ));
@@ -1752,6 +2280,18 @@ impl TestClient {
         invoke(&self.webview, cmd, args)
             .await
             .unwrap_or_else(|e| panic!("{cmd}: {e}"))
+    }
+
+    /// Like [`invoke_json`] but returns the `Result` so a test can assert on a
+    /// command that is EXPECTED to fail (e.g. a rejected DS write). Still
+    /// activates this client first so signed DS writes go out under its identity.
+    pub(crate) async fn invoke_try(
+        &self,
+        cmd: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.activate();
+        invoke(&self.webview, cmd, args).await
     }
 }
 

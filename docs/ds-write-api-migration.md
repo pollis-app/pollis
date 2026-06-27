@@ -269,16 +269,24 @@ change (a single client GC'ing shared envelopes was already a latent bug per the
 |---|---|---|---|
 | `POST /v1/key-packages` | `{packages: [{ref_hash, key_package}], device_id}` | caller publishes only for their own `(user_id, device_id)`; `device_id` belongs to caller | `INSERT OR IGNORE INTO mls_key_package` (user_id = caller) |
 | `POST /v1/key-packages/replenish` | `{packages: [...], device_id}` | same | DELETE stale unclaimed for caller's device + INSERT pool — **one transaction** |
+| `POST /v1/key-packages/claim` | `{target_user_id, target_device_id?}` | ANY authenticated caller (claim is how you add a peer — NOT owner-scoped) | `UPDATE mls_key_package SET claimed=1 WHERE ref_hash=(SELECT … WHERE user_id=target [AND device_id=target] AND claimed=0 ORDER BY created_at ASC LIMIT 1) RETURNING ref_hash, key_package`; `404 no_key_package` when the pool is empty |
 | `POST /v1/devices/cert` | `{device_id, device_cert, mls_signature_pub, cert_*}` | caller owns `device_id`; cert binds caller's identity | UPDATE `user_device WHERE device_id = ? AND user_id = caller` |
 | `POST /v1/devices/register` | `{device_id}` | caller registers their own device | `INSERT OR IGNORE INTO user_device` (user_id = caller) |
 | `POST /v1/push-tokens` | `{token, device_id, platform}` | caller's device | INSERT `user_push_token` (user_id = caller) |
 | `POST /v1/welcomes/ack` | `{welcome_ids[]}` (or `{conversation_id, device_id}`) | caller is the `recipient_id` of those welcomes | UPDATE/DELETE `mls_welcome.delivered WHERE recipient_id = caller` |
 
-> **Key-package claiming caveat:** *claiming* a peer's key package (marking `claimed=1`)
-> happens as part of building a commit. With the DS as sole writer this must be a
-> DS-side step of the **add path** — fold the claim into `/v1/commits` (the commit that
-> adds the device) so the claim and the commit are atomic. Do not expose a raw
-> "claim someone else's KP" endpoint.
+> **Key-package claiming (implemented as `POST /v1/key-packages/claim`, blocker C1):**
+> *claiming* a peer's key package (marking `claimed=1`) happens while building the add
+> commit — and the client needs the returned `key_package` BYTES *before* it can build
+> that commit. So folding the claim into `/v1/commits` (the earlier plan) is not workable:
+> the bytes are an input to the commit, not a side effect of submitting it. Instead the
+> claim is its own endpoint that runs the exact `UPDATE … SET claimed=1 … RETURNING`
+> the client used to run directly and returns `{ ref_hash, key_package }`. Authz: ANY
+> authenticated device may claim ANY target's package (claiming IS how you add someone),
+> so it is the one domain-D write that is not owner-scoped — the device signature
+> authenticates the claimer, and nothing in the body is bound to it. Atomicity is the
+> single-row `WHERE claimed=0` UPDATE: concurrent claims of a one-package pool yield
+> exactly one winner, the rest a `404 no_key_package` (mirrors the old no-row outcome).
 
 ### 2.E. Auth / session / account lifecycle
 
