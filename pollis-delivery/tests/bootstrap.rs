@@ -80,6 +80,18 @@ CREATE TABLE group_member (\
 CREATE TABLE dm_channel_member (\
   dm_channel_id TEXT NOT NULL, user_id TEXT NOT NULL,\
   PRIMARY KEY (dm_channel_id, user_id)\
+);\
+CREATE TABLE device_enrollment_request (\
+  id TEXT PRIMARY KEY,\
+  user_id TEXT NOT NULL,\
+  new_device_id TEXT NOT NULL,\
+  new_device_ephemeral_pub BLOB NOT NULL,\
+  verification_code TEXT NOT NULL,\
+  wrapped_account_key BLOB,\
+  status TEXT NOT NULL,\
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  expires_at TEXT NOT NULL,\
+  approved_by_device_id TEXT\
 );";
 
 fn b64(b: &[u8]) -> String {
@@ -500,4 +512,207 @@ async fn publish_cert_rejects_wrong_account_key() {
     )
     .await;
     assert_eq!(s, StatusCode::OK, "a valid cert must be accepted");
+}
+
+// ── 7. Subsequent device — cert-validity ALONE (no session) ──────────────────
+
+/// Establish an account identity under `account` and register `device_id`, both
+/// using the session minted by re-login. Returns once the device row exists but
+/// has NO cert yet — the state a subsequent device is in just before its first
+/// cert publish.
+async fn setup_registered_device(
+    state: &AppState,
+    email: &str,
+    device_id: &str,
+    account: &SigningKey,
+) -> String {
+    let v = login(state, email, device_id).await;
+    let user_id = v["user_id"].as_str().unwrap().to_string();
+    let token = v["session_token"].as_str().unwrap().to_string();
+    let (s, _) = send(
+        state,
+        "/v1/auth/establish-identity",
+        serde_json::json!({
+            "account_id_pub": b64(&account.verifying_key().to_bytes()),
+            "salt": b64(&[1u8; 32]),
+            "nonce": b64(&[2u8; 12]),
+            "wrapped_key": b64(&[3u8; 48]),
+        }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "establish-identity should succeed");
+    let (s, _) = send(
+        state,
+        "/v1/auth/register-device",
+        serde_json::json!({ "device_id": device_id }),
+        Some(&token),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "register-device should succeed");
+    user_id
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn publish_cert_validity_alone_no_session() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+
+    let device_id = "dev-sub";
+    let account = gen_key();
+    let user_id = setup_registered_device(&state, "sub@x.com", device_id, &account).await;
+
+    let mut mls_pub = [0u8; 32];
+    OsRng.fill_bytes(&mut mls_pub);
+    let issued_at: u64 = 1_700_000_000;
+    let cert = account.sign(&cert_payload(device_id, &mls_pub, 1, issued_at));
+
+    // No session header — the cert (signed by the established account key) is the
+    // ONLY proof. user_id comes from the body.
+    let (s, _) = send(
+        &state,
+        "/v1/auth/publish-device-cert",
+        serde_json::json!({
+            "user_id": user_id,
+            "device_id": device_id,
+            "device_cert": b64(&cert.to_bytes()),
+            "cert_issued_at": issued_at as i64,
+            "cert_identity_version": 1,
+            "mls_signature_pub": b64(&mls_pub),
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::OK,
+        "a valid cert with no session must be accepted (cert-validity gate)"
+    );
+
+    // The pivot landed.
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT mls_signature_pub FROM user_device WHERE device_id = ?1",
+            libsql::params![device_id],
+        )
+        .await
+        .unwrap();
+    let stored: Vec<u8> = rows
+        .next()
+        .await
+        .unwrap()
+        .unwrap()
+        .get::<Option<Vec<u8>>>(0)
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored, mls_pub.to_vec());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn publish_cert_validity_alone_rejects_wrong_account_key() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+
+    let device_id = "dev-sub2";
+    let account = gen_key();
+    let user_id = setup_registered_device(&state, "sub2@x.com", device_id, &account).await;
+
+    let mut mls_pub = [0u8; 32];
+    OsRng.fill_bytes(&mut mls_pub);
+    let issued_at: u64 = 1_700_000_000;
+
+    // A cert signed by an ATTACKER key, no session — must be rejected. This is
+    // the load-bearing property: cert-validity-alone never accepts a cert that
+    // doesn't chain to the account's stored account_id_pub.
+    let attacker = gen_key();
+    let bad_cert = attacker.sign(&cert_payload(device_id, &mls_pub, 1, issued_at));
+    let (s, _) = send(
+        &state,
+        "/v1/auth/publish-device-cert",
+        serde_json::json!({
+            "user_id": user_id,
+            "device_id": device_id,
+            "device_cert": b64(&bad_cert.to_bytes()),
+            "cert_issued_at": issued_at as i64,
+            "cert_identity_version": 1,
+            "mls_signature_pub": b64(&mls_pub),
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "a cert not signed by the account key must be rejected with no session"
+    );
+
+    // No session AND no body user_id → unauthorized (nothing to bind the user).
+    let (s, _) = send(
+        &state,
+        "/v1/auth/publish-device-cert",
+        serde_json::json!({
+            "device_id": device_id,
+            "device_cert": b64(&account.sign(&cert_payload(device_id, &mls_pub, 1, issued_at)).to_bytes()),
+            "cert_issued_at": issued_at as i64,
+            "cert_identity_version": 1,
+            "mls_signature_pub": b64(&mls_pub),
+        }),
+        None,
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "no session and no user_id leaves no one to authorize as"
+    );
+}
+
+// ── 8. Enrollment request — session-gated, binds user from session ───────────
+
+#[tokio::test(flavor = "multi_thread")]
+async fn enrollment_request_is_session_gated_and_binds_user() {
+    let db = fresh_db().await;
+    let state = dev_state(Arc::clone(&db));
+
+    let device_id = "dev-enr";
+    let v = login(&state, "enr@x.com", device_id).await;
+    let user_id = v["user_id"].as_str().unwrap().to_string();
+    let token = v["session_token"].as_str().unwrap().to_string();
+
+    let req_body = serde_json::json!({
+        "request_id": "req-1",
+        "new_device_ephemeral_pub": b64(&[7u8; 32]),
+        "verification_code": "123456",
+        "created_at": "2026-06-27T00:00:00Z",
+        "expires_at": "2026-06-27T00:10:00Z",
+    });
+
+    // No session → unauthorized.
+    let (s, _) = send(&state, "/v1/auth/enrollment-request", req_body.clone(), None).await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "enrollment-request must be session-gated"
+    );
+
+    // With the session → 200, and the row is bound to the session's user + device.
+    let (s, _) = send(&state, "/v1/auth/enrollment-request", req_body, Some(&token)).await;
+    assert_eq!(s, StatusCode::OK, "enrollment-request with session should 200");
+
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT user_id, new_device_id, status FROM device_enrollment_request WHERE id = ?1",
+            libsql::params!["req-1"],
+        )
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().expect("enrollment row inserted");
+    let row_user: String = row.get(0).unwrap();
+    let row_device: String = row.get(1).unwrap();
+    let row_status: String = row.get(2).unwrap();
+    assert_eq!(row_user, user_id, "user_id must be bound from the session");
+    assert_eq!(row_device, device_id, "new_device_id must be bound from the session");
+    assert_eq!(row_status, "pending");
 }

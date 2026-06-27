@@ -279,37 +279,42 @@ pub struct PublishCertBody {
     /// Raw 32-byte MLS signing pubkey, base64 (STANDARD) — the column the
     /// device-signature gate verifies against.
     pub mls_signature_pub: String,
+    /// The publishing user. IGNORED when a session is present (bound from the
+    /// session instead). REQUIRED on the cert-validity-alone (subsequent-device)
+    /// path, where there is no session to bind the user from — the cert
+    /// verification against this user's `account_id_pub` is the load-bearing proof.
+    #[serde(default)]
+    pub user_id: Option<String>,
 }
 
-/// POST /v1/auth/publish-device-cert — the PIVOT write. Gate = session AND
-/// cert-validity: the cert's Ed25519 signature is re-verified against the
-/// account's stored `account_id_pub` (a 409 if no identity is established yet)
-/// before the `user_device` cert columns are populated. The session is
-/// invalidated on success — it has done its one job. Mirrors
-/// pollis-core `mls::device::ensure_device_cert`'s write.
+/// POST /v1/auth/publish-device-cert — the PIVOT write. DUAL gate, in both cases
+/// the cert's Ed25519 signature is re-verified against the account's stored
+/// `account_id_pub` (a 409 if no identity is established yet) before the
+/// `user_device` cert columns are populated:
+///
+///   (a) **session + cert-validity** — first-device signup. `user_id`/`device_id`
+///       are bound from the session (never the body); the session is invalidated
+///       on success (single-use through the pivot).
+///   (b) **cert-validity ALONE** — a subsequent device (sibling-approval
+///       enrollment / Secret-Key recovery) whose session may have expired while
+///       it waited for approval. No session header: `user_id`/`device_id` come
+///       from the body and the cert verification IS the authentication. This is
+///       strictly STRONGER than a bearer session — forging it needs the account
+///       private key — and `apply_publish_device_cert` still requires a
+///       pre-existing `user_device` row and never fails open.
+///
+/// Mirrors pollis-core `mls::device::ensure_device_cert`'s write.
 pub async fn publish_device_cert(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
     let now = now_unix();
-    // Read the raw token first so we can invalidate it on success.
-    let token = match crate::session::session_token(&headers) {
-        Some(t) if !t.is_empty() => t.to_string(),
-        _ => return AuthRejection::Unauthorized.into_response(),
-    };
-    let claims = match state.sessions.resolve(&token, now) {
-        Some(c) => c,
-        None => return AuthRejection::Unauthorized.into_response(),
-    };
 
     let parsed: PublishCertBody = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return bad_request("invalid body"),
     };
-    if parsed.device_id != claims.device_id {
-        return AuthRejection::Forbidden.into_response();
-    }
     let cert_bytes = match b64_decode(&parsed.device_cert) {
         Ok(b) => b,
         Err(_) => return bad_request("invalid device_cert"),
@@ -323,6 +328,37 @@ pub async fn publish_device_cert(
     }
     let issued_at = parsed.cert_issued_at as u64;
 
+    // Pick the gate: a live session (gate a) takes precedence; otherwise fall
+    // back to cert-validity-alone with the body `user_id` (gate b). A token that
+    // is present but expired/unknown does NOT resolve, so it cleanly falls
+    // through to (b) — which is exactly the "session outlived by slow approval"
+    // case the subsequent-device path is built for.
+    let session_token = crate::session::session_token(&headers)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string());
+    let session_claims = session_token
+        .as_ref()
+        .and_then(|t| state.sessions.resolve(t, now));
+
+    let (user_id, device_id, invalidate_token) = match session_claims {
+        Some(claims) => {
+            // Gate (a): bind from the session; the body device_id must match.
+            if parsed.device_id != claims.device_id {
+                return AuthRejection::Forbidden.into_response();
+            }
+            (claims.user_id, claims.device_id, session_token)
+        }
+        None => {
+            // Gate (b): no live session — the user_id MUST come from the body and
+            // the cert-validity check below is the load-bearing proof.
+            let uid = match parsed.user_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(u) => u.to_string(),
+                None => return AuthRejection::Unauthorized.into_response(),
+            };
+            (uid, parsed.device_id.clone(), None)
+        }
+    };
+
     let conn = match state.db.conn() {
         Ok(c) => c,
         Err(e) => return internal(e),
@@ -330,8 +366,8 @@ pub async fn publish_device_cert(
 
     match apply_publish_device_cert(
         &conn,
-        &claims.user_id,
-        &claims.device_id,
+        &user_id,
+        &device_id,
         &cert_bytes,
         issued_at,
         parsed.cert_identity_version,
@@ -340,9 +376,11 @@ pub async fn publish_device_cert(
     .await
     {
         Ok(PublishCertOutcome::Applied) => {
-            // The session has done its one job; invalidate it so the bootstrap
-            // token is single-use through the pivot.
-            state.sessions.invalidate(&token);
+            // Single-use through the pivot: invalidate the bootstrap session if
+            // one was used (gate a). Gate (b) had no session to spend.
+            if let Some(token) = invalidate_token {
+                state.sessions.invalidate(&token);
+            }
             ok_status()
         }
         Ok(PublishCertOutcome::IdentityNotEstablished) => {
@@ -434,4 +472,96 @@ pub async fn apply_publish_device_cert(
     }
 
     Ok(PublishCertOutcome::Applied)
+}
+
+// ── POST /v1/auth/enrollment-request ─────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct EnrollmentRequestBody {
+    pub request_id: String,
+    /// New device's ephemeral X25519 public key, base64 (STANDARD). The private
+    /// half never leaves the requesting device.
+    pub new_device_ephemeral_pub: String,
+    pub verification_code: String,
+    pub created_at: String,
+    pub expires_at: String,
+}
+
+/// POST /v1/auth/enrollment-request — INSERT a pending `device_enrollment_request`
+/// for the session's user + device. SESSION-gated because the requesting device
+/// is pre-credential (its `mls_signature_pub` is still NULL, so it cannot
+/// device-sign). `user_id` and `new_device_id` are bound from the session, NEVER
+/// the body — a token can only file an enrollment request for ITS OWN account +
+/// device. Mirrors pollis-core `device_enrollment::start_device_enrollment`'s
+/// remote write.
+pub async fn enrollment_request(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let claims = match verify_session(&headers, &state.sessions, now_unix()) {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    let parsed: EnrollmentRequestBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return bad_request("invalid body"),
+    };
+    let ephemeral_pub = match b64_decode(&parsed.new_device_ephemeral_pub) {
+        Ok(b) => b,
+        Err(_) => return bad_request("invalid new_device_ephemeral_pub"),
+    };
+
+    let conn = match state.db.conn() {
+        Ok(c) => c,
+        Err(e) => return internal(e),
+    };
+    match apply_enrollment_request(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &parsed.request_id,
+        &ephemeral_pub,
+        &parsed.verification_code,
+        &parsed.created_at,
+        &parsed.expires_at,
+    )
+    .await
+    {
+        Ok(()) => ok_status(),
+        Err(e) => internal(e),
+    }
+}
+
+/// INSERT the pending enrollment request, `user_id` + `new_device_id` bound to
+/// the session caller. Extracted from the handler so the in-process integration
+/// harness drives the identical write against the shared main DB.
+#[allow(clippy::too_many_arguments)]
+pub async fn apply_enrollment_request(
+    conn: &libsql::Connection,
+    user_id: &str,
+    new_device_id: &str,
+    request_id: &str,
+    ephemeral_pub: &[u8],
+    verification_code: &str,
+    created_at: &str,
+    expires_at: &str,
+) -> anyhow::Result<()> {
+    conn.execute(
+        "INSERT INTO device_enrollment_request \
+         (id, user_id, new_device_id, new_device_ephemeral_pub, verification_code, \
+          status, created_at, expires_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)",
+        libsql::params![
+            request_id.to_string(),
+            user_id.to_string(),
+            new_device_id.to_string(),
+            ephemeral_pub.to_vec(),
+            verification_code.to_string(),
+            created_at.to_string(),
+            expires_at.to_string(),
+        ],
+    )
+    .await?;
+    Ok(())
 }

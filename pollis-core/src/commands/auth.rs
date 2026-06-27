@@ -326,10 +326,41 @@ async fn verify_otp_ds(
 
         Some(secret_key)
     } else {
-        // Re-login / enrollment — OUT OF SCOPE for the DS bootstrap. Register the
-        // device on the direct path; the account key arrives via sibling approval
-        // or Secret-Key recovery.
-        register_device(state, &user_id).await?;
+        // Re-login / subsequent device for an EXISTING account. The DS just minted
+        // a session (verify-otp). Resolve this device's id and route its
+        // `register-device` write through the session-gated DS endpoint — the
+        // device has no signing credential yet (its `mls_signature_pub` is NULL),
+        // so it cannot device-sign. The account key arrives next via sibling
+        // approval (`start_device_enrollment`) or Secret-Key recovery; the FIRST
+        // cert publish is then gated by cert-validity ALONE (not this session),
+        // since approval can outlast the session TTL. See
+        // `docs/otp-server-bootstrap-design.md` §5.
+        let device_id = ensure_device_id(state, &user_id, &candidate_device_id).await?;
+        if device_id == candidate_device_id {
+            // Brand-new device for this account (nothing in the keystore yet): the
+            // session minted above is bound to exactly this device_id, so it can
+            // authorize the row.
+            let hostname = gethostname::gethostname().to_string_lossy().to_string();
+            let device_name = format!("{hostname} ({})", std::env::consts::OS);
+            crate::commands::mls::ds_post_session_ok(
+                state,
+                "/v1/auth/register-device",
+                &session_token,
+                &serde_json::json!({ "device_id": device_id, "device_name": device_name }),
+            )
+            .await?;
+            // Hold the session for the session-gated enrollment REQUEST write that
+            // a sibling-approval enrollment performs next (also pre-credential).
+            // NOT stashed in `bootstrap_session`: the cert publish must stay on the
+            // cert-validity-alone path.
+            *state.enrollment_session.lock().await = Some(session_token.clone());
+        } else {
+            // A device already known to this account (its registered device_id
+            // predates this session, which is bound to a fresh candidate). The
+            // session can't authorize it; re-register directly — a `last_seen`
+            // touch whose cert was already published on a prior login.
+            register_device(state, &user_id).await?;
+        }
         None
     };
 

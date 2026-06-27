@@ -73,6 +73,16 @@ pub struct AppState {
     /// re-login / subsequent-device cert publishes, which stay on the direct
     /// Turso write path. See `docs/otp-server-bootstrap-design.md`.
     pub bootstrap_session: Arc<Mutex<Option<String>>>,
+    /// The OTP-session bearer token minted by the DS `verify-otp` on a
+    /// **re-login / subsequent-device** (`has_identity`) sign-in, held so the
+    /// session-gated writes a NEW device performs *before* it has a signing
+    /// credential — `register-device` and the enrollment **request** — can
+    /// present it. Deliberately SEPARATE from [`bootstrap_session`]: the
+    /// subsequent-device cert publish must NOT consume a session (sibling
+    /// approval can outlast the TTL), so it is gated by cert-validity ALONE.
+    /// `Some` only between `verify_otp` and the enrollment request; `None` on the
+    /// direct (no-DS) path. See `docs/otp-server-bootstrap-design.md` §5.
+    pub enrollment_session: Arc<Mutex<Option<String>>>,
     /// Bound port of the loopback media HTTP server, set once during
     /// startup. `None` in test/headless contexts that don't spin up the
     /// server. The port plus `media_server_token` produce the URLs the
@@ -174,6 +184,7 @@ impl AppState {
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
             unlock: Arc::new(Mutex::new(None)),
             bootstrap_session: Arc::new(Mutex::new(None)),
+            enrollment_session: Arc::new(Mutex::new(None)),
             media_server_port: Arc::new(Mutex::new(None)),
             media_server_token: Arc::new(Mutex::new(None)),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]

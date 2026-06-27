@@ -215,6 +215,11 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/auth/establish-identity", post(bootstrap::establish_identity))
         .route("/v1/auth/register-device", post(bootstrap::register_device))
         .route("/v1/auth/publish-device-cert", post(bootstrap::publish_device_cert))
+        // Subsequent-device (re-login) bootstrap: the session-gated enrollment
+        // REQUEST write (the requesting device is still pre-credential). The
+        // subsequent-device cert publish reuses publish-device-cert above, gated
+        // by cert-validity ALONE (no session). See docs §5.
+        .route("/v1/auth/enrollment-request", post(bootstrap::enrollment_request))
         .with_state(state)
 }
 

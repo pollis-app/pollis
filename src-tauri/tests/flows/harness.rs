@@ -1560,8 +1560,10 @@ async fn delivery_register_device(
     }
 }
 
-/// `POST /v1/auth/publish-device-cert` — the PIVOT: gated by session AND
-/// cert-validity; invalidates the session on success.
+/// `POST /v1/auth/publish-device-cert` — the PIVOT. DUAL gate, mirroring the
+/// production handler: (a) session + cert-validity (first-device signup; session
+/// invalidated on success), or (b) cert-validity ALONE with the body `user_id`
+/// (subsequent device whose session may have expired during sibling approval).
 async fn delivery_publish_device_cert(
     axum::extract::State(state): axum::extract::State<DsState>,
     headers: axum::http::HeaderMap,
@@ -1569,21 +1571,10 @@ async fn delivery_publish_device_cert(
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     let now = now_u64();
-    let token = match pollis_delivery::session::session_token(&headers) {
-        Some(t) if !t.is_empty() => t.to_string(),
-        _ => return pollis_delivery::error::AuthRejection::Unauthorized.into_response(),
-    };
-    let claims = match state.sessions.resolve(&token, now) {
-        Some(c) => c,
-        None => return pollis_delivery::error::AuthRejection::Unauthorized.into_response(),
-    };
     let parsed: pollis_delivery::bootstrap::PublishCertBody = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return ds_bad_request(),
     };
-    if parsed.device_id != claims.device_id {
-        return pollis_delivery::error::AuthRejection::Forbidden.into_response();
-    }
     let cert_bytes = match b64d(&parsed.device_cert) {
         Some(b) => b,
         None => return ds_bad_request(),
@@ -1596,14 +1587,39 @@ async fn delivery_publish_device_cert(
         return ds_bad_request();
     }
     let issued_at = parsed.cert_issued_at as u64;
+
+    // Gate selection: a live session (gate a) wins; else cert-validity-alone with
+    // the body user_id (gate b). A present-but-expired token falls through to (b).
+    let session_token = pollis_delivery::session::session_token(&headers)
+        .filter(|t| !t.is_empty())
+        .map(|t| t.to_string());
+    let session_claims = session_token
+        .as_ref()
+        .and_then(|t| state.sessions.resolve(t, now));
+    let (user_id, device_id, invalidate_token) = match session_claims {
+        Some(claims) => {
+            if parsed.device_id != claims.device_id {
+                return pollis_delivery::error::AuthRejection::Forbidden.into_response();
+            }
+            (claims.user_id, claims.device_id, session_token)
+        }
+        None => {
+            let uid = match parsed.user_id.as_deref().filter(|s| !s.trim().is_empty()) {
+                Some(u) => u.to_string(),
+                None => return pollis_delivery::error::AuthRejection::Unauthorized.into_response(),
+            };
+            (uid, parsed.device_id.clone(), None)
+        }
+    };
+
     let conn = match state.main.conn().await {
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("conn: {e}")),
     };
     match pollis_delivery::bootstrap::apply_publish_device_cert(
         &conn,
-        &claims.user_id,
-        &claims.device_id,
+        &user_id,
+        &device_id,
         &cert_bytes,
         issued_at,
         parsed.cert_identity_version,
@@ -1612,7 +1628,9 @@ async fn delivery_publish_device_cert(
     .await
     {
         Ok(pollis_delivery::bootstrap::PublishCertOutcome::Applied) => {
-            state.sessions.invalidate(&token);
+            if let Some(token) = invalidate_token {
+                state.sessions.invalidate(&token);
+            }
             ds_ok()
         }
         Ok(pollis_delivery::bootstrap::PublishCertOutcome::IdentityNotEstablished) => {
@@ -1625,6 +1643,49 @@ async fn delivery_publish_device_cert(
             ds_conflict("device not registered for this user")
         }
         Err(e) => ds_internal_error(format!("publish-device-cert: {e}")),
+    }
+}
+
+/// `POST /v1/auth/enrollment-request` — session-gated INSERT of a pending
+/// `device_enrollment_request`, user + device bound from the session.
+async fn delivery_enrollment_request(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let claims = match pollis_delivery::session::verify_session(&headers, &state.sessions, now_u64())
+    {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    let parsed: pollis_delivery::bootstrap::EnrollmentRequestBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let ephemeral_pub = match b64d(&parsed.new_device_ephemeral_pub) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_enrollment_request(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &parsed.request_id,
+        &ephemeral_pub,
+        &parsed.verification_code,
+        &parsed.created_at,
+        &parsed.expires_at,
+    )
+    .await
+    {
+        Ok(()) => ds_ok(),
+        Err(e) => ds_internal_error(format!("enrollment-request: {e}")),
     }
 }
 
@@ -1820,6 +1881,10 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     .route(
                         "/v1/auth/publish-device-cert",
                         axum::routing::post(delivery_publish_device_cert),
+                    )
+                    .route(
+                        "/v1/auth/enrollment-request",
+                        axum::routing::post(delivery_enrollment_request),
                     )
                     .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.
