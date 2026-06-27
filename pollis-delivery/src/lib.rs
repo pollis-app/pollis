@@ -202,8 +202,8 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // Domains E + G (#419) — account lifecycle / identity rotation /
         // recovery / device-enrollment / security audit. All land on the MAIN
         // DB. The account-identity bootstrap (signup version-1 establishment),
-        // device registration, the enrollment *request*, and logout device
-        // removal stay on the client's direct path (see `account` module docs).
+        // device registration, and the enrollment *request* stay on the client's
+        // direct path (see `account` module docs).
         .route("/v1/account/rotate-identity", post(account::rotate_identity))
         .route("/v1/account/delete", post(account::delete_account))
         .route("/v1/account/reset-recover", post(account::reset_recover))
@@ -211,6 +211,10 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/enrollment/approve", post(account::approve_enrollment))
         .route("/v1/enrollment/reject", post(account::reject_enrollment))
         .route("/v1/devices/revoke", post(account::revoke_device))
+        // Logout device removal (bucket-C C4) — DEVICE-SIGNED DELETE of the
+        // signer's OWN `user_device` row. Distinct from `/v1/devices/revoke`
+        // (which tombstones): logout must re-register cleanly on next sign-in.
+        .route("/v1/auth/logout", post(account::logout_device))
         // Server-side OTP + bootstrap (Goal B #419). request/verify-otp generate,
         // validate, and email the OTP server-side and mint an OTP-session token;
         // the three session-gated bootstrap writes establish the device's signing

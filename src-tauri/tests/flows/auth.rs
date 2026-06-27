@@ -894,3 +894,59 @@ async fn group_reconcile_tofu_detects_key_swap() {
     drop(bob);
     drop(carol);
 }
+
+/// Bucket-C C4 end-to-end: `logout(delete_data = true)` removes this device's
+/// remote `user_device` row by routing a DEVICE-SIGNED `POST /v1/auth/logout`
+/// through the DS — issued BEFORE the local DB / signing key are torn down. Under
+/// the read-only Turso token this is the path that keeps logout working (the old
+/// direct DELETE would have failed). Asserts the row is gone afterwards.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn logout_with_delete_removes_device_via_ds() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+
+    // The device row exists after sign-up (a cert was published by set_pin).
+    let device_id: String = {
+        let conn = alice.state.remote_db.conn().await.expect("remote conn");
+        let mut rows = conn
+            .query(
+                "SELECT device_id FROM user_device WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await
+            .expect("user_device select");
+        rows.next()
+            .await
+            .expect("rows")
+            .expect("device row present pre-logout")
+            .get::<String>(0)
+            .expect("device_id")
+    };
+
+    // Drive the real command — its DS-routed device removal must run while the
+    // signer is still live.
+    invoke::<()>(&alice.webview, "logout", json!({ "deleteData": true }))
+        .await
+        .expect("logout(delete_data=true)");
+
+    // The shared remote handle is unaffected by the local teardown, so we can
+    // confirm the DS DELETE landed.
+    let conn = alice.state.remote_db.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM user_device WHERE device_id = ?1",
+            libsql::params![device_id.clone()],
+        )
+        .await
+        .expect("user_device exists query");
+    assert!(
+        rows.next().await.expect("rows").is_none(),
+        "logout(delete_data=true) must remove this device's user_device row via the DS"
+    );
+
+    drop(alice);
+}
