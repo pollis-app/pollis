@@ -160,3 +160,76 @@ pub async fn ds_post_ok(state: &Arc<AppState>, path: &str, body: &serde_json::Va
     }
     Ok(())
 }
+
+/// Resolve the DS base URL or error if it isn't configured. Shared by the
+/// unauthenticated + session-bearer bootstrap clients below.
+fn delivery_base(state: &Arc<AppState>) -> Result<String> {
+    state
+        .config
+        .pollis_delivery_url
+        .as_deref()
+        .map(|s| s.trim_end_matches('/').to_string())
+        .ok_or_else(|| Error::Other(anyhow::anyhow!("pollis_delivery_url not configured")))
+}
+
+/// POST `body` (JSON) to `{pollis_delivery_url}{path}` with NO auth headers — the
+/// pre-identity OTP endpoints (`request-otp` / `verify-otp`), which the DS gates
+/// by the OTP itself, not a device signature or a session. Returns the raw
+/// [`reqwest::Response`] so the caller reads the body / maps the status.
+pub async fn ds_post_plain(
+    state: &Arc<AppState>,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response> {
+    let url = format!("{}{}", delivery_base(state)?, path);
+    reqwest::Client::new()
+        .post(&url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .json(body)
+        .send()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_plain {path}: {e}")))
+}
+
+/// Sign-free sibling of [`ds_post`] for the OTP-session-gated bootstrap writes
+/// (establish-identity / register-device / publish-device-cert). During bootstrap
+/// the device has no MLS signing key yet, so these carry the OTP-session bearer
+/// token in `X-Pollis-Session` instead of the four `X-Pollis-*` signature headers.
+/// Returns the raw [`reqwest::Response`] so the caller maps the status.
+pub async fn ds_post_session(
+    state: &Arc<AppState>,
+    path: &str,
+    session_token: &str,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response> {
+    let url = format!("{}{}", delivery_base(state)?, path);
+    let body_bytes = serde_json::to_vec(body)
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session serialize: {e}")))?;
+    reqwest::Client::new()
+        .post(&url)
+        .header("X-Pollis-Session", session_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(body_bytes)
+        .send()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session {path}: {e}")))
+}
+
+/// [`ds_post_session`] for bootstrap writes that must NOT silently fail: any
+/// non-2xx becomes an `Err` carrying the status + body.
+pub async fn ds_post_session_ok(
+    state: &Arc<AppState>,
+    path: &str,
+    session_token: &str,
+    body: &serde_json::Value,
+) -> Result<()> {
+    let resp = ds_post_session(state, path, session_token, body).await?;
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "ds_post_session {path} {s}: {txt}"
+        )));
+    }
+    Ok(())
+}

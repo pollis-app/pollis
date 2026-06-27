@@ -64,6 +64,15 @@ pub struct AppState {
     /// Not yet load-bearing — stage 6 flips the app over to reading the
     /// unwrapped keys from here instead of the legacy keystore slots.
     pub unlock: Arc<Mutex<Option<UnlockState>>>,
+    /// The short-lived OTP-session bearer token minted by the DS `verify-otp`
+    /// during first-device signup, held across the bootstrap sequence so the
+    /// session-gated `publish-device-cert` (driven later by `set_pin` →
+    /// `ensure_device_cert`) can present it. `Some` only between `verify_otp` and
+    /// the first cert publish; cleared once the cert lands (the token is then
+    /// spent server-side too). Always `None` on the direct (no-DS) path and for
+    /// re-login / subsequent-device cert publishes, which stay on the direct
+    /// Turso write path. See `docs/otp-server-bootstrap-design.md`.
+    pub bootstrap_session: Arc<Mutex<Option<String>>>,
     /// Bound port of the loopback media HTTP server, set once during
     /// startup. `None` in test/headless contexts that don't spin up the
     /// server. The port plus `media_server_token` produce the URLs the
@@ -164,6 +173,7 @@ impl AppState {
             device_id: Arc::new(Mutex::new(None)),
             enrollment_ephemeral_keys: Arc::new(Mutex::new(HashMap::new())),
             unlock: Arc::new(Mutex::new(None)),
+            bootstrap_session: Arc::new(Mutex::new(None)),
             media_server_port: Arc::new(Mutex::new(None)),
             media_server_token: Arc::new(Mutex::new(None)),
             #[cfg(not(any(target_os = "ios", target_os = "android")))]

@@ -68,7 +68,36 @@ pub async fn get_identity() -> Result<Option<IdentityInfo>> {
 }
 
 /// Request an OTP to be sent to the given email address.
+///
+/// When a Delivery Service is configured the OTP is generated, stored, and
+/// emailed server-side (`POST /v1/auth/request-otp`) — the client no longer
+/// touches `state.otp_store` or the Resend key. With no DS configured it falls
+/// back to the legacy client-side path. See `docs/otp-server-bootstrap-design.md`.
 pub async fn request_otp(
+    state: &Arc<AppState>,
+    email: String,
+) -> Result<()> {
+    if state.config.pollis_delivery_url.is_some() {
+        let resp = crate::commands::mls::ds_post_plain(
+            state,
+            "/v1/auth/request-otp",
+            &serde_json::json!({ "email": email }),
+        )
+        .await?;
+        if !resp.status().is_success() {
+            let s = resp.status();
+            let txt = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("request-otp failed ({s}): {txt}").into());
+        }
+        return Ok(());
+    }
+
+    request_otp_direct(state, email).await
+}
+
+/// Legacy client-side OTP request — generate + store in `state.otp_store` and
+/// email via Resend. Used only when no Delivery Service is configured.
+async fn request_otp_direct(
     state: &Arc<AppState>,
     email: String,
 ) -> Result<()> {
@@ -133,8 +162,243 @@ pub async fn request_otp(
     Ok(())
 }
 
-/// Verify an OTP code, create or load the user in Turso, persist session to keystore.
+/// Verify an OTP code, create or load the user, and complete first-device
+/// onboarding.
+///
+/// When a Delivery Service is configured the OTP validation, account
+/// create/load, account-identity establishment, and device registration all run
+/// server-side behind a server-validated OTP-session token
+/// ([`verify_otp_ds`]). With no DS configured it falls back to the legacy
+/// all-client path ([`verify_otp_direct`]). See
+/// `docs/otp-server-bootstrap-design.md`.
 pub async fn verify_otp(
+    state: &Arc<AppState>,
+    email: String,
+    code: String,
+) -> Result<UserProfile> {
+    if state.config.pollis_delivery_url.is_some() {
+        verify_otp_ds(state, email, code).await
+    } else {
+        verify_otp_direct(state, email, code).await
+    }
+}
+
+/// First-device-signup onboarding routed through the Delivery Service.
+///
+/// `verify-otp` (DS) validates the code, creates/loads the account, and mints a
+/// short-lived OTP-session token. With that token the client then orchestrates
+/// the credential-establishing bootstrap writes — none of which can be
+/// device-signed because they *establish* the device's signing credential:
+///
+///   1. `establish-identity` (session-gated) — the version-1 account identity.
+///      The client keeps the private `account_id_key` (in `state.unlock`) and
+///      sends only the public + Secret-Key-wrapped material.
+///   2. `register-device` (session-gated) — the `user_device` row + watermarks.
+///   3. the session token is stashed in `state.bootstrap_session` so the
+///      pivot write — the first `publish-device-cert`, driven later by `set_pin`
+///      → `ensure_device_cert` — can present it.
+///
+/// A returning device with an established identity (`has_identity`) is a
+/// re-login / enrollment, which is OUT OF SCOPE for the DS bootstrap this slice:
+/// it registers its device on the direct path and obtains the account key via
+/// the existing sibling-approval / Secret-Key flows.
+async fn verify_otp_ds(
+    state: &Arc<AppState>,
+    email: String,
+    code: String,
+) -> Result<UserProfile> {
+    // Mint a candidate device_id to bind the session to. We don't know user_id
+    // until verify-otp returns, and the keystore device_id slot is keyed by
+    // user_id — but a brand-new signup has no slot yet, so this candidate becomes
+    // the device's stable id once persisted below.
+    let candidate_device_id = Ulid::new().to_string();
+
+    // 1. verify-otp: DS validates the OTP, creates/loads the account, mints a
+    //    session. Unauthenticated (the OTP itself is the proof).
+    let resp = crate::commands::mls::ds_post_plain(
+        state,
+        "/v1/auth/verify-otp",
+        &serde_json::json!({
+            "email": email,
+            "code": code,
+            "device_id": candidate_device_id,
+        }),
+    )
+    .await?;
+    let status = resp.status();
+    if status.as_u16() == 401 {
+        return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into());
+    }
+    if status.as_u16() == 429 {
+        return Err(anyhow::anyhow!(
+            "Too many attempts. Please request a new code."
+        )
+        .into());
+    }
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("verify-otp failed ({status}): {txt}").into());
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("verify-otp response: {e}"))?;
+
+    let user_id = v["user_id"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("verify-otp response missing user_id"))?
+        .to_string();
+    let username = v["username"]
+        .as_str()
+        .unwrap_or_else(|| email.split('@').next().unwrap_or("user"))
+        .to_string();
+    let has_identity = v["has_identity"].as_bool().unwrap_or(false);
+    let session_token = v["session_token"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("verify-otp response missing session_token"))?
+        .to_string();
+
+    // Orphan-detection for a returning device whose server identity no longer
+    // matches the local key (a reset elsewhere). Mirrors the direct path.
+    if has_identity {
+        let remote_pub = read_account_id_pub(state, &user_id).await.unwrap_or(None);
+        if let Some(pub_bytes) = remote_pub {
+            let matches = crate::commands::account_identity::has_matching_local_account_identity(
+                state, &user_id, &pub_bytes,
+            )
+            .await
+            .unwrap_or(false);
+            if !matches {
+                if let Err(e) =
+                    crate::commands::account_identity::wipe_local_account_identity(state, &user_id)
+                        .await
+                {
+                    eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
+                }
+            }
+        }
+    }
+
+    let new_secret_key = if !has_identity {
+        // First-device signup (or a pre-identity account). Persist the candidate
+        // device_id (no existing slot for a brand-new user) and set it as this
+        // device's id — the session is bound to it, so establish/register/cert
+        // must all use the same value.
+        let device_id = ensure_device_id(state, &user_id, &candidate_device_id).await?;
+
+        // Pure crypto: keygen + Secret Key + wrap, installed into state.unlock.
+        let (secret_key, material) =
+            crate::commands::account_identity::generate_account_identity_material(state, &user_id)
+                .await?;
+
+        // 2. establish-identity (session-gated): the DS does the CAS UPDATE +
+        //    account_key_log v1 + account_recovery insert.
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        crate::commands::mls::ds_post_session_ok(
+            state,
+            "/v1/auth/establish-identity",
+            &session_token,
+            &serde_json::json!({
+                "account_id_pub": b64.encode(material.account_id_pub),
+                "salt": b64.encode(material.salt),
+                "nonce": b64.encode(material.nonce),
+                "wrapped_key": b64.encode(&material.wrapped_key),
+            }),
+        )
+        .await?;
+
+        // 3. register-device (session-gated): the DS inserts the user_device row
+        //    + seeds watermarks.
+        let hostname = gethostname::gethostname().to_string_lossy().to_string();
+        let device_name = format!("{hostname} ({})", std::env::consts::OS);
+        crate::commands::mls::ds_post_session_ok(
+            state,
+            "/v1/auth/register-device",
+            &session_token,
+            &serde_json::json!({ "device_id": device_id, "device_name": device_name }),
+        )
+        .await?;
+
+        // Stash the session so the pivot — the first publish-device-cert, run by
+        // set_pin → ensure_device_cert — can present it.
+        *state.bootstrap_session.lock().await = Some(session_token.clone());
+
+        Some(secret_key)
+    } else {
+        // Re-login / enrollment — OUT OF SCOPE for the DS bootstrap. Register the
+        // device on the direct path; the account key arrives via sibling approval
+        // or Secret-Key recovery.
+        register_device(state, &user_id).await?;
+        None
+    };
+
+    let enrollment_required = has_identity
+        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
+            .await
+            .unwrap_or(false);
+
+    let profile = UserProfile {
+        id: user_id,
+        email,
+        username,
+        new_secret_key,
+        enrollment_required,
+    };
+
+    crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
+
+    Ok(profile)
+}
+
+/// Read `users.account_id_pub` for `user_id` from the remote DB (still a direct
+/// read — Slice 3 downgrades the token to read-only but reads stay direct).
+async fn read_account_id_pub(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<Option<Vec<u8>>> {
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn
+        .query(
+            "SELECT account_id_pub FROM users WHERE id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await?;
+    match rows.next().await? {
+        Some(row) => Ok(row.get::<Option<Vec<u8>>>(0).ok().flatten()),
+        None => Ok(None),
+    }
+}
+
+/// Resolve this device's stable `device_id` for `user_id`, persisting `candidate`
+/// in the keystore if none exists yet, and store it in `AppState.device_id`.
+/// Extracted so the DS bootstrap path can determine the device_id (to bind the
+/// OTP session to) without doing the remote `user_device` write that
+/// [`register_device`] does directly.
+async fn ensure_device_id(
+    state: &Arc<AppState>,
+    user_id: &str,
+    candidate: &str,
+) -> Result<String> {
+    let device_id = match state.keystore.load_for_user(DEVICE_ID_KEY, user_id).await? {
+        Some(bytes) => String::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("corrupt device_id in keystore: {e}"))?,
+        None => {
+            state
+                .keystore
+                .store_for_user(DEVICE_ID_KEY, user_id, candidate.as_bytes())
+                .await?;
+            candidate.to_string()
+        }
+    };
+    *state.device_id.lock().await = Some(device_id.clone());
+    Ok(device_id)
+}
+
+/// Legacy all-client OTP verification + onboarding. Used only when no Delivery
+/// Service is configured: validates against `state.otp_store`, INSERTs the user,
+/// generates the account identity, and registers the device — all direct to Turso.
+async fn verify_otp_direct(
     state: &Arc<AppState>,
     email: String,
     code: String,
@@ -649,15 +913,8 @@ async fn dev_login_inner(state: &Arc<AppState>, email: String) -> Result<UserPro
 /// call (persisted in the OS keystore), inserts/updates the remote `user_device`
 /// table, and stores the id in `AppState.device_id`.
 async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String> {
-    let device_id = match state.keystore.load_for_user(DEVICE_ID_KEY, user_id).await? {
-        Some(bytes) => String::from_utf8(bytes)
-            .map_err(|e| anyhow::anyhow!("corrupt device_id in keystore: {e}"))?,
-        None => {
-            let id = Ulid::new().to_string();
-            state.keystore.store_for_user(DEVICE_ID_KEY, user_id, id.as_bytes()).await?;
-            id
-        }
-    };
+    // Resolve-or-create the stable device_id (also sets `state.device_id`).
+    let device_id = ensure_device_id(state, user_id, &Ulid::new().to_string()).await?;
 
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let device_name = format!("{hostname} ({})", std::env::consts::OS);
@@ -702,7 +959,7 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
         eprintln!("[watermark] register_device: dm seed failed: {e}");
     }
 
-    *state.device_id.lock().await = Some(device_id.clone());
+    // `state.device_id` was already set by `ensure_device_id` above.
     eprintln!("[auth] device registered: {device_id}");
 
     // Device-cert publish moved out of register_device. It needs the

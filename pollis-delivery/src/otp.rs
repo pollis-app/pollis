@@ -28,6 +28,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use ulid::Ulid;
 
+use crate::session::SessionStore;
 use crate::writes::bad_request;
 use crate::AppState;
 
@@ -240,31 +241,32 @@ pub async fn request_otp(State(state): State<AppState>, body: axum::body::Bytes)
     if email.is_empty() {
         return ok_200();
     }
+    process_request_otp(&state.otp, &state.otp_config, &email).await;
+    ok_200()
+}
 
-    let cfg = &state.otp_config;
+/// Generate + store an OTP for `email` and (unless DEV_OTP is set or no Resend
+/// key is configured) email it via Resend. Extracted from the handler so the
+/// in-process integration harness drives the exact same store + throttle +
+/// DEV_OTP logic against the shared OTP store.
+pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
     let code = match &cfg.dev_otp {
         Some(dev) => dev.clone(),
         None => format!("{:06}", OsRng.gen_range(0..1_000_000u32)),
     };
 
-    let outcome = state.otp.prepare(
-        &email,
-        &code,
-        cfg.ttl_secs,
-        cfg.resend_throttle_secs,
-        now_unix(),
-    );
+    let outcome = otp.prepare(email, &code, cfg.ttl_secs, cfg.resend_throttle_secs, now_unix());
 
     match outcome {
-        PrepareOutcome::Throttled => return ok_200(),
+        PrepareOutcome::Throttled => {}
         PrepareOutcome::Send(code) => {
             // DEV_OTP: skip the real send entirely.
             if cfg.dev_otp.is_some() {
                 tracing::info!("DEV_OTP active — skipping email send for {email}");
-                return ok_200();
+                return;
             }
             if let Some(key) = &cfg.resend_api_key {
-                if let Err(e) = send_otp_email(key, &email, &code).await {
+                if let Err(e) = send_otp_email(key, email, &code).await {
                     // A send failure leaks nothing about account existence; log
                     // and still 200 so the response is uniform.
                     tracing::error!("OTP email send failed for {email}: {e:#}");
@@ -274,7 +276,6 @@ pub async fn request_otp(State(state): State<AppState>, body: axum::body::Bytes)
             }
         }
     }
-    ok_200()
 }
 
 async fn send_otp_email(api_key: &str, email: &str, code: &str) -> anyhow::Result<()> {
@@ -328,59 +329,83 @@ pub async fn verify_otp(State(state): State<AppState>, body: axum::body::Bytes) 
         return bad_request("email and device_id required");
     }
 
-    let cfg = &state.otp_config;
-    match state
-        .otp
-        .verify(&email, &parsed.code, cfg.max_attempts, now_unix())
+    let conn = match state.db.conn() {
+        Ok(c) => c,
+        Err(e) => return internal(e),
+    };
+
+    match apply_verify_otp(
+        &conn,
+        &state.otp,
+        &state.sessions,
+        &state.otp_config,
+        &email,
+        &parsed.code,
+        &device_id,
+    )
+    .await
     {
+        Ok(result) => verify_otp_response(result),
+        Err(e) => internal(e),
+    }
+}
+
+/// The outcome of [`apply_verify_otp`] — the handler maps it to the wire
+/// response (the in-process harness maps it the same way).
+pub enum VerifyOtpResult {
+    Ok {
+        user_id: String,
+        username: String,
+        is_new_account: bool,
+        has_identity: bool,
+        session_token: String,
+        session_expires_at: u64,
+    },
+    /// Wrong / expired / unknown code → 401.
+    InvalidCode,
+    /// Past the attempt limit → 429.
+    LockedOut,
+}
+
+/// Validate the submitted OTP, create-or-load the account, and mint a session
+/// token — all the DB + store work behind `verify-otp`, extracted from the
+/// handler so the in-process integration harness drives the identical logic
+/// against the shared main DB + OTP/session stores.
+pub async fn apply_verify_otp(
+    conn: &libsql::Connection,
+    otp: &OtpStore,
+    sessions: &SessionStore,
+    cfg: &OtpConfig,
+    email: &str,
+    code: &str,
+    device_id: &str,
+) -> anyhow::Result<VerifyOtpResult> {
+    match otp.verify(email, code, cfg.max_attempts, now_unix()) {
         VerifyOutcome::Ok => {}
-        VerifyOutcome::LockedOut => {
-            return (
-                StatusCode::TOO_MANY_REQUESTS,
-                Json(serde_json::json!({ "error": "too many attempts" })),
-            )
-                .into_response()
-        }
+        VerifyOutcome::LockedOut => return Ok(VerifyOtpResult::LockedOut),
         VerifyOutcome::Invalid | VerifyOutcome::Expired | VerifyOutcome::NotFound => {
-            return (
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({ "error": "invalid code" })),
-            )
-                .into_response()
+            return Ok(VerifyOtpResult::InvalidCode)
         }
     }
 
     // Code is good: create or load the account. Mirrors pollis-core
     // `auth::verify_otp` — server-gen ULID id + a default username from the email
     // prefix plus a 4-char ULID suffix for uniqueness.
-    let conn = match state.db.conn() {
-        Ok(c) => c,
-        Err(e) => return internal(e),
-    };
-
-    let existing = match conn
+    let mut rows = conn
         .query(
             "SELECT id, username, account_id_pub FROM users WHERE email = ?1",
-            libsql::params![email.clone()],
+            libsql::params![email.to_string()],
         )
-        .await
-    {
-        Ok(mut rows) => match rows.next().await {
-            Ok(r) => r,
-            Err(e) => return internal(e.into()),
-        },
-        Err(e) => return internal(e.into()),
-    };
+        .await?;
+    let existing = rows.next().await?;
+    drop(rows);
 
     let (user_id, username, has_identity, is_new_account) = match existing {
         Some(row) => {
-            let id: String = match row.get(0) {
-                Ok(v) => v,
-                Err(e) => return internal(e.into()),
-            };
-            let uname: String = row.get(1).unwrap_or_else(|_| {
-                email.split('@').next().unwrap_or("user").to_string()
-            });
+            let id: String = row.get(0)?;
+            let uname: String = row
+                .get(1)
+                .unwrap_or_else(|_| email.split('@').next().unwrap_or("user").to_string());
             let pub_bytes: Option<Vec<u8>> = row.get::<Option<Vec<u8>>>(2).ok().flatten();
             (id, uname, pub_bytes.is_some(), false)
         }
@@ -389,36 +414,62 @@ pub async fn verify_otp(State(state): State<AppState>, body: axum::body::Bytes) 
             let suffix = &user_id[user_id.len().saturating_sub(4)..];
             let email_prefix = email.split('@').next().unwrap_or("user");
             let default_username = format!("{email_prefix}_{suffix}");
-            if let Err(e) = conn
-                .execute(
-                    "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
-                    libsql::params![user_id.clone(), email.clone(), default_username.clone()],
-                )
-                .await
-            {
-                return internal(e.into());
-            }
+            conn.execute(
+                "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
+                libsql::params![user_id.clone(), email.to_string(), default_username.clone()],
+            )
+            .await?;
             (user_id, default_username, false, true)
         }
     };
 
     let now = now_unix();
-    let session_token = state
-        .sessions
-        .mint(&user_id, &email, &device_id, cfg.session_ttl_secs, now);
+    let session_token = sessions.mint(&user_id, email, device_id, cfg.session_ttl_secs, now);
 
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "user_id": user_id,
-            "username": username,
-            "is_new_account": is_new_account,
-            "has_identity": has_identity,
-            "session_token": session_token,
-            "session_expires_at": now + cfg.session_ttl_secs,
-        })),
-    )
-        .into_response()
+    Ok(VerifyOtpResult::Ok {
+        user_id,
+        username,
+        is_new_account,
+        has_identity,
+        session_token,
+        session_expires_at: now + cfg.session_ttl_secs,
+    })
+}
+
+/// Map a [`VerifyOtpResult`] to the wire response. Shared by the production
+/// handler and the in-process harness so both speak the same status codes.
+pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
+    match result {
+        VerifyOtpResult::Ok {
+            user_id,
+            username,
+            is_new_account,
+            has_identity,
+            session_token,
+            session_expires_at,
+        } => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "user_id": user_id,
+                "username": username,
+                "is_new_account": is_new_account,
+                "has_identity": has_identity,
+                "session_token": session_token,
+                "session_expires_at": session_expires_at,
+            })),
+        )
+            .into_response(),
+        VerifyOtpResult::LockedOut => (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(serde_json::json!({ "error": "too many attempts" })),
+        )
+            .into_response(),
+        VerifyOtpResult::InvalidCode => (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({ "error": "invalid code" })),
+        )
+            .into_response(),
+    }
 }
 
 // ── small response helpers ───────────────────────────────────────────────────

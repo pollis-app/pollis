@@ -155,6 +155,15 @@ struct DsState {
     main: Arc<RemoteDb>,
     /// Commit-log DB — `mls_commit_log` / `mls_welcome` / `mls_group_info`.
     log: Arc<RemoteDb>,
+    /// In-memory OTP store shared by request-otp / verify-otp (Goal B #419).
+    /// Shallow-`Clone` (shared `Arc`), so every cloned `DsState` — one per
+    /// request — sees the same codes.
+    otp: pollis_delivery::otp::OtpStore,
+    /// In-memory OTP-session store gating the three bootstrap writes.
+    sessions: pollis_delivery::session::SessionStore,
+    /// OTP/session tunables. DEV_OTP is forced so verify-otp accepts the fixed
+    /// harness code with no real email send.
+    otp_config: pollis_delivery::otp::OtpConfig,
 }
 
 /// Shared auth gate for the in-process DS: verify the device signature over the
@@ -211,6 +220,32 @@ fn ds_ok() -> axum::response::Response {
         axum::Json(serde_json::json!({ "status": "ok" })),
     )
         .into_response()
+}
+
+/// 409 with the DS's conflict envelope — the bootstrap CAS / out-of-order cases.
+fn ds_conflict(msg: &str) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::CONFLICT,
+        axum::Json(serde_json::json!({ "status": "conflict", "error": msg })),
+    )
+        .into_response()
+}
+
+/// STANDARD base64 decode, `None` on malformed input — for the bootstrap
+/// endpoints' base64-encoded key/cert fields.
+fn b64d(s: &str) -> Option<Vec<u8>> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD.decode(s).ok()
+}
+
+/// Unix seconds as `u64` — the OTP/session stores' clock type (distinct from
+/// `pollis_delivery::auth::now_unix`'s `i64` signature-timestamp clock).
+fn now_u64() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// Map a domain-A [`pollis_delivery::writes::WriteOutcome`] to a Response —
@@ -1364,6 +1399,235 @@ async fn delivery_devices_revoke(
     }
 }
 
+// ─── Server-side OTP + bootstrap (Goal B #419) ──────────────────────────────
+//
+// These five run BEFORE the device has an MLS signing key, so they are NOT
+// device-signed: request/verify-otp are unauthenticated (the OTP is the proof),
+// and the three bootstrap writes are gated by the OTP-session token in
+// `X-Pollis-Session`. They drive the SAME `pollis_delivery::{otp,bootstrap}`
+// logic the production handlers do (the `process_*` / `apply_*` fns), against the
+// SHARED main handle (`state.main`) — the sole writer the clients read from —
+// plus the OTP + session stores held on `DsState`. With the client seam flipped,
+// every test's `sign_up` exercises this full DS bootstrap path end to end.
+
+/// `POST /v1/auth/request-otp` — unauthenticated; honors DEV_OTP so no email is
+/// sent and the fixed harness code verifies.
+async fn delivery_request_otp(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let parsed: pollis_delivery::otp::RequestOtpBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let email = parsed.email.trim().to_string();
+    if !email.is_empty() {
+        pollis_delivery::otp::process_request_otp(&state.otp, &state.otp_config, &email).await;
+    }
+    ds_ok()
+}
+
+/// `POST /v1/auth/verify-otp` — unauthenticated; validates the code, creates or
+/// loads the account on the MAIN DB, and mints an OTP-session token.
+async fn delivery_verify_otp(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let parsed: pollis_delivery::otp::VerifyOtpBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let email = parsed.email.trim().to_string();
+    let device_id = parsed.device_id.trim().to_string();
+    if email.is_empty() || device_id.is_empty() {
+        return ds_bad_request();
+    }
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::otp::apply_verify_otp(
+        &conn,
+        &state.otp,
+        &state.sessions,
+        &state.otp_config,
+        &email,
+        &parsed.code,
+        &device_id,
+    )
+    .await
+    {
+        Ok(result) => pollis_delivery::otp::verify_otp_response(result),
+        Err(e) => ds_internal_error(format!("verify-otp: {e}")),
+    }
+}
+
+/// `POST /v1/auth/establish-identity` — session-gated version-1 identity (CAS).
+async fn delivery_establish_identity(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let claims = match pollis_delivery::session::verify_session(
+        &headers,
+        &state.sessions,
+        now_u64(),
+    ) {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    let parsed: pollis_delivery::bootstrap::EstablishIdentityBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let (pub_bytes, salt, nonce, wrapped) = match (
+        b64d(&parsed.account_id_pub),
+        b64d(&parsed.salt),
+        b64d(&parsed.nonce),
+        b64d(&parsed.wrapped_key),
+    ) {
+        (Some(p), Some(s), Some(n), Some(w)) => (p, s, n, w),
+        _ => return ds_bad_request(),
+    };
+    if pub_bytes.len() != 32 {
+        return ds_bad_request();
+    }
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_establish_identity(
+        &conn,
+        &claims.user_id,
+        &pub_bytes,
+        &salt,
+        &nonce,
+        &wrapped,
+    )
+    .await
+    {
+        Ok(pollis_delivery::bootstrap::EstablishOutcome::Applied) => ds_ok(),
+        Ok(pollis_delivery::bootstrap::EstablishOutcome::Conflict) => {
+            ds_conflict("identity already established")
+        }
+        Err(e) => ds_internal_error(format!("establish-identity: {e}")),
+    }
+}
+
+/// `POST /v1/auth/register-device` — session-gated device row + watermarks.
+async fn delivery_register_device(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let claims = match pollis_delivery::session::verify_session(
+        &headers,
+        &state.sessions,
+        now_u64(),
+    ) {
+        Ok(c) => c,
+        Err(rej) => return rej.into_response(),
+    };
+    let parsed: pollis_delivery::bootstrap::RegisterDeviceBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    if parsed.device_id.trim().is_empty() || parsed.device_id != claims.device_id {
+        return pollis_delivery::error::AuthRejection::Forbidden.into_response();
+    }
+    let device_name = parsed
+        .device_name
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "device".to_string());
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_register_device(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &device_name,
+    )
+    .await
+    {
+        Ok(()) => ds_ok(),
+        Err(e) => ds_internal_error(format!("register-device: {e}")),
+    }
+}
+
+/// `POST /v1/auth/publish-device-cert` — the PIVOT: gated by session AND
+/// cert-validity; invalidates the session on success.
+async fn delivery_publish_device_cert(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let now = now_u64();
+    let token = match pollis_delivery::session::session_token(&headers) {
+        Some(t) if !t.is_empty() => t.to_string(),
+        _ => return pollis_delivery::error::AuthRejection::Unauthorized.into_response(),
+    };
+    let claims = match state.sessions.resolve(&token, now) {
+        Some(c) => c,
+        None => return pollis_delivery::error::AuthRejection::Unauthorized.into_response(),
+    };
+    let parsed: pollis_delivery::bootstrap::PublishCertBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    if parsed.device_id != claims.device_id {
+        return pollis_delivery::error::AuthRejection::Forbidden.into_response();
+    }
+    let cert_bytes = match b64d(&parsed.device_cert) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
+    let mls_sig_pub = match b64d(&parsed.mls_signature_pub) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
+    if parsed.cert_issued_at < 0 {
+        return ds_bad_request();
+    }
+    let issued_at = parsed.cert_issued_at as u64;
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_publish_device_cert(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &cert_bytes,
+        issued_at,
+        parsed.cert_identity_version,
+        &mls_sig_pub,
+    )
+    .await
+    {
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::Applied) => {
+            state.sessions.invalidate(&token);
+            ds_ok()
+        }
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::IdentityNotEstablished) => {
+            ds_conflict("account identity not established")
+        }
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::CertInvalid) => {
+            pollis_delivery::error::AuthRejection::Unauthorized.into_response()
+        }
+        Ok(pollis_delivery::bootstrap::PublishCertOutcome::DeviceNotRegistered) => {
+            ds_conflict("device not registered for this user")
+        }
+        Err(e) => ds_internal_error(format!("publish-device-cert: {e}")),
+    }
+}
+
 /// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
 /// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
 /// port, and serve it on a DEDICATED OS thread with its own runtime so the
@@ -1379,7 +1643,22 @@ async fn delivery_devices_revoke(
 async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> String {
     use std::sync::mpsc;
 
-    let state = DsState { main, log };
+    let state = DsState {
+        main,
+        log,
+        otp: pollis_delivery::otp::OtpStore::default(),
+        sessions: pollis_delivery::session::SessionStore::default(),
+        // DEV_OTP forces the fixed harness code and skips the email send; no
+        // resend throttle so back-to-back sign-ups in one test aren't blocked.
+        otp_config: pollis_delivery::otp::OtpConfig {
+            resend_api_key: None,
+            dev_otp: Some(DEV_OTP.to_string()),
+            ttl_secs: 600,
+            session_ttl_secs: 600,
+            resend_throttle_secs: 0,
+            max_attempts: 5,
+        },
+    };
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::Builder::new()
         .name("in-process-delivery".into())
@@ -1523,6 +1802,25 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                         axum::routing::post(delivery_enrollment_reject),
                     )
                     .route("/v1/devices/revoke", axum::routing::post(delivery_devices_revoke))
+                    // Server-side OTP + bootstrap (Goal B #419) — the first-device
+                    // signup path the client seam now routes through the DS.
+                    .route(
+                        "/v1/auth/request-otp",
+                        axum::routing::post(delivery_request_otp),
+                    )
+                    .route("/v1/auth/verify-otp", axum::routing::post(delivery_verify_otp))
+                    .route(
+                        "/v1/auth/establish-identity",
+                        axum::routing::post(delivery_establish_identity),
+                    )
+                    .route(
+                        "/v1/auth/register-device",
+                        axum::routing::post(delivery_register_device),
+                    )
+                    .route(
+                        "/v1/auth/publish-device-cert",
+                        axum::routing::post(delivery_publish_device_cert),
+                    )
                     .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))

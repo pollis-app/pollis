@@ -22,7 +22,7 @@ pub use provider::{
 pub use device::{ensure_device_cert, load_or_create_device_signer, resign_stale_device_certs};
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
-pub(crate) use ds_client::{ds_post, ds_post_ok};
+pub(crate) use ds_client::{ds_post, ds_post_ok, ds_post_plain, ds_post_session_ok};
 
 // ── Key packages ─────────────────────────────────────────────────────────────
 pub use key_packages::{

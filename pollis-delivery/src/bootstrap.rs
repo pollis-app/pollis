@@ -109,57 +109,67 @@ pub async fn establish_identity(
         Ok(c) => c,
         Err(e) => return internal(e),
     };
-    let tx = match conn.transaction().await {
-        Ok(t) => t,
-        Err(e) => return internal(e.into()),
-    };
+    match apply_establish_identity(&conn, &claims.user_id, &pub_bytes, &salt, &nonce, &wrapped).await
+    {
+        Ok(EstablishOutcome::Applied) => ok_status(),
+        Ok(EstablishOutcome::Conflict) => conflict("identity already established"),
+        Err(e) => internal(e),
+    }
+}
+
+/// Outcome of [`apply_establish_identity`] — `Conflict` is the CAS loss (an
+/// identity already exists; never overwritten).
+pub enum EstablishOutcome {
+    Applied,
+    Conflict,
+}
+
+/// Version-1 account-identity establishment in ONE transaction (CAS UPDATE +
+/// `account_key_log` v1 + `account_recovery`). Extracted from the handler so the
+/// in-process integration harness drives the identical writes against the shared
+/// main DB. `user_id` is the session-bound caller, never a body field.
+pub async fn apply_establish_identity(
+    conn: &libsql::Connection,
+    user_id: &str,
+    pub_bytes: &[u8],
+    salt: &[u8],
+    nonce: &[u8],
+    wrapped: &[u8],
+) -> anyhow::Result<EstablishOutcome> {
+    let tx = conn.transaction().await?;
 
     // CAS: claim the identity only if none is set. 0 rows ⇒ already established ⇒
-    // 409. This is the invariant that makes "a re-login overwrites the account
-    // key" unrepresentable.
-    let affected = match tx
+    // conflict. This is the invariant that makes "a re-login overwrites the
+    // account key" unrepresentable.
+    let affected = tx
         .execute(
             "UPDATE users SET account_id_pub = ?1, identity_version = 1 \
              WHERE id = ?2 AND account_id_pub IS NULL",
-            libsql::params![pub_bytes.clone(), claims.user_id.clone()],
+            libsql::params![pub_bytes.to_vec(), user_id.to_string()],
         )
-        .await
-    {
-        Ok(n) => n,
-        Err(e) => return internal(e.into()),
-    };
+        .await?;
     if affected == 0 {
         // Nothing written; roll back and report the conflict.
         drop(tx);
-        return conflict("identity already established");
+        return Ok(EstablishOutcome::Conflict);
     }
 
-    if let Err(e) = tx
-        .execute(
-            "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-             VALUES (?1, ?2, 1)",
-            libsql::params![claims.user_id.clone(), pub_bytes.clone()],
-        )
-        .await
-    {
-        return internal(e.into());
-    }
-    if let Err(e) = tx
-        .execute(
-            "INSERT INTO account_recovery \
-             (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
-             VALUES (?1, 1, ?2, ?3, ?4, datetime('now'), datetime('now'))",
-            libsql::params![claims.user_id.clone(), salt, nonce, wrapped],
-        )
-        .await
-    {
-        return internal(e.into());
-    }
+    tx.execute(
+        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+         VALUES (?1, ?2, 1)",
+        libsql::params![user_id.to_string(), pub_bytes.to_vec()],
+    )
+    .await?;
+    tx.execute(
+        "INSERT INTO account_recovery \
+         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
+         VALUES (?1, 1, ?2, ?3, ?4, datetime('now'), datetime('now'))",
+        libsql::params![user_id.to_string(), salt.to_vec(), nonce.to_vec(), wrapped.to_vec()],
+    )
+    .await?;
 
-    if let Err(e) = tx.commit().await {
-        return internal(e.into());
-    }
-    ok_status()
+    tx.commit().await?;
+    Ok(EstablishOutcome::Applied)
 }
 
 // ── POST /v1/auth/register-device ────────────────────────────────────────────
@@ -203,57 +213,56 @@ pub async fn register_device(
         Ok(c) => c,
         Err(e) => return internal(e),
     };
-    let tx = match conn.transaction().await {
-        Ok(t) => t,
-        Err(e) => return internal(e.into()),
-    };
-
-    if let Err(e) = tx
-        .execute(
-            "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
-             ON CONFLICT(device_id) DO UPDATE SET \
-                last_seen = datetime('now'), \
-                device_name = COALESCE(user_device.device_name, excluded.device_name)",
-            libsql::params![device_id.clone(), claims.user_id.clone(), device_name],
-        )
-        .await
-    {
-        return internal(e.into());
+    match apply_register_device(&conn, &claims.user_id, &device_id, &device_name).await {
+        Ok(()) => ok_status(),
+        Err(e) => internal(e),
     }
+}
+
+/// INSERT the device row (COALESCE-preserving any existing name) + seed
+/// conversation watermarks, bound to the session's `user_id`. Extracted from the
+/// handler so the in-process integration harness drives the identical writes
+/// against the shared main DB.
+pub async fn apply_register_device(
+    conn: &libsql::Connection,
+    user_id: &str,
+    device_id: &str,
+    device_name: &str,
+) -> anyhow::Result<()> {
+    let tx = conn.transaction().await?;
+
+    tx.execute(
+        "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(device_id) DO UPDATE SET \
+            last_seen = datetime('now'), \
+            device_name = COALESCE(user_device.device_name, excluded.device_name)",
+        libsql::params![device_id.to_string(), user_id.to_string(), device_name.to_string()],
+    )
+    .await?;
 
     // Seed watermark rows for every conversation the user already belongs to so a
     // new device doesn't retroactively block envelope cleanup. INSERT OR IGNORE —
     // mirrors auth.rs.
-    if let Err(e) = tx
-        .execute(
-            "INSERT OR IGNORE INTO conversation_watermark \
-                (conversation_id, user_id, device_id, last_fetched_at) \
-             SELECT c.id, ?1, ?2, datetime('now') \
-             FROM channels c \
-             JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
-            libsql::params![claims.user_id.clone(), device_id.clone()],
-        )
-        .await
-    {
-        return internal(e.into());
-    }
-    if let Err(e) = tx
-        .execute(
-            "INSERT OR IGNORE INTO conversation_watermark \
-                (conversation_id, user_id, device_id, last_fetched_at) \
-             SELECT dcm.dm_channel_id, ?1, ?2, datetime('now') \
-             FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
-            libsql::params![claims.user_id.clone(), device_id.clone()],
-        )
-        .await
-    {
-        return internal(e.into());
-    }
+    tx.execute(
+        "INSERT OR IGNORE INTO conversation_watermark \
+            (conversation_id, user_id, device_id, last_fetched_at) \
+         SELECT c.id, ?1, ?2, datetime('now') \
+         FROM channels c \
+         JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
+        libsql::params![user_id.to_string(), device_id.to_string()],
+    )
+    .await?;
+    tx.execute(
+        "INSERT OR IGNORE INTO conversation_watermark \
+            (conversation_id, user_id, device_id, last_fetched_at) \
+         SELECT dcm.dm_channel_id, ?1, ?2, datetime('now') \
+         FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
+        libsql::params![user_id.to_string(), device_id.to_string()],
+    )
+    .await?;
 
-    if let Err(e) = tx.commit().await {
-        return internal(e.into());
-    }
-    ok_status()
+    tx.commit().await?;
+    Ok(())
 }
 
 // ── POST /v1/auth/publish-device-cert ────────────────────────────────────────
@@ -319,27 +328,72 @@ pub async fn publish_device_cert(
         Err(e) => return internal(e),
     };
 
+    match apply_publish_device_cert(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &cert_bytes,
+        issued_at,
+        parsed.cert_identity_version,
+        &mls_sig_pub,
+    )
+    .await
+    {
+        Ok(PublishCertOutcome::Applied) => {
+            // The session has done its one job; invalidate it so the bootstrap
+            // token is single-use through the pivot.
+            state.sessions.invalidate(&token);
+            ok_status()
+        }
+        Ok(PublishCertOutcome::IdentityNotEstablished) => {
+            conflict("account identity not established")
+        }
+        Ok(PublishCertOutcome::CertInvalid) => AuthRejection::Unauthorized.into_response(),
+        Ok(PublishCertOutcome::DeviceNotRegistered) => {
+            conflict("device not registered for this user")
+        }
+        Err(e) => internal(e),
+    }
+}
+
+/// Outcome of [`apply_publish_device_cert`]. `CertInvalid` is the cert-validity
+/// gate failing (401); the two conflicts are out-of-order bootstrap (409).
+pub enum PublishCertOutcome {
+    Applied,
+    IdentityNotEstablished,
+    CertInvalid,
+    DeviceNotRegistered,
+}
+
+/// The PIVOT write: verify the cert chains to the account's `account_id_pub`
+/// (the cert-validity gate) then populate the `user_device` cert columns +
+/// `mls_signature_pub`. Extracted from the handler so the in-process integration
+/// harness drives the identical verify + write against the shared main DB.
+/// Does NOT touch the session — the caller invalidates it on `Applied`.
+pub async fn apply_publish_device_cert(
+    conn: &libsql::Connection,
+    user_id: &str,
+    device_id: &str,
+    cert_bytes: &[u8],
+    issued_at: u64,
+    cert_identity_version: u32,
+    mls_sig_pub: &[u8],
+) -> anyhow::Result<PublishCertOutcome> {
     // The account_id_pub the cert must chain to. Absent/NULL ⇒ identity not yet
-    // established ⇒ 409 (publish before establish is out of order).
+    // established ⇒ out of order.
     let account_id_pub: Vec<u8> = {
-        let mut rows = match conn
+        let mut rows = conn
             .query(
                 "SELECT account_id_pub FROM users WHERE id = ?1",
-                libsql::params![claims.user_id.clone()],
+                libsql::params![user_id.to_string()],
             )
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => return internal(e.into()),
-        };
-        match rows.next().await {
-            Ok(Some(row)) => match row.get::<Option<Vec<u8>>>(0) {
-                Ok(Some(p)) => p,
-                Ok(None) => return conflict("account identity not established"),
-                Err(e) => return internal(e.into()),
+            .await?;
+        match rows.next().await? {
+            Some(row) => match row.get::<Option<Vec<u8>>>(0)? {
+                Some(p) => p,
+                None => return Ok(PublishCertOutcome::IdentityNotEstablished),
             },
-            Ok(None) => return conflict("account identity not established"),
-            Err(e) => return internal(e.into()),
+            None => return Ok(PublishCertOutcome::IdentityNotEstablished),
         }
     };
 
@@ -347,44 +401,37 @@ pub async fn publish_device_cert(
     // account key over (device_id, mls_sig_pub, identity_version, issued_at).
     if !verify_device_cert(
         &account_id_pub,
-        &claims.device_id,
-        &mls_sig_pub,
-        parsed.cert_identity_version,
+        device_id,
+        mls_sig_pub,
+        cert_identity_version,
         issued_at,
-        &cert_bytes,
+        cert_bytes,
     ) {
-        return AuthRejection::Unauthorized.into_response();
+        return Ok(PublishCertOutcome::CertInvalid);
     }
 
     // Bound to the session user; populating `mls_signature_pub` is what makes the
     // device device-signature-authenticatable from here on.
-    let affected = match conn
+    let affected = conn
         .execute(
             "UPDATE user_device \
              SET device_cert = ?1, cert_issued_at = ?2, cert_identity_version = ?3, \
                  mls_signature_pub = ?4 \
              WHERE device_id = ?5 AND user_id = ?6",
             libsql::params![
-                cert_bytes,
+                cert_bytes.to_vec(),
                 issued_at.to_string(),
-                parsed.cert_identity_version as i64,
-                mls_sig_pub,
-                claims.device_id.clone(),
-                claims.user_id.clone(),
+                cert_identity_version as i64,
+                mls_sig_pub.to_vec(),
+                device_id.to_string(),
+                user_id.to_string(),
             ],
         )
-        .await
-    {
-        Ok(n) => n,
-        Err(e) => return internal(e.into()),
-    };
+        .await?;
     if affected == 0 {
         // The device row isn't the actor's (or doesn't exist) — register first.
-        return conflict("device not registered for this user");
+        return Ok(PublishCertOutcome::DeviceNotRegistered);
     }
 
-    // The session has done its one job; invalidate it so the bootstrap token is
-    // single-use through the pivot.
-    state.sessions.invalidate(&token);
-    ok_status()
+    Ok(PublishCertOutcome::Applied)
 }

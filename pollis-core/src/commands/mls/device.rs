@@ -180,30 +180,63 @@ pub async fn ensure_device_cert(
     // round-trip to u64 for signature verification later.
     let issued_at_str = issued_at.to_string();
 
-    // BOOTSTRAP — stays DIRECT, never routed through the DS (#419 domain D).
-    // This UPDATE sets `mls_signature_pub`, which is the exact column the DS
-    // reads to authenticate a signed request (`auth::verify_request`). Until it
-    // is populated this device cannot produce a signature the DS will accept, so
-    // the write that establishes the credential cannot be authenticated by that
-    // credential. Device cert (re)publish therefore writes Turso directly; every
-    // post-enrolment domain-D write (key packages, push tokens, cert re-sign) is
-    // signed and routed through the DS. See `pollis_delivery::devices` docs.
-    conn.execute(
-        "UPDATE user_device \
-         SET device_cert = ?1, \
-             cert_issued_at = ?2, \
-             cert_identity_version = ?3, \
-             mls_signature_pub = ?4 \
-         WHERE device_id = ?5",
-        libsql::params![
-            cert,
-            issued_at_str,
-            identity_version as i64,
-            sig_pub_bytes,
-            device_id
-        ],
-    )
-    .await?;
+    // BOOTSTRAP PIVOT — this write sets `mls_signature_pub`, the exact column the
+    // DS reads to authenticate a signed request (`auth::verify_request`). Until
+    // it's populated the device cannot produce a signature the DS would accept,
+    // so the write that *establishes* the credential cannot be authenticated by
+    // that credential. Two paths:
+    //
+    //   * First-device signup with a DS configured — gated by the OTP session
+    //     (stashed in `state.bootstrap_session` by `verify_otp`) PLUS cert-validity
+    //     (the DS re-verifies the cert against the account's `account_id_pub`).
+    //   * Otherwise (no DS, OR a re-login / subsequent-device publish that has no
+    //     bootstrap session) — DIRECT Turso write, as before. The subsequent-device
+    //     cert-validity-alone gate is a later slice.
+    //
+    // See `docs/otp-server-bootstrap-design.md`.
+    let bootstrap_session = state.bootstrap_session.lock().await.clone();
+    match (state.config.pollis_delivery_url.as_deref(), bootstrap_session) {
+        (Some(_), Some(token)) => {
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD;
+            let body = serde_json::json!({
+                "device_id": device_id,
+                "device_cert": b64.encode(&cert),
+                "cert_issued_at": issued_at as i64,
+                "cert_identity_version": identity_version,
+                "mls_signature_pub": b64.encode(&sig_pub_bytes),
+            });
+            crate::commands::mls::ds_post_session_ok(
+                state,
+                "/v1/auth/publish-device-cert",
+                &token,
+                &body,
+            )
+            .await?;
+            // Single-use: the token is spent server-side on success. Clear the
+            // local copy so the next ensure_device_cert (unlock / re-sign) takes
+            // the direct path.
+            *state.bootstrap_session.lock().await = None;
+        }
+        _ => {
+            conn.execute(
+                "UPDATE user_device \
+                 SET device_cert = ?1, \
+                     cert_issued_at = ?2, \
+                     cert_identity_version = ?3, \
+                     mls_signature_pub = ?4 \
+                 WHERE device_id = ?5",
+                libsql::params![
+                    cert,
+                    issued_at_str,
+                    identity_version as i64,
+                    sig_pub_bytes,
+                    device_id
+                ],
+            )
+            .await?;
+        }
+    }
 
     eprintln!(
         "[mls] device cert published for {user_id}:{device_id} (identity_version={identity_version})"
