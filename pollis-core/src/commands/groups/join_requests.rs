@@ -52,16 +52,30 @@ pub async fn request_group_access(
     let id = Ulid::new().to_string();
     // Upsert: new insert, or reset a prior rejected/approved row back to pending.
     // reviewed_by and reviewed_at are intentionally preserved so the history of
-    // who reviewed the previous request is available for future UI use.
-    conn.execute(
-        "INSERT INTO group_join_request (id, group_id, requester_id, status, created_at)
-         VALUES (?1, ?2, ?3, 'pending', datetime('now'))
-         ON CONFLICT(group_id, requester_id) DO UPDATE SET
-             id         = excluded.id,
-             status     = 'pending',
-             created_at = excluded.created_at",
-        libsql::params![id, group_id.clone(), requester_id],
-    ).await.map_err(|e| db_err(e.into(), "Join request"))?;
+    // who reviewed the previous request is available for future UI use. DS seam:
+    // route the upsert (authorized as the requester server-side) through the
+    // Delivery Service when configured; else direct.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "id": id,
+                "group_id": group_id,
+                "requester_id": requester_id,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/join-requests/create", &body).await?;
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO group_join_request (id, group_id, requester_id, status, created_at)
+                 VALUES (?1, ?2, ?3, 'pending', datetime('now'))
+                 ON CONFLICT(group_id, requester_id) DO UPDATE SET
+                     id         = excluded.id,
+                     status     = 'pending',
+                     created_at = excluded.created_at",
+                libsql::params![id, group_id.clone(), requester_id],
+            ).await.map_err(|e| db_err(e.into(), "Join request"))?;
+        }
+    }
 
     // Notify the group's existing admins so the pending-request list (menu
     // badge + bottom bar) refreshes live instead of waiting for a manual
@@ -189,12 +203,26 @@ pub async fn approve_join_request(
 
     let now = chrono::Utc::now().to_rfc3339();
 
-    add_member_to_group(&conn, &group_id, &requester_id).await?;
+    // DS seam: route the member-add + request-approve through the Delivery
+    // Service (one transactional, admin-gated write) when configured; else direct.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "request_id": request_id,
+                "approver_id": approver_id,
+                "reviewed_at": now,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/join-requests/approve", &body).await?;
+        }
+        None => {
+            add_member_to_group(&conn, &group_id, &requester_id).await?;
 
-    conn.execute(
-        "UPDATE group_join_request SET status = 'approved', reviewed_by = ?1, reviewed_at = ?2 WHERE id = ?3",
-        libsql::params![approver_id.clone(), now, request_id],
-    ).await?;
+            conn.execute(
+                "UPDATE group_join_request SET status = 'approved', reviewed_by = ?1, reviewed_at = ?2 WHERE id = ?3",
+                libsql::params![approver_id.clone(), now, request_id],
+            ).await?;
+        }
+    }
 
     // Reconcile adds the requester's devices to the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -259,10 +287,24 @@ pub async fn reject_join_request(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    conn.execute(
-        "UPDATE group_join_request SET status = 'rejected', reviewed_by = ?1, reviewed_at = ?2 WHERE id = ?3",
-        libsql::params![approver_id, now, request_id],
-    ).await?;
+    // DS seam: route the status update through the Delivery Service (admin
+    // re-derived server-side) when configured; else direct.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "request_id": request_id,
+                "approver_id": approver_id,
+                "reviewed_at": now,
+            });
+            crate::commands::mls::ds_post_ok(state, "/v1/join-requests/reject", &body).await?;
+        }
+        None => {
+            conn.execute(
+                "UPDATE group_join_request SET status = 'rejected', reviewed_by = ?1, reviewed_at = ?2 WHERE id = ?3",
+                libsql::params![approver_id, now, request_id],
+            ).await?;
+        }
+    }
 
     Ok(())
 }

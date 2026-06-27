@@ -88,6 +88,9 @@ rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
 # clients use, so flows exercise the deployed DS submission path end to end.
 pollis-delivery = { path = "../pollis-delivery" }
 axum = "0.7"
+# Used by the flows harness's `signed_post_status` to base64-encode the Ed25519
+# request signature when driving the DS over raw HTTP (server-side authz tests).
+base64 = "0.22"
 
 [target.'cfg(unix)'.dependencies]
 # setrlimit(RLIMIT_NOFILE, ...) at startup so we don't hit the macOS default

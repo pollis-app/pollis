@@ -220,6 +220,15 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
+    // BOOTSTRAP — stays DIRECT, NOT routed through the DS (#419 domains E+G).
+    // This is the version-1 account-identity establishment at signup. It runs
+    // inside `verify_otp` BEFORE `register_device` / `ensure_device_cert`, so no
+    // device signing key is enrolled yet (`user_device.mls_signature_pub` is
+    // NULL) and the local DB isn't even open — the device cannot produce a
+    // signature the DS would accept. It is single-device, single-shot, with no
+    // concurrency, so the `UNIQUE (user_id, identity_version)` index on
+    // `account_key_log` is a sufficient guard. Rotations (version ≥ 2) DO route
+    // through the CAS-guarded `/v1/account/rotate-identity` (see `reset_identity`).
     let conn = state.remote_db.conn().await?;
 
     conn.execute(
@@ -426,22 +435,16 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
-    // 3. Atomically bump identity_version, overwrite users.account_id_pub,
-    //    and REPLACE the account_recovery row. We do this in three
-    //    statements because libsql doesn't expose a transaction
-    //    abstraction in our current setup; failure between statements
-    //    leaves a partial state that the next reset_identity call can
-    //    clean up.
+    // 3. Rotate the account identity. The `account_key_log` is an append-only,
+    //    transparency-backed log (#419 domains E+G): the version bump, the log
+    //    append, and the `account_recovery` rewrap MUST be one atomic,
+    //    CAS-guarded unit so two concurrent rotations can never fork the
+    //    published account-key transparency history. We read the current
+    //    version (the CAS expectation) and hand it to the Delivery Service —
+    //    the sole writer — which performs the conditional append in ONE
+    //    transaction (`pollis_delivery::account::apply_rotate_identity`).
     let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "UPDATE users \
-         SET account_id_pub = ?1, identity_version = identity_version + 1 \
-         WHERE id = ?2",
-        libsql::params![public_bytes.to_vec(), user_id.to_string()],
-    )
-    .await?;
-
-    let new_version: i64 = {
+    let based_on_version: i64 = {
         let mut rows = conn
             .query(
                 "SELECT identity_version FROM users WHERE id = ?1",
@@ -458,35 +461,77 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         }
     };
 
-    // Append the rotated key + new version to the account-key transparency
-    // history. Kept in lock-step with the users UPDATE above; `?` propagation
-    // means the INSERT can never silently fail while the rotation persists.
-    conn.execute(
-        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-         VALUES (?1, ?2, ?3)",
-        libsql::params![user_id.to_string(), public_bytes.to_vec(), new_version],
-    )
-    .await?;
-
-    conn.execute(
-        "INSERT INTO account_recovery \
-         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now')) \
-         ON CONFLICT(user_id) DO UPDATE SET \
-             identity_version = excluded.identity_version, \
-             salt = excluded.salt, \
-             nonce = excluded.nonce, \
-             wrapped_key = excluded.wrapped_key, \
-             updated_at = datetime('now')",
-        libsql::params![
-            user_id.to_string(),
-            new_version,
-            salt.to_vec(),
-            nonce.to_vec(),
-            wrapped
-        ],
-    )
-    .await?;
+    let new_version: i64 = match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD;
+            let body = serde_json::json!({
+                "based_on_version": based_on_version,
+                "account_id_pub": b64.encode(public_bytes),
+                "salt": b64.encode(salt),
+                "nonce": b64.encode(nonce),
+                "wrapped_key": b64.encode(&wrapped),
+            });
+            let resp =
+                crate::commands::mls::ds_post(state, "/v1/account/rotate-identity", &body).await?;
+            let status = resp.status();
+            if status.as_u16() == 409 {
+                // A concurrent rotation already won this version. Refuse rather
+                // than forking the transparency log — caller must re-read + retry.
+                return Err(Error::Other(anyhow::anyhow!(
+                    "identity rotation lost a concurrent race (account_key_log CAS); retry"
+                )));
+            }
+            if !status.is_success() {
+                let txt = resp.text().await.unwrap_or_default();
+                return Err(Error::Other(anyhow::anyhow!(
+                    "DS rotate-identity {status}: {txt}"
+                )));
+            }
+            let v: serde_json::Value = resp
+                .json()
+                .await
+                .map_err(|e| Error::Other(anyhow::anyhow!("rotate-identity response: {e}")))?;
+            v["identity_version"].as_i64().unwrap_or(based_on_version + 1)
+        }
+        None => {
+            // Direct fallback (pre-cutover / no DS configured). Three statements;
+            // the same per-version uniqueness is enforced by the `UNIQUE
+            // (user_id, identity_version)` index on `account_key_log`.
+            let new_version = based_on_version + 1;
+            conn.execute(
+                "UPDATE users SET account_id_pub = ?1, identity_version = ?2 WHERE id = ?3",
+                libsql::params![public_bytes.to_vec(), new_version, user_id.to_string()],
+            )
+            .await?;
+            conn.execute(
+                "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+                 VALUES (?1, ?2, ?3)",
+                libsql::params![user_id.to_string(), public_bytes.to_vec(), new_version],
+            )
+            .await?;
+            conn.execute(
+                "INSERT INTO account_recovery \
+                 (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now')) \
+                 ON CONFLICT(user_id) DO UPDATE SET \
+                     identity_version = excluded.identity_version, \
+                     salt = excluded.salt, \
+                     nonce = excluded.nonce, \
+                     wrapped_key = excluded.wrapped_key, \
+                     updated_at = datetime('now')",
+                libsql::params![
+                    user_id.to_string(),
+                    new_version,
+                    salt.to_vec(),
+                    nonce.to_vec(),
+                    wrapped
+                ],
+            )
+            .await?;
+            new_version
+        }
+    };
 
     // 4. Install the new private key in AppState.unlock so the calling
     //    device is enrolled under the new identity. The bytes never
@@ -507,19 +552,33 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         );
     }
 
-    // 6. Record the reset in the security log. Best-effort only.
-    let event_id = ulid::Ulid::new().to_string();
-    let _ = conn
-        .execute(
-            "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
-             VALUES (?1, ?2, 'identity_reset', NULL, ?3)",
-            libsql::params![
-                event_id,
-                user_id.to_string(),
-                format!("new_identity_version={new_version}")
-            ],
-        )
-        .await;
+    // 6. Record the reset in the security log. Best-effort only. Routed through
+    //    the DS (sole writer; #419 domains E+G) when configured, else direct.
+    let metadata = format!("new_identity_version={new_version}");
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({
+                "kind": "identity_reset",
+                "device_id": serde_json::Value::Null,
+                "metadata": metadata,
+            });
+            if let Err(e) =
+                crate::commands::mls::ds_post_ok(state, "/v1/security-events", &body).await
+            {
+                eprintln!("[reset] DS security-event failed (non-fatal): {e}");
+            }
+        }
+        None => {
+            let event_id = ulid::Ulid::new().to_string();
+            let _ = conn
+                .execute(
+                    "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
+                     VALUES (?1, ?2, 'identity_reset', NULL, ?3)",
+                    libsql::params![event_id, user_id.to_string(), metadata],
+                )
+                .await;
+        }
+    }
 
     Ok(secret_key_display)
 }

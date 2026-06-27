@@ -664,6 +664,13 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
 
     // COALESCE preserves any existing device_name — fills it in only if NULL,
     // so a user-set rename (future feature) is never overwritten on reconnect.
+    //
+    // BOOTSTRAP — stays DIRECT, never routed through the DS (#419 domain D).
+    // This creates the device's `user_device` row with `mls_signature_pub` still
+    // NULL; the row is what a later `ensure_device_cert` populates to make the
+    // device DS-authenticatable. A brand-new device has no registered key for the
+    // DS to verify against, so its first registration cannot be signature-authed
+    // and writes Turso directly. See `pollis_delivery::devices` docs.
     let conn = state.remote_db.conn().await?;
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
@@ -734,6 +741,14 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     if delete_data {
         if let Some(ref uid) = user_id {
             // Remove this device from the remote registry.
+            //
+            // BOOTSTRAP-CLASS — stays DIRECT, NOT routed through the DS (#419
+            // domains E+G). By the time this runs the local DB has already been
+            // unloaded and the in-memory session (`unlock`) cleared (above), and
+            // `state.device_id` has been taken — so there is no signing key
+            // available to authenticate a DS request. The device is logging
+            // itself out; a stale `user_device` row left behind on a network
+            // failure is harmless (it's tombstoned/overwritten on next login).
             if let Some(ref did) = device_id {
                 if let Ok(conn) = state.remote_db.conn().await {
                     let _ = conn.execute(
@@ -831,94 +846,107 @@ pub async fn delete_account(
     }
 
     // ── Phase 2: remote data cleanup ───────────────────────────────────
-
-    // Handle group ownership before removing memberships. For each group
-    // the user belongs to, check whether they're the sole member (delete
-    // the group) or the sole admin (promote another member first).
-    {
-        let mut group_rows = conn.query(
-            "SELECT group_id, role FROM group_member WHERE user_id = ?1",
-            libsql::params![user_id.clone()],
-        ).await?;
-
-        let mut memberships: Vec<(String, String)> = Vec::new();
-        while let Some(row) = group_rows.next().await? {
-            memberships.push((row.get(0)?, row.get(1)?));
+    //
+    // Route the entire remote wipe through the DS (#419 domains E+G) as ONE
+    // transaction when configured: the group-ownership handoff, the sent-envelope
+    // / key-package / membership deletes, and the final `users` delete all commit
+    // together or not at all — a half-deleted account is a corrupt state. The
+    // device is still fully enrolled here (the local DB is unloaded only in Phase
+    // 3 below), so it can sign the request.
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({});
+            crate::commands::mls::ds_post_ok(state, "/v1/account/delete", &body).await?;
         }
-
-        for (gid, role) in &memberships {
-            // How many members does this group have?
-            let mut count_rows = conn.query(
-                "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
-                libsql::params![gid.clone()],
-            ).await?;
-            let member_count: i64 = if let Some(row) = count_rows.next().await? {
-                row.get(0)?
-            } else {
-                0
-            };
-
-            if member_count <= 1 {
-                // Sole member — delete the entire group (cascades channels, invites, etc.)
-                let _ = conn.execute(
-                    "DELETE FROM groups WHERE id = ?1",
-                    libsql::params![gid.clone()],
-                ).await;
-                eprintln!("[account] deleted empty group {gid}");
-            } else if role == "admin" {
-                // Check if there are other admins.
-                let mut admin_rows = conn.query(
-                    "SELECT COUNT(*) FROM group_member WHERE group_id = ?1 AND role = 'admin' AND user_id != ?2",
-                    libsql::params![gid.clone(), user_id.clone()],
+        None => {
+            // Direct fallback (pre-cutover / no DS). Handle group ownership
+            // before removing memberships.
+            {
+                let mut group_rows = conn.query(
+                    "SELECT group_id, role FROM group_member WHERE user_id = ?1",
+                    libsql::params![user_id.clone()],
                 ).await?;
-                let other_admins: i64 = if let Some(row) = admin_rows.next().await? {
-                    row.get(0)?
-                } else {
-                    0
-                };
 
-                if other_admins == 0 {
-                    // Sole admin — promote the first non-admin member.
-                    let mut candidate_rows = conn.query(
-                        "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
-                        libsql::params![gid.clone(), user_id.clone()],
+                let mut memberships: Vec<(String, String)> = Vec::new();
+                while let Some(row) = group_rows.next().await? {
+                    memberships.push((row.get(0)?, row.get(1)?));
+                }
+
+                for (gid, role) in &memberships {
+                    // How many members does this group have?
+                    let mut count_rows = conn.query(
+                        "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
+                        libsql::params![gid.clone()],
                     ).await?;
-                    if let Some(row) = candidate_rows.next().await? {
-                        let new_admin: String = row.get(0)?;
+                    let member_count: i64 = if let Some(row) = count_rows.next().await? {
+                        row.get(0)?
+                    } else {
+                        0
+                    };
+
+                    if member_count <= 1 {
+                        // Sole member — delete the entire group (cascades channels, invites, etc.)
                         let _ = conn.execute(
-                            "UPDATE group_member SET role = 'admin' WHERE group_id = ?1 AND user_id = ?2",
-                            libsql::params![gid.clone(), new_admin.clone()],
+                            "DELETE FROM groups WHERE id = ?1",
+                            libsql::params![gid.clone()],
                         ).await;
-                        eprintln!("[account] promoted {new_admin} to admin in group {gid}");
+                        eprintln!("[account] deleted empty group {gid}");
+                    } else if role == "admin" {
+                        // Check if there are other admins.
+                        let mut admin_rows = conn.query(
+                            "SELECT COUNT(*) FROM group_member WHERE group_id = ?1 AND role = 'admin' AND user_id != ?2",
+                            libsql::params![gid.clone(), user_id.clone()],
+                        ).await?;
+                        let other_admins: i64 = if let Some(row) = admin_rows.next().await? {
+                            row.get(0)?
+                        } else {
+                            0
+                        };
+
+                        if other_admins == 0 {
+                            // Sole admin — promote the first non-admin member.
+                            let mut candidate_rows = conn.query(
+                                "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
+                                libsql::params![gid.clone(), user_id.clone()],
+                            ).await?;
+                            if let Some(row) = candidate_rows.next().await? {
+                                let new_admin: String = row.get(0)?;
+                                let _ = conn.execute(
+                                    "UPDATE group_member SET role = 'admin' WHERE group_id = ?1 AND user_id = ?2",
+                                    libsql::params![gid.clone(), new_admin.clone()],
+                                ).await;
+                                eprintln!("[account] promoted {new_admin} to admin in group {gid}");
+                            }
+                        }
                     }
                 }
             }
+
+            // Remove encrypted message envelopes sent by this user
+            let _ = conn.execute(
+                "DELETE FROM message_envelope WHERE sender_id = ?1",
+                libsql::params![user_id.clone()],
+            ).await;
+
+            // Remove MLS key packages
+            let _ = conn.execute(
+                "DELETE FROM mls_key_package WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            ).await;
+
+            // Remove group memberships (for groups that weren't deleted above)
+            let _ = conn.execute(
+                "DELETE FROM group_member WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            ).await;
+
+            // Remove the user row itself (cascades to dm_channel_member, group_invite, etc.)
+            conn.execute(
+                "DELETE FROM users WHERE id = ?1",
+                libsql::params![user_id.clone()],
+            ).await?;
         }
     }
-
-    // Remove encrypted message envelopes sent by this user
-    let _ = conn.execute(
-        "DELETE FROM message_envelope WHERE sender_id = ?1",
-        libsql::params![user_id.clone()],
-    ).await;
-
-    // Remove MLS key packages
-    let _ = conn.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1",
-        libsql::params![user_id.clone()],
-    ).await;
-
-    // Remove group memberships (for groups that weren't deleted above)
-    let _ = conn.execute(
-        "DELETE FROM group_member WHERE user_id = ?1",
-        libsql::params![user_id.clone()],
-    ).await;
-
-    // Remove the user row itself (cascades to dm_channel_member, group_invite, etc.)
-    conn.execute(
-        "DELETE FROM users WHERE id = ?1",
-        libsql::params![user_id.clone()],
-    ).await?;
 
     // ── Phase 3: local cleanup ─────────────────────────────────────────
 
@@ -1065,26 +1093,33 @@ pub async fn revoke_device(
         )));
     }
 
-    // Drop unclaimed key packages — these are one-time-use and useless
-    // for a revoked device.
-    conn.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
-        libsql::params![user_id.clone(), device_id.clone()],
-    )
-    .await?;
-    // Tombstone the device instead of hard-deleting (issue #372). Other
-    // members' `verify_added_devices` must be able to distinguish "this
-    // device was revoked — drop any rejoin attempt" from "this device
-    // is just lagging — don't destroy commits about it." A hard-delete
-    // makes those two cases indistinguishable; the tombstone makes the
-    // revocation observable AND keeps the row available for later cert
-    // verification of historical commits.
-    conn.execute(
-        "UPDATE user_device SET revoked_at = datetime('now') \
-         WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
-        libsql::params![device_id.clone(), user_id.clone()],
-    )
-    .await?;
+    // Drop the revoked device's unclaimed key packages (one-time-use, useless
+    // now) and tombstone its row (issue #372 — a tombstone, not a hard-delete,
+    // so other members' `verify_added_devices` can tell "revoked, drop rejoin"
+    // from "lagging, keep commits" and the row stays available for historical
+    // cert verification). Routed through the DS (#419 domains E+G) as one
+    // transaction when configured — the CURRENT device drives this and is fully
+    // enrolled, so it can sign; the DS binds both writes to the signer
+    // (`WHERE user_id = actor`).
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({ "device_id": device_id });
+            crate::commands::mls::ds_post_ok(state, "/v1/devices/revoke", &body).await?;
+        }
+        None => {
+            conn.execute(
+                "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
+                libsql::params![user_id.clone(), device_id.clone()],
+            )
+            .await?;
+            conn.execute(
+                "UPDATE user_device SET revoked_at = datetime('now') \
+                 WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
+                libsql::params![device_id.clone(), user_id.clone()],
+            )
+            .await?;
+        }
+    }
 
     // Collect every conversation the user belongs to (groups + DMs) so
     // we can reconcile each one as the calling device.

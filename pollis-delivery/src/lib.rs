@@ -19,10 +19,15 @@
 //! That keeps existing unsigned clients and the integration harness working
 //! until a follow-up makes the pollis-core client sign + send the headers.
 
+pub mod account;
 pub mod auth;
 pub mod commit;
 pub mod db;
+pub mod devices;
 pub mod error;
+pub mod groups;
+pub mod messages;
+pub mod profile;
 pub mod writes;
 
 use std::sync::Arc;
@@ -120,6 +125,65 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/welcomes/ack", post(writes::welcomes_ack))
         .route("/v1/welcomes/reset", post(writes::welcomes_reset))
         .route("/v1/welcomes/purge", post(writes::welcomes_purge))
+        // Domain A (#419) — messages / envelopes / watermarks / reactions /
+        // attachments. All land on the MAIN DB.
+        .route("/v1/messages/send", post(messages::send_message))
+        .route("/v1/messages/edit", post(messages::edit_message))
+        .route("/v1/messages/delete", post(messages::delete_message))
+        .route("/v1/reactions/add", post(messages::add_reaction))
+        .route("/v1/reactions/remove", post(messages::remove_reaction))
+        .route("/v1/watermarks/advance", post(messages::advance_watermark))
+        .route("/v1/envelopes/gc", post(messages::envelope_gc))
+        .route("/v1/attachments/register", post(messages::register_attachment))
+        .route("/v1/attachments/delete", post(messages::delete_attachment))
+        // Domain B (#419) — groups / channels / membership / invites /
+        // join-requests. All land on the MAIN DB.
+        .route("/v1/groups/create", post(groups::create_group))
+        .route("/v1/groups/update", post(groups::update_group))
+        .route("/v1/groups/delete", post(groups::delete_group))
+        .route("/v1/groups/leave", post(groups::leave_group))
+        .route("/v1/channels/create", post(groups::create_channel))
+        .route("/v1/channels/update", post(groups::update_channel))
+        .route("/v1/channels/delete", post(groups::delete_channel))
+        .route("/v1/members/remove", post(groups::remove_member))
+        .route("/v1/members/role", post(groups::set_member_role))
+        .route("/v1/invites/create", post(groups::create_invite))
+        .route("/v1/invites/accept", post(groups::accept_invite))
+        .route("/v1/invites/decline", post(groups::decline_invite))
+        .route("/v1/join-requests/create", post(groups::create_join_request))
+        .route("/v1/join-requests/approve", post(groups::approve_join_request))
+        .route("/v1/join-requests/reject", post(groups::reject_join_request))
+        // Domain C (#419) — profile / preferences / blocks / DMs. All land on
+        // the MAIN DB.
+        .route("/v1/profile/update", post(profile::update_profile))
+        .route("/v1/profile/preferences", post(profile::save_preferences))
+        .route("/v1/blocks/add", post(profile::block_user))
+        .route("/v1/blocks/remove", post(profile::unblock_user))
+        .route("/v1/dm/create", post(profile::create_dm))
+        .route("/v1/dm/accept", post(profile::accept_dm))
+        .route("/v1/dm/add", post(profile::add_dm_member))
+        .route("/v1/dm/remove", post(profile::remove_dm_member))
+        .route("/v1/dm/leave", post(profile::leave_dm))
+        // Domain D (#419) — key-packages / device-cert re-sign / push tokens.
+        // All land on the MAIN DB. Device registration + the FIRST cert publish
+        // are bootstrap writes that stay on the client's direct path (see
+        // `devices` module docs).
+        .route("/v1/key-packages", post(devices::publish_key_packages))
+        .route("/v1/key-packages/replenish", post(devices::replenish_key_packages))
+        .route("/v1/devices/resign", post(devices::resign_device_certs))
+        .route("/v1/push-tokens", post(devices::register_push_token))
+        // Domains E + G (#419) — account lifecycle / identity rotation /
+        // recovery / device-enrollment / security audit. All land on the MAIN
+        // DB. The account-identity bootstrap (signup version-1 establishment),
+        // device registration, the enrollment *request*, and logout device
+        // removal stay on the client's direct path (see `account` module docs).
+        .route("/v1/account/rotate-identity", post(account::rotate_identity))
+        .route("/v1/account/delete", post(account::delete_account))
+        .route("/v1/account/reset-recover", post(account::reset_recover))
+        .route("/v1/security-events", post(account::record_security_event))
+        .route("/v1/enrollment/approve", post(account::approve_enrollment))
+        .route("/v1/enrollment/reject", post(account::reject_enrollment))
+        .route("/v1/devices/revoke", post(account::revoke_device))
         .with_state(state)
 }
 

@@ -145,3 +145,18 @@ pub async fn ds_post(
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post {path}: {e}")))?;
     Ok(resp)
 }
+
+/// [`ds_post`] for writes that must NOT silently fail: any non-2xx becomes an
+/// `Err` carrying the status + body. Use this when the direct-write path it
+/// replaces propagated its error (`conn.execute(...).await?`). For best-effort
+/// writes (the direct path logged and continued) call [`ds_post`] and log
+/// instead.
+pub async fn ds_post_ok(state: &Arc<AppState>, path: &str, body: &serde_json::Value) -> Result<()> {
+    let resp = ds_post(state, path, body).await?;
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!("ds_post {path} {s}: {txt}")));
+    }
+    Ok(())
+}

@@ -131,23 +131,51 @@ pub async fn ingest_channel_envelopes_inner(
         &envelopes,
     ).await?;
 
+    // DS seam: advance this device's watermark + run envelope GC through the
+    // Delivery Service when configured; else direct. Both are best-effort (the
+    // direct path logs and continues), so DS failures are logged too.
     if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![channel_id.to_string(), user_id.to_string(), did.clone(), ts],
-        ).await {
-            eprintln!("[watermark] ingest_channel: upsert failed: {e}");
+        match state.config.pollis_delivery_url.as_deref() {
+            Some(_) => {
+                let body = serde_json::json!({
+                    "conversation_id": channel_id,
+                    "user_id": user_id,
+                    "device_id": did,
+                    "last_fetched_at": ts,
+                });
+                if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await {
+                    eprintln!("[watermark] ingest_channel: DS advance failed: {e}");
+                }
+            }
+            None => {
+                if let Err(e) = conn.execute(
+                    "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+                       last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+                    libsql::params![channel_id.to_string(), user_id.to_string(), did.clone(), ts],
+                ).await {
+                    eprintln!("[watermark] ingest_channel: upsert failed: {e}");
+                }
+            }
         }
     }
 
-    if let Err(e) = conn.execute(
-        CLEANUP_CHANNEL_ENVELOPES,
-        libsql::params![channel_id.to_string()],
-    ).await {
-        eprintln!("[ingest] channel cleanup failed: {e}");
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({ "conversation_id": channel_id, "is_dm": false });
+            if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/envelopes/gc", &body).await {
+                eprintln!("[ingest] channel cleanup (DS) failed: {e}");
+            }
+        }
+        None => {
+            if let Err(e) = conn.execute(
+                CLEANUP_CHANNEL_ENVELOPES,
+                libsql::params![channel_id.to_string()],
+            ).await {
+                eprintln!("[ingest] channel cleanup failed: {e}");
+            }
+        }
     }
 
     Ok(())
@@ -356,23 +384,49 @@ pub async fn ingest_dm_envelopes_inner(
         &envelopes,
     ).await?;
 
+    // DS seam — see ingest_channel_envelopes_inner. DM cleanup uses the DM query.
     if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
-        if let Err(e) = conn.execute(
-            "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-               last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-            libsql::params![dm_channel_id.to_string(), user_id.to_string(), did.clone(), ts],
-        ).await {
-            eprintln!("[watermark] ingest_dm: upsert failed: {e}");
+        match state.config.pollis_delivery_url.as_deref() {
+            Some(_) => {
+                let body = serde_json::json!({
+                    "conversation_id": dm_channel_id,
+                    "user_id": user_id,
+                    "device_id": did,
+                    "last_fetched_at": ts,
+                });
+                if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await {
+                    eprintln!("[watermark] ingest_dm: DS advance failed: {e}");
+                }
+            }
+            None => {
+                if let Err(e) = conn.execute(
+                    "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
+                       last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
+                    libsql::params![dm_channel_id.to_string(), user_id.to_string(), did.clone(), ts],
+                ).await {
+                    eprintln!("[watermark] ingest_dm: upsert failed: {e}");
+                }
+            }
         }
     }
 
-    if let Err(e) = conn.execute(
-        CLEANUP_DM_ENVELOPES,
-        libsql::params![dm_channel_id.to_string()],
-    ).await {
-        eprintln!("[ingest] dm cleanup failed: {e}");
+    match state.config.pollis_delivery_url.as_deref() {
+        Some(_) => {
+            let body = serde_json::json!({ "conversation_id": dm_channel_id, "is_dm": true });
+            if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/envelopes/gc", &body).await {
+                eprintln!("[ingest] dm cleanup (DS) failed: {e}");
+            }
+        }
+        None => {
+            if let Err(e) = conn.execute(
+                CLEANUP_DM_ENVELOPES,
+                libsql::params![dm_channel_id.to_string()],
+            ).await {
+                eprintln!("[ingest] dm cleanup failed: {e}");
+            }
+        }
     }
 
     Ok(())
