@@ -109,7 +109,9 @@ impl Config {
             livekit_url: String::new(),
             livekit_api_key: String::new(),
             livekit_api_secret: String::new(),
-            // Integration tests exercise the direct write path.
+            // Default None; the flows harness overrides this to its in-process
+            // DS URL, so integration tests exercise the real (signed) DS write
+            // path. There is no remaining direct-write path to exercise.
             pollis_delivery_url: None,
         })
     }
