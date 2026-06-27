@@ -1105,6 +1105,37 @@ async fn delivery_key_packages(
     }
 }
 
+/// `POST /v1/key-packages/claim` — claim a TARGET user's (optionally a specific
+/// device's) unclaimed key package. NOT owner-scoped: the gate only authenticates
+/// the claimer; any authenticated user may claim a peer's package (claiming is how
+/// you add someone). Runs the SAME `apply_claim_key_package` the production handler
+/// runs, against the SHARED main DB so the claim and the subsequent add-commit see
+/// the same rows.
+async fn delivery_key_packages_claim(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    if let Err(resp) = ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        return resp;
+    }
+    let parsed: pollis_delivery::devices::ClaimKeyPackageBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::devices::apply_claim_key_package(&conn, &parsed).await {
+        Ok(o) => pollis_delivery::devices::claim_outcome_response(o),
+        Err(e) => ds_internal_error(format!("key-packages/claim: {e}")),
+    }
+}
+
 /// `POST /v1/key-packages/replenish`.
 async fn delivery_key_packages_replenish(
     axum::extract::State(state): axum::extract::State<DsState>,
@@ -1905,6 +1936,10 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     .route("/v1/dm/leave", axum::routing::post(delivery_dm_leave))
                     // Domain D (#419) — all on the MAIN DB.
                     .route("/v1/key-packages", axum::routing::post(delivery_key_packages))
+                    .route(
+                        "/v1/key-packages/claim",
+                        axum::routing::post(delivery_key_packages_claim),
+                    )
                     .route(
                         "/v1/key-packages/replenish",
                         axum::routing::post(delivery_key_packages_replenish),

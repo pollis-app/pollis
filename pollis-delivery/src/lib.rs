@@ -195,6 +195,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // are bootstrap writes that stay on the client's direct path (see
         // `devices` module docs).
         .route("/v1/key-packages", post(devices::publish_key_packages))
+        .route("/v1/key-packages/claim", post(devices::claim_key_package))
         .route("/v1/key-packages/replenish", post(devices::replenish_key_packages))
         .route("/v1/devices/resign", post(devices::resign_device_certs))
         .route("/v1/push-tokens", post(devices::register_push_token))
