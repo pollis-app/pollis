@@ -824,7 +824,10 @@ async fn envelope_cleanup_ttl_or_watermark() {
     let channel_id = alice.general_channel_id(&group_id).await;
     alice.process_commits_for(&channel_id).await;
 
-    let remote = alice.state.remote_db.clone();
+    // The backdating + watermark hacks below poke the "server" DB directly,
+    // standing in for server-side envelope GC effects. The client's own
+    // `state.remote_db` is a read-only view, so use the writable world handle.
+    let remote = crate::harness::writable_remote().await;
 
     // ── Negative: young envelope, only sender fetched ──
     // Wipe watermarks first so add-member's seeded "now" rows don't satisfy
@@ -1176,7 +1179,10 @@ async fn revoked_device_cannot_rejoin_group() {
     // Pre-#372 this was a hard DELETE; the migration to tombstones changed
     // revoke_device to set revoked_at, and this test mirrors that path.
     {
-        let conn = alice.state.remote_db.conn().await.expect("remote conn");
+        // Server-side revocation effect — poke the writable "server" handle
+        // directly (the client's `state.remote_db` is a read-only view).
+        let remote = crate::harness::writable_remote().await;
+        let conn = remote.conn().await.expect("remote conn");
         conn.execute(
             "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
             libsql::params![bob_p.id.clone()],

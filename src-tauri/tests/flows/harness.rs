@@ -2053,6 +2053,20 @@ pub(crate) async fn wipe() {
         .expect("wipe test turso");
 }
 
+/// The WRITABLE main-DB handle — the very one the in-process DS writes through.
+///
+/// A client's `state.remote_db` is a READ-ONLY view (PRAGMA query_only=ON),
+/// mirroring the production read-only Turso token, so it rejects every direct
+/// write. Tests that must seed or mutate *server-side* state directly —
+/// backdating envelopes or clearing watermarks to set up an envelope-GC
+/// scenario, tombstoning a revoked device's `user_device` row — stand in for
+/// effects that happen server-side in prod (envelope GC, DS-driven device
+/// revocation), NOT for client writes. They use THIS handle, not a client's
+/// read-only one.
+pub(crate) async fn writable_remote() -> Arc<RemoteDb> {
+    world().await.remote.clone()
+}
+
 /// The in-process Delivery Service base URL (e.g. `http://127.0.0.1:NNNNN`).
 pub(crate) async fn delivery_url() -> String {
     world()
@@ -2175,10 +2189,18 @@ impl TestClient {
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());
         let state = Arc::new(AppState::new_with_parts(
             w.config.clone(),
-            // Main DB.
-            w.remote.clone(),
+            // Main DB — a READ-ONLY view (PRAGMA query_only=ON), mirroring the
+            // production read-only Turso token the client will hold. It SHARES
+            // the writable handle's underlying `Database` (so it sees every row
+            // the in-process DS writes with no WAL lag) but rejects any direct
+            // INSERT/UPDATE/DELETE. A stray client-side write that should have
+            // gone through the DS therefore fails the suite instead of silently
+            // passing — the definitive gate for the prod read-only-token flip.
+            Arc::new(w.remote.query_only_view()),
             // Commit-log DB — a genuinely separate libsql file, so a query that
-            // should hit one DB but is routed to the other fails loudly.
+            // should hit one DB but is routed to the other fails loudly. Goal A
+            // already made this read-only-ish (the client only reads the log;
+            // the DS is the sole writer), so it keeps the shared handle.
             w.log.clone(),
             keystore,
         ));
