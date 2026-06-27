@@ -1,18 +1,9 @@
-//! MLS key-package lifecycle commands.
+//! MLS key-package lifecycle.
 //!
-//! These three commands handle the KeyPackage lifecycle that precedes any MLS
-//! group operation:
-//!
-//!   generate_mls_key_package  — create a fresh KeyPackage + SignatureKeyPair,
-//!                               persist everything in the local mls_kv table
-//!   publish_mls_key_package   — upload the public KeyPackage to the remote
-//!                               mls_key_package table in Turso
-//!   fetch_mls_key_package     — atomically claim one unclaimed KeyPackage for
-//!                               a target user from the remote table
-//!
-//! Both `generate_mls_key_package` and `publish_mls_key_package` are called
-//! from `initialize_identity` so every user has a published package available
-//! for use in Phase 3 group/DM creation.
+//! The KeyPackage pool (build + publish + replenish) that precedes any MLS
+//! group operation. `ensure_mls_key_package` rotates this device's pool on
+//! login; `replenish_key_packages` tops it up after welcomes consume packages.
+//! Both route owner-scoped writes through the Delivery Service.
 
 use openmls::prelude::*;
 use openmls_rust_crypto::RustCrypto;
@@ -27,60 +18,7 @@ use crate::state::AppState;
 use super::device::load_or_create_device_signer;
 use super::provider::{make_credential, parse_credential_user_id, PollisProvider, CS};
 
-// ── Commands ──────────────────────────────────────────────────────────────────
-
-/// Generate a fresh MLS `KeyPackage` + `SignatureKeyPair` for this device and
-/// persist both in the local `mls_kv` table.
-///
-/// Returns the TLS-serialised `KeyPackage` bytes and its hex-encoded hash ref.
-/// Safe to call multiple times — each call produces a distinct key package.
-pub async fn generate_mls_key_package(
-    state: &Arc<AppState>,
-    user_id: String,
-) -> Result<serde_json::Value> {
-    let device_id = state.device_id.lock().await.clone()
-        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
-
-    // All local DB work is sync — collect results in a block before any await.
-    let (ref_hex, kp_bytes) = {
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| {
-            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
-        })?;
-
-        let provider = PollisProvider::new(db.conn());
-
-        let (sig_keys, sig_pub_bytes) =
-            load_or_create_device_signer(&provider, &user_id, &device_id)?;
-
-        let credential = make_credential(&user_id, &device_id);
-        let sig_pub = OpenMlsSignaturePublicKey::new(
-            sig_pub_bytes.into(),
-            CS.signature_algorithm(),
-        ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
-        let cred_with_key = CredentialWithKey {
-            credential,
-            signature_key: sig_pub.into(),
-        };
-
-        let bundle = KeyPackage::builder()
-            .build(CS, &provider, &sig_keys, cred_with_key)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp build: {e}")))?;
-
-        let kp = bundle.key_package();
-        let hash_ref = kp
-            .hash_ref(provider.crypto())
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp hash_ref: {e}")))?;
-        let ref_hex = hex::encode(hash_ref.as_slice());
-        let kp_bytes = kp
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp serialize: {e}")))?;
-
-        (ref_hex, kp_bytes)
-    };
-
-    Ok(serde_json::json!({ "ref_hex": ref_hex, "key_package_bytes": kp_bytes }))
-}
+// ── Key-package pool ──────────────────────────────────────────────────────────
 
 /// Shape `(ref_hash, key_package_bytes)` pairs into the DS write-API
 /// `packages` array: each `key_package` is base64 (STANDARD), since the bytes
@@ -141,83 +79,6 @@ async fn build_one_key_package(
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp serialize: {e}")))?;
 
     Ok((ref_hex, kp_bytes))
-}
-
-/// Upload a TLS-serialised `KeyPackage` (produced by `generate_mls_key_package`)
-/// to the remote `mls_key_package` table so other users can claim it.
-pub async fn publish_mls_key_package(
-    state: &Arc<AppState>,
-    user_id: String,
-    ref_hex: String,
-    key_package_bytes: Vec<u8>,
-) -> Result<()> {
-    let device_id = state.device_id.lock().await.clone()
-        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
-
-    // DS seam: route the owner-scoped publish through the Delivery Service (the
-    // write API) when configured; else write Turso directly.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let packages = kp_packages_json(&[(ref_hex, key_package_bytes)]);
-            let body = serde_json::json!({
-                "device_id": device_id,
-                "packages": packages,
-                "user_id": user_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/key-packages", &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
-                 VALUES (?1, ?2, ?3, ?4)",
-                libsql::params![ref_hex, user_id, key_package_bytes, device_id],
-            ).await?;
-        }
-    }
-    Ok(())
-}
-
-/// Atomically claim one unclaimed `KeyPackage` for `target_user_id` from the
-/// remote table and return its TLS bytes.  Returns `null` if none are available.
-///
-/// DS seam: the claim is a `claimed = 1` write on a *peer's* row, which a
-/// read-only Turso token cannot perform, so it routes through the Delivery
-/// Service when configured (no device is named here — any of the target's
-/// unclaimed packages is eligible). Both paths return the same bytes and the same
-/// `None`-on-empty signal.
-pub async fn fetch_mls_key_package(
-    state: &Arc<AppState>,
-    target_user_id: String,
-) -> Result<Option<Vec<u8>>> {
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => crate::commands::mls::ds_claim_key_package(state, &target_user_id, None).await,
-        None => {
-            let conn = state.remote_db.conn().await?;
-
-            // Atomically claim the oldest unclaimed package.
-            let mut rows = conn.query(
-                "UPDATE mls_key_package
-                 SET claimed = 1
-                 WHERE ref_hash = (
-                     SELECT ref_hash FROM mls_key_package
-                     WHERE user_id = ?1 AND claimed = 0
-                     ORDER BY created_at ASC
-                     LIMIT 1
-                 )
-                 RETURNING key_package",
-                libsql::params![target_user_id],
-            ).await?;
-
-            match rows.next().await? {
-                Some(row) => {
-                    let bytes: Vec<u8> = row.get(0)?;
-                    Ok(Some(bytes))
-                }
-                None => Ok(None),
-            }
-        }
-    }
 }
 
 /// Rotate key packages: delete unclaimed packages for this device from the

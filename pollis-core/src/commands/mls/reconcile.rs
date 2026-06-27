@@ -932,12 +932,3 @@ pub async fn reconcile_group_mls_impl(
 
     Ok(outcome)
 }
-
-pub async fn reconcile_group_mls(
-    state: &Arc<AppState>,
-    conversation_id: String,
-    actor_user_id: String,
-) -> crate::error::Result<()> {
-    reconcile_group_mls_impl(state, &conversation_id, &actor_user_id).await?;
-    Ok(())
-}

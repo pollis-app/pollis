@@ -462,17 +462,6 @@ pub async fn init_mls_group(
     Ok(())
 }
 
-/// Create a fresh MLS group for `conversation_id` (a channel or DM ULID).
-/// The creator becomes the sole initial member.  Other users are added via
-/// `reconcile_group_mls`.
-pub async fn create_mls_group(
-    state: &Arc<AppState>,
-    conversation_id: String,
-    creator_user_id: String,
-) -> Result<()> {
-    init_mls_group(state, &conversation_id, &creator_user_id).await
-}
-
 // ── Phase 4: Member changes ───────────────────────────────────────────────────
 
 /// Reload an existing MLS group from storage and recover the signer.

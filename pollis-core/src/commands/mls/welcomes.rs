@@ -66,16 +66,6 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
     Ok(())
 }
 
-/// Process a TLS-encoded MLS `Welcome` and persist the resulting group state.
-/// Production code uses `poll_mls_welcomes`; this command is exposed for
-/// manual invocation or testing.
-pub async fn process_welcome(
-    state: &Arc<AppState>,
-    welcome_bytes: Vec<u8>,
-) -> Result<()> {
-    apply_welcome(state, &welcome_bytes).await
-}
-
 /// Poll the remote `mls_welcome` table for undelivered Welcome messages
 /// addressed to `user_id`.  Each one is applied locally and then marked
 /// `delivered = 1` so it is not processed again.
