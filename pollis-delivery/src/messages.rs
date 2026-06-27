@@ -51,7 +51,7 @@ use axum::{
     body::Bytes,
     extract::State,
     http::{HeaderMap, Method, Uri},
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use libsql::Connection;
 use serde::Deserialize;
@@ -59,7 +59,7 @@ use ulid::Ulid;
 
 use crate::error::AppError;
 use crate::writes::{
-    bad_request, gate, is_member, ok_json, outcome_response, resolve_actor, WriteOutcome,
+    bad_request, gate, is_member, outcome_response, resolve_actor, WriteOutcome,
 };
 use crate::AppState;
 
