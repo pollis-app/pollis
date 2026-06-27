@@ -509,76 +509,37 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         }
     };
 
-    let new_version: i64 = match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            use base64::Engine as _;
-            let b64 = base64::engine::general_purpose::STANDARD;
-            let body = serde_json::json!({
-                "based_on_version": based_on_version,
-                "account_id_pub": b64.encode(public_bytes),
-                "salt": b64.encode(salt),
-                "nonce": b64.encode(nonce),
-                "wrapped_key": b64.encode(&wrapped),
-            });
-            let resp =
-                crate::commands::mls::ds_post(state, "/v1/account/rotate-identity", &body).await?;
-            let status = resp.status();
-            if status.as_u16() == 409 {
-                // A concurrent rotation already won this version. Refuse rather
-                // than forking the transparency log — caller must re-read + retry.
-                return Err(Error::Other(anyhow::anyhow!(
-                    "identity rotation lost a concurrent race (account_key_log CAS); retry"
-                )));
-            }
-            if !status.is_success() {
-                let txt = resp.text().await.unwrap_or_default();
-                return Err(Error::Other(anyhow::anyhow!(
-                    "DS rotate-identity {status}: {txt}"
-                )));
-            }
-            let v: serde_json::Value = resp
-                .json()
-                .await
-                .map_err(|e| Error::Other(anyhow::anyhow!("rotate-identity response: {e}")))?;
-            v["identity_version"].as_i64().unwrap_or(based_on_version + 1)
+    let new_version: i64 = {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let body = serde_json::json!({
+            "based_on_version": based_on_version,
+            "account_id_pub": b64.encode(public_bytes),
+            "salt": b64.encode(salt),
+            "nonce": b64.encode(nonce),
+            "wrapped_key": b64.encode(&wrapped),
+        });
+        let resp =
+            crate::commands::mls::ds_post(state, "/v1/account/rotate-identity", &body).await?;
+        let status = resp.status();
+        if status.as_u16() == 409 {
+            // A concurrent rotation already won this version. Refuse rather
+            // than forking the transparency log — caller must re-read + retry.
+            return Err(Error::Other(anyhow::anyhow!(
+                "identity rotation lost a concurrent race (account_key_log CAS); retry"
+            )));
         }
-        None => {
-            // Direct fallback (pre-cutover / no DS configured). Three statements;
-            // the same per-version uniqueness is enforced by the `UNIQUE
-            // (user_id, identity_version)` index on `account_key_log`.
-            let new_version = based_on_version + 1;
-            conn.execute(
-                "UPDATE users SET account_id_pub = ?1, identity_version = ?2 WHERE id = ?3",
-                libsql::params![public_bytes.to_vec(), new_version, user_id.to_string()],
-            )
-            .await?;
-            conn.execute(
-                "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-                 VALUES (?1, ?2, ?3)",
-                libsql::params![user_id.to_string(), public_bytes.to_vec(), new_version],
-            )
-            .await?;
-            conn.execute(
-                "INSERT INTO account_recovery \
-                 (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now')) \
-                 ON CONFLICT(user_id) DO UPDATE SET \
-                     identity_version = excluded.identity_version, \
-                     salt = excluded.salt, \
-                     nonce = excluded.nonce, \
-                     wrapped_key = excluded.wrapped_key, \
-                     updated_at = datetime('now')",
-                libsql::params![
-                    user_id.to_string(),
-                    new_version,
-                    salt.to_vec(),
-                    nonce.to_vec(),
-                    wrapped
-                ],
-            )
-            .await?;
-            new_version
+        if !status.is_success() {
+            let txt = resp.text().await.unwrap_or_default();
+            return Err(Error::Other(anyhow::anyhow!(
+                "DS rotate-identity {status}: {txt}"
+            )));
         }
+        let v: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("rotate-identity response: {e}")))?;
+        v["identity_version"].as_i64().unwrap_or(based_on_version + 1)
     };
 
     // 4. Install the new private key in AppState.unlock so the calling
@@ -601,31 +562,15 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     }
 
     // 6. Record the reset in the security log. Best-effort only. Routed through
-    //    the DS (sole writer; #419 domains E+G) when configured, else direct.
+    //    the DS (sole writer; #419 domains E+G).
     let metadata = format!("new_identity_version={new_version}");
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "kind": "identity_reset",
-                "device_id": serde_json::Value::Null,
-                "metadata": metadata,
-            });
-            if let Err(e) =
-                crate::commands::mls::ds_post_ok(state, "/v1/security-events", &body).await
-            {
-                eprintln!("[reset] DS security-event failed (non-fatal): {e}");
-            }
-        }
-        None => {
-            let event_id = ulid::Ulid::new().to_string();
-            let _ = conn
-                .execute(
-                    "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
-                     VALUES (?1, ?2, 'identity_reset', NULL, ?3)",
-                    libsql::params![event_id, user_id.to_string(), metadata],
-                )
-                .await;
-        }
+    let body = serde_json::json!({
+        "kind": "identity_reset",
+        "device_id": serde_json::Value::Null,
+        "metadata": metadata,
+    });
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &body).await {
+        eprintln!("[reset] DS security-event failed (non-fatal): {e}");
     }
 
     Ok(secret_key_display)

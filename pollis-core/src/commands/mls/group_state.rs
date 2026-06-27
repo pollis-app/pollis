@@ -74,42 +74,21 @@ pub async fn publish_group_info(
     };
 
     // W4 seam: route the GroupInfo republish through the Delivery Service (the
-    // sole writer of the log DB) when configured; else write direct (tests /
-    // pre-cutover). Mirrors `submit_commit`.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            use base64::Engine as _;
-            let body = serde_json::json!({
-                "conversation_id": conversation_id,
-                "epoch": epoch as i64,
-                "group_info": base64::engine::general_purpose::STANDARD.encode(&bytes),
-                "updated_by_device_id": device_id,
-            });
-            let resp = super::ds_client::ds_post(state, "/v1/group-info", &body).await?;
-            if !resp.status().is_success() {
-                let s = resp.status();
-                let txt = resp.text().await.unwrap_or_default();
-                return Err(crate::error::Error::Other(anyhow::anyhow!(
-                    "publish_group_info DS {s}: {txt}"
-                )));
-            }
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "INSERT INTO mls_group_info \
-                 (conversation_id, epoch, group_info, updated_at, updated_by_device_id) \
-                 VALUES (?1, ?2, ?3, datetime('now'), ?4) \
-                 ON CONFLICT(conversation_id) DO UPDATE SET \
-                     epoch = excluded.epoch, \
-                     group_info = excluded.group_info, \
-                     updated_at = datetime('now'), \
-                     updated_by_device_id = excluded.updated_by_device_id \
-                 WHERE excluded.epoch > mls_group_info.epoch",
-                libsql::params![conversation_id, epoch as i64, bytes, device_id],
-            )
-            .await?;
-        }
+    // sole writer of the log DB). Mirrors `submit_commit`.
+    use base64::Engine as _;
+    let body = serde_json::json!({
+        "conversation_id": conversation_id,
+        "epoch": epoch as i64,
+        "group_info": base64::engine::general_purpose::STANDARD.encode(&bytes),
+        "updated_by_device_id": device_id,
+    });
+    let resp = super::ds_client::ds_post(state, "/v1/group-info", &body).await?;
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(crate::error::Error::Other(anyhow::anyhow!(
+            "publish_group_info DS {s}: {txt}"
+        )));
     }
 
     Ok(())

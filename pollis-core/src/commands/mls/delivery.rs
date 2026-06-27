@@ -1,24 +1,15 @@
 //! Client seam for submitting MLS commits to the log.
 //!
-//! Two paths, one decision, keyed on `config.pollis_delivery_url`
-//! (compile-time-baked from `POLLIS_DELIVERY_URL`, or runtime env in dev):
-//! - **Direct** (default, when it's `None`): the client writes the commit +
-//!   GroupInfo + Welcomes straight to Turso — mirroring what the Delivery
-//!   Service does on a win, so the test/local path is byte-for-byte equivalent
-//!   to the DS path. Used in tests and until the Delivery Service is deployed.
-//! - **Http** (when it's `Some(url)`): submission routes through the deployed
-//!   Delivery Service, which becomes the *sole writer* and serializes commits
-//!   per conversation authoritatively (race-free, gap-free, append-only — see
-//!   the `pollis-delivery` crate). The DS writes commit + GroupInfo + Welcomes
-//!   atomically on a win.
+//! Submission routes through the deployed Delivery Service, which is the *sole
+//! writer* and serializes commits per conversation authoritatively (race-free,
+//! gap-free, append-only — see the `pollis-delivery` crate). The DS writes the
+//! commit + its resulting-epoch GroupInfo + the added members' Welcomes
+//! atomically on a win, returning a [`SubmitResult`].
 //!
-//! Either way the caller gets the same [`SubmitResult`] and doesn't care which
-//! path ran — that's the whole point of the seam.
-//!
-//! Scope (Slice 1): the commit, its resulting-epoch GroupInfo, and the added
-//! members' Welcomes now land as ONE unit through this seam. `submit_commit`
-//! OWNS all three — the committer no longer writes Welcomes inline or
-//! republishes GroupInfo after the merge.
+//! Scope: the commit, its resulting-epoch GroupInfo, and the added members'
+//! Welcomes land as ONE unit through this seam. `submit_commit` OWNS all three —
+//! the committer no longer writes Welcomes inline or republishes GroupInfo after
+//! the merge.
 
 use std::sync::Arc;
 
@@ -57,114 +48,18 @@ pub async fn submit_commit(
     group_info: Option<&[u8]>,
     welcomes: &[WelcomeOut],
 ) -> Result<SubmitResult> {
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            http_submit(
-                state,
-                conversation_id,
-                epoch,
-                sender_id,
-                commit,
-                added_user_id,
-                added_device_ids,
-                group_info,
-                welcomes,
-            )
-            .await
-        }
-        None => {
-            direct_submit(
-                state,
-                conversation_id,
-                epoch,
-                sender_id,
-                commit,
-                added_user_id,
-                added_device_ids,
-                group_info,
-                welcomes,
-            )
-            .await
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn direct_submit(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-    epoch: i64,
-    sender_id: &str,
-    commit: &[u8],
-    added_user_id: Option<&str>,
-    added_device_ids: Option<&str>,
-    group_info: Option<&[u8]>,
-    welcomes: &[WelcomeOut],
-) -> Result<SubmitResult> {
-    let conn = state.remote_db.conn().await?;
-    // Claim this epoch. The UNIQUE(conversation_id, epoch) constraint +
-    // `ON CONFLICT DO NOTHING` makes exactly one writer win per epoch (no fork),
-    // matching the prior Direct behavior so existing race tests stay green.
-    let affected = conn
-        .execute(
-            "INSERT INTO mls_commit_log \
-             (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
-             ON CONFLICT(conversation_id, epoch) DO NOTHING",
-            libsql::params![
-                conversation_id.to_string(),
-                epoch,
-                sender_id.to_string(),
-                commit.to_vec(),
-                added_user_id.map(str::to_string),
-                added_device_ids.map(str::to_string),
-            ],
-        )
-        .await?;
-
-    if affected == 0 {
-        return Ok(SubmitResult::LostRace);
-    }
-
-    // Won the epoch. Write the resulting-epoch GroupInfo + any Welcomes so a
-    // future joiner / newly-added device can come online — exactly mirroring
-    // `pollis-delivery/src/commit.rs` on a win (same SQL, same semantics). This
-    // keeps the Direct/test path equivalent to the DS path.
-    if let Some(gi) = group_info {
-        conn.execute(
-            "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
-             VALUES (?1, ?2, ?3, ?4) \
-             ON CONFLICT(conversation_id) DO UPDATE SET \
-                 epoch = excluded.epoch, \
-                 group_info = excluded.group_info, \
-                 updated_by_device_id = excluded.updated_by_device_id, \
-                 updated_at = datetime('now')",
-            libsql::params![
-                conversation_id.to_string(),
-                epoch + 1,
-                gi.to_vec(),
-                sender_id.to_string(),
-            ],
-        )
-        .await?;
-    }
-    for w in welcomes {
-        conn.execute(
-            "INSERT INTO mls_welcome \
-                 (id, conversation_id, recipient_id, welcome_data, recipient_device_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            libsql::params![
-                ulid::Ulid::new().to_string(),
-                conversation_id.to_string(),
-                w.recipient_id.clone(),
-                w.welcome.clone(),
-                w.recipient_device_id.clone(),
-            ],
-        )
-        .await?;
-    }
-
-    Ok(SubmitResult::Committed)
+    http_submit(
+        state,
+        conversation_id,
+        epoch,
+        sender_id,
+        commit,
+        added_user_id,
+        added_device_ids,
+        group_info,
+        welcomes,
+    )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]

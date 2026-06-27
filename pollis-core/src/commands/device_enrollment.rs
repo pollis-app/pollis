@@ -206,13 +206,13 @@ pub async fn start_device_enrollment(
     // (`register_device`) but never ran `ensure_device_cert`, so its
     // `user_device.mls_signature_pub` is still NULL and it cannot produce a
     // signature the DS would accept. So the write is SESSION-gated (the
-    // `enrollment_session` minted by re-login `verify_otp`) when a DS is
-    // configured, else DIRECT (pre-cutover / no DS). The DS binds `user_id` and
-    // `new_device_id` from the session — never the body. The enrollment APPROVAL
-    // / REJECTION (run on an already-enrolled sibling) route via device signature.
+    // `enrollment_session` minted by re-login `verify_otp`). The DS binds `user_id`
+    // and `new_device_id` from the session — never the body. The enrollment
+    // APPROVAL / REJECTION (run on an already-enrolled sibling) route via device
+    // signature.
     let enrollment_session = state.enrollment_session.lock().await.clone();
-    match (state.config.pollis_delivery_url.as_deref(), enrollment_session) {
-        (Some(_), Some(token)) => {
+    match enrollment_session {
+        Some(token) => {
             use base64::Engine as _;
             let b64 = base64::engine::general_purpose::STANDARD;
             let body = serde_json::json!({
@@ -230,37 +230,16 @@ pub async fn start_device_enrollment(
             )
             .await?;
         }
-        (Some(_), None) => {
-            // Bucket-C C6: a DS IS configured but the in-memory `enrollment_session`
-            // is gone (e.g. the app restarted between re-login and enrollment). The
-            // session-gated write above is the only authable path here — the
-            // requesting device is still pre-credential (`mls_signature_pub` NULL),
-            // so it cannot device-sign. A direct write would fail under a read-only
-            // token anyway, so fail LOUD + recoverable instead of silently writing:
-            // the user re-requests the OTP, which re-mints the enrollment session.
+        None => {
+            // Bucket-C C6: the in-memory `enrollment_session` is gone (e.g. the app
+            // restarted between re-login and enrollment). The session-gated write
+            // above is the only authable path here — the requesting device is still
+            // pre-credential (`mls_signature_pub` NULL), so it cannot device-sign.
+            // Fail LOUD + recoverable: the user re-requests the OTP, which re-mints
+            // the enrollment session.
             return Err(Error::Other(anyhow::anyhow!(
                 "Your sign-in session expired. Please sign in again to enroll this device."
             )));
-        }
-        (None, _) => {
-            // No DS configured (pre-cutover / no-DS path): the legacy direct write.
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "INSERT INTO device_enrollment_request \
-                 (id, user_id, new_device_id, new_device_ephemeral_pub, verification_code, \
-                  status, created_at, expires_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6, ?7)",
-                libsql::params![
-                    request_id.clone(),
-                    user_id.clone(),
-                    device_id.clone(),
-                    ephemeral_public.as_bytes().to_vec(),
-                    verification_code.clone(),
-                    now.to_rfc3339(),
-                    expires_at_str.clone()
-                ],
-            )
-            .await?;
         }
     }
 
@@ -580,52 +559,24 @@ pub async fn approve_device_enrollment(
     //    (`WHERE id = ? AND user_id = actor`), so a device can only approve
     //    enrollments for its OWN account.
     let metadata = format!("via=approval,approver={approver_device_id}");
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            use base64::Engine as _;
-            let b64 = base64::engine::general_purpose::STANDARD;
-            let body = serde_json::json!({
-                "request_id": request_id,
-                "wrapped_account_key": b64.encode(&wrapped),
-                "approved_by_device_id": approver_device_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/enrollment/approve", &body).await?;
+    {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let body = serde_json::json!({
+            "request_id": request_id,
+            "wrapped_account_key": b64.encode(&wrapped),
+            "approved_by_device_id": approver_device_id,
+        });
+        crate::commands::mls::ds_post_ok(state, "/v1/enrollment/approve", &body).await?;
 
-            // 6. Record a security event (best-effort).
-            let ev = serde_json::json!({
-                "kind": "device_enrolled",
-                "device_id": new_device_id,
-                "metadata": metadata,
-            });
-            if let Err(e) =
-                crate::commands::mls::ds_post_ok(state, "/v1/security-events", &ev).await
-            {
-                eprintln!("[enrollment] DS security-event failed (non-fatal): {e}");
-            }
-        }
-        None => {
-            conn.execute(
-                "UPDATE device_enrollment_request \
-                 SET wrapped_account_key = ?1, \
-                     status = 'approved', \
-                     approved_by_device_id = ?2 \
-                 WHERE id = ?3",
-                libsql::params![wrapped, approver_device_id.clone(), request_id.clone()],
-            )
-            .await?;
-
-            // 6. Record a security event.
-            let event_id = Ulid::new().to_string();
-            if let Err(e) = conn
-                .execute(
-                    "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
-                     VALUES (?1, ?2, 'device_enrolled', ?3, ?4)",
-                    libsql::params![event_id, user_id.clone(), new_device_id.clone(), metadata],
-                )
-                .await
-            {
-                eprintln!("[enrollment] security_event insert failed (non-fatal): {e}");
-            }
+        // 6. Record a security event (best-effort).
+        let ev = serde_json::json!({
+            "kind": "device_enrolled",
+            "device_id": new_device_id,
+            "metadata": metadata,
+        });
+        if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &ev).await {
+            eprintln!("[enrollment] DS security-event failed (non-fatal): {e}");
         }
     }
 
@@ -695,29 +646,14 @@ pub async fn recover_with_secret_key(
         ),
     );
 
-    // 4. Record a security event so the user can audit this in the
-    //    Security settings page.
-    //
-    // Bucket-C C5: this runs PRE-FINALIZE — the account key was just unwrapped
-    // into `AppState.unlock`, but this device has NOT yet published its
-    // cross-signing cert (`finalize_enrollment` → `ensure_device_cert` runs after
-    // `set_pin`), so its `user_device.mls_signature_pub` is still NULL and it
-    // cannot device-sign a request the DS gate would accept. The only DS audit
-    // endpoint (`/v1/security-events`) is device-signed, so there is no authable
-    // path for this write here. It is a NON-load-bearing audit row, so when a DS
-    // is configured (read-only token) we SKIP it rather than fire a doomed direct
-    // write; on the no-DS path it stays direct + best-effort.
-    if state.config.pollis_delivery_url.is_none() {
-        let conn = state.remote_db.conn().await?;
-        let device_id = state.device_id.lock().await.clone().unwrap_or_default();
-        let _ = conn
-            .execute(
-                "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
-                 VALUES (?1, ?2, 'device_enrolled', ?3, 'via=secret_key')",
-                libsql::params![Ulid::new().to_string(), user_id.clone(), device_id],
-            )
-            .await;
-    }
+    // 4. A security-event audit row would go here, but this runs PRE-FINALIZE —
+    // the account key was just unwrapped into `AppState.unlock`, yet this device
+    // has NOT published its cross-signing cert (`finalize_enrollment` →
+    // `ensure_device_cert` runs after `set_pin`), so its
+    // `user_device.mls_signature_pub` is still NULL and it cannot device-sign a
+    // request the DS gate would accept. The only DS audit endpoint
+    // (`/v1/security-events`) is device-signed, so there is no authable path for
+    // this NON-load-bearing audit row here — it is skipped.
 
     Ok(())
 }
@@ -787,157 +723,30 @@ pub async fn reset_identity_and_recover(
         // half-cleaned account is a corrupt state. The current device CAN sign
         // here: it was enrolled before the reset, so its `mls_signature_pub`
         // survives the account-key rotation (the local DB is wiped only below).
-        match state.config.pollis_delivery_url.as_deref() {
-            Some(_) => {
-                let body = serde_json::json!({ "current_device_id": current_device_id });
-                crate::commands::mls::ds_post_ok(state, "/v1/account/reset-recover", &body).await?;
-            }
-            None => {
-                // Direct fallback (pre-cutover / no DS). Group membership
-                // cleanup (handle ownership first).
-                let mut group_rows = conn
-                    .query(
-                        "SELECT group_id, role FROM group_member WHERE user_id = ?1",
-                        libsql::params![user_id.clone()],
-                    )
-                    .await?;
-                let mut memberships: Vec<(String, String)> = Vec::new();
-                while let Some(row) = group_rows.next().await? {
-                    memberships.push((row.get(0)?, row.get(1)?));
-                }
-
-                for (gid, role) in &memberships {
-                    let mut count_rows = conn
-                        .query(
-                            "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
-                            libsql::params![gid.clone()],
-                        )
-                        .await?;
-                    let member_count: i64 = if let Some(row) = count_rows.next().await? {
-                        row.get(0)?
-                    } else {
-                        0
-                    };
-
-                    if member_count <= 1 {
-                        // Sole member — delete the entire group
-                        let _ = conn
-                            .execute(
-                                "DELETE FROM groups WHERE id = ?1",
-                                libsql::params![gid.clone()],
-                            )
-                            .await;
-                        eprintln!("[reset] deleted empty group {gid}");
-                    } else if role == "admin" {
-                        // Sole admin — promote another member
-                        let mut admin_rows = conn
-                            .query(
-                                "SELECT COUNT(*) FROM group_member WHERE group_id = ?1 AND role = 'admin' AND user_id != ?2",
-                                libsql::params![gid.clone(), user_id.clone()],
-                            )
-                            .await?;
-                        let other_admins: i64 = if let Some(row) = admin_rows.next().await? {
-                            row.get(0)?
-                        } else {
-                            0
-                        };
-                        if other_admins == 0 {
-                            let mut candidate_rows = conn
-                                .query(
-                                    "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
-                                    libsql::params![gid.clone(), user_id.clone()],
-                                )
-                                .await?;
-                            if let Some(row) = candidate_rows.next().await? {
-                                let new_admin: String = row.get(0)?;
-                                let _ = conn
-                                    .execute(
-                                        "UPDATE group_member SET role = 'admin' WHERE group_id = ?1 AND user_id = ?2",
-                                        libsql::params![gid.clone(), new_admin.clone()],
-                                    )
-                                    .await;
-                                eprintln!("[reset] promoted {new_admin} to admin in group {gid}");
-                            }
-                        }
-                    }
-                }
-
-                // Delete group memberships
-                let _ = conn
-                    .execute(
-                        "DELETE FROM group_member WHERE user_id = ?1",
-                        libsql::params![user_id.clone()],
-                    )
-                    .await;
-
-                // Delete DM channel memberships
-                let _ = conn
-                    .execute(
-                        "DELETE FROM dm_channel_member WHERE user_id = ?1",
-                        libsql::params![user_id.clone()],
-                    )
-                    .await;
-
-                // Delete MLS key packages (old identity, no longer valid)
-                let _ = conn
-                    .execute(
-                        "DELETE FROM mls_key_package WHERE user_id = ?1",
-                        libsql::params![user_id.clone()],
-                    )
-                    .await;
-
-                // Delete other devices (orphaned by the identity rotation).
-                // Keep the current device row since ensure_device_cert uses UPDATE.
-                if let Some(ref dev_id) = current_device_id {
-                    let _ = conn
-                        .execute(
-                            "DELETE FROM user_device WHERE user_id = ?1 AND device_id != ?2",
-                            libsql::params![user_id.clone(), dev_id.clone()],
-                        )
-                        .await;
-                } else {
-                    let _ = conn
-                        .execute(
-                            "DELETE FROM user_device WHERE user_id = ?1",
-                            libsql::params![user_id.clone()],
-                        )
-                        .await;
-                }
-            }
-        }
+        let body = serde_json::json!({ "current_device_id": current_device_id });
+        crate::commands::mls::ds_post_ok(state, "/v1/account/reset-recover", &body).await?;
 
         // Delete pending MLS welcomes (W8 seam). Route through the Delivery
-        // Service (sole writer of the log DB) when configured; else direct
-        // DELETE on remote_db (tests / pre-cutover). The local device row +
-        // its `mls_signature_pub` still exist here (the wipe happens below), so
-        // the signed purge authenticates against the registered device key.
-        match state.config.pollis_delivery_url.as_deref() {
-            Some(_) => {
-                let body = serde_json::json!({});
-                match crate::commands::mls::ds_post(state, "/v1/welcomes/purge", &body).await {
-                    Ok(resp) if resp.status().is_success() => {}
-                    Ok(resp) => {
-                        let s = resp.status();
-                        let txt = resp.text().await.unwrap_or_default();
-                        eprintln!("[reset] DS welcomes purge {s}: {txt}");
-                    }
-                    Err(e) => {
-                        eprintln!("[reset] DS welcomes purge failed: {e}");
-                    }
+        // Service (sole writer of the log DB). The local device row + its
+        // `mls_signature_pub` still exist here (the wipe happens below), so the
+        // signed purge authenticates against the registered device key.
+        {
+            let body = serde_json::json!({});
+            match crate::commands::mls::ds_post(state, "/v1/welcomes/purge", &body).await {
+                Ok(resp) if resp.status().is_success() => {}
+                Ok(resp) => {
+                    let s = resp.status();
+                    let txt = resp.text().await.unwrap_or_default();
+                    eprintln!("[reset] DS welcomes purge {s}: {txt}");
                 }
-            }
-            None => {
-                let _ = conn
-                    .execute(
-                        "DELETE FROM mls_welcome WHERE recipient_id = ?1",
-                        libsql::params![user_id.clone()],
-                    )
-                    .await;
+                Err(e) => {
+                    eprintln!("[reset] DS welcomes purge failed: {e}");
+                }
             }
         }
 
         // (Other devices are orphaned as part of the membership/device cleanup
-        // above — via the DS reset-recover transaction, or the direct fallback.)
+        // above — via the DS reset-recover transaction.)
 
         // Wipe local DB (MLS group state, cached messages — all invalid now)
         state.unload_user_db().await;
@@ -1022,7 +831,7 @@ pub async fn reject_device_enrollment(
             libsql::params![request_id.clone()],
         )
         .await?;
-    let (user_id, new_device_id): (String, String) = match rows.next().await? {
+    let (_user_id, new_device_id): (String, String) = match rows.next().await? {
         Some(row) => (row.get(0)?, row.get(1)?),
         None => {
             return Err(Error::Other(anyhow::anyhow!(
@@ -1032,46 +841,22 @@ pub async fn reject_device_enrollment(
     };
     drop(rows);
 
-    // Flip the request to 'rejected'. Routed through the DS (#419 domains E+G)
-    // when configured — the rejecting device is a fully-enrolled sibling, so it
-    // can sign; the DS binds the request to the signer (`WHERE id = ? AND
-    // user_id = actor`).
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "request_id": request_id,
-                "approved_by_device_id": approver_device_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/enrollment/reject", &body).await?;
+    // Flip the request to 'rejected'. Routed through the DS (#419 domains E+G) —
+    // the rejecting device is a fully-enrolled sibling, so it can sign; the DS
+    // binds the request to the signer (`WHERE id = ? AND user_id = actor`).
+    let body = serde_json::json!({
+        "request_id": request_id,
+        "approved_by_device_id": approver_device_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/enrollment/reject", &body).await?;
 
-            let ev = serde_json::json!({
-                "kind": "device_rejected",
-                "device_id": new_device_id,
-                "metadata": serde_json::Value::Null,
-            });
-            if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &ev).await
-            {
-                eprintln!("[enrollment] DS security-event (reject) failed (non-fatal): {e}");
-            }
-        }
-        None => {
-            conn.execute(
-                "UPDATE device_enrollment_request \
-                 SET status = 'rejected', approved_by_device_id = ?1 \
-                 WHERE id = ?2",
-                libsql::params![approver_device_id, request_id],
-            )
-            .await?;
-
-            let event_id = Ulid::new().to_string();
-            let _ = conn
-                .execute(
-                    "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
-                     VALUES (?1, ?2, 'device_rejected', ?3, NULL)",
-                    libsql::params![event_id, user_id, new_device_id],
-                )
-                .await;
-        }
+    let ev = serde_json::json!({
+        "kind": "device_rejected",
+        "device_id": new_device_id,
+        "metadata": serde_json::Value::Null,
+    });
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &ev).await {
+        eprintln!("[enrollment] DS security-event (reject) failed (non-fatal): {e}");
     }
 
     Ok(())

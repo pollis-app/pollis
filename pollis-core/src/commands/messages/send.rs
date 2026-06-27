@@ -129,28 +129,16 @@ pub async fn send_message(
     };
 
     // Post to Turso for offline delivery. DS seam: route the envelope write
-    // through the Delivery Service (the write API) when configured; else direct.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "id": id,
-                "conversation_id": conversation_id,
-                "sender_id": sender_id,
-                "ciphertext": ciphertext_remote,
-                "reply_to_id": reply_to_id,
-                "sent_at": now,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/messages/send", &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                libsql::params![id.clone(), conversation_id.clone(), sender_id.clone(), ciphertext_remote, reply_to_id.clone(), now.clone()],
-            ).await?;
-        }
-    }
+    // through the Delivery Service (the write API).
+    let body = serde_json::json!({
+        "id": id,
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "ciphertext": ciphertext_remote,
+        "reply_to_id": reply_to_id,
+        "sent_at": now,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/messages/send", &body).await?;
 
     // Notify recipients via LiveKit. Non-fatal — errors are logged, not returned.
     let uname = sender_username.as_deref();

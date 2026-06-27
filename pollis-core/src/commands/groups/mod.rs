@@ -10,22 +10,6 @@ mod join_requests;
 mod membership;
 mod types;
 
-use crate::error::Error;
-
-/// Map a libsql error to a user-facing message based on known constraint patterns.
-pub(super) fn db_err(e: crate::error::Error, context: &str) -> crate::error::Error {
-    let msg = e.to_string();
-    if msg.contains("FOREIGN KEY") {
-        Error::Other(anyhow::anyhow!(
-            "{context}: your session may be out of sync — please sign out and sign back in."
-        ))
-    } else if msg.contains("UNIQUE") || msg.contains("SQLITE_CONSTRAINT_UNIQUE") {
-        Error::Other(anyhow::anyhow!("{context} already exists."))
-    } else {
-        e
-    }
-}
-
 /// Mirrors the frontend `deriveSlug` in urlRouting.ts.
 pub(super) fn derive_slug(name: &str) -> String {
     let lower = name.to_lowercase();

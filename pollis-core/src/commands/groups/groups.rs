@@ -4,7 +4,6 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::db_err;
 use super::derive_slug;
 use super::types::{Channel, Group, GroupWithChannels};
 
@@ -116,51 +115,18 @@ pub async fn create_group(
     let voice_channel_id =
         create_default_voice_channel.unwrap_or(false).then(|| Ulid::new().to_string());
 
-    // DS seam: route the group + admin-member + default-channel inserts through
-    // the Delivery Service (one transactional, server-authorized write) when
-    // configured; else write directly to Turso.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "id": id,
-                "name": name,
-                "description": description,
-                "owner_id": owner_id,
-                "default_text_channel_id": text_channel_id,
-                "default_voice_channel_id": voice_channel_id,
-                "created_at": now,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/groups/create", &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "INSERT INTO groups (id, name, description, owner_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-                libsql::params![id.clone(), name.clone(), description.clone(), owner_id.clone(), now.clone()],
-            ).await.map_err(|e| db_err(e.into(), "Group"))?;
-
-            conn.execute(
-                "INSERT INTO group_member (group_id, user_id, role) VALUES (?1, ?2, 'admin')",
-                libsql::params![id.clone(), owner_id.clone()],
-            ).await.map_err(|e| db_err(e.into(), "Group member"))?;
-
-            if let Some(text_id) = &text_channel_id {
-                conn.execute(
-                    "INSERT INTO channels (id, group_id, name, description, channel_type) \
-                     VALUES (?1, ?2, 'General', NULL, 'text')",
-                    libsql::params![text_id.clone(), id.clone()],
-                ).await.map_err(|e| db_err(e.into(), "Channel"))?;
-            }
-
-            if let Some(voice_id) = &voice_channel_id {
-                conn.execute(
-                    "INSERT INTO channels (id, group_id, name, description, channel_type) \
-                     VALUES (?1, ?2, 'Voice Chat', NULL, 'voice')",
-                    libsql::params![voice_id.clone(), id.clone()],
-                ).await.map_err(|e| db_err(e.into(), "Channel"))?;
-            }
-        }
-    }
+    // Route the group + admin-member + default-channel inserts through the
+    // Delivery Service (one transactional, server-authorized write).
+    let body = serde_json::json!({
+        "id": id,
+        "name": name,
+        "description": description,
+        "owner_id": owner_id,
+        "default_text_channel_id": text_channel_id,
+        "default_voice_channel_id": voice_channel_id,
+        "created_at": now,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/groups/create", &body).await?;
 
     // Create the per-group MLS group — all channels in this group share it.
     match crate::commands::mls::init_mls_group(state, &id, &owner_id).await {
@@ -204,40 +170,16 @@ pub async fn update_group(
         return Err(Error::Other(anyhow::anyhow!("only group admins can update group settings")));
     }
 
-    // DS seam: route the column updates through the Delivery Service (which
-    // re-derives the admin role server-side) when configured; else direct.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "group_id": group_id,
-                "requester_id": requester_id,
-                "name": name,
-                "description": description,
-                "icon_url": icon_url,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/groups/update", &body).await?;
-        }
-        None => {
-            if let Some(ref n) = name {
-                conn.execute(
-                    "UPDATE groups SET name = ?1 WHERE id = ?2",
-                    libsql::params![n.clone(), group_id.clone()],
-                ).await?;
-            }
-            if let Some(ref d) = description {
-                conn.execute(
-                    "UPDATE groups SET description = ?1 WHERE id = ?2",
-                    libsql::params![d.clone(), group_id.clone()],
-                ).await?;
-            }
-            if let Some(ref u) = icon_url {
-                conn.execute(
-                    "UPDATE groups SET icon_url = ?1 WHERE id = ?2",
-                    libsql::params![u.clone(), group_id.clone()],
-                ).await?;
-            }
-        }
-    }
+    // Route the column updates through the Delivery Service (which re-derives the
+    // admin role server-side).
+    let body = serde_json::json!({
+        "group_id": group_id,
+        "requester_id": requester_id,
+        "name": name,
+        "description": description,
+        "icon_url": icon_url,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/groups/update", &body).await?;
 
     let mut rows = conn.query(
         "SELECT id, name, description, owner_id, created_at FROM groups WHERE id = ?1",
@@ -280,24 +222,13 @@ pub async fn delete_group(
         return Err(Error::Other(anyhow::anyhow!("only group admins can delete the group")));
     }
 
-    // CASCADE deletes group_member and channels entries. DS seam: route the
-    // delete through the Delivery Service (admin re-checked server-side) when
-    // configured; else direct.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "group_id": group_id,
-                "requester_id": requester_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/groups/delete", &body).await?;
-        }
-        None => {
-            conn.execute(
-                "DELETE FROM groups WHERE id = ?1",
-                libsql::params![group_id],
-            ).await?;
-        }
-    }
+    // CASCADE deletes group_member and channels entries. Route the delete through
+    // the Delivery Service (admin re-checked server-side).
+    let body = serde_json::json!({
+        "group_id": group_id,
+        "requester_id": requester_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/groups/delete", &body).await?;
 
     Ok(())
 }

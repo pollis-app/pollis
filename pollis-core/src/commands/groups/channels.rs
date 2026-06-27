@@ -4,7 +4,6 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::db_err;
 use super::types::Channel;
 
 pub async fn list_group_channels(
@@ -46,27 +45,16 @@ pub async fn create_channel(
     let channel_type = channel_type.unwrap_or_else(|| "text".to_string());
 
     // DS seam: route the channel insert through the Delivery Service (which
-    // re-derives group membership server-side) when configured; else direct.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "id": id,
-                "group_id": group_id,
-                "name": name,
-                "description": description,
-                "channel_type": channel_type,
-                "creator_id": _creator_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/channels/create", &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "INSERT INTO channels (id, group_id, name, description, channel_type) VALUES (?1, ?2, ?3, ?4, ?5)",
-                libsql::params![id.clone(), group_id.clone(), name.clone(), description.clone(), channel_type.clone()],
-            ).await.map_err(|e| db_err(e.into(), "Channel"))?;
-        }
-    }
+    // re-derives group membership server-side).
+    let body = serde_json::json!({
+        "id": id,
+        "group_id": group_id,
+        "name": name,
+        "description": description,
+        "channel_type": channel_type,
+        "creator_id": _creator_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/channels/create", &body).await?;
 
     Ok(Channel { id, group_id, name, description, channel_type })
 }
@@ -108,32 +96,14 @@ pub async fn update_channel(
     }
 
     // DS seam: route the column updates through the Delivery Service (admin
-    // re-derived server-side) when configured; else direct.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "channel_id": channel_id,
-                "requester_id": requester_id,
-                "name": name,
-                "description": description,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/channels/update", &body).await?;
-        }
-        None => {
-            if let Some(ref n) = name {
-                conn.execute(
-                    "UPDATE channels SET name = ?1 WHERE id = ?2",
-                    libsql::params![n.clone(), channel_id.clone()],
-                ).await?;
-            }
-            if let Some(ref d) = description {
-                conn.execute(
-                    "UPDATE channels SET description = ?1 WHERE id = ?2",
-                    libsql::params![d.clone(), channel_id.clone()],
-                ).await?;
-            }
-        }
-    }
+    // re-derived server-side).
+    let body = serde_json::json!({
+        "channel_id": channel_id,
+        "requester_id": requester_id,
+        "name": name,
+        "description": description,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/channels/update", &body).await?;
 
     let mut rows = conn.query(
         "SELECT id, group_id, name, description, channel_type FROM channels WHERE id = ?1",
@@ -187,32 +157,12 @@ pub async fn delete_channel(
     }
 
     // DS seam: route the envelope/watermark/channel deletes through the Delivery
-    // Service (one transactional, admin-gated write) when configured; else direct.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "channel_id": channel_id,
-                "requester_id": requester_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/channels/delete", &body).await?;
-        }
-        None => {
-            conn.execute(
-                "DELETE FROM message_envelope WHERE conversation_id = ?1",
-                libsql::params![channel_id.clone()],
-            ).await?;
-
-            conn.execute(
-                "DELETE FROM conversation_watermark WHERE conversation_id = ?1",
-                libsql::params![channel_id.clone()],
-            ).await?;
-
-            conn.execute(
-                "DELETE FROM channels WHERE id = ?1",
-                libsql::params![channel_id],
-            ).await?;
-        }
-    }
+    // Service (one transactional, admin-gated write).
+    let body = serde_json::json!({
+        "channel_id": channel_id,
+        "requester_id": requester_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/channels/delete", &body).await?;
 
     if let Err(e) = crate::commands::livekit::publish_membership_changed_to_room(
         &state.livekit,

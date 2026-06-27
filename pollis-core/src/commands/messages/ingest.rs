@@ -4,51 +4,6 @@ use std::sync::Arc;
 use crate::error::Result;
 use crate::state::AppState;
 
-// Envelope cleanup: TTL gate OR watermark gate. Watermark gate is keyed on
-// (user, device) — a multi-device user whose other device hasn't synced keeps
-// envelopes alive until either every device catches up or the TTL expires.
-const CLEANUP_CHANNEL_ENVELOPES: &str = "\
-DELETE FROM message_envelope
- WHERE conversation_id = ?1
-   AND (
-     sent_at < datetime('now', '-30 days')
-     OR sent_at < (
-       SELECT CASE
-                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
-                THEN MIN(cw.last_fetched_at)
-                ELSE NULL
-              END
-       FROM group_member gm
-       JOIN channels c ON c.id = ?1 AND c.group_id = gm.group_id
-       JOIN user_device ud ON ud.user_id = gm.user_id
-       LEFT JOIN conversation_watermark cw
-              ON cw.conversation_id = ?1
-             AND cw.user_id = ud.user_id
-             AND cw.device_id = ud.device_id
-     )
-   )";
-
-const CLEANUP_DM_ENVELOPES: &str = "\
-DELETE FROM message_envelope
- WHERE conversation_id = ?1
-   AND (
-     sent_at < datetime('now', '-30 days')
-     OR sent_at < (
-       SELECT CASE
-                WHEN COUNT(ud.device_id) = COUNT(cw.last_fetched_at)
-                THEN MIN(cw.last_fetched_at)
-                ELSE NULL
-              END
-       FROM dm_channel_member dcm
-       JOIN user_device ud ON ud.user_id = dcm.user_id
-       LEFT JOIN conversation_watermark cw
-              ON cw.conversation_id = ?1
-             AND cw.user_id = ud.user_id
-             AND cw.device_id = ud.device_id
-       WHERE dcm.dm_channel_id = ?1
-     )
-   )";
-
 /// Pull new envelopes for a channel from remote, decrypt, and persist into the
 /// local `message` table (the authoritative history for this device). Applies
 /// any pending edit envelopes, advances this user's watermark to the max
@@ -131,51 +86,23 @@ pub async fn ingest_channel_envelopes_inner(
         &envelopes,
     ).await?;
 
-    // DS seam: advance this device's watermark + run envelope GC through the
-    // Delivery Service when configured; else direct. Both are best-effort (the
-    // direct path logs and continues), so DS failures are logged too.
+    // Advance this device's watermark + run envelope GC through the Delivery
+    // Service. Both are best-effort, so DS failures are logged and ignored.
     if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
-        match state.config.pollis_delivery_url.as_deref() {
-            Some(_) => {
-                let body = serde_json::json!({
-                    "conversation_id": channel_id,
-                    "user_id": user_id,
-                    "device_id": did,
-                    "last_fetched_at": ts,
-                });
-                if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await {
-                    eprintln!("[watermark] ingest_channel: DS advance failed: {e}");
-                }
-            }
-            None => {
-                if let Err(e) = conn.execute(
-                    "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-                     VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-                       last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-                    libsql::params![channel_id.to_string(), user_id.to_string(), did.clone(), ts],
-                ).await {
-                    eprintln!("[watermark] ingest_channel: upsert failed: {e}");
-                }
-            }
+        let body = serde_json::json!({
+            "conversation_id": channel_id,
+            "user_id": user_id,
+            "device_id": did,
+            "last_fetched_at": ts,
+        });
+        if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await {
+            eprintln!("[watermark] ingest_channel: DS advance failed: {e}");
         }
     }
 
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({ "conversation_id": channel_id, "is_dm": false });
-            if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/envelopes/gc", &body).await {
-                eprintln!("[ingest] channel cleanup (DS) failed: {e}");
-            }
-        }
-        None => {
-            if let Err(e) = conn.execute(
-                CLEANUP_CHANNEL_ENVELOPES,
-                libsql::params![channel_id.to_string()],
-            ).await {
-                eprintln!("[ingest] channel cleanup failed: {e}");
-            }
-        }
+    let body = serde_json::json!({ "conversation_id": channel_id, "is_dm": false });
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/envelopes/gc", &body).await {
+        eprintln!("[ingest] channel cleanup (DS) failed: {e}");
     }
 
     Ok(())
@@ -190,10 +117,10 @@ pub async fn ingest_channel_envelopes_inner(
 /// locally (idempotent no-op). A decrypt failure does *not* advance the
 /// watermark past its envelope — this keeps failed envelopes alive in
 /// `message_envelope` so a subsequent ingest (after commits/welcomes catch
-/// up) can retry them. The 30-day absolute cutoff in CLEANUP_*_ENVELOPES is
-/// the backstop for envelopes that are permanently undecryptable (e.g.
-/// encrypted to an epoch this device never joined, like pre-join history
-/// for a newly-added member).
+/// up) can retry them. The Delivery Service's envelope GC (a 30-day absolute
+/// cutoff OR a watermark gate) is the backstop for envelopes that are
+/// permanently undecryptable (e.g. encrypted to an epoch this device never
+/// joined, like pre-join history for a newly-added member).
 async fn persist_envelopes_locally(
     state: &Arc<AppState>,
     conversation_id: &str,
@@ -384,49 +311,23 @@ pub async fn ingest_dm_envelopes_inner(
         &envelopes,
     ).await?;
 
-    // DS seam — see ingest_channel_envelopes_inner. DM cleanup uses the DM query.
+    // Advance watermark + run envelope GC through the DS — see
+    // ingest_channel_envelopes_inner. DM cleanup uses the DM query.
     if let (Some(ts), Some(did)) = (watermark_ts, device_id.as_ref()) {
-        match state.config.pollis_delivery_url.as_deref() {
-            Some(_) => {
-                let body = serde_json::json!({
-                    "conversation_id": dm_channel_id,
-                    "user_id": user_id,
-                    "device_id": did,
-                    "last_fetched_at": ts,
-                });
-                if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await {
-                    eprintln!("[watermark] ingest_dm: DS advance failed: {e}");
-                }
-            }
-            None => {
-                if let Err(e) = conn.execute(
-                    "INSERT INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-                     VALUES (?1, ?2, ?3, ?4)
-                     ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET
-                       last_fetched_at = MAX(last_fetched_at, excluded.last_fetched_at)",
-                    libsql::params![dm_channel_id.to_string(), user_id.to_string(), did.clone(), ts],
-                ).await {
-                    eprintln!("[watermark] ingest_dm: upsert failed: {e}");
-                }
-            }
+        let body = serde_json::json!({
+            "conversation_id": dm_channel_id,
+            "user_id": user_id,
+            "device_id": did,
+            "last_fetched_at": ts,
+        });
+        if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/watermarks/advance", &body).await {
+            eprintln!("[watermark] ingest_dm: DS advance failed: {e}");
         }
     }
 
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({ "conversation_id": dm_channel_id, "is_dm": true });
-            if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/envelopes/gc", &body).await {
-                eprintln!("[ingest] dm cleanup (DS) failed: {e}");
-            }
-        }
-        None => {
-            if let Err(e) = conn.execute(
-                CLEANUP_DM_ENVELOPES,
-                libsql::params![dm_channel_id.to_string()],
-            ).await {
-                eprintln!("[ingest] dm cleanup failed: {e}");
-            }
-        }
+    let body = serde_json::json!({ "conversation_id": dm_channel_id, "is_dm": true });
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/envelopes/gc", &body).await {
+        eprintln!("[ingest] dm cleanup (DS) failed: {e}");
     }
 
     Ok(())
