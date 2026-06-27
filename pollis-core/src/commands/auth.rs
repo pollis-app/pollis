@@ -357,8 +357,11 @@ async fn verify_otp_ds(
         } else {
             // A device already known to this account (its registered device_id
             // predates this session, which is bound to a fresh candidate). The
-            // session can't authorize it; re-register directly — a `last_seen`
-            // touch whose cert was already published on a prior login.
+            // session can't authorize it and the local DB is still closed (no
+            // signing key), so `register_device` no-ops its remote write under a DS
+            // (bucket-C C2) — the row already exists with a cert from a prior
+            // login; the `last_seen` touch it skips is non-critical. It still
+            // resolves + sets `state.device_id`.
             register_device(state, &user_id).await?;
         }
         None
@@ -1020,44 +1023,59 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
     let hostname = gethostname::gethostname().to_string_lossy().to_string();
     let device_name = format!("{hostname} ({})", std::env::consts::OS);
 
-    // COALESCE preserves any existing device_name — fills it in only if NULL,
-    // so a user-set rename (future feature) is never overwritten on reconnect.
-    //
-    // BOOTSTRAP — stays DIRECT, never routed through the DS (#419 domain D).
-    // This creates the device's `user_device` row with `mls_signature_pub` still
-    // NULL; the row is what a later `ensure_device_cert` populates to make the
-    // device DS-authenticatable. A brand-new device has no registered key for the
-    // DS to verify against, so its first registration cannot be signature-authed
-    // and writes Turso directly. See `pollis_delivery::devices` docs.
-    let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
-         ON CONFLICT(device_id) DO UPDATE SET \
-            last_seen = datetime('now'), \
-            device_name = COALESCE(user_device.device_name, excluded.device_name)",
-        libsql::params![device_id.clone(), user_id, device_name],
-    ).await?;
+    // The remote `user_device` + watermark writes ONLY happen on the no-DS
+    // (direct) path. Bucket-C C2/C3: every caller that reaches this fn WHILE a DS
+    // is configured does so at a PRE-UNLOCK point — the known-device re-login
+    // branch of `verify_otp_ds` and the session-resume `get_session` — where the
+    // local DB is still closed (no device signing key is loadable) and the OTP
+    // session, if any, is bound to a throwaway candidate device, not this one. So
+    // neither a device-signature nor a session can authenticate the write, and a
+    // brand-new device's row is instead created by the session-gated
+    // `/v1/auth/register-device` in `verify_otp_ds`. What's left here is a
+    // non-critical `last_seen` touch + watermark backfill on a row that ALREADY
+    // exists (the device logged in before; its row + cert were published then).
+    // Under a read-only Turso token the direct write would fail every time — fatal
+    // (`?`-propagated) for C2, noisy for C3 — so we skip it entirely when a DS is
+    // configured. `ensure_device_id` above already set `state.device_id`, so the
+    // rest of the flow (and later DS calls) still have it.
+    if state.config.pollis_delivery_url.is_none() {
+        // COALESCE preserves any existing device_name — fills it in only if NULL,
+        // so a user-set rename (future feature) is never overwritten on reconnect.
+        //
+        // BOOTSTRAP — direct on the no-DS path. This creates the device's
+        // `user_device` row with `mls_signature_pub` still NULL; the row is what a
+        // later `ensure_device_cert` populates to make the device
+        // DS-authenticatable. See `pollis_delivery::devices` docs.
+        let conn = state.remote_db.conn().await?;
+        conn.execute(
+            "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(device_id) DO UPDATE SET \
+                last_seen = datetime('now'), \
+                device_name = COALESCE(user_device.device_name, excluded.device_name)",
+            libsql::params![device_id.clone(), user_id, device_name],
+        ).await?;
 
-    // Seed watermark rows for every conversation the user is already a member
-    // of so this device doesn't retroactively block envelope cleanup (see #162).
-    // Pre-registration messages aren't decryptable here anyway — MLS welcomes
-    // only flow forward — so anchoring the watermark at "now" is correct.
-    if let Err(e) = conn.execute(
-        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-         SELECT c.id, ?1, ?2, datetime('now')
-         FROM channels c
-         JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
-        libsql::params![user_id, device_id.clone()],
-    ).await {
-        eprintln!("[watermark] register_device: channel seed failed: {e}");
-    }
-    if let Err(e) = conn.execute(
-        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-         SELECT dcm.dm_channel_id, ?1, ?2, datetime('now')
-         FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
-        libsql::params![user_id, device_id.clone()],
-    ).await {
-        eprintln!("[watermark] register_device: dm seed failed: {e}");
+        // Seed watermark rows for every conversation the user is already a member
+        // of so this device doesn't retroactively block envelope cleanup (see #162).
+        // Pre-registration messages aren't decryptable here anyway — MLS welcomes
+        // only flow forward — so anchoring the watermark at "now" is correct.
+        if let Err(e) = conn.execute(
+            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             SELECT c.id, ?1, ?2, datetime('now')
+             FROM channels c
+             JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
+            libsql::params![user_id, device_id.clone()],
+        ).await {
+            eprintln!("[watermark] register_device: channel seed failed: {e}");
+        }
+        if let Err(e) = conn.execute(
+            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
+             SELECT dcm.dm_channel_id, ?1, ?2, datetime('now')
+             FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
+            libsql::params![user_id, device_id.clone()],
+        ).await {
+            eprintln!("[watermark] register_device: dm seed failed: {e}");
+        }
     }
 
     // `state.device_id` was already set by `ensure_device_id` above.
@@ -1080,9 +1098,49 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     let index = crate::accounts::read_accounts_index().unwrap_or_default();
     let user_id = index.last_active_user;
 
-    // Grab the device_id before clearing it.
-    let device_id = state.device_id.lock().await.take();
+    // Snapshot the device_id WITHOUT clearing it yet — a DS-routed device
+    // removal (below) is device-signed and needs `state.device_id` still set.
+    let device_id = state.device_id.lock().await.clone();
 
+    // Remove this device from the remote registry FIRST, while the local DB, the
+    // device signing key, and the in-memory session are all still live.
+    //
+    // Bucket-C C4: when a DS is configured this is a DEVICE-SIGNED
+    // `POST /v1/auth/logout` — a self-scoped DELETE of THIS device's `user_device`
+    // row (the DS binds it to the authenticated signer, so a caller can only log
+    // out their own account's device). On the no-DS path it's the legacy direct
+    // DELETE. It MUST run before `unload_user_db` / the `unlock` clear below: once
+    // those run the signer is gone and a device-signed request is impossible —
+    // which was exactly why this used to stay on the direct path and break under a
+    // read-only token. Best-effort either way: a stale row left behind on a
+    // network failure is harmless (re-registered/overwritten on next login).
+    if delete_data {
+        if let (Some(uid), Some(did)) = (user_id.as_ref(), device_id.as_ref()) {
+            match state.config.pollis_delivery_url {
+                Some(_) => {
+                    let body = serde_json::json!({ "device_id": did, "user_id": uid });
+                    if let Err(e) =
+                        crate::commands::mls::ds_post_ok(state, "/v1/auth/logout", &body).await
+                    {
+                        eprintln!("[auth] logout device removal via DS failed (non-fatal): {e}");
+                    }
+                }
+                None => {
+                    if let Ok(conn) = state.remote_db.conn().await {
+                        let _ = conn
+                            .execute(
+                                "DELETE FROM user_device WHERE device_id = ?1",
+                                libsql::params![did.clone()],
+                            )
+                            .await;
+                    }
+                }
+            }
+        }
+    }
+
+    // Now tear down local state.
+    *state.device_id.lock().await = None;
     state.unload_user_db().await;
     *state.unlock.lock().await = None;
 
@@ -1098,23 +1156,7 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
 
     if delete_data {
         if let Some(ref uid) = user_id {
-            // Remove this device from the remote registry.
-            //
-            // BOOTSTRAP-CLASS — stays DIRECT, NOT routed through the DS (#419
-            // domains E+G). By the time this runs the local DB has already been
-            // unloaded and the in-memory session (`unlock`) cleared (above), and
-            // `state.device_id` has been taken — so there is no signing key
-            // available to authenticate a DS request. The device is logging
-            // itself out; a stale `user_device` row left behind on a network
-            // failure is harmless (it's tombstoned/overwritten on next login).
-            if let Some(ref did) = device_id {
-                if let Ok(conn) = state.remote_db.conn().await {
-                    let _ = conn.execute(
-                        "DELETE FROM user_device WHERE device_id = ?1",
-                        libsql::params![did.clone()],
-                    ).await;
-                }
-            }
+            // Remote device removal already ran above (while the signer was live).
             let _ = state.keystore.delete_for_user("db_key", uid).await;
             let _ = state.keystore.delete_for_user("db_key_wrapped", uid).await;
             let _ = state.keystore.delete_for_user("account_id_key", uid).await;

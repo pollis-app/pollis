@@ -1402,6 +1402,33 @@ async fn delivery_devices_revoke(
     }
 }
 
+/// `POST /v1/auth/logout` — bucket-C C4. DEVICE-SIGNED, self-scoped DELETE of the
+/// signer's OWN `user_device` row.
+async fn delivery_auth_logout(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::account::LogoutDeviceBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::account::apply_logout_device(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("auth/logout: {e}")),
+    }
+}
+
 // ─── Server-side OTP + bootstrap (Goal B #419) ──────────────────────────────
 //
 // These five run BEFORE the device has an MLS signing key, so they are NOT
@@ -1934,6 +1961,7 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                         axum::routing::post(delivery_enrollment_reject),
                     )
                     .route("/v1/devices/revoke", axum::routing::post(delivery_devices_revoke))
+                    .route("/v1/auth/logout", axum::routing::post(delivery_auth_logout))
                     // Server-side OTP + bootstrap (Goal B #419) — the first-device
                     // signup path the client seam now routes through the DS.
                     .route(

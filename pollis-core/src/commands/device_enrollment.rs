@@ -230,7 +230,20 @@ pub async fn start_device_enrollment(
             )
             .await?;
         }
-        _ => {
+        (Some(_), None) => {
+            // Bucket-C C6: a DS IS configured but the in-memory `enrollment_session`
+            // is gone (e.g. the app restarted between re-login and enrollment). The
+            // session-gated write above is the only authable path here — the
+            // requesting device is still pre-credential (`mls_signature_pub` NULL),
+            // so it cannot device-sign. A direct write would fail under a read-only
+            // token anyway, so fail LOUD + recoverable instead of silently writing:
+            // the user re-requests the OTP, which re-mints the enrollment session.
+            return Err(Error::Other(anyhow::anyhow!(
+                "Your sign-in session expired. Please sign in again to enroll this device."
+            )));
+        }
+        (None, _) => {
+            // No DS configured (pre-cutover / no-DS path): the legacy direct write.
             let conn = state.remote_db.conn().await?;
             conn.execute(
                 "INSERT INTO device_enrollment_request \
@@ -685,21 +698,26 @@ pub async fn recover_with_secret_key(
     // 4. Record a security event so the user can audit this in the
     //    Security settings page.
     //
-    // BOOTSTRAP — stays DIRECT, NOT routed through the DS (#419 domains E+G).
-    // This runs pre-finalize: the account key was just unwrapped into
-    // `AppState.unlock`, but this device has NOT yet published its cross-signing
-    // cert (`finalize_enrollment` → `ensure_device_cert` runs after `set_pin`),
-    // so its `user_device.mls_signature_pub` isn't established and it cannot sign
-    // a DS request the gate would accept. Best-effort either way.
-    let conn = state.remote_db.conn().await?;
-    let device_id = state.device_id.lock().await.clone().unwrap_or_default();
-    let _ = conn
-        .execute(
-            "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
-             VALUES (?1, ?2, 'device_enrolled', ?3, 'via=secret_key')",
-            libsql::params![Ulid::new().to_string(), user_id.clone(), device_id],
-        )
-        .await;
+    // Bucket-C C5: this runs PRE-FINALIZE — the account key was just unwrapped
+    // into `AppState.unlock`, but this device has NOT yet published its
+    // cross-signing cert (`finalize_enrollment` → `ensure_device_cert` runs after
+    // `set_pin`), so its `user_device.mls_signature_pub` is still NULL and it
+    // cannot device-sign a request the DS gate would accept. The only DS audit
+    // endpoint (`/v1/security-events`) is device-signed, so there is no authable
+    // path for this write here. It is a NON-load-bearing audit row, so when a DS
+    // is configured (read-only token) we SKIP it rather than fire a doomed direct
+    // write; on the no-DS path it stays direct + best-effort.
+    if state.config.pollis_delivery_url.is_none() {
+        let conn = state.remote_db.conn().await?;
+        let device_id = state.device_id.lock().await.clone().unwrap_or_default();
+        let _ = conn
+            .execute(
+                "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
+                 VALUES (?1, ?2, 'device_enrolled', ?3, 'via=secret_key')",
+                libsql::params![Ulid::new().to_string(), user_id.clone(), device_id],
+            )
+            .await;
+    }
 
     Ok(())
 }

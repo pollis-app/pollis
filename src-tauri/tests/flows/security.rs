@@ -556,3 +556,101 @@ async fn account_key_log_cas_rejects_second_rotation_at_same_version() {
 
     drop(alice);
 }
+
+/// Bucket-C C4 — the DEVICE-SIGNED logout endpoint (`POST /v1/auth/logout`) is
+/// self-scoped: a signer may only remove a device on THEIR OWN account, never
+/// another user's. This is the negative companion to the logout flow (which the
+/// `logout(delete_data=true)` command drives through this endpoint when a DS is
+/// configured).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn ds_logout_only_removes_own_device() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut mallory = TestClient::new().await;
+
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let _mallory = mallory.sign_up("mallory@test.local").await;
+
+    // Resolve each client's stable device_id from the shared remote.
+    async fn device_id_of(client: &TestClient, user_id: &str) -> String {
+        let conn = client.state.remote_db.conn().await.expect("remote conn");
+        let mut rows = conn
+            .query(
+                "SELECT device_id FROM user_device WHERE user_id = ?1",
+                libsql::params![user_id.to_string()],
+            )
+            .await
+            .expect("user_device select");
+        rows.next()
+            .await
+            .expect("rows")
+            .expect("device row")
+            .get::<String>(0)
+            .expect("device_id")
+    }
+    async fn device_row_exists(client: &TestClient, device_id: &str) -> bool {
+        let conn = client.state.remote_db.conn().await.expect("remote conn");
+        let mut rows = conn
+            .query(
+                "SELECT 1 FROM user_device WHERE device_id = ?1",
+                libsql::params![device_id.to_string()],
+            )
+            .await
+            .expect("user_device exists query");
+        rows.next().await.expect("rows").is_some()
+    }
+
+    let alice_device = device_id_of(&alice, &alice_profile.id).await;
+    let mallory_device = device_id_of(&mallory, mallory.user_id()).await;
+
+    // (1) Mallory signs a logout NAMING alice's account → 403. resolve_actor
+    //     refuses the body's user_id ≠ signer before any DELETE runs.
+    let body = serde_json::to_vec(&json!({
+        "device_id": alice_device,
+        "user_id": alice_profile.id,
+    }))
+    .expect("serialize logout body");
+    let code = signed_post_status(&mallory, "/v1/auth/logout", &body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed logout of ANOTHER user's device must be FORBIDDEN, got {code}"
+    );
+    assert!(
+        device_row_exists(&alice, &alice_device).await,
+        "alice's device row must survive a forbidden cross-user logout"
+    );
+
+    // (2) Mallory signs a logout of alice's device WITHOUT a body user_id → 200,
+    //     but it is a no-op: the DELETE is bound `WHERE user_id = <signer>`, so it
+    //     can never match alice's device. Self-scope holds even with no body id.
+    let body = serde_json::to_vec(&json!({ "device_id": alice_device }))
+        .expect("serialize logout body");
+    let code = signed_post_status(&mallory, "/v1/auth/logout", &body).await;
+    assert_eq!(
+        code, 200,
+        "an own-account logout request is accepted (no-op when the device isn't the signer's), got {code}"
+    );
+    assert!(
+        device_row_exists(&alice, &alice_device).await,
+        "alice's device row must NOT be removable by mallory's self-scoped logout"
+    );
+
+    // (3) Mallory signs a logout of her OWN device → 200, and her row is GONE.
+    //     The happy path: you can remove your own device.
+    let body = serde_json::to_vec(&json!({ "device_id": mallory_device }))
+        .expect("serialize logout body");
+    let code = signed_post_status(&mallory, "/v1/auth/logout", &body).await;
+    assert_eq!(
+        code, 200,
+        "a signer logging out their OWN device must succeed, got {code}"
+    );
+    assert!(
+        !device_row_exists(&alice, &mallory_device).await,
+        "mallory's own device row must be removed by her logout"
+    );
+
+    drop(alice);
+    drop(mallory);
+}
