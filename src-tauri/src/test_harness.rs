@@ -33,6 +33,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::auth::get_identity,
             crate::commands::auth::request_otp,
             crate::commands::auth::verify_otp,
+            crate::commands::auth::request_email_change_otp,
+            crate::commands::auth::verify_email_change,
             crate::commands::auth::dev_login,
             crate::commands::auth::get_session,
             crate::commands::auth::logout,

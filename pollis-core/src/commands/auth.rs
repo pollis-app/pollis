@@ -570,12 +570,15 @@ async fn verify_otp_direct(
 }
 
 /// Send an OTP to a new email address as part of the email-change flow.
-/// Reuses the regular `request_otp` machinery — the OTP is stored keyed on
-/// the *new* email, and `verify_email_change` consumes it on success.
 ///
-/// Pre-checks uniqueness so the user gets an immediate "already in use"
-/// error instead of waiting until verify time. A second uniqueness check
-/// runs at verify time to close the race.
+/// When a Delivery Service is configured the request is DEVICE-SIGNED and routed
+/// to `POST /v1/auth/request-email-change-otp` — the DS records `(authed user →
+/// new_email)`, generates/stores/emails the OTP keyed on the new email, and the
+/// client no longer touches `state.otp_store`, the Resend key, or `users` (it
+/// holds only a read-only token). The DS always 200s (anti-enumeration), so the
+/// uniqueness check moves to verify time. With no DS configured it falls back to
+/// the legacy client-side path: pre-check uniqueness, then `request_otp` keyed on
+/// the new email. See `docs/otp-server-bootstrap-design.md`.
 pub async fn request_email_change_otp(
     state: &Arc<AppState>,
     user_id: String,
@@ -584,6 +587,18 @@ pub async fn request_email_change_otp(
     let trimmed = new_email.trim().to_string();
     if trimmed.is_empty() {
         return Err(anyhow::anyhow!("Email is required.").into());
+    }
+
+    if state.config.pollis_delivery_url.is_some() {
+        // Device-signed: `authed` (== this user) is derived from the signature by
+        // `ds_post`; the body carries only the new email.
+        crate::commands::mls::ds_post_ok(
+            state,
+            "/v1/auth/request-email-change-otp",
+            &serde_json::json!({ "new_email": trimmed }),
+        )
+        .await?;
+        return Ok(());
     }
 
     let conn = state.remote_db.conn().await?;
@@ -606,18 +621,88 @@ pub async fn request_email_change_otp(
 
 /// Verify the OTP sent to a new email address and atomically swap
 /// `users.email` for the calling user. The OTP proves the caller controls
-/// the new mailbox; the device's keystore identity proves they're the one
-/// asking. We re-check uniqueness right before the UPDATE to close the
-/// window between request and verify.
+/// the new mailbox; the device's signing identity proves they're the one
+/// asking.
+///
+/// When a Delivery Service is configured the OTP validation, requester binding,
+/// and `UPDATE users` all run server-side behind the device-signature gate
+/// (`POST /v1/auth/verify-email-change`) — the authed user is bound from the
+/// signature, never the body. With no DS configured it falls back to the legacy
+/// client-side path ([`verify_email_change_direct`]). Either way the client then
+/// mirrors the new address into the local `accounts.json` index (a device-local
+/// file the DS can't touch).
 pub async fn verify_email_change(
     state: &Arc<AppState>,
     user_id: String,
     new_email: String,
     code: String,
 ) -> Result<()> {
-    use sha2::{Digest, Sha256};
-
     let trimmed = new_email.trim().to_string();
+
+    if state.config.pollis_delivery_url.is_some() {
+        let resp = crate::commands::mls::ds_post(
+            state,
+            "/v1/auth/verify-email-change",
+            &serde_json::json!({ "new_email": trimmed, "code": code }),
+        )
+        .await?;
+        match resp.status().as_u16() {
+            200 => {}
+            401 => return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into()),
+            429 => {
+                return Err(anyhow::anyhow!("Too many attempts. Please request a new code.").into())
+            }
+            403 => {
+                return Err(anyhow::anyhow!(
+                    "This change wasn't requested from this account. Request a new code."
+                )
+                .into())
+            }
+            409 => {
+                return Err(anyhow::anyhow!("That email was just claimed by another account.").into())
+            }
+            _ => {
+                let s = resp.status();
+                let txt = resp.text().await.unwrap_or_default();
+                return Err(anyhow::anyhow!("verify-email-change failed ({s}): {txt}").into());
+            }
+        }
+    } else {
+        verify_email_change_direct(state, &user_id, &trimmed, &code).await?;
+    }
+
+    // Mirror the new email into the local accounts index so the login screen's
+    // "continue as" picker shows the new address. Device-local — runs on both
+    // paths after the swap succeeds. A read of `users.username` is fine under the
+    // client's read-only token.
+    let conn = state.remote_db.conn().await?;
+    let mut name_rows = conn
+        .query(
+            "SELECT username FROM users WHERE id = ?1",
+            libsql::params![user_id.clone()],
+        )
+        .await?;
+    if let Some(row) = name_rows.next().await? {
+        let username: String = row.get(0)?;
+        if let Err(e) = crate::accounts::upsert_account(&user_id, &username, Some(&trimmed), None) {
+            eprintln!("[auth] email-change accounts.json mirror failed: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Legacy client-side email-change verify — validate the OTP against
+/// `state.otp_store`, race-check uniqueness, then `UPDATE users SET email`. Used
+/// only when no Delivery Service is configured. The accounts.json mirror is done
+/// by the caller ([`verify_email_change`]) on both paths.
+async fn verify_email_change_direct(
+    state: &Arc<AppState>,
+    user_id: &str,
+    trimmed: &str,
+    code: &str,
+) -> Result<()> {
+    use sha2::{Digest, Sha256};
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -626,7 +711,7 @@ pub async fn verify_email_change(
 
     let entry = {
         let store = state.otp_store.lock().await;
-        store.get(&trimmed).cloned()
+        store.get(trimmed).cloned()
     }
     .ok_or_else(|| {
         anyhow::anyhow!("No verification request for that email. Request a new code.")
@@ -645,7 +730,7 @@ pub async fn verify_email_change(
 
     {
         let mut store = state.otp_store.lock().await;
-        store.remove(&trimmed);
+        store.remove(trimmed);
     }
 
     let conn = state.remote_db.conn().await?;
@@ -655,7 +740,7 @@ pub async fn verify_email_change(
     let mut rows = conn
         .query(
             "SELECT 1 FROM users WHERE email = ?1 AND id != ?2",
-            libsql::params![trimmed.clone(), user_id.clone()],
+            libsql::params![trimmed.to_string(), user_id.to_string()],
         )
         .await?;
     if rows.next().await?.is_some() {
@@ -664,24 +749,9 @@ pub async fn verify_email_change(
 
     conn.execute(
         "UPDATE users SET email = ?1 WHERE id = ?2",
-        libsql::params![trimmed.clone(), user_id.clone()],
+        libsql::params![trimmed.to_string(), user_id.to_string()],
     )
     .await?;
-
-    // Mirror the new email into the local accounts index so the login
-    // screen's "continue as" picker shows the new address.
-    let mut name_rows = conn
-        .query(
-            "SELECT username FROM users WHERE id = ?1",
-            libsql::params![user_id.clone()],
-        )
-        .await?;
-    if let Some(row) = name_rows.next().await? {
-        let username: String = row.get(0)?;
-        if let Err(e) = crate::accounts::upsert_account(&user_id, &username, Some(&trimmed), None) {
-            eprintln!("[auth] email-change accounts.json mirror failed: {e}");
-        }
-    }
 
     Ok(())
 }

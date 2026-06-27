@@ -26,6 +26,7 @@ pub mod cert;
 pub mod commit;
 pub mod db;
 pub mod devices;
+pub mod email_change;
 pub mod error;
 pub mod groups;
 pub mod messages;
@@ -68,6 +69,9 @@ pub struct AppState {
     pub sessions: session::SessionStore,
     /// OTP/session tunables + the Resend key (DS env).
     pub otp_config: otp::OtpConfig,
+    /// Email-change OTP store + requester binding (device-signed, separate from
+    /// the signup OTP store so the two can't collide on the same address).
+    pub email_change: email_change::EmailChangeStore,
 }
 
 impl AppState {
@@ -88,6 +92,7 @@ impl AppState {
             otp: otp::OtpStore::default(),
             sessions: session::SessionStore::default(),
             otp_config: otp::OtpConfig::default(),
+            email_change: email_change::EmailChangeStore::default(),
         }
     }
 
@@ -220,6 +225,18 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // subsequent-device cert publish reuses publish-device-cert above, gated
         // by cert-validity ALONE (no session). See docs §5.
         .route("/v1/auth/enrollment-request", post(bootstrap::enrollment_request))
+        // Email change (Goal B #419 final piece) — DEVICE-SIGNED (the user is
+        // already authenticated; the OTP only proves control of the NEW mailbox).
+        // request records (authed → new_email); verify requires the signed caller
+        // to match and swaps `users.email`. See `email_change` module docs.
+        .route(
+            "/v1/auth/request-email-change-otp",
+            post(email_change::request_email_change_otp),
+        )
+        .route(
+            "/v1/auth/verify-email-change",
+            post(email_change::verify_email_change),
+        )
         .with_state(state)
 }
 

@@ -100,7 +100,8 @@ pub struct OtpStore {
 
 /// Normalize an email for store keying so request/verify always agree: trim +
 /// lowercase. (The `users` table is still queried with the as-typed address.)
-fn normalize_email(email: &str) -> String {
+/// `pub(crate)` so the email-change store keys its requester map identically.
+pub(crate) fn normalize_email(email: &str) -> String {
     email.trim().to_lowercase()
 }
 

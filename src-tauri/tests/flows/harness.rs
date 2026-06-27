@@ -164,6 +164,9 @@ struct DsState {
     /// OTP/session tunables. DEV_OTP is forced so verify-otp accepts the fixed
     /// harness code with no real email send.
     otp_config: pollis_delivery::otp::OtpConfig,
+    /// Email-change OTP store + requester binding (device-signed). Separate from
+    /// `otp` so a signup OTP and an email-change to the same address can't collide.
+    email_change: pollis_delivery::email_change::EmailChangeStore,
 }
 
 /// Shared auth gate for the in-process DS: verify the device signature over the
@@ -1689,6 +1692,73 @@ async fn delivery_enrollment_request(
     }
 }
 
+/// `POST /v1/auth/request-email-change-otp` — DEVICE-SIGNED. Record the
+/// authenticated requester for the new email and prepare+store the OTP (DEV_OTP,
+/// no send). Always 200.
+async fn delivery_request_email_change_otp(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::email_change::RequestEmailChangeBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let new_email = parsed.new_email.trim().to_string();
+    if !new_email.is_empty() {
+        state
+            .email_change
+            .request(&state.otp_config, &authed, &new_email)
+            .await;
+    }
+    ds_ok()
+}
+
+/// `POST /v1/auth/verify-email-change` — DEVICE-SIGNED. Validate the OTP +
+/// requester binding (authed == requester), then swap `users.email` on the MAIN
+/// DB. The authed user comes from the SIGNATURE, never the body.
+async fn delivery_verify_email_change(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    method: axum::http::Method,
+    uri: axum::http::Uri,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> axum::response::Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::email_change::VerifyEmailChangeBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::email_change::apply_verify_email_change(
+        &conn,
+        &state.email_change,
+        &state.otp_config,
+        &authed,
+        &parsed.new_email,
+        &parsed.code,
+    )
+    .await
+    {
+        Ok(outcome) => pollis_delivery::email_change::email_change_response(outcome),
+        Err(e) => ds_internal_error(format!("verify-email-change: {e}")),
+    }
+}
+
 /// Boot an axum router exposing the DS's full write surface (`/v1/commits` plus
 /// the W4–W8 endpoints) backed by the shared `RemoteDb`, bind it on a loopback
 /// port, and serve it on a DEDICATED OS thread with its own runtime so the
@@ -1719,6 +1789,7 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
             resend_throttle_secs: 0,
             max_attempts: 5,
         },
+        email_change: pollis_delivery::email_change::EmailChangeStore::default(),
     };
     let (tx, rx) = mpsc::channel::<String>();
     std::thread::Builder::new()
@@ -1885,6 +1956,15 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                     .route(
                         "/v1/auth/enrollment-request",
                         axum::routing::post(delivery_enrollment_request),
+                    )
+                    // Email change (Goal B #419 final piece) — device-signed.
+                    .route(
+                        "/v1/auth/request-email-change-otp",
+                        axum::routing::post(delivery_request_email_change_otp),
+                    )
+                    .route(
+                        "/v1/auth/verify-email-change",
+                        axum::routing::post(delivery_verify_email_change),
                     )
                     .with_state(state);
                 // Bind :0 so the OS hands us a free port; read it back before serving.
@@ -2115,6 +2195,18 @@ impl TestClient {
         invoke(&self.webview, cmd, args)
             .await
             .unwrap_or_else(|e| panic!("{cmd}: {e}"))
+    }
+
+    /// Like [`invoke_json`] but returns the `Result` so a test can assert on a
+    /// command that is EXPECTED to fail (e.g. a rejected DS write). Still
+    /// activates this client first so signed DS writes go out under its identity.
+    pub(crate) async fn invoke_try(
+        &self,
+        cmd: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        self.activate();
+        invoke(&self.webview, cmd, args).await
     }
 }
 
