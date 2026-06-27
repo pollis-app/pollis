@@ -111,36 +111,14 @@ pub async fn delete_message(
         // member soft-deletes on next ingest. The server re-verifies admin
         // authority (it must not trust the client's branch choice). DS seam:
         // route the whole 3-write op (one transaction server-side) through the
-        // Delivery Service when configured; else direct.
+        // Delivery Service.
         let now = chrono::Utc::now().to_rfc3339();
-        match state.config.pollis_delivery_url.as_deref() {
-            Some(_) => {
-                let body = serde_json::json!({
-                    "message_id": message_id,
-                    "conversation_id": conversation_id,
-                    "msg_sender_id": msg_sender_id,
-                });
-                crate::commands::mls::ds_post_ok(state, "/v1/messages/delete", &body).await?;
-            }
-            None => {
-                conn.execute(
-                    "DELETE FROM message_envelope WHERE id = ?1",
-                    libsql::params![message_id.clone()],
-                ).await?;
-                conn.execute(
-                    "DELETE FROM message_envelope WHERE target_message_id = ?1 AND type = 'edit'",
-                    libsql::params![message_id.clone()],
-                ).await?;
-
-                let tombstone_id = Ulid::new().to_string();
-                conn.execute(
-                    "INSERT INTO message_envelope
-                         (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id)
-                     VALUES (?1, ?2, ?3, '', ?4, 'delete', ?5)",
-                    libsql::params![tombstone_id, conversation_id.clone(), user_id.clone(), now.clone(), message_id.clone()],
-                ).await?;
-            }
-        }
+        let body = serde_json::json!({
+            "message_id": message_id,
+            "conversation_id": conversation_id,
+            "msg_sender_id": msg_sender_id,
+        });
+        crate::commands::mls::ds_post_ok(state, "/v1/messages/delete", &body).await?;
 
         // Soft-delete locally and collect orphaned attachments. The admin
         // may not have a local row (joined after the message was sent and
@@ -201,29 +179,13 @@ pub async fn delete_message(
     // Self-delete path (caller is the original sender). Remove the message
     // envelope (best-effort — may already be gone) and any pending edit. DS
     // seam: route both deletes (one transaction server-side, scoped to the
-    // authenticated sender) through the Delivery Service when configured.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "message_id": message_id,
-                "conversation_id": conversation_id,
-                "msg_sender_id": user_id,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/messages/delete", &body).await?;
-        }
-        None => {
-            conn.execute(
-                "DELETE FROM message_envelope WHERE id = ?1 AND sender_id = ?2",
-                libsql::params![message_id.clone(), user_id.clone()],
-            ).await?;
-
-            // Remove any pending edit envelope for this message.
-            conn.execute(
-                "DELETE FROM message_envelope WHERE target_message_id = ?1 AND type = 'edit'",
-                libsql::params![message_id.clone()],
-            ).await?;
-        }
-    }
+    // authenticated sender) through the Delivery Service.
+    let body = serde_json::json!({
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+        "msg_sender_id": user_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/messages/delete", &body).await?;
 
     // Read the local plaintext content before deleting so we can inspect any
     // embedded attachment metadata. Then delete the local row and compute
@@ -370,24 +332,12 @@ fn filter_orphaned_locally_all(
 /// removed first — if R2 deletion fails, a future re-upload will re-register
 /// the row and overwrite the object, restoring a consistent state.
 async fn cleanup_attachment(state: &Arc<AppState>, att: &AttachmentRef) {
-    // DS seam: remove the dedup row through the Delivery Service when
-    // configured; else direct. Best-effort either way (a convergent re-upload
-    // re-creates the row), so failures are logged, never bubbled.
+    // DS seam: remove the dedup row through the Delivery Service. Best-effort
+    // (a convergent re-upload re-creates the row), so failures are logged,
+    // never bubbled.
     let remote_result = async {
-        match state.config.pollis_delivery_url.as_deref() {
-            Some(_) => {
-                let body = serde_json::json!({ "content_hash": att.content_hash });
-                crate::commands::mls::ds_post_ok(state, "/v1/attachments/delete", &body).await
-            }
-            None => {
-                let conn = state.remote_db.conn().await?;
-                conn.execute(
-                    "DELETE FROM attachment_object WHERE content_hash = ?1",
-                    libsql::params![att.content_hash.clone()],
-                ).await?;
-                Ok::<_, crate::error::Error>(())
-            }
-        }
+        let body = serde_json::json!({ "content_hash": att.content_hash });
+        crate::commands::mls::ds_post_ok(state, "/v1/attachments/delete", &body).await
     }
     .await;
 
@@ -502,36 +452,16 @@ pub async fn edit_message(
 
     // Replace any existing edit envelope for this message with the new one
     // (DELETE + INSERT, single transaction on the DS side). DS seam: route the
-    // replace through the Delivery Service when configured; else direct.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "envelope_id": envelope_id,
-                "conversation_id": conversation_id,
-                "target_message_id": message_id,
-                "sender_id": user_id,
-                "ciphertext": ciphertext_remote,
-                "sent_at": now,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/messages/edit", &body).await?;
-        }
-        None => {
-            // DELETE + INSERT rather than ON CONFLICT to stay compatible with older libsql.
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "DELETE FROM message_envelope
-                 WHERE conversation_id = ?1 AND target_message_id = ?2 AND type = 'edit'",
-                libsql::params![conversation_id.clone(), message_id.clone()],
-            ).await?;
-
-            conn.execute(
-                "INSERT INTO message_envelope
-                     (id, conversation_id, sender_id, ciphertext, sent_at, type, target_message_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'edit', ?6)",
-                libsql::params![envelope_id, conversation_id.clone(), user_id.clone(), ciphertext_remote, now, message_id.clone()],
-            ).await?;
-        }
-    }
+    // replace through the Delivery Service.
+    let body = serde_json::json!({
+        "envelope_id": envelope_id,
+        "conversation_id": conversation_id,
+        "target_message_id": message_id,
+        "sender_id": user_id,
+        "ciphertext": ciphertext_remote,
+        "sent_at": now,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/messages/edit", &body).await?;
 
     // Notify recipients via LiveKit so they invalidate their cache immediately.
     // Non-fatal — errors are logged, not returned.

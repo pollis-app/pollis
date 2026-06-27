@@ -112,13 +112,7 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::messages::get_reactions,
             crate::commands::messages::delete_message,
             crate::commands::messages::edit_message,
-            crate::commands::mls::generate_mls_key_package,
-            crate::commands::mls::publish_mls_key_package,
-            crate::commands::mls::fetch_mls_key_package,
-            crate::commands::mls::create_mls_group,
-            crate::commands::mls::process_welcome,
             crate::commands::mls::poll_mls_welcomes,
-            crate::commands::mls::reconcile_group_mls,
             crate::commands::mls::process_pending_commits,
         ])
         .manage(state)

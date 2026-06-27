@@ -66,16 +66,6 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
     Ok(())
 }
 
-/// Process a TLS-encoded MLS `Welcome` and persist the resulting group state.
-/// Production code uses `poll_mls_welcomes`; this command is exposed for
-/// manual invocation or testing.
-pub async fn process_welcome(
-    state: &Arc<AppState>,
-    welcome_bytes: Vec<u8>,
-) -> Result<()> {
-    apply_welcome(state, &welcome_bytes).await
-}
-
 /// Poll the remote `mls_welcome` table for undelivered Welcome messages
 /// addressed to `user_id`.  Each one is applied locally and then marked
 /// `delivered = 1` so it is not processed again.
@@ -123,32 +113,18 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         processed_ids.push(id);
     }
 
-    // W5 seam: mark delivered=1 through the Delivery Service (sole writer) when
-    // configured; else direct UPDATE on remote_db (tests / pre-cutover).
+    // W5 seam: mark delivered=1 through the Delivery Service (sole writer).
     if !processed_ids.is_empty() {
-        match state.config.pollis_delivery_url.as_deref() {
-            Some(_) => {
-                let body = serde_json::json!({ "welcome_ids": processed_ids });
-                match super::ds_client::ds_post(state, "/v1/welcomes/ack", &body).await {
-                    Ok(resp) if resp.status().is_success() => {}
-                    Ok(resp) => {
-                        let s = resp.status();
-                        let txt = resp.text().await.unwrap_or_default();
-                        eprintln!("[mls] poll_mls_welcomes: DS ack {s}: {txt}");
-                    }
-                    Err(e) => {
-                        eprintln!("[mls] poll_mls_welcomes: DS ack failed: {e}");
-                    }
-                }
+        let body = serde_json::json!({ "welcome_ids": processed_ids });
+        match super::ds_client::ds_post(state, "/v1/welcomes/ack", &body).await {
+            Ok(resp) if resp.status().is_success() => {}
+            Ok(resp) => {
+                let s = resp.status();
+                let txt = resp.text().await.unwrap_or_default();
+                eprintln!("[mls] poll_mls_welcomes: DS ack {s}: {txt}");
             }
-            None => {
-                let conn = state.remote_db.conn().await?;
-                for id in &processed_ids {
-                    let _ = conn.execute(
-                        "UPDATE mls_welcome SET delivered = 1 WHERE id = ?1",
-                        libsql::params![id.clone()],
-                    ).await;
-                }
+            Err(e) => {
+                eprintln!("[mls] poll_mls_welcomes: DS ack failed: {e}");
             }
         }
     }
@@ -170,8 +146,7 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
 /// `mls_kv`, and crucially AFTER `ensure_device_cert` has (re)published this
 /// device's `mls_signature_pub` — so the signed DS reset authenticates against
 /// the registered device key. Routes through the Delivery Service (sole writer
-/// of the log DB) when configured; else a direct `remote_db` write (tests /
-/// pre-cutover).
+/// of the log DB).
 ///
 /// Scoped to THIS device when a `device_id` exists: resetting a user's entire
 /// welcome set would make sibling devices re-process and clobber their working
@@ -186,42 +161,19 @@ pub async fn reset_welcome_delivery(state: &Arc<AppState>, user_id: &str) -> Res
         .flatten()
         .and_then(|b| String::from_utf8(b).ok());
 
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            // The DS derives the recipient from the authenticated user; the body
-            // only carries the device scope (null ⇒ all of this user's welcomes).
-            let body = serde_json::json!({ "device_id": maybe_device_id });
-            match super::ds_client::ds_post(state, "/v1/welcomes/reset", &body).await {
-                Ok(resp) if resp.status().is_success() => {}
-                Ok(resp) => {
-                    let s = resp.status();
-                    let txt = resp.text().await.unwrap_or_default();
-                    eprintln!("[mls] reset_welcome_delivery: DS reset {s}: {txt}");
-                }
-                Err(e) => {
-                    eprintln!("[mls] reset_welcome_delivery: DS reset failed: {e}");
-                }
-            }
+    // The DS derives the recipient from the authenticated user; the body
+    // only carries the device scope (null ⇒ all of this user's welcomes).
+    let body = serde_json::json!({ "device_id": maybe_device_id });
+    match super::ds_client::ds_post(state, "/v1/welcomes/reset", &body).await {
+        Ok(resp) if resp.status().is_success() => {}
+        Ok(resp) => {
+            let s = resp.status();
+            let txt = resp.text().await.unwrap_or_default();
+            eprintln!("[mls] reset_welcome_delivery: DS reset {s}: {txt}");
         }
-        None => match state.remote_db.conn().await {
-            Ok(conn) => {
-                if let Some(ref did) = maybe_device_id {
-                    let _ = conn.execute(
-                        "UPDATE mls_welcome SET delivered = 0 \
-                         WHERE recipient_id = ?1 AND (recipient_device_id = ?2 OR recipient_device_id IS NULL)",
-                        libsql::params![user_id, did.clone()],
-                    ).await;
-                } else {
-                    let _ = conn.execute(
-                        "UPDATE mls_welcome SET delivered = 0 WHERE recipient_id = ?1",
-                        libsql::params![user_id],
-                    ).await;
-                }
-            }
-            Err(e) => {
-                eprintln!("[mls] reset_welcome_delivery: remote_db conn failed (non-fatal): {e}");
-            }
-        },
+        Err(e) => {
+            eprintln!("[mls] reset_welcome_delivery: DS reset failed: {e}");
+        }
     }
 
     Ok(())

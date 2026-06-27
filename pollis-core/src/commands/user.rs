@@ -46,33 +46,16 @@ pub async fn update_user_profile(
     avatar_url: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    // DS seam: route the profile write through the Delivery Service (the write
-    // API) when configured; else write Turso directly. Server-side authz binds
-    // the edit to the authenticated user's own row.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "user_id": user_id,
-                "username": username,
-                "preferred_name": preferred_name,
-                "phone": phone,
-                "avatar_url": avatar_url,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/profile/update", &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "UPDATE users SET
-                    username = COALESCE(?2, username),
-                    preferred_name = COALESCE(?3, preferred_name),
-                    phone = COALESCE(?4, phone),
-                    avatar_url = COALESCE(?5, avatar_url)
-                 WHERE id = ?1",
-                libsql::params![user_id, username, preferred_name, phone, avatar_url],
-            ).await?;
-        }
-    }
+    // Route the profile write through the Delivery Service (the write API).
+    // Server-side authz binds the edit to the authenticated user's own row.
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "username": username,
+        "preferred_name": preferred_name,
+        "phone": phone,
+        "avatar_url": avatar_url,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/profile/update", &body).await?;
 
     Ok(())
 }
@@ -136,26 +119,13 @@ pub async fn save_preferences(
 ) -> Result<()> {
     upsert_local_preferences(state, &preferences_json).await;
 
-    // DS seam: route the remote preferences upsert through the Delivery Service
-    // when configured; else write Turso directly. The local cache above is
-    // written unconditionally either way.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({
-                "user_id": user_id,
-                "preferences": preferences_json,
-            });
-            crate::commands::mls::ds_post_ok(state, "/v1/profile/preferences", &body).await?;
-        }
-        None => {
-            let conn = state.remote_db.conn().await?;
-            conn.execute(
-                "INSERT INTO user_preferences (user_id, preferences, updated_at) VALUES (?1, ?2, datetime('now'))
-                 ON CONFLICT(user_id) DO UPDATE SET preferences = ?2, updated_at = datetime('now')",
-                libsql::params![user_id.clone(), preferences_json.clone()],
-            ).await?;
-        }
-    }
+    // Route the remote preferences upsert through the Delivery Service. The
+    // local cache above is written unconditionally beforehand.
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "preferences": preferences_json,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/profile/preferences", &body).await?;
 
     Ok(())
 }

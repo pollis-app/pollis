@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::error::Result;
 use crate::state::AppState;
@@ -69,118 +68,40 @@ pub async fn get_identity() -> Result<Option<IdentityInfo>> {
 
 /// Request an OTP to be sent to the given email address.
 ///
-/// When a Delivery Service is configured the OTP is generated, stored, and
-/// emailed server-side (`POST /v1/auth/request-otp`) — the client no longer
-/// touches `state.otp_store` or the Resend key. With no DS configured it falls
-/// back to the legacy client-side path. See `docs/otp-server-bootstrap-design.md`.
+/// The OTP is generated, stored, and emailed server-side by the Delivery
+/// Service (`POST /v1/auth/request-otp`) — the client never touches
+/// `state.otp_store` or a Resend key. See `docs/otp-server-bootstrap-design.md`.
 pub async fn request_otp(
     state: &Arc<AppState>,
     email: String,
 ) -> Result<()> {
-    if state.config.pollis_delivery_url.is_some() {
-        let resp = crate::commands::mls::ds_post_plain(
-            state,
-            "/v1/auth/request-otp",
-            &serde_json::json!({ "email": email }),
-        )
-        .await?;
-        if !resp.status().is_success() {
-            let s = resp.status();
-            let txt = resp.text().await.unwrap_or_default();
-            return Err(anyhow::anyhow!("request-otp failed ({s}): {txt}").into());
-        }
-        return Ok(());
-    }
-
-    request_otp_direct(state, email).await
-}
-
-/// Legacy client-side OTP request — generate + store in `state.otp_store` and
-/// email via Resend. Used only when no Delivery Service is configured.
-async fn request_otp_direct(
-    state: &Arc<AppState>,
-    email: String,
-) -> Result<()> {
-    use rand::Rng;
-    use sha2::{Sha256, Digest};
-
-    // Generate OTP in a scoped block so ThreadRng (non-Send) is dropped
-    // before the first await point.
-    let otp = {
-        let mut rng = rand::thread_rng();
-        format!("{:06}", rng.gen_range(0..1_000_000u32))
-    };
-
-    let mut hasher = Sha256::new();
-    hasher.update(otp.as_bytes());
-    let hash = format!("{:x}", hasher.finalize());
-
-    let expires_at = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() + 600;
-
-    {
-        let mut store = state.otp_store.lock().await;
-        store.insert(email.clone(), crate::state::OtpEntry { hash, expires_at });
-    }
-
-    // In development, DEV_OTP overrides the random code and skips the email send.
-    // Set DEV_OTP=000000 in .env.development to use a fixed code during local iteration.
-    // Compiled out entirely in release builds so the env var has no effect in production.
-    #[cfg(debug_assertions)]
-    if let Ok(dev_otp) = std::env::var("DEV_OTP") {
-        let mut dev_hasher = Sha256::new();
-        dev_hasher.update(dev_otp.trim().as_bytes());
-        let dev_hash = format!("{:x}", dev_hasher.finalize());
-        let mut store = state.otp_store.lock().await;
-        store.insert(email.clone(), crate::state::OtpEntry { hash: dev_hash, expires_at });
-        eprintln!("[auth] DEV_OTP active — skipping email send for {email}");
-        return Ok(());
-    }
-
-    let client = reqwest::Client::new();
-    let body = serde_json::json!({
-        "from": "Pollis <noreply@mail.pollis.com>",
-        "to": [email],
-        "subject": "Your Pollis sign-in code",
-        "text": format!("Your verification code is: {}\n\nThis code expires in 10 minutes.", otp),
-    });
-
-    let resp = client
-        .post("https://api.resend.com/emails")
-        .header("Authorization", format!("Bearer {}", state.config.resend_api_key))
-        .json(&body)
-        .send()
-        .await?;
-
+    let resp = crate::commands::mls::ds_post_plain(
+        state,
+        "/v1/auth/request-otp",
+        &serde_json::json!({ "email": email }),
+    )
+    .await?;
     if !resp.status().is_success() {
-        let err_text = resp.text().await.unwrap_or_default();
-        return Err(anyhow::anyhow!("Failed to send email: {}", err_text).into());
+        let s = resp.status();
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("request-otp failed ({s}): {txt}").into());
     }
-
     Ok(())
 }
 
 /// Verify an OTP code, create or load the user, and complete first-device
 /// onboarding.
 ///
-/// When a Delivery Service is configured the OTP validation, account
-/// create/load, account-identity establishment, and device registration all run
-/// server-side behind a server-validated OTP-session token
-/// ([`verify_otp_ds`]). With no DS configured it falls back to the legacy
-/// all-client path ([`verify_otp_direct`]). See
+/// The OTP validation, account create/load, account-identity establishment, and
+/// device registration all run server-side behind a server-validated
+/// OTP-session token ([`verify_otp_ds`]). See
 /// `docs/otp-server-bootstrap-design.md`.
 pub async fn verify_otp(
     state: &Arc<AppState>,
     email: String,
     code: String,
 ) -> Result<UserProfile> {
-    if state.config.pollis_delivery_url.is_some() {
-        verify_otp_ds(state, email, code).await
-    } else {
-        verify_otp_direct(state, email, code).await
-    }
+    verify_otp_ds(state, email, code).await
 }
 
 /// First-device-signup onboarding routed through the Delivery Service.
@@ -429,149 +350,6 @@ async fn ensure_device_id(
     Ok(device_id)
 }
 
-/// Legacy all-client OTP verification + onboarding. Used only when no Delivery
-/// Service is configured: validates against `state.otp_store`, INSERTs the user,
-/// generates the account identity, and registers the device — all direct to Turso.
-async fn verify_otp_direct(
-    state: &Arc<AppState>,
-    email: String,
-    code: String,
-) -> Result<UserProfile> {
-    use sha2::{Sha256, Digest};
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let stored = {
-        let store = state.otp_store.lock().await;
-        store.get(&email).cloned()
-    };
-
-    let entry = stored.ok_or_else(|| {
-        anyhow::anyhow!("No sign-in request found for this email. Please request a new code.")
-    })?;
-
-    if now > entry.expires_at {
-        return Err(anyhow::anyhow!("This code has expired. Please request a new one.").into());
-    }
-
-    let mut hasher = Sha256::new();
-    hasher.update(code.trim().as_bytes());
-    let provided_hash = format!("{:x}", hasher.finalize());
-
-    if provided_hash != entry.hash {
-        return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into());
-    }
-
-    {
-        let mut store = state.otp_store.lock().await;
-        store.remove(&email);
-    }
-
-    let conn = state.remote_db.conn().await?;
-
-    let mut rows = conn.query(
-        "SELECT id, username, account_id_pub FROM users WHERE email = ?1",
-        libsql::params![email.clone()],
-    ).await?;
-
-    let user_row = rows.next().await?;
-
-    let (user_id, username, remote_pub) = if let Some(row) = user_row {
-        let id: String = row.get(0)?;
-        let uname: String = row.get(1).unwrap_or_else(|_| {
-            email.split('@').next().unwrap_or("user").to_string()
-        });
-        let pub_bytes: Option<Vec<u8>> = row.get(2).ok();
-        (id, uname, pub_bytes)
-    } else {
-        let user_id = Ulid::new().to_string();
-        // Append the last 4 chars of the ULID so the default username is unique
-        // even when multiple users share the same email prefix (e.g. john@foo.com, john@bar.com).
-        let suffix = &user_id[user_id.len().saturating_sub(4)..];
-        let email_prefix = email.split('@').next().unwrap_or("user");
-        let default_username = format!("{}_{}", email_prefix, suffix);
-        conn.execute(
-            "INSERT INTO users (id, email, username) VALUES (?1, ?2, ?3)",
-            libsql::params![user_id.clone(), email.clone(), default_username.clone()],
-        ).await?;
-        (user_id, default_username, None)
-    };
-
-    // If the server has an identity but the locally-stored key doesn't
-    // match, this device has been orphaned by a reset on another device
-    // (or its local key is corrupt). Wipe the stale local key so the
-    // normal enrollment gate takes over.
-    if let Some(ref pub_bytes) = remote_pub {
-        let matches = crate::commands::account_identity::has_matching_local_account_identity(
-            state,
-            &user_id,
-            pub_bytes,
-        )
-        .await
-        .unwrap_or(false);
-        if !matches {
-            if let Err(e) =
-                crate::commands::account_identity::wipe_local_account_identity(state, &user_id).await
-            {
-                eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
-            }
-        }
-    }
-
-    let has_identity = remote_pub.is_some();
-
-    // First-device signup (or a pre-identity user): generate the long-lived
-    // account identity key and a Secret Key to hand back to the frontend
-    // exactly once. See MULTI_DEVICE_ENROLLMENT.md.
-    let new_secret_key = if !has_identity {
-        match crate::commands::account_identity::generate_account_identity(
-            state,
-            &user_id,
-        )
-        .await
-        {
-            Ok(sk) => Some(sk),
-            Err(e) => {
-                eprintln!("[auth] generate_account_identity failed: {e}");
-                return Err(e);
-            }
-        }
-    } else {
-        None
-    };
-
-    // Enrollment required when the user has an identity on the server but
-    // this device doesn't hold a matching local copy of the account_id_key.
-    let enrollment_required = has_identity
-        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
-            .await
-            .unwrap_or(false);
-
-    let profile = UserProfile {
-        id: user_id,
-        email,
-        username,
-        new_secret_key: new_secret_key.clone(),
-        enrollment_required,
-    };
-
-    // accounts.json is the durable record of "who has signed in on
-    // this device" — the prior `session_{uid}` keystore blob was a
-    // redundant second source of truth and a flaky one (issue #184).
-    //
-    // The local DB is NOT opened here — set_pin (or unlock, on a
-    // returning device) opens it via load_user_db_with_key under the
-    // PIN-gated db_key. Until then, AppState.local_db is None and
-    // any DB-touching command fails fast.
-    register_device(state, &profile.id).await?;
-    crate::accounts::upsert_account(&profile.id, &profile.username, Some(&profile.email), None)?;
-
-    Ok(profile)
-}
-
 /// Send an OTP to a new email address as part of the email-change flow.
 ///
 /// When a Delivery Service is configured the request is DEVICE-SIGNED and routed
@@ -627,11 +405,9 @@ pub async fn request_email_change_otp(
 /// the new mailbox; the device's signing identity proves they're the one
 /// asking.
 ///
-/// When a Delivery Service is configured the OTP validation, requester binding,
-/// and `UPDATE users` all run server-side behind the device-signature gate
-/// (`POST /v1/auth/verify-email-change`) — the authed user is bound from the
-/// signature, never the body. With no DS configured it falls back to the legacy
-/// client-side path ([`verify_email_change_direct`]). Either way the client then
+/// The OTP validation, requester binding, and `UPDATE users` all run server-side
+/// behind the device-signature gate (`POST /v1/auth/verify-email-change`) — the
+/// authed user is bound from the signature, never the body. The client then
 /// mirrors the new address into the local `accounts.json` index (a device-local
 /// file the DS can't touch).
 pub async fn verify_email_change(
@@ -642,42 +418,37 @@ pub async fn verify_email_change(
 ) -> Result<()> {
     let trimmed = new_email.trim().to_string();
 
-    if state.config.pollis_delivery_url.is_some() {
-        let resp = crate::commands::mls::ds_post(
-            state,
-            "/v1/auth/verify-email-change",
-            &serde_json::json!({ "new_email": trimmed, "code": code }),
-        )
-        .await?;
-        match resp.status().as_u16() {
-            200 => {}
-            401 => return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into()),
-            429 => {
-                return Err(anyhow::anyhow!("Too many attempts. Please request a new code.").into())
-            }
-            403 => {
-                return Err(anyhow::anyhow!(
-                    "This change wasn't requested from this account. Request a new code."
-                )
-                .into())
-            }
-            409 => {
-                return Err(anyhow::anyhow!("That email was just claimed by another account.").into())
-            }
-            _ => {
-                let s = resp.status();
-                let txt = resp.text().await.unwrap_or_default();
-                return Err(anyhow::anyhow!("verify-email-change failed ({s}): {txt}").into());
-            }
+    let resp = crate::commands::mls::ds_post(
+        state,
+        "/v1/auth/verify-email-change",
+        &serde_json::json!({ "new_email": trimmed, "code": code }),
+    )
+    .await?;
+    match resp.status().as_u16() {
+        200 => {}
+        401 => return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into()),
+        429 => {
+            return Err(anyhow::anyhow!("Too many attempts. Please request a new code.").into())
         }
-    } else {
-        verify_email_change_direct(state, &user_id, &trimmed, &code).await?;
+        403 => {
+            return Err(anyhow::anyhow!(
+                "This change wasn't requested from this account. Request a new code."
+            )
+            .into())
+        }
+        409 => {
+            return Err(anyhow::anyhow!("That email was just claimed by another account.").into())
+        }
+        _ => {
+            let s = resp.status();
+            let txt = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("verify-email-change failed ({s}): {txt}").into());
+        }
     }
 
     // Mirror the new email into the local accounts index so the login screen's
-    // "continue as" picker shows the new address. Device-local — runs on both
-    // paths after the swap succeeds. A read of `users.username` is fine under the
-    // client's read-only token.
+    // "continue as" picker shows the new address. Runs after the swap succeeds.
+    // A read of `users.username` is fine under the client's read-only token.
     let conn = state.remote_db.conn().await?;
     let mut name_rows = conn
         .query(
@@ -691,70 +462,6 @@ pub async fn verify_email_change(
             eprintln!("[auth] email-change accounts.json mirror failed: {e}");
         }
     }
-
-    Ok(())
-}
-
-/// Legacy client-side email-change verify — validate the OTP against
-/// `state.otp_store`, race-check uniqueness, then `UPDATE users SET email`. Used
-/// only when no Delivery Service is configured. The accounts.json mirror is done
-/// by the caller ([`verify_email_change`]) on both paths.
-async fn verify_email_change_direct(
-    state: &Arc<AppState>,
-    user_id: &str,
-    trimmed: &str,
-    code: &str,
-) -> Result<()> {
-    use sha2::{Digest, Sha256};
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let entry = {
-        let store = state.otp_store.lock().await;
-        store.get(trimmed).cloned()
-    }
-    .ok_or_else(|| {
-        anyhow::anyhow!("No verification request for that email. Request a new code.")
-    })?;
-
-    if now > entry.expires_at {
-        return Err(anyhow::anyhow!("This code has expired. Request a new one.").into());
-    }
-
-    let mut hasher = Sha256::new();
-    hasher.update(code.trim().as_bytes());
-    let provided = format!("{:x}", hasher.finalize());
-    if provided != entry.hash {
-        return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into());
-    }
-
-    {
-        let mut store = state.otp_store.lock().await;
-        store.remove(trimmed);
-    }
-
-    let conn = state.remote_db.conn().await?;
-
-    // Race-close: between request and verify, someone else could have
-    // claimed this email. Reject if so — the user gets a clear error.
-    let mut rows = conn
-        .query(
-            "SELECT 1 FROM users WHERE email = ?1 AND id != ?2",
-            libsql::params![trimmed.to_string(), user_id.to_string()],
-        )
-        .await?;
-    if rows.next().await?.is_some() {
-        return Err(anyhow::anyhow!("That email was just claimed by another account.").into());
-    }
-
-    conn.execute(
-        "UPDATE users SET email = ?1 WHERE id = ?2",
-        libsql::params![trimmed.to_string(), user_id.to_string()],
-    )
-    .await?;
 
     Ok(())
 }
@@ -1020,65 +727,16 @@ async fn register_device(state: &Arc<AppState>, user_id: &str) -> Result<String>
     // Resolve-or-create the stable device_id (also sets `state.device_id`).
     let device_id = ensure_device_id(state, user_id, &Ulid::new().to_string()).await?;
 
-    let hostname = gethostname::gethostname().to_string_lossy().to_string();
-    let device_name = format!("{hostname} ({})", std::env::consts::OS);
-
-    // The remote `user_device` + watermark writes ONLY happen on the no-DS
-    // (direct) path. Bucket-C C2/C3: every caller that reaches this fn WHILE a DS
-    // is configured does so at a PRE-UNLOCK point — the known-device re-login
-    // branch of `verify_otp_ds` and the session-resume `get_session` — where the
-    // local DB is still closed (no device signing key is loadable) and the OTP
-    // session, if any, is bound to a throwaway candidate device, not this one. So
-    // neither a device-signature nor a session can authenticate the write, and a
-    // brand-new device's row is instead created by the session-gated
-    // `/v1/auth/register-device` in `verify_otp_ds`. What's left here is a
-    // non-critical `last_seen` touch + watermark backfill on a row that ALREADY
-    // exists (the device logged in before; its row + cert were published then).
-    // Under a read-only Turso token the direct write would fail every time — fatal
-    // (`?`-propagated) for C2, noisy for C3 — so we skip it entirely when a DS is
-    // configured. `ensure_device_id` above already set `state.device_id`, so the
+    // The remote `user_device` + watermark writes are owned by the Delivery
+    // Service now. A brand-new device's row is created by the session-gated
+    // `/v1/auth/register-device` in `verify_otp_ds`; every caller that reaches
+    // *this* fn does so at a PRE-UNLOCK point (the known-device re-login branch of
+    // `verify_otp_ds`, the session-resume `get_session`) where the local DB is
+    // still closed and no device signing key is loadable. The old direct
+    // `last_seen` touch + watermark backfill on an ALREADY-existing row could
+    // neither be device-signed nor performed under a read-only Turso token, so it
+    // is dropped. `ensure_device_id` above already set `state.device_id`, so the
     // rest of the flow (and later DS calls) still have it.
-    if state.config.pollis_delivery_url.is_none() {
-        // COALESCE preserves any existing device_name — fills it in only if NULL,
-        // so a user-set rename (future feature) is never overwritten on reconnect.
-        //
-        // BOOTSTRAP — direct on the no-DS path. This creates the device's
-        // `user_device` row with `mls_signature_pub` still NULL; the row is what a
-        // later `ensure_device_cert` populates to make the device
-        // DS-authenticatable. See `pollis_delivery::devices` docs.
-        let conn = state.remote_db.conn().await?;
-        conn.execute(
-            "INSERT INTO user_device (device_id, user_id, device_name) VALUES (?1, ?2, ?3) \
-             ON CONFLICT(device_id) DO UPDATE SET \
-                last_seen = datetime('now'), \
-                device_name = COALESCE(user_device.device_name, excluded.device_name)",
-            libsql::params![device_id.clone(), user_id, device_name],
-        ).await?;
-
-        // Seed watermark rows for every conversation the user is already a member
-        // of so this device doesn't retroactively block envelope cleanup (see #162).
-        // Pre-registration messages aren't decryptable here anyway — MLS welcomes
-        // only flow forward — so anchoring the watermark at "now" is correct.
-        if let Err(e) = conn.execute(
-            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-             SELECT c.id, ?1, ?2, datetime('now')
-             FROM channels c
-             JOIN group_member gm ON gm.group_id = c.group_id AND gm.user_id = ?1",
-            libsql::params![user_id, device_id.clone()],
-        ).await {
-            eprintln!("[watermark] register_device: channel seed failed: {e}");
-        }
-        if let Err(e) = conn.execute(
-            "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-             SELECT dcm.dm_channel_id, ?1, ?2, datetime('now')
-             FROM dm_channel_member dcm WHERE dcm.user_id = ?1",
-            libsql::params![user_id, device_id.clone()],
-        ).await {
-            eprintln!("[watermark] register_device: dm seed failed: {e}");
-        }
-    }
-
-    // `state.device_id` was already set by `ensure_device_id` above.
     eprintln!("[auth] device registered: {device_id}");
 
     // Device-cert publish moved out of register_device. It needs the
@@ -1105,36 +763,18 @@ pub async fn logout(state: &Arc<AppState>, delete_data: bool) -> Result<()> {
     // Remove this device from the remote registry FIRST, while the local DB, the
     // device signing key, and the in-memory session are all still live.
     //
-    // Bucket-C C4: when a DS is configured this is a DEVICE-SIGNED
-    // `POST /v1/auth/logout` — a self-scoped DELETE of THIS device's `user_device`
-    // row (the DS binds it to the authenticated signer, so a caller can only log
-    // out their own account's device). On the no-DS path it's the legacy direct
-    // DELETE. It MUST run before `unload_user_db` / the `unlock` clear below: once
-    // those run the signer is gone and a device-signed request is impossible —
-    // which was exactly why this used to stay on the direct path and break under a
-    // read-only token. Best-effort either way: a stale row left behind on a
-    // network failure is harmless (re-registered/overwritten on next login).
+    // Bucket-C C4: this is a DEVICE-SIGNED `POST /v1/auth/logout` — a self-scoped
+    // DELETE of THIS device's `user_device` row (the DS binds it to the
+    // authenticated signer, so a caller can only log out their own account's
+    // device). It MUST run before `unload_user_db` / the `unlock` clear below:
+    // once those run the signer is gone and a device-signed request is impossible.
+    // Best-effort: a stale row left behind on a network failure is harmless
+    // (re-registered/overwritten on next login).
     if delete_data {
         if let (Some(uid), Some(did)) = (user_id.as_ref(), device_id.as_ref()) {
-            match state.config.pollis_delivery_url {
-                Some(_) => {
-                    let body = serde_json::json!({ "device_id": did, "user_id": uid });
-                    if let Err(e) =
-                        crate::commands::mls::ds_post_ok(state, "/v1/auth/logout", &body).await
-                    {
-                        eprintln!("[auth] logout device removal via DS failed (non-fatal): {e}");
-                    }
-                }
-                None => {
-                    if let Ok(conn) = state.remote_db.conn().await {
-                        let _ = conn
-                            .execute(
-                                "DELETE FROM user_device WHERE device_id = ?1",
-                                libsql::params![did.clone()],
-                            )
-                            .await;
-                    }
-                }
+            let body = serde_json::json!({ "device_id": did, "user_id": uid });
+            if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/auth/logout", &body).await {
+                eprintln!("[auth] logout device removal via DS failed (non-fatal): {e}");
             }
         }
     }
@@ -1253,100 +893,8 @@ pub async fn delete_account(
     // together or not at all — a half-deleted account is a corrupt state. The
     // device is still fully enrolled here (the local DB is unloaded only in Phase
     // 3 below), so it can sign the request.
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({});
-            crate::commands::mls::ds_post_ok(state, "/v1/account/delete", &body).await?;
-        }
-        None => {
-            // Direct fallback (pre-cutover / no DS). Handle group ownership
-            // before removing memberships.
-            {
-                let mut group_rows = conn.query(
-                    "SELECT group_id, role FROM group_member WHERE user_id = ?1",
-                    libsql::params![user_id.clone()],
-                ).await?;
-
-                let mut memberships: Vec<(String, String)> = Vec::new();
-                while let Some(row) = group_rows.next().await? {
-                    memberships.push((row.get(0)?, row.get(1)?));
-                }
-
-                for (gid, role) in &memberships {
-                    // How many members does this group have?
-                    let mut count_rows = conn.query(
-                        "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
-                        libsql::params![gid.clone()],
-                    ).await?;
-                    let member_count: i64 = if let Some(row) = count_rows.next().await? {
-                        row.get(0)?
-                    } else {
-                        0
-                    };
-
-                    if member_count <= 1 {
-                        // Sole member — delete the entire group (cascades channels, invites, etc.)
-                        let _ = conn.execute(
-                            "DELETE FROM groups WHERE id = ?1",
-                            libsql::params![gid.clone()],
-                        ).await;
-                        eprintln!("[account] deleted empty group {gid}");
-                    } else if role == "admin" {
-                        // Check if there are other admins.
-                        let mut admin_rows = conn.query(
-                            "SELECT COUNT(*) FROM group_member WHERE group_id = ?1 AND role = 'admin' AND user_id != ?2",
-                            libsql::params![gid.clone(), user_id.clone()],
-                        ).await?;
-                        let other_admins: i64 = if let Some(row) = admin_rows.next().await? {
-                            row.get(0)?
-                        } else {
-                            0
-                        };
-
-                        if other_admins == 0 {
-                            // Sole admin — promote the first non-admin member.
-                            let mut candidate_rows = conn.query(
-                                "SELECT user_id FROM group_member WHERE group_id = ?1 AND user_id != ?2 LIMIT 1",
-                                libsql::params![gid.clone(), user_id.clone()],
-                            ).await?;
-                            if let Some(row) = candidate_rows.next().await? {
-                                let new_admin: String = row.get(0)?;
-                                let _ = conn.execute(
-                                    "UPDATE group_member SET role = 'admin' WHERE group_id = ?1 AND user_id = ?2",
-                                    libsql::params![gid.clone(), new_admin.clone()],
-                                ).await;
-                                eprintln!("[account] promoted {new_admin} to admin in group {gid}");
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Remove encrypted message envelopes sent by this user
-            let _ = conn.execute(
-                "DELETE FROM message_envelope WHERE sender_id = ?1",
-                libsql::params![user_id.clone()],
-            ).await;
-
-            // Remove MLS key packages
-            let _ = conn.execute(
-                "DELETE FROM mls_key_package WHERE user_id = ?1",
-                libsql::params![user_id.clone()],
-            ).await;
-
-            // Remove group memberships (for groups that weren't deleted above)
-            let _ = conn.execute(
-                "DELETE FROM group_member WHERE user_id = ?1",
-                libsql::params![user_id.clone()],
-            ).await;
-
-            // Remove the user row itself (cascades to dm_channel_member, group_invite, etc.)
-            conn.execute(
-                "DELETE FROM users WHERE id = ?1",
-                libsql::params![user_id.clone()],
-            ).await?;
-        }
-    }
+    let body = serde_json::json!({});
+    crate::commands::mls::ds_post_ok(state, "/v1/account/delete", &body).await?;
 
     // ── Phase 3: local cleanup ─────────────────────────────────────────
 
@@ -1501,25 +1049,8 @@ pub async fn revoke_device(
     // transaction when configured — the CURRENT device drives this and is fully
     // enrolled, so it can sign; the DS binds both writes to the signer
     // (`WHERE user_id = actor`).
-    match state.config.pollis_delivery_url.as_deref() {
-        Some(_) => {
-            let body = serde_json::json!({ "device_id": device_id });
-            crate::commands::mls::ds_post_ok(state, "/v1/devices/revoke", &body).await?;
-        }
-        None => {
-            conn.execute(
-                "DELETE FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2",
-                libsql::params![user_id.clone(), device_id.clone()],
-            )
-            .await?;
-            conn.execute(
-                "UPDATE user_device SET revoked_at = datetime('now') \
-                 WHERE device_id = ?1 AND user_id = ?2 AND revoked_at IS NULL",
-                libsql::params![device_id.clone(), user_id.clone()],
-            )
-            .await?;
-        }
-    }
+    let body = serde_json::json!({ "device_id": device_id });
+    crate::commands::mls::ds_post_ok(state, "/v1/devices/revoke", &body).await?;
 
     // Collect every conversation the user belongs to (groups + DMs) so
     // we can reconcile each one as the calling device.

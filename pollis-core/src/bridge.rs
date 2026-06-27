@@ -130,8 +130,6 @@ struct InitConfig {
     livekit_api_key: String,
     #[serde(default)]
     livekit_api_secret: String,
-    #[serde(default)]
-    resend_api_key: String,
     /// Optional Delivery Service base URL. Absent → direct Turso writes.
     #[serde(default)]
     pollis_delivery_url: Option<String>,
@@ -166,7 +164,6 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 livekit_url: parsed.livekit_url,
                 livekit_api_key: parsed.livekit_api_key,
                 livekit_api_secret: parsed.livekit_api_secret,
-                resend_api_key: parsed.resend_api_key,
                 pollis_delivery_url: parsed.pollis_delivery_url.filter(|s| !s.is_empty()),
             };
             let state = AppState::new(config).await?;

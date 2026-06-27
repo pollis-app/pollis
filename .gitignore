@@ -87,3 +87,7 @@ playwright-report/
 playwright/.cache/
 # Local DB backups (never commit — contains encrypted envelopes/tokens)
 db-backups/
+
+# local env backups (never commit — contain real tokens)
+.env.*.bak*
+*.bak-rw
