@@ -581,6 +581,45 @@ pub(crate) async fn process_pending_commits_locked(
     mls_group_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
+    process_pending_commits_locked_impl(state, mls_group_id, user_id, None).await
+}
+
+/// Like [`process_pending_commits_inner`], but after the local group reaches
+/// each epoch during the replay it invokes `on_epoch(conn, epoch)` so the caller
+/// can decrypt the application-message envelopes sealed at that epoch BEFORE the
+/// next commit advances past it.
+///
+/// This is the interleave that makes offline catch-up correct under
+/// `max_past_epochs = 0` (issue #418). With the default `max_past_epochs = 0`,
+/// the ratchet keys for an epoch are discarded the instant the group advances
+/// past it. The old ingest path applied *every* pending commit first — jumping
+/// straight to head — and only then tried to decrypt the backlog, so any message
+/// sent at an intermediate epoch was sealed under keys that no longer existed and
+/// decrypted as `WrongEpoch`, permanently lost. By decrypting each epoch's
+/// messages while the group is still AT that epoch, every message a current
+/// member was eligible to read survives a heavy offline-churn catch-up.
+///
+/// `on_epoch` fires once for the member's starting epoch (before any commit) and
+/// once after each commit that successfully advances the group. It does NOT fire
+/// for epochs skipped by a recovery jump (epoch-gap / fork / eviction →
+/// external-join); messages at those epochs are caught on the NEXT ingest, when
+/// the rejoined epoch becomes the starting epoch.
+pub async fn process_pending_commits_inner_with_hook(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+    on_epoch: &mut (dyn FnMut(&rusqlite::Connection, u64) + Send),
+) -> crate::error::Result<()> {
+    let _guard = state.mls_group_lock(mls_group_id).await;
+    process_pending_commits_locked_impl(state, mls_group_id, user_id, Some(on_epoch)).await
+}
+
+async fn process_pending_commits_locked_impl(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+    mut on_epoch: Option<&mut (dyn FnMut(&rusqlite::Connection, u64) + Send)>,
+) -> crate::error::Result<()> {
     // 1. Get the current epoch from the local group.
     let has_group = {
         let guard = state.local_db.lock().await;
@@ -613,6 +652,16 @@ pub(crate) async fn process_pending_commits_locked(
             return Ok(());
         }
     };
+
+    // #418 interleave: decrypt the envelopes sealed at the member's CURRENT
+    // epoch before any commit advances the group past it. (No-op for callers
+    // that pass no hook — e.g. send / reconcile catch-up.)
+    if let Some(hook) = on_epoch.as_deref_mut() {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            hook(db.conn(), initial_epoch);
+        }
+    }
 
     // 2. Fetch pending commits from remote, along with the add-metadata
     //    columns (`added_user_id`, `added_device_ids`) so we can verify
@@ -892,6 +941,16 @@ pub(crate) async fn process_pending_commits_locked(
         if applied {
             current_epoch += 1;
             any_applied = true;
+            // #418 interleave: the commit we just merged advanced the group to
+            // `current_epoch`. Decrypt the envelopes sealed at this epoch NOW,
+            // while the group still holds its ratchet keys — the next iteration's
+            // commit will advance past it and (max_past_epochs = 0) discard them.
+            if let Some(hook) = on_epoch.as_deref_mut() {
+                let guard = state.local_db.lock().await;
+                if let Some(db) = guard.as_ref() {
+                    hook(db.conn(), current_epoch);
+                }
+            }
         }
     }
 
@@ -1001,6 +1060,27 @@ pub fn try_mls_encrypt(
     let (mut group, signer) = load_group_with_signer(&provider, conversation_id).ok()?;
     let msg_out = group.create_message(&provider, &signer, plaintext).ok()?;
     msg_out.tls_serialize_detached().ok()
+}
+
+/// Parse the MLS epoch a `message` / `edit` envelope was sealed at, WITHOUT
+/// decrypting it (no group state touched).
+///
+/// Returns `None` when the bytes are not a valid MLS `ProtocolMessage` — e.g. a
+/// `delete` tombstone, whose ciphertext is empty — so the caller treats such
+/// envelopes as epoch-independent.
+///
+/// This is the load-bearing primitive for the epoch-stepped ingest interleave
+/// (issue #418): because `max_past_epochs` is 0, a message must be decrypted
+/// while the local group is still AT its epoch, so the ingest pass routes each
+/// envelope to the moment in the commit replay when the group reaches the
+/// matching epoch. The epoch is read by PARSING the envelope rather than inferred
+/// from `sent_at` — clock skew and same-epoch reordering make `sent_at` an
+/// unreliable proxy for the cryptographic epoch.
+pub fn envelope_epoch(ciphertext: &[u8]) -> Option<u64> {
+    let mut reader: &[u8] = ciphertext;
+    let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
+    let protocol_msg = msg_in.try_into_protocol_message().ok()?;
+    Some(protocol_msg.epoch().as_u64())
 }
 
 /// Try to decrypt MLS ciphertext bytes for `conversation_id`.
