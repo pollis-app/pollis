@@ -4,8 +4,6 @@ use ulid::Ulid;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::db_err;
-use super::membership::add_member_to_group;
 use super::types::PendingInvite;
 
 /// Invite a user (by username) to a group. Inviter must be a current member.
@@ -74,10 +72,15 @@ pub async fn send_group_invite(
     }
 
     let id = Ulid::new().to_string();
-    conn.execute(
-        "INSERT INTO group_invite (id, group_id, inviter_id, invitee_id) VALUES (?1, ?2, ?3, ?4)",
-        libsql::params![id, group_id.clone(), inviter_id.clone(), invitee_id.clone()],
-    ).await.map_err(|e| db_err(e.into(), "Invite"))?;
+    // DS seam: route the invite insert through the Delivery Service (inviter's
+    // admin role re-derived server-side).
+    let body = serde_json::json!({
+        "id": id,
+        "group_id": group_id,
+        "inviter_id": inviter_id,
+        "invitee_id": invitee_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/invites/create", &body).await?;
 
     // Reconcile adds the invitee's devices to the MLS tree now so their
     // Welcome is ready before they accept — no dependency on simultaneous
@@ -153,13 +156,13 @@ pub async fn accept_group_invite(
         return Err(Error::Other(anyhow::anyhow!("invite not found or already processed")));
     };
 
-    add_member_to_group(&conn, &group_id, &user_id).await?;
-
-    // Delete the invite row — accepted invites don't need to be retained.
-    conn.execute(
-        "DELETE FROM group_invite WHERE id = ?1",
-        libsql::params![invite_id],
-    ).await?;
+    // DS seam: route the member-add + invite-delete through the Delivery Service
+    // (one transactional write, authorized as the invitee server-side).
+    let body = serde_json::json!({
+        "invite_id": invite_id,
+        "user_id": user_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/invites/accept", &body).await?;
 
     // Notify existing group members so they see the new member.
     // The accepting user isn't connected to the group room yet, so use
@@ -185,18 +188,21 @@ pub async fn decline_group_invite(
 
     let mut rows = conn.query(
         "SELECT 1 FROM group_invite WHERE id = ?1 AND invitee_id = ?2",
-        libsql::params![invite_id.clone(), user_id],
+        libsql::params![invite_id.clone(), user_id.clone()],
     ).await?;
 
     if rows.next().await?.is_none() {
         return Err(Error::Other(anyhow::anyhow!("invite not found or already processed")));
     }
 
-    // Delete the invite row — declined invites don't need to be retained.
-    conn.execute(
-        "DELETE FROM group_invite WHERE id = ?1",
-        libsql::params![invite_id],
-    ).await?;
+    // Delete the invite row — declined invites don't need to be retained. DS
+    // seam: route the delete (scoped to the invitee server-side) through the
+    // Delivery Service.
+    let body = serde_json::json!({
+        "invite_id": invite_id,
+        "user_id": user_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/invites/decline", &body).await?;
 
     Ok(())
 }

@@ -174,28 +174,73 @@ pub async fn ensure_device_cert(
     // 4. Write cert + signing pub + issued_at + identity_version into
     //    the remote `user_device` row. Other clients read these columns
     //    before accepting this device into any MLS group.
-    //
-    // `cert_issued_at` is stored as a decimal string of unix seconds —
-    // the migration created the column as TEXT, and we need lossless
-    // round-trip to u64 for signature verification later.
-    let issued_at_str = issued_at.to_string();
 
-    conn.execute(
-        "UPDATE user_device \
-         SET device_cert = ?1, \
-             cert_issued_at = ?2, \
-             cert_identity_version = ?3, \
-             mls_signature_pub = ?4 \
-         WHERE device_id = ?5",
-        libsql::params![
-            cert,
-            issued_at_str,
-            identity_version as i64,
-            sig_pub_bytes,
-            device_id
-        ],
-    )
-    .await?;
+    // BOOTSTRAP PIVOT — this write sets `mls_signature_pub`, the exact column the
+    // DS reads to authenticate a signed request (`auth::verify_request`). Until
+    // it's populated the device cannot produce a signature the DS would accept,
+    // so the write that *establishes* the credential cannot be authenticated by
+    // that credential. Two paths (both use the SAME
+    // `/v1/auth/publish-device-cert` endpoint):
+    //
+    //   * First-device signup — gated by the OTP session (stashed in
+    //     `state.bootstrap_session` by `verify_otp`) PLUS cert-validity. The token
+    //     is single-use, spent server-side on success.
+    //   * Subsequent device (sibling-approval enrollment / Secret-Key recovery) —
+    //     gated by **cert-validity ALONE**, no live session. The cert proves
+    //     possession of the account key (it verifies against the account's
+    //     `account_id_pub`), which is STRONGER than a session and survives a slow
+    //     sibling approval that would outlast the session TTL. The request carries
+    //     `user_id` in the body (no session to bind it); the DS still requires a
+    //     pre-existing `user_device` row and never fails open.
+    //
+    // See `docs/otp-server-bootstrap-design.md` §5.
+    let bootstrap_session = state.bootstrap_session.lock().await.clone();
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let body = serde_json::json!({
+        "user_id": user_id,
+        "device_id": device_id,
+        "device_cert": b64.encode(&cert),
+        "cert_issued_at": issued_at as i64,
+        "cert_identity_version": identity_version,
+        "mls_signature_pub": b64.encode(&sig_pub_bytes),
+    });
+    match bootstrap_session {
+        Some(token) => {
+            // First-device signup: session + cert-validity, single-use.
+            crate::commands::mls::ds_post_session_ok(
+                state,
+                "/v1/auth/publish-device-cert",
+                &token,
+                &body,
+            )
+            .await?;
+            // The token is spent server-side on success. Clear the local
+            // copy so the next ensure_device_cert takes the cert-validity
+            // path.
+            *state.bootstrap_session.lock().await = None;
+        }
+        None => {
+            // Subsequent device: cert-validity ALONE — no session header.
+            let resp = crate::commands::mls::ds_post_plain(
+                state,
+                "/v1/auth/publish-device-cert",
+                &body,
+            )
+            .await?;
+            if !resp.status().is_success() {
+                let s = resp.status();
+                let txt = resp.text().await.unwrap_or_default();
+                return Err(crate::error::Error::Other(anyhow::anyhow!(
+                    "publish-device-cert (cert-validity) {s}: {txt}"
+                )));
+            }
+            // A subsequent device's first cert publish completes its
+            // bootstrap; the session it used for register-device /
+            // enrollment-request has done its job.
+            *state.enrollment_session.lock().await = None;
+        }
+    }
 
     eprintln!(
         "[mls] device cert published for {user_id}:{device_id} (identity_version={identity_version})"
@@ -273,7 +318,11 @@ pub async fn resign_stale_device_certs(
         out
     };
 
-    let mut count = 0;
+    // Sign every stale device's cert with the account identity key (held only in
+    // the OS keystore) BEFORE any remote write, collecting the cert columns. The
+    // re-sign never touches `mls_signature_pub` — only the cert columns — so it
+    // cannot change a device's DS-auth credential.
+    let mut signed: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(devices.len());
     for (device_id, sig_pub_bytes) in devices {
         let issued_at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -289,24 +338,28 @@ pub async fn resign_stale_device_certs(
             issued_at,
         )
         .await?;
+        signed.push((device_id, cert, issued_at.to_string()));
+    }
+    let count = signed.len();
 
-        let issued_at_str = issued_at.to_string();
-        conn.execute(
-            "UPDATE user_device \
-             SET device_cert = ?1, \
-                 cert_issued_at = ?2, \
-                 cert_identity_version = ?3 \
-             WHERE device_id = ?4 AND user_id = ?5",
-            libsql::params![
-                cert,
-                issued_at_str,
-                identity_version as i64,
-                device_id.clone(),
-                user_id
-            ],
-        )
-        .await?;
-        count += 1;
+    // DS seam: re-stamp the cert columns through the Delivery Service (the write
+    // API) — user-scoped: the actor re-signs certs for any of THEIR OWN devices,
+    // never another user's.
+    if !signed.is_empty() {
+        use base64::Engine as _;
+        let certs: Vec<serde_json::Value> = signed
+            .iter()
+            .map(|(device_id, cert, issued_at_str)| {
+                serde_json::json!({
+                    "device_id": device_id,
+                    "device_cert": base64::engine::general_purpose::STANDARD.encode(cert),
+                    "cert_issued_at": issued_at_str,
+                    "cert_identity_version": identity_version as i64,
+                })
+            })
+            .collect();
+        let body = serde_json::json!({ "certs": certs, "user_id": user_id });
+        crate::commands::mls::ds_post_ok(state, "/v1/devices/resign", &body).await?;
     }
 
     eprintln!(

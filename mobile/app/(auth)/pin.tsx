@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { View, Text, Pressable } from "react-native";
 import { useRouter } from "expo-router";
 import { Screen, Crumb } from "../../components/ui";
-import { PollisMark } from "../../components/PollisMark";
+import { Icon } from "../../components/icons";
 import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
 import {
   useSetPin,
@@ -149,7 +149,6 @@ function AuthPIN() {
         ]}
       />
       <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
-        <PollisMark />
         <View style={{ gap: 8 }}>
           <Text style={[ty.h1, { color: semantic.ink }]}>{headline}</Text>
           <Text
@@ -229,6 +228,31 @@ function AuthPIN() {
               {error}
             </Text>
           ) : null}
+
+          {/* Always offer a way out of this screen — without it, an error
+              like "no key material to wrap; sign in again" strands the user
+              on the keypad with no path back to sign-in. */}
+          <Pressable
+            onPress={() => router.replace("/(auth)/email")}
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              alignSelf: "flex-start",
+              gap: 8,
+              marginTop: 40,
+            }}
+          >
+            <Icon.back color={semantic.ink} />
+            <Text
+              style={{
+                fontFamily: ty.body.fontFamily,
+                fontSize: 16,
+                color: semantic.ink,
+              }}
+            >
+              Sign in again
+            </Text>
+          </Pressable>
         </View>
       </View>
 
@@ -248,15 +272,18 @@ function AuthPIN() {
             key={i}
             disabled={k === ""}
             onPress={() => (k === "bk" ? setPin(pin.slice(0, -1)) : push(k))}
-            style={{
+            // Subtle press feedback: the key briefly fills with the soft amber
+            // tier so a tap is acknowledged without anything flashy.
+            style={({ pressed }) => ({
               width: "33.333%",
-              backgroundColor: palette.bg,
+              backgroundColor:
+                pressed && k !== "" ? semantic.accentSoft : palette.bg,
               paddingVertical: 18,
               alignItems: "center",
               justifyContent: "center",
               gap: 2,
               marginBottom: 1,
-            }}
+            })}
           >
             <Text
               style={{

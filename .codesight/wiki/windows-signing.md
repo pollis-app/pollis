@@ -1,6 +1,6 @@
 # Windows Code Signing — Azure Trusted Signing
 
-Pollis signs Windows `.exe` artifacts (inner binary + NSIS installer) using **Azure Trusted Signing**. Signing runs on the `windows-latest` GitHub Actions runner via `electron-builder`'s `signtoolOptions.sign` hook (`electron/build/sign.js`), which wraps `signtool.exe` with Azure's `/dlib` + `/dmdf` integration. The private key lives in Azure's HSM — no PFX, no hardware token.
+Pollis signs the Windows NSIS installer using **Azure Trusted Signing**. Signing runs on the `windows-latest` GitHub Actions runner inside **Tauri's bundler**: the release workflow injects a `bundle.windows.signCommand` into `src-tauri/tauri.conf.json` that points `signtool.exe` at Azure's Code Signing dlib (`signtool sign … /dlib Azure.CodeSigning.Dlib.dll /dmdf <metadata.json> %1`), then `pnpm build:tauri:windows` invokes it on the bundled artifact. The private key lives in Azure's HSM — no PFX, no hardware token.
 
 > Note: in earlier names of the service this was called "Azure Artifact Signing". The Azure resources below still appear under that namespace in the `az` CLI surface (`az artifact-signing …`) even though Microsoft markets the service as Trusted Signing today.
 
@@ -100,7 +100,7 @@ Steps 2 and 4 are **portal-only** — no CLI path exists. Everything else is scr
      --scope "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.CodeSigning/codeSigningAccounts/<account>/certificateProfiles/pollis-public"
    ```
 
-8. **Update Doppler** with the six secrets from the table above. The CI workflow (`.github/workflows/electron-release.yml`) picks them up automatically; `electron-builder`'s sign hook reads them at signing time and passes them into the Azure dlib.
+8. **Update Doppler** with the six secrets from the table above. The release workflow (`.github/workflows/desktop-release.yml`) picks them up automatically: it writes the signing metadata JSON, injects the `signtool` `signCommand` into `tauri.conf.json`, and Tauri's bundler invokes signtool at bundle time — which hands the metadata to the Azure dlib (authenticated via `DefaultAzureCredential` from `AZURE_TENANT_ID/CLIENT_ID/CLIENT_SECRET`).
 
 ## Migrating to an organization tenant
 

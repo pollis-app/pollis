@@ -5,7 +5,7 @@ Pollis has two tiers of automated tests:
 1. **Unit tests** (in-crate `#[cfg(test)]` modules) — pure logic, in-memory rusqlite schemas, no I/O.
 2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. This document covers the harness.
 
-> The harness is built on top of Tauri's test machinery (`tauri::test::get_ipc_response` + `MockRuntime`) because the underlying command logic lives in `pollis-core` and is reachable through either dispatcher. The shipping shell is Electron, but the harness drives the same commands through a headless Tauri runtime as a convenient test fixture — no separate Electron-side harness is needed because `pollis-core` is the unit under test in both cases.
+> The harness is built on top of Tauri's test machinery (`tauri::test::get_ipc_response` + `MockRuntime`). Tauri is the shipping shell, so the harness drives the real command logic through the same dispatch path the app uses, headlessly — `pollis-core` is the unit under test, reached through the `#[tauri::command]` shims exactly as at runtime.
 
 ## Integration harness — goals
 

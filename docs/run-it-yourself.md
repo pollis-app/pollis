@@ -72,9 +72,22 @@ walkthrough in [`livekit/DEPLOY.md`](../livekit/DEPLOY.md). The short version:
 ```bash
 # On a server with a domain + TLS cert:
 livekit-server generate-keys            # -> API key + secret
-# put them in livekit/livekit.yml under `keys:`, set your domain in nginx.conf
+# Add a keys: block to livekit/livekit.yml (it's omitted on purpose so no
+# secret is committed — the comment at the bottom of the file shows the shape):
+#   keys:
+#     <API key>: <API secret>
 docker compose -f livekit/docker-compose.yml up -d
 ```
+
+> **Heads-up on `nginx.conf`:** the committed `livekit/nginx.conf` is Pollis's
+> *production* ingress — it has server blocks for `rtc`/`downpage`/`api`/`api-dev`/
+> `deploy.pollis.com`, proxies to the `delivery`/`watchtower` containers, and
+> references Pollis's Let's Encrypt + Cloudflare-origin certs. For your own SFU
+> you only need the LiveKit block: keep the single `server { … proxy_pass
+> http://livekit:7880; }` (and the `:80` redirect), point `server_name` and the
+> cert paths at your domain, and delete the rest. (Pollis itself no longer
+> deploys this by hand — `livekit/DEPLOY.md` documents the `workflow_dispatch`
+> deploy button — but `docker compose up -d` on your box works exactly the same.)
 
 Note the `wss://` URL and the API key/secret — they go in your `.env` next. For a
 purely local sanity check you can also run `livekit-server --dev` and use its

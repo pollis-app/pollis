@@ -10,6 +10,7 @@ import type { RouterContext } from "../types/router";
 import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
 import { useSelfAuditAccountKey } from "../hooks/queries";
+import { formatDateTime } from "../utils/format";
 
 /// Human-readable summary for each `security_event.kind` the backend
 /// currently emits. Unknown kinds fall through to the raw string so we
@@ -54,15 +55,6 @@ function shortId(id: string): string {
     return id;
   }
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
-}
-
-function formatTimestamp(iso: string): string {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString();
-  } catch {
-    return iso;
-  }
 }
 
 const sectionHeaderClass =
@@ -303,7 +295,7 @@ export const SecurityPage: React.FC = observer(() => {
                       {deviceDisplayName(d)}
                     </span>
                     <span style={{ color: "var(--c-text-dim)" }}>
-                      Last seen {formatTimestamp(d.last_seen)}
+                      Last seen {formatDateTime(d.last_seen)}
                     </span>
                   </div>
                 )}
@@ -368,7 +360,7 @@ export const SecurityPage: React.FC = observer(() => {
                       <span style={{ color: "var(--c-text-muted)" }}>{detail}</span>
                     )}
                     <span style={{ color: "var(--c-text-dim)" }}>
-                      {formatTimestamp(event.created_at)}
+                      {formatDateTime(event.created_at)}
                     </span>
                   </div>
                 );

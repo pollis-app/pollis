@@ -17,7 +17,13 @@ mod auth;
 mod dms;
 #[path = "flows/groups.rs"]
 mod groups;
+#[path = "flows/heavy_churn.rs"]
+mod heavy_churn;
 #[path = "flows/messages.rs"]
 mod messages;
+#[path = "flows/rejoin.rs"]
+mod rejoin;
+#[path = "flows/security.rs"]
+mod security;
 #[path = "flows/voice.rs"]
 mod voice;

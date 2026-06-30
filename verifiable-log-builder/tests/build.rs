@@ -254,6 +254,59 @@ async fn tampered_entry_fails_verification() {
     );
 }
 
+#[tokio::test]
+async fn empty_commit_log_yields_empty_commit_log_error_not_no_db_source() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("empty.db");
+    // A connectable DB with the right table but ZERO rows — the freshly-cut-over
+    // log DB case. The DB is fine; it is just empty.
+    seed_db(&db_path, &[]).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+    assert!(read.is_empty());
+
+    let err = source::ensure_non_empty(&read).unwrap_err();
+    // It must be the empty-table signal, NOT the missing-`--db` signal.
+    assert!(
+        matches!(err, verifiable_log_builder::BuilderError::EmptyCommitLog),
+        "expected EmptyCommitLog, got: {err}"
+    );
+    let msg = err.to_string();
+    assert!(msg.contains("db connected OK"), "got: {msg}");
+    assert!(
+        !msg.contains("--db") && !msg.contains("TURSO_DATABASE_URL"),
+        "must not look like a missing-db-source error: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn empty_commit_log_still_builds_a_valid_bundle() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("empty.db");
+    seed_db(&db_path, &[]).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+
+    // A zero-row commit log produces a valid empty bundle (one STH over tree
+    // size 0, no entries). This is what keeps `serve generate --bundle ...`
+    // working when the commit log happens to be empty: the file always exists
+    // and parses, rather than the builder aborting and leaving it missing.
+    let bundle = build_bundle(&read, &signing_key(), TS).unwrap();
+    assert_eq!(bundle.entries.len(), 0);
+    assert_eq!(bundle.inclusion.len(), 0);
+    assert_eq!(bundle.consistency.len(), 0);
+    assert_eq!(bundle.sths.len(), 1);
+    assert_eq!(bundle.sths[0].tree_size, 0);
+    assert!(monitor_verify(&bundle), "empty bundle must still verify");
+
+    // And it round-trips through the on-disk JSON shape `serve generate` reads.
+    let json = serde_json::to_string_pretty(&bundle).unwrap();
+    let reparsed: Bundle = serde_json::from_str(&json).unwrap();
+    assert!(monitor_verify(&reparsed));
+}
+
 #[test]
 fn keygen_output_roundtrips() {
     let g = keys::generate();

@@ -155,7 +155,11 @@ function Msg({
 
 function TextChat() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string; kind?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    kind?: string;
+    name?: string;
+  }>();
   const conversationId = params.id ?? null;
   const kind: ConversationKind | null =
     params.kind === "channel" || params.kind === "dm" ? params.kind : null;
@@ -242,6 +246,23 @@ function TextChat() {
   }, [messages]);
 
   const ctxLabel = kind === "dm" ? "DIRECT" : "CHANNEL";
+
+  // Header title: prefer the human name passed in by the opener (channel name
+  // or DM peer handle). For DMs opened without one, fall back to the other
+  // participant's username derived from the messages. Never show the raw
+  // conversation ULID — that's what was overflowing the context bar.
+  const peerName = useMemo(() => {
+    if (kind !== "dm") {
+      return null;
+    }
+    const peerMsg = messages.find((m) => m.sender_id !== currentUser?.id);
+    return peerMsg?.sender_username ?? null;
+  }, [kind, messages, currentUser?.id]);
+
+  const title =
+    (typeof params.name === "string" && params.name.trim()) ||
+    peerName ||
+    (kind === "dm" ? "Direct message" : "Channel");
 
   return (
     <Screen>
@@ -342,16 +363,27 @@ function TextChat() {
       <Ctx
         cr={ctxLabel}
         name={
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-            <Icon.hash color={semantic.ink} />
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
+              flex: 1,
+              minWidth: 0,
+            }}
+          >
+            {kind === "channel" ? <Icon.hash color={semantic.ink} /> : null}
             <Text
+              numberOfLines={1}
+              ellipsizeMode="tail"
               style={{
+                flex: 1,
                 fontFamily: ty.rowN.fontFamily,
                 fontSize: 15,
                 color: semantic.ink,
               }}
             >
-              {conversationId ?? "—"}
+              {title}
             </Text>
           </View>
         }

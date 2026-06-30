@@ -13,7 +13,7 @@ use verifiable_log::{
 };
 use verifiable_log_builder::account_key::{AccountKeyInvariant, STH_CONTEXT, TENANT};
 use verifiable_log_builder::builder::Bundle;
-use verifiable_log_builder::{build_account_bundle, source};
+use verifiable_log_builder::{build_account_bundle, build_bundle, source};
 
 const TS: u64 = 1_700_000_000_000;
 const KEY: [u8; 32] = [9u8; 32];
@@ -206,6 +206,46 @@ async fn rebuild_is_byte_identical_for_a_reused_timestamp() {
     assert_ne!(
         first, moved,
         "a different timestamp must change the signed STH bytes"
+    );
+}
+
+/// The two tenants are independent: an empty commit log must not block the
+/// account-key bundle (and vice versa). This mirrors the builder's decoupled
+/// `run_build` — an empty commit source surfaces `EmptyCommitLog` and still
+/// yields a valid (empty) commit bundle, while the non-empty account log builds
+/// and verifies entirely on its own.
+#[tokio::test]
+async fn account_bundle_builds_when_commit_log_is_empty() {
+    // Commit log empty (e.g. right after Goal A's cutover).
+    let empty_commits: Vec<source::CommitRow> = Vec::new();
+    assert!(
+        matches!(
+            source::ensure_non_empty(&empty_commits).unwrap_err(),
+            verifiable_log_builder::BuilderError::EmptyCommitLog
+        ),
+        "an empty commit log must surface EmptyCommitLog"
+    );
+    // It still produces a valid bundle rather than aborting the whole run.
+    build_bundle(&empty_commits, &signing_key(), TS)
+        .expect("empty commit log must still build a valid bundle");
+
+    // The account-key log is non-empty and its bundle builds + verifies
+    // independently of the commit log's (empty) state.
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("accounts.db");
+    let rows = vec![
+        row(1, "u-alice", 1, &[0xa1; 32]),
+        row(2, "u-bob", 1, &[0xb1; 32]),
+    ];
+    seed_db(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_account_key_log(&conn).await.unwrap();
+    let bundle = build_account_bundle(&read, &signing_key(), TS).unwrap();
+    assert_eq!(bundle.entries.len(), 2);
+    assert!(
+        monitor_verify_account(&bundle),
+        "account bundle must verify even though the commit log is empty"
     );
 }
 

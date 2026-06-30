@@ -122,7 +122,7 @@ pub async fn publish_to_room_server(
 /// is already connected to. Used by `send_message` to notify group channel members.
 /// Returns silently (non-fatal) if the room is not connected.
 pub async fn publish_new_message_to_room(
-    livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
+    state: &Arc<AppState>,
     room_id: &str,
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
@@ -130,7 +130,7 @@ pub async fn publish_new_message_to_room(
     sender_username: Option<&str>,
 ) -> Result<()> {
     let room = {
-        let lk = livekit.lock().await;
+        let lk = state.livekit.lock().await;
         lk.rooms.get(room_id).map(|(r, _)| Arc::clone(r))
     };
 
@@ -276,6 +276,28 @@ pub async fn publish_membership_changed_to_room(
         .map_err(|e| Error::Other(anyhow::anyhow!("publish_membership_changed: {e}")))?;
 
     Ok(())
+}
+
+/// Broadcasts a `join_requests_changed` event to a group's LiveKit room so
+/// connected admins refetch the pending join-request list when a new request
+/// arrives. Unlike `publish_membership_changed_to_room`, the requester is NOT
+/// a member of the group and is therefore not connected to its room, so this
+/// rides the server-side `publish_to_room_server` path (a temporary "server"
+/// participant) rather than a locally-connected room. Best-effort and
+/// fire-and-forget — callers should log errors.
+pub async fn publish_join_requests_changed_to_room(
+    config: &Config,
+    group_id: &str,
+) -> Result<()> {
+    publish_to_room_server(
+        config,
+        group_id,
+        serde_json::json!({
+            "type": "join_requests_changed",
+            "group_id": group_id,
+        }),
+    )
+    .await
 }
 
 /// Broadcasts a `member_role_changed` event to a group's LiveKit room so

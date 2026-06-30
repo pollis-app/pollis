@@ -824,7 +824,10 @@ async fn envelope_cleanup_ttl_or_watermark() {
     let channel_id = alice.general_channel_id(&group_id).await;
     alice.process_commits_for(&channel_id).await;
 
-    let remote = alice.state.remote_db.clone();
+    // The backdating + watermark hacks below poke the "server" DB directly,
+    // standing in for server-side envelope GC effects. The client's own
+    // `state.remote_db` is a read-only view, so use the writable world handle.
+    let remote = crate::harness::writable_remote().await;
 
     // ── Negative: young envelope, only sender fetched ──
     // Wipe watermarks first so add-member's seeded "now" rows don't satisfy
@@ -973,8 +976,9 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
 
     // Precondition sanity (diagnostic): the fork was actually produced. The
     // add-bob commit was epoch 0, so the concurrent adds race for epoch 1.
-    let remote = alice.state.remote_db.clone();
-    let distinct = distinct_commits_at_epoch(&remote, &group_id, 1).await;
+    // The commit log lives on the LOG DB (split harness), so inspect it there.
+    let log = alice.state.log_db.clone();
+    let distinct = distinct_commits_at_epoch(&log, &group_id, 1).await;
     eprintln!("[test] distinct commits at epoch 1 = {distinct} (fork iff > 1)");
 
     // Membership never shrank — bob is still a current member.
@@ -1019,6 +1023,96 @@ async fn concurrent_commits_at_same_epoch_must_not_fork_a_member() {
     drop(bob);
     drop(dave);
     drop(erin);
+}
+
+/// Issue #411: a lost SUCCESS-response must not wedge the committer or strand
+/// the member they just added. The DS writes the add-carol commit (it lands
+/// canonically) but alice sees a network error. The fix must make alice ADOPT
+/// her own landed commit — merge to advance her epoch AND write carol's Welcome
+/// + publish GroupInfo — rather than roll back, delete her group, and wedge.
+///
+/// On the pre-fix code alice clears the pending commit and never writes the
+/// Welcome, so carol can't join and alice later self-deletes against a stale
+/// GroupInfo: both assertions below fail.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn lost_submit_response_is_adopted_not_wedged() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Lossy").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // Add bob and settle both at a shared epoch.
+    alice.invite(&group_id, &bob_p.username).await;
+    let bob_inv = bob
+        .first_pending_invite()
+        .await
+        .expect("bob invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&bob_inv).await;
+    bob.poll().await;
+    alice.process_commits_for(&channel_id).await;
+    bob.process_commits_for(&channel_id).await;
+
+    // Arm the one-shot fault on the in-process Delivery Service: alice's next
+    // commit lands (commit + Welcome + GroupInfo all written) but the DS's
+    // success response is dropped — a lost success-response on the real HTTP
+    // path. The client must adopt its own canonical commit, not wedge.
+    crate::harness::LOSE_NEXT_DS_RESPONSE.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    alice.invite(&group_id, &carol_p.username).await;
+
+    assert!(
+        !crate::harness::LOSE_NEXT_DS_RESPONSE.load(std::sync::atomic::Ordering::SeqCst),
+        "DS lost-response fault should have fired exactly once"
+    );
+
+    // INVARIANT 1 — carol's Welcome was written despite the lost response, so
+    // she can join.
+    let carol_inv = carol
+        .first_pending_invite()
+        .await
+        .expect("carol must have a pending invite after the lost-response add")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    carol.accept_invite(&carol_inv).await;
+    carol.poll().await;
+    alice.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // INVARIANT 2 — alice did not wedge: she can still send, and both the
+    // existing member (bob) and the member added through the lost-response
+    // commit (carol) decrypt it.
+    alice
+        .send_channel_message(&channel_id, "after-lost-response")
+        .await;
+    bob.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    for (who, client) in [("bob", &bob), ("carol", &carol)] {
+        let msgs = client.fetch_channel_messages(&channel_id).await;
+        let contents: Vec<&str> = msgs.iter().filter_map(|m| m["content"].as_str()).collect();
+        assert!(
+            contents.contains(&"after-lost-response"),
+            "{who} (a current member) must decrypt alice's message after she adopted her own \
+             lost-response commit — committer wedged or member stranded otherwise. got: {msgs:#?}"
+        );
+    }
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
 }
 
 /// #356 — a device whose `user_device` row has been deleted (the revoked-device
@@ -1085,7 +1179,10 @@ async fn revoked_device_cannot_rejoin_group() {
     // Pre-#372 this was a hard DELETE; the migration to tombstones changed
     // revoke_device to set revoked_at, and this test mirrors that path.
     {
-        let conn = alice.state.remote_db.conn().await.expect("remote conn");
+        // Server-side revocation effect — poke the writable "server" handle
+        // directly (the client's `state.remote_db` is a read-only view).
+        let remote = crate::harness::writable_remote().await;
+        let conn = remote.conn().await.expect("remote conn");
         conn.execute(
             "UPDATE user_device SET revoked_at = datetime('now') WHERE user_id = ?1",
             libsql::params![bob_p.id.clone()],
@@ -1133,4 +1230,204 @@ async fn revoked_device_cannot_rejoin_group() {
     drop(alice);
     drop(bob);
     drop(carol);
+}
+
+/// Read the `mls_group_info` row (epoch, byte length) for a conversation, if any.
+async fn group_info_row(
+    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    conversation_id: &str,
+) -> Option<(i64, usize)> {
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT epoch, group_info FROM mls_group_info WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("group_info query");
+    match rows.next().await.expect("row") {
+        Some(row) => {
+            let epoch: i64 = row.get(0).expect("epoch");
+            let blob: Vec<u8> = row.get(1).expect("group_info");
+            Some((epoch, blob.len()))
+        }
+        None => None,
+    }
+}
+
+/// Count `mls_welcome` rows for a recipient in a conversation.
+async fn welcome_count(
+    remote: &Arc<pollis_lib::db::remote::RemoteDb>,
+    conversation_id: &str,
+    recipient_id: &str,
+) -> i64 {
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM mls_welcome WHERE conversation_id = ?1 AND recipient_id = ?2",
+            libsql::params![conversation_id.to_string(), recipient_id.to_string()],
+        )
+        .await
+        .expect("welcome count query");
+    let row = rows.next().await.expect("row").expect("some row");
+    row.get::<i64>(0).expect("count")
+}
+
+/// Slice 1 — commit + Welcome + GroupInfo land atomically through the Delivery
+/// Service. The whole flows harness routes submission through an in-process
+/// `pollis-delivery` instance (see `harness::world`), so this asserts the DS
+/// path specifically:
+///
+///   1. When alice adds bob, the DS writes the add commit, bob's Welcome, AND
+///      the resulting-epoch GroupInfo as one unit — all three rows are present
+///      remotely after the single `invite` call (no separate inline Welcome
+///      write, no post-merge GroupInfo republish).
+///   2. Bob joins purely from the DS-written Welcome and decrypts alice's
+///      message — proving the Welcome the DS persisted is the real one.
+///   3. The GroupInfo the DS wrote sits at the resulting epoch (epoch after the
+///      add), so a future device could external-join from it.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Atomic").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    // The MLS control-plane tables (`mls_group_info`, `mls_welcome`) live on the
+    // LOG DB in the split harness — inspect them there, not on the main DB.
+    let remote = alice.state.log_db.clone();
+
+    // Baseline GroupInfo: init_mls_group published the epoch-0 GroupInfo. The
+    // MLS group is keyed by group_id (the channel's group), so that's the
+    // conversation id for the control-plane rows.
+    let (epoch0, _) = group_info_row(&remote, &group_id)
+        .await
+        .expect("epoch-0 GroupInfo should exist after group creation");
+    assert_eq!(epoch0, 0, "fresh group's GroupInfo should be at epoch 0");
+
+    // Alice invites bob. reconcile builds the add commit and hands commit +
+    // Welcome + GroupInfo to the delivery seam, which here is the in-process
+    // Delivery Service over HTTP. The DS writes all three atomically on the win.
+    alice.invite(&group_id, &bob_p.username).await;
+
+    // (1) The DS wrote bob's Welcome.
+    assert_eq!(
+        welcome_count(&remote, &group_id, &bob_p.id).await,
+        1,
+        "the DS should have written exactly one Welcome for bob alongside the commit"
+    );
+
+    // (1) The DS advanced the stored GroupInfo to the resulting epoch (1). The
+    // committer no longer republishes GroupInfo after the merge — this row came
+    // from the commit bundle, written atomically with the commit by the DS.
+    let (epoch_after_add, gi_len) = group_info_row(&remote, &group_id)
+        .await
+        .expect("GroupInfo should exist after the add commit");
+    assert_eq!(
+        epoch_after_add, 1,
+        "the DS-written GroupInfo should sit at the resulting epoch (1)"
+    );
+    assert!(gi_len > 0, "GroupInfo blob must be non-empty");
+
+    // (2) Bob joins purely from the DS-written Welcome, then decrypts a message.
+    bob.accept_invite(
+        bob.first_pending_invite()
+            .await
+            .expect("bob pending invite")["id"]
+            .as_str()
+            .expect("invite id"),
+    )
+    .await;
+    bob.poll().await;
+
+    alice.send_channel_message(&channel_id, "atomic-hello").await;
+
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let bob_contents: Vec<&str> = bob_msgs
+        .iter()
+        .filter_map(|m| m["content"].as_str())
+        .collect();
+    assert!(
+        bob_contents.contains(&"atomic-hello"),
+        "bob should decrypt alice's message after joining via the DS-written Welcome, got: {bob_msgs:#?}"
+    );
+
+    drop(alice);
+    drop(bob);
+}
+
+/// Regression: a dropped bootstrap GroupInfo publish is self-healed on the next
+/// "group touched" pass, instead of bricking the group forever.
+///
+/// The bug: `init_mls_group` publishes the epoch-0 GroupInfo best-effort. If that
+/// DS post fails (a transient outage right as the group is created), nothing ever
+/// retried it — the post-merge republish only fired when a commit was applied
+/// (`any_applied`), which is never true for a freshly created, sole-member group.
+/// With no GroupInfo in the log DB, no member could ever external-join, so a group
+/// created during an outage was permanently unjoinable (and any message sent into
+/// it was silently lost).
+///
+/// We reproduce the stranded state directly — delete the epoch-0 GroupInfo row
+/// from the log DB (exactly what a failed publish leaves behind) — then run an
+/// ordinary commit-processing pass and assert the row reappears at the same epoch.
+/// Before the fix this pass was a no-op and the row stayed gone.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let _alice_p = alice.sign_up("alice@test.local").await;
+
+    let group_id = alice.create_group("Stranded").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    // MLS control-plane rows live on the LOG DB; the MLS group is keyed by group_id.
+    let log = alice.state.log_db.clone();
+
+    // Baseline: init_mls_group published the epoch-0 GroupInfo.
+    let (epoch0, _) = group_info_row(&log, &group_id)
+        .await
+        .expect("epoch-0 GroupInfo should exist after group creation");
+    assert_eq!(epoch0, 0, "fresh group's GroupInfo should be at epoch 0");
+
+    // Simulate the create-time publish having been dropped by a transient DS
+    // failure: remove the only GroupInfo row. This is the exact bricked state.
+    {
+        let conn = log.conn().await.expect("log conn");
+        conn.execute(
+            "DELETE FROM mls_group_info WHERE conversation_id = ?1",
+            libsql::params![group_id.clone()],
+        )
+        .await
+        .expect("delete group_info");
+    }
+    assert!(
+        group_info_row(&log, &group_id).await.is_none(),
+        "precondition: GroupInfo row should be gone (simulating the dropped publish)"
+    );
+
+    // An ordinary touch — the same commit-processing pass the sweep, send, and
+    // realtime ingest all run. No commit is applied (sole-member group), so the
+    // old `any_applied` republish would NOT fire; only the new durability backstop
+    // does.
+    alice.process_commits_for(&channel_id).await;
+
+    // The heal republished the current-epoch GroupInfo, so a member can once
+    // again external-join the group.
+    let (healed_epoch, len) = group_info_row(&log, &group_id)
+        .await
+        .expect("GroupInfo should be republished by the self-heal on the next touch");
+    assert_eq!(
+        healed_epoch, 0,
+        "republished GroupInfo should be at the group's current epoch (0)"
+    );
+    assert!(len > 0, "republished GroupInfo blob should be non-empty");
+
+    drop(alice);
 }

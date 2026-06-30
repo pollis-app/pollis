@@ -46,7 +46,8 @@ pub use participants::{
 };
 pub use publish::{
     cancel_call, dismiss_call_on_my_devices, publish_deleted_message_to_room,
-    publish_edited_message_to_room, publish_member_role_changed_to_room,
+    publish_edited_message_to_room, publish_join_requests_changed_to_room,
+    publish_member_role_changed_to_room,
     publish_membership_changed_to_room, publish_new_message_to_room, publish_ping,
     publish_to_room_server, publish_to_user_inbox, publish_typing, publish_voice_presence,
     start_call, StartCallResult,
@@ -115,6 +116,13 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
                 kind,
             });
             return conv_id;
+        }
+        Some("join_requests_changed") => {
+            if let Some(group_id) = data.get("group_id").and_then(|v| v.as_str()) {
+                let _ = channel.send(RealtimeEvent::JoinRequestsChanged {
+                    group_id: group_id.to_owned(),
+                });
+            }
         }
         Some("voice_joined") => {
             if let (Some(channel_id), Some(user_id)) = (

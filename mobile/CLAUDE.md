@@ -98,10 +98,22 @@ ndk;27.1.12297006 cmake;3.22.1`. A clean `gradlew assembleDebug` produces
 `android/app/build/outputs/apk/debug/app-debug.apk` with `libpollis-native.so`
 embedded for arm64-v8a / armeabi-v7a / x86_64.
 
-**iOS is NOT buildable on this Mac** — it's macOS 14.7 + Xcode 15.1, and Expo
-SDK 55 requires **Xcode 26 / macOS 26** (verified still true June 2026: SDK 54
-was the last to accept Xcode 16.x). Needs a macOS upgrade or a different
-machine; the iOS xcframework present locally is a stale prior artifact.
+**iOS build verified on macOS 26.4.1 (Tahoe) + Xcode 26.4.1, 2026-06-22.** A
+clean run from a fresh checkout works end to end with no source changes: `ubrn
+build ios` → `PollisNativeFramework.xcframework` (device `ios-arm64` + universal
+`ios-arm64_x86_64-simulator` slices), `expo prebuild --platform ios` →
+`pod install`, then `pnpm expo run:ios` compiles RN-from-source and launches on
+the iPhone 17 Pro simulator; the bridge initializes against live Turso and the
+app reaches the auth screen. Toolchain (all no-sudo): the three iOS Rust targets
+(`rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios`),
+`uniffi-bindgen-react-native` CLI pinned to `0.31.0-2`, and CocoaPods.
+
+**Expo SDK 55 requires Xcode 26 / macOS 26** (verified still true June 2026: SDK
+54 was the last to accept Xcode 16.x). On an older macOS/Xcode (e.g. macOS 14.7
++ Xcode 15.1) the build hits `@MainActor` parse errors in `expo-modules-core`
+([expo/expo#42525](https://github.com/expo/expo/issues/42525) — closed, won't
+fix); that machine needs a macOS/Xcode upgrade and any iOS xcframework it
+carries is a stale prior artifact.
 
 ---
 
@@ -161,6 +173,27 @@ Prefer `pnpm expo install <pkg>` over `pnpm add <pkg>` for Expo-ecosystem packag
 ```bash
 cd mobile && rm -rf node_modules pnpm-lock.yaml && pnpm install --ignore-workspace
 ```
+
+### 9. Bridge commands MUST run off the JS thread (small-stack overflow)
+
+uniffi-bindgen-react-native polls exported `async` futures **directly on the
+JS/Hermes thread**, which has a small stack (~1 MB iOS, often less on Android).
+Some synchronous work we call into needs far more — notably libsql's recursive
+SQL parser (`yyParser::yy_reduce`), which runs client-side on **every** query.
+On the JS thread it overflows the guard page and hard-crashes the whole app
+with SIGBUS (`KERN_PROTECTION_FAILURE` at the stack guard region) on the first
+DB query. This bit us at `verify_otp` (the first query in the auth flow) and
+reproduced identically on iOS and Android. Desktop never hits it — Tauri runs
+commands on a multi-threaded Tokio runtime with generous worker stacks.
+
+Fix (in `pollis-core/src/bridge.rs`): `init_pollis` and `invoke` immediately
+hand off to `run_on_worker`, which spawns the real work on a dedicated
+multi-threaded Tokio runtime whose worker threads (named `pollis-bridge`) carry
+an 8 MB stack; the JS thread only `await`s the join handle. **Any new bridge
+entry point that does real work must go through `run_on_worker`** — don't run
+command bodies inline on the uniffi-exported future. To confirm the runtime is
+live at runtime: `sample <app-pid> 1 | grep pollis-bridge` (note `ps -M`
+truncates thread names and won't show them).
 
 ---
 

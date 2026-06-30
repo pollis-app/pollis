@@ -1,147 +1,131 @@
-# LiveKit Server Deployment
+# LiveKit + nginx Deployment
+
+This directory holds the **canonical, deployable** config for the LiveKit media
+server and the shared nginx ingress on the Pollis VPS. `main` is the source of
+truth — **do not hand-edit on the box**; deploys go through a button.
+
+## Deploy (the button)
+
+**Actions tab → "Deploy LiveKit + nginx" → Run workflow** (`prod` default).
+
+`.github/workflows/livekit-deploy.yml` (#410) SSHes to the box, syncs this dir,
+renders the LiveKit keys from secrets, and runs `docker compose up -d` + a
+graceful nginx reload. No manual SSH. See "Workflow requirements" below.
 
 ## Stack
-- LiveKit server (Docker)
-- Nginx reverse proxy (Docker)
-- Let's Encrypt SSL (host certbot)
 
-## Directory Structure
+| Service | Image (pinned) | Managed by |
+|---------|----------------|------------|
+| `livekit` | `livekit/livekit-server:v1.10.0` | this compose |
+| `nginx` (shared ingress) | `nginx:1.29-alpine` | this compose |
+| `delivery` / `delivery-dev` | `ghcr.io/actuallydan/pollis-delivery:{prod,dev}` | **#407** (Watchtower) — standalone |
+| `watchtower` | `containrrr/watchtower` | **#407** — standalone |
+
+All five containers share the `livekit_default` docker network. nginx reaches
+the delivery/watchtower containers by network alias.
+
 ```
 livekit/
-  docker-compose.yml
-  livekit.yml
-  nginx.conf
-  README.md
+  docker-compose.yml   # livekit + nginx only (delivery/watchtower owned by #407)
+  livekit.yml          # non-secret; deploy appends the keys: block from secrets
+  nginx.conf           # full ingress: rtc, downpage (LiveKit) + api, api-dev, deploy (delivery)
+  DEPLOY.md
 ```
 
----
+### Ingress routing (nginx.conf)
 
-## Fresh Server Setup
+| Hostname | Upstream | Cert |
+|----------|----------|------|
+| `rtc.pollis.com` | `livekit:7880` | Let's Encrypt |
+| `downpage.xyz` | `livekit:7880` (legacy) | Let's Encrypt |
+| `api.pollis.com` | `delivery:8788` | Cloudflare Origin (`/etc/ssl/cloudflare/verify.pollis.com.*`) |
+| `api-dev.pollis.com` | `delivery-dev:8788` | Cloudflare Origin |
+| `deploy.pollis.com` | `watchtower:8080` | Cloudflare Origin |
 
-### 1. Install Docker
+> **Ordering dependency:** nginx resolves `proxy_pass` upstreams at config load,
+> so the `delivery`/`delivery-dev`/`watchtower` containers must be **up before
+> nginx starts or reloads** — otherwise nginx fails with "host not found in
+> upstream". On a fresh box, deploy the Delivery Service (#407) first. The deploy
+> workflow runs `nginx -t` before reloading to catch this.
+
+## Workflow requirements (one-time)
+
+- **Secrets:** `VPS_SSH_KEY` (deploy private key; add the pubkey to the box's
+  `authorized_keys`), `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (must match what
+  shipped clients use).
+- **Variables:** `VPS_HOST` (`31.97.140.76`), `VPS_USER` (`root`).
+- **GitHub Environment** `livekit-prod` (+ `livekit-dev` if used) for the
+  optional manual-approval gate.
+
+## Fresh-box provisioning (one-time, manual)
+
+The deploy workflow assumes the box already has Docker, the firewall, certs, and
+the host tunables in place. On a brand-new box:
+
+### 1. Docker + firewall
 ```bash
 curl -fsSL https://get.docker.com | sh
+ufw allow 80/tcp && ufw allow 443/tcp
+ufw allow 7881/tcp          # ICE TCP
+ufw allow 7882/udp          # ICE UDP
+ufw allow 5349/tcp          # TURNS (TURN over TLS, for VPNs)
+ufw allow 30000:30100/udp   # TURN relay media ports
+ufw reload
 ```
+Note: if the host (e.g. Hostinger) has a control-panel firewall, open the same
+ports there too — it overrides UFW.
 
-### 2. Open firewall ports
+### 2. Certs
+- **Let's Encrypt** (`rtc.pollis.com`, `downpage.xyz`) via host certbot:
+  ```bash
+  apt install certbot -y
+  certbot certonly --standalone -d rtc.pollis.com -d downpage.xyz
+  ```
+  Auto-renews via a systemd timer; nginx must reload to pick up renewals:
+  ```bash
+  # crontab -e
+  0 3 * * * certbot renew --quiet && docker compose -f /root/livekit/docker-compose.yml exec -T nginx nginx -s reload
+  ```
+- **Cloudflare Origin cert** for `api`/`api-dev`/`deploy.pollis.com` at
+  `/etc/ssl/cloudflare/verify.pollis.com.{pem,key}` (Cloudflare runs Full
+  (strict) in front of these).
+
+### 3. Host tunables (UDP receive buffer)
+LiveKit warns and drops packets under load if the OS UDP receive buffer is below
+5 MB. Apply once (already applied on the current box):
 ```bash
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw allow 7881/tcp          # ICE TCP
-sudo ufw allow 7882/udp          # ICE UDP
-sudo ufw allow 5349/tcp          # TURNS (TURN over TLS, for VPN clients)
-sudo ufw allow 30000:30100/udp   # TURN relay media ports
-sudo ufw reload
+sysctl -w net.core.rmem_max=5000000
+sysctl -w net.core.rmem_default=5000000
+echo "net.core.rmem_max=5000000"     >> /etc/sysctl.conf
+echo "net.core.rmem_default=5000000" >> /etc/sysctl.conf
 ```
 
-Note: If your host (e.g. Hostinger) has a control panel firewall, open the same ports there too -- it overrides UFW.
+### 4. Delivery Service
+Stand up `delivery` / `delivery-dev` / `watchtower` (#407) so nginx's upstreams
+resolve, then hit the **Deploy LiveKit + nginx** button.
 
-### 3. Install certbot and generate SSL cert
-```bash
-sudo apt install certbot -y
-sudo certbot certonly --standalone -d yourdomain.com
-```
-
-Certbot installs a systemd timer that auto-renews the cert before it expires. Certs expire every 90 days.
-
-### 4. Clone or copy this directory onto the server
-```bash
-mkdir ~/livekit && cd ~/livekit
-# copy docker-compose.yml, livekit.yml, nginx.conf here
-```
-
-### 5. Edit livekit.yml
-Replace `your_api_key` and `your_api_secret` with your actual credentials:
-```bash
-vim livekit.yml
-```
-
-Generate a key/secret pair if you don't have one:
-```bash
-livekit-server generate-keys
-```
-
-### 6. Edit nginx.conf
-Replace both instances of `yourdomain.com` with your actual domain:
-```bash
-vim nginx.conf
-```
-
-### 7. Start the stack
-```bash
-docker compose up -d
-```
-
-### 8. Verify
-```bash
-docker compose ps
-curl https://yourdomain.com
-```
-
-Both containers should show as `Up` and the curl should return `OK`.
-
----
-
-## App Connection
+## App connection
 
 | Protocol | Endpoint |
 |----------|----------|
-| WebSocket (prod) | `wss://yourdomain.com` |
-| HTTP API | `https://yourdomain.com` |
+| WebSocket (prod) | `wss://rtc.pollis.com` |
+| HTTP API | `https://rtc.pollis.com` |
 
----
-
-## SSL Renewal
-
-Certbot renews automatically, but Nginx needs a restart to pick up the new cert:
+## Useful commands (on the box)
 
 ```bash
-sudo certbot renew
-docker compose restart nginx
+cd /root/livekit
+docker compose ps                 # status (livekit + nginx)
+docker compose logs -f livekit    # LiveKit logs
+docker compose exec nginx nginx -t            # validate ingress config
+docker compose exec nginx nginx -s reload     # graceful reload after a cert renew
+docker stats                      # live CPU/memory per container
 ```
 
-To automate this, add a cron job:
-```bash
-sudo crontab -e
-```
-```
-0 3 * * * certbot renew --quiet && docker compose -f /root/livekit/docker-compose.yml restart nginx
-```
+## Performance notes
 
----
-
-## Useful Commands
-
-```bash
-docker compose up -d          # start stack
-docker compose down           # stop stack
-docker compose restart        # restart all services
-docker compose ps             # status
-docker compose logs -f        # live logs
-docker compose logs livekit   # LiveKit logs only
-docker compose logs nginx     # Nginx logs only
-docker stats                  # live CPU/memory per container
-```
-
----
-
-## Performance Notes
-
-- Each participant media track consumes one UDP port from the 50000-50200 range
-- 200 ports handles ~20-30 concurrent users comfortably
-- To expand the range, edit the UDP ports in docker-compose.yml (note: large ranges cause slow Docker startup)
-- LiveKit exposes a Prometheus metrics endpoint at `/metrics` if you want to hook up monitoring later
-
-### UDP receive buffer
-
-LiveKit will warn at startup if the OS UDP receive buffer is below 5 MB (`UDP receive buffer is too small for a production set-up`). Under light load this doesn't matter, but at scale it causes packet drops and audio glitches. To fix:
-
-```bash
-# Apply immediately
-sudo sysctl -w net.core.rmem_max=5000000
-sudo sysctl -w net.core.rmem_default=5000000
-
-# Persist across reboots
-echo "net.core.rmem_max=5000000" | sudo tee -a /etc/sysctl.conf
-echo "net.core.rmem_default=5000000" | sudo tee -a /etc/sysctl.conf
-```
+- Each participant media track consumes one UDP port from the 30000–30100 range
+  (TURN relay); ~100 ports handles a healthy number of concurrent users.
+- LiveKit exposes Prometheus metrics at `/metrics` for future monitoring.
+- Expanding the UDP range means editing the port mapping in `docker-compose.yml`
+  *and* the firewall; large ranges slow Docker startup.

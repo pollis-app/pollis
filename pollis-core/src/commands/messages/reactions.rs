@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use ulid::Ulid;
 
 use crate::error::Result;
 use crate::state::AppState;
@@ -22,15 +21,14 @@ pub async fn add_reaction(
     emoji: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-    let id = Ulid::new().to_string();
-    let now = chrono::Utc::now().to_rfc3339();
-
-    conn.execute(
-        "INSERT OR IGNORE INTO message_reaction (id, message_id, user_id, emoji, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        libsql::params![id, message_id, user_id, emoji, now],
-    ).await?;
+    // DS seam: the server generates the row id + timestamp and binds the
+    // reacting user to the authenticated identity.
+    let body = serde_json::json!({
+        "message_id": message_id,
+        "emoji": emoji,
+        "user_id": user_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/reactions/add", &body).await?;
 
     Ok(())
 }
@@ -43,12 +41,12 @@ pub async fn remove_reaction(
     emoji: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    conn.execute(
-        "DELETE FROM message_reaction WHERE message_id = ?1 AND user_id = ?2 AND emoji = ?3",
-        libsql::params![message_id, user_id, emoji],
-    ).await?;
+    let body = serde_json::json!({
+        "message_id": message_id,
+        "emoji": emoji,
+        "user_id": user_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/reactions/remove", &body).await?;
 
     Ok(())
 }

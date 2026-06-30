@@ -19,13 +19,59 @@
 //! `ok(...)` so it round-trips as a JSON string on the JS side.
 
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::OnceCell;
 
 use crate::config::Config;
 use crate::state::AppState;
 
 static APP_STATE: OnceCell<Arc<AppState>> = OnceCell::const_new();
+
+/// A dedicated multi-threaded Tokio runtime whose worker threads carry a
+/// large stack, used to run *all* bridge command work off the calling
+/// thread.
+///
+/// Why this exists: uniffi-bindgen-react-native drives exported `async`
+/// functions by polling their futures **directly on the JS/Hermes thread**
+/// (see the `ffi_*_rust_future_poll` → JSI call path). That thread has a
+/// small stack — roughly 1 MB on iOS, often less on Android — while some
+/// synchronous work we call into needs far more: libsql parses every SQL
+/// statement client-side through a deeply-recursive lemon parser
+/// (`yyParser::yy_reduce`), which blows past the JS thread's guard page and
+/// crashes the whole app with SIGBUS (`KERN_PROTECTION_FAILURE` at the
+/// stack guard region) on the first query. Desktop never hits this because
+/// Tauri already runs commands on a multi-threaded Tokio runtime with
+/// generous worker stacks.
+///
+/// By spawning the real work onto these big-stack workers and only
+/// `await`ing the join handle on the JS thread, the JS thread does nothing
+/// stack-hungry and the parser gets the headroom it needs.
+fn worker_runtime() -> &'static tokio::runtime::Runtime {
+    static RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RT.get_or_init(|| {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .thread_stack_size(8 * 1024 * 1024)
+            .thread_name("pollis-bridge")
+            .enable_all()
+            .build()
+            .expect("failed to build pollis bridge worker runtime")
+    })
+}
+
+/// Run a command future on the big-stack [`worker_runtime`] and await its
+/// result from the (small-stack) calling thread. The closure builds the
+/// future on the worker so nothing stack-hungry runs on the JS thread.
+async fn run_on_worker<F, T>(fut: F) -> Result<T, BridgeError>
+where
+    F: std::future::Future<Output = Result<T, BridgeError>> + Send + 'static,
+    T: Send + 'static,
+{
+    worker_runtime()
+        .spawn(fut)
+        .await
+        .map_err(|e| BridgeError::Bridge(format!("bridge worker task failed: {e}")))?
+}
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 #[uniffi(flat_error)]
@@ -54,6 +100,12 @@ impl From<anyhow::Error> for BridgeError {
 struct InitConfig {
     turso_url: String,
     turso_token: String,
+    /// Optional read-only commit-log DB connection. Absent → log_db falls back
+    /// to the main remote DB.
+    #[serde(default)]
+    log_db_url: Option<String>,
+    #[serde(default)]
+    log_db_token: Option<String>,
     /// Absolute path of a writable directory the bridge can park per-app
     /// state in. Required on Android (we drop the CA bundle there and
     /// scope `POLLIS_DATA_DIR` to it); optional everywhere else, where
@@ -78,8 +130,9 @@ struct InitConfig {
     livekit_api_key: String,
     #[serde(default)]
     livekit_api_secret: String,
+    /// Optional Delivery Service base URL. Absent → direct Turso writes.
     #[serde(default)]
-    resend_api_key: String,
+    pollis_delivery_url: Option<String>,
 }
 
 /// Initialize the process-global `AppState`. Safe to call multiple times —
@@ -89,6 +142,10 @@ struct InitConfig {
 /// use R2 / LiveKit yet can omit them).
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn init_pollis(config_json: String) -> Result<(), BridgeError> {
+    run_on_worker(init_pollis_inner(config_json)).await
+}
+
+async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
     APP_STATE
         .get_or_try_init(|| async {
             let parsed: InitConfig = serde_json::from_str(&config_json)?;
@@ -97,6 +154,8 @@ pub async fn init_pollis(config_json: String) -> Result<(), BridgeError> {
             let config = Config {
                 turso_url: parsed.turso_url,
                 turso_token: parsed.turso_token,
+                log_db_url: parsed.log_db_url.filter(|s| !s.is_empty()),
+                log_db_token: parsed.log_db_token.filter(|s| !s.is_empty()),
                 r2_endpoint: parsed.r2_endpoint,
                 r2_access_key_id: parsed.r2_access_key_id,
                 r2_secret_access_key: parsed.r2_secret_access_key,
@@ -105,7 +164,7 @@ pub async fn init_pollis(config_json: String) -> Result<(), BridgeError> {
                 livekit_url: parsed.livekit_url,
                 livekit_api_key: parsed.livekit_api_key,
                 livekit_api_secret: parsed.livekit_api_secret,
-                resend_api_key: parsed.resend_api_key,
+                pollis_delivery_url: parsed.pollis_delivery_url.filter(|s| !s.is_empty()),
             };
             let state = AppState::new(config).await?;
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))
@@ -179,6 +238,10 @@ fn ok<T: serde::Serialize>(v: T) -> Result<String, BridgeError> {
 /// + the static screens. Add commands here as the mobile UI needs them.
 #[uniffi::export(async_runtime = "tokio")]
 pub async fn invoke(cmd: String, args_json: String) -> Result<String, BridgeError> {
+    run_on_worker(invoke_inner(cmd, args_json)).await
+}
+
+async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeError> {
     let args: Value = if args_json.trim().is_empty() {
         Value::Object(Default::default())
     } else {

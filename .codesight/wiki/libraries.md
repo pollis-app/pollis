@@ -30,6 +30,6 @@
 - `frontend/src/utils/fileIcon.ts` — getFileIcon
 
 ---
-**Note:** This only covers frontend libraries. The Rust backend lives in `pollis-core/src/commands/`, loaded into the Electron main process via `pollis-node` (napi-rs); see [commands.md](./commands.md). Legacy `#[tauri::command]` shims under `src-tauri/src/commands/` are preserved as a rollback path.
+**Note:** This only covers frontend libraries. The Rust backend lives in `pollis-core/src/commands/`, exposed to the renderer by the Tauri host via the `#[tauri::command]` shims under `src-tauri/src/commands/`; see [commands.md](./commands.md).
 
 _Back to [index.md](./index.md)_

@@ -1,0 +1,51 @@
+# Manual deploy of the static marketing site (website/) to Cloudflare Pages.
+#
+# Moves the website off auto-on-merge onto the deploy-button pattern (#406):
+# `main` stays always-deployable, publishing is a deliberate manual act.
+#
+# The Pages project (`pollis`) is GIT-CONNECTED (root dir `website/`, production
+# branch `main`), so deployments are git builds — not wrangler direct uploads
+# (which Cloudflare rejects on a git-connected project). The manual trigger is
+# therefore a Pages **Deploy Hook**: a POST kicks a build of the connected
+# production branch, same pipeline as before, just on-demand.
+#
+# Manual only — no push/tag trigger. See #406.
+#
+# One-time setup in the Cloudflare dashboard (Pages → pollis → Settings):
+#   1. Branch control → Automatic deployments → OFF (so merges to main no longer
+#      auto-deploy; this workflow becomes the only path that ships the site).
+#   2. Deploy Hooks → create one for branch `main`; store its URL as the GitHub
+#      secret `CF_PAGES_DEPLOY_HOOK` (the URL embeds the project + a token).
+name: Deploy Website
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: website-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Optional manual-approval gate + audit trail, matching the other deploys.
+    environment: website-prod
+    steps:
+      - name: Preflight — deploy hook configured
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.CF_PAGES_DEPLOY_HOOK }}" ]; then
+            echo "::error::Missing required config: secrets.CF_PAGES_DEPLOY_HOOK"
+            exit 1
+          fi
+
+      # Kicks a git build of the connected production branch (main). The build
+      # runs async on Cloudflare — watch progress in the Pages dashboard, same as
+      # the delivery deploys poke Watchtower and return.
+      - name: Trigger Cloudflare Pages build
+        run: |
+          set -euo pipefail
+          curl -fsS -X POST "${{ secrets.CF_PAGES_DEPLOY_HOOK }}" ; echo

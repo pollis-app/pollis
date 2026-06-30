@@ -181,130 +181,180 @@ pub async fn start_screen_share(
         ss.local_writer = Some(session.writer);
     }
 
-    // Read the first protocol message; expect Format. Anything
-    // else (or EOF) is a hard failure. Generous 5-min timeout
-    // covers the user staring at the portal picker on Linux.
+    // Read protocol messages until we get one that announces the source
+    // dimensions (a `Format`, or a leading `Frame` — both self-describe
+    // their size), an `Error` to surface, or we run out of patience.
+    //
+    // This is a tolerant LOOP, not a single rigid read, on purpose. On the
+    // Wayland/Portal path the helper's `param_changed` callback only emits
+    // `Format` once pipewire has negotiated a non-zero size; an early
+    // `param_changed` carrying a not-yet-negotiated zero size sends nothing
+    // (`pollis-capture-linux/src/linux.rs` ~L445), so the FIRST message the
+    // parent sees can legitimately be a `Frame` rather than a `Format`. The
+    // old code special-cased exactly one leading `Frame` and treated every
+    // other non-`Format` message as a fatal "protocol error" — so any other
+    // benign, out-of-expected-order message before `Format` (e.g. a stray
+    // `Sources`/`Select`, only meaningful in the macOS picker handshake, or
+    // any future status message) hard-failed the share with a misleading
+    // generic error. We now skip non-dimension, non-`Error` messages and
+    // keep reading. Bounds keep a misbehaving helper from hanging us: the
+    // 5-min wall-clock deadline (covers the user staring at the portal
+    // picker) plus a hard cap on skipped messages.
     let mut reader = session.reader;
     eprintln!("[screenshare] awaiting video format from helper");
-    let read_result = tokio::time::timeout(
-        std::time::Duration::from_secs(300),
-        pollis_capture_proto::read_msg(&mut reader),
-    )
-    .await;
-    let msg = match read_result {
-        Ok(r) => r,
-        Err(_) => {
-            // 300s elapsed with no format. The user staring at the OS
-            // picker is the expected long case; hitting this means the
-            // portal never produced a stream.
-            stop_screen_share(state).await.ok();
-            return Err(fail_capture(
-                state,
-                "Screen capture timed out waiting for a source. Please try again.".into(),
-            )
-            .await);
-        }
-    };
     use pollis_capture_proto::CaptureMsg;
-    let (width, height) = match msg {
-        Ok(Some(CaptureMsg::Format { width, height })) => {
-            eprintln!("[screenshare] helper announced {}x{}", width, height);
-            (width & !1, height & !1)
-        }
-        // The Linux pipewire helper can deliver a Frame ahead of (or
-        // instead of) the Format message: `param_changed` may fire first
-        // with a not-yet-negotiated zero size — skipping the Format send —
-        // while `process` then streams frames carrying real dimensions.
-        // Frames are self-describing, so treat a leading Frame as the
-        // format announcement and drop its single payload; the next frame
-        // (~1 refresh later) feeds the publish loop normally. (spike/
-        // tauri-revival — this path went unexercised through the Electron era.)
-        Ok(Some(CaptureMsg::Frame { width, height, .. })) => {
-            eprintln!(
-                "[screenshare] helper sent frame before format; deriving {}x{}",
-                width, height
-            );
-            (width & !1, height & !1)
-        }
-        Ok(Some(CaptureMsg::Sources(_)))
-        | Ok(Some(CaptureMsg::Select(_)))
-        | Ok(Some(CaptureMsg::Cameras(_)))
-        | Ok(Some(CaptureMsg::SelectCamera(_))) => {
-            eprintln!("[screenshare] helper sent unexpected message before format");
-            stop_screen_share(state).await.ok();
-            return Err(fail_capture(
-                state,
-                "Screen capture failed (protocol error). Please try again.".into(),
-            )
-            .await);
-        }
-        Ok(Some(CaptureMsg::Error { message })) => {
-            // The helper relays the failure cause as a prefixed string.
-            // Split the three distinct shapes the old code collapsed
-            // into one "permission" message:
-            //   - `unsupported:` — the desktop environment has no
-            //     ScreenCast backend at all (Linux Cinnamon/MATE/XFCE
-            //     on Wayland). NOT something the user can grant; emit
-            //     LocalUnsupported so the UI shows a different message.
-            //   - `cancel` / `dismiss` — normal user cancellation, not
-            //     an error to surface as LocalError.
-            //   - everything else (portal errors, denied permission,
-            //     SCK failures) — a genuine capture failure.
-            eprintln!("[screenshare] helper error: {message}");
-            stop_screen_share(state).await.ok();
-            let lower = message.to_lowercase();
-            if lower.starts_with("unsupported:") || lower.contains("no screencast") {
-                let human = "Screen sharing isn't available on this desktop. \
-                    Your desktop environment doesn't provide a screen-sharing \
-                    backend (xdg-desktop-portal ScreenCast). GNOME, KDE or an \
-                    X11 session support it."
-                    .to_string();
-                let ev = {
-                    let ss = state.screenshare.lock().await;
-                    ss.events.clone()
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(300);
+    // A misbehaving helper streaming junk shouldn't keep us looping forever;
+    // a healthy handshake needs at most one skip (a lone Sources/Select or a
+    // zero-size artifact) before Format/Frame arrives.
+    const MAX_SKIPPED_BEFORE_FORMAT: usize = 64;
+    let mut skipped = 0usize;
+    let (width, height) = loop {
+        let read_result =
+            tokio::time::timeout_at(deadline, pollis_capture_proto::read_msg(&mut reader)).await;
+        let msg = match read_result {
+            Ok(r) => r,
+            Err(_) => {
+                // 300s elapsed with no format. The user staring at the OS
+                // picker is the expected long case; hitting this means the
+                // portal never produced a stream.
+                stop_screen_share(state).await.ok();
+                return Err(fail_capture(
+                    state,
+                    "Screen capture timed out waiting for a source. Please try again.".into(),
+                )
+                .await);
+            }
+        };
+        match msg {
+            Ok(Some(CaptureMsg::Format { width, height })) => {
+                eprintln!("[screenshare] helper announced {}x{}", width, height);
+                break (width & !1, height & !1);
+            }
+            // The Linux pipewire helper can deliver a Frame ahead of (or
+            // instead of) the Format message: `param_changed` may fire first
+            // with a not-yet-negotiated zero size — skipping the Format send —
+            // while `process` then streams frames carrying real dimensions.
+            // Frames are self-describing, so treat a leading Frame as the
+            // format announcement and drop its single payload; the next frame
+            // (~1 refresh later) feeds the publish loop normally. (spike/
+            // tauri-revival — this path went unexercised through the Electron era.)
+            Ok(Some(CaptureMsg::Frame { width, height, .. })) => {
+                eprintln!(
+                    "[screenshare] helper sent frame before format; deriving {}x{}",
+                    width, height
+                );
+                break (width & !1, height & !1);
+            }
+            // Not a dimension-bearing message and not an error. These should
+            // never reach the parent on the Linux/portal path (the picker is
+            // the OS dialog, not an in-app Sources→Select round-trip), but
+            // tolerate them rather than fail the share: skip and keep waiting
+            // for the real Format/Frame.
+            // Camera-handshake messages (Cameras/SelectCamera) join Sources/
+            // Select here: none of them belong on the Linux screenshare path
+            // (the picker is the OS portal dialog, not an in-app round-trip),
+            // but tolerate any of them rather than fail the share.
+            Ok(Some(
+                other
+                @ (CaptureMsg::Sources(_)
+                    | CaptureMsg::Select(_)
+                    | CaptureMsg::Cameras(_)
+                    | CaptureMsg::SelectCamera(_)),
+            )) => {
+                skipped += 1;
+                let kind = match other {
+                    CaptureMsg::Sources(_) => "sources",
+                    CaptureMsg::Select(_) => "select",
+                    CaptureMsg::Cameras(_) => "cameras",
+                    _ => "select-camera",
                 };
-                if let Some(ev) = ev {
-                    let _ = ev.send(ScreenShareEvent::LocalUnsupported {
-                        message: human.clone(),
-                    });
+                eprintln!(
+                    "[screenshare] skipping unexpected '{kind}' message before format \
+                     (skipped {skipped}); still waiting for format"
+                );
+                if skipped > MAX_SKIPPED_BEFORE_FORMAT {
+                    eprintln!(
+                        "[screenshare] helper sent {skipped} non-format messages before any \
+                         format — giving up"
+                    );
+                    stop_screen_share(state).await.ok();
+                    return Err(fail_capture(
+                        state,
+                        "Screen capture failed (protocol error). Please try again.".into(),
+                    )
+                    .await);
                 }
-                return Err(crate::error::Error::Other(anyhow::anyhow!(human)));
+                continue;
             }
-            // User-cancelled the source picker. The helper prefixes these
-            // with `cancel:`. Treat as a no-op: clean up (already done
-            // above), exit silently with Ok so the frontend's
-            // start().catch() never fires and no toast appears. No
-            // LocalStarted event was emitted, so the store stays at
-            // screenShareLocalActive=false.
-            if lower.starts_with("cancel:")
-                || lower.starts_with("cancelled")
-                || lower.contains("dismiss")
-            {
-                return Ok(());
+            Ok(Some(CaptureMsg::Error { message })) => {
+                // The helper relays the failure cause as a prefixed string.
+                // Split the three distinct shapes the old code collapsed
+                // into one "permission" message:
+                //   - `unsupported:` — the desktop environment has no
+                //     ScreenCast backend at all (Linux Cinnamon/MATE/XFCE
+                //     on Wayland). NOT something the user can grant; emit
+                //     LocalUnsupported so the UI shows a different message.
+                //   - `cancel` / `dismiss` — normal user cancellation, not
+                //     an error to surface as LocalError.
+                //   - everything else (portal errors, denied permission,
+                //     SCK failures) — a genuine capture failure.
+                eprintln!("[screenshare] helper error: {message}");
+                stop_screen_share(state).await.ok();
+                let lower = message.to_lowercase();
+                if lower.starts_with("unsupported:") || lower.contains("no screencast") {
+                    let human = "Screen sharing isn't available on this desktop. \
+                        Your desktop environment doesn't provide a screen-sharing \
+                        backend (xdg-desktop-portal ScreenCast). GNOME, KDE or an \
+                        X11 session support it."
+                        .to_string();
+                    let ev = {
+                        let ss = state.screenshare.lock().await;
+                        ss.events.clone()
+                    };
+                    if let Some(ev) = ev {
+                        let _ = ev.send(ScreenShareEvent::LocalUnsupported {
+                            message: human.clone(),
+                        });
+                    }
+                    return Err(crate::error::Error::Other(anyhow::anyhow!(human)));
+                }
+                // User-cancelled the source picker. The helper prefixes these
+                // with `cancel:`. Treat as a no-op: clean up (already done
+                // above), exit silently with Ok so the frontend's
+                // start().catch() never fires and no toast appears. No
+                // LocalStarted event was emitted, so the store stays at
+                // screenShareLocalActive=false.
+                if lower.starts_with("cancel:")
+                    || lower.starts_with("cancelled")
+                    || lower.contains("dismiss")
+                {
+                    return Ok(());
+                }
+                return Err(fail_capture(
+                    state,
+                    "Screen capture could not start. Check screen-capture permission and try again.".into(),
+                )
+                .await);
             }
-            return Err(fail_capture(
-                state,
-                "Screen capture could not start. Check screen-capture permission and try again.".into(),
-            )
-            .await);
-        }
-        Ok(None) => {
-            eprintln!("[screenshare] helper closed socket before format");
-            stop_screen_share(state).await.ok();
-            return Err(fail_capture(
-                state,
-                "Screen capture ended before it started. Please try again.".into(),
-            )
-            .await);
-        }
-        Err(e) => {
-            eprintln!("[screenshare] helper read error: {e}");
-            stop_screen_share(state).await.ok();
-            return Err(fail_capture(
-                state,
-                "Lost the screen-capture connection. Please try again.".into(),
-            )
-            .await);
+            Ok(None) => {
+                eprintln!("[screenshare] helper closed socket before format");
+                stop_screen_share(state).await.ok();
+                return Err(fail_capture(
+                    state,
+                    "Screen capture ended before it started. Please try again.".into(),
+                )
+                .await);
+            }
+            Err(e) => {
+                eprintln!("[screenshare] helper read error: {e}");
+                stop_screen_share(state).await.ok();
+                return Err(fail_capture(
+                    state,
+                    "Lost the screen-capture connection. Please try again.".into(),
+                )
+                .await);
+            }
         }
     };
 

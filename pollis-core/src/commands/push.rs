@@ -36,17 +36,16 @@ pub async fn register_push_token(
     state: &Arc<AppState>,
 ) -> Result<()> {
     let now = chrono::Utc::now().to_rfc3339();
-    let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO push_token (token, user_id, platform, updated_at)
-         VALUES (?1, ?2, ?3, ?4)
-         ON CONFLICT(token) DO UPDATE SET
-             user_id = excluded.user_id,
-             platform = excluded.platform,
-             updated_at = excluded.updated_at",
-        libsql::params![token, user_id, platform, now],
-    )
-    .await?;
+
+    // DS seam: route the owner-scoped upsert through the Delivery Service (the
+    // write API).
+    let body = serde_json::json!({
+        "token": token,
+        "platform": platform,
+        "updated_at": now,
+        "user_id": user_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/push-tokens", &body).await?;
     Ok(())
 }
 

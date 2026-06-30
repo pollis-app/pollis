@@ -128,13 +128,17 @@ pub async fn send_message(
         mls_ct_str
     };
 
-    // Post to Turso for offline delivery.
-    let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "INSERT INTO message_envelope (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        libsql::params![id.clone(), conversation_id.clone(), sender_id.clone(), ciphertext_remote, reply_to_id.clone(), now.clone()],
-    ).await?;
+    // Post to Turso for offline delivery. DS seam: route the envelope write
+    // through the Delivery Service (the write API).
+    let body = serde_json::json!({
+        "id": id,
+        "conversation_id": conversation_id,
+        "sender_id": sender_id,
+        "ciphertext": ciphertext_remote,
+        "reply_to_id": reply_to_id,
+        "sent_at": now,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/messages/send", &body).await?;
 
     // Notify recipients via LiveKit. Non-fatal — errors are logged, not returned.
     let uname = sender_username.as_deref();
@@ -142,7 +146,7 @@ pub async fn send_message(
         // One LiveKit room per group covers all its channels.
         // Receivers filter by channel_id in the event payload.
         if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
-            &state.livekit,
+            state,
             &mls_group_id,
             Some(&conversation_id),
             None,
@@ -155,7 +159,7 @@ pub async fn send_message(
         // DM: publish directly to the shared DM room (conversation_id is the room name).
         // Both participants are connected to this room via connect_rooms.
         if let Err(e) = crate::commands::livekit::publish_new_message_to_room(
-            &state.livekit,
+            state,
             &conversation_id,
             None,
             Some(&conversation_id),

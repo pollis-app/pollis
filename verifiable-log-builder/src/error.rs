@@ -27,6 +27,12 @@ pub enum BuilderError {
     #[error("no database source: pass --db <url-or-path> or set TURSO_DATABASE_URL")]
     NoDbSource,
 
+    #[error("commit log is empty: nothing to build a bundle from (db connected OK)")]
+    EmptyCommitLog,
+
+    #[error("account-key log is empty: nothing to build a bundle from (db connected OK)")]
+    EmptyAccountKeyLog,
+
     #[error(
         "no signing key: set env `{0}` to 32-byte hex, or pass --signing-key-file <path>. \
          Refusing to invent a key. Use `builder keygen` to mint a throwaway dev key."

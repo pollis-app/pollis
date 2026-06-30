@@ -461,12 +461,13 @@ pub async fn upload_media(
             )));
         }
 
-        // Register in Turso so future uploads of the same file skip R2.
-        let conn = state.remote_db.conn().await?;
-        conn.execute(
-            "INSERT OR IGNORE INTO attachment_object (content_hash, r2_key) VALUES (?1, ?2)",
-            libsql::params![content_hash.clone(), r2_key.clone()],
-        ).await?;
+        // Register in Turso so future uploads of the same file skip R2 — route the
+        // dedup-row write through the Delivery Service.
+        let body = serde_json::json!({
+            "content_hash": content_hash,
+            "r2_key": r2_key,
+        });
+        crate::commands::mls::ds_post_ok(state, "/v1/attachments/register", &body).await?;
     }
 
     Ok(MediaUploadResult {

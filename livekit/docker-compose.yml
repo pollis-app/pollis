@@ -1,25 +1,46 @@
+# LiveKit + nginx ingress stack for the Pollis VPS.
+#
+# Scope: this compose manages ONLY `livekit` and the shared `nginx` ingress.
+# The `delivery`, `delivery-dev`, and `watchtower` containers are deployed
+# independently by the Delivery Service workflows (#407, delivery-deploy-*.yml)
+# via Watchtower, and run as standalone containers on the same `livekit_default`
+# network. nginx reaches them by network alias (see nginx.conf api/api-dev/deploy
+# server blocks), so they must be up before nginx starts/reloads — nginx resolves
+# proxy_pass upstreams at config load and will refuse to start if one is missing.
+#
+# Images are pinned by digest (no `:latest`) so a deploy is reproducible; the
+# human-readable tag is cosmetic when an @sha256 digest is present. Bump these
+# deliberately when upgrading.
+#
+# Deploys go through .github/workflows/livekit-deploy.yml (manual button). Do not
+# hand-edit on the box — `main` carries the canonical config.
 services:
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.10.0@sha256:6ff9c33d21ae1b92b7f5a86bc55890a3e5b8ebe7b8a847349c5ee326e90ac965
     ports:
       - "7881:7881"             # ICE TCP candidates
       - "7882:7882/udp"         # ICE UDP (single-port mux)
       - "5349:5349"             # TURNS (TURN over TLS)
       - "30000-30100:30000-30100/udp"  # TURN relay media ports
     volumes:
+      # livekit.yml is rendered on the box with the `keys:` block appended from
+      # secrets by the deploy workflow — see livekit.yml's trailing note.
       - ./livekit.yml:/etc/livekit.yml
       - /etc/letsencrypt:/etc/letsencrypt:ro
     command: --config /etc/livekit.yml
     restart: unless-stopped
 
   nginx:
-    image: nginx:alpine
+    image: nginx:1.29-alpine@sha256:e7257f1ef28ba17cf7c248cb8ccf6f0c6e0228ab9c315c152f9c203cd34cf6d1
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      # Let's Encrypt — rtc.pollis.com + downpage.xyz (LiveKit endpoints).
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      # Cloudflare Origin cert — api / api-dev / deploy .pollis.com (delivery + watchtower).
+      - /etc/ssl/cloudflare:/etc/ssl/cloudflare:ro
     depends_on:
       - livekit
     restart: unless-stopped

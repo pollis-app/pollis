@@ -201,6 +201,86 @@ pub fn unwrap_recovery_blob(
 /// Caller is responsible for ensuring the user has no existing identity
 /// (`users.account_id_pub IS NULL`) before invoking this.
 pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> Result<String> {
+    let (secret_key_display, material) =
+        generate_account_identity_material(state, user_id).await?;
+
+    // BOOTSTRAP — DIRECT path (no DS configured). This is the version-1
+    // account-identity establishment at signup. It runs inside `verify_otp`
+    // BEFORE `register_device` / `ensure_device_cert`, so no device signing key
+    // is enrolled yet (`user_device.mls_signature_pub` is NULL) and the local DB
+    // isn't even open — the device cannot produce a signature the DS would
+    // accept. It is single-device, single-shot, with no concurrency, so the
+    // `UNIQUE (user_id, identity_version)` index on `account_key_log` is a
+    // sufficient guard. When a DS IS configured, `verify_otp` instead splits this:
+    // it calls `generate_account_identity_material` (the crypto above) and sends
+    // the public/wrapped material to the session-gated `/v1/auth/establish-identity`
+    // endpoint (see `docs/otp-server-bootstrap-design.md`). Rotations (version ≥ 2)
+    // route through the CAS-guarded `/v1/account/rotate-identity`.
+    let conn = state.remote_db.conn().await?;
+
+    conn.execute(
+        "UPDATE users SET account_id_pub = ?1, identity_version = 1 WHERE id = ?2",
+        libsql::params![material.account_id_pub.to_vec(), user_id.to_string()],
+    )
+    .await?;
+
+    // Append the version-1 row to the account-key transparency history. Kept in
+    // lock-step with the users UPDATE above; `?` propagation means the INSERT can
+    // never silently fail while the key change persists.
+    conn.execute(
+        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
+         VALUES (?1, ?2, 1)",
+        libsql::params![user_id.to_string(), material.account_id_pub.to_vec()],
+    )
+    .await?;
+
+    conn.execute(
+        "INSERT INTO account_recovery \
+         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
+         VALUES (?1, 1, ?2, ?3, ?4, datetime('now'), datetime('now'))",
+        libsql::params![
+            user_id.to_string(),
+            material.salt.to_vec(),
+            material.nonce.to_vec(),
+            material.wrapped_key.clone()
+        ],
+    )
+    .await?;
+
+    Ok(secret_key_display)
+}
+
+/// The public/wrapped material the server persists for a fresh account identity.
+/// Everything here is safe to send to the server — the private `account_id_key`
+/// is held only locally (in `AppState.unlock`) and on the server only as
+/// `wrapped_key`, sealed under the user-held Secret Key.
+pub struct AccountIdentityMaterial {
+    /// Ed25519 account identity public key (32 bytes).
+    pub account_id_pub: [u8; 32],
+    /// `account_recovery` salt (HKDF salt for the Secret-Key-derived wrap key).
+    pub salt: [u8; SALT_LEN],
+    /// AES-GCM nonce for the wrapped private key.
+    pub nonce: [u8; NONCE_LEN],
+    /// The account identity private key, AES-GCM-sealed under the wrap key.
+    pub wrapped_key: Vec<u8>,
+}
+
+/// Pure-crypto half of account-identity generation, with NO server write.
+///
+/// Generates the Ed25519 account keypair + a one-time Secret Key, wraps the
+/// private key under the Secret-Key-derived KEK, and installs the private key
+/// plus a fresh `db_key` into `AppState.unlock` (the only on-disk copy is the
+/// server-side `account_recovery` blob, which is wrapped under the Secret Key).
+///
+/// Returns the formatted Secret Key to show the user once, plus the
+/// [`AccountIdentityMaterial`] the caller persists — either via the direct DB
+/// writes in [`generate_account_identity`] (no DS) or by POSTing it to the
+/// session-gated `/v1/auth/establish-identity` (DS configured). The caller is
+/// responsible for ensuring the user has no existing identity first.
+pub async fn generate_account_identity_material(
+    state: &Arc<AppState>,
+    user_id: &str,
+) -> Result<(String, AccountIdentityMaterial)> {
     let mut rng = OsRng;
 
     let signing_key = SigningKey::generate(&mut rng);
@@ -220,40 +300,17 @@ pub async fn generate_account_identity(state: &Arc<AppState>, user_id: &str) -> 
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
-    let conn = state.remote_db.conn().await?;
-
-    conn.execute(
-        "UPDATE users SET account_id_pub = ?1, identity_version = 1 WHERE id = ?2",
-        libsql::params![public_bytes.to_vec(), user_id.to_string()],
-    )
-    .await?;
-
-    // Append the version-1 row to the account-key transparency history. Kept in
-    // lock-step with the users UPDATE above; `?` propagation means the INSERT can
-    // never silently fail while the key change persists.
-    conn.execute(
-        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-         VALUES (?1, ?2, 1)",
-        libsql::params![user_id.to_string(), public_bytes.to_vec()],
-    )
-    .await?;
-
-    conn.execute(
-        "INSERT INTO account_recovery \
-         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
-         VALUES (?1, 1, ?2, ?3, ?4, datetime('now'), datetime('now'))",
-        libsql::params![
-            user_id.to_string(),
-            salt.to_vec(),
-            nonce.to_vec(),
-            wrapped
-        ],
-    )
-    .await?;
-
     *state.unlock.lock().await = Some(unlock_state_with_fresh_db_key(user_id, &private_bytes));
 
-    Ok(secret_key_display)
+    Ok((
+        secret_key_display,
+        AccountIdentityMaterial {
+            account_id_pub: public_bytes,
+            salt,
+            nonce,
+            wrapped_key: wrapped,
+        },
+    ))
 }
 
 /// Build an `UnlockState` carrying the supplied account identity
@@ -426,22 +483,16 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
     let wrap_key = derive_wrap_key(&secret_key_body, &salt);
     let wrapped = aes_gcm_encrypt(&wrap_key, &nonce, &private_bytes)?;
 
-    // 3. Atomically bump identity_version, overwrite users.account_id_pub,
-    //    and REPLACE the account_recovery row. We do this in three
-    //    statements because libsql doesn't expose a transaction
-    //    abstraction in our current setup; failure between statements
-    //    leaves a partial state that the next reset_identity call can
-    //    clean up.
+    // 3. Rotate the account identity. The `account_key_log` is an append-only,
+    //    transparency-backed log (#419 domains E+G): the version bump, the log
+    //    append, and the `account_recovery` rewrap MUST be one atomic,
+    //    CAS-guarded unit so two concurrent rotations can never fork the
+    //    published account-key transparency history. We read the current
+    //    version (the CAS expectation) and hand it to the Delivery Service —
+    //    the sole writer — which performs the conditional append in ONE
+    //    transaction (`pollis_delivery::account::apply_rotate_identity`).
     let conn = state.remote_db.conn().await?;
-    conn.execute(
-        "UPDATE users \
-         SET account_id_pub = ?1, identity_version = identity_version + 1 \
-         WHERE id = ?2",
-        libsql::params![public_bytes.to_vec(), user_id.to_string()],
-    )
-    .await?;
-
-    let new_version: i64 = {
+    let based_on_version: i64 = {
         let mut rows = conn
             .query(
                 "SELECT identity_version FROM users WHERE id = ?1",
@@ -458,35 +509,38 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         }
     };
 
-    // Append the rotated key + new version to the account-key transparency
-    // history. Kept in lock-step with the users UPDATE above; `?` propagation
-    // means the INSERT can never silently fail while the rotation persists.
-    conn.execute(
-        "INSERT INTO account_key_log (user_id, account_id_pub, identity_version) \
-         VALUES (?1, ?2, ?3)",
-        libsql::params![user_id.to_string(), public_bytes.to_vec(), new_version],
-    )
-    .await?;
-
-    conn.execute(
-        "INSERT INTO account_recovery \
-         (user_id, identity_version, salt, nonce, wrapped_key, created_at, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'), datetime('now')) \
-         ON CONFLICT(user_id) DO UPDATE SET \
-             identity_version = excluded.identity_version, \
-             salt = excluded.salt, \
-             nonce = excluded.nonce, \
-             wrapped_key = excluded.wrapped_key, \
-             updated_at = datetime('now')",
-        libsql::params![
-            user_id.to_string(),
-            new_version,
-            salt.to_vec(),
-            nonce.to_vec(),
-            wrapped
-        ],
-    )
-    .await?;
+    let new_version: i64 = {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let body = serde_json::json!({
+            "based_on_version": based_on_version,
+            "account_id_pub": b64.encode(public_bytes),
+            "salt": b64.encode(salt),
+            "nonce": b64.encode(nonce),
+            "wrapped_key": b64.encode(&wrapped),
+        });
+        let resp =
+            crate::commands::mls::ds_post(state, "/v1/account/rotate-identity", &body).await?;
+        let status = resp.status();
+        if status.as_u16() == 409 {
+            // A concurrent rotation already won this version. Refuse rather
+            // than forking the transparency log — caller must re-read + retry.
+            return Err(Error::Other(anyhow::anyhow!(
+                "identity rotation lost a concurrent race (account_key_log CAS); retry"
+            )));
+        }
+        if !status.is_success() {
+            let txt = resp.text().await.unwrap_or_default();
+            return Err(Error::Other(anyhow::anyhow!(
+                "DS rotate-identity {status}: {txt}"
+            )));
+        }
+        let v: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| Error::Other(anyhow::anyhow!("rotate-identity response: {e}")))?;
+        v["identity_version"].as_i64().unwrap_or(based_on_version + 1)
+    };
 
     // 4. Install the new private key in AppState.unlock so the calling
     //    device is enrolled under the new identity. The bytes never
@@ -507,19 +561,17 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
         );
     }
 
-    // 6. Record the reset in the security log. Best-effort only.
-    let event_id = ulid::Ulid::new().to_string();
-    let _ = conn
-        .execute(
-            "INSERT INTO security_event (id, user_id, kind, device_id, metadata) \
-             VALUES (?1, ?2, 'identity_reset', NULL, ?3)",
-            libsql::params![
-                event_id,
-                user_id.to_string(),
-                format!("new_identity_version={new_version}")
-            ],
-        )
-        .await;
+    // 6. Record the reset in the security log. Best-effort only. Routed through
+    //    the DS (sole writer; #419 domains E+G).
+    let metadata = format!("new_identity_version={new_version}");
+    let body = serde_json::json!({
+        "kind": "identity_reset",
+        "device_id": serde_json::Value::Null,
+        "metadata": metadata,
+    });
+    if let Err(e) = crate::commands::mls::ds_post_ok(state, "/v1/security-events", &body).await {
+        eprintln!("[reset] DS security-event failed (non-fatal): {e}");
+    }
 
     Ok(secret_key_display)
 }

@@ -553,6 +553,106 @@ async fn unlock_resigns_stale_sibling_device_cert() {
     drop(alice);
 }
 
+// ─── Email change (device-signed, through the DS) ────────────────────────────
+
+/// Email change routed through the Delivery Service end to end. The request +
+/// verify are DEVICE-SIGNED (the user is already authenticated); the OTP only
+/// proves control of the NEW mailbox.
+///
+/// Asserts the happy path AND the two security properties:
+///   1. a wrong code is refused (the change does not go through);
+///   2. a DIFFERENT signed user can't consume alice's pending change — the
+///      requester binding (authed == the user who asked) blocks it, and crucially
+///      does NOT burn alice's still-valid code;
+///   3. alice's correct code then swaps `users.email`, bound to HER signature
+///      (never the body), leaving bob's email untouched.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn email_change_through_ds_happy_and_security() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let alice_id = alice_profile.id.clone();
+    let bob_id = bob_profile.id.clone();
+
+    let new_email = "alice-new@test.local";
+
+    // Alice requests the change — DS records (alice → new_email) and stores the
+    // OTP (DEV_OTP) keyed by new_email. Always 200.
+    alice
+        .invoke_json(
+            "request_email_change_otp",
+            json!({ "userId": alice_id, "newEmail": new_email }),
+        )
+        .await;
+
+    // 1. A wrong code is refused (and keeps the binding so a retry is possible).
+    let err = alice
+        .invoke_try(
+            "verify_email_change",
+            json!({ "userId": alice_id, "newEmail": new_email, "code": "999999" }),
+        )
+        .await
+        .expect_err("a wrong code must be refused");
+    assert!(
+        err.to_lowercase().contains("invalid"),
+        "expected an invalid-code error, got: {err}"
+    );
+
+    // 2. Bob (a DIFFERENT signed user) can't consume alice's pending change, even
+    //    with the correct code — the requester binding rejects it before the OTP
+    //    is even checked, so alice's code stays valid.
+    let cross = bob
+        .invoke_try(
+            "verify_email_change",
+            json!({ "userId": bob_id, "newEmail": new_email, "code": crate::harness::DEV_OTP }),
+        )
+        .await
+        .expect_err("a different signed user must not consume alice's change");
+    assert!(
+        cross.to_lowercase().contains("account") || cross.to_lowercase().contains("request"),
+        "expected a binding/forbidden error, got: {cross}"
+    );
+
+    // 3. Alice's correct code swaps her email, bound to HER signature.
+    alice
+        .invoke_json(
+            "verify_email_change",
+            json!({ "userId": alice_id, "newEmail": new_email, "code": crate::harness::DEV_OTP }),
+        )
+        .await;
+
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    let read_email = |id: String| {
+        let conn = &conn;
+        async move {
+            let mut rows = conn
+                .query("SELECT email FROM users WHERE id = ?1", libsql::params![id])
+                .await
+                .expect("users select");
+            let row = rows.next().await.expect("rows").expect("user row");
+            row.get::<String>(0).expect("email")
+        }
+    };
+
+    assert_eq!(
+        read_email(alice_id.clone()).await,
+        new_email,
+        "alice's email must be swapped to the new address"
+    );
+    assert_eq!(
+        read_email(bob_id.clone()).await,
+        "bob@test.local",
+        "bob's email must be untouched by alice's change"
+    );
+
+    drop(alice);
+    drop(bob);
+}
+
 // ─── Safety numbers / contact verification ───────────────────────────────────
 
 /// Full lifecycle of the Signal-style safety number:
@@ -793,4 +893,60 @@ async fn group_reconcile_tofu_detects_key_swap() {
     drop(alice);
     drop(bob);
     drop(carol);
+}
+
+/// Bucket-C C4 end-to-end: `logout(delete_data = true)` removes this device's
+/// remote `user_device` row by routing a DEVICE-SIGNED `POST /v1/auth/logout`
+/// through the DS — issued BEFORE the local DB / signing key are torn down. Under
+/// the read-only Turso token this is the path that keeps logout working (the old
+/// direct DELETE would have failed). Asserts the row is gone afterwards.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn logout_with_delete_removes_device_via_ds() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let profile = alice.sign_up("alice@test.local").await;
+    let user_id = profile.id.clone();
+
+    // The device row exists after sign-up (a cert was published by set_pin).
+    let device_id: String = {
+        let conn = alice.state.remote_db.conn().await.expect("remote conn");
+        let mut rows = conn
+            .query(
+                "SELECT device_id FROM user_device WHERE user_id = ?1",
+                libsql::params![user_id.clone()],
+            )
+            .await
+            .expect("user_device select");
+        rows.next()
+            .await
+            .expect("rows")
+            .expect("device row present pre-logout")
+            .get::<String>(0)
+            .expect("device_id")
+    };
+
+    // Drive the real command — its DS-routed device removal must run while the
+    // signer is still live.
+    invoke::<()>(&alice.webview, "logout", json!({ "deleteData": true }))
+        .await
+        .expect("logout(delete_data=true)");
+
+    // The shared remote handle is unaffected by the local teardown, so we can
+    // confirm the DS DELETE landed.
+    let conn = alice.state.remote_db.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT 1 FROM user_device WHERE device_id = ?1",
+            libsql::params![device_id.clone()],
+        )
+        .await
+        .expect("user_device exists query");
+    assert!(
+        rows.next().await.expect("rows").is_none(),
+        "logout(delete_data=true) must remove this device's user_device row via the DS"
+    );
+
+    drop(alice);
 }

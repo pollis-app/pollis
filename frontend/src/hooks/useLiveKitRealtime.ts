@@ -76,6 +76,12 @@ type RealtimeEvent =
     group_id: string;
   }
   | {
+    // A new join request was created for a group the recipient admins.
+    // Refetch the pending-request list (menu badge + bottom bar).
+    type: 'join_requests_changed';
+    group_id: string;
+  }
+  | {
     type: 'edited_message';
     channel_id: string | null;
     conversation_id: string | null;
@@ -365,6 +371,20 @@ export function useLiveKitRealtime() {
           queryKey: groupQueryKeys.members(event.group_id),
         });
         queryClientRef.current.invalidateQueries({ queryKey: ['groups'] });
+        return;
+      }
+
+      if (event.type === 'join_requests_changed') {
+        // A new join request arrived for a group this admin manages.
+        // Invalidate both the per-group list and the aggregate
+        // "all admin" count so the menu badge and the group's bottom-bar
+        // pending list both update without a manual refetch.
+        queryClientRef.current.invalidateQueries({
+          queryKey: groupQueryKeys.joinRequests(event.group_id),
+        });
+        queryClientRef.current.invalidateQueries({
+          queryKey: ['join-requests', 'all-admin'],
+        });
         return;
       }
 

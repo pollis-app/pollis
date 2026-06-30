@@ -164,9 +164,7 @@ helper, never killing the host app.
 
 ### Packaging
 
-The helper sidecar packaging story is in transition: the legacy `src-tauri/` build pipeline ships a working sidecar today, while the active Electron pipeline's strategy (extraResource via electron-builder, or fold-in to `pollis-node`) is still being decided. Both paths are documented here so the helper can be wired into the Electron build without re-discovering the constraints.
-
-**Legacy Tauri shell (still produces a runnable helper):**
+The helper sidecar ships through the Tauri build pipeline:
 - `src-tauri/tauri.macos.conf.json`: `externalBin`
   `binaries/pollis-capture-macos`, Developer-ID signed, **same team
   9JF7WWYMU2**.
@@ -177,9 +175,6 @@ The helper sidecar packaging story is in transition: the legacy `src-tauri/` bui
   reused on the app job (ubuntu-22.04). No shell script wrapper — runs
   uniformly for `cargo check`, `tauri dev`, and `tauri build` on macOS
   and Linux. Windows is skipped (WGC is in-process).
-
-**Electron shell (active path; helper packaging is a TODO in `electron/build/electron-builder.yml`):**
-- The decision pending in the config TODO is whether to ship the helper as an `extraResources` entry next to `pollis-node`, embed it inside `pollis-node`, or drop the separate binary entirely if `pollis-node` performs the capture itself. Until that lands, screenshare under the Electron build will not have a packaged helper.
 
 ### Picker UX
 
@@ -211,12 +206,17 @@ Linux helpers never send `MSG_SOURCES` and never read `MSG_SELECT`.
 The same opcodes are reserved in the proto crate so both helpers
 share one wire format definition.
 
-## Electron publish-path codec policy
+## Browser publish-path codec policy
 
-Under Electron, capture + encode + publish all happen in Chromium
-(`screenShareSession.ts` → `livekitView.publishScreenShare`), bypassing
-the Rust helper pipeline above. The codec is chosen **per-machine at
-publish time** by `frontend/src/screenshare/codecPolicy.ts`:
+When the host WebView exposes WebRTC (`hasWebRTC()` in
+`frontend/src/bridge/runtime.ts` — historically the Electron Chromium
+renderer, and any Chromium-based WebView2), capture + encode + publish
+all happen in the WebView (`screenShareSession.ts` →
+`livekitView.publishScreenShare`), bypassing the Rust helper pipeline
+above. Under Tauri's WebKitGTK (Linux) there is no WebRTC, so the Rust
+helper path is used instead. On the browser path the codec is chosen
+**per-machine at publish time** by
+`frontend/src/screenshare/codecPolicy.ts`:
 
 - **Hardware H.264 when present.** `pickScreenShareCodec()` scans
   `RTCRtpSender.getCapabilities('video')` for an H.264 entry whose
@@ -364,8 +364,6 @@ default; the driver adjusts and we publish whatever it gives. Verified at
 - `frontend/src/screenshare/screenShareSession.ts` —
   `local_unsupported` event + distinct error message.
 - `src-tauri/tauri.linux.conf.json`, `src-tauri/tauri.macos.conf.json`
-  — sidecar packaging in the legacy Tauri build.
+  — sidecar packaging in the Tauri build.
 - `src-tauri/build.rs` — auto-builds + stages the per-OS helper sidecar
-  during the legacy Tauri shell's cargo build.
-- `electron/build/electron-builder.yml` — active build config; helper
-  packaging strategy is the open TODO described in "Packaging" above.
+  during the Tauri shell's cargo build.

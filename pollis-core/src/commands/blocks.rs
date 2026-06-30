@@ -45,31 +45,15 @@ pub async fn block_user(
         )));
     }
 
-    let conn = state.remote_db.conn().await?;
-
-    // Insert the block row. PK conflict means the block already
-    // exists, which is fine — idempotent.
-    conn.execute(
-        "INSERT OR IGNORE INTO user_block (blocker_id, blocked_id)
-         VALUES (?1, ?2)",
-        libsql::params![blocker_id.clone(), blocked_id.clone()],
-    )
-    .await?;
-
-    // Reset accepted_at to NULL for the blocker's membership in every
-    // DM channel shared with the blocked user. If the block is later
-    // released, the channel resurfaces as a request rather than in
-    // the regular DM list.
-    conn.execute(
-        "UPDATE dm_channel_member
-         SET accepted_at = NULL
-         WHERE user_id = ?1
-           AND dm_channel_id IN (
-             SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?2
-           )",
-        libsql::params![blocker_id, blocked_id],
-    )
-    .await?;
+    // DS seam: route the block write (insert block row + reset the blocker's
+    // accepted_at in shared DMs) through the Delivery Service. Server-side authz
+    // binds the block to the authenticated user's own list and runs both writes
+    // in one transaction.
+    let body = serde_json::json!({
+        "blocker_id": blocker_id,
+        "blocked_id": blocked_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/blocks/add", &body).await?;
 
     Ok(())
 }
@@ -79,13 +63,13 @@ pub async fn unblock_user(
     blocked_id: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
-    let conn = state.remote_db.conn().await?;
-
-    conn.execute(
-        "DELETE FROM user_block WHERE blocker_id = ?1 AND blocked_id = ?2",
-        libsql::params![blocker_id, blocked_id],
-    )
-    .await?;
+    // DS seam: route the unblock (delete block row) through the Delivery
+    // Service.
+    let body = serde_json::json!({
+        "blocker_id": blocker_id,
+        "blocked_id": blocked_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/blocks/remove", &body).await?;
 
     Ok(())
 }

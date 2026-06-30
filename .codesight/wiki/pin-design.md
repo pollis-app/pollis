@@ -231,7 +231,7 @@ Critically: the Turso-side account is untouched. Other devices for the same user
 
 ## New and changed commands
 
-Dispatched in `pollis-node/src/dispatch/pin.rs` (the active path), with a parallel `#[tauri::command]` shim retained under `src-tauri/src/commands/pin.rs` for rollback. The real implementation is in `pollis-core/src/commands/pin.rs` (alongside `auth.rs` and `account_identity.rs` in the same crate).
+Dispatched by the `#[tauri::command]` shim under `src-tauri/src/commands/pin.rs` (registered in `src-tauri/src/lib.rs`'s `invoke_handler!`). The real implementation is in `pollis-core/src/commands/pin.rs` (alongside `auth.rs` and `account_identity.rs` in the same crate).
 
 - `set_pin(old_pin: Option<String>, new_pin: String) -> Result<()>`
   - Initial set and change. See lifecycle above.

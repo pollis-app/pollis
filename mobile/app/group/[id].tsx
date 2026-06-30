@@ -127,7 +127,7 @@ function GroupDetail() {
               setSelectedChannelId(c.id);
               router.push({
                 pathname: "/chat/[id]",
-                params: { id: c.id, kind: "channel" },
+                params: { id: c.id, kind: "channel", name: c.name },
               });
             }}
           />

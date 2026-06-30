@@ -50,7 +50,27 @@ fn is_remote_url(db: &str) -> bool {
         || lower.starts_with("wss://")
 }
 
-/// Connect to a commit-log database.
+/// Connect to a database with an explicitly-supplied auth token.
+///
+/// * If `db` looks like a URL → remote Turso, authenticated with the PASSED
+///   `token` (each database carries its own token: after Goal A's cutover the
+///   commit log lives in a separate "log DB" with its own credentials, distinct
+///   from the main DB that still owns `account_key_log`).
+/// * Otherwise `db` is treated as a local SQLite file path (no network) and the
+///   `token` is ignored — this is what the tests use.
+pub async fn connect_with_token(db: &str, token: &str) -> Result<libsql::Connection> {
+    let database = if is_remote_url(db) {
+        libsql::Builder::new_remote(db.to_string(), token.to_string())
+            .build()
+            .await?
+    } else {
+        libsql::Builder::new_local(db).build().await?
+    };
+    Ok(database.connect()?)
+}
+
+/// Connect to a commit-log database, reading the auth token from the
+/// environment.
 ///
 /// * If `db` looks like a URL → remote Turso; the auth token is read from
 ///   `TURSO_AUTH_TOKEN` (empty if unset, which works for unauthenticated dev
@@ -58,15 +78,8 @@ fn is_remote_url(db: &str) -> bool {
 /// * Otherwise `db` is treated as a local SQLite file path (no network) — this
 ///   is what the tests use.
 pub async fn connect(db: &str) -> Result<libsql::Connection> {
-    let database = if is_remote_url(db) {
-        let token = std::env::var("TURSO_AUTH_TOKEN").unwrap_or_default();
-        libsql::Builder::new_remote(db.to_string(), token)
-            .build()
-            .await?
-    } else {
-        libsql::Builder::new_local(db).build().await?
-    };
-    Ok(database.connect()?)
+    let token = std::env::var("TURSO_AUTH_TOKEN").unwrap_or_default();
+    connect_with_token(db, &token).await
 }
 
 /// Read every `mls_commit_log` row in ascending `seq` order, hashing each
@@ -165,20 +178,24 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(digest)
 }
 
-/// Guard against an empty source: building a bundle over zero commits is almost
-/// always a misconfiguration (wrong DB / wrong table), so surface it.
+/// Guard against an empty commit-log source. An empty table is a distinct
+/// condition from a missing `--db` argument: the DB connected fine, it just has
+/// no commits yet (e.g. immediately after Goal A's cutover). So it returns
+/// [`BuilderError::EmptyCommitLog`], never [`BuilderError::NoDbSource`] — the
+/// latter is reserved for the genuine missing-source case in `builder.rs`.
 pub fn ensure_non_empty(rows: &[CommitRow]) -> Result<()> {
     if rows.is_empty() {
-        return Err(BuilderError::NoDbSource);
+        return Err(BuilderError::EmptyCommitLog);
     }
     Ok(())
 }
 
 /// Guard against an empty account-key source. Separate from [`ensure_non_empty`]
-/// so the two tenants can be checked independently.
+/// so the two tenants can be checked independently — an empty account-key log
+/// returns its own [`BuilderError::EmptyAccountKeyLog`].
 pub fn ensure_account_non_empty(rows: &[AccountKeyRow]) -> Result<()> {
     if rows.is_empty() {
-        return Err(BuilderError::NoDbSource);
+        return Err(BuilderError::EmptyAccountKeyLog);
     }
     Ok(())
 }

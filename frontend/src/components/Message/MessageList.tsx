@@ -4,6 +4,7 @@ import { useBlockedUsers } from "../../hooks/queries";
 import { useGroupMembers } from "../../hooks/queries/useGroups";
 import { observer } from "mobx-react-lite";
 import { rosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
+import { formatDayDivider } from "../../utils/format";
 import type { Message } from "../../types";
 
 const toMs = (timestamp: number): number =>
@@ -11,28 +12,6 @@ const toMs = (timestamp: number): number =>
 
 const startOfLocalDay = (d: Date): number =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-
-const formatDayDividerLabel = (timestamp: number): string => {
-  const d = new Date(toMs(timestamp));
-  const now = new Date();
-  const dayStart = startOfLocalDay(d);
-  const todayStart = startOfLocalDay(now);
-  const dayDiff = Math.round((todayStart - dayStart) / 86_400_000);
-
-  if (dayDiff === 0) {
-    return "Today";
-  }
-  if (dayDiff === 1) {
-    return "Yesterday";
-  }
-  if (dayDiff > 1 && dayDiff <= 6) {
-    return d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" });
-  }
-  if (d.getFullYear() === now.getFullYear()) {
-    return d.toLocaleDateString([], { month: "short", day: "numeric" });
-  }
-  return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
-};
 
 const DayDivider: React.FC<{ label: string }> = ({ label }) => (
   <div
@@ -352,7 +331,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         return (
           <React.Fragment key={item.key}>
             {showDivider && (
-              <DayDivider label={formatDayDividerLabel(message.created_at)} />
+              <DayDivider label={formatDayDivider(toMs(message.created_at))} />
             )}
             {rendered}
           </React.Fragment>

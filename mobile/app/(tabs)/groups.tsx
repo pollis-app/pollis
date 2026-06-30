@@ -132,7 +132,7 @@ function Groups() {
                   setSelectedChannelId(c.id);
                   router.push({
                     pathname: "/chat/[id]",
-                    params: { id: c.id, kind: "channel" },
+                    params: { id: c.id, kind: "channel", name: c.name },
                   });
                 }}
               />
@@ -146,7 +146,7 @@ function Groups() {
           icon={<Icon.plus color={semantic.ink} />}
           onPress={() => router.push("/group/new")}
         >
-          NEW GROUP
+          New Group
         </Button>
         <Button
           variant="subtle"
@@ -154,7 +154,7 @@ function Groups() {
           icon={<Icon.search color={semantic.ink} />}
           onPress={() => router.push("/group/discover")}
         >
-          Join by slug
+          Join Group
         </Button>
       </BottomAction>
     </Screen>

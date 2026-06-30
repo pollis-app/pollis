@@ -5,35 +5,6 @@ use crate::state::AppState;
 
 use super::types::GroupMember;
 
-/// Internal helper: add a user directly to a group as a member.
-/// Used by invite acceptance and join request approval.
-pub(super) async fn add_member_to_group(
-    conn: &libsql::Connection,
-    group_id: &str,
-    user_id: &str,
-) -> Result<()> {
-    conn.execute(
-        "INSERT OR IGNORE INTO group_member (group_id, user_id, role) VALUES (?1, ?2, 'member')",
-        libsql::params![group_id, user_id],
-    ).await?;
-
-    // Initialize watermark rows for every (channel, device) pair so pre-join
-    // messages don't block envelope cleanup indefinitely. Devices registered
-    // after this point are seeded by `register_device`.
-    if let Err(e) = conn.execute(
-        "INSERT OR IGNORE INTO conversation_watermark (conversation_id, user_id, device_id, last_fetched_at)
-         SELECT c.id, ?1, ud.device_id, datetime('now')
-         FROM channels c
-         JOIN user_device ud ON ud.user_id = ?1
-         WHERE c.group_id = ?2",
-        libsql::params![user_id, group_id],
-    ).await {
-        eprintln!("[watermark] add_member_to_group: watermark init failed: {e}");
-    }
-
-    Ok(())
-}
-
 pub async fn get_group_members(
     group_id: String,
     state: &Arc<AppState>,
@@ -90,10 +61,14 @@ pub async fn remove_member_from_group(
         )));
     }
 
-    conn.execute(
-        "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), user_id.clone()],
-    ).await?;
+    // Route the member-row delete through the Delivery Service (which re-derives
+    // the admin/self rule server-side).
+    let body = serde_json::json!({
+        "group_id": group_id,
+        "user_id": user_id,
+        "requester_id": requester_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/members/remove", &body).await?;
 
     // Reconcile removes the member's leaves from the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
@@ -132,17 +107,6 @@ pub async fn leave_group(
         return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
     };
 
-    // Check how many members the group has
-    let mut count_rows = conn.query(
-        "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
-        libsql::params![group_id.clone()],
-    ).await?;
-    let member_count: i64 = if let Some(row) = count_rows.next().await? {
-        row.get(0)?
-    } else {
-        0
-    };
-
     // Owners can leave thegroup, there's no requirement for ownership atm so I am commenting this out.
     // Might change when we introduce rolls, give them the option to require transfer, etc.
 
@@ -152,10 +116,14 @@ pub async fn leave_group(
     //     )));
     // }
 
-    conn.execute(
-        "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
-        libsql::params![group_id.clone(), user_id.clone()],
-    ).await?;
+    // Route the leaver's member-row delete (and, when the group empties, the group
+    // delete) through the Delivery Service — one server-authorized write scoped to
+    // the signer's own row.
+    let body = serde_json::json!({
+        "group_id": group_id,
+        "user_id": user_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/groups/leave", &body).await?;
 
     // A user cannot commit their own removal in MLS ("remove_members with self
     // as target" is rejected by the spec).  Instead, wipe the local group state
@@ -178,13 +146,8 @@ pub async fn leave_group(
         eprintln!("[realtime] leave_group: notify group {group_id}: {e}");
     }
 
-    // If no members remain, delete the group (cascades to channels, invites, etc.)
-    if member_count <= 1 {
-        conn.execute(
-            "DELETE FROM groups WHERE id = ?1",
-            libsql::params![group_id],
-        ).await?;
-    }
+    // If no members remain, the group is deleted (cascades to channels, invites,
+    // etc.); the DS handles that server-side inside the leave write above.
 
     Ok(())
 }
@@ -230,10 +193,15 @@ pub async fn set_member_role(
         return Err(Error::Other(anyhow::anyhow!("user is not a member of this group")));
     }
 
-    conn.execute(
-        "UPDATE group_member SET role = ?1 WHERE group_id = ?2 AND user_id = ?3",
-        libsql::params![role, group_id.clone(), user_id],
-    ).await?;
+    // Route the role update through the Delivery Service (admin re-derived
+    // server-side, target-membership re-checked).
+    let body = serde_json::json!({
+        "group_id": group_id,
+        "user_id": user_id,
+        "role": role,
+        "requester_id": requester_id,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/members/role", &body).await?;
 
     // Notify other online group members so their members list refreshes.
     // Best-effort realtime push; routed through the livekit boundary so this
