@@ -1361,3 +1361,73 @@ async fn commit_welcome_groupinfo_land_atomically_via_delivery_service() {
     drop(alice);
     drop(bob);
 }
+
+/// Regression: a dropped bootstrap GroupInfo publish is self-healed on the next
+/// "group touched" pass, instead of bricking the group forever.
+///
+/// The bug: `init_mls_group` publishes the epoch-0 GroupInfo best-effort. If that
+/// DS post fails (a transient outage right as the group is created), nothing ever
+/// retried it — the post-merge republish only fired when a commit was applied
+/// (`any_applied`), which is never true for a freshly created, sole-member group.
+/// With no GroupInfo in the log DB, no member could ever external-join, so a group
+/// created during an outage was permanently unjoinable (and any message sent into
+/// it was silently lost).
+///
+/// We reproduce the stranded state directly — delete the epoch-0 GroupInfo row
+/// from the log DB (exactly what a failed publish leaves behind) — then run an
+/// ordinary commit-processing pass and assert the row reappears at the same epoch.
+/// Before the fix this pass was a no-op and the row stayed gone.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let _alice_p = alice.sign_up("alice@test.local").await;
+
+    let group_id = alice.create_group("Stranded").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    // MLS control-plane rows live on the LOG DB; the MLS group is keyed by group_id.
+    let log = alice.state.log_db.clone();
+
+    // Baseline: init_mls_group published the epoch-0 GroupInfo.
+    let (epoch0, _) = group_info_row(&log, &group_id)
+        .await
+        .expect("epoch-0 GroupInfo should exist after group creation");
+    assert_eq!(epoch0, 0, "fresh group's GroupInfo should be at epoch 0");
+
+    // Simulate the create-time publish having been dropped by a transient DS
+    // failure: remove the only GroupInfo row. This is the exact bricked state.
+    {
+        let conn = log.conn().await.expect("log conn");
+        conn.execute(
+            "DELETE FROM mls_group_info WHERE conversation_id = ?1",
+            libsql::params![group_id.clone()],
+        )
+        .await
+        .expect("delete group_info");
+    }
+    assert!(
+        group_info_row(&log, &group_id).await.is_none(),
+        "precondition: GroupInfo row should be gone (simulating the dropped publish)"
+    );
+
+    // An ordinary touch — the same commit-processing pass the sweep, send, and
+    // realtime ingest all run. No commit is applied (sole-member group), so the
+    // old `any_applied` republish would NOT fire; only the new durability backstop
+    // does.
+    alice.process_commits_for(&channel_id).await;
+
+    // The heal republished the current-epoch GroupInfo, so a member can once
+    // again external-join the group.
+    let (healed_epoch, len) = group_info_row(&log, &group_id)
+        .await
+        .expect("GroupInfo should be republished by the self-heal on the next touch");
+    assert_eq!(
+        healed_epoch, 0,
+        "republished GroupInfo should be at the group's current epoch (0)"
+    );
+    assert!(len > 0, "republished GroupInfo blob should be non-empty");
+
+    drop(alice);
+}
