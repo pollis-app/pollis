@@ -3,7 +3,7 @@ import { decode } from "blurhash";
 import { dialogSave, writeFile } from "../../bridge";
 import { Reply, Download, Film, Check, Edit2, Trash2 } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
-import { formatFileSize, formatDuration } from "../../utils/format";
+import { formatFileSize, formatDuration, formatTimeOfDay, formatFullTimestamp } from "../../utils/format";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { downloadAndDecryptMedia, getMediaUrl } from "../../services/r2-upload";
@@ -31,15 +31,10 @@ interface MessageItemProps {
   onScrollToReply?: (messageId: string) => void;
 }
 
-const formatTimestamp = (timestamp: number): string => {
-  const tsMs = timestamp < 1e12 ? timestamp * 1000 : timestamp;
-  return new Date(tsMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-};
-
-const formatFullTimestamp = (timestamp: number): string => {
-  const tsMs = timestamp < 1e12 ? timestamp * 1000 : timestamp;
-  return new Date(tsMs).toLocaleString([], { dateStyle: "full", timeStyle: "short" });
-};
+// `created_at` arrives as unix seconds or milliseconds depending on source;
+// normalize to milliseconds before formatting.
+const toMs = (timestamp: number): number =>
+  timestamp < 1e12 ? timestamp * 1000 : timestamp;
 
 export const MessageItem: React.FC<MessageItemProps> = observer(({
   message,
@@ -131,11 +126,11 @@ export const MessageItem: React.FC<MessageItemProps> = observer(({
       <div className="flex items-start gap-0 min-w-0">
         <span
           data-testid="message-timestamp"
-          title={formatFullTimestamp(message.created_at)}
+          title={formatFullTimestamp(toMs(message.created_at))}
           className="flex-shrink-0 text-xs font-mono tabular-nums select-none w-20"
           style={{ color: "var(--c-text-muted)", lineHeight: "1.5rem" }}
         >
-          {formatTimestamp(message.created_at)}
+          {formatTimeOfDay(toMs(message.created_at))}
         </span>
 
         <span

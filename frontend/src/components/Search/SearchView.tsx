@@ -1,21 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useSearchMessages } from "../../hooks/queries/useSearchMessages";
+import { formatShortDateTime } from "../../utils/format";
 import type { SearchResult } from "../../types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function formatTimestamp(sentAt: string): string {
-  const date = new Date(sentAt);
-  if (isNaN(date.getTime())) {
-    return sentAt;
-  }
-  return date.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 // Highlight occurrences of `term` in `text` by wrapping them in a <mark> span.
 function HighlightedSnippet({ text, term }: { text: string; term: string }) {
@@ -186,7 +174,7 @@ export const SearchView: React.FC<SearchViewProps> = ({ onNavigateToConversation
                       className="text-xs font-mono flex-shrink-0"
                       style={{ color: "var(--c-text-muted)" }}
                     >
-                      {formatTimestamp(result.sent_at)}
+                      {formatShortDateTime(result.sent_at)}
                     </span>
                   </div>
 
