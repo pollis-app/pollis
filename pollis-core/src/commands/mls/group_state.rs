@@ -94,6 +94,86 @@ pub async fn publish_group_info(
     Ok(())
 }
 
+/// Whether the durably-published GroupInfo is stale relative to our local epoch
+/// and must be republished.
+///
+/// `published` is the epoch of the GroupInfo currently stored in the log DB
+/// (`None` = no row at all — it was never published, or a create-time publish
+/// was dropped). `local` is this device's current MLS group epoch.
+///
+/// Republish iff the log DB has no GroupInfo, or its GroupInfo is behind us. An
+/// equal epoch is already durable, and a *higher* one means another member
+/// advanced and published past us — neither needs our help. The DS `/v1/group-info`
+/// upsert is epoch-monotone, so republishing an equal/stale epoch would be a
+/// harmless no-op anyway; this check just avoids the needless round-trip.
+fn group_info_is_stale(published: Option<u64>, local: u64) -> bool {
+    match published {
+        None => true,
+        Some(p) => p < local,
+    }
+}
+
+/// Highest epoch of the GroupInfo durably stored in the log DB for this group,
+/// or `None` if there's no row — or the read fails, which we deliberately treat
+/// as "absent" so the caller errs toward republishing rather than assuming
+/// durability. (Mirrors `voice_e2ee::published_group_epoch`'s read idiom, but
+/// with the opposite failure bias: this is a write-durability backstop, so a
+/// redundant publish on a transient blip is safer than a missed heal.)
+async fn published_group_info_epoch(state: &Arc<AppState>, mls_group_id: &str) -> Option<u64> {
+    // Read-only GroupInfo epoch lookup → log_db (falls back to remote_db pre-cutover).
+    let conn = state.log_db.conn().await.ok()?;
+    let mut rows = conn
+        .query(
+            "SELECT epoch FROM mls_group_info WHERE conversation_id = ?1",
+            libsql::params![mls_group_id.to_string()],
+        )
+        .await
+        .ok()?;
+    let row = rows.next().await.ok()??;
+    row.get::<i64>(0).ok().map(|v| v as u64)
+}
+
+/// Durability backstop for MLS bootstrap: ensure the log DB holds a current-epoch
+/// GroupInfo for this group, republishing if a past publish was dropped.
+///
+/// `publish_group_info` is best-effort at create time (`init_mls_group`) and on
+/// epoch advance. If that DS post fails — e.g. a transient outage right as a group
+/// is created — the group is otherwise stranded forever: with no GroupInfo in the
+/// log DB, no member can external-join, and (if the add-member Welcome was dropped
+/// in the same outage) no member can join at all. Nothing else heals it, because
+/// the `any_applied` republish in `process_pending_commits_locked_impl` never fires
+/// for a sole-member creator who applies no commits.
+///
+/// Called on every "group touched" pass (sweep / send / realtime ingest /
+/// reconcile). Cheap for healthy groups — one indexed read, and a DS post only
+/// when the stored GroupInfo is missing or behind. Idempotent (the upsert is
+/// epoch-monotone), and it also rescues already-bricked groups on the next pass.
+/// No-op when we have no local group (nothing to export).
+async fn ensure_group_info_published(state: &Arc<AppState>, mls_group_id: &str) {
+    let local_epoch = {
+        let guard = state.local_db.lock().await;
+        let Some(db) = guard.as_ref() else { return };
+        let provider = PollisProvider::new(db.conn());
+        let group_id = GroupId::from_slice(mls_group_id.as_bytes());
+        match MlsGroup::load(provider.storage(), &group_id) {
+            Ok(Some(g)) => g.epoch().as_u64(),
+            _ => return,
+        }
+    };
+
+    let published = published_group_info_epoch(state, mls_group_id).await;
+    if !group_info_is_stale(published, local_epoch) {
+        return;
+    }
+
+    if let Err(e) = publish_group_info(state, mls_group_id).await {
+        eprintln!(
+            "[mls] ensure_group_info_published: republish for {mls_group_id} \
+             (local epoch {local_epoch}, published {published:?}) failed: {e}"
+        );
+    }
+}
+
 // ── External-commit joining ──────────────────────────────────────────────────
 
 /// Join an existing MLS group via external commit, using the latest
@@ -581,6 +661,45 @@ pub(crate) async fn process_pending_commits_locked(
     mls_group_id: &str,
     user_id: &str,
 ) -> crate::error::Result<()> {
+    process_pending_commits_locked_impl(state, mls_group_id, user_id, None).await
+}
+
+/// Like [`process_pending_commits_inner`], but after the local group reaches
+/// each epoch during the replay it invokes `on_epoch(conn, epoch)` so the caller
+/// can decrypt the application-message envelopes sealed at that epoch BEFORE the
+/// next commit advances past it.
+///
+/// This is the interleave that makes offline catch-up correct under
+/// `max_past_epochs = 0` (issue #418). With the default `max_past_epochs = 0`,
+/// the ratchet keys for an epoch are discarded the instant the group advances
+/// past it. The old ingest path applied *every* pending commit first — jumping
+/// straight to head — and only then tried to decrypt the backlog, so any message
+/// sent at an intermediate epoch was sealed under keys that no longer existed and
+/// decrypted as `WrongEpoch`, permanently lost. By decrypting each epoch's
+/// messages while the group is still AT that epoch, every message a current
+/// member was eligible to read survives a heavy offline-churn catch-up.
+///
+/// `on_epoch` fires once for the member's starting epoch (before any commit) and
+/// once after each commit that successfully advances the group. It does NOT fire
+/// for epochs skipped by a recovery jump (epoch-gap / fork / eviction →
+/// external-join); messages at those epochs are caught on the NEXT ingest, when
+/// the rejoined epoch becomes the starting epoch.
+pub async fn process_pending_commits_inner_with_hook(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+    on_epoch: &mut (dyn FnMut(&rusqlite::Connection, u64) + Send),
+) -> crate::error::Result<()> {
+    let _guard = state.mls_group_lock(mls_group_id).await;
+    process_pending_commits_locked_impl(state, mls_group_id, user_id, Some(on_epoch)).await
+}
+
+async fn process_pending_commits_locked_impl(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+    mut on_epoch: Option<&mut (dyn FnMut(&rusqlite::Connection, u64) + Send)>,
+) -> crate::error::Result<()> {
     // 1. Get the current epoch from the local group.
     let has_group = {
         let guard = state.local_db.lock().await;
@@ -613,6 +732,16 @@ pub(crate) async fn process_pending_commits_locked(
             return Ok(());
         }
     };
+
+    // #418 interleave: decrypt the envelopes sealed at the member's CURRENT
+    // epoch before any commit advances the group past it. (No-op for callers
+    // that pass no hook — e.g. send / reconcile catch-up.)
+    if let Some(hook) = on_epoch.as_deref_mut() {
+        let guard = state.local_db.lock().await;
+        if let Some(db) = guard.as_ref() {
+            hook(db.conn(), initial_epoch);
+        }
+    }
 
     // 2. Fetch pending commits from remote, along with the add-metadata
     //    columns (`added_user_id`, `added_device_ids`) so we can verify
@@ -892,6 +1021,16 @@ pub(crate) async fn process_pending_commits_locked(
         if applied {
             current_epoch += 1;
             any_applied = true;
+            // #418 interleave: the commit we just merged advanced the group to
+            // `current_epoch`. Decrypt the envelopes sealed at this epoch NOW,
+            // while the group still holds its ratchet keys — the next iteration's
+            // commit will advance past it and (max_past_epochs = 0) discard them.
+            if let Some(hook) = on_epoch.as_deref_mut() {
+                let guard = state.local_db.lock().await;
+                if let Some(db) = guard.as_ref() {
+                    hook(db.conn(), current_epoch);
+                }
+            }
         }
     }
 
@@ -920,10 +1059,17 @@ pub(crate) async fn process_pending_commits_locked(
         }
     }
 
+    // GroupInfo durability backstop. The `any_applied` path advanced our epoch,
+    // so its freshly-exported GroupInfo must be republished — but we also heal the
+    // case where a *past* publish (e.g. the create-time one in `init_mls_group`)
+    // was dropped by a transient DS failure and never retried. `any_applied` is
+    // false for a stranded sole-member creator, so the old gated republish never
+    // ran and the group stayed unjoinable forever (no GroupInfo → no external-join).
+    // `ensure_group_info_published` republishes only when the log DB's GroupInfo is
+    // missing or behind us, so it subsumes the old `any_applied` republish too.
+    ensure_group_info_published(state, mls_group_id).await;
+
     if any_applied {
-        if let Err(e) = publish_group_info(state, mls_group_id).await {
-            eprintln!("[mls] process_pending_commits: publish_group_info failed (non-fatal): {e}");
-        }
         // Voice E2EE: when the epoch advances for the MLS group currently
         // backing the active voice room, re-derive the per-room key and
         // rotate it on the live KeyProvider. No-op when voice is idle.
@@ -1003,6 +1149,27 @@ pub fn try_mls_encrypt(
     msg_out.tls_serialize_detached().ok()
 }
 
+/// Parse the MLS epoch a `message` / `edit` envelope was sealed at, WITHOUT
+/// decrypting it (no group state touched).
+///
+/// Returns `None` when the bytes are not a valid MLS `ProtocolMessage` — e.g. a
+/// `delete` tombstone, whose ciphertext is empty — so the caller treats such
+/// envelopes as epoch-independent.
+///
+/// This is the load-bearing primitive for the epoch-stepped ingest interleave
+/// (issue #418): because `max_past_epochs` is 0, a message must be decrypted
+/// while the local group is still AT its epoch, so the ingest pass routes each
+/// envelope to the moment in the commit replay when the group reaches the
+/// matching epoch. The epoch is read by PARSING the envelope rather than inferred
+/// from `sent_at` — clock skew and same-epoch reordering make `sent_at` an
+/// unreliable proxy for the cryptographic epoch.
+pub fn envelope_epoch(ciphertext: &[u8]) -> Option<u64> {
+    let mut reader: &[u8] = ciphertext;
+    let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
+    let protocol_msg = msg_in.try_into_protocol_message().ok()?;
+    Some(protocol_msg.epoch().as_u64())
+}
+
 /// Try to decrypt MLS ciphertext bytes for `conversation_id`.
 ///
 /// The bytes must be TLS-serialised `MlsMessageOut` (i.e. what we stored in
@@ -1026,5 +1193,46 @@ pub fn try_mls_decrypt(
     match processed.into_content() {
         ProcessedMessageContent::ApplicationMessage(app_msg) => Some(app_msg.into_bytes()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod group_info_heal_tests {
+    use super::group_info_is_stale;
+
+    // The decision at the heart of the bootstrap-durability backstop: republish
+    // the GroupInfo iff the log DB's copy is missing or behind our local epoch.
+    // This is exactly what was missing before — the old republish only ran when a
+    // commit was applied (`any_applied`), so a sole-member creator whose
+    // create-time publish was dropped (`None`) never republished and the group
+    // stayed permanently unjoinable.
+    #[test]
+    fn republishes_when_groupinfo_never_landed() {
+        // No GroupInfo row at all — the stranded-creator bug. Must republish at
+        // any epoch, including epoch 0 (a freshly created, sole-member group).
+        assert!(group_info_is_stale(None, 0));
+        assert!(group_info_is_stale(None, 7));
+    }
+
+    #[test]
+    fn republishes_when_groupinfo_is_behind() {
+        // A later epoch-advance publish was dropped; the stored GroupInfo lags our
+        // local epoch, so the current epoch isn't externally joinable until we heal.
+        assert!(group_info_is_stale(Some(0), 1));
+        assert!(group_info_is_stale(Some(3), 7));
+    }
+
+    #[test]
+    fn skips_when_groupinfo_is_current() {
+        // Already durable at our epoch — no DS round-trip needed.
+        assert!(!group_info_is_stale(Some(0), 0));
+        assert!(!group_info_is_stale(Some(5), 5));
+    }
+
+    #[test]
+    fn skips_when_groupinfo_is_ahead() {
+        // Another member advanced and published past us; don't republish a stale
+        // view of an epoch we no longer lead.
+        assert!(!group_info_is_stale(Some(9), 4));
     }
 }

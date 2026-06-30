@@ -36,9 +36,9 @@ pub use welcomes::{
 
 // ── Group lifecycle / encrypt / decrypt / commit processing ──────────────────
 pub use group_state::{
-    external_join_group, forget_local_mls_group, has_local_group, init_mls_group,
-    process_pending_commits, process_pending_commits_inner, publish_group_info, try_mls_decrypt,
-    try_mls_encrypt,
+    envelope_epoch, external_join_group, forget_local_mls_group, has_local_group, init_mls_group,
+    process_pending_commits, process_pending_commits_inner, process_pending_commits_inner_with_hook,
+    publish_group_info, try_mls_decrypt, try_mls_encrypt,
 };
 
 // ── Cold-launch / post-reconnect sweep ──────────────────────────────────────
