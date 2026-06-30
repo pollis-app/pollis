@@ -480,7 +480,7 @@ pub async fn dev_login(
 
     #[cfg(debug_assertions)]
     {
-        let profile = dev_login_inner(&_state, _email).await?;
+        let profile = dev_login_dispatch(&_state, _email).await?;
         eprintln!("[auth] dev_login: logged in as {}", profile.username);
         Ok(profile)
     }
@@ -510,7 +510,7 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
         let dev_email = dev_email.trim().to_string();
         if !dev_email.is_empty() {
             eprintln!("[auth] DEV_EMAIL active — auto-logging in as {dev_email}");
-            let profile = dev_login_inner(&state, dev_email).await?;
+            let profile = dev_login_dispatch(&state, dev_email).await?;
             return Ok(Some(profile));
         }
     }
@@ -638,6 +638,190 @@ pub async fn get_session(state: &Arc<AppState>) -> Result<Option<UserProfile>> {
     profile.enrollment_required = remote_pub.is_some() && !has_local_identity;
 
     Ok(Some(profile))
+}
+
+/// DEV_EMAIL auto-login entry point.
+///
+/// When a Delivery Service is configured it now OWNS auth/bootstrap (#419): the
+/// DS authorizes every write by the device's registered `mls_signature_pub`, so a
+/// device that never ran the DS bootstrap handshake (verify-otp → register-device
+/// → publish-device-cert) has no DS-recognized credential and every DS write 401s.
+/// The legacy `dev_login_inner` writes the account straight to Turso and skips
+/// that handshake entirely, so under a DS it produces a "logged in locally but not
+/// DS-enrolled" device — exactly the `publish-device-cert 401` + failed
+/// external-join symptoms. So when a DS is configured we drive the real DS
+/// enrollment ([`dev_login_ds`]); only the no-DS / self-host path keeps the
+/// Turso-direct shortcut. A DS enrollment failure (e.g. the DS isn't running with
+/// a matching `DEV_OTP`) falls back to the legacy path so startup still completes.
+#[cfg(debug_assertions)]
+async fn dev_login_dispatch(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
+    if state.config.pollis_delivery_url.is_none() {
+        return dev_login_inner(state, email).await;
+    }
+    match dev_login_ds(state, email.clone()).await {
+        Ok(profile) => Ok(profile),
+        Err(e) => {
+            eprintln!(
+                "[auth] DEV_EMAIL DS enrollment failed ({e}); falling back to direct dev login. \
+                 If you expect DS auth to work, ensure the Delivery Service is running with \
+                 DEV_OTP set to the same value as this client (default 000000)."
+            );
+            dev_login_inner(state, email).await
+        }
+    }
+}
+
+/// The deterministic dev OTP code. Mirrors the DS's `DEV_OTP` (read server-side in
+/// `pollis_delivery::otp`); they must match for `verify-otp` to accept it.
+#[cfg(debug_assertions)]
+fn dev_otp_code() -> String {
+    std::env::var("DEV_OTP")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| "000000".to_string())
+}
+
+/// DEV_EMAIL auto-login that ENROLLS the device with the Delivery Service, so a
+/// pre-#419 dev device (or a fresh dev machine) obtains a DS-recognized credential
+/// instead of 401ing on every DS write.
+///
+/// Mirrors the production [`verify_otp_ds`] handshake, with one dev-only twist that
+/// makes it work for a RETURNING device (the case production leaves to
+/// sibling-approval / Secret-Key enrollment): it binds the OTP session to this
+/// device's EXISTING `device_id` (resolved from the keystore before verify-otp),
+/// so the subsequent session-gated `register-device` can create the DS
+/// `user_device` row for a device that already exists locally. Production's
+/// returning-device branch can't do this — its session is bound to a throwaway
+/// candidate id — which is why a pre-#419 device never gets a DS row and its
+/// cert-validity `publish-device-cert` 401s.
+///
+/// Strictly dev-only (`#[cfg(debug_assertions)]`); it does not touch the
+/// production bootstrap invariants.
+#[cfg(debug_assertions)]
+async fn dev_login_ds(state: &Arc<AppState>, email: String) -> Result<UserProfile> {
+    // Pre-resolve the account (if any) so we can reuse this device's stable
+    // device_id and bind the OTP session to it. A brand-new dev account has no
+    // row yet — the standard first-device DS bootstrap (verify_otp_ds via
+    // verify_otp) is already correct for that, so delegate.
+    let conn = state.remote_db.conn().await?;
+    let existing_user_id: Option<String> = {
+        let mut rows = conn
+            .query(
+                "SELECT id FROM users WHERE email = ?1",
+                libsql::params![email.clone()],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => Some(row.get::<String>(0)?),
+            None => None,
+        }
+    };
+    let user_id = match existing_user_id {
+        Some(uid) => uid,
+        None => {
+            eprintln!("[auth] DEV_EMAIL: no existing account for {email}; first-device DS bootstrap");
+            request_otp(state, email.clone()).await?;
+            return verify_otp(state, email, dev_otp_code()).await;
+        }
+    };
+
+    // Bind the session to this device's existing id (or a fresh candidate on a
+    // clean machine). Sending it in the verify-otp body is what lets the
+    // session-gated register-device below authorize THIS device's row.
+    let bound_device_id = match state.keystore.load_for_user(DEVICE_ID_KEY, &user_id).await? {
+        Some(bytes) => String::from_utf8(bytes)
+            .map_err(|e| anyhow::anyhow!("corrupt device_id in keystore: {e}"))?,
+        None => Ulid::new().to_string(),
+    };
+
+    request_otp(state, email.clone()).await?;
+
+    let resp = crate::commands::mls::ds_post_plain(
+        state,
+        "/v1/auth/verify-otp",
+        &serde_json::json!({
+            "email": email,
+            "code": dev_otp_code(),
+            "device_id": bound_device_id,
+        }),
+    )
+    .await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("dev verify-otp failed ({status}): {txt}").into());
+    }
+    let v: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("dev verify-otp response: {e}"))?;
+    let username = v["username"]
+        .as_str()
+        .unwrap_or_else(|| email.split('@').next().unwrap_or("user"))
+        .to_string();
+    let has_identity = v["has_identity"].as_bool().unwrap_or(false);
+    let session_token = v["session_token"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("dev verify-otp response missing session_token"))?
+        .to_string();
+
+    // Persist + publish the bound device_id into state.
+    let device_id = ensure_device_id(state, &user_id, &bound_device_id).await?;
+
+    // Orphan-detection: a reset elsewhere leaves a stale local key. Mirror the
+    // direct path so the enrollment gate recomputes honestly.
+    if has_identity {
+        if let Some(pub_bytes) = read_account_id_pub(state, &user_id).await.unwrap_or(None) {
+            let matches = crate::commands::account_identity::has_matching_local_account_identity(
+                state, &user_id, &pub_bytes,
+            )
+            .await
+            .unwrap_or(false);
+            if !matches {
+                if let Err(e) =
+                    crate::commands::account_identity::wipe_local_account_identity(state, &user_id)
+                        .await
+                {
+                    eprintln!("[auth] wipe_local_account_identity (non-fatal): {e}");
+                }
+            }
+        }
+    }
+
+    // register-device (session-gated): creates/upserts the DS `user_device` row —
+    // the row a pre-#419 device is missing. Idempotent.
+    let hostname = gethostname::gethostname().to_string_lossy().to_string();
+    let device_name = format!("{hostname} ({})", std::env::consts::OS);
+    crate::commands::mls::ds_post_session_ok(
+        state,
+        "/v1/auth/register-device",
+        &session_token,
+        &serde_json::json!({ "device_id": device_id, "device_name": device_name }),
+    )
+    .await?;
+
+    // Stash the session so the cert pivot (set_pin / unlock → ensure_device_cert)
+    // publishes via the session path — which both authorizes the write and, with
+    // the row now present, lands `mls_signature_pub` so later device-signed DS
+    // writes (GroupInfo, external-join) authenticate.
+    *state.bootstrap_session.lock().await = Some(session_token);
+
+    let enrollment_required = has_identity
+        && !crate::commands::account_identity::has_local_account_identity(state, &user_id)
+            .await
+            .unwrap_or(false);
+
+    crate::accounts::upsert_account(&user_id, &username, Some(&email), None)?;
+
+    eprintln!("[auth] DEV_EMAIL: DS-enrolled device {device_id} for {user_id}");
+    Ok(UserProfile {
+        id: user_id,
+        email,
+        username,
+        new_secret_key: None,
+        enrollment_required,
+    })
 }
 
 // Helper shared by get_session (DEV_EMAIL) and dev_login.
