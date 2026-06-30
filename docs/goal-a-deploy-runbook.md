@@ -164,6 +164,24 @@ Then redeploy the DS so it picks up the new env: run the **Deploy Delivery
 
 (Dev DS at `/root/ds.env` on its host + **Deploy Delivery (dev)** equivalently.)
 
+> **⚠️ Co-located dev + prod on one host — keep `DEV_OTP` off prod.** Dev builds
+> can auto-enroll via a fixed `DEV_OTP` (the DS skips the email send and accepts
+> only that code; see `pollis-delivery/src/otp.rs`). That is a deliberate sign-in
+> **bypass** — on the prod `delivery` container it would make the production OTP a
+> fixed, publicly-guessable code (account takeover). If a single host runs **both**
+> `delivery` (`:prod`) and `delivery-dev` (`:dev`), do **NOT** append `DEV_OTP` to a
+> shared `/root/ds.env` — both containers would read it. Scope it to dev only:
+>
+> - **compose-managed:** put `DEV_OTP=000000` under the `delivery-dev` service's own
+>   `environment:` block (per-service; physically can't reach `delivery`), or
+> - **run-managed:** give dev its own file (e.g. `/root/ds-dev.env` = the shared
+>   lines **plus** `DEV_OTP`) and point only `delivery-dev` at it; leave
+>   `/root/ds.env` untouched for prod.
+>
+> Confirm the env-file → container mapping (read-only) before changing anything —
+> e.g. `docker inspect delivery --format '{{range .Config.Env}}{{println .}}{{end}}' | cut -d= -f1`
+> to list prod's env **key names** (no values) and verify `DEV_OTP` is not among them.
+
 ---
 
 ## 4. Local dev / test env files
