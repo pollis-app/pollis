@@ -28,6 +28,12 @@ ulid = "1"
 # `verify_device_cert` uses (raw 32-byte pubkey, 64-byte PureEdDSA sig).
 ed25519-dalek = "2"
 sha2 = "0.10"
+# Authorized-secrets broker (#393): mint LiveKit JWTs server-side (pure HS256,
+# no native dep) and HMAC for the R2 SigV4 query-string presign. Same crates as
+# pollis-core's livekit_jwt / r2 so the contract stays byte-identical.
+jsonwebtoken = "9"
+hmac = "0.12"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 # CSPRNG for OTP codes and 256-bit session tokens (OsRng).
 rand = "0.8"
 # Send the OTP email via Resend (server-side; the key lives in DS env now, not

@@ -22,6 +22,7 @@
 pub mod account;
 pub mod auth;
 pub mod bootstrap;
+pub mod broker;
 pub mod cert;
 pub mod commit;
 pub mod db;
@@ -72,6 +73,9 @@ pub struct AppState {
     /// Email-change OTP store + requester binding (device-signed, separate from
     /// the signup OTP store so the two can't collide on the same address).
     pub email_change: email_change::EmailChangeStore,
+    /// Authorized-secrets broker config (#393) — LiveKit + R2 secrets read from
+    /// DS env. Default all-`None`; the matching endpoint 503s until configured.
+    pub broker: broker::BrokerConfig,
 }
 
 impl AppState {
@@ -93,6 +97,7 @@ impl AppState {
             sessions: session::SessionStore::default(),
             otp_config: otp::OtpConfig::default(),
             email_change: email_change::EmailChangeStore::default(),
+            broker: broker::BrokerConfig::default(),
         }
     }
 
@@ -100,6 +105,14 @@ impl AppState {
     /// can thread DS env without widening the constructors.
     pub fn with_otp_config(mut self, config: otp::OtpConfig) -> Self {
         self.otp_config = config;
+        self
+    }
+
+    /// Override the broker config (LiveKit + R2 secrets). Builder so `main` can
+    /// thread DS env without widening the constructors, mirroring
+    /// [`Self::with_otp_config`].
+    pub fn with_broker_config(mut self, config: broker::BrokerConfig) -> Self {
+        self.broker = config;
         self
     }
 }
@@ -136,7 +149,8 @@ pub fn build_router_with_log_db(db: Arc<Db>, log_db: Arc<Db>) -> Router {
         }
     );
     let state = AppState::new_with_log_db(db, log_db, require_auth)
-        .with_otp_config(otp::OtpConfig::from_env());
+        .with_otp_config(otp::OtpConfig::from_env())
+        .with_broker_config(broker::BrokerConfig::from_env());
     build_router_with_state(state)
 }
 
@@ -242,6 +256,13 @@ pub fn build_router_with_state(state: AppState) -> Router {
             "/v1/auth/verify-email-change",
             post(email_change::verify_email_change),
         )
+        // Authorized-secrets broker (#393) — DEVICE-SIGNED. Move the two
+        // secret-dependent on-device ops server-side: mint a LiveKit token
+        // (identity derived from the verified signer, never the client) and
+        // presign an R2 GET/PUT. Secrets live in DS env, never the client
+        // bundle. See `broker` module docs + `docs/secrets-broker.md`.
+        .route("/v1/livekit/token", post(broker::livekit_token))
+        .route("/v1/r2/presign", post(broker::r2_presign))
         .with_state(state)
 }
 
