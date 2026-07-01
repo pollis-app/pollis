@@ -17,6 +17,7 @@ Start here. Navigate to the article you need.
 - [Notifications](./notifications.md) — Sound, OS notification, badge, and alert dispatcher (`notify()` + category table)
 - [Audio Processing](./audio-processing.md) — Mic-side AGC + NS + AEC pipeline (WebRTC APM), playback mixer, AEC render reference, build deps
 - [Screen-Capture Helper Split](./capture-split.md) — Per-platform capture subprocess + shared socket protocol; Linux two-backend session-type routing (#281), macOS SCK isolation (#283)
+- [Authorized-Secrets Broker](./secrets-broker.md) — Server-side LiveKit token minting + R2 SigV4 presign so API secrets never ship in the client bundle (#393)
 
 ## Quick Reference
 
