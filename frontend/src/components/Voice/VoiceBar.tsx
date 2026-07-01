@@ -3,13 +3,14 @@ import { useNavigate } from "@tanstack/react-router";
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
-import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff } from "lucide-react";
+import { Volume2, Mic, MicOff, PhoneOff, SlidersHorizontal, Monitor, MonitorOff, Video, VideoOff } from "lucide-react";
 import { PillButton } from "../ui/PillButton";
 import { voiceSession } from "../../voice";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { userIdFromVoiceIdentity } from "../../voice/identity";
 import { toggleScreenShare } from "../../screenshare/screenShareActions";
-import { shareOf } from "../../types/voice-state";
+import { toggleCamera } from "../../camera/cameraActions";
+import { shareOf, cameraOf } from "../../types/voice-state";
 
 interface VoiceBarProps {
   channelId: string;
@@ -29,6 +30,9 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
   // affordance — covers in-flight `starting` (recovery from wedged publish)
   // and `failed` (lets the user clear the error state by stopping).
   const shareInFlight = share.kind !== 'idle';
+  const camera = cameraOf(voiceState);
+  const cameraActive = camera.kind === 'active';
+  const cameraInFlight = camera.kind !== 'idle';
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const navigate = useNavigate();
 
@@ -131,6 +135,34 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         square
       >
         {shareActive ? <MonitorOff size={12} /> : <Monitor size={12} />}
+      </PillButton>
+
+      {/* Camera toggle — webcam published into the same voice room as a
+          TrackSource::Camera track. With one camera it starts directly; with
+          several the in-app picker (CameraPicker) takes over the stage. */}
+      <PillButton
+        data-testid="voice-bar-camera-button"
+        accent={cameraInFlight && !cameraActive ? "var(--c-danger)" : "var(--c-accent)"}
+        onClick={() => toggleCamera(camera)}
+        title={
+          cameraActive
+            ? "Turn off camera"
+            : camera.kind === "picking"
+              ? "Cancel"
+              : cameraInFlight
+                ? "Cancel (recover)"
+                : "Turn on camera"
+        }
+        aria-label={
+          cameraActive
+            ? "Turn off camera"
+            : camera.kind === "picking"
+              ? "Cancel camera picker"
+              : "Turn on camera"
+        }
+        square
+      >
+        {cameraActive ? <VideoOff size={12} /> : <Video size={12} />}
       </PillButton>
 
       {/* Leave button */}

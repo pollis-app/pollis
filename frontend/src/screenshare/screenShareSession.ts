@@ -89,6 +89,12 @@ export type ScreenShareEvent =
       identity: string;
       width: number;
       height: number;
+      /** Screen share vs webcam. Both kinds of remote video ride this one
+       *  event + frame WebSocket; the tag (read from the LiveKit
+       *  publication's TrackSource on the backend) is what routes the
+       *  track_key to a screenshare tile vs a participant's camera tile.
+       *  Optional/defaulted for compatibility with older backends. */
+      source?: "screen" | "camera";
     }
   | { type: "remote_stopped"; track_key: string };
 
@@ -704,15 +710,31 @@ class ScreenShareSession {
         store.shareFailed(ev.message);
         break;
       case "remote_started":
-        store.upsertScreenShareRemote(ev.identity, {
-          trackKey: ev.track_key,
-          width: ev.width,
-          height: ev.height,
-        });
+        // One event stream, two destinations: a webcam track becomes the
+        // publisher's tile face (cameraRemotes), a screen share becomes a
+        // spotlight streamer (screenShareRemotes). Default to screen for an
+        // untagged event from an older backend.
+        if (ev.source === "camera") {
+          store.upsertCameraRemote(ev.identity, {
+            trackKey: ev.track_key,
+            width: ev.width,
+            height: ev.height,
+          });
+        } else {
+          store.upsertScreenShareRemote(ev.identity, {
+            trackKey: ev.track_key,
+            width: ev.width,
+            height: ev.height,
+          });
+        }
         playSfx(SFX.ping);
         break;
       case "remote_stopped":
+        // The stop event carries only the track_key, not its source, so fan
+        // out to both maps — each scans its own entries and ignores a
+        // track_key it doesn't hold.
         store.removeScreenShareRemote(ev.track_key);
+        store.removeCameraRemote(ev.track_key);
         playSfx(SFX.ping);
         break;
     }

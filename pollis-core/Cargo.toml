@@ -128,6 +128,12 @@ windows = { version = "0.62", features = [
     # (ApplicationFrameHost) + background app windows from the picker —
     # the same trick Slack/Discord use to hide invisible top-level windows.
     "Win32_Graphics_Dwm",
+    # Webcam capture (camera/start_windows.rs): Media Foundation device
+    # enumeration (MFEnumDeviceSources) + IMFSourceReader capture loop, and
+    # the COM apartment those calls run in. Currently consumed only by the
+    # SCAFFOLD stub; the real MF capture is a TODO (#394 Windows follow-up).
+    "Win32_Media_MediaFoundation",
+    "Win32_System_Com",
 ] }
 
 # Desktop-only crates, excluded from the mobile (iOS/Android) build:

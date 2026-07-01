@@ -6,6 +6,12 @@
 	<string>alert</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Pollis needs microphone access for voice channels</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Pollis needs camera access to share your webcam in voice channels</string>
+	<!-- Allow using an iPhone as a webcam (Continuity Camera); also silences the
+	     AVCaptureDeviceTypeContinuityCamera warning the helper logs at enumeration. -->
+	<key>NSCameraUseContinuityCameraDeviceType</key>
+	<true/>
 	<!-- Screen sharing on macOS uses ScreenCaptureKit in-process; TCC
 	     prompts the user on first capture attempt. macOS uses its own
 	     system message regardless of this key on most OS versions, but

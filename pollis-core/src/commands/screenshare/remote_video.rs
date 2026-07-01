@@ -1,6 +1,8 @@
 //! Remote video track plumbing — called from the voice room loop when a
-//! remote participant publishes/unpublishes a screenshare track, and on
-//! room disconnect for blanket cleanup.
+//! remote participant publishes/unpublishes a video track (screen share or
+//! webcam), and on room disconnect for blanket cleanup. Both video kinds
+//! share this one drain + frame WebSocket; the `source` tag on the
+//! `RemoteStarted` event is what lets the renderer tell them apart.
 
 use std::sync::Arc;
 
@@ -9,15 +11,16 @@ use livekit::track::RemoteVideoTrack;
 
 use crate::state::AppState;
 
-use super::{codec::pack_frame_bytes, stop::stop_screen_share, ScreenShareEvent};
+use super::{codec::pack_frame_bytes, stop::stop_screen_share, RemoteVideoSource, ScreenShareEvent};
 
 pub async fn on_remote_video_subscribed(
     track: RemoteVideoTrack,
     participant_identity: String,
+    source: RemoteVideoSource,
     state: &Arc<AppState>,
 ) {
     let track_key = format!("{}-{}", participant_identity, track.sid());
-    eprintln!("[screenshare] remote video subscribed: {track_key}");
+    eprintln!("[screenshare] remote video subscribed: {track_key} (source={source:?})");
 
     let (events, frames) = {
         let ss = state.screenshare.lock().await;
@@ -53,6 +56,7 @@ pub async fn on_remote_video_subscribed(
                         identity: identity_clone.clone(),
                         width: w,
                         height: h,
+                        source,
                     });
                 }
             }

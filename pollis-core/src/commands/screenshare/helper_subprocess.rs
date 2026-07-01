@@ -141,7 +141,7 @@ fn capture_helper_name() -> &'static str {
     }
 }
 
-fn locate_capture_helper() -> Result<std::path::PathBuf> {
+pub(crate) fn locate_capture_helper() -> Result<std::path::PathBuf> {
     use std::path::PathBuf;
 
     let helper = capture_helper_name();

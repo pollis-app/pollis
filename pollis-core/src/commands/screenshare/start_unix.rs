@@ -251,11 +251,23 @@ pub async fn start_screen_share(
             // the OS dialog, not an in-app Sources→Select round-trip), but
             // tolerate them rather than fail the share: skip and keep waiting
             // for the real Format/Frame.
-            Ok(Some(other @ (CaptureMsg::Sources(_) | CaptureMsg::Select(_)))) => {
+            // Camera-handshake messages (Cameras/SelectCamera) join Sources/
+            // Select here: none of them belong on the Linux screenshare path
+            // (the picker is the OS portal dialog, not an in-app round-trip),
+            // but tolerate any of them rather than fail the share.
+            Ok(Some(
+                other
+                @ (CaptureMsg::Sources(_)
+                    | CaptureMsg::Select(_)
+                    | CaptureMsg::Cameras(_)
+                    | CaptureMsg::SelectCamera(_)),
+            )) => {
                 skipped += 1;
                 let kind = match other {
                     CaptureMsg::Sources(_) => "sources",
-                    _ => "select",
+                    CaptureMsg::Select(_) => "select",
+                    CaptureMsg::Cameras(_) => "cameras",
+                    _ => "select-camera",
                 };
                 eprintln!(
                     "[screenshare] skipping unexpected '{kind}' message before format \
@@ -471,7 +483,10 @@ pub async fn start_screen_share(
                     // the new dimensions; LiveKit's NativeVideoSource
                     // tolerates per-frame size changes.
                 }
-                Ok(Some(CaptureMsg::Sources(_))) | Ok(Some(CaptureMsg::Select(_))) => {
+                Ok(Some(CaptureMsg::Sources(_)))
+                | Ok(Some(CaptureMsg::Select(_)))
+                | Ok(Some(CaptureMsg::Cameras(_)))
+                | Ok(Some(CaptureMsg::SelectCamera(_))) => {
                     // Only valid during the picker handshake — should
                     // never appear once frames are flowing. Ignore.
                 }

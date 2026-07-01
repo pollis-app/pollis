@@ -1,9 +1,12 @@
 //! pollis-capture-proto
 //!
-//! The single shared definition of the screen-capture helper
-//! Unix-socket wire protocol. Both per-platform helper subprocesses
-//! (`pollis-capture-linux`, `pollis-capture-macos`) encode frames with
-//! this crate; `pollis-core`'s main-process reader decodes them with it.
+//! The single shared definition of the capture helper Unix-socket wire
+//! protocol — both screen capture and webcam capture. Both per-platform
+//! helper subprocesses (`pollis-capture-linux`, `pollis-capture-macos`)
+//! encode frames with this crate; `pollis-core`'s main-process reader
+//! decodes them with it. The helper is launched in either screen or
+//! camera mode; the two modes share the Format + Frame messages and
+//! differ only in their enumeration/selection handshake.
 //!
 //! This crate exists so the wire bytes have exactly one home. It was
 //! factored out of the original hand-rolled encode/decode that lived in
@@ -38,14 +41,34 @@
 //!     display/window/app identifier; the helper builds an
 //!     `SCContentFilter` from it and proceeds to Format → Frame.
 //!
+//!   type 0x05  Cameras (helper → parent)
+//!     payload := utf-8 JSON `CameraList`
+//!     Sent once in camera mode after the helper enumerates the OS's
+//!     video-capture devices. The parent renders them in its own picker
+//!     (it lists every device the OS reports — no virtual-camera
+//!     filtering, matching Discord/Zoom), then replies with SelectCamera.
+//!
+//!   type 0x06  SelectCamera (parent → helper)
+//!     payload := utf-8 JSON `CameraSelection`
+//!     The parent's response to Cameras. Carries the opaque per-platform
+//!     device id (macOS `AVCaptureDevice.uniqueID`, Linux V4L2 node path,
+//!     Windows MF symbolic link) — a String, unlike the u32 ids screen
+//!     sources use. The helper opens that device and proceeds to Format →
+//!     Frame. Camera frames reuse the Format + Frame messages unchanged:
+//!     the helper delivers BGRA (alpha ignored) exactly like the screen
+//!     path, so the parent's I420 conversion + LiveKit publish is shared.
+//!
 //!   type 0xFF  Error
 //!     payload := utf-8 message
 //!
-//! Lifecycle on macOS: helper connects → Sources → (parent reads,
+//! Lifecycle on macOS (screen): helper connects → Sources → (parent reads,
 //! shows picker) → Select → Format → Frame ... until the parent
 //! closes the socket.
-//! Lifecycle on Linux: helper connects → Format → Frame ... (no
+//! Lifecycle on Linux (screen): helper connects → Format → Frame ... (no
 //! enumeration round-trip; portal owns the picker).
+//! Lifecycle in camera mode (all platforms): helper connects → Cameras →
+//! (parent reads, shows picker / auto-picks) → SelectCamera → Format →
+//! Frame ... until the parent closes the socket.
 //! The parent stops capture by closing the socket; the helper observes
 //! EPIPE on next write or EOF on read and exits.
 
@@ -60,6 +83,10 @@ pub const MSG_FRAME: u8 = 0x02;
 pub const MSG_SOURCES: u8 = 0x03;
 /// User's pick from the in-app picker, parent → helper. JSON payload.
 pub const MSG_SELECT: u8 = 0x04;
+/// Enumerated video-capture devices, helper → parent. JSON payload.
+pub const MSG_CAMERAS: u8 = 0x05;
+/// User's camera pick from the in-app picker, parent → helper. JSON payload.
+pub const MSG_SELECT_CAMERA: u8 = 0x06;
 /// A fatal error from the helper, carrying a human-readable utf-8 string.
 pub const MSG_ERROR: u8 = 0xFF;
 
@@ -84,6 +111,8 @@ pub enum CaptureMsg {
     },
     Sources(SourceList),
     Select(Selection),
+    Cameras(CameraList),
+    SelectCamera(CameraSelection),
     Error {
         message: String,
     },
@@ -146,6 +175,35 @@ pub enum Selection {
     Window { id: u32 },
 }
 
+/// A capturable video-capture device (webcam / capture card / virtual cam).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraSource {
+    /// Opaque, stable per-platform device handle: macOS
+    /// `AVCaptureDevice.uniqueID`, Linux V4L2 node path (e.g.
+    /// `/dev/video0`), Windows MF symbolic link. A String, unlike the
+    /// u32 ids `DisplaySource`/`WindowSource` use — camera handles are
+    /// not small integers. The parent passes it back verbatim in
+    /// `CameraSelection`.
+    pub id: String,
+    /// Friendly label like "FaceTime HD Camera" — for picker UI.
+    pub name: String,
+}
+
+/// The camera enumeration result sent helper → parent. Lists every
+/// device the OS reports; no virtual-camera filtering (matches the
+/// Discord/Zoom convention — the parent shows them all).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraList {
+    pub cameras: Vec<CameraSource>,
+}
+
+/// What the user picked in the camera picker. Parent → helper.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CameraSelection {
+    /// The chosen `CameraSource::id`, echoed back verbatim.
+    pub id: String,
+}
+
 // ── Encoding (helper side) ────────────────────────────────────────────────
 
 /// Serialize a Format message to its exact wire bytes.
@@ -199,6 +257,26 @@ pub fn encode_select(sel: &Selection) -> Vec<u8> {
     buf
 }
 
+/// Serialize a Cameras message (helper → parent).
+pub fn encode_cameras(list: &CameraList) -> Vec<u8> {
+    let json = serde_json::to_vec(list).expect("CameraList serializes");
+    let mut buf = Vec::with_capacity(1 + 4 + json.len());
+    buf.push(MSG_CAMERAS);
+    buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&json);
+    buf
+}
+
+/// Serialize a SelectCamera message (parent → helper).
+pub fn encode_select_camera(sel: &CameraSelection) -> Vec<u8> {
+    let json = serde_json::to_vec(sel).expect("CameraSelection serializes");
+    let mut buf = Vec::with_capacity(1 + 4 + json.len());
+    buf.push(MSG_SELECT_CAMERA);
+    buf.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&json);
+    buf
+}
+
 /// Serialize an Error message to its exact wire bytes.
 pub fn encode_error(message: &str) -> Vec<u8> {
     let mut buf = Vec::with_capacity(1 + 4 + message.len());
@@ -232,6 +310,8 @@ where
         }
         CaptureMsg::Sources(list) => w.write_all(&encode_sources(list)).await,
         CaptureMsg::Select(sel) => w.write_all(&encode_select(sel)).await,
+        CaptureMsg::Cameras(list) => w.write_all(&encode_cameras(list)).await,
+        CaptureMsg::SelectCamera(sel) => w.write_all(&encode_select_camera(sel)).await,
         CaptureMsg::Error { message } => w.write_all(&encode_error(message)).await,
     }
 }
@@ -320,6 +400,28 @@ where
                 )
             })?;
             Ok(Some(CaptureMsg::Select(sel)))
+        }
+        MSG_CAMERAS => {
+            let mut bytes = vec![0u8; payload_len];
+            r.read_exact(&mut bytes).await?;
+            let list: CameraList = serde_json::from_slice(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("cameras json: {e}"),
+                )
+            })?;
+            Ok(Some(CaptureMsg::Cameras(list)))
+        }
+        MSG_SELECT_CAMERA => {
+            let mut bytes = vec![0u8; payload_len];
+            r.read_exact(&mut bytes).await?;
+            let sel: CameraSelection = serde_json::from_slice(&bytes).map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("select_camera json: {e}"),
+                )
+            })?;
+            Ok(Some(CaptureMsg::SelectCamera(sel)))
         }
         MSG_ERROR => {
             let mut bytes = vec![0u8; payload_len];
@@ -454,6 +556,43 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn cameras_roundtrip() {
+        let m = roundtrip(CaptureMsg::Cameras(CameraList {
+            cameras: vec![
+                CameraSource {
+                    id: "0x1420000005ac8600".into(),
+                    name: "FaceTime HD Camera".into(),
+                },
+                CameraSource {
+                    id: "/dev/video0".into(),
+                    name: "Logitech BRIO".into(),
+                },
+            ],
+        }))
+        .await;
+        match m {
+            CaptureMsg::Cameras(list) => {
+                assert_eq!(list.cameras.len(), 2);
+                assert_eq!(list.cameras[0].name, "FaceTime HD Camera");
+                assert_eq!(list.cameras[1].id, "/dev/video0");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn select_camera_roundtrip() {
+        match roundtrip(CaptureMsg::SelectCamera(CameraSelection {
+            id: "/dev/video2".into(),
+        }))
+        .await
+        {
+            CaptureMsg::SelectCamera(sel) => assert_eq!(sel.id, "/dev/video2"),
+            _ => panic!("wrong variant"),
+        }
+    }
+
     // The exact opcode bytes are load-bearing across three crates;
     // pin them so an accidental renumber is caught.
     #[test]
@@ -462,6 +601,8 @@ mod tests {
         assert_eq!(MSG_FRAME, 0x02);
         assert_eq!(MSG_SOURCES, 0x03);
         assert_eq!(MSG_SELECT, 0x04);
+        assert_eq!(MSG_CAMERAS, 0x05);
+        assert_eq!(MSG_SELECT_CAMERA, 0x06);
         assert_eq!(MSG_ERROR, 0xFF);
     }
 }

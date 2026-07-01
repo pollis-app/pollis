@@ -2,8 +2,10 @@ import { makeAutoObservable } from 'mobx';
 import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, VoiceParticipant } from '../types';
 import type { VoiceState } from '../types/voice-state';
 import type { SourceList } from '../screenshare/screenShareSession';
+import type { CameraSource } from '../camera/types';
 
 type ScreenShareRemote = { trackKey: string; width: number; height: number };
+type CameraRemote = { trackKey: string; width: number; height: number };
 type EnrollmentApproval = { requestId: string; newDeviceId: string; verificationCode: string };
 type IncomingCall = { callId: string; roomName: string; callerId: string; callerUsername: string };
 type OutgoingCall = { callId: string; calleeId: string };
@@ -64,6 +66,12 @@ class AppStore implements AppState {
 
   /** Active remote screenshares keyed by participant identity. */
   screenShareRemotes: Record<string, ScreenShareRemote> = {};
+
+  /** Active remote webcams keyed by participant identity. Separate from
+   *  screenShareRemotes so a participant can publish both at once; the
+   *  camera renders as that participant's tile face, the screen share as a
+   *  spotlight streamer. */
+  cameraRemotes: Record<string, CameraRemote> = {};
 
   /** Track key currently being viewed in the inline stream pane, if any. */
   viewingScreenShareTrackKey: string | null = null;
@@ -244,6 +252,7 @@ class AppStore implements AppState {
       counterpartyUserId,
       micMuted: false,
       share: { kind: 'idle' },
+      camera: { kind: 'idle' },
     };
   }
 
@@ -352,6 +361,69 @@ class AppStore implements AppState {
     this.voiceState = { ...this.voiceState, share: { kind: 'idle' } };
   }
 
+  // ── Camera lifecycle — mirrors the share transitions above. Camera and
+  // share are independent slots on `joined`, so a user can run both. ──────
+
+  cameraStartPicking(cameras: CameraSource[]) {
+    if (this.voiceState.kind !== 'joined' || this.voiceState.camera.kind !== 'idle') {
+      console.warn('[voiceState] cameraStartPicking ignored:', this.voiceState.kind, 'camera=', this.voiceState.kind === 'joined' ? this.voiceState.camera.kind : 'n/a');
+      return;
+    }
+    this.voiceState = { ...this.voiceState, camera: { kind: 'picking', cameras } };
+  }
+
+  cameraCancelPicker() {
+    if (this.voiceState.kind !== 'joined' || this.voiceState.camera.kind !== 'picking') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, camera: { kind: 'idle' } };
+  }
+
+  cameraStartStarting() {
+    if (this.voiceState.kind !== 'joined') {
+      console.warn('[voiceState] cameraStartStarting ignored:', this.voiceState.kind);
+      return;
+    }
+    // From idle (a direct start) or picking (after a device pick).
+    if (this.voiceState.camera.kind !== 'idle' && this.voiceState.camera.kind !== 'picking') {
+      console.warn('[voiceState] cameraStartStarting ignored, camera=', this.voiceState.camera.kind);
+      return;
+    }
+    this.voiceState = {
+      ...this.voiceState,
+      camera: { kind: 'starting', startedAt: performance.now() },
+    };
+  }
+
+  cameraStarted(deviceId: string, dimensions: { width: number; height: number } | null) {
+    if (this.voiceState.kind !== 'joined' || this.voiceState.camera.kind !== 'starting') {
+      console.warn('[voiceState] cameraStarted ignored:', this.voiceState.kind, this.voiceState.kind === 'joined' ? this.voiceState.camera.kind : 'n/a');
+      return;
+    }
+    this.voiceState = {
+      ...this.voiceState,
+      camera: { kind: 'active', deviceId, dimensions },
+    };
+  }
+
+  cameraFailed(error: string) {
+    if (this.voiceState.kind !== 'joined') {
+      console.warn('[voiceState] cameraFailed ignored, voice=', this.voiceState.kind);
+      return;
+    }
+    this.voiceState = {
+      ...this.voiceState,
+      camera: { kind: 'failed', error },
+    };
+  }
+
+  cameraStopped() {
+    if (this.voiceState.kind !== 'joined') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, camera: { kind: 'idle' } };
+  }
+
   setStatusBarAlert(alert: StatusBarAlert | null) {
     this.statusBarAlert = alert;
   }
@@ -401,6 +473,24 @@ class AppStore implements AppState {
     this.viewingScreenShareTrackKey = k;
   }
 
+  upsertCameraRemote(identity: string, info: CameraRemote) {
+    this.cameraRemotes = { ...this.cameraRemotes, [identity]: info };
+  }
+
+  /** Remove a remote camera by its track key. Safe to call for a track key
+   *  that isn't a camera (the screenshare remove does the symmetric thing) —
+   *  the two maps are scanned independently, so a stop event can fan out to
+   *  both without knowing which kind the track was. */
+  removeCameraRemote(trackKey: string) {
+    const next: Record<string, CameraRemote> = {};
+    for (const [id, info] of Object.entries(this.cameraRemotes)) {
+      if (info.trackKey !== trackKey) {
+        next[id] = info;
+      }
+    }
+    this.cameraRemotes = next;
+  }
+
   setPendingEnrollmentApproval(p: EnrollmentApproval | null) {
     this.pendingEnrollmentApproval = p;
   }
@@ -448,6 +538,7 @@ class AppStore implements AppState {
     this.voiceParticipants = [];
     this.voiceActiveSpeakerIds = [];
     this.screenShareRemotes = {};
+    this.cameraRemotes = {};
     this.viewingScreenShareTrackKey = null;
     this.pendingEnrollmentApproval = null;
     this.pendingDeleteChannelId = null;

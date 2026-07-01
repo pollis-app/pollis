@@ -16,6 +16,18 @@ struct Args {
     /// socket is the parent's signal to make us exit.
     #[arg(long)]
     socket: String,
+    /// What to capture. `screen` (default) drives the portal/PipeWire or
+    /// X11/SHM backend; `camera` drives V4L2. They share the Format/Frame
+    /// wire protocol and differ only in enumeration/selection — and camera
+    /// skips the session-type probe entirely (V4L2 is display-agnostic).
+    #[arg(long, value_enum, default_value_t = Mode::Screen)]
+    mode: Mode,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum Mode {
+    Screen,
+    Camera,
 }
 
 /// Which capture backend the routing probe selected for this session.
@@ -130,16 +142,24 @@ pub fn run() -> Result<()> {
         .enable_all()
         .build()?;
 
-    rt.block_on(async move { run_async(&args.socket).await })
+    rt.block_on(async move { run_async(&args.socket, args.mode).await })
 }
 
-async fn run_async(socket_path: &str) -> Result<()> {
-    eprintln!("[capture] connecting to parent socket {socket_path}");
+async fn run_async(socket_path: &str, mode: Mode) -> Result<()> {
+    eprintln!("[capture] connecting to parent socket {socket_path} (mode={mode:?})");
     let mut sock = UnixStream::connect(socket_path)
         .await
         .with_context(|| format!("connect to {socket_path}"))?;
-    eprintln!("[capture] connected — probing session backend");
+    eprintln!("[capture] connected");
 
+    // Camera capture has no session-type dependency — V4L2 is a kernel
+    // API that works the same under X11, Wayland, or headless — so it
+    // skips the screen path's portal-vs-X11 probe entirely.
+    if mode == Mode::Camera {
+        return crate::camera::run_camera(&mut sock).await;
+    }
+
+    eprintln!("[capture] probing session backend");
     let backend = probe_backend().await;
 
     match backend {

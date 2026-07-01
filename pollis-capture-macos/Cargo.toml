@@ -48,3 +48,28 @@ libc = "0.2"
 # capture helpers. No Info.plist required; all runtime.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder"] }
+# Webcam capture (camera mode). ScreenCaptureKit can't capture cameras —
+# that's AVFoundation. The helper opens an AVCaptureSession with an
+# AVCaptureVideoDataOutput configured for 32BGRA and pipes the same
+# Format/Frame messages the screen path uses. Same crash-isolation
+# rationale: an AVFoundation/CoreMediaIO ObjC `@throw` kills only the
+# helper, not the app.
+objc2-foundation = { version = "0.3", features = ["NSString", "NSArray", "NSDictionary", "NSValue", "NSError", "NSObject"] }
+objc2-av-foundation = { version = "0.3", features = [
+    "AVCaptureDevice",
+    "AVCaptureSession",
+    "AVCaptureInput",
+    "AVCaptureOutputBase",
+    "AVCaptureVideoDataOutput",
+    "AVMediaFormat",
+    "objc2-core-media",
+    "objc2-core-foundation",
+    "dispatch2",
+] }
+objc2-core-media = { version = "0.3", features = ["CMSampleBuffer", "CMFormatDescription", "CMTime", "objc2-core-video"] }
+objc2-core-video = { version = "0.3", features = ["CVPixelBuffer", "CVImageBuffer", "CVBuffer", "CVReturn", "CVBase"] }
+objc2-core-foundation = { version = "0.3", features = ["CFString", "CFBase"] }
+# GCD serial dispatch queue for the AVCaptureVideoDataOutput sample-buffer
+# delegate (the method requires a non-null queue). Match the version
+# objc2-av-foundation links so the DispatchQueue type is identical.
+dispatch2 = "0.3"

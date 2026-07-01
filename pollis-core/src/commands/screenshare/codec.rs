@@ -60,7 +60,7 @@ pub(super) fn resolve_screenshare_encoding(max_framerate: Option<u32>) -> (f64, 
 /// source's native dimensions. No downscale: encoders are fed the
 /// full-res frame and VP8 (or whatever codec is selected) decides what
 /// to do with it. Shared by all three OS push paths.
-pub(super) fn convert_to_i420(
+pub(crate) fn convert_to_i420(
     width: i32,
     height: i32,
     src_stride: u32,
@@ -84,7 +84,11 @@ pub(super) fn convert_to_i420(
 // [ u32 LE y_stride ][ u32 LE u_stride ][ u32 LE v_stride ]
 // [ i64 LE timestamp_us ]
 // [ Y plane bytes ][ U plane bytes ][ V plane bytes ]
-pub(super) fn pack_frame_bytes(
+//
+// `pub(crate)` (not `pub(super)`) so the sibling `camera` module reuses it
+// to mirror local webcam frames to the renderer for self-preview, exactly
+// like screen share does — the two share one frame wire format + transport.
+pub(crate) fn pack_frame_bytes(
     track_key: &str,
     width: u32,
     height: u32,

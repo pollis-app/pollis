@@ -35,6 +35,7 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
             let state = state.inner().clone();
             tauri::async_runtime::spawn(async move {
                 let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                let _ = pollis_core::commands::camera::stop_camera(&state).await;
             });
         }
         // Prevent the window from actually being destroyed.
@@ -533,6 +534,10 @@ commands::livekit::get_livekit_token,
             commands::screenshare::cancel_screen_share_picker,
             commands::screenshare::start_screen_share,
             commands::screenshare::stop_screen_share,
+            commands::camera::subscribe_camera_events,
+            commands::camera::list_video_devices,
+            commands::camera::start_camera,
+            commands::camera::stop_camera,
             commands::sfx::play_sfx,
             commands::sfx::start_ring,
             commands::sfx::stop_ring,
@@ -580,6 +585,7 @@ commands::livekit::get_livekit_token,
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
                         let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                        let _ = pollis_core::commands::camera::stop_camera(&state).await;
                     });
                 }
             }
@@ -610,6 +616,7 @@ commands::livekit::get_livekit_token,
                     let state = state.inner().clone();
                     tauri::async_runtime::block_on(async move {
                         let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
+                        let _ = pollis_core::commands::camera::stop_camera(&state).await;
                         // Close the LiveKit rooms (realtime + voice) so the
                         // server evicts us immediately instead of waiting out its
                         // RTC timeout — otherwise our voice card lingers as a

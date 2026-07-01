@@ -1,11 +1,13 @@
-# Screen-Capture Helper Split
+# Capture Helper Split (screen + webcam)
 
 How Pollis captures the local screen for screen-share, and why capture
 runs in a **per-platform helper subprocess** on Linux and macOS but
-in-process on Windows.
+in-process on Windows. The same helper split also captures the **webcam**
+(`--mode camera`) — see [Webcam capture](#webcam-capture---mode-camera).
 
-Covers issues **#281** (Linux: no portal backend on Cinnamon/MATE/XFCE)
-and **#283** (macOS: uncatchable Objective-C throw from ScreenCaptureKit).
+Covers issues **#281** (Linux: no portal backend on Cinnamon/MATE/XFCE),
+**#283** (macOS: uncatchable Objective-C throw from ScreenCaptureKit), and
+**#394** (webcam over the same split).
 
 ## TL;DR
 
@@ -240,6 +242,82 @@ The pin reorders **within** the AV1-stripped codec list `sdpMunger.ts`
 already enforces, so the PT=35 BUNDLE collision that originally forced
 VP8 stays closed. `VITE_POLLIS_SCREENSHARE_CODEC` = `h264` | `vp8`
 overrides the auto-detection for A/B testing. See issue #364.
+
+## Webcam capture (`--mode camera`)
+
+The same helper-split infrastructure also captures the **local webcam** for
+a third video track published into the active voice room
+(`TrackSource::Camera`, alongside mic + screen share). Room-level E2EE
+encrypts it automatically — no camera-specific crypto. PR #394.
+
+### How it reuses the split
+
+Each capture helper takes a `--mode {screen|camera}` flag (clap). `screen`
+(default) is everything above; `camera` drives a webcam:
+
+| Platform | Camera mechanism | Status |
+|----------|------------------|--------|
+| macOS | `pollis-capture-macos --mode camera` — AVFoundation `AVCaptureSession` + `AVCaptureVideoDataOutput` (32BGRA) | done |
+| Linux | `pollis-capture-linux --mode camera` — V4L2 (`v4l` crate), MJPG (zune-jpeg) or YUYV → BGRx | done |
+| Windows | not yet — `unsupported.rs` returns a clean "not yet supported" | TODO |
+
+**No display-server split on Linux.** Unlike screen capture (portal vs
+xcb/SHM, routed by session type), webcam capture has *one* path: V4L2 is a
+kernel API, identical under X11, Wayland, and headless. The camera mode in
+`linux.rs` skips `probe_backend()` entirely. (A Flatpak/Snap sandbox would
+need the camera *portal*; native Pollis isn't sandboxed, so direct
+`/dev/videoN` access — the Discord/Zoom native convention — is correct.)
+
+### Camera handshake (proto extension)
+
+Two more message types, mirroring the macOS screen picker handshake:
+
+- `MSG_CAMERAS (0x05)` helper → parent: JSON `CameraList` — every
+  capture device the OS reports (no virtual-camera filtering). Linux lists
+  each `/dev/videoN` that advertises `VIDEO_CAPTURE` *and* a pixel format
+  (drops the metadata-only sibling nodes UVC cams expose).
+- `MSG_SELECT_CAMERA (0x06)` parent → helper: JSON `CameraSelection` —
+  the opaque per-platform device id (macOS `AVCaptureDevice.uniqueID`,
+  Linux V4L2 node path), echoed back verbatim.
+
+Lifecycle (all platforms): helper connects → `Cameras` → parent shows the
+in-app picker (or auto-picks when there's one device) → `SelectCamera` →
+`Format` → `Frame…`. Camera frames reuse the unchanged `Format`/`Frame`
+messages — every helper delivers **BGRx**, so the parent's `convert_to_i420`
++ LiveKit publish is shared with the screen path.
+
+### Linux pixel-format policy (`pollis-capture-linux/src/camera.rs`)
+
+Prefers **MJPG** (the only HD format many UVC cams expose; some are
+MJPG-only), decoded to RGB with `zune-jpeg`, then packed BGRx. Falls back to
+raw **YUYV** (4:2:2), converted in-process via BT.601. H.264 is ignored
+(heavy decode, every UVC cam also offers MJPG/YUYV). Negotiates 1280×720 by
+default; the driver adjusts and we publish whatever it gives. Verified at
+**32 fps** (release) against an EMEET SmartCam S600.
+
+### Parent + frontend (`camera/` modules)
+
+- **Parent**: `pollis-core/src/commands/camera/` — `capture.rs` is
+  platform-agnostic (talks only the socket protocol; `locate_capture_helper`
+  picks the per-OS helper), gated `any(macos, linux)`; other platforms get
+  `unsupported.rs`. Lifecycle: `list_video_devices` / `start_camera` /
+  `stop_camera`, events via `CameraEvent` (`local_started/stopped/error`).
+- **Local self-preview**: the reader task mirrors each outgoing frame
+  (throttled) to the renderer over the *same* frame WebSocket screen share
+  uses, under `LOCAL_CAMERA_PREVIEW_KEY` (distinct from screen share's
+  `LOCAL_PREVIEW_KEY`).
+- **Remote camera**: every remote video track flows through the one shared
+  `on_remote_video_subscribed` drain + frame WS. The voice room loop reads
+  the publication's `TrackSource` and tags `ScreenShareEvent::RemoteStarted`
+  with a `source` (`screen` | `camera`); the renderer routes the track_key
+  to a participant's camera tile (the tile face) vs a screenshare spotlight
+  streamer. The Tauri renderer has no JS LiveKit client, so this tag is the
+  only thing that distinguishes them.
+- **Frontend**: `camera/cameraSession.ts` (event subscription + lifecycle,
+  reuses `screenShareSession`'s frame router), `camera/cameraActions.ts`
+  (`toggleCamera`), `components/Voice/CameraPicker.tsx` (in-app picker, bar
+  pattern), camera toggle in `VoiceBar` + the stage tray, and camera-as-
+  tile-face in `StageTile`. MobX `CameraState` union mirrors `ShareState`.
 
 ## Parent-side pipeline (unchanged, shared by all paths)
 

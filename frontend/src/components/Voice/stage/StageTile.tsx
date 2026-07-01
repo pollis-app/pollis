@@ -74,6 +74,12 @@ export interface StageParticipant {
   streamTrackKey?: string;
   streamWidth?: number;
   streamHeight?: number;
+  /** Track key + hint dimensions of this participant's active webcam (local
+   *  preview or remote). Renders as the tile's face — the avatar's slot —
+   *  when present and there's no screen share occupying the tile. */
+  cameraTrackKey?: string;
+  cameraWidth?: number;
+  cameraHeight?: number;
   /** Local user only, while the voice session is still negotiating. */
   isConnecting?: boolean;
 }
@@ -114,6 +120,11 @@ export const StageTile: React.FC<Props> = ({
   const preview = mode === "preview";
 
   const hasFeed = p.streamTrackKey !== undefined;
+  // Camera shows as the tile face only when a screen share isn't already
+  // occupying it — a participant doing both surfaces the screen here and
+  // their camera follows the spotlight/screenshare; the tile face stays the
+  // screen. Camera never drives the spotlight (that's screen-share only).
+  const hasCamera = !hasFeed && p.cameraTrackKey !== undefined;
   // A streaming tile in the filmstrip is clickable to spotlight it; the
   // big tile is already focused, the preview state isn't a live call.
   const focusable = hasFeed && !big && !preview;
@@ -154,6 +165,13 @@ export const StageTile: React.FC<Props> = ({
             trackKey={p.streamTrackKey!}
             initialWidth={p.streamWidth}
             initialHeight={p.streamHeight}
+            preview={!big}
+          />
+        ) : hasCamera ? (
+          <RemoteVideoTile
+            trackKey={p.cameraTrackKey!}
+            initialWidth={p.cameraWidth}
+            initialHeight={p.cameraHeight}
             preview={!big}
           />
         ) : (
