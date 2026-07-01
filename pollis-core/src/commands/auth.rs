@@ -75,16 +75,21 @@ pub async fn request_otp(
     state: &Arc<AppState>,
     email: String,
 ) -> Result<()> {
+    eprintln!(
+        "[auth] request_otp: email={email} → delivery_url={:?}",
+        state.config.pollis_delivery_url
+    );
     let resp = crate::commands::mls::ds_post_plain(
         state,
         "/v1/auth/request-otp",
         &serde_json::json!({ "email": email }),
     )
     .await?;
-    if !resp.status().is_success() {
-        let s = resp.status();
+    let status = resp.status();
+    eprintln!("[auth] request_otp: DS responded HTTP {status}");
+    if !status.is_success() {
         let txt = resp.text().await.unwrap_or_default();
-        return Err(anyhow::anyhow!("request-otp failed ({s}): {txt}").into());
+        return Err(anyhow::anyhow!("request-otp failed ({status}): {txt}").into());
     }
     Ok(())
 }
@@ -136,6 +141,10 @@ async fn verify_otp_ds(
 
     // 1. verify-otp: DS validates the OTP, creates/loads the account, mints a
     //    session. Unauthenticated (the OTP itself is the proof).
+    eprintln!(
+        "[auth] verify_otp: email={email} → delivery_url={:?}",
+        state.config.pollis_delivery_url
+    );
     let resp = crate::commands::mls::ds_post_plain(
         state,
         "/v1/auth/verify-otp",
@@ -147,6 +156,7 @@ async fn verify_otp_ds(
     )
     .await?;
     let status = resp.status();
+    eprintln!("[auth] verify_otp: DS responded HTTP {status}");
     if status.as_u16() == 401 {
         return Err(anyhow::anyhow!("Invalid code. Please check and try again.").into());
     }
@@ -201,16 +211,36 @@ async fn verify_otp_ds(
     }
 
     let new_secret_key = if !has_identity {
-        // First-device signup (or a pre-identity account). Persist the candidate
-        // device_id (no existing slot for a brand-new user) and set it as this
-        // device's id — the session is bound to it, so establish/register/cert
-        // must all use the same value.
-        let device_id = ensure_device_id(state, &user_id, &candidate_device_id).await?;
+        eprintln!("[auth] verify_otp: first-device path (has_identity=false) user_id={user_id}");
+        // FORCE this device's id to the session-bound candidate — do NOT preserve
+        // whatever the keystore holds. On a genuine first signup the slot is empty,
+        // so this is identical to `ensure_device_id`. But on a RETRY after a
+        // partial-bootstrap failure (a transient establish-identity error, a
+        // dropped connection, etc.) the keystore still holds the ABORTED attempt's
+        // candidate, while this call's verify-otp minted a session bound to a FRESH
+        // candidate. Preserving the stale id makes register-device send a device_id
+        // the session doesn't authorize, which the DS rejects as Forbidden — and it
+        // stays wedged on every retry until the keychain is cleared by hand.
+        // `has_identity == false` guarantees no device was ever registered
+        // (register-device runs AFTER establish-identity, which is what sets the
+        // identity), so the stale id is worthless and overwriting it is safe. This
+        // makes first-device signup idempotent under retry.
+        state
+            .keystore
+            .store_for_user(DEVICE_ID_KEY, &user_id, candidate_device_id.as_bytes())
+            .await?;
+        *state.device_id.lock().await = Some(candidate_device_id.clone());
+        let device_id = candidate_device_id.clone();
 
         // Pure crypto: keygen + Secret Key + wrap, installed into state.unlock.
         let (secret_key, material) =
             crate::commands::account_identity::generate_account_identity_material(state, &user_id)
-                .await?;
+                .await
+                .map_err(|e| {
+                    eprintln!("[auth] verify_otp: generate_account_identity_material FAILED: {e}");
+                    e
+                })?;
+        eprintln!("[auth] verify_otp: identity material ready (device_id={device_id}) → establish-identity");
 
         // 2. establish-identity (session-gated): the DS does the CAS UPDATE +
         //    account_key_log v1 + account_recovery insert.
@@ -227,7 +257,12 @@ async fn verify_otp_ds(
                 "wrapped_key": b64.encode(&material.wrapped_key),
             }),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            eprintln!("[auth] verify_otp: establish-identity FAILED: {e}");
+            e
+        })?;
+        eprintln!("[auth] verify_otp: establish-identity OK → register-device");
 
         // 3. register-device (session-gated): the DS inserts the user_device row
         //    + seeds watermarks.
@@ -239,7 +274,12 @@ async fn verify_otp_ds(
             &session_token,
             &serde_json::json!({ "device_id": device_id, "device_name": device_name }),
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            eprintln!("[auth] verify_otp: register-device FAILED: {e}");
+            e
+        })?;
+        eprintln!("[auth] verify_otp: register-device OK (first-device bootstrap complete)");
 
         // Stash the session so the pivot — the first publish-device-cert, run by
         // set_pin → ensure_device_cert — can present it.

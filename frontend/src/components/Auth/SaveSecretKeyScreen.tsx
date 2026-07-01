@@ -127,10 +127,10 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
         </div>
         <TitleBar />
         <div
-          className="flex-1 flex items-center justify-center"
+          className="flex-1 flex justify-center overflow-y-auto"
           style={{ position: "relative", zIndex: 1, padding: "1rem" }}
         >
-          <Card padding="lg" style={{ width: "100%", maxWidth: 480 }}>
+          <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 480 }}>
             <div className="flex flex-col gap-5">
               <div>
                 <h1
@@ -189,10 +189,10 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
         </div>
         <TitleBar />
         <div
-          className="flex-1 flex items-center justify-center"
+          className="flex-1 flex justify-center overflow-y-auto"
           style={{ position: "relative", zIndex: 1, padding: "1rem", overflowY: "auto" }}
         >
-          <Card padding="lg" style={{ width: "100%", maxWidth: 480 }}>
+          <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 480 }}>
             <div className="flex flex-col gap-5">
               <div>
                 <h1
@@ -287,10 +287,10 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
       </div>
       <TitleBar />
       <div
-        className="flex-1 flex items-center justify-center"
+        className="flex-1 flex justify-center overflow-y-auto"
         style={{ position: "relative", zIndex: 1, padding: "1rem" }}
       >
-        <Card padding="lg" style={{ width: "100%", maxWidth: 480 }}>
+        <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 480 }}>
           <div className="flex flex-col gap-5">
             <div>
               <h1
