@@ -121,6 +121,94 @@ Rules of thumb:
 - **Register new commands in `build_client_app`.** The `tauri::generate_handler![...]` macro call in `src-tauri/src/test_harness.rs` must include every command invoked by a test.
 - **Add FK-safe wipes.** If you introduce a new table referenced by tests, add it to `wipe_remote` in the correct order (child tables before parent).
 
+## The `DsFault` seam — injecting DS-side faults
+
+The flows harness routes every commit submit through an **in-process
+`pollis-delivery`** instance (`spawn_in_process_delivery` in `harness.rs`). That
+seam is the only place a fault can be injected *without* touching production code:
+the client's `SubmitResult` is lossy (it discards the DS's `Rejected` detail) and
+`http_submit` is hardwired, so there is no client-side network seam to mock. All
+faults therefore live **DS/harness-side**, and the real client code path runs
+untouched against a DS that behaves exactly like prod plus one perturbation.
+
+`harness::DsFault` is a **one-shot, atomically-consumed** fault menu (a
+`Mutex<Option<DsFault>>`, `NEXT_DS_FAULT`). Arm it with `arm_ds_fault(fault)`
+immediately before the operation whose commit submit you want to perturb; it
+fires exactly once and disarms, so it is safe even though every `#[serial]` test
+shares the single in-process DS. Assert it fired with `!ds_fault_armed()`.
+
+| Fault | What the DS does | Client must |
+|---|---|---|
+| `DropResponse` | commit + GroupInfo + Welcomes **land**, then the success response is turned into a 500 (the #411 shape) | adopt its own canonical commit (`our_commit_is_canonical`), not wedge |
+| `Fail500PostWrite` | same as above — persists, then 500s | adopt (generalized #411, e.g. on a *removal* commit) |
+| `Fail500PreWrite` | returns 500 **without persisting** — the clean, retryable failure | roll the staged commit back cleanly; never adopt a phantom epoch |
+| `DropWelcome` | commit + GroupInfo land, but the add's Welcomes are **never persisted** (cleared off the body before `submit_commit`) | recover the new member via external-join |
+
+The gap-creating fault is **not** a `DsFault` variant. A live submit-path deletion
+of the *head* commit row only lowers the head (the next committer refills it), so
+it never leaves a durable interior gap. Instead, `harness::drop_commit_row(conv,
+epoch)` deletes one interior row **post-hoc** on the LOG DB (the handle the DS
+itself writes through) after higher epochs have already been appended — the
+`… N-1, [gap], N+1 …` shape that trips `process_pending_commits`'s append-only-log
+gap detector. It asserts loudly that exactly one row was removed. `conv` is the
+**MLS group id** — for a group channel that is the `group_id`, not the channel id
+(`process_pending_commits` resolves channel→group). `harness::ds_head_epoch(conv)`
+reads `MAX(epoch)+1` from the log via `pollis_delivery::commit::head_epoch` for
+convergence assertions.
+
+**Production `pollis-delivery` semantics are never modified** by any of this — the
+faults are pure harness-layer perturbations (`delivery_submit` consumes them; the
+gap helper writes directly to the shared LOG handle).
+
+## The adversarial recovery suite (`flows/adversarial.rs`)
+
+These scenarios follow the backend-core doctrine: each tries to *create* an
+invalid / lossy state and proves the group either refuses it or converges out of
+it (never happy-path replay). Convergence is asserted through the real command
+pipeline — a fork, wedge, or squatted duplicate leaf fails the decrypt checks.
+
+- **`fail500_post_write_commit_is_adopted_not_wedged`** — generalized #411 on a
+  **removal** commit. `Fail500PostWrite` makes the DS persist alice's carol-removal
+  + GroupInfo then 500; alice must observe her commit is canonical and adopt it.
+  Proves: fault fires once; roster converged (carol gone, alice+bob remain);
+  alice not wedged (bob decrypts her post-adopt message); evicted carol can't read it.
+- **`fail500_pre_write_persists_nothing_and_does_not_wedge`** — the contrast case.
+  A pre-write 500 must persist nothing, so the commit-log head is **unchanged**
+  and alice rolls back cleanly (no phantom epoch): she still round-trips with bob
+  at her real epoch. This is the "pre-write ≠ lost-response" distinction.
+- **`epoch_gap_recovers_via_external_join`** (#430-P2 / F1) — bob is offline while
+  the group churns through several epochs, then one interior commit row is dropped
+  (`drop_commit_row`). On return bob retains the message at his join epoch
+  (decrypted by the interleave hook *before* the gap), trips the gap detector,
+  forgets his stale group, and external-joins onto the head; he then decrypts
+  post-recovery traffic and the group agrees on the head epoch. **Accepted loss
+  (documented, not fought):** messages sealed at the epochs the gap forces bob to
+  jump over are unrecoverable for bob — that is the injected F1 gap's direct
+  consequence, and exactly what the I1 DB triggers exist to prevent upstream. The
+  test proves the client *recovers*, not that the gap is lossless.
+- **`dropped_welcome_recovers_via_external_join`** (F5) — bob's add commit +
+  GroupInfo land but `DropWelcome` strips his Welcome. With no Welcome to drain,
+  bob's catch-up finds no local group and external-joins from GroupInfo, creating a
+  *second* leaf; the staying member must prune the duplicate. Proves both-direction
+  decrypt (a fork would break one) and a roster listing bob exactly once. The
+  GroupInfo-**and**-Welcome-both-dropped case is accepted as unrecoverable and is
+  not attempted here.
+- **`eviction_then_readd_has_provable_blackout`** — bob reads a pre-removal
+  message (cached locally), is removed while offline, and two messages are sent
+  while he is out; he is then re-added (`apply_welcome` deletes his stale group and
+  rejoins him at the new epoch). He decrypts the cached pre-removal message and
+  post-re-add traffic but **provably cannot** decrypt the two evicted-window
+  messages (sealed at epochs he was not a member of). Note bob stays passive during
+  the blackout — a merely-*removed* (non-revoked) device that processed its removal
+  would external-join back in; keeping bob offline is what makes the blackout real.
+- **`revoked_device_locked_out_of_every_recovery_path`** — bob's `user_device` row
+  is tombstoned (`revoked_at`) and he is removed, then he drives **every** client
+  recovery entry point (`process_pending_commits`, `get_channel_messages`). The
+  `local_device_registered` gate keeps him out of external-join; the load-bearing
+  checks are the *observable* lockout (he can't decrypt any post-removal message,
+  and is absent from the roster) plus the group staying live for carol — a silent
+  gate no-op is never accepted as a pass, and a wedge would fail carol's check.
+
 ## Behaviors the scenarios exercise
 
 - **`edit_message_across_membership_changes`** covers edits across add and remove. Worth knowing when reading the assertions: `get_channel_messages` applies edit envelopes with `UPDATE message SET content = ?` only — if the recipient has no local row for the edited message (e.g. they joined after the original was sent), the edit does not populate a new row for them. The scenario asserts convergence on members that had the original cached; for late joiners it asserts only that stale plaintext never leaks.
