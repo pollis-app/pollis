@@ -11,6 +11,8 @@
 #[path = "flows/harness.rs"]
 mod harness;
 
+#[path = "flows/adversarial.rs"]
+mod adversarial;
 #[path = "flows/auth.rs"]
 mod auth;
 #[path = "flows/dms.rs"]
