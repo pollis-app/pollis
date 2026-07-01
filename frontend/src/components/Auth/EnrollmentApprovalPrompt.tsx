@@ -75,11 +75,12 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
       <TitleBar />
 
       <div
-        className="flex-1 flex items-center justify-center"
+        className="flex-1 flex justify-center overflow-y-auto"
         style={{ position: "relative", zIndex: 1, padding: "1rem" }}
       >
         <Card
           padding="lg"
+          className="my-auto"
           style={{
             width: "100%",
             maxWidth: 480,

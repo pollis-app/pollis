@@ -71,10 +71,10 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
       </div>
       <TitleBar />
       <div
-        className="flex-1 flex items-center justify-center"
+        className="flex-1 flex justify-center overflow-y-auto"
         style={{ position: "relative", zIndex: 1 }}
       >
-        <Card padding="lg" style={{ width: "100%", maxWidth: 360 }}>
+        <Card padding="lg" className="my-auto" style={{ width: "100%", maxWidth: 360 }}>
           <div className="flex flex-col gap-5">
             <div>
               <h2 className="text-sm font-mono font-semibold" style={{ color: "var(--c-text)" }}>

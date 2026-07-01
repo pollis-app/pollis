@@ -140,7 +140,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
       <TitleBar />
 
       <div
-        className="flex-1 flex items-center justify-center"
+        className="flex-1 flex justify-center overflow-y-auto"
         style={{ position: "relative", zIndex: 1, padding: "1rem" }}
       >
         <Card
@@ -148,6 +148,12 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
           style={{
             width: "100%",
             maxWidth: 460,
+            // Center vertically when the window is tall enough, but fall back
+            // to scrolling (auto margins + overflow-y-auto on the parent, NOT
+            // items-center) when the card is taller than the viewport so the
+            // top isn't clipped on short windows.
+            marginTop: "auto",
+            marginBottom: "auto",
             // Visually distinct accent border so this doesn't blend with
             // the OTP card.
             border: "2px solid var(--c-accent)",
@@ -377,7 +383,9 @@ const SecretKeyFallbackPane: React.FC<{
       await api.recoverWithSecretKey(userId, value.trim());
       onRecovered();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Recovery failed";
+      // Surface the real backend reason (Tauri rejects with a string, not an
+      // Error) instead of a generic "Recovery failed".
+      const message = err instanceof Error ? err.message : String(err) || "Recovery failed";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -474,7 +482,10 @@ const ResetConfirmPane: React.FC<{
       const newKey = await api.resetIdentityAndRecover(userId, typedEmail.trim());
       onResetComplete(newKey);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Reset failed";
+      // Tauri rejects with a serialized string, not an Error — fall back to
+      // String(err) (matching PinEntryScreen) so the real backend reason
+      // surfaces instead of a generic "Reset failed".
+      const message = err instanceof Error ? err.message : String(err) || "Reset failed";
       setError(message);
     } finally {
       setIsLoading(false);
