@@ -16,7 +16,11 @@ concurrency:
 
 jobs:
   tests:
-    runs-on: ubuntu-22.04
+    # 24.04, not 22.04: src-tauri/build.rs compiles pollis-capture-linux, whose
+    # libspa 0.9 bindgen needs PipeWire >= 1.0 headers (same reason the release
+    # workflow's build-capture-helper job runs on 24.04). No AppImage is built
+    # here, so the 22.04 glibc-floor concern doesn't apply.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
