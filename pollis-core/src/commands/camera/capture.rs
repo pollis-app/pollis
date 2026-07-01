@@ -86,7 +86,10 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
         .arg("camera")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::inherit())
-        .stderr(std::process::Stdio::inherit())
+        // Pipe stderr (not inherit) so a startup failure — bad args, camera TCC
+        // denial, no camera — can be surfaced to the UI instead of vanishing
+        // into the terminal. We re-echo it below so dev logs are unchanged.
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
         .spawn();
     let mut helper = match helper {
@@ -101,6 +104,25 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
             .await);
         }
     };
+
+    // Drain the helper's stderr into a buffer (still echoing each line to our
+    // own stderr so terminal/dev logs are unchanged). On an early-exit failure
+    // this lets us report the helper's actual reason; on success the task keeps
+    // draining for the helper's lifetime so its pipe never fills and blocks.
+    let stderr_buf = Arc::new(tokio::sync::Mutex::new(String::new()));
+    let stderr_task = helper.stderr.take().map(|stderr| {
+        let buf = Arc::clone(&stderr_buf);
+        tokio::spawn(async move {
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                eprintln!("[camera-helper] {line}");
+                let mut b = buf.lock().await;
+                b.push_str(&line);
+                b.push('\n');
+            }
+        })
+    });
 
     let (stream, _addr) = tokio::select! {
         res = listener.accept() => match res {
@@ -121,11 +143,23 @@ async fn spawn_camera_helper(state: &Arc<AppState>) -> Result<HelperSession> {
         status = helper.wait() => {
             eprintln!("[camera] helper exited before connecting: {status:?}");
             let _ = std::fs::remove_file(&socket_path);
-            return Err(fail_capture(
-                state,
-                "Camera capture could not start (helper exited). Check camera permission and try again.".into(),
-            )
-            .await);
+            // Give the drain a beat to flush, then surface the helper's real reason.
+            if let Some(t) = stderr_task {
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(500), t).await;
+            }
+            let captured = stderr_buf.lock().await;
+            let detail = captured.trim();
+            let msg = if detail.is_empty() {
+                "Camera capture could not start (helper exited). Check camera permission and try again.".to_string()
+            } else {
+                // The helper's last stderr line is the actual cause (bad args,
+                // permission denied, no camera device, …).
+                format!(
+                    "Camera capture failed: {}",
+                    detail.lines().last().unwrap_or(detail)
+                )
+            };
+            return Err(fail_capture(state, msg).await);
         }
     };
     let _ = std::fs::remove_file(&socket_path);
