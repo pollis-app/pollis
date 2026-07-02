@@ -187,6 +187,72 @@ async fn removed_member_locked_out_on_catchup() {
     drop(dave);
 }
 
+// ─── Scenario 8 — committer strands its own un-ingested inbound msg (repro) ──
+
+/// **Deterministic repro for the fuzzer's committer-ingest finding (issue #440).**
+/// The group-level catch-up fix (#438) covers the *fetch/sweep/realtime* paths, but
+/// NOT the commit-INITIATION paths. When a member initiates a commit (invite /
+/// remove) they merge their own commit and advance their epoch immediately; if they
+/// were holding an un-ingested inbound message at the current epoch, `max_past_epochs
+/// = 0` discards its keys and it is lost to them.
+///
+/// Mirrors the fuzzer's minimal sequence `[Add(2), Send(2), Add(1)]`: carol joins,
+/// carol sends `m0` (alice is a member but has NOT fetched, so `m0` is un-ingested
+/// for her), then alice adds bob — merging her own add commit and advancing past
+/// `m0`'s epoch before ingesting it. The invariant: alice, a continuous member since
+/// `m0` was sent, MUST decrypt it. EXPECTED TO FAIL until the committer-ingest fix
+/// lands (ingest the current epoch before merging a self-initiated commit); it
+/// exists to confirm the committer strand is real, not a fuzzer-oracle artifact
+/// (the earlier removed-member finding turned out to be one).
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn committer_does_not_strand_inbound_message() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("CommitterIngest").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // carol joins; alice is caught up to carol's join epoch.
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+
+    // carol sends m0 at the current epoch. alice does NOT fetch — m0 stays
+    // un-ingested for her.
+    carol.send_channel_message(&channel_id, "m0").await;
+
+    // alice initiates a commit (adds bob) WITHOUT first ingesting m0: `invite`
+    // merges her own add commit and advances her epoch past m0's epoch.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    // alice fetches. m0 was sealed at the pre-add epoch she advanced past.
+    let alice_view = contents(&alice, &channel_id).await;
+
+    // Positive control: carol (the sender) has m0 locally — it was genuinely sent.
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"m0".to_string()),
+        "carol (sender) must have m0"
+    );
+
+    // Bulletproof invariant: alice was a member when m0 was sent, so she MUST
+    // decrypt it. Fails until the committer-ingest fix (#440) lands.
+    assert!(
+        alice_view.contains(&"m0".to_string()),
+        "COMMITTER STRAND: alice lost m0 (sent by carol while alice was a member) because she \
+         advanced her own epoch by committing an add before ingesting it. alice view={alice_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
 /// Invite `member` to `group_id`, accept, drain the Welcome, and replay commits
