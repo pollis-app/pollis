@@ -8,6 +8,19 @@ name: MLS & delivery tests
 
 on:
   pull_request:
+    # Skip the heavy Rust gate for PRs that can't affect it — frontend, the
+    # marketing site, and docs/markdown only. Uses paths-ignore (not an
+    # allow-list) so any Rust/workspace change still triggers it; only the
+    # listed pure-non-Rust surfaces are exempt. NOTE: don't mark this a
+    # *required* check under branch protection while path-filtered — GitHub
+    # leaves required-but-skipped checks pending forever, which would wedge
+    # frontend-only PRs. Gate merges on it via the ruleset's "skipped = pass"
+    # option, or keep it advisory.
+    paths-ignore:
+      - 'frontend/**'
+      - 'website/**'
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
 
 concurrency:
