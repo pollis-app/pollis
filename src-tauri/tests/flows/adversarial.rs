@@ -187,6 +187,166 @@ async fn removed_member_locked_out_on_catchup() {
     drop(dave);
 }
 
+// ─── Scenario 7b — removed member climbs back via external-join (repro) ──────
+
+/// **Deterministic repro for the fuzzer's `[Add(1), Remove(1), Add(2)]` finding
+/// (membership leak #2).** Scenario 7 proves a removed member cannot read a
+/// message sent BEFORE they come online, but a removed member's external-join
+/// still *climbs them back into the MLS tree* — the leak only becomes observable
+/// once a NEW message is sent AFTER the climb-back, at an epoch the re-joined leaf
+/// holds keys for. This scenario forces exactly that ordering and is the tighter
+/// repro: the add-then-immediately-remove shape (bob added, then removed at the
+/// very next commit) leaves the smallest gap for the recovery to slip through.
+///
+/// Root cause: the DS `/v1/commits` endpoint does NOT gate submissions on group
+/// membership, and the client-side recovery guard gated ONLY on
+/// `local_device_registered` (device-not-revoked), NOT on current group
+/// membership. So bob — removed but not revoked — self-evicts on catch-up, then
+/// external-joins and WINS its epoch on the CAS, rejoining the tree. alice's next
+/// catch-up applies bob's external-join, and a message she then sends is sealed
+/// for bob too. The fix gates the external-join recovery on CURRENT membership as
+/// well, so a removed member never rebuilds itself.
+///
+/// carol (added after bob's removal, a continuous member) is the positive control:
+/// she MUST decrypt the post-climb message, isolating the invariant to bob.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn removed_member_cannot_climb_back_via_external_join() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("RemovedClimbBack").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // [Add(1), Remove(1), Add(2)] — bob in, bob out at the very next commit, carol in.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    alice.remove_member(&group_id, bob_p.id.as_str()).await;
+    alice.process_commits_for(&channel_id).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    alice.process_commits_for(&channel_id).await;
+
+    // bob (removed, device still registered) comes online and runs the returning-
+    // client catch-up. WITHOUT the membership gate this self-evicts then external-
+    // joins bob back into the tree.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+
+    // alice catches up (applying bob's external-join, if it landed) and THEN sends
+    // a fresh message. If bob climbed back into alice's tree, this is sealed for
+    // bob too — the leak. Sent AFTER the climb-back is what makes the leak
+    // observable (unlike Scenario 7's pre-climb message).
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "post-climb").await;
+
+    // bob makes one more recovery pass and reads.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+    let bob_view = contents(&bob, &channel_id).await;
+
+    // Positive control: carol (continuous member) decrypts post-climb — it was
+    // genuinely delivered, isolating the question to bob.
+    carol.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"post-climb".to_string()),
+        "carol (a continuous member) must decrypt the post-climb message"
+    );
+
+    // Sanity: bob is not a current member (removal deleted his roster row and an
+    // external-join never re-adds it).
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        !members.contains(&bob_p.id),
+        "bob should not be a current member after removal, got: {members:?}"
+    );
+
+    // LOCKOUT INVARIANT: removed bob must NOT decrypt a message sent after his
+    // removal — even one sent after his own recovery pass. If this fails, a
+    // removed (not revoked) member climbed back into the tree via external-join.
+    assert!(
+        !bob_view.contains(&"post-climb".to_string()),
+        "MEMBERSHIP LEAK CONFIRMED: removed bob decrypted a post-climb message — he rebuilt \
+         himself into the tree via external-join. A removed member must be gated out of the \
+         recovery path on membership, not just device-revocation. bob view={bob_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
+// ─── Scenario 8 — committer strands its own un-ingested inbound msg (repro) ──
+
+/// **Deterministic repro for the fuzzer's committer-ingest finding (issue #440).**
+/// The group-level catch-up fix (#438) covers the *fetch/sweep/realtime* paths, but
+/// NOT the commit-INITIATION paths. When a member initiates a commit (invite /
+/// remove) they merge their own commit and advance their epoch immediately; if they
+/// were holding an un-ingested inbound message at the current epoch, `max_past_epochs
+/// = 0` discards its keys and it is lost to them.
+///
+/// Mirrors the fuzzer's minimal sequence `[Add(2), Send(2), Add(1)]`: carol joins,
+/// carol sends `m0` (alice is a member but has NOT fetched, so `m0` is un-ingested
+/// for her), then alice adds bob — merging her own add commit and advancing past
+/// `m0`'s epoch before ingesting it. The invariant: alice, a continuous member since
+/// `m0` was sent, MUST decrypt it. The committer-ingest fix (#440) makes the commit-
+/// INITIATION paths (invite / remove / send / edit) run the interleaved ingesting
+/// catch-up before advancing their own epoch, so alice decrypts `m0` before merging
+/// her add commit — this regression test locks that in.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn committer_does_not_strand_inbound_message() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("CommitterIngest").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // carol joins; alice is caught up to carol's join epoch.
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+
+    // carol sends m0 at the current epoch. alice does NOT fetch — m0 stays
+    // un-ingested for her.
+    carol.send_channel_message(&channel_id, "m0").await;
+
+    // alice initiates a commit (adds bob) WITHOUT first ingesting m0: `invite`
+    // merges her own add commit and advances her epoch past m0's epoch.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    // alice fetches. m0 was sealed at the pre-add epoch she advanced past.
+    let alice_view = contents(&alice, &channel_id).await;
+
+    // Positive control: carol (the sender) has m0 locally — it was genuinely sent.
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"m0".to_string()),
+        "carol (sender) must have m0"
+    );
+
+    // Bulletproof invariant: alice was a member when m0 was sent, so she MUST
+    // decrypt it. Fails until the committer-ingest fix (#440) lands.
+    assert!(
+        alice_view.contains(&"m0".to_string()),
+        "COMMITTER STRAND: alice lost m0 (sent by carol while alice was a member) because she \
+         advanced her own epoch by committing an add before ingesting it. alice view={alice_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
 /// Invite `member` to `group_id`, accept, drain the Welcome, and replay commits
@@ -489,6 +649,126 @@ async fn epoch_gap_recovers_via_external_join() {
     assert!(
         contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
         "dave must decrypt post-recovery traffic — the group forked at the gap otherwise"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+    drop(dave);
+}
+
+// ─── Scenario 2b — un-ingested message survives a forced rebuild (repro) ─────
+
+/// **Deterministic repro for the fuzzer/marathon message-strand-through-rebuild
+/// finding (#4).** The marathon (500 ops, heavy `DsFault`) flagged a CONTINUOUS
+/// member — alice, the owner — losing an early prefix of messages after a
+/// fault-recovery external-join **rebuild** jumped her local group to head. The
+/// governing invariant: every epoch-ADVANCING path (including a recovery rebuild)
+/// must INGEST the current epoch's messages *before* advancing past it, because
+/// `max_past_epochs = 0` discards the ratchet keys the instant the group advances
+/// (issues #440 / #441 established this for the fetch / send / commit-initiation
+/// paths; this closes it on the RECOVERY seam).
+///
+/// This scenario proves the per-epoch interleave hook decrypts un-ingested
+/// messages at **every** epoch the replay passes through — not just the member's
+/// initial epoch — before an external-join rebuild discards those keys. A
+/// continuous member (bob) is offline while the group churns, holds TWO
+/// un-ingested messages (one at his *join* epoch, one at a *mid-replay* epoch he
+/// only reaches after applying a commit), and is then forced to rebuild by an
+/// injected commit-log gap. Both messages must survive: the join-epoch one is
+/// caught by the initial-epoch hook, and — the load-bearing new assertion — the
+/// mid-replay one is caught by the post-commit hook the instant bob's replay
+/// reaches epoch 2, *before* the gap forces the jump to head.
+///
+/// The lost-race converge path (`reconcile.rs`) now runs this SAME interleaved
+/// catch-up rather than a bare commit-only replay, so a converge that advances or
+/// rebuilds can't strand a current-epoch message either. That path is
+/// timing-sensitive and is exercised by the model fuzzer + marathon
+/// (`model_marathon_convergence`), the authoritative gate for #4.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn continuous_member_keeps_mid_replay_message_through_rebuild() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+
+    let group_id = alice.create_group("MidReplay").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // Bob joins at commit epoch 0 → head 1; his MLS epoch is 1. He then goes
+    // "offline" (no poll/process/fetch until the very end).
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    // (M1) at bob's JOIN epoch (1) — caught by the initial-epoch hook on his return.
+    alice.send_channel_message(&channel_id, "M1-join-epoch").await;
+
+    // Carol add advances the shared group 1 → 2 (commit epoch 1, head 2).
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+
+    // (M2) at a MID-replay epoch (2) — bob only reaches epoch 2 AFTER applying the
+    // carol-add commit, so it exercises the post-commit hook, not the initial one.
+    alice.send_channel_message(&channel_id, "M2-mid-replay").await;
+
+    // More churn while bob is offline:
+    //   commit epoch 2: carol remove (head 3)  <-- this row will be dropped
+    //   commit epoch 3: dave add    (head 4)
+    alice.remove_member(&group_id, carol_p.id.as_str()).await;
+    alice.process_commits_for(&channel_id).await;
+    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
+
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        4,
+        "expected head epoch 4 after join/send/add/remove/add churn"
+    );
+
+    // Punch the gap ABOVE both messages: drop the carol-remove commit (epoch 2).
+    // The log now reads 0,1,[gap],3 — a member replaying from epoch 1 ingests M1
+    // (epoch 1), applies the epoch-1 commit to reach epoch 2 and ingests M2, THEN
+    // hits the gap at epoch 3 and rebuilds via external-join.
+    drop_commit_row(&group_id, 2).await;
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        4,
+        "dropping an interior row must not change the head (MAX(epoch)+1 = 4)"
+    );
+
+    // Bob comes back. This single fetch drains his backlog and forces the rebuild.
+    let bob_view = contents(&bob, &channel_id).await;
+
+    // Both un-ingested messages survived the rebuild. M1 proves the initial-epoch
+    // hook; M2 is the load-bearing assertion — a mid-replay epoch's message must
+    // be ingested before the rebuild discards its keys.
+    assert!(
+        bob_view.contains(&"M1-join-epoch".to_string()),
+        "bob must retain the message at his join epoch (initial-epoch hook), got: {bob_view:?}"
+    );
+    assert!(
+        bob_view.contains(&"M2-mid-replay".to_string()),
+        "STRAND THROUGH REBUILD: bob lost M2, sent at a mid-replay epoch he held keys for. The \
+         interleave hook must ingest each epoch's messages BEFORE the external-join rebuild jumps \
+         the local group to head. got: {bob_view:?}"
+    );
+
+    // Bob recovered — current member, decrypts fresh post-recovery traffic.
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "after-recovery").await;
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        members.contains(&bob_p.id),
+        "bob must be a current member after rebuild, got: {members:?}"
+    );
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"after-recovery".to_string()),
+        "bob must decrypt post-recovery traffic — he wedged on the rebuild otherwise"
     );
 
     drop(alice);

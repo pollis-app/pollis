@@ -82,6 +82,23 @@ pub async fn send_group_invite(
     });
     crate::commands::mls::ds_post_ok(state, "/v1/invites/create", &body).await?;
 
+    // Ingest-before-advance (issue #440, committer strand): catch this device up
+    // to head with the INTERLEAVED ingesting catch-up — decrypting every bound
+    // conversation's messages at each epoch — BEFORE reconcile stages + merges
+    // our add commit and advances our epoch. Reconcile advances the shared MLS
+    // group; with `max_past_epochs = 0`, any current-epoch inbound message we
+    // haven't fetched yet would have its keys discarded the instant we advance
+    // past it. Hoisted ABOVE reconcile deliberately: `reconcile_group_mls_impl`
+    // holds the per-conversation MLS lock (`mls_group_lock`) for its whole body,
+    // and the interleaved catch-up re-acquires that SAME lock internally — running
+    // it here, before reconcile takes the lock, ingests the current epoch without
+    // deadlocking.
+    if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
+        state, &group_id, &inviter_id,
+    ).await {
+        eprintln!("[mls] send_group_invite: catch_up_mls_group for {group_id}: {e}");
+    }
+
     // Reconcile adds the invitee's devices to the MLS tree now so their
     // Welcome is ready before they accept — no dependency on simultaneous
     // online presence between inviter and acceptor.

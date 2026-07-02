@@ -654,6 +654,79 @@ async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
     }
 }
 
+/// Whether `user_id` is a CURRENT member of the conversation backed by
+/// `mls_group_id`. Gates the external-join *recovery* paths on group membership
+/// so a member who was REMOVED from the group (their `group_member` /
+/// `dm_channel_member` row deleted) can't rebuild/rejoin itself — even though the
+/// device is still registered (not revoked). `local_device_registered` alone does
+/// NOT catch this: a removed-but-not-revoked device passes that gate, and the DS
+/// `/v1/commits` endpoint does not gate submissions on membership, so a removed
+/// member's external-join would otherwise WIN its epoch on the CAS and climb the
+/// removed member back into the tree — a membership leak (fuzzer finding #2).
+///
+/// Mirrors the DS-side `pollis_delivery::writes::is_member`: an MLS
+/// `mls_group_id` is one of a group id (channels share one MLS group keyed by the
+/// group id), a DM channel id, or a channel id, so all three membership shapes
+/// are accepted.
+///
+/// Fails CLOSED (returns false) on a missing device context or any query error:
+/// unlike the revoked-device check, this guards a membership *leak*, so when we
+/// cannot confirm membership we must NOT rebuild. This is never a permanent
+/// lockout — a legitimate current member simply recovers on the next catch-up
+/// pass once the (transient) read succeeds — and by the time control reaches this
+/// gate the same `remote_db` was already read successfully for the commit-log
+/// fetch, so a failure here is vanishingly unlikely in practice.
+async fn local_user_is_member(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) -> bool {
+    let conn = match state.remote_db.conn().await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    match conn
+        .query(
+            "SELECT 1 WHERE \
+                EXISTS (SELECT 1 FROM dm_channel_member \
+                        WHERE dm_channel_id = ?1 AND user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM group_member \
+                        WHERE group_id = ?1 AND user_id = ?2) \
+             OR EXISTS (SELECT 1 FROM channels c \
+                        JOIN group_member gm ON gm.group_id = c.group_id \
+                        WHERE c.id = ?1 AND gm.user_id = ?2) \
+             LIMIT 1",
+            libsql::params![mls_group_id, user_id],
+        )
+        .await
+    {
+        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
+        Err(_) => false,
+    }
+}
+
+/// Both cooperative gates on the external-join *recovery* paths: this device is
+/// still registered (not revoked) AND its user is still a current member of the
+/// group. A `false` from either means "do not rebuild/rejoin". Logs the specific
+/// reason so a skipped recovery is never a silent no-op.
+async fn may_rejoin_via_external_join(
+    state: &Arc<AppState>,
+    mls_group_id: &str,
+    user_id: &str,
+) -> bool {
+    if !local_device_registered(state, user_id).await {
+        eprintln!(
+            "[mls] external-join recovery for {mls_group_id}: device for {user_id} is no longer \
+             registered (revoked) — staying out"
+        );
+        return false;
+    }
+    if !local_user_is_member(state, mls_group_id, user_id).await {
+        eprintln!(
+            "[mls] external-join recovery for {mls_group_id}: {user_id} is no longer a group \
+             member (removed) — staying out"
+        );
+        return false;
+    }
+    true
+}
+
 /// Body of [`process_pending_commits_inner`]. Assumes the caller already holds
 /// the per-conversation MLS lock (`state.mls_group_lock`).
 pub(crate) async fn process_pending_commits_locked(
@@ -716,18 +789,19 @@ async fn process_pending_commits_locked_impl(
     let initial_epoch = match has_group {
         Some(epoch) => epoch,
         None => {
-            // No local group — external-join to create one, UNLESS this
-            // device has been revoked (its `user_device` row is gone). A
-            // revoked device must not climb back in: doing so squats an epoch
-            // and, under the UNIQUE(conversation_id, epoch) constraint, would
-            // wedge the group. Lock already held by the wrapper, so call the
-            // unlocked inner variant.
-            if local_device_registered(state, user_id).await {
+            // No local group — external-join to create one, UNLESS this device
+            // has been revoked (its `user_device` row is gone) OR its user is no
+            // longer a group member (removed from `group_member`). Either must
+            // not climb back in: a revoked/removed member's external-join squats
+            // an epoch and, under the UNIQUE(conversation_id, epoch) constraint,
+            // would wedge the group — and, absent a DS membership gate on
+            // `/v1/commits`, a removed member would otherwise rejoin the tree and
+            // decrypt post-removal traffic (membership leak, fuzzer finding #2).
+            // Lock already held by the wrapper, so call the unlocked inner variant.
+            if may_rejoin_via_external_join(state, mls_group_id, user_id).await {
                 if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
                     eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
                 }
-            } else {
-                eprintln!("[mls] process_pending_commits: device for {user_id} is no longer registered — not external-joining {mls_group_id} (revoked)");
             }
             return Ok(());
         }
@@ -1086,17 +1160,19 @@ async fn process_pending_commits_locked_impl(
     };
     if !group_exists {
         // Recover by external-join — UNLESS this device was revoked (its
-        // `user_device` row is gone), in which case it must stay out rather
-        // than squatting an epoch to climb back in. A legitimately-forked or
-        // freshly-wiped device keeps its row and recovers normally.
-        if local_device_registered(state, user_id).await {
+        // `user_device` row is gone) OR its user was removed from the group
+        // (`group_member` row gone). Either must stay out rather than squatting
+        // an epoch to climb back in: a removed member that self-evicted here
+        // (applied its own removal above) would otherwise rebuild and rejoin the
+        // tree, decrypting post-removal traffic (membership leak, fuzzer finding
+        // #2). A legitimately-forked or freshly-wiped CURRENT member keeps both
+        // rows and recovers normally.
+        if may_rejoin_via_external_join(state, mls_group_id, user_id).await {
             eprintln!("[mls] process_pending_commits: group {mls_group_id} was deleted during processing — external-joining to recover");
             // Lock already held by the wrapper, so call the unlocked inner variant.
             if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
                 eprintln!("[mls] process_pending_commits: recovery external-join failed for {mls_group_id}: {e}");
             }
-        } else {
-            eprintln!("[mls] process_pending_commits: group {mls_group_id} deleted and device for {user_id} is no longer registered — staying out (revoked)");
         }
     }
 
@@ -1112,10 +1188,11 @@ async fn process_pending_commits_locked_impl(
 /// en route would strand any message sealed at an epoch it skips past
 /// (`max_past_epochs = 0`). Route through `catch_up_mls_group_interleaved`, which
 /// decrypts every bound conversation's messages at each epoch before advancing
-/// past it, and still reaches head. (The send / edit / reconcile hot paths do
-/// NOT go through here — they call `process_pending_commits_inner` /
-/// `process_pending_commits_locked` directly, reaching head immediately before
-/// their own op with nothing to strand.)
+/// past it, and still reaches head. (The send / edit / invite / remove commit-
+/// INITIATION paths do NOT go through this command, but they run the SAME
+/// interleaved catch-up before advancing their own epoch — see issue #440, the
+/// committer strand — so a current-epoch inbound message is never stranded by a
+/// self-initiated commit either.)
 pub async fn process_pending_commits(
     state: &Arc<AppState>,
     conversation_id: String,

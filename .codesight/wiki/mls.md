@@ -69,7 +69,7 @@ When device A commits a membership change:
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
 
-The send / edit / reconcile hot paths call this bare variant directly: they reach head immediately before their own op, so there is nothing to strand.
+The bare `process_pending_commits_inner` / `_locked` variants are the raw commit replay used internally by the interleaved catch-up (via `process_pending_commits_inner_with_hook`). Callers that ADVANCE the epoch — the **commit-INITIATION** paths and the recovery converge alike — must NOT use the bare variant directly. The **commit-INITIATION** paths — send, edit, invite (add), remove — must NOT use the bare variant: advancing this device to head before its own op discards the ratchet keys for the current epoch (`max_past_epochs = 0`), so a current-epoch inbound message this device hasn't fetched yet would be **stranded** by its own commit (issue #440, the *committer strand*). They instead run the interleaved ingesting catch-up **before** advancing — see "Pre-op ingest-before-advance" below.
 
 ### Group-level interleaved catch-up (message-loss fix)
 
@@ -106,6 +106,77 @@ The replay still reaches head even with zero envelopes, so the cold-launch
 "advance every group to head" guarantee is preserved. Steady state is cheap:
 watermarks make repeat catch-ups return zero envelopes.
 
+### Pre-op ingest-before-advance (committer strand, #440)
+
+The group-level catch-up above closes the *fetch / sweep / realtime* variants,
+but a fourth variant lives on the **commit-INITIATION** paths. When a client
+performs its OWN operation it first catches up to head; if that catch-up is
+commit-only, the client advances its epoch past a current-epoch inbound message
+it hasn't ingested and loses it (`max_past_epochs = 0`). So every pre-op catch-up
+runs the **interleaved ingesting** `catch_up_mls_group_interleaved` before the op
+advances the epoch:
+
+| Path | Call site | Lock held at the catch-up? |
+| --- | --- | --- |
+| Send message | `messages/send.rs` | No — swaps `process_pending_commits_inner` → interleaved catch-up |
+| Edit message | `messages/edit_delete.rs` | No — same swap |
+| Add member (invite) | `groups/invites.rs` (`send_group_invite`) | **Yes inside reconcile** — so the catch-up is HOISTED into the caller, before `reconcile_group_mls_impl` takes the per-conversation `mls_group_lock` |
+| Remove member | `groups/membership.rs` (`remove_member_from_group`) | Same hoist, same reason |
+| Voice / screenshare join | `voice_e2ee::derive_voice_key` | Already ingests (`ingest_*_envelopes_inner` → interleaved catch-up) — no change |
+
+**Locking caveat.** `catch_up_mls_group_interleaved` internally calls
+`process_pending_commits_inner_with_hook`, which acquires the per-conversation
+`mls_group_lock`. It therefore MUST NOT be invoked while that lock is already
+held. `reconcile_group_mls_impl` (the add/remove committer) holds the lock for
+its whole body, so the invite/remove paths run the catch-up in their *caller*
+BEFORE reconcile is entered. Send/edit hold no lock and swap in place.
+
+**Recovery seam — lost-race converge (#4).** The reconcile-internal lost-race
+converge was the LAST epoch-advancing path still using a bare commit-only replay
+(`process_pending_commits_locked`). Applying the winner's commit — or rebuilding
+via external-join if the converge forks — advances past the current epoch, so a
+current-epoch inbound message not yet ingested would be stranded
+(`max_past_epochs = 0`), exactly the strand-through-rebuild the marathon flagged
+for a continuous member. It now runs the INTERLEAVED
+`catch_up_mls_group_interleaved` instead, decrypting each epoch's messages before
+advancing/rebuilding past it. Because that catch-up re-acquires the
+`mls_group_lock`, reconcile drops its own guard first (it returns immediately
+after the converge, so this is equivalent to reconcile finishing and a normal
+catch-up running). This extends the ingest-before-advance invariant to every
+advance path — fetch/sweep/realtime (group-level catch-up), send/edit/invite/
+remove (pre-op hoist), and now the recovery converge.
+
+### Recovery-path guards (revocation + membership lockout)
+
+The external-join **recovery** paths in `process_pending_commits_locked_impl`
+(no local group at start; group self-deleted during processing via eviction /
+fork / epoch-gap) rebuild this device onto the published GroupInfo. Both are
+gated by `may_rejoin_via_external_join`, which requires **two** things before it
+lets a device rebuild:
+
+1. `local_device_registered` — this device's `user_device` row still exists and
+   is not revoked (fails **open** on error: a transient blip must never lock a
+   legitimate device out of recovery);
+2. `local_user_is_member` — the user is still a CURRENT member of the group
+   (`group_member` / `dm_channel_member` / channel→group), mirroring the DS-side
+   `writes::is_member`. Fails **closed** on error: this guards a membership
+   *leak*, so when membership can't be confirmed we do NOT rebuild (never a
+   permanent lockout — a real member recovers on the next pass).
+
+**Why membership, not just revocation (fuzzer finding #2).** The DS
+`/v1/commits` endpoint does NOT gate submissions on membership. A member who was
+*removed* (their `group_member` row deleted) but whose device was NOT revoked
+would pass the revocation gate, self-evict on catch-up, then external-join and
+WIN its epoch on the CAS — climbing back into the tree and decrypting
+post-removal traffic. The membership gate makes "a removed member rebuilds
+itself" unrepresentable client-side. The `[Add(1), Remove(1), Add(2)]` shape is
+the tightest repro (`removed_member_cannot_climb_back_via_external_join`): the
+leak is only observable once a message is sent AFTER the climb-back.
+
+The membership check uses `state.remote_db.conn()` directly (a separate
+connection), NOT the `mls_group_lock` — safe to call from inside
+`process_pending_commits_locked_impl`, which already holds that lock.
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:
@@ -136,7 +207,7 @@ Both peers compute the same 32-byte key because both hold the same exporter secr
 ## Message Encrypt/Decrypt
 
 **Send** (`send_message`):
-1. Poll welcomes → process pending commits (ensures current epoch)
+1. Poll welcomes → interleaved ingesting catch-up (`catch_up_mls_group_interleaved`) to reach the current epoch while decrypting any current-epoch inbound message first, so this device's own send can't strand it (#440)
 2. `try_mls_encrypt(local_db, group_id, plaintext)` → MLS ciphertext
 3. Store ciphertext in `message_envelope` (remote) and `message` (local)
 

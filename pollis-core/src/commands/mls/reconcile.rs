@@ -14,7 +14,6 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 
 use crate::state::AppState;
 
-use super::group_state::process_pending_commits_locked;
 use super::provider::{parse_credential_device_id, parse_credential_user_id, PollisProvider, CS};
 
 /// Result of the compare-and-swap commit submission in `reconcile_group_mls_impl`.
@@ -391,8 +390,9 @@ pub async fn reconcile_group_mls_impl(
     // Serialize all MLS mutations for this conversation on this device so two
     // concurrent reconciles (or a reconcile racing the external-join path)
     // can't both stage + commit from the same epoch. Held for the whole
-    // function; the lost-race recovery below calls the unlocked
-    // `process_pending_commits_locked` rather than re-acquiring.
+    // function EXCEPT the lost-race converge below, which drops it and runs the
+    // INTERLEAVED ingesting catch-up (which re-acquires the lock) so a converge
+    // that advances/rebuilds can't strand an un-ingested current-epoch message.
     let _mls_guard = state.mls_group_lock(&conversation_id).await;
 
     let conn = state.remote_db.conn().await?;
@@ -782,8 +782,26 @@ pub async fn reconcile_group_mls_impl(
                     "[mls] reconcile: lost epoch {epoch} race for {conversation_id} — rolling back local pending commit and converging on the winner"
                 );
                 clear_pending_best_effort(state, &conversation_id).await;
-                if let Err(e) =
-                    process_pending_commits_locked(state, &conversation_id, &actor_user_id).await
+                // Converge on the winner through the INTERLEAVED ingesting
+                // catch-up rather than a bare commit-only replay. This is a
+                // recovery-seam ADVANCE path: applying the winner's commit (or
+                // rebuilding via external-join if we forked) moves us past our
+                // current epoch, and with `max_past_epochs = 0` a current-epoch
+                // inbound message we haven't ingested yet would have its keys
+                // discarded — the last advance path not covered by the #440/#441
+                // ingest-before-advance invariant. The interleaved catch-up
+                // decrypts each epoch's messages BEFORE advancing past it and
+                // still reaches head. It re-acquires the per-conversation MLS
+                // lock, so we drop ours first; reconcile returns immediately
+                // after, so this is equivalent to reconcile finishing and a
+                // normal catch-up running.
+                drop(_mls_guard);
+                if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
+                    state,
+                    &conversation_id,
+                    &actor_user_id,
+                )
+                .await
                 {
                     eprintln!(
                         "[mls] reconcile: converge-after-lost-race failed for {conversation_id}: {e}"

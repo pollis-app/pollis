@@ -389,8 +389,8 @@ pub async fn edit_message(
     // Catch up MLS state before encrypting. Without this, an edit can be
     // emitted at a stale epoch — recipients at the current epoch will fail
     // to decrypt it. send_message does the same two-step catch-up here
-    // (poll_mls_welcomes + process_pending_commits) and edit_message was
-    // missing it. See issue #371 scenario 2.
+    // (poll_mls_welcomes + catch-up) and edit_message was missing it. See
+    // issue #371 scenario 2.
     {
         let device_id = state.device_id.lock().await.clone();
         if let Some(ref did) = device_id {
@@ -401,10 +401,16 @@ pub async fn edit_message(
             }
         }
     }
+    // Use the INTERLEAVED ingesting catch-up (not the commit-only
+    // `process_pending_commits_inner`): editing advances this device to head, and
+    // with `max_past_epochs = 0` a current-epoch inbound message we haven't
+    // fetched yet would be stranded when we advance past its epoch (issue #440,
+    // the committer strand). Safe here — edit_message holds no MLS group lock, so
+    // the catch-up re-acquiring it cannot deadlock.
     if let Err(e) =
-        crate::commands::mls::process_pending_commits_inner(state, &mls_group_id, &user_id).await
+        super::catch_up_mls_group_interleaved(state, &mls_group_id, &user_id).await
     {
-        eprintln!("[messages] edit_message: process_pending_commits for {mls_group_id}: {e}");
+        eprintln!("[messages] edit_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
     // Encrypt the new content with MLS and update local cache atomically.
