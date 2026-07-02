@@ -1,5 +1,6 @@
 packages:
   - frontend
+  - e2e
 
 ignoredBuiltDependencies:
   - esbuild

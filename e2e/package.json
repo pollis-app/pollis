@@ -1,0 +1,14 @@
+{
+  "name": "@pollis/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests that drive the real Tauri desktop app via WebDriver (tauri-driver + WebKitWebDriver).",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node ./e2e.js"
+  },
+  "devDependencies": {
+    "dotenv": "^16",
+    "webdriverio": "^8"
+  }
+}
