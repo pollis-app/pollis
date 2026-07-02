@@ -29,8 +29,8 @@ pub use read::{
 
 // ── Ingest (envelope pull + watermark + cleanup) ─────────────────────────────
 pub use ingest::{
-    ingest_channel_envelopes, ingest_channel_envelopes_inner, ingest_dm_envelopes,
-    ingest_dm_envelopes_inner,
+    catch_up_mls_group_interleaved, ingest_channel_envelopes, ingest_channel_envelopes_inner,
+    ingest_dm_envelopes, ingest_dm_envelopes_inner,
 };
 
 // ── Edit / delete ────────────────────────────────────────────────────────────

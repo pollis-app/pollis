@@ -121,6 +121,192 @@ Rules of thumb:
 - **Register new commands in `build_client_app`.** The `tauri::generate_handler![...]` macro call in `src-tauri/src/test_harness.rs` must include every command invoked by a test.
 - **Add FK-safe wipes.** If you introduce a new table referenced by tests, add it to `wipe_remote` in the correct order (child tables before parent).
 
+## The `DsFault` seam — injecting DS-side faults
+
+The flows harness routes every commit submit through an **in-process
+`pollis-delivery`** instance (`spawn_in_process_delivery` in `harness.rs`). That
+seam is the only place a fault can be injected *without* touching production code:
+the client's `SubmitResult` is lossy (it discards the DS's `Rejected` detail) and
+`http_submit` is hardwired, so there is no client-side network seam to mock. All
+faults therefore live **DS/harness-side**, and the real client code path runs
+untouched against a DS that behaves exactly like prod plus one perturbation.
+
+`harness::DsFault` is a **one-shot, atomically-consumed** fault menu (a
+`Mutex<Option<DsFault>>`, `NEXT_DS_FAULT`). Arm it with `arm_ds_fault(fault)`
+immediately before the operation whose commit submit you want to perturb; it
+fires exactly once and disarms, so it is safe even though every `#[serial]` test
+shares the single in-process DS. Assert it fired with `!ds_fault_armed()`.
+
+| Fault | What the DS does | Client must |
+|---|---|---|
+| `DropResponse` | commit + GroupInfo + Welcomes **land**, then the success response is turned into a 500 (the #411 shape) | adopt its own canonical commit (`our_commit_is_canonical`), not wedge |
+| `Fail500PostWrite` | same as above — persists, then 500s | adopt (generalized #411, e.g. on a *removal* commit) |
+| `Fail500PreWrite` | returns 500 **without persisting** — the clean, retryable failure | roll the staged commit back cleanly; never adopt a phantom epoch |
+| `DropWelcome` | commit + GroupInfo land, but the add's Welcomes are **never persisted** (cleared off the body before `submit_commit`) | recover the new member via external-join |
+
+The gap-creating fault is **not** a `DsFault` variant. A live submit-path deletion
+of the *head* commit row only lowers the head (the next committer refills it), so
+it never leaves a durable interior gap. Instead, `harness::drop_commit_row(conv,
+epoch)` deletes one interior row **post-hoc** on the LOG DB (the handle the DS
+itself writes through) after higher epochs have already been appended — the
+`… N-1, [gap], N+1 …` shape that trips `process_pending_commits`'s append-only-log
+gap detector. It asserts loudly that exactly one row was removed. `conv` is the
+**MLS group id** — for a group channel that is the `group_id`, not the channel id
+(`process_pending_commits` resolves channel→group). `harness::ds_head_epoch(conv)`
+reads `MAX(epoch)+1` from the log via `pollis_delivery::commit::head_epoch` for
+convergence assertions.
+
+**Production `pollis-delivery` semantics are never modified** by any of this — the
+faults are pure harness-layer perturbations (`delivery_submit` consumes them; the
+gap helper writes directly to the shared LOG handle).
+
+## The adversarial recovery suite (`flows/adversarial.rs`)
+
+These scenarios follow the backend-core doctrine: each tries to *create* an
+invalid / lossy state and proves the group either refuses it or converges out of
+it (never happy-path replay). Convergence is asserted through the real command
+pipeline — a fork, wedge, or squatted duplicate leaf fails the decrypt checks.
+
+- **`fail500_post_write_commit_is_adopted_not_wedged`** — generalized #411 on a
+  **removal** commit. `Fail500PostWrite` makes the DS persist alice's carol-removal
+  + GroupInfo then 500; alice must observe her commit is canonical and adopt it.
+  Proves: fault fires once; roster converged (carol gone, alice+bob remain);
+  alice not wedged (bob decrypts her post-adopt message); evicted carol can't read it.
+- **`fail500_pre_write_persists_nothing_and_does_not_wedge`** — the contrast case.
+  A pre-write 500 must persist nothing, so the commit-log head is **unchanged**
+  and alice rolls back cleanly (no phantom epoch): she still round-trips with bob
+  at her real epoch. This is the "pre-write ≠ lost-response" distinction.
+- **`epoch_gap_recovers_via_external_join`** (#430-P2 / F1) — bob is offline while
+  the group churns through several epochs, then one interior commit row is dropped
+  (`drop_commit_row`). On return bob retains the message at his join epoch
+  (decrypted by the interleave hook *before* the gap), trips the gap detector,
+  forgets his stale group, and external-joins onto the head; he then decrypts
+  post-recovery traffic and the group agrees on the head epoch. **Accepted loss
+  (documented, not fought):** messages sealed at the epochs the gap forces bob to
+  jump over are unrecoverable for bob — that is the injected F1 gap's direct
+  consequence, and exactly what the I1 DB triggers exist to prevent upstream. The
+  test proves the client *recovers*, not that the gap is lossless.
+- **`dropped_welcome_recovers_via_external_join`** (F5) — bob's add commit +
+  GroupInfo land but `DropWelcome` strips his Welcome. With no Welcome to drain,
+  bob's catch-up finds no local group and external-joins from GroupInfo, creating a
+  *second* leaf; the staying member must prune the duplicate. Proves both-direction
+  decrypt (a fork would break one) and a roster listing bob exactly once. The
+  GroupInfo-**and**-Welcome-both-dropped case is accepted as unrecoverable and is
+  not attempted here.
+- **`eviction_then_readd_has_provable_blackout`** — bob reads a pre-removal
+  message (cached locally), is removed while offline, and two messages are sent
+  while he is out; he is then re-added (`apply_welcome` deletes his stale group and
+  rejoins him at the new epoch). He decrypts the cached pre-removal message and
+  post-re-add traffic but **provably cannot** decrypt the two evicted-window
+  messages (sealed at epochs he was not a member of). Note bob stays passive during
+  the blackout — a merely-*removed* (non-revoked) device that processed its removal
+  would external-join back in; keeping bob offline is what makes the blackout real.
+- **`revoked_device_locked_out_of_every_recovery_path`** — bob's `user_device` row
+  is tombstoned (`revoked_at`) and he is removed, then he drives **every** client
+  recovery entry point (`process_pending_commits`, `get_channel_messages`). The
+  `local_device_registered` gate keeps him out of external-join; the load-bearing
+  checks are the *observable* lockout (he can't decrypt any post-removal message,
+  and is absent from the roster) plus the group staying live for carol — a silent
+  gate no-op is never accepted as a pass, and a wedge would fail carol's check.
+- **`cross_channel_sibling_message_is_not_stranded`** — regression for the
+  cross-channel epoch strand. Carol is a continuous member of a group with two text
+  channels A and B. Alice sends `mB0` on B (carol hasn't fetched B), then adds bob
+  (a commit advancing the *shared* MLS group). Carol opens A first — a per-channel
+  catch-up would advance the shared group past `mB0`'s epoch and drop it
+  (`max_past_epochs = 0`). The group-level `catch_up_mls_group_interleaved` instead
+  catches up **every** sibling channel when A is opened, so `mB0` is decrypted at its
+  epoch and visible when carol later opens B. Proves the group-level catch-up closes
+  the strand that a bare per-channel/commit-only replay leaves open.
+
+## The model-based proptest fuzz layer (`flows/model.rs`)
+
+Where `adversarial.rs` proves *hand-picked* recovery orderings, `model.rs` is the
+"beyond reasonable doubt" complement: it **generates random op/fault/offline
+sequences**, forces the group to converge, and asserts the bulletproof-membership
+invariant for *every* generated sequence. It is model-based (not blind fuzzing)
+because it maintains a plain-Rust **shadow oracle** alongside execution and checks
+reality against it.
+
+### The shadow oracle
+
+Over a fixed pool of 4 pre-signed-up clients (`alice` = the owner/committer, plus
+`bob`/`carol`/`dave`) and one group channel, it tracks:
+
+- the **current membership set**, and each current member's **continuous-stint
+  join clock** (`joined_at`), and
+- for every Send, `(body, membership_snapshot, sent_at_clock)`.
+
+After convergence it asserts, for each actor `X` and message `M(snapshot S,
+clock t_M)`:
+
+1. **Positive delivery** — if `X` is a current member AND has been a member
+   *continuously* since `M` (its stint's join clock ≤ `t_M`), `X` MUST decrypt `M`.
+2. **Negative / forward secrecy** — `X ∉ S` ⟹ `X` must NOT decrypt `M`. This
+   encodes *exactly* the two accepted losses (before-join; sent-while-removed) and
+   nothing weaker.
+3. **No wedge** — every current member decrypts a final alice-authored probe
+   (per-client proof they all reached the head; stronger than reading the
+   server-side `ds_head_epoch` integer, which is also sanity-checked).
+4. **Roster consistency** — every current member's `group_member_ids` equals the
+   shadow model's current set.
+
+Deliberately **not** asserted (to be neither too strong nor too weak): a removed
+member's *cached* history (`X ∈ S` but not current), and messages sent during a
+stint `X` was later removed-and-re-added from (`X ∈ S` but current join clock >
+`t_M`) — removal forgets MLS state and re-add gives a fresh leaf, so an unfetched
+pre-removal message is cryptographically gone and there is no key backup
+(Megolm-style backup is forbidden). The *cached* flip side is covered
+deterministically by `eviction_then_readd_has_provable_blackout`.
+
+### Ops → real commands (no invented seams)
+
+Each op maps to a method already used by the green suite; there is no
+rotate/self-update op because `self_update` does not exist in this repo. Ops that
+are ill-formed against the shadow model (Send from a non-member, Remove of an
+absent actor, Add of a present one) are **skipped in execution and not recorded**.
+
+| Op | Backing command(s) |
+|---|---|
+| `Add(t)` | `join_member`: `send_group_invite` → `accept_group_invite` → `poll_mls_welcomes` → `process_pending_commits` |
+| `Remove(t)` | `remove_member_from_group` + committer `process_pending_commits` |
+| `Send(a)` | sender syncs (`poll_mls_welcomes` + `process_pending_commits`), then `send_message` |
+| `Sync(a)` | `poll_mls_welcomes` + `process_pending_commits` + `get_channel_messages` (models "come back online") |
+| `Fault(v)` | `arm_ds_fault` before the next commit-producing op |
+
+`process_pending_commits` and `get_channel_messages` both route through the
+group-level `catch_up_mls_group_interleaved`, so a returning member decrypts every
+message sealed at an epoch it advances past — not a bare commit-only replay. This
+is what makes the "member continuous since `M` was sent must decrypt `M`" assertion
+pass under offline-churn: without the interleave, `process_pending_commits` would
+jump the shared group to head and strand `M` (`max_past_epochs = 0`).
+
+The fuzzer's fault set is the three **landing** faults — `Fail500PostWrite`,
+`DropResponse`, `DropWelcome` — all of which leave the commit durable and drive the
+client through a recovery path (adopt-own-canonical / external-join / duplicate-leaf
+prune) while the command still returns `Ok`, so the shadow model applies the
+membership change normally. `Fail500PreWrite` (clean no-op rollback, surfaces a
+client error) and the `drop_commit_row` interior gap are left to their deterministic
+scenarios (`fail500_pre_write_persists_nothing_and_does_not_wedge`,
+`epoch_gap_recovers_via_external_join`).
+
+### The hard parts (how they're handled)
+
+- **Async/proptest bridge** — proptest closures are sync; the harness is async.
+  One process-wide multi-thread `tokio::runtime::Runtime` `block_on`s the case body
+  inside the closure. The whole test is `#[serial]` (shared `WORLD` / in-process DS
+  / `NEXT_DS_FAULT`); every case starts with `wipe()` + `clear_ds_fault()` so cases
+  can't bleed. `clear_ds_fault()` is a harness helper added for exactly this.
+- **Determinism / shrinking** — MLS key generation uses the OS RNG and is **not
+  seedable** from the harness, so replays aren't bitwise-identical and shrinking is
+  best-effort (we do **not** claim deterministic shrinking). Failure persistence is
+  disabled (`failure_persistence = None`) so no misleading "regression" seed is
+  written; every failure message embeds the full **op sequence**, which is the repro
+  of record.
+- **CI time budget** — each case spins real MLS crypto + a real DS, so CI runs a
+  **modest** count (`DEFAULT_CASES = 32`, sequences of 4–12 ops, 4 actors) — a couple
+  of minutes. This is documented, not silent under-coverage. Deep fuzzing is a local
+  soak: `PROPTEST_CASES=2000 cargo test --features test-harness --test flows model`.
+
 ## Behaviors the scenarios exercise
 
 - **`edit_message_across_membership_changes`** covers edits across add and remove. Worth knowing when reading the assertions: `get_channel_messages` applies edit envelopes with `UPDATE message SET content = ?` only — if the recipient has no local row for the edited message (e.g. they joined after the original was sent), the edit does not populate a new row for them. The scenario asserts convergence on members that had the original cached; for late joiners it asserts only that stale plaintext never leaks.

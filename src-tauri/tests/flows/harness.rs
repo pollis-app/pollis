@@ -136,13 +136,91 @@ pub(crate) async fn world() -> &'static TestWorld {
         .await
 }
 
-/// One-shot fault for the in-process DS: when armed, the next ACCEPTED commit is
-/// fully written (commit + GroupInfo + Welcomes land) but its success response
-/// is turned into a 500 — simulating a lost success-response. This exercises the
-/// client's idempotent adopt-on-lost-response path (issue #411) on the real DS
-/// (HTTP) path, which is the only path that can actually lose a response.
-pub(crate) static LOSE_NEXT_DS_RESPONSE: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+/// One-shot fault menu for the in-process Delivery Service.
+///
+/// When armed, the next commit submit (`POST /v1/commits`) that the fault
+/// *applies to* is perturbed exactly once and the arm is then atomically
+/// consumed — so a fault set up for one operation can never bleed into a later
+/// one, even though every `#[serial]` test shares the single in-process DS
+/// (`spawn_in_process_delivery`). This generalizes the old
+/// `LOSE_NEXT_DS_RESPONSE: AtomicBool` (issue #411) into the failure taxonomy the
+/// adversarial recovery suite drives (see `flows/adversarial.rs`).
+///
+/// SAFETY / SCOPE: every fault lives in the HARNESS layer (this file), NEVER in
+/// `pollis-delivery`. Production commit semantics stay untouched — the real
+/// client code path runs against a DS that behaves exactly as prod plus the one
+/// injected perturbation. `DropWelcome` is realized by clearing the Welcomes off
+/// the parsed body *before* `submit_commit` (so they're simply never persisted),
+/// not by patching the delivery crate.
+///
+/// The commit-log GAP fault (`DropCommitRow`, #430-P2 / F1) is deliberately NOT a
+/// variant here: deleting an already-acked commit row is done post-hoc by
+/// [`drop_commit_row`], because a live-path deletion of the *head* row only lowers
+/// the head (the next committer refills it) and never leaves a durable interior
+/// gap. See that helper's docs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DsFault {
+    /// The commit + GroupInfo + Welcomes LAND, then the success response is
+    /// turned into a 500 — the #411 "lost success-response" shape from the
+    /// client's view. The client must adopt its own canonical commit, not wedge.
+    DropResponse,
+    /// Same mechanism as [`DsFault::DropResponse`], named for the generalized-#411
+    /// scenario: the DS persists the write, THEN returns 500, so the client
+    /// believes the submit failed while the DS has in fact committed it. Recovery
+    /// is the `our_commit_is_canonical` adopt path.
+    Fail500PostWrite,
+    /// The DS returns 500 WITHOUT persisting anything — the clean, retryable
+    /// failure (the contrast case to `Fail500PostWrite`). Nothing lands, so a
+    /// straight resubmit succeeds; no adoption, no gap.
+    Fail500PreWrite,
+    /// The commit + GroupInfo land, but the Welcomes carried by this add are
+    /// never persisted, so the added member's Welcome never becomes fetchable.
+    /// The new member must recover via external-join instead.
+    DropWelcome,
+}
+
+/// The single armed one-shot DS fault, or `None`. A `Mutex<Option<_>>` (rather
+/// than an atomic) so it can carry the fault *kind*, and `const`-constructible so
+/// it can live in a `static`. Only ever locked across non-await sections
+/// ([`peek_ds_fault`] / [`take_ds_fault`] copy the value out and drop the guard
+/// immediately), so it never blocks the async runtime.
+pub(crate) static NEXT_DS_FAULT: std::sync::Mutex<Option<DsFault>> =
+    std::sync::Mutex::new(None);
+
+/// Arm the next-commit DS fault. One-shot: consumed the first time it applies.
+pub(crate) fn arm_ds_fault(fault: DsFault) {
+    *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = Some(fault);
+}
+
+/// Force-disarm any armed fault. Deterministic scenarios arm-and-consume in the
+/// same breath, so they never need this; the model/proptest fuzzer
+/// (`flows/model.rs`) calls it at the start of every generated case as a
+/// belt-and-suspenders guard, so a fault armed for a commit-producing op that a
+/// later case never issued can never bleed across cases sharing the singleton
+/// `NEXT_DS_FAULT`.
+pub(crate) fn clear_ds_fault() {
+    *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = None;
+}
+
+/// Peek the armed fault without consuming it.
+fn peek_ds_fault() -> Option<DsFault> {
+    *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned")
+}
+
+/// Atomically consume (disarm) the armed fault, returning what was armed.
+fn take_ds_fault() -> Option<DsFault> {
+    NEXT_DS_FAULT
+        .lock()
+        .expect("NEXT_DS_FAULT poisoned")
+        .take()
+}
+
+/// True iff a DS fault is still armed — for the "armed before, disarmed after"
+/// assertion that proves the fault fired exactly once (replaces the old
+/// `LOSE_NEXT_DS_RESPONSE.load(...)`).
+pub(crate) fn ds_fault_armed() -> bool {
+    peek_ds_fault().is_some()
+}
 
 /// Two-handle state for the in-process DS, mirroring production
 /// `pollis_delivery::AppState { db, log_db }`: auth + membership lookups run on
@@ -283,7 +361,7 @@ async fn delivery_submit(
         Err(resp) => return resp,
     };
 
-    let parsed: SubmitBody = match serde_json::from_slice(&body) {
+    let mut parsed: SubmitBody = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return ds_bad_request(),
     };
@@ -293,6 +371,31 @@ async fn delivery_submit(
         return pollis_delivery::error::AuthRejection::Forbidden.into_response();
     }
 
+    // ── Pre-write faults, each consumed ONLY when it applies ──────────────────
+    // (peek, then take at the application point, so an armed fault is never
+    // wasted on a submit it wasn't meant for).
+    match peek_ds_fault() {
+        Some(DsFault::Fail500PreWrite) => {
+            take_ds_fault();
+            // Nothing is persisted — the clean, retryable failure. The client
+            // may simply resubmit and win the same epoch.
+            return (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                "simulated pre-write failure (test fault injection)",
+            )
+                .into_response();
+        }
+        Some(DsFault::DropWelcome) => {
+            take_ds_fault();
+            // Commit + GroupInfo still land; the added member's Welcome never
+            // does. Clearing the body's Welcomes means `submit_commit` never
+            // writes an `mls_welcome` row, so the new member can't join from a
+            // Welcome and must recover via external-join.
+            parsed.welcomes.clear();
+        }
+        _ => {}
+    }
+
     // The commit log lives on the LOG DB.
     let conn = match state.log.conn().await {
         Ok(c) => c,
@@ -300,12 +403,18 @@ async fn delivery_submit(
     };
     match pollis_delivery::commit::submit_commit(&conn, &parsed).await {
         Ok(outcome) => {
-            // Lost-response fault: the commit + GroupInfo + Welcomes have already
-            // LANDED above; drop the success response so the client must recover
-            // by observing the commit is canonical and adopting it (issue #411).
+            // Post-write faults: the commit + GroupInfo + any Welcomes have
+            // already LANDED above; turn the success response into a 500 so the
+            // client must recover by observing the commit is canonical and
+            // adopting it (issue #411 / `our_commit_is_canonical`). `DropResponse`
+            // and `Fail500PostWrite` share this mechanism.
             if matches!(outcome, SubmitResponse::Accepted { .. })
-                && LOSE_NEXT_DS_RESPONSE.swap(false, std::sync::atomic::Ordering::SeqCst)
+                && matches!(
+                    peek_ds_fault(),
+                    Some(DsFault::DropResponse) | Some(DsFault::Fail500PostWrite)
+                )
             {
+                take_ds_fault();
                 return (
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR,
                     "simulated lost submit response (test fault injection)",
@@ -2067,6 +2176,59 @@ pub(crate) async fn writable_remote() -> Arc<RemoteDb> {
     world().await.remote.clone()
 }
 
+/// Post-hoc commit-log GAP injection for the epoch-gap recovery scenario
+/// (#430-P2 / invariant F1).
+///
+/// A live submit-path fault can't leave a durable *interior* gap: dropping the
+/// head commit row merely lowers the head, and the next committer refills it. A
+/// real gap — epochs `… N-1, [N missing], N+1 …` — persists only when a row is
+/// removed AFTER a higher epoch has already been appended above it. So the gap
+/// scenario lets every commit land normally, then deletes ONE interior row
+/// directly on the LOG DB — the very handle the in-process DS writes through, so
+/// the deletion is as authoritative as a DS write. A member catching up from
+/// below then reads `N-1` immediately followed by `N+1`, trips the
+/// append-only-log gap detector in `process_pending_commits`, drops its stale
+/// local group, and must recover via external-join rather than wedge.
+///
+/// `conversation_id` is the MLS group id. For a group channel that is the
+/// `group_id` (see `process_pending_commits`'s channel→group resolution in
+/// `group_state.rs`), NOT the channel id.
+///
+/// Asserts loudly that exactly one row was removed — a silent no-op would mean
+/// the scenario armed the wrong epoch and would prove nothing.
+pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for drop_commit_row");
+    let affected = conn
+        .execute(
+            "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND epoch = ?2",
+            libsql::params![conversation_id.to_string(), epoch],
+        )
+        .await
+        .expect("delete commit row");
+    assert_eq!(
+        affected, 1,
+        "drop_commit_row: expected exactly ONE commit at epoch {epoch} for \
+         {conversation_id} to delete, deleted {affected} — the gap scenario's \
+         setup is wrong (no such epoch, or a duplicate row)"
+    );
+}
+
+/// The Delivery Service's head epoch for a conversation — `MAX(epoch) + 1` over
+/// the commit log — read straight from the LOG DB via
+/// `pollis_delivery::commit::head_epoch`. Convergence assertions use this to
+/// confirm the group advanced (and past a dropped epoch) and that a returning
+/// member reached the shared head.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn ds_head_epoch(conversation_id: &str) -> i64 {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for ds_head_epoch");
+    pollis_delivery::commit::head_epoch(&conn, conversation_id)
+        .await
+        .expect("head_epoch")
+}
+
 /// The in-process Delivery Service base URL (e.g. `http://127.0.0.1:NNNNN`).
 pub(crate) async fn delivery_url() -> String {
     world()
@@ -2415,6 +2577,27 @@ impl TestClient {
             .invoke_json("list_group_channels", json!({ "groupId": group_id }))
             .await;
         channels.as_array().expect("channels array").clone()
+    }
+
+    /// Create an additional text channel in a group and return its ID. All
+    /// channels in a group share the group's single MLS group (`mls_group_id ==
+    /// group_id`), so this is how a test builds the multi-channel topology needed
+    /// to exercise cross-channel epoch interactions.
+    #[allow(dead_code)]
+    pub(crate) async fn create_channel(&self, group_id: &str, name: &str) -> String {
+        let ch: serde_json::Value = self
+            .invoke_json(
+                "create_channel",
+                json!({
+                    "groupId": group_id,
+                    "name": name,
+                    "description": null,
+                    "channelType": "text",
+                    "creatorId": self.user_id(),
+                }),
+            )
+            .await;
+        ch["id"].as_str().expect("channel id").to_string()
     }
 
     /// Return the #General text channel ID for a group.

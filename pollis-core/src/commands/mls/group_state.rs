@@ -1103,8 +1103,19 @@ async fn process_pending_commits_locked_impl(
     Ok(())
 }
 
-/// Tauri command wrapper — resolves conversation_id to MLS group ID, then
-/// delegates to `process_pending_commits_inner`.
+/// Tauri command wrapper — resolves conversation_id to MLS group ID, then runs
+/// the group-level interleaved catch-up.
+///
+/// This is a user-facing CATCH-UP entry point (the app's manual "sync" shortcut,
+/// and the test harness's `process_commits_for`), so it must NOT be a bare
+/// commit-only replay: advancing the shared group to head without decrypting
+/// en route would strand any message sealed at an epoch it skips past
+/// (`max_past_epochs = 0`). Route through `catch_up_mls_group_interleaved`, which
+/// decrypts every bound conversation's messages at each epoch before advancing
+/// past it, and still reaches head. (The send / edit / reconcile hot paths do
+/// NOT go through here — they call `process_pending_commits_inner` /
+/// `process_pending_commits_locked` directly, reaching head immediately before
+/// their own op with nothing to strand.)
 pub async fn process_pending_commits(
     state: &Arc<AppState>,
     conversation_id: String,
@@ -1121,7 +1132,7 @@ pub async fn process_pending_commits(
             None => conversation_id,
         }
     };
-    process_pending_commits_inner(state, &mls_group_id, &user_id).await
+    crate::commands::messages::catch_up_mls_group_interleaved(state, &mls_group_id, &user_id).await
 }
 
 // ── Phase 5 helpers: encrypt / decrypt ───────────────────────────────────────

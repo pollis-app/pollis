@@ -181,10 +181,18 @@ pub async fn connect_rooms(
                                                             eprintln!("[mls] poll_welcomes for {conv_id}: {e}");
                                                         }
                                                     }
-                                                    if let Err(e) = crate::commands::mls::process_pending_commits_inner(
+                                                    // Group-level interleaved catch-up, not a
+                                                    // bare commit-only replay: a membership commit
+                                                    // advances the shared group past an epoch at
+                                                    // which a channel may hold an un-ingested
+                                                    // message, and (max_past_epochs = 0) its keys
+                                                    // would then be gone. Interleaving decrypts en
+                                                    // route. `conv_id` is the mls_group_id
+                                                    // (group_id for channels, dm_channel_id for DMs).
+                                                    if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
                                                         &state, &conv_id, &uid,
                                                     ).await {
-                                                        eprintln!("[mls] process_pending_commits for {conv_id}: {e}");
+                                                        eprintln!("[mls] catch_up_mls_group for {conv_id}: {e}");
                                                     }
                                                 });
                                             }

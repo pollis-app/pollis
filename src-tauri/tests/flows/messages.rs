@@ -1068,12 +1068,12 @@ async fn lost_submit_response_is_adopted_not_wedged() {
     // commit lands (commit + Welcome + GroupInfo all written) but the DS's
     // success response is dropped — a lost success-response on the real HTTP
     // path. The client must adopt its own canonical commit, not wedge.
-    crate::harness::LOSE_NEXT_DS_RESPONSE.store(true, std::sync::atomic::Ordering::SeqCst);
+    crate::harness::arm_ds_fault(crate::harness::DsFault::DropResponse);
 
     alice.invite(&group_id, &carol_p.username).await;
 
     assert!(
-        !crate::harness::LOSE_NEXT_DS_RESPONSE.load(std::sync::atomic::Ordering::SeqCst),
+        !crate::harness::ds_fault_armed(),
         "DS lost-response fault should have fired exactly once"
     );
 
