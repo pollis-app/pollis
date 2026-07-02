@@ -69,7 +69,7 @@ When device A commits a membership change:
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
 
-The bare `process_pending_commits_inner` / `_locked` variants are for the pure recovery/converge paths only (e.g. reconcile's lost-race convergence). The **commit-INITIATION** paths — send, edit, invite (add), remove — must NOT use the bare variant: advancing this device to head before its own op discards the ratchet keys for the current epoch (`max_past_epochs = 0`), so a current-epoch inbound message this device hasn't fetched yet would be **stranded** by its own commit (issue #440, the *committer strand*). They instead run the interleaved ingesting catch-up **before** advancing — see "Pre-op ingest-before-advance" below.
+The bare `process_pending_commits_inner` / `_locked` variants are the raw commit replay used internally by the interleaved catch-up (via `process_pending_commits_inner_with_hook`). Callers that ADVANCE the epoch — the **commit-INITIATION** paths and the recovery converge alike — must NOT use the bare variant directly. The **commit-INITIATION** paths — send, edit, invite (add), remove — must NOT use the bare variant: advancing this device to head before its own op discards the ratchet keys for the current epoch (`max_past_epochs = 0`), so a current-epoch inbound message this device hasn't fetched yet would be **stranded** by its own commit (issue #440, the *committer strand*). They instead run the interleaved ingesting catch-up **before** advancing — see "Pre-op ingest-before-advance" below.
 
 ### Group-level interleaved catch-up (message-loss fix)
 
@@ -129,9 +129,22 @@ advances the epoch:
 `mls_group_lock`. It therefore MUST NOT be invoked while that lock is already
 held. `reconcile_group_mls_impl` (the add/remove committer) holds the lock for
 its whole body, so the invite/remove paths run the catch-up in their *caller*
-BEFORE reconcile is entered. Send/edit hold no lock and swap in place. The
-reconcile-internal recovery replay (lost-race → `process_pending_commits_locked`)
-is left untouched — it is a converge path, not a pre-op catch-up.
+BEFORE reconcile is entered. Send/edit hold no lock and swap in place.
+
+**Recovery seam — lost-race converge (#4).** The reconcile-internal lost-race
+converge was the LAST epoch-advancing path still using a bare commit-only replay
+(`process_pending_commits_locked`). Applying the winner's commit — or rebuilding
+via external-join if the converge forks — advances past the current epoch, so a
+current-epoch inbound message not yet ingested would be stranded
+(`max_past_epochs = 0`), exactly the strand-through-rebuild the marathon flagged
+for a continuous member. It now runs the INTERLEAVED
+`catch_up_mls_group_interleaved` instead, decrypting each epoch's messages before
+advancing/rebuilding past it. Because that catch-up re-acquires the
+`mls_group_lock`, reconcile drops its own guard first (it returns immediately
+after the converge, so this is equivalent to reconcile finishing and a normal
+catch-up running). This extends the ingest-before-advance invariant to every
+advance path — fetch/sweep/realtime (group-level catch-up), send/edit/invite/
+remove (pre-op hoist), and now the recovery converge.
 
 ### Recovery-path guards (revocation + membership lockout)
 

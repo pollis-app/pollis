@@ -657,6 +657,126 @@ async fn epoch_gap_recovers_via_external_join() {
     drop(dave);
 }
 
+// ─── Scenario 2b — un-ingested message survives a forced rebuild (repro) ─────
+
+/// **Deterministic repro for the fuzzer/marathon message-strand-through-rebuild
+/// finding (#4).** The marathon (500 ops, heavy `DsFault`) flagged a CONTINUOUS
+/// member — alice, the owner — losing an early prefix of messages after a
+/// fault-recovery external-join **rebuild** jumped her local group to head. The
+/// governing invariant: every epoch-ADVANCING path (including a recovery rebuild)
+/// must INGEST the current epoch's messages *before* advancing past it, because
+/// `max_past_epochs = 0` discards the ratchet keys the instant the group advances
+/// (issues #440 / #441 established this for the fetch / send / commit-initiation
+/// paths; this closes it on the RECOVERY seam).
+///
+/// This scenario proves the per-epoch interleave hook decrypts un-ingested
+/// messages at **every** epoch the replay passes through — not just the member's
+/// initial epoch — before an external-join rebuild discards those keys. A
+/// continuous member (bob) is offline while the group churns, holds TWO
+/// un-ingested messages (one at his *join* epoch, one at a *mid-replay* epoch he
+/// only reaches after applying a commit), and is then forced to rebuild by an
+/// injected commit-log gap. Both messages must survive: the join-epoch one is
+/// caught by the initial-epoch hook, and — the load-bearing new assertion — the
+/// mid-replay one is caught by the post-commit hook the instant bob's replay
+/// reaches epoch 2, *before* the gap forces the jump to head.
+///
+/// The lost-race converge path (`reconcile.rs`) now runs this SAME interleaved
+/// catch-up rather than a bare commit-only replay, so a converge that advances or
+/// rebuilds can't strand a current-epoch message either. That path is
+/// timing-sensitive and is exercised by the model fuzzer + marathon
+/// (`model_marathon_convergence`), the authoritative gate for #4.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn continuous_member_keeps_mid_replay_message_through_rebuild() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+
+    let group_id = alice.create_group("MidReplay").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // Bob joins at commit epoch 0 → head 1; his MLS epoch is 1. He then goes
+    // "offline" (no poll/process/fetch until the very end).
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+
+    // (M1) at bob's JOIN epoch (1) — caught by the initial-epoch hook on his return.
+    alice.send_channel_message(&channel_id, "M1-join-epoch").await;
+
+    // Carol add advances the shared group 1 → 2 (commit epoch 1, head 2).
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+
+    // (M2) at a MID-replay epoch (2) — bob only reaches epoch 2 AFTER applying the
+    // carol-add commit, so it exercises the post-commit hook, not the initial one.
+    alice.send_channel_message(&channel_id, "M2-mid-replay").await;
+
+    // More churn while bob is offline:
+    //   commit epoch 2: carol remove (head 3)  <-- this row will be dropped
+    //   commit epoch 3: dave add    (head 4)
+    alice.remove_member(&group_id, carol_p.id.as_str()).await;
+    alice.process_commits_for(&channel_id).await;
+    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
+
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        4,
+        "expected head epoch 4 after join/send/add/remove/add churn"
+    );
+
+    // Punch the gap ABOVE both messages: drop the carol-remove commit (epoch 2).
+    // The log now reads 0,1,[gap],3 — a member replaying from epoch 1 ingests M1
+    // (epoch 1), applies the epoch-1 commit to reach epoch 2 and ingests M2, THEN
+    // hits the gap at epoch 3 and rebuilds via external-join.
+    drop_commit_row(&group_id, 2).await;
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        4,
+        "dropping an interior row must not change the head (MAX(epoch)+1 = 4)"
+    );
+
+    // Bob comes back. This single fetch drains his backlog and forces the rebuild.
+    let bob_view = contents(&bob, &channel_id).await;
+
+    // Both un-ingested messages survived the rebuild. M1 proves the initial-epoch
+    // hook; M2 is the load-bearing assertion — a mid-replay epoch's message must
+    // be ingested before the rebuild discards its keys.
+    assert!(
+        bob_view.contains(&"M1-join-epoch".to_string()),
+        "bob must retain the message at his join epoch (initial-epoch hook), got: {bob_view:?}"
+    );
+    assert!(
+        bob_view.contains(&"M2-mid-replay".to_string()),
+        "STRAND THROUGH REBUILD: bob lost M2, sent at a mid-replay epoch he held keys for. The \
+         interleave hook must ingest each epoch's messages BEFORE the external-join rebuild jumps \
+         the local group to head. got: {bob_view:?}"
+    );
+
+    // Bob recovered — current member, decrypts fresh post-recovery traffic.
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "after-recovery").await;
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        members.contains(&bob_p.id),
+        "bob must be a current member after rebuild, got: {members:?}"
+    );
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"after-recovery".to_string()),
+        "bob must decrypt post-recovery traffic — he wedged on the rebuild otherwise"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+    drop(dave);
+}
+
 // ─── Scenario 3 — dropped Welcome recovers via external-join ────────────────
 
 /// **Invalid state it attacks:** a newly-added member stranded because their only
