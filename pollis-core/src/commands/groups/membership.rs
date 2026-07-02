@@ -70,6 +70,23 @@ pub async fn remove_member_from_group(
     });
     crate::commands::mls::ds_post_ok(state, "/v1/members/remove", &body).await?;
 
+    // Ingest-before-advance (issue #440, committer strand): catch this device up
+    // to head with the INTERLEAVED ingesting catch-up — decrypting every bound
+    // conversation's messages at each epoch — BEFORE reconcile stages + merges
+    // our remove commit and advances our epoch. Reconcile advances the shared MLS
+    // group; with `max_past_epochs = 0`, any current-epoch inbound message we
+    // haven't fetched yet would have its keys discarded the instant we advance
+    // past it. Hoisted ABOVE reconcile deliberately: `reconcile_group_mls_impl`
+    // holds the per-conversation MLS lock (`mls_group_lock`) for its whole body,
+    // and the interleaved catch-up re-acquires that SAME lock internally — running
+    // it here, before reconcile takes the lock, ingests the current epoch without
+    // deadlocking.
+    if let Err(e) = crate::commands::messages::catch_up_mls_group_interleaved(
+        state, &group_id, &requester_id,
+    ).await {
+        eprintln!("[mls] remove_member_from_group: catch_up_mls_group for {group_id}: {e}");
+    }
+
     // Reconcile removes the member's leaves from the MLS tree.
     if let Err(e) = crate::commands::mls::reconcile_group_mls_impl(
         state, &group_id, &requester_id,

@@ -69,7 +69,7 @@ When device A commits a membership change:
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
 
-The send / edit / reconcile hot paths call this bare variant directly: they reach head immediately before their own op, so there is nothing to strand.
+The bare `process_pending_commits_inner` / `_locked` variants are for the pure recovery/converge paths only (e.g. reconcile's lost-race convergence). The **commit-INITIATION** paths — send, edit, invite (add), remove — must NOT use the bare variant: advancing this device to head before its own op discards the ratchet keys for the current epoch (`max_past_epochs = 0`), so a current-epoch inbound message this device hasn't fetched yet would be **stranded** by its own commit (issue #440, the *committer strand*). They instead run the interleaved ingesting catch-up **before** advancing — see "Pre-op ingest-before-advance" below.
 
 ### Group-level interleaved catch-up (message-loss fix)
 
@@ -106,6 +106,33 @@ The replay still reaches head even with zero envelopes, so the cold-launch
 "advance every group to head" guarantee is preserved. Steady state is cheap:
 watermarks make repeat catch-ups return zero envelopes.
 
+### Pre-op ingest-before-advance (committer strand, #440)
+
+The group-level catch-up above closes the *fetch / sweep / realtime* variants,
+but a fourth variant lives on the **commit-INITIATION** paths. When a client
+performs its OWN operation it first catches up to head; if that catch-up is
+commit-only, the client advances its epoch past a current-epoch inbound message
+it hasn't ingested and loses it (`max_past_epochs = 0`). So every pre-op catch-up
+runs the **interleaved ingesting** `catch_up_mls_group_interleaved` before the op
+advances the epoch:
+
+| Path | Call site | Lock held at the catch-up? |
+| --- | --- | --- |
+| Send message | `messages/send.rs` | No — swaps `process_pending_commits_inner` → interleaved catch-up |
+| Edit message | `messages/edit_delete.rs` | No — same swap |
+| Add member (invite) | `groups/invites.rs` (`send_group_invite`) | **Yes inside reconcile** — so the catch-up is HOISTED into the caller, before `reconcile_group_mls_impl` takes the per-conversation `mls_group_lock` |
+| Remove member | `groups/membership.rs` (`remove_member_from_group`) | Same hoist, same reason |
+| Voice / screenshare join | `voice_e2ee::derive_voice_key` | Already ingests (`ingest_*_envelopes_inner` → interleaved catch-up) — no change |
+
+**Locking caveat.** `catch_up_mls_group_interleaved` internally calls
+`process_pending_commits_inner_with_hook`, which acquires the per-conversation
+`mls_group_lock`. It therefore MUST NOT be invoked while that lock is already
+held. `reconcile_group_mls_impl` (the add/remove committer) holds the lock for
+its whole body, so the invite/remove paths run the catch-up in their *caller*
+BEFORE reconcile is entered. Send/edit hold no lock and swap in place. The
+reconcile-internal recovery replay (lost-race → `process_pending_commits_locked`)
+is left untouched — it is a converge path, not a pre-op catch-up.
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:
@@ -136,7 +163,7 @@ Both peers compute the same 32-byte key because both hold the same exporter secr
 ## Message Encrypt/Decrypt
 
 **Send** (`send_message`):
-1. Poll welcomes → process pending commits (ensures current epoch)
+1. Poll welcomes → interleaved ingesting catch-up (`catch_up_mls_group_interleaved`) to reach the current epoch while decrypting any current-epoch inbound message first, so this device's own send can't strand it (#440)
 2. `try_mls_encrypt(local_db, group_id, plaintext)` → MLS ciphertext
 3. Store ciphertext in `message_envelope` (remote) and `message` (local)
 

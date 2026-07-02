@@ -102,10 +102,20 @@ pub async fn send_message(
         }
     }
 
-    // Ensure this device has a local MLS group at the current epoch.
-    // Processes pending commits; falls back to external-join if needed.
-    if let Err(e) = crate::commands::mls::process_pending_commits_inner(state, &mls_group_id, &sender_id).await {
-        eprintln!("[messages] send_message: process_pending_commits for {mls_group_id}: {e}");
+    // Catch this device up to head with the INTERLEAVED ingesting catch-up,
+    // decrypting every bound conversation's messages at each epoch BEFORE the
+    // shared local group advances past it. A bare commit-only replay
+    // (`process_pending_commits_inner`) would reach head immediately, and with
+    // `max_past_epochs = 0` a current-epoch inbound message we haven't fetched
+    // yet would have its keys discarded the instant we advance past its epoch
+    // (issue #440, the committer strand — a send that catches up commit-only
+    // strands an un-ingested inbound message). The interleaved catch-up is a
+    // superset: it still reaches head (creating/repairing the local group via
+    // external-join if needed), just decrypting en route. Safe to call here —
+    // send_message holds no MLS group lock, so re-acquiring it inside the
+    // catch-up cannot deadlock.
+    if let Err(e) = super::catch_up_mls_group_interleaved(state, &mls_group_id, &sender_id).await {
+        eprintln!("[messages] send_message: catch_up_mls_group for {mls_group_id}: {e}");
     }
 
     let ciphertext_remote = {

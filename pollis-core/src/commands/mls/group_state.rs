@@ -1112,10 +1112,11 @@ async fn process_pending_commits_locked_impl(
 /// en route would strand any message sealed at an epoch it skips past
 /// (`max_past_epochs = 0`). Route through `catch_up_mls_group_interleaved`, which
 /// decrypts every bound conversation's messages at each epoch before advancing
-/// past it, and still reaches head. (The send / edit / reconcile hot paths do
-/// NOT go through here — they call `process_pending_commits_inner` /
-/// `process_pending_commits_locked` directly, reaching head immediately before
-/// their own op with nothing to strand.)
+/// past it, and still reaches head. (The send / edit / invite / remove commit-
+/// INITIATION paths do NOT go through this command, but they run the SAME
+/// interleaved catch-up before advancing their own epoch — see issue #440, the
+/// committer strand — so a current-epoch inbound message is never stranded by a
+/// self-initiated commit either.)
 pub async fn process_pending_commits(
     state: &Arc<AppState>,
     conversation_id: String,

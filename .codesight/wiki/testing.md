@@ -217,6 +217,15 @@ pipeline — a fork, wedge, or squatted duplicate leaf fails the decrypt checks.
   catches up **every** sibling channel when A is opened, so `mB0` is decrypted at its
   epoch and visible when carol later opens B. Proves the group-level catch-up closes
   the strand that a bare per-channel/commit-only replay leaves open.
+- **`committer_does_not_strand_inbound_message`** — regression for the *committer
+  strand* (#440), the commit-INITIATION variant. Carol sends `m0` while alice (a
+  member) hasn't fetched it, then alice adds bob. Advancing her own epoch by merging
+  the add commit would discard `m0`'s keys (`max_past_epochs = 0`) before she ingests
+  it. The fix makes the pre-op paths (send / edit / invite / remove) run the
+  interleaved ingesting catch-up **before** advancing their own epoch, so alice
+  decrypts `m0` before the add. Proves the group-level catch-up (fetch/sweep/realtime)
+  and the pre-op ingest (commit-initiation) together leave no path that strands a
+  current member's in-window message.
 
 ## The model-based proptest fuzz layer (`flows/model.rs`)
 
@@ -279,6 +288,15 @@ message sealed at an epoch it advances past — not a bare commit-only replay. T
 is what makes the "member continuous since `M` was sent must decrypt `M`" assertion
 pass under offline-churn: without the interleave, `process_pending_commits` would
 jump the shared group to head and strand `M` (`max_past_epochs = 0`).
+
+The alice-committer ops (`Add`/`Remove`) also strand `M` on the **commit-initiation**
+side if alice commits while holding an un-ingested inbound `M` at the current epoch
+(the committer strand, #440): `send_group_invite` / `remove_member_from_group` run
+the interleaved catch-up **before** entering `reconcile_group_mls_impl` (which holds
+the `mls_group_lock` for its whole body — so the catch-up is hoisted above the lock
+to avoid a re-entrant deadlock), and `send_message` swaps its commit-only catch-up
+for the interleaved one. This is why the fuzzer, which previously surfaced this class
+and was `#[ignore]`d, is now re-enabled and green.
 
 The fuzzer's fault set is the three **landing** faults — `Fail500PostWrite`,
 `DropResponse`, `DropWelcome` — all of which leave the commit durable and drive the
