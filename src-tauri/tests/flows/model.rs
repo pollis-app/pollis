@@ -493,20 +493,8 @@ async fn run_case(ops: &[Op]) -> Result<(), String> {
 /// bulletproof-membership invariant for every one of them. `#[serial]` because it
 /// shares the singleton `WORLD` / in-process DS / `NEXT_DS_FAULT` with the rest of
 /// the flows suite.
-///
-/// TEMPORARILY `#[ignore]`d (2026-07-02): the group-level catch-up fix landed and
-/// the whole DETERMINISTIC suite — every original-bug repro (cross-channel strand,
-/// removed-member lockout, the five recovery scenarios) — is green and locks that
-/// fix in. This fuzzer, exploring further, now surfaces a SEPARATE, not-yet-fixed
-/// class: a *committer* that initiates a membership change while holding an
-/// un-ingested inbound message advances its own epoch past that message and loses
-/// it (the catch-up paths are fixed; the commit-INITIATION paths — invite / remove
-/// / send — are not). That's tracked as its own follow-up; re-enable this test
-/// (remove `#[ignore]`) as part of fixing the committer-ingest-ordering class.
-/// Run locally meanwhile with `cargo test ... -- --ignored`.
 #[test]
 #[serial]
-#[ignore = "surfaces the un-fixed committer-ingest-ordering class; re-enable with that fix"]
 fn model_based_convergence_is_bulletproof() {
     let cases = std::env::var("PROPTEST_CASES")
         .ok()

@@ -200,10 +200,10 @@ async fn removed_member_locked_out_on_catchup() {
 /// carol sends `m0` (alice is a member but has NOT fetched, so `m0` is un-ingested
 /// for her), then alice adds bob — merging her own add commit and advancing past
 /// `m0`'s epoch before ingesting it. The invariant: alice, a continuous member since
-/// `m0` was sent, MUST decrypt it. EXPECTED TO FAIL until the committer-ingest fix
-/// lands (ingest the current epoch before merging a self-initiated commit); it
-/// exists to confirm the committer strand is real, not a fuzzer-oracle artifact
-/// (the earlier removed-member finding turned out to be one).
+/// `m0` was sent, MUST decrypt it. The committer-ingest fix (#440) makes the commit-
+/// INITIATION paths (invite / remove / send / edit) run the interleaved ingesting
+/// catch-up before advancing their own epoch, so alice decrypts `m0` before merging
+/// her add commit — this regression test locks that in.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn committer_does_not_strand_inbound_message() {
