@@ -2,9 +2,10 @@
 //!
 //! Single backend command that, given a user_id, enumerates every MLS
 //! group the user is in (regular groups + DMs) and runs the catch-up
-//! sequence (`poll_mls_welcomes_inner` once + `process_pending_commits_inner`
-//! per group) so the local MLS state matches the server's published epoch
-//! before the user can take any MLS-powered action.
+//! sequence (`poll_mls_welcomes_inner` once + `catch_up_mls_group_interleaved`
+//! per group) so the local MLS state matches the server's published epoch —
+//! decrypting every message sealed en route, not just replaying commits — before
+//! the user can take any MLS-powered action.
 //!
 //! Closes the cold-launch race documented in issue #371 scenario 5: between
 //! sign-in / unlock and the first time any per-call catch-up fires, a user
@@ -65,22 +66,26 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         dm_ids.len()
     );
 
-    // Regular groups: mls_group_id IS the group id; process_pending_commits
-    // takes mls_group_id directly.
+    // Regular groups: mls_group_id IS the group id. Route through the group-level
+    // interleaved catch-up (not a bare commit-only replay) so a returning offline
+    // member decrypts every message sealed at an epoch it's about to advance past,
+    // rather than losing anything sent before a membership change during its
+    // offline window. Interleaved ingest still advances the group to head, so the
+    // cold-launch guarantee (#371) is preserved.
     for gid in &group_ids {
         if let Err(e) =
-            crate::commands::mls::process_pending_commits_inner(state, gid, user_id).await
+            crate::commands::messages::catch_up_mls_group_interleaved(state, gid, user_id).await
         {
-            eprintln!("[mls-sweep] process_pending_commits for group {gid}: {e}");
+            eprintln!("[mls-sweep] catch_up_mls_group for group {gid}: {e}");
         }
     }
 
-    // DMs: mls_group_id IS the dm_channel_id.
+    // DMs: mls_group_id IS the dm_channel_id — a single-conversation MLS group.
     for did in &dm_ids {
         if let Err(e) =
-            crate::commands::mls::process_pending_commits_inner(state, did, user_id).await
+            crate::commands::messages::catch_up_mls_group_interleaved(state, did, user_id).await
         {
-            eprintln!("[mls-sweep] process_pending_commits for dm {did}: {e}");
+            eprintln!("[mls-sweep] catch_up_mls_group for dm {did}: {e}");
         }
     }
 
