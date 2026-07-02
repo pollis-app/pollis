@@ -34,8 +34,26 @@ jobs:
     # workflow's build-capture-helper job runs on 24.04). No AppImage is built
     # here, so the 22.04 glibc-floor concern doesn't apply.
     runs-on: ubuntu-24.04
+    env:
+      # The flows test binary links the whole native stack (Tauri + libwebrtc +
+      # livekit + cpal); with full DWARF it grew large enough to crash the runner's
+      # linker (`ld ... signal 7 [Bus error]` — link-time memory/disk exhaustion).
+      # Tests don't need debuginfo (assertions print their own context / op
+      # sequences, not backtraces), so drop it to shrink the binary and the link.
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
+
+      # Reclaim ~20-30 GB of preinstalled toolchains we don't use, so linking the
+      # large native test binary can't exhaust the runner's disk/tmpfs (the other
+      # trigger for the `ld` bus error).
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+            /usr/local/share/boost /opt/hostedtoolcache/CodeQL /usr/local/.ghcup || true
+          sudo docker image prune --all --force || true
+          df -h /
 
       - uses: dtolnay/rust-toolchain@stable
 
