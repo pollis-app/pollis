@@ -23,6 +23,8 @@ mod groups;
 mod heavy_churn;
 #[path = "flows/messages.rs"]
 mod messages;
+#[path = "flows/model.rs"]
+mod model;
 #[path = "flows/rejoin.rs"]
 mod rejoin;
 #[path = "flows/security.rs"]

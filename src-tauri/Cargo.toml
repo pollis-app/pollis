@@ -76,6 +76,10 @@ tokio = { version = "1", features = ["full", "test-util"] }
 dotenvy = "0.15"
 serial_test = "3"
 tempfile = "3"
+# Model-based property fuzzer for the adversarial MLS recovery suite
+# (tests/flows/model.rs): generates random op/fault/offline sequences, forces
+# convergence, and asserts the bulletproof-membership invariant for all of them.
+proptest = "1"
 # Used directly by tests/multi_device_messaging.rs for in-process MLS
 # state simulation. Production lib code reaches MLS through pollis-core.
 openmls = "0.8"

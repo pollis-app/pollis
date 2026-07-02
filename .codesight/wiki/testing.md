@@ -209,6 +209,88 @@ pipeline — a fork, wedge, or squatted duplicate leaf fails the decrypt checks.
   and is absent from the roster) plus the group staying live for carol — a silent
   gate no-op is never accepted as a pass, and a wedge would fail carol's check.
 
+## The model-based proptest fuzz layer (`flows/model.rs`)
+
+Where `adversarial.rs` proves *hand-picked* recovery orderings, `model.rs` is the
+"beyond reasonable doubt" complement: it **generates random op/fault/offline
+sequences**, forces the group to converge, and asserts the bulletproof-membership
+invariant for *every* generated sequence. It is model-based (not blind fuzzing)
+because it maintains a plain-Rust **shadow oracle** alongside execution and checks
+reality against it.
+
+### The shadow oracle
+
+Over a fixed pool of 4 pre-signed-up clients (`alice` = the owner/committer, plus
+`bob`/`carol`/`dave`) and one group channel, it tracks:
+
+- the **current membership set**, and each current member's **continuous-stint
+  join clock** (`joined_at`), and
+- for every Send, `(body, membership_snapshot, sent_at_clock)`.
+
+After convergence it asserts, for each actor `X` and message `M(snapshot S,
+clock t_M)`:
+
+1. **Positive delivery** — if `X` is a current member AND has been a member
+   *continuously* since `M` (its stint's join clock ≤ `t_M`), `X` MUST decrypt `M`.
+2. **Negative / forward secrecy** — `X ∉ S` ⟹ `X` must NOT decrypt `M`. This
+   encodes *exactly* the two accepted losses (before-join; sent-while-removed) and
+   nothing weaker.
+3. **No wedge** — every current member decrypts a final alice-authored probe
+   (per-client proof they all reached the head; stronger than reading the
+   server-side `ds_head_epoch` integer, which is also sanity-checked).
+4. **Roster consistency** — every current member's `group_member_ids` equals the
+   shadow model's current set.
+
+Deliberately **not** asserted (to be neither too strong nor too weak): a removed
+member's *cached* history (`X ∈ S` but not current), and messages sent during a
+stint `X` was later removed-and-re-added from (`X ∈ S` but current join clock >
+`t_M`) — removal forgets MLS state and re-add gives a fresh leaf, so an unfetched
+pre-removal message is cryptographically gone and there is no key backup
+(Megolm-style backup is forbidden). The *cached* flip side is covered
+deterministically by `eviction_then_readd_has_provable_blackout`.
+
+### Ops → real commands (no invented seams)
+
+Each op maps to a method already used by the green suite; there is no
+rotate/self-update op because `self_update` does not exist in this repo. Ops that
+are ill-formed against the shadow model (Send from a non-member, Remove of an
+absent actor, Add of a present one) are **skipped in execution and not recorded**.
+
+| Op | Backing command(s) |
+|---|---|
+| `Add(t)` | `join_member`: `send_group_invite` → `accept_group_invite` → `poll_mls_welcomes` → `process_pending_commits` |
+| `Remove(t)` | `remove_member_from_group` + committer `process_pending_commits` |
+| `Send(a)` | sender syncs (`poll_mls_welcomes` + `process_pending_commits`), then `send_message` |
+| `Sync(a)` | `poll_mls_welcomes` + `process_pending_commits` + `get_channel_messages` (models "come back online") |
+| `Fault(v)` | `arm_ds_fault` before the next commit-producing op |
+
+The fuzzer's fault set is the three **landing** faults — `Fail500PostWrite`,
+`DropResponse`, `DropWelcome` — all of which leave the commit durable and drive the
+client through a recovery path (adopt-own-canonical / external-join / duplicate-leaf
+prune) while the command still returns `Ok`, so the shadow model applies the
+membership change normally. `Fail500PreWrite` (clean no-op rollback, surfaces a
+client error) and the `drop_commit_row` interior gap are left to their deterministic
+scenarios (`fail500_pre_write_persists_nothing_and_does_not_wedge`,
+`epoch_gap_recovers_via_external_join`).
+
+### The hard parts (how they're handled)
+
+- **Async/proptest bridge** — proptest closures are sync; the harness is async.
+  One process-wide multi-thread `tokio::runtime::Runtime` `block_on`s the case body
+  inside the closure. The whole test is `#[serial]` (shared `WORLD` / in-process DS
+  / `NEXT_DS_FAULT`); every case starts with `wipe()` + `clear_ds_fault()` so cases
+  can't bleed. `clear_ds_fault()` is a harness helper added for exactly this.
+- **Determinism / shrinking** — MLS key generation uses the OS RNG and is **not
+  seedable** from the harness, so replays aren't bitwise-identical and shrinking is
+  best-effort (we do **not** claim deterministic shrinking). Failure persistence is
+  disabled (`failure_persistence = None`) so no misleading "regression" seed is
+  written; every failure message embeds the full **op sequence**, which is the repro
+  of record.
+- **CI time budget** — each case spins real MLS crypto + a real DS, so CI runs a
+  **modest** count (`DEFAULT_CASES = 32`, sequences of 4–12 ops, 4 actors) — a couple
+  of minutes. This is documented, not silent under-coverage. Deep fuzzing is a local
+  soak: `PROPTEST_CASES=2000 cargo test --features test-harness --test flows model`.
+
 ## Behaviors the scenarios exercise
 
 - **`edit_message_across_membership_changes`** covers edits across add and remove. Worth knowing when reading the assertions: `get_channel_messages` applies edit envelopes with `UPDATE message SET content = ?` only — if the recipient has no local row for the edited message (e.g. they joined after the original was sent), the edit does not populate a new row for them. The scenario asserts convergence on members that had the original cached; for late joiners it asserts only that stale plaintext never leaks.

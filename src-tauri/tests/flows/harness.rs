@@ -192,6 +192,16 @@ pub(crate) fn arm_ds_fault(fault: DsFault) {
     *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = Some(fault);
 }
 
+/// Force-disarm any armed fault. Deterministic scenarios arm-and-consume in the
+/// same breath, so they never need this; the model/proptest fuzzer
+/// (`flows/model.rs`) calls it at the start of every generated case as a
+/// belt-and-suspenders guard, so a fault armed for a commit-producing op that a
+/// later case never issued can never bleed across cases sharing the singleton
+/// `NEXT_DS_FAULT`.
+pub(crate) fn clear_ds_fault() {
+    *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned") = None;
+}
+
 /// Peek the armed fault without consuming it.
 fn peek_ds_fault() -> Option<DsFault> {
     *NEXT_DS_FAULT.lock().expect("NEXT_DS_FAULT poisoned")
