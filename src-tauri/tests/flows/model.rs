@@ -291,6 +291,11 @@ async fn run_case(ops: &[Op]) -> Result<(), String> {
     // A logical clock that ticks once per op, so `joined_at` and each message's
     // `sent_at` are ordered and "continuous membership since M" is decidable.
     let mut clock: usize = 0;
+    // How many commit-producing ops (Add/Remove) actually LANDED — used to decide
+    // whether the DS head *must* have advanced past genesis. A degenerate sequence
+    // whose every membership op is skipped by a well-formedness guard (e.g. all
+    // Remove of a never-added actor) leaves the group correctly at epoch 0.
+    let mut commit_ops: usize = 0;
 
     for op in ops {
         clock += 1;
@@ -308,6 +313,7 @@ async fn run_case(ops: &[Op]) -> Result<(), String> {
                     arm_ds_fault(f);
                 }
                 join_member(&clients[0], &clients[t], &group_id, &channel_id, &usernames[t]).await;
+                commit_ops += 1;
                 current.insert(t);
                 ever.insert(t);
                 // This stint's continuous membership starts now (overwrites any
@@ -327,6 +333,7 @@ async fn run_case(ops: &[Op]) -> Result<(), String> {
                 }
                 clients[0].remove_member(&group_id, &ids[t]).await;
                 clients[0].process_commits_for(&channel_id).await;
+                commit_ops += 1;
                 current.remove(&t);
             }
             Op::Send(a) => {
@@ -439,12 +446,22 @@ async fn run_case(ops: &[Op]) -> Result<(), String> {
             ));
         }
     }
-    let head = ds_head_epoch(&group_id).await;
-    if head <= 0 {
-        return Err(fail_msg(
-            ops,
-            &format!("DS head epoch is {head}; the group should have advanced past creation"),
-        ));
+    // Only demand the DS advanced past genesis if a membership commit actually
+    // landed: a sequence whose every Add/Remove was skipped by a well-formedness
+    // guard (e.g. all-Remove of a never-added actor) leaves the group correctly at
+    // epoch 0, which is not a wedge. When commits DID land, a genesis head would be
+    // a real bug (the DS silently dropped every commit).
+    if commit_ops > 0 {
+        let head = ds_head_epoch(&group_id).await;
+        if head <= 0 {
+            return Err(fail_msg(
+                ops,
+                &format!(
+                    "DS head epoch is {head} after {commit_ops} committed membership op(s); the \
+                     group should have advanced past creation"
+                ),
+            ));
+        }
     }
 
     // ── Assertion 4: roster consistency — every current member's roster equals
