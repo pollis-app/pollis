@@ -69,7 +69,42 @@ When device A commits a membership change:
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
 
-This runs automatically on every message send (`send_message`) and message read (`get_channel_messages`, `get_dm_messages`), plus when `membership_changed` events arrive.
+The send / edit / reconcile hot paths call this bare variant directly: they reach head immediately before their own op, so there is nothing to strand.
+
+### Group-level interleaved catch-up (message-loss fix)
+
+Every **catch-up** entry point instead routes through
+`messages::catch_up_mls_group_interleaved(state, mls_group_id, user_id)`:
+- `get_channel_messages` (opening a channel) and `get_dm_messages`
+- the cold-launch/reconnect sweep `catch_up_all_mls_groups`
+- the realtime `membership_changed` handler (`livekit/realtime.rs`)
+- the `process_pending_commits` command (the app's manual "sync" shortcut)
+
+**Why a group-level catch-up exists.** All channels in a group share ONE MLS
+group (`mls_group_id == group_id`), but message ingest is per-conversation, and
+`max_past_epochs = 0` (forward secrecy — the ratchet keys for an epoch are
+discarded the instant the group advances past it). A per-channel or commit-only
+catch-up advances the shared local group past an epoch at which *some* bound
+conversation still holds an un-ingested message, and that message is then
+**permanently undecryptable**. Three variants of the same root:
+1. **cross-channel strand** — opening channel A advances the shared group past an
+   epoch at which sibling channel B holds an un-ingested message;
+2. **cold-launch sweep** — a bare commit-only replay advances every group to head
+   before any message is ingested;
+3. **realtime membership signal** — a bare commit-only replay on the membership
+   event does the same.
+
+**How it fixes them.** Given an `mls_group_id`, it enumerates *all* bound
+conversations (a group's `channels`, or the single DM whose id IS the
+`mls_group_id`), pulls each one's un-ingested envelopes past *that conversation's*
+own watermark, indexes every envelope by its parsed MLS epoch across all
+conversations, then drives the shared group's commit replay **once** — decrypting
+the envelopes (from any conversation) sealed at each epoch via the `on_epoch` hook
+in `process_pending_commits_locked_impl` **before** the next commit advances past
+it. Each conversation's watermark advances independently over its own envelopes.
+The replay still reaches head even with zero envelopes, so the cold-launch
+"advance every group to head" guarantee is preserved. Steady state is cheap:
+watermarks make repeat catch-ups return zero envelopes.
 
 ## Multi-Device Enrollment
 
@@ -106,10 +141,18 @@ Both peers compute the same 32-byte key because both hold the same exporter secr
 3. Store ciphertext in `message_envelope` (remote) and `message` (local)
 
 **Receive** (`get_channel_messages` / `get_dm_messages`):
-1. Poll welcomes → process pending commits
-2. Fetch `message_envelope` rows from Turso
-3. `try_mls_decrypt(local_db, group_id, ciphertext)` → plaintext
-4. Cache decrypted content in local `message` table
+1. Poll welcomes
+2. `catch_up_mls_group_interleaved` — enumerate every bound conversation, fetch
+   its un-ingested `message_envelope` rows from Turso, and replay commits ONCE
+   for the shared group, decrypting each conversation's envelopes at the epoch
+   they were sealed at (via `try_mls_decrypt`) *before* advancing past it
+3. Cache decrypted content in the local `message` table; advance each
+   conversation's watermark independently
+4. Read the requested conversation's page from the local `message` table
+
+Decryption is interleaved with commit replay because `max_past_epochs = 0`: a
+message must be decrypted while the local group is still AT its epoch (see
+`envelope_epoch`, which parses an envelope's epoch without touching group state).
 
 ## Credential Format
 

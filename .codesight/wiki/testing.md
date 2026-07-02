@@ -208,6 +208,15 @@ pipeline — a fork, wedge, or squatted duplicate leaf fails the decrypt checks.
   checks are the *observable* lockout (he can't decrypt any post-removal message,
   and is absent from the roster) plus the group staying live for carol — a silent
   gate no-op is never accepted as a pass, and a wedge would fail carol's check.
+- **`cross_channel_sibling_message_is_not_stranded`** — regression for the
+  cross-channel epoch strand. Carol is a continuous member of a group with two text
+  channels A and B. Alice sends `mB0` on B (carol hasn't fetched B), then adds bob
+  (a commit advancing the *shared* MLS group). Carol opens A first — a per-channel
+  catch-up would advance the shared group past `mB0`'s epoch and drop it
+  (`max_past_epochs = 0`). The group-level `catch_up_mls_group_interleaved` instead
+  catches up **every** sibling channel when A is opened, so `mB0` is decrypted at its
+  epoch and visible when carol later opens B. Proves the group-level catch-up closes
+  the strand that a bare per-channel/commit-only replay leaves open.
 
 ## The model-based proptest fuzz layer (`flows/model.rs`)
 
@@ -263,6 +272,13 @@ absent actor, Add of a present one) are **skipped in execution and not recorded*
 | `Send(a)` | sender syncs (`poll_mls_welcomes` + `process_pending_commits`), then `send_message` |
 | `Sync(a)` | `poll_mls_welcomes` + `process_pending_commits` + `get_channel_messages` (models "come back online") |
 | `Fault(v)` | `arm_ds_fault` before the next commit-producing op |
+
+`process_pending_commits` and `get_channel_messages` both route through the
+group-level `catch_up_mls_group_interleaved`, so a returning member decrypts every
+message sealed at an epoch it advances past — not a bare commit-only replay. This
+is what makes the "member continuous since `M` was sent must decrypt `M`" assertion
+pass under offline-churn: without the interleave, `process_pending_commits` would
+jump the shared group to head and strand `M` (`max_past_epochs = 0`).
 
 The fuzzer's fault set is the three **landing** faults — `Fail500PostWrite`,
 `DropResponse`, `DropWelcome` — all of which leave the commit durable and drive the

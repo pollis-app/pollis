@@ -21,17 +21,20 @@ use crate::harness::{
 };
 use serial_test::serial;
 
-// ─── Scenario 6 — cross-channel epoch strand (VERIFICATION repro) ────────────
+// ─── Scenario 6 — cross-channel epoch strand (regression) ────────────────────
 
-/// **Verification repro for the cross-channel variant of the sweep/realtime
+/// **Regression test for the cross-channel variant of the sweep/realtime
 /// message-loss bug.** All channels in a group share ONE MLS group
 /// (`mls_group_id == group_id`), but message ingest is per-channel
-/// (`get_channel_messages(channel_id)` pulls only that channel's envelopes while
-/// advancing the *shared* local MLS group). So opening one channel can advance the
-/// group past an epoch at which a *sibling* channel holds an un-ingested message —
-/// and with `max_past_epochs = 0` that message's keys are then gone, exactly as in
-/// the cold-launch sweep, but triggered through the normal fetch path with no
-/// sweep involved.
+/// (`get_channel_messages(channel_id)` pulls only that channel's envelopes). Before
+/// the fix, opening one channel advanced the *shared* local MLS group past an epoch
+/// at which a *sibling* channel held an un-ingested message — and with
+/// `max_past_epochs = 0` that message's keys were then gone, exactly as in the
+/// cold-launch sweep, but triggered through the normal fetch path with no sweep
+/// involved. The group-level interleaved catch-up
+/// (`catch_up_mls_group_interleaved`) closes this: opening ANY channel catches up
+/// the WHOLE group, decrypting every sibling channel's messages at each epoch
+/// before advancing past it.
 ///
 /// Sequence: alice + carol in a group with two text channels A and B.
 /// 1. alice sends `mB0` on channel B at epoch E (carol is a member but has not
@@ -85,8 +88,8 @@ async fn cross_channel_sibling_message_is_not_stranded() {
     let carol_b = contents(&carol, &chan_b).await;
 
     // Bulletproof invariant: a continuous member must decrypt every message sent
-    // while they were a member. EXPECTED TO FAIL until the group-level catch-up
-    // fix lands — this repro confirms the cross-channel strand is real.
+    // while they were a member. With the group-level interleaved catch-up, opening
+    // channel A caught carol up on the whole group — including channel B's mB0.
     assert!(
         carol_b.contains(&"mB0".to_string()),
         "CROSS-CHANNEL STRAND: carol was a continuous member when mB0 was sent on channel B, \
