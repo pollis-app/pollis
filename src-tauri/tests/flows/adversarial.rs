@@ -187,6 +187,100 @@ async fn removed_member_locked_out_on_catchup() {
     drop(dave);
 }
 
+// ─── Scenario 7b — removed member climbs back via external-join (repro) ──────
+
+/// **Deterministic repro for the fuzzer's `[Add(1), Remove(1), Add(2)]` finding
+/// (membership leak #2).** Scenario 7 proves a removed member cannot read a
+/// message sent BEFORE they come online, but a removed member's external-join
+/// still *climbs them back into the MLS tree* — the leak only becomes observable
+/// once a NEW message is sent AFTER the climb-back, at an epoch the re-joined leaf
+/// holds keys for. This scenario forces exactly that ordering and is the tighter
+/// repro: the add-then-immediately-remove shape (bob added, then removed at the
+/// very next commit) leaves the smallest gap for the recovery to slip through.
+///
+/// Root cause: the DS `/v1/commits` endpoint does NOT gate submissions on group
+/// membership, and the client-side recovery guard gated ONLY on
+/// `local_device_registered` (device-not-revoked), NOT on current group
+/// membership. So bob — removed but not revoked — self-evicts on catch-up, then
+/// external-joins and WINS its epoch on the CAS, rejoining the tree. alice's next
+/// catch-up applies bob's external-join, and a message she then sends is sealed
+/// for bob too. The fix gates the external-join recovery on CURRENT membership as
+/// well, so a removed member never rebuilds itself.
+///
+/// carol (added after bob's removal, a continuous member) is the positive control:
+/// she MUST decrypt the post-climb message, isolating the invariant to bob.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn removed_member_cannot_climb_back_via_external_join() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("RemovedClimbBack").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // [Add(1), Remove(1), Add(2)] — bob in, bob out at the very next commit, carol in.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    alice.remove_member(&group_id, bob_p.id.as_str()).await;
+    alice.process_commits_for(&channel_id).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    alice.process_commits_for(&channel_id).await;
+
+    // bob (removed, device still registered) comes online and runs the returning-
+    // client catch-up. WITHOUT the membership gate this self-evicts then external-
+    // joins bob back into the tree.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+
+    // alice catches up (applying bob's external-join, if it landed) and THEN sends
+    // a fresh message. If bob climbed back into alice's tree, this is sealed for
+    // bob too — the leak. Sent AFTER the climb-back is what makes the leak
+    // observable (unlike Scenario 7's pre-climb message).
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "post-climb").await;
+
+    // bob makes one more recovery pass and reads.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+    let bob_view = contents(&bob, &channel_id).await;
+
+    // Positive control: carol (continuous member) decrypts post-climb — it was
+    // genuinely delivered, isolating the question to bob.
+    carol.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"post-climb".to_string()),
+        "carol (a continuous member) must decrypt the post-climb message"
+    );
+
+    // Sanity: bob is not a current member (removal deleted his roster row and an
+    // external-join never re-adds it).
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        !members.contains(&bob_p.id),
+        "bob should not be a current member after removal, got: {members:?}"
+    );
+
+    // LOCKOUT INVARIANT: removed bob must NOT decrypt a message sent after his
+    // removal — even one sent after his own recovery pass. If this fails, a
+    // removed (not revoked) member climbed back into the tree via external-join.
+    assert!(
+        !bob_view.contains(&"post-climb".to_string()),
+        "MEMBERSHIP LEAK CONFIRMED: removed bob decrypted a post-climb message — he rebuilt \
+         himself into the tree via external-join. A removed member must be gated out of the \
+         recovery path on membership, not just device-revocation. bob view={bob_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 // ─── Scenario 8 — committer strands its own un-ingested inbound msg (repro) ──
 
 /// **Deterministic repro for the fuzzer's committer-ingest finding (issue #440).**

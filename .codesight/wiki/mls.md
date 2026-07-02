@@ -133,6 +133,37 @@ BEFORE reconcile is entered. Send/edit hold no lock and swap in place. The
 reconcile-internal recovery replay (lost-race → `process_pending_commits_locked`)
 is left untouched — it is a converge path, not a pre-op catch-up.
 
+### Recovery-path guards (revocation + membership lockout)
+
+The external-join **recovery** paths in `process_pending_commits_locked_impl`
+(no local group at start; group self-deleted during processing via eviction /
+fork / epoch-gap) rebuild this device onto the published GroupInfo. Both are
+gated by `may_rejoin_via_external_join`, which requires **two** things before it
+lets a device rebuild:
+
+1. `local_device_registered` — this device's `user_device` row still exists and
+   is not revoked (fails **open** on error: a transient blip must never lock a
+   legitimate device out of recovery);
+2. `local_user_is_member` — the user is still a CURRENT member of the group
+   (`group_member` / `dm_channel_member` / channel→group), mirroring the DS-side
+   `writes::is_member`. Fails **closed** on error: this guards a membership
+   *leak*, so when membership can't be confirmed we do NOT rebuild (never a
+   permanent lockout — a real member recovers on the next pass).
+
+**Why membership, not just revocation (fuzzer finding #2).** The DS
+`/v1/commits` endpoint does NOT gate submissions on membership. A member who was
+*removed* (their `group_member` row deleted) but whose device was NOT revoked
+would pass the revocation gate, self-evict on catch-up, then external-join and
+WIN its epoch on the CAS — climbing back into the tree and decrypting
+post-removal traffic. The membership gate makes "a removed member rebuilds
+itself" unrepresentable client-side. The `[Add(1), Remove(1), Add(2)]` shape is
+the tightest repro (`removed_member_cannot_climb_back_via_external_join`): the
+leak is only observable once a message is sent AFTER the climb-back.
+
+The membership check uses `state.remote_db.conn()` directly (a separate
+connection), NOT the `mls_group_lock` — safe to call from inside
+`process_pending_commits_locked_impl`, which already holds that lock.
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:
