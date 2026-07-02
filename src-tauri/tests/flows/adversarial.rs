@@ -102,6 +102,91 @@ async fn cross_channel_sibling_message_is_not_stranded() {
     drop(carol);
 }
 
+// ─── Scenario 7 — removed (not revoked) member lockout on catch-up (repro) ───
+
+/// **Deterministic repro for the fuzzer's second finding.** The model fuzzer, on
+/// `[Add(1), Add(2), Remove(1), Add(3)]`, flagged: a member who was REMOVED from
+/// the group (but whose device was NOT revoked) ended a convergence catch-up
+/// holding a message sent AFTER their removal — a `MEMBERSHIP LEAK`. Static
+/// reading says this can't happen: removal deletes the `group_member` row, the DS
+/// gates commit submission by `is_member`, and self-eviction deletes the local
+/// group; so a removed member's external-join recovery should be DS-rejected and
+/// their view empty. This test mirrors the minimal fuzzer sequence deterministically
+/// to settle whether the leak is REAL or a fuzzer-oracle artifact.
+///
+/// bob is added, carol is added, bob is REMOVED (device left registered — this is
+/// NOT the revoked-device case), dave is added, then alice sends a post-removal
+/// message. bob then comes online and runs the same catch-up a returning client
+/// runs. The lockout invariant: removed bob must NOT decrypt the post-removal
+/// message, and must not be a current member. carol (a continuous member) MUST
+/// decrypt it — proving the message was genuinely delivered and it's specifically
+/// removed bob who must be locked out.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn removed_member_locked_out_on_catchup() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+
+    let group_id = alice.create_group("RemovedLockout").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // [Add(1), Add(2), Remove(1), Add(3)] — bob in, carol in, bob out, dave in.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    alice.remove_member(&group_id, bob_p.id.as_str()).await;
+    alice.process_commits_for(&channel_id).await;
+    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
+    alice.process_commits_for(&channel_id).await;
+
+    // Post-removal message (the fuzzer's final "probe"): sent while bob is out.
+    alice.send_channel_message(&channel_id, "post-removal").await;
+    carol.process_commits_for(&channel_id).await;
+    dave.process_commits_for(&channel_id).await;
+
+    // bob (removed, device still registered) comes online and catches up exactly
+    // as a returning client does — the fuzzer's convergence step for an ever-member.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+    let bob_view = contents(&bob, &channel_id).await;
+
+    // Sanity: bob is not a current member.
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        !members.contains(&bob_p.id),
+        "bob should not be a current member after removal, got: {members:?}"
+    );
+
+    // Positive control: carol (continuous member) DID receive the post-removal
+    // message — so it was genuinely delivered, isolating the question to bob.
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"post-removal".to_string()),
+        "carol (a continuous member) must decrypt the post-removal message"
+    );
+
+    // LOCKOUT INVARIANT: removed bob must NOT decrypt a message sent after his
+    // removal. If this fails, the fuzzer's MEMBERSHIP LEAK is real — a removed
+    // (not revoked) member climbed back in via the catch-up / external-join path.
+    assert!(
+        !bob_view.contains(&"post-removal".to_string()),
+        "MEMBERSHIP LEAK CONFIRMED: removed bob decrypted a post-removal message via catch-up — \
+         a removed (not revoked) member must stay locked out. bob view={bob_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+    drop(dave);
+}
+
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
 /// Invite `member` to `group_id`, accept, drain the Welcome, and replay commits
