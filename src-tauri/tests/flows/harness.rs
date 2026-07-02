@@ -2579,6 +2579,27 @@ impl TestClient {
         channels.as_array().expect("channels array").clone()
     }
 
+    /// Create an additional text channel in a group and return its ID. All
+    /// channels in a group share the group's single MLS group (`mls_group_id ==
+    /// group_id`), so this is how a test builds the multi-channel topology needed
+    /// to exercise cross-channel epoch interactions.
+    #[allow(dead_code)]
+    pub(crate) async fn create_channel(&self, group_id: &str, name: &str) -> String {
+        let ch: serde_json::Value = self
+            .invoke_json(
+                "create_channel",
+                json!({
+                    "groupId": group_id,
+                    "name": name,
+                    "description": null,
+                    "channelType": "text",
+                    "creatorId": self.user_id(),
+                }),
+            )
+            .await;
+        ch["id"].as_str().expect("channel id").to_string()
+    }
+
     /// Return the #General text channel ID for a group.
     pub(crate) async fn general_channel_id(&self, group_id: &str) -> String {
         self.list_group_channels(group_id)

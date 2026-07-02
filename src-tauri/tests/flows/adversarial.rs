@@ -21,6 +21,84 @@ use crate::harness::{
 };
 use serial_test::serial;
 
+// ─── Scenario 6 — cross-channel epoch strand (VERIFICATION repro) ────────────
+
+/// **Verification repro for the cross-channel variant of the sweep/realtime
+/// message-loss bug.** All channels in a group share ONE MLS group
+/// (`mls_group_id == group_id`), but message ingest is per-channel
+/// (`get_channel_messages(channel_id)` pulls only that channel's envelopes while
+/// advancing the *shared* local MLS group). So opening one channel can advance the
+/// group past an epoch at which a *sibling* channel holds an un-ingested message —
+/// and with `max_past_epochs = 0` that message's keys are then gone, exactly as in
+/// the cold-launch sweep, but triggered through the normal fetch path with no
+/// sweep involved.
+///
+/// Sequence: alice + carol in a group with two text channels A and B.
+/// 1. alice sends `mB0` on channel B at epoch E (carol is a member but has not
+///    fetched B yet, so it sits un-ingested).
+/// 2. alice adds bob — a membership commit advancing the shared MLS group E→E+1.
+/// 3. carol opens channel A (`fetch` A) — this applies the pending commit,
+///    advancing carol's shared local group to E+1 and discarding epoch-E keys,
+///    WITHOUT ingesting channel B's `mB0`.
+/// 4. carol opens channel B — its ingest now starts from E+1; `mB0` (sealed at E)
+///    is behind the epoch wall and is dropped.
+///
+/// The assertion is the bulletproof invariant: carol, a continuous member since
+/// `mB0` was sent, MUST decrypt it. This test is EXPECTED TO FAIL until the fix
+/// (group-level interleaved catch-up) lands — it exists to confirm the
+/// cross-channel variant is real, not just reasoned.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn cross_channel_sibling_message_is_not_stranded() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("CrossChan").await;
+    let chan_a = alice.general_channel_id(&group_id).await;
+    let chan_b = alice.create_channel(&group_id, "beta").await;
+
+    // Carol is a full member of the group's (shared) MLS group.
+    join_member(&alice, &carol, &group_id, &chan_a, &carol_p.username).await;
+    carol.process_commits_for(&chan_a).await;
+
+    // (1) alice sends on channel B at the current epoch E. Carol does NOT fetch B,
+    // so mB0 stays un-ingested for her.
+    alice.send_channel_message(&chan_b, "mB0").await;
+
+    // (2) membership change: adding bob advances the SHARED MLS group E→E+1.
+    join_member(&alice, &bob, &group_id, &chan_a, &bob_p.username).await;
+    alice.process_commits_for(&chan_a).await;
+
+    // (3) carol opens channel A first. This applies bob's commit (E→E+1) for the
+    // shared group and discards epoch-E keys — without ingesting channel B.
+    let _ = contents(&carol, &chan_a).await;
+
+    // (4) carol opens channel B. mB0 was sealed at E, which carol was advanced
+    // past in step 3.
+    let carol_b = contents(&carol, &chan_b).await;
+
+    // Bulletproof invariant: a continuous member must decrypt every message sent
+    // while they were a member. EXPECTED TO FAIL until the group-level catch-up
+    // fix lands — this repro confirms the cross-channel strand is real.
+    assert!(
+        carol_b.contains(&"mB0".to_string()),
+        "CROSS-CHANNEL STRAND: carol was a continuous member when mB0 was sent on channel B, \
+         but opening channel A first advanced the shared MLS group past mB0's epoch and lost it. \
+         channel-B view={carol_b:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
 /// Invite `member` to `group_id`, accept, drain the Welcome, and replay commits
