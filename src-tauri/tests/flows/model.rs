@@ -532,6 +532,13 @@ fn model_based_convergence_is_bulletproof() {
 /// SHORT cases, this runs ONE very LONG case, exercising deep interleavings of
 /// the single convergence gate end to end.
 ///
+/// KNOWN RESIDUAL (issue #442): at high op counts this soak still surfaces a
+/// fork-recovery strand — a continuous member forced to external-join-rebuild
+/// under a heavy fault storm loses the un-ingested backlog whose keys were on the
+/// abandoned branch. That needs runtime tracing to pin (which fault forks the
+/// member) and is deliberately NOT gated here; the per-PR fuzzer + deterministic
+/// recovery repros are the gate. This soak is the reproduction tool for #442.
+///
 /// `#[ignore]`d by default (it's a multi-minute soak, too heavy for the per-PR
 /// gate); run explicitly. Tunable via env for an even crazier run:
 ///   MARATHON_OPS (default 300), MARATHON_ACTORS (default 6).
