@@ -180,8 +180,7 @@ fn fault_variant(v: u8) -> DsFault {
     }
 }
 
-fn op_strategy() -> impl Strategy<Value = Op> {
-    let npool = NACTORS as u8;
+fn op_strategy(npool: u8) -> impl Strategy<Value = Op> {
     prop_oneof![
         // Weighted toward Send/Sync so most coverage is message delivery across
         // membership churn; Add/Remove/Fault salt in the adversarial orderings.
@@ -194,7 +193,7 @@ fn op_strategy() -> impl Strategy<Value = Op> {
 }
 
 fn ops_strategy() -> impl Strategy<Value = Vec<Op>> {
-    proptest::collection::vec(op_strategy(), MIN_OPS..=MAX_OPS)
+    proptest::collection::vec(op_strategy(NACTORS as u8), MIN_OPS..=MAX_OPS)
 }
 
 // ─── shared helpers (mirrors `flows/adversarial.rs`; kept local to avoid
@@ -254,21 +253,23 @@ fn fail_msg(ops: &[Op], detail: &str) -> String {
 
 // ─── the generated-case body ─────────────────────────────────────────────────
 
-async fn run_case(ops: &[Op]) -> Result<(), String> {
+async fn run_case(ops: &[Op], nactors: usize) -> Result<(), String> {
     // Fresh remote + no armed fault so cases can't bleed across the shared world.
     wipe().await;
     clear_ds_fault();
 
-    // A small fixed pool of pre-signed-up clients + one group channel.
-    let emails = ["alice@test.local", "bob@test.local", "carol@test.local", "dave@test.local"];
-    let mut clients: Vec<TestClient> = Vec::with_capacity(NACTORS);
-    for _ in 0..NACTORS {
+    // A pool of `nactors` pre-signed-up clients (index 0 = owner/committer) + one
+    // group channel. Emails are generated so the pool can scale (the marathon
+    // soak runs with a larger pool than the modest fuzzer default).
+    let mut clients: Vec<TestClient> = Vec::with_capacity(nactors);
+    for _ in 0..nactors {
         clients.push(TestClient::new().await);
     }
-    let mut ids: Vec<String> = Vec::with_capacity(NACTORS);
-    let mut usernames: Vec<String> = Vec::with_capacity(NACTORS);
-    for i in 0..NACTORS {
-        let p = clients[i].sign_up(emails[i]).await;
+    let mut ids: Vec<String> = Vec::with_capacity(nactors);
+    let mut usernames: Vec<String> = Vec::with_capacity(nactors);
+    for i in 0..nactors {
+        let email = format!("user{i}@test.local");
+        let p = clients[i].sign_up(&email).await;
         ids.push(p.id.clone());
         usernames.push(p.username.clone());
     }
@@ -511,7 +512,7 @@ fn model_based_convergence_is_bulletproof() {
     let rt = runtime();
     let mut runner = TestRunner::new(config);
     let result = runner.run(&ops_strategy(), |ops| {
-        rt.block_on(run_case(&ops))
+        rt.block_on(run_case(&ops, NACTORS))
             .map_err(|detail| TestCaseError::fail(detail))?;
         Ok(())
     });
@@ -521,5 +522,54 @@ fn model_based_convergence_is_bulletproof() {
         // embedded op-sequence detail — actionable even when shrinking is only
         // best-effort.
         panic!("model-based proptest found a failing case: {err}");
+    }
+}
+
+/// Marathon soak: ONE crazy-long generated sequence — hundreds of ops over a
+/// larger actor pool, with messages, membership churn, offline/online, and DS
+/// faults all flying — run through the SAME shadow-oracle convergence check as
+/// the property fuzzer. Where `model_based_convergence_is_bulletproof` runs many
+/// SHORT cases, this runs ONE very LONG case, exercising deep interleavings of
+/// the single convergence gate end to end.
+///
+/// `#[ignore]`d by default (it's a multi-minute soak, too heavy for the per-PR
+/// gate); run explicitly. Tunable via env for an even crazier run:
+///   MARATHON_OPS (default 300), MARATHON_ACTORS (default 6).
+/// e.g. `MARATHON_OPS=800 MARATHON_ACTORS=8 cargo test --features test-harness \
+///        --test flows -- --ignored --nocapture model_marathon_convergence`
+///
+/// No shrinking (`max_shrink_iters = 0`): shrinking a several-hundred-op MLS
+/// sequence is prohibitively slow and, per the module header, MLS RNG isn't
+/// seedable — the printed op sequence on failure is the repro of record.
+#[test]
+#[serial]
+#[ignore = "multi-minute soak; run explicitly (-- --ignored model_marathon_convergence)"]
+fn model_marathon_convergence() {
+    let ops_n: usize = std::env::var("MARATHON_OPS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(300);
+    let actors: usize = std::env::var("MARATHON_ACTORS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(6)
+        .max(2);
+
+    let mut config = Config::default();
+    config.cases = 1;
+    config.failure_persistence = None;
+    config.max_shrink_iters = 0;
+
+    let rt = runtime();
+    let mut runner = TestRunner::new(config);
+    let strat = proptest::collection::vec(op_strategy(actors as u8), ops_n..=ops_n);
+    let result = runner.run(&strat, |ops| {
+        rt.block_on(run_case(&ops, actors))
+            .map_err(|detail| TestCaseError::fail(detail))?;
+        Ok(())
+    });
+
+    if let Err(err) = result {
+        panic!("marathon soak found a failing case: {err}");
     }
 }

@@ -22,6 +22,15 @@ on:
       - 'docs/**'
       - '**/*.md'
   workflow_dispatch:
+    inputs:
+      marathon_ops:
+        description: "Marathon soak: number of ops in the single long sequence"
+        required: false
+        default: "300"
+      marathon_actors:
+        description: "Marathon soak: actor pool size"
+        required: false
+        default: "6"
 
 concurrency:
   group: mls-tests-${{ github.ref }}
@@ -115,3 +124,16 @@ jobs:
         if: ${{ !cancelled() }}
         working-directory: src-tauri
         run: cargo test --features test-harness --test flows
+
+      # Marathon soak: ONE crazy-long generated sequence (hundreds of ops, larger
+      # actor pool, messages + churn + faults) through the shadow-oracle
+      # convergence check. Manual-only (workflow_dispatch) — too heavy for the
+      # per-PR gate; the test is `#[ignore]`d so normal runs skip it. Tune via the
+      # workflow inputs above.
+      - name: MLS marathon soak
+        if: ${{ github.event_name == 'workflow_dispatch' && !cancelled() }}
+        working-directory: src-tauri
+        env:
+          MARATHON_OPS: ${{ github.event.inputs.marathon_ops }}
+          MARATHON_ACTORS: ${{ github.event.inputs.marathon_actors }}
+        run: cargo test --features test-harness --test flows -- --ignored --nocapture model_marathon_convergence
