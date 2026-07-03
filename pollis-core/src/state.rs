@@ -7,15 +7,15 @@ use crate::config::Config;
 use crate::db::{local::LocalDb, remote::RemoteDb};
 use crate::keystore::{self, Keystore};
 use crate::commands::pin::UnlockState;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 use crate::commands::camera::CameraState;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 use crate::commands::screenshare::ScreenShareState;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::commands::terminal::PtySession;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 use crate::commands::voice::VoiceState;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 use crate::commands::voice_test::VoiceTestState;
 use crate::realtime::LiveKitState;
 
@@ -43,13 +43,13 @@ pub struct AppState {
     pub keystore: Arc<dyn Keystore>,
     pub otp_store: Arc<Mutex<HashMap<String, OtpEntry>>>,
     pub livekit: Arc<Mutex<LiveKitState>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(feature = "media")]
     pub voice: Arc<Mutex<VoiceState>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(feature = "media")]
     pub voice_test: Arc<Mutex<VoiceTestState>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(feature = "media")]
     pub screenshare: Arc<Mutex<ScreenShareState>>,
-    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    #[cfg(feature = "media")]
     pub camera: Arc<Mutex<CameraState>>,
     pub update_required: Arc<AtomicBool>,
     /// Per-device ULID, set during login. Each physical device gets a stable ID
@@ -177,13 +177,13 @@ impl AppState {
             keystore,
             otp_store: Arc::new(Mutex::new(HashMap::new())),
             livekit: Arc::new(Mutex::new(LiveKitState::new())),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            #[cfg(feature = "media")]
             voice: Arc::new(Mutex::new(VoiceState::new())),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            #[cfg(feature = "media")]
             voice_test: Arc::new(Mutex::new(VoiceTestState::new())),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            #[cfg(feature = "media")]
             screenshare: Arc::new(Mutex::new(ScreenShareState::new())),
-            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            #[cfg(feature = "media")]
             camera: Arc::new(Mutex::new(CameraState::new())),
             update_required: Arc::new(AtomicBool::new(false)),
             device_id: Arc::new(Mutex::new(None)),
@@ -245,7 +245,7 @@ impl AppState {
     pub async fn shutdown(&self) {
         self.shutdown_signal.notify_waiters();
 
-        #[cfg(not(any(target_os = "ios", target_os = "android")))]
+        #[cfg(feature = "media")]
         {
             let mut guard = self.livekit.lock().await;
             let rooms = std::mem::take(&mut guard.rooms);

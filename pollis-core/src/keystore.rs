@@ -23,9 +23,14 @@ fn namespaced(key: &str) -> String {
     }
 }
 
-// ── Debug builds: plain JSON file (no keychain, no OS prompts) ──────────────
+// ── File-backed keystore: plain JSON file (no keychain, no OS prompts) ──────
+//
+// Selected for debug builds (no OS prompts during dev/test) AND whenever the
+// `os-keystore` feature is off — the latter drops the `keyring` dependency
+// entirely so a headless build with no `dbus-1` can link. A release build with
+// default features on uses the OS keychain backend below, unchanged.
 
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, not(feature = "os-keystore")))]
 mod backend {
     use super::namespaced;
     use crate::error::{Error, Result};
@@ -180,8 +185,12 @@ mod backend {
 }
 
 // ── Release builds: OS keychain ──────────────────────────────────────────────
+//
+// Requires BOTH a release build AND the `os-keystore` feature (on by default),
+// so the default desktop release path is unchanged. `--no-default-features`
+// drops `keyring` and falls back to the file-backed backend above.
 
-#[cfg(not(debug_assertions))]
+#[cfg(all(not(debug_assertions), feature = "os-keystore"))]
 mod backend {
     use super::namespaced;
     use crate::error::{Error, Result};

@@ -7,12 +7,13 @@ pub mod user;
 pub mod groups;
 pub mod messages;
 pub mod dm;
-// LiveKit realtime: real Rust impl on desktop, no-op stub on mobile (mobile
-// uses the native LiveKit SDK — issue #185). Same public API either way so
-// core call sites stay #[cfg]-free.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+// LiveKit realtime: real Rust impl when the `media` feature is on (desktop),
+// no-op stub otherwise — mobile builds with `media` off and uses the native
+// LiveKit SDK (issue #185). Same public API either way so core call sites stay
+// #[cfg]-free.
+#[cfg(feature = "media")]
 pub mod livekit;
-#[cfg(any(target_os = "ios", target_os = "android"))]
+#[cfg(not(feature = "media"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
 // LiveKit access-token minting — pure jsonwebtoken, no native deps, so it
@@ -27,7 +28,7 @@ pub mod push;
 pub mod r2;
 pub mod safety;
 pub mod transparency;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 pub mod sfx;
 // Terminal pane: real PTY backend on Unix desktop, Windows stub until
 // ConPTY is wired. Gated out entirely on mobile.
@@ -38,22 +39,22 @@ pub mod terminal;
 #[path = "terminal_windows.rs"]
 pub mod terminal;
 pub mod update;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 pub mod camera;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 pub mod screenshare;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 pub mod voice;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 pub mod voice_apm;
-// voice_e2ee: real impl on desktop; mobile stub keeps the one MLS-path call
-// site (on_mls_epoch_changed) #[cfg]-free.
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+// voice_e2ee: real impl with the `media` feature on; stub otherwise. The stub
+// keeps the one MLS-path call site (on_mls_epoch_changed) #[cfg]-free.
+#[cfg(feature = "media")]
 pub mod voice_e2ee;
-#[cfg(any(target_os = "ios", target_os = "android"))]
+#[cfg(not(feature = "media"))]
 #[path = "voice_e2ee_stub.rs"]
 pub mod voice_e2ee;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 pub mod voice_denoiser;
-#[cfg(not(any(target_os = "ios", target_os = "android")))]
+#[cfg(feature = "media")]
 pub mod voice_test;

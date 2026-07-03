@@ -11,13 +11,43 @@ name = "pollis_core"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [features]
-default = []
+default = ["media", "os-keystore"]
 # When enabled, emits a `uniffi-bindgen` bin target so we can run the
 # binding generator without installing a separate crate.
 cli = ["uniffi/cli"]
+# OS keychain backend (release desktop: macOS Keychain / Windows Credential
+# Manager / Linux Secret Service). ON by default. Pulls in `keyring`, which
+# unconditionally links `dbus-secret-service -> dbus -> libdbus-sys` (the
+# system `dbus-1` C lib) even in debug/test builds where the runtime backend
+# is the file store — so a headless box with no `dbus-1` still fails to link.
+# Turning this OFF (`--no-default-features`) drops the `keyring` dependency and
+# forces the file-backed keystore everywhere. A normal RELEASE desktop build
+# keeps default features, so its OS-keychain path is bit-for-bit unchanged.
+os-keystore = ["dep:keyring"]
 # Exposes test helpers (Config::for_test, InMemoryKeystore) for the
 # integration harness in src-tauri/tests/flows.rs.
 test-harness = []
+# Desktop real-time media stack: LiveKit engine + libwebrtc, host audio I/O
+# (cpal/rodio), and the WebRTC AudioProcessing module. Selects EXACTLY the
+# modules + deps a non-mobile desktop build gets today; turning it OFF reaches
+# the same stub surface the iOS/Android build reaches via `cfg(any(ios,
+# android))`. This feature exists because a `[target.'cfg(...)']` table cannot
+# evaluate `feature = ...`, so the carve-out mobile drives through target_os is
+# instead drivable on a Linux desktop (e.g. headless CI with no ALSA / no C++
+# media toolchain) by building `--no-default-features`.
+#
+# `webrtc-audio-processing` is enabled here too, but the dep itself stays
+# target-gated to non-Windows/non-mobile below (its bundled meson+abseil C++
+# build has no MSVC/NDK path). `dep:` referencing a target-scoped optional dep
+# is a no-op on excluded targets, so a Windows/mobile `media` build still omits
+# it — preserving today's platform matrix exactly.
+media = [
+    "dep:livekit",
+    "dep:libwebrtc",
+    "dep:cpal",
+    "dep:rodio",
+    "dep:webrtc-audio-processing",
+]
 
 [dependencies]
 uniffi = { version = "0.31", features = ["tokio"] }
@@ -44,7 +74,11 @@ argon2 = "0.5"
 chacha20poly1305 = "0.10"
 rand = "0.8"
 rand_core = { version = "0.6", features = ["getrandom"] }
-keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native", "crypto-rust"] }
+# Optional — pulled in only by the `os-keystore` feature (on by default). See
+# the feature comment above: keyring hard-links `libdbus-sys` on Linux, so the
+# headless/box build drops it via `--no-default-features` and uses the file
+# store. Feature-on cfg reproduces today's desktop keychain build exactly.
+keyring = { version = "3", features = ["apple-native", "sync-secret-service", "windows-native", "crypto-rust"], optional = true }
 base64 = "0.22"
 hex = "0.4"
 ulid = "1"
@@ -84,6 +118,20 @@ gethostname = "1.1.0"
 # published per-user reports. Path dep on the serve layer (#330, slice E).
 verifiable-log-serve = { path = "../verifiable-log-serve" }
 
+# Desktop real-time media stack — optional, pulled in by the `media` feature
+# (on by default). These have no mobile path and mobile drops voice, so a mobile
+# build turns `media` off. They live here (not in a `[target.'cfg(...)']` table)
+# because a target table cannot evaluate `feature = ...`; the module gates in
+# `commands/mod.rs`, `state.rs`, and `realtime.rs` are keyed on `feature =
+# "media"` so the feature-on cfg set reproduces today's non-mobile desktop build
+# exactly.
+# - livekit/libwebrtc: Rust LiveKit realtime/media engine.
+# - cpal/rodio: host audio I/O for voice + sound effects.
+livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"], optional = true }
+libwebrtc = { version = "0.3", optional = true }
+cpal = { version = "0.15", optional = true }
+rodio = { version = "0.19", default-features = false, features = ["wav"], optional = true }
+
 # Vendor the WebRTC AudioProcessing module so AGC/NS/AEC are owned by us
 # end-to-end and tunable from Rust. The system pkg-config build branch wants
 # webrtc-audio-processing-2 >= 2.1 which most distros don't ship yet.
@@ -92,8 +140,12 @@ verifiable-log-serve = { path = "../verifiable-log-serve" }
 # abseil-cpp build that has zero MSVC support upstream. iOS/Android are
 # excluded for the same reason — the bundled C++ build hardcodes
 # -mmacos-version-min and has no NDK path; mobile does not do voice.
+# Optional + pulled in by the `media` feature (see [features]). Stays
+# target-gated because the bundled C++ build has no MSVC/NDK support, so even
+# with `media` on a Windows/mobile build must not attempt it. `dep:` in the
+# feature is inert on these excluded targets.
 [target.'cfg(not(any(target_os = "windows", target_os = "ios", target_os = "android")))'.dependencies]
-webrtc-audio-processing = { version = "2", features = ["bundled"] }
+webrtc-audio-processing = { version = "2", features = ["bundled"], optional = true }
 
 # See the note above the [dependencies] table — mobile vendors OpenSSL,
 # desktop links the system one.
@@ -143,18 +195,15 @@ windows = { version = "0.62", features = [
 #   violation" — Rust's I/O safety guard catches close() of an OwnedFd it
 #   tracks). nix is already a transitive dep via several crates; declaring
 #   it explicitly with `pty` lets us call `openpty` + `Winsize` directly.
-# - livekit/libwebrtc: Rust LiveKit realtime/media engine. Mobile uses the
-#   native LiveKit SDK (@livekit/react-native) instead — see issue #185.
-# - cpal/rodio: host audio I/O for voice + sound effects; no mobile path
-#   and mobile drops voice.
+# NOTE: the LiveKit/libwebrtc engine and cpal/rodio host audio I/O used to live
+# in this table (excluded on mobile via target_os). They are now optional deps
+# in [dependencies] above, pulled in by the `media` feature — mobile uses the
+# native LiveKit SDK (@livekit/react-native — issue #185) and drops voice, so a
+# mobile build turns `media` off (`--no-default-features`) to reach the stubs.
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
 nix = { version = "0.30", features = ["term"] }
 libc = "0.2"
-livekit = { version = "0.7", features = ["rustls-tls-webpki-roots"] }
-libwebrtc = "0.3"
-cpal = "0.15"
-rodio = { version = "0.19", default-features = false, features = ["wav"] }
 
 # Shared capture-helper wire protocol. Both the Linux and macOS capture
 # helpers are subprocesses speaking this; this is the parent-side decoder.
