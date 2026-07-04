@@ -47,6 +47,7 @@ Secrets are managed via **Doppler**, which syncs to GitHub Actions secrets autom
 
 ```bash
 cargo test --features test-harness --test flows   # Multi-client integration tests
+cargo test -p pollis --no-default-features --features test-harness --test flows   # Same suite, headless (no webkit2gtk/ALSA/dbus)
 ```
 
 The integration harness (`src-tauri/tests/flows.rs`) drives the real command implementations through the same dispatch path the runtime uses — no `_inner` shims, no mocked DB layer. Each test gets its own per-client `AppState` + `InMemoryKeystore` but shares a disposable Turso instance configured in `.env.test`. See `.codesight/wiki/testing.md` for the full architecture and how to add scenarios.

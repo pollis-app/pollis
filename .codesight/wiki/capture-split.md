@@ -206,42 +206,22 @@ Linux helpers never send `MSG_SOURCES` and never read `MSG_SELECT`.
 The same opcodes are reserved in the proto crate so both helpers
 share one wire format definition.
 
-## Browser publish-path codec policy
+## Electron renderer publish path
 
-When the host WebView exposes WebRTC (`hasWebRTC()` in
-`frontend/src/bridge/runtime.ts` — historically the Electron Chromium
-renderer, and any Chromium-based WebView2), capture + encode + publish
-all happen in the WebView (`screenShareSession.ts` →
-`livekitView.publishScreenShare`), bypassing the Rust helper pipeline
-above. Under Tauri's WebKitGTK (Linux) there is no WebRTC, so the Rust
-helper path is used instead. On the browser path the codec is chosen
-**per-machine at publish time** by
-`frontend/src/screenshare/codecPolicy.ts`:
+When `hasElectron()` is true (`frontend/src/bridge/runtime.ts`), capture
++ encode + publish happen entirely in the renderer, bypassing the Rust
+helper pipeline above. `screenShareSession.ts` captures via
+`navigator.mediaDevices.getUserMedia` with `chromeMediaSource: "desktop"`
+and `chromeMediaSourceId` (the opaque Electron source id from
+`desktopCapturer.getSources`), then hands the `MediaStreamTrack` to
+`livekitView.publishScreenShare`. The track is published with a
+`screenShareEncoding` cap (8 Mbps, 60 fps, `degradationPreference:
+maintain-framerate`) — no per-machine codec detection; Chromium
+negotiates the best available codec with the SFU directly.
 
-- **Hardware H.264 when present.** `pickScreenShareCodec()` scans
-  `RTCRtpSender.getCapabilities('video')` for an H.264 entry whose
-  `profile-level-id` does **not** end in `1f` (level > 3.1). Software
-  OpenH264 only advertises baseline Level 3.1, so any higher-level entry
-  (e.g. High/5.2 `640034`) is itself proof a hardware encoder
-  (VideoToolbox / Media Foundation / VAAPI) is registered. When found,
-  that exact capability is pinned first via `setPreferredVideoCodec()` in
-  `sdpMunger.ts`, so SDP negotiation offers it ahead of baseline 3.1 and
-  Chromium engages the hardware encoder at high resolution/framerate
-  ("uncap the negotiation").
-- **Software VP8 fallback.** If only baseline `…1f` H.264 entries exist
-  (typical on GPU-less Windows/VMs and most Linux), publish VP8 — it has
-  no level cap and we control its bitrate/framerate, a better fallback
-  than baseline-3.1 H.264 (which can't do 1080p).
-
-Cross-platform: macOS always gets HW H.264 (VideoToolbox); Windows
-usually does (any GPU machine); Linux often falls back to VP8. Decode is
-never a problem — every Pollis client is the same Chromium with H.264
-bundled, so any client decodes any other's stream regardless of platform.
-
-The pin reorders **within** the AV1-stripped codec list `sdpMunger.ts`
-already enforces, so the PT=35 BUNDLE collision that originally forced
-VP8 stays closed. `VITE_POLLIS_SCREENSHARE_CODEC` = `h264` | `vp8`
-overrides the auto-detection for A/B testing. See issue #364.
+Under Tauri (the shipping shell), `hasElectron()` is always false: there
+is no `window.electronAPI`, so this branch is dead. The Rust helper
+pipeline described above is the only active path.
 
 ## Webcam capture (`--mode camera`)
 

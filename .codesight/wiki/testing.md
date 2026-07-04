@@ -31,6 +31,22 @@ The `test-harness` feature:
 
 It is **not** enabled in release builds.
 
+### Running headless (no desktop environment)
+
+```bash
+cargo test -p pollis --no-default-features --features test-harness --test flows
+```
+
+The `pollis` crate's default features are the shipping desktop config —
+`native-shell` (wry + webkit2gtk), `media` (LiveKit + libwebrtc + cpal/rodio),
+and `os-keystore` (keyring/dbus). `--no-default-features` drops all three, so
+the harness compiles and runs on `MockRuntime` on a machine with no display
+server, no ALSA, and no dbus — a bare CI runner or headless box. The harness
+never touches the shell or media surface, so coverage is identical; the
+`[[bin]]` is `required-features = ["native-shell"]` and simply isn't built.
+`pollis-core` has the matching `media`/`os-keystore` features (headless builds
+use the file-backed keystore automatically).
+
 ## `.env.test`
 
 Tests require a disposable Turso database. Create `.env.test` at the repo root:
@@ -324,6 +340,31 @@ scenarios (`fail500_pre_write_persists_nothing_and_does_not_wedge`,
   **modest** count (`DEFAULT_CASES = 32`, sequences of 4–12 ops, 4 actors) — a couple
   of minutes. This is documented, not silent under-coverage. Deep fuzzing is a local
   soak: `PROPTEST_CASES=2000 cargo test --features test-harness --test flows model`.
+- **The oracle must read like production** — the delivery assertions fetch each
+  member's view through the same paginated `get_channel_messages` the app uses,
+  and the harness pages through the **full** history (`fetch_channel_messages`
+  follows `next_cursor` to the end). A single-page read looks correct until a
+  run sends more than one page (50) of messages, then falsely reports the
+  *oldest* messages as lost for a member who has been present since the start —
+  they're simply below the first page. That artifact burned real time as a
+  suspected production loss bug (#442) before being traced to the oracle.
+
+### The marathon soak (`model_marathon_convergence`)
+
+One long randomized sequence instead of many short ones — the shape that
+surfaces slow-burn divergence (deep epoch churn, long offline stints, fault
+pile-ups) that 4–12-op cases can't reach. It is `#[ignore]`d (multi-minute);
+run it explicitly:
+
+```bash
+MARATHON_OPS=500 MARATHON_ACTORS=8 cargo test --features test-harness \
+  --test flows -- --ignored --nocapture model_marathon_convergence
+```
+
+Knobs: `MARATHON_OPS` (default 300), `MARATHON_ACTORS` (default 6). Composes
+with the headless build above, so the soak runs on any headless Linux box.
+MLS keygen uses the OS RNG and is not seedable — on failure the printed **op
+sequence** is the repro of record, not a proptest seed.
 
 ## Behaviors the scenarios exercise
 

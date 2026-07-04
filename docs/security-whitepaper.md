@@ -2,7 +2,7 @@
 
 **Audience:** independent security auditors evaluating the cryptographic protocol design and surrounding flows.
 **Scope:** the desktop application in this repository, its remote services (Turso, Cloudflare R2, LiveKit, Resend), and the trust boundaries between them. Web-app concerns (XSS, CSP, SOP) are out of scope; this document covers cryptographic protocol design, key custody, identity, group membership, and the data-flow paths that move plaintext or key material across trust boundaries.
-**Status:** authoritative. The legacy `ARCHITECTURE.md` file at the repo root predates the migration from Signal Protocol to MLS and should not be used as a reference. Where `ARCHITECTURE.md` and this document disagree, this document wins. The wiki under `.codesight/wiki/` is also authoritative for implementation specifics.
+**Status:** authoritative. `ARCHITECTURE.md` at the repo root and the wiki under `.codesight/wiki/` are also authoritative for implementation specifics. Where this document disagrees with those sources on cryptographic claims, this document wins.
 
 ---
 
