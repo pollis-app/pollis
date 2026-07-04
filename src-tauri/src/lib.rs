@@ -387,6 +387,10 @@ pub fn run() {
             tray_handle.manage(tray::TrayState::default());
             tray::setup(&tray_handle);
 
+            // Holds the "revoke media permissions on quit" preference so the
+            // ExitRequested hook can read it synchronously at shutdown.
+            tray_handle.manage(commands::media_permissions::MediaPermissionsState::default());
+
             // WebRTC is disabled by default in WebKitGTK and must be explicitly enabled.
             // Without this, RTCPeerConnection is undefined in the JS context on Linux.
             #[cfg(target_os = "linux")]
@@ -410,6 +414,9 @@ pub fn run() {
             tray::tray_set_close_to_tray,
             tray::tray_set_enabled,
             tray::tray_set_voice_state,
+            commands::media_permissions::get_media_permission_status,
+            commands::media_permissions::revoke_media_permissions,
+            commands::media_permissions::set_revoke_media_on_exit,
             commands::auth::initialize_identity,
             commands::auth::get_identity,
             commands::auth::request_otp,
@@ -639,6 +646,16 @@ commands::livekit::get_livekit_token,
                         // Tauri has no equivalent, so call it explicitly here.
                         state.shutdown().await;
                     });
+                }
+                // If the user opted into "revoke system permissions when Pollis
+                // quits", best-effort clear the macOS TCC grants now. Reads the
+                // atomic synchronously — no async prefs fetch at exit. No-op on
+                // Linux/Windows. Runs after the capture teardown above so we
+                // never clear a grant out from under a still-live capture.
+                if let Some(mp) =
+                    _app.try_state::<commands::media_permissions::MediaPermissionsState>()
+                {
+                    commands::media_permissions::revoke_on_exit_if_enabled(_app, mp.inner());
                 }
             }
         });

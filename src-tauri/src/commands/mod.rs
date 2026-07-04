@@ -6,6 +6,11 @@ pub mod device_enrollment;
 pub mod dm;
 pub mod groups;
 pub mod install_kind;
+// OS-level media permissions (camera/mic/screen). Like tray.rs it is built
+// from shell-runtime concerns (TCC, the ConsentStore registry, ms-settings
+// deep-links), so it's native-shell-only and never touches pollis-core.
+#[cfg(feature = "native-shell")]
+pub mod media_permissions;
 pub mod messages;
 pub mod mls;
 pub mod pin;

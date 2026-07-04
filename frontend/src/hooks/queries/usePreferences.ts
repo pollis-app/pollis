@@ -67,6 +67,13 @@ export interface PreferencesData {
    */
   menubar_icon?: boolean;
   /**
+   * When true, Pollis clears the OS media permissions (camera / microphone /
+   * screen share) as it quits. macOS runs `tccutil reset` per kind so the OS
+   * re-prompts next use; Linux/Windows have no standing grant to clear. Pushed
+   * to the host via `set_revoke_media_on_exit`. Default false.
+   */
+  revoke_media_on_exit?: boolean;
+  /**
    * Per-remote-user output volume multipliers, keyed by `user_id`.
    * Range 0.0..=2.0; 1.0 is unity. Absent users default to unity.
    *
@@ -288,6 +295,7 @@ export function usePreferences() {
         sidebar_open_by_default: getPreference<boolean>(json, "sidebar_open_by_default", true),
         close_to_tray: getPreference<boolean>(json, "close_to_tray", true),
         menubar_icon: getPreference<boolean>(json, "menubar_icon", false),
+        revoke_media_on_exit: getPreference<boolean>(json, "revoke_media_on_exit", false),
         user_volumes: getPreference<{ [userId: string]: number } | undefined>(
           json,
           "user_volumes",
@@ -411,4 +419,16 @@ export function useApplyPreferences(): void {
       console.warn("[tray] setTrayEnabled failed:", err);
     });
   }, [menubarIcon]);
+
+  // Push the "revoke media permissions on quit" pref to the host so the
+  // ExitRequested hook can read it synchronously at shutdown. Same reasoning
+  // as close-to-tray above.
+  const revokeMediaOnExit = data?.revoke_media_on_exit ?? false;
+  useEffect(() => {
+    void invoke("set_revoke_media_on_exit", { enabled: revokeMediaOnExit }).catch(
+      (err) => {
+        console.warn("[media-permissions] set_revoke_media_on_exit failed:", err);
+      },
+    );
+  }, [revokeMediaOnExit]);
 }

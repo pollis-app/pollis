@@ -5,3 +5,9 @@ export const isMac =
 export const isWindows =
   typeof navigator !== "undefined" &&
   navigator.userAgent.toLowerCase().includes("windows");
+
+export const isLinux =
+  typeof navigator !== "undefined" &&
+  navigator.userAgent.toLowerCase().includes("linux") &&
+  !isMac &&
+  !isWindows;

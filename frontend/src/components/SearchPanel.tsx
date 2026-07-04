@@ -187,7 +187,7 @@ const PAGE_RESULTS: SearchResultItem[] = [
   { type: "page", id: "page-settings-hub", name: "Settings", breadcrumb: "/settings", path: "/settings", keywords: "preferences user security" },
   { type: "page", id: "page-preferences", name: "Preferences", breadcrumb: "/preferences", path: "/preferences", keywords: "theme color font notifications appearance" },
   { type: "page", id: "page-voice-settings", name: "Voice Settings", breadcrumb: "/settings/voice", path: "/voice-settings", keywords: "microphone speaker audio mic noise suppression echo cancellation agc auto join" },
-  { type: "page", id: "page-security", name: "Security", breadcrumb: "/security", path: "/security", keywords: "audit log devices identity key rotation" },
+  { type: "page", id: "page-security", name: "Security", breadcrumb: "/security", path: "/security", keywords: "audit log devices identity key rotation camera microphone screen permission permissions revoke privacy access" },
   { type: "page", id: "page-shortcuts", name: "Key Bindings", breadcrumb: "/shortcuts", path: "/shortcuts", keywords: "key bindings keyboard shortcuts hotkeys keybindings cmd ctrl" },
   { type: "page", id: "page-update", name: "Software Update", breadcrumb: "/update", path: "/update", keywords: "update version upgrade install release" },
   { type: "page", id: "page-invites", name: "Invites", breadcrumb: "/invites", path: "/invites", keywords: "pending invitations groups" },

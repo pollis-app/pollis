@@ -18,6 +18,7 @@ Start here. Navigate to the article you need.
 - [Audio Processing](./audio-processing.md) — Mic-side AGC + NS + AEC pipeline (WebRTC APM), playback mixer, AEC render reference, build deps
 - [Screen-Capture Helper Split](./capture-split.md) — Per-platform capture subprocess + shared socket protocol; Linux two-backend session-type routing (#281), macOS SCK isolation (#283)
 - [Authorized-Secrets Broker](./secrets-broker.md) — Server-side LiveKit token minting + R2 SigV4 presign so API secrets never ship in the client bundle (#393)
+- [Media Permissions](./media-permissions.md) — OS camera/mic/screen access: live status, revoke-on-quit, manual revoke; honest per-OS behavior (#443)
 
 ## Quick Reference
 
