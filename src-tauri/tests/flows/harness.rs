@@ -2762,17 +2762,31 @@ impl TestClient {
         .await;
     }
 
+    /// Fetch the FULL message history for a channel, following the cursor across
+    /// every page. The production read (`get_channel_messages`) is paginated
+    /// (default page 50, newest-first); reading only the first page would make an
+    /// oracle over a long history (e.g. the 500-op marathon, which sends >50
+    /// messages) falsely report the OLDEST messages as lost for a member who has
+    /// been present since the start — they're simply below the first page. The
+    /// model's bulletproof-delivery assertion needs the whole history, so page
+    /// through to the end.
     pub(crate) async fn fetch_channel_messages(&self, channel_id: &str) -> Vec<serde_json::Value> {
-        let page: serde_json::Value = self
-            .invoke_json(
-                "get_channel_messages",
-                json!({ "userId": self.user_id(), "channelId": channel_id, "limit": 50 }),
-            )
-            .await;
-        page["messages"]
-            .as_array()
-            .expect("messages array")
-            .clone()
+        let mut all: Vec<serde_json::Value> = Vec::new();
+        let mut cursor: Option<serde_json::Value> = None;
+        loop {
+            let mut args = json!({ "userId": self.user_id(), "channelId": channel_id, "limit": 50 });
+            if let Some(c) = &cursor {
+                args["cursor"] = c.clone();
+            }
+            let page: serde_json::Value = self.invoke_json("get_channel_messages", args).await;
+            let msgs = page["messages"].as_array().expect("messages array");
+            all.extend(msgs.iter().cloned());
+            match page.get("next_cursor") {
+                Some(nc) if !nc.is_null() => cursor = Some(nc.clone()),
+                _ => break,
+            }
+        }
+        all
     }
 
     /// Change a member's role in a group (`"admin"` or `"member"`).
