@@ -7,7 +7,16 @@ fn main() {
     #[cfg(target_os = "macos")]
     println!("cargo:rustc-link-arg=-ObjC");
 
-    stage_capture_helper();
+    // The per-OS screen-capture helper is only needed by the running desktop
+    // shell (screenshare). A headless build (`native-shell` off — the flows
+    // MLS harness on MockRuntime) skips it: the helper pulls PipeWire/libspa
+    // (Linux) which a headless CI box need not have. Cargo exposes each
+    // enabled feature to build scripts as `CARGO_FEATURE_<NAME>`.
+    if std::env::var_os("CARGO_FEATURE_NATIVE_SHELL").is_some() {
+        stage_capture_helper();
+    } else {
+        stage_placeholder_sidecar();
+    }
 
     tauri_build::build()
 }
@@ -131,6 +140,32 @@ fn stage_capture_helper() {
         std::fs::set_permissions(&sidecar, perm.clone()).expect("chmod sidecar");
         if dev_copy.exists() {
             std::fs::set_permissions(&dev_copy, perm).expect("chmod dev copy");
+        }
+    }
+}
+
+/// Headless builds (`native-shell` off) skip building the capture helper, but
+/// `tauri_build::build()` still validates the `externalBin` sidecar declared in
+/// `tauri.{linux,macos}.conf.json` exists. Stage a zero-byte placeholder so the
+/// config check passes; it is never executed or bundled (the flows harness runs
+/// on MockRuntime and a headless build produces no installer).
+fn stage_placeholder_sidecar() {
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let helper = match target_os.as_str() {
+        "linux" => "pollis-capture-linux",
+        "macos" => "pollis-capture-macos",
+        _ => return,
+    };
+    let target = std::env::var("TARGET").expect("TARGET set by cargo");
+    let sidecar_dir = PathBuf::from("binaries");
+    std::fs::create_dir_all(&sidecar_dir).ok();
+    let sidecar = sidecar_dir.join(format!("{helper}-{target}"));
+    if !sidecar.exists() {
+        std::fs::write(&sidecar, b"").expect("write placeholder sidecar");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o755));
         }
     }
 }

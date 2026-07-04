@@ -9,21 +9,31 @@ pub use pollis_core::sink as core_sink;
 pub use pollis_core::state;
 pub mod sink;
 pub mod commands;
+// The system tray is built from Wry-typed handles (TrayIcon<Wry>, Menu<Wry>);
+// only compiled with the native shell.
+#[cfg(feature = "native-shell")]
 pub mod tray;
 
 #[cfg(feature = "test-harness")]
 pub mod test_harness;
 
+// These imports are only used by the native-shell helpers + run() below, all
+// gated on `native-shell`. Gate the imports too so the headless lib builds
+// warning-free (the test harness pulls in AppState via its own `use`).
+#[cfg(feature = "native-shell")]
 use std::sync::Arc;
+#[cfg(feature = "native-shell")]
 use tauri::Manager;
 
+#[cfg(feature = "native-shell")]
 use config::Config;
+#[cfg(feature = "native-shell")]
 use state::AppState;
 
 /// On macOS, intercept the window close request (Cmd+W / red traffic light)
 /// and hide the window instead of destroying it. The app keeps running in
 /// the dock and can be re-opened without a cold start.
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "native-shell", target_os = "macos"))]
 fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         // Cmd+W only hides the window (real quit is Cmd+Q →
@@ -58,7 +68,7 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
 /// `decorations: false` (borderless, no buttons), so we re-add the
 /// titled/closable/miniaturizable/resizable masks here to bring the traffic
 /// lights back; without them the reserved 68px slot renders empty.
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "native-shell", target_os = "macos"))]
 fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
     use cocoa::appkit::{NSWindow, NSWindowStyleMask, NSWindowTitleVisibility};
     use cocoa::base::{id, NO, YES};
@@ -98,7 +108,7 @@ fn apply_macos_rounded_corners(window: &tauri::WebviewWindow, radius: f64) {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(feature = "native-shell", target_os = "windows"))]
 fn apply_windows_rounded_corners(window: &tauri::WebviewWindow) {
     use windows_sys::Win32::Foundation::HWND;
     use windows_sys::Win32::Graphics::Dwm::{
@@ -120,7 +130,7 @@ fn apply_windows_rounded_corners(window: &tauri::WebviewWindow) {
 
 /// On macOS, re-show the main window when the user clicks the dock icon
 /// (RunEvent::Reopen).
-#[cfg(target_os = "macos")]
+#[cfg(all(feature = "native-shell", target_os = "macos"))]
 fn show_on_reopen(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -137,6 +147,7 @@ fn show_on_reopen(app: &tauri::AppHandle) {
 ///
 /// On Linux, file managers use the text/uri-list MIME type with file:// URIs,
 /// which `read_text()` picks up fine.
+#[cfg(feature = "native-shell")]
 #[tauri::command]
 fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
     // macOS: read file URLs from NSPasteboard via AppleScript-ObjC bridge
@@ -204,6 +215,7 @@ fn read_clipboard_files(app: tauri::AppHandle) -> Vec<String> {
 /// doesn't expose as `DataTransferItem` files — notably screenshots and
 /// images copied from a browser on Linux. macOS WebKit surfaces these as
 /// JS File objects directly, so this is mainly a Linux/Windows path.
+#[cfg(feature = "native-shell")]
 #[tauri::command]
 async fn read_clipboard_image_to_temp(app: tauri::AppHandle) -> String {
     use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -239,6 +251,7 @@ async fn read_clipboard_image_to_temp(app: tauri::AppHandle) -> String {
 
 /// Cmd+W handler: hide the window on macOS (matching hide_on_close behaviour)
 /// or close it on Windows/Linux.
+#[cfg(feature = "native-shell")]
 #[tauri::command]
 fn hide_window(window: tauri::Window) {
     #[cfg(target_os = "macos")]
@@ -248,6 +261,7 @@ fn hide_window(window: tauri::Window) {
     let _ = window.close();
 }
 
+#[cfg(feature = "native-shell")]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // macOS launches GUI apps with a soft `RLIMIT_NOFILE` of 256, which is

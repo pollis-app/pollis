@@ -29,5 +29,10 @@ mod model;
 mod rejoin;
 #[path = "flows/security.rs"]
 mod security;
+// voice.rs compile-depends on the media command surface (voice_e2ee helpers +
+// the media-gated state.voice field), so it only builds with `media` on. Every
+// other flow module — MLS/adversarial/model/messaging/etc. — stays in the
+// headless build; they are the point of the headless harness.
+#[cfg(feature = "media")]
 #[path = "flows/voice.rs"]
 mod voice;

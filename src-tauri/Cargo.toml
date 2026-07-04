@@ -18,6 +18,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "pollis"
 path = "src/main.rs"
+# The binary is the desktop shell — it wires up wry/webkit2gtk and registers
+# the media command surface. A headless build (`--no-default-features`) drops
+# the shell and only compiles the lib + flows integration test on MockRuntime.
+required-features = ["native-shell"]
 
 [[test]]
 name = "flows"
@@ -25,11 +29,38 @@ path = "tests/flows.rs"
 required-features = ["test-harness"]
 
 [features]
+# Default = today's shipping desktop config, byte-for-byte: the native shell
+# (wry + webkit2gtk + the five tauri default features), the desktop media
+# stack, and the OS keychain. `--no-default-features --features test-harness`
+# drops all three so the flows harness compiles + runs on MockRuntime WITHOUT
+# wry/webkit2gtk and with pollis-core's media stack off (headless CI).
+default = ["native-shell", "media", "os-keystore"]
+# The Tauri desktop shell: the real webview runtime (wry), the five tauri
+# default features that ship today, and webkit2gtk (Linux WebRTC settings).
+# Gates `run()`, the window/clipboard/tray helpers, and `pub mod tray`. Pulls
+# in `media` because `run()` registers the media command surface — a shell
+# without media is not a shipping config.
+native-shell = [
+    "media",
+    "tauri/wry",
+    "tauri/compression",
+    "tauri/common-controls-v6",
+    "tauri/dynamic-acl",
+    "tauri/x11",
+    "dep:webkit2gtk",
+]
+# Desktop real-time media stack (LiveKit + libwebrtc + cpal/rodio/APM), via
+# pollis-core. Gates the media command shims + their re-exports here.
+media = ["pollis-core/media"]
+# OS keychain backend, via pollis-core. ON by default; off drops `keyring`
+# (and its libdbus-sys link) so a headless box with no dbus-1 still links.
+os-keystore = ["pollis-core/os-keystore"]
 # Exposes Config::for_test() + InMemoryKeystore + the test_harness module
 # to integration tests. Pulls in `tauri/test` so `MockRuntime` is available
 # and `pollis-core/test-harness` so the per-client test helpers are in
 # scope. Not enabled in release builds — run the harness with
-# `cargo test --features test-harness --test flows`.
+# `cargo test --features test-harness --test flows` (default features), or
+# headless with `--no-default-features --features test-harness`.
 test-harness = ["tauri/test", "pollis-core/test-harness"]
 
 [build-dependencies]
@@ -39,13 +70,21 @@ tauri-build = { version = "2", features = [] }
 # Backend logic — commands, state, keystore, db, MLS, voice/livekit, …
 # All non-Tauri-runtime code lives here so future CLI / TUI / mobile
 # binaries can consume it without dragging in the Tauri runtime.
-pollis-core = { path = "../pollis-core" }
+# default-features off so `--no-default-features` on this crate drops
+# pollis-core's media + os-keystore. The `media`/`os-keystore` features here
+# re-enable them via passthrough (both are in `default`), so a normal build is
+# unchanged.
+pollis-core = { path = "../pollis-core", default-features = false }
 # Re-exported for the screenshare Tauri shim: `Selection` and
 # `SourceList` are part of the public command signatures (the frontend
 # sends/receives them via invoke()).
 pollis-capture-proto = { path = "../pollis-capture-proto" }
 
-tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png"] }
+# default-features off so a headless build drops wry. The five tauri default
+# features (wry, compression, common-controls-v6, dynamic-acl, x11) are moved
+# into `native-shell`; the three extras below stay unconditional (protocol-asset
+# / tray-icon / image-png compile without wry and are used by the shims + tray).
+tauri = { version = "2", default-features = false, features = ["protocol-asset", "tray-icon", "image-png"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -71,7 +110,10 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 
 [dev-dependencies]
-tauri = { version = "2", features = ["test"] }
+# default-features off (mirrors the [dependencies] entry) so the flows test
+# graph stays wry-free under `--no-default-features`. Feature-unified with the
+# main dep, so the default build still gets wry via `native-shell`.
+tauri = { version = "2", default-features = false, features = ["test"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 dotenvy = "0.15"
 serial_test = "3"
@@ -104,7 +146,9 @@ base64 = "0.22"
 libc = "0.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = { version = "2", features = ["v2_38"] }
+# Optional — pulled in by `native-shell` via `dep:webkit2gtk`. Only used by
+# run()'s Linux WebRTC-settings hook, which is itself native-shell-gated.
+webkit2gtk = { version = "2", features = ["v2_38"], optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.26"
