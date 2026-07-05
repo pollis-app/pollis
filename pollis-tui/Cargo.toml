@@ -9,6 +9,13 @@ rust-version.workspace = true
 name = "pollis"
 path = "src/main.rs"
 
+# The reusable data/sync/auth library the binary — and the in-box smoke tests —
+# call. Making it a real lib target is what lets `tests/` link the M2 sync core
+# without dragging in the ratatui render loop.
+[lib]
+name = "pollis_tui"
+path = "src/lib.rs"
+
 [dependencies]
 # Media + os-keystore OFF: the TUI is headless (no LiveKit/libwebrtc/cpal, no
 # keyring/dbus). Auth/pin/mls/messages all compile media-off. See docs/pollis-tui-spec.md §9.
@@ -19,3 +26,22 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 ratatui = "0.28"
 crossterm = "0.28"
 anyhow = "1"
+
+[dev-dependencies]
+# Re-declare pollis-core with `test-harness` so the smoke tests get the
+# test-only constructors (`RemoteDb::connect_local` / `query_only_view`). Cargo
+# merges this with the normal dep for the test build only; the binary build
+# never sees `test-harness`. See pollis-core/src/db/remote.rs.
+pollis-core = { path = "../pollis-core", default-features = false, features = ["test-harness"] }
+# The in-box smoke rig stands up the real Delivery Service in-process (exactly as
+# the flows harness does) and drives two clients through it — no Tauri, headless.
+# pollis-delivery is pure axum/libsql, so it links with no webkit/ALSA/dbus.
+pollis-delivery = { path = "../pollis-delivery" }
+axum = "0.7"
+base64 = "0.22"
+tempfile = "3"
+serde_json = "1"
+libsql = { version = "0.9", features = ["remote"] }
+# `full` for the test harness: the in-process DS needs `net` (TcpListener) and
+# the two-client scenario runs on a multi-thread runtime.
+tokio = { version = "1", features = ["full"] }

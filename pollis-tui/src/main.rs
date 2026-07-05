@@ -2,8 +2,9 @@
 //! `pollis-core` with no Tauri, no IPC and no WebView. See
 //! `docs/pollis-tui-spec.md` and `.codesight/wiki/pollis-tui.md`.
 
+// `auth`, `data` and `sync` live in the library crate (`pollis_tui`) so the
+// in-box smoke tests can link them; the binary reaches `auth` through the lib.
 mod app;
-mod auth;
 mod terminal;
 mod ui;
 

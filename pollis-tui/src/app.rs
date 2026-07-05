@@ -10,7 +10,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pollis_core::commands::auth::UserProfile;
 use pollis_core::state::AppState;
 
-use crate::auth::{self, Boot};
+use pollis_tui::auth::{self, Boot};
 
 /// Which screen the user is looking at. Text-input buffers live on [`App`], not
 /// in the variants, so transitions are cheap and the render code reads one field.

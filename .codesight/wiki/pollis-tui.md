@@ -114,19 +114,55 @@ export POLLIS_DATA_DIR="$HOME/.local/share/pollis-tui" # own device identity
 cargo run -p pollis-tui --bin pollis
 ```
 
-A fully scripted signup→send→read smoke test needs the disposable test Turso plus
-a running `pollis-delivery` (the `flows` harness stands both up in-process and
-forces `DEV_OTP`); reuse `.env.test` the way the harness does. Without those
-credentials + a reachable DS the binary can build and start but cannot complete an
-end-to-end auth round-trip.
+Running the real binary needs a reachable remote Turso + DS, so it can't run in a
+credential-less box. The **in-box smoke tests** sidestep that: they stand up the
+DS in-process (exactly as the `flows` harness does) against a **local** libsql
+file and force `DEV_OTP`, so the whole client path runs headless with no network:
+
+```bash
+cargo test -p pollis-tui        # unit tests + auth/sync smokes, all in-box
+```
+
+- `tests/common/mod.rs` — the shared rig: local libsql (`RemoteDb::connect_local`,
+  gated behind pollis-core's `test-harness` dev-dep feature), an in-process
+  `pollis-delivery` wired to just the routes the scenario hits, and a `TestClient`
+  that signs up + drives the `pollis_tui` library through its own read-only
+  `query_only_view` (proving the client never writes Turso directly — all writes
+  go through the DS).
+- `tests/sync_smoke.rs` — **the M2 gate.** Two clients share one DS + libsql; A
+  opens a DM to B and sends while B is offline; B is driven *only* through
+  `sync::sync_once` and must decrypt exactly A's message. Proves cross-client
+  receive over real MLS.
+
+## Sync model (M2, spec §6)
+
+Media is off, so there is no LiveKit realtime inbox — the TUI **polls**.
+`src/sync.rs` owns the canonical catch-up order, and `src/data.rs` owns the typed
+read layer it (and the M2b left pane) share:
+
+```text
+sync_once(user):
+  1. poll_mls_welcomes(user)              — drain Welcomes (may JOIN new groups/DMs)
+  2. load_conversations(user)             — enumerate AFTER welcomes
+  3. for each conversation: process_pending_commits  — advance MLS to head epoch
+  4. for each conversation: get_channel_messages / get_dm_messages  — ingest + decrypt
+```
+
+Order is load-bearing: welcomes run **first** (a Welcome can create the group the
+commits then replay into) and the message read runs **last** (it triggers the
+interleaved replay+decrypt that surfaces a peer's message). One round can leave a
+recovering member mid-handshake, so `sync_rounds` runs a fixed few (~4 settle an
+interleaved catch-up). `spawn_loop` runs `sync_once` on a 3–5 s cadence in a
+cancelable background task the M2b UI will own.
 
 ## Milestones
 - **M0** — skeleton: crate + workspace wiring, `AppState::new` boot, ratatui event
   loop, clean quit. ✅
 - **M1** — auth: first-device signup (OTP→PIN→`initialize_identity`) + returning
   `get_session`→`unlock`. ✅
-- **M2** — read: group/channel/DM tree, paginated message list, background poll
-  loop (spec §6).
+- **M2** — read: sync/read core done — `data.rs` (conversation tree + paginated
+  message reads) + `sync.rs` (§6 poll loop), gated by the cross-client `sync_smoke`.
+  ✅ (M2b: the ratatui three-pane UI on top is the next pass.)
 - **M3** — write: send, create group/channel, start/accept DM, invites.
 - **M4** — multi-device enrollment + Secret-Key recovery UX.
 
