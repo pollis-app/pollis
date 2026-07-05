@@ -31,7 +31,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use pollis_core::accounts;
-use pollis_core::commands::{auth, dm, messages};
+use pollis_core::commands::{auth, dm, messages, pin};
 use pollis_core::config::Config;
 use pollis_core::db::remote::RemoteDb;
 use pollis_core::db::{BASELINE_SQL, LOG_DB_SCHEMA, POST_BASELINE_MIGRATIONS};
@@ -187,6 +187,19 @@ pub struct World {
     pub config: Config,
     // Kept alive so the temp dir (per-user DBs + libsql files) survives the test.
     _tmp: std::path::PathBuf,
+}
+
+impl World {
+    /// Carve out a per-device `POLLIS_DATA_DIR` under the world's temp dir. Two
+    /// devices of the SAME user MUST NOT share a data dir — their local SQLCipher
+    /// DB (`pollis_{user_id}.db`), file keystore, and `accounts.json` all key off
+    /// `POLLIS_DATA_DIR`, so a shared dir would have the second device clobber the
+    /// first. Used by the multi-device enrollment + recovery smokes.
+    pub fn device_dir(&self, name: &str) -> std::path::PathBuf {
+        let dir = self._tmp.join(name);
+        std::fs::create_dir_all(&dir).expect("create per-device data dir");
+        dir
+    }
 }
 
 /// Stand up the whole world: temp dir, two libsql files + schema, and the
@@ -888,6 +901,136 @@ async fn delivery_publish_device_cert(
     }
 }
 
+// ── Domains E + G (#419) — device-enrollment / security audit ─────────────────
+// Copied verbatim-in-pattern from the flows harness (`flows/harness.rs`): the
+// same `pollis_delivery::{bootstrap,account}::apply_*` calls the desktop DS runs.
+// Only the set the M4 enrollment + recovery flows touch is wired.
+
+// ── /v1/auth/enrollment-request — SESSION-gated INSERT of a pending request ────
+// The requesting (new) device is pre-credential (`mls_signature_pub` NULL), so
+// it cannot device-sign; the write authenticates via the `enrollment_session`
+// minted by re-login `verify_otp`. The DS binds user + device from the session.
+async fn delivery_enrollment_request(
+    State(state): State<DsState>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let claims =
+        match pollis_delivery::session::verify_session(&headers, &state.sessions, now_u64()) {
+            Ok(c) => c,
+            Err(rej) => return rej.into_response(),
+        };
+    let parsed: pollis_delivery::bootstrap::EnrollmentRequestBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let ephemeral_pub = match b64d(&parsed.new_device_ephemeral_pub) {
+        Some(b) => b,
+        None => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::bootstrap::apply_enrollment_request(
+        &conn,
+        &claims.user_id,
+        &claims.device_id,
+        &parsed.request_id,
+        &ephemeral_pub,
+        &parsed.verification_code,
+        &parsed.created_at,
+        &parsed.expires_at,
+    )
+    .await
+    {
+        Ok(()) => ds_ok(),
+        Err(e) => ds_internal_error(format!("enrollment-request: {e}")),
+    }
+}
+
+// ── /v1/enrollment/approve — DEVICE-signed by an already-enrolled sibling ──────
+async fn delivery_enrollment_approve(
+    State(state): State<DsState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::account::ApproveEnrollmentBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::account::apply_approve_enrollment(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("enrollment/approve: {e}")),
+    }
+}
+
+// ── /v1/enrollment/reject — DEVICE-signed by an already-enrolled sibling ───────
+async fn delivery_enrollment_reject(
+    State(state): State<DsState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::account::RejectEnrollmentBody =
+        match serde_json::from_slice(&body) {
+            Ok(b) => b,
+            Err(_) => return ds_bad_request(),
+        };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::account::apply_reject_enrollment(&conn, Some(&authed), &parsed).await {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("enrollment/reject: {e}")),
+    }
+}
+
+// ── /v1/security-events — DEVICE-signed audit rows (best-effort in the client) ─
+async fn delivery_security_events(
+    State(state): State<DsState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let authed = match ds_auth(&state.main, &method, &uri, &headers, &body).await {
+        Ok(u) => u,
+        Err(resp) => return resp,
+    };
+    let parsed: pollis_delivery::account::SecurityEventBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return ds_bad_request(),
+    };
+    let conn = match state.main.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+    match pollis_delivery::account::apply_record_security_event(&conn, Some(&authed), &parsed).await
+    {
+        Ok(o) => ds_outcome(o),
+        Err(e) => ds_internal_error(format!("security-events: {e}")),
+    }
+}
+
 /// Boot the axum router with ONLY the routes the DM message path exercises, on a
 /// dedicated OS thread + runtime so the server outlives the per-test runtime.
 async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> String {
@@ -971,6 +1114,23 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
                         "/v1/auth/publish-device-cert",
                         axum::routing::post(delivery_publish_device_cert),
                     )
+                    // Device enrollment + recovery (Domains E + G) — M4
+                    .route(
+                        "/v1/auth/enrollment-request",
+                        axum::routing::post(delivery_enrollment_request),
+                    )
+                    .route(
+                        "/v1/enrollment/approve",
+                        axum::routing::post(delivery_enrollment_approve),
+                    )
+                    .route(
+                        "/v1/enrollment/reject",
+                        axum::routing::post(delivery_enrollment_reject),
+                    )
+                    .route(
+                        "/v1/security-events",
+                        axum::routing::post(delivery_security_events),
+                    )
                     .with_state(state);
                 let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
                     .await
@@ -995,6 +1155,11 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
 pub struct TestClient {
     pub state: Arc<AppState>,
     pub profile: Option<auth::UserProfile>,
+    /// When set, this device's `POLLIS_DATA_DIR` — repointed (via [`use_dir`])
+    /// before any keystore/local-DB/`accounts.json` touch. `None` means "use the
+    /// world's shared dir" (the single-device smokes). Two devices of the SAME
+    /// user MUST each set their own, or they collide on disk.
+    data_dir: Option<std::path::PathBuf>,
 }
 
 impl TestClient {
@@ -1016,6 +1181,20 @@ impl TestClient {
         Self {
             state,
             profile: None,
+            data_dir: None,
+        }
+    }
+
+    /// Point `POLLIS_DATA_DIR` at this client's own dir, if it has one. Called at
+    /// the start of every keystore/DB-touching path so a second device of the same
+    /// user reads/writes its OWN on-disk state. No-op for shared-dir clients.
+    ///
+    /// Safe because a single test runs its clients sequentially (device A does its
+    /// work, then device B does its), and each integration-test file is its own
+    /// process — so this process-global swap never races another test.
+    fn use_dir(&self) {
+        if let Some(dir) = &self.data_dir {
+            std::env::set_var("POLLIS_DATA_DIR", dir);
         }
     }
 
@@ -1035,6 +1214,30 @@ impl TestClient {
         Self {
             state,
             profile: None,
+            data_dir: None,
+        }
+    }
+
+    /// Like [`new_persistent`], but pinned to its OWN `POLLIS_DATA_DIR` (a subdir
+    /// `name` under the world's temp dir). Required whenever two clients belong to
+    /// the SAME user (the multi-device enrollment + Secret-Key recovery smokes):
+    /// each device needs an isolated local DB + keystore + accounts index. The dir
+    /// is repointed just-in-time by [`use_dir`] before every on-disk touch.
+    pub fn new_persistent_in(world: &World, name: &str) -> Self {
+        let dir = world.device_dir(name);
+        // Build the keystore under THIS device's dir (default_os_keystore reads
+        // POLLIS_DATA_DIR eagerly at construction).
+        std::env::set_var("POLLIS_DATA_DIR", &dir);
+        let state = Arc::new(AppState::new_with_parts(
+            world.config.clone(),
+            Arc::new(world.main.query_only_view()),
+            world.log.clone(),
+            default_os_keystore(),
+        ));
+        Self {
+            state,
+            profile: None,
+            data_dir: Some(dir),
         }
     }
 
@@ -1048,6 +1251,8 @@ impl TestClient {
     /// have moved it), which is what `get_session` keys off.
     pub fn restart(&mut self, world: &World) {
         self.activate();
+        // Rebuild the keystore against THIS device's dir (default_os_keystore reads
+        // POLLIS_DATA_DIR eagerly); `activate` already repointed it via `use_dir`.
         // Replace the Arc: the old AppState (and its file keystore handle) drops
         // when the last reference goes. The rebuilt state reads the same on-disk
         // keystore + local SQLCipher DB the previous instance wrote.
@@ -1068,6 +1273,9 @@ impl TestClient {
     /// signing already works after signup; this keeps the shared fallback honest
     /// for any path that consults it.
     fn activate(&self) {
+        // Repoint POLLIS_DATA_DIR FIRST so the accounts-index write below (and
+        // every subsequent DB/keystore touch) lands in THIS device's dir.
+        self.use_dir();
         if let Some(p) = &self.profile {
             let _ = accounts::upsert_account(&p.id, &p.username, None, None);
         }
@@ -1077,6 +1285,9 @@ impl TestClient {
     /// (request_otp → verify_otp → set_pin → initialize_identity). Everything
     /// routes through the in-process DS.
     pub async fn sign_up(&mut self, email: &str) -> auth::UserProfile {
+        // Repoint POLLIS_DATA_DIR before verify_otp generates identity material +
+        // writes the device id to the keystore (both key off the data dir).
+        self.use_dir();
         pollis_tui::auth::request_otp(&self.state, email)
             .await
             .unwrap_or_else(|e| panic!("request_otp({email}): {e}"));
@@ -1172,5 +1383,124 @@ impl TestClient {
         pollis_tui::data::dm_messages(&self.state, self.user_id(), dm_channel_id, None)
             .await
             .expect("dm_messages")
+    }
+
+    /// The set of conversation ids this device currently sees (proves an enrolled
+    /// device picked up the account's DMs/groups after external-join).
+    pub async fn conversation_ids(&self) -> Vec<String> {
+        self.activate();
+        pollis_tui::data::load_conversations(&self.state, self.user_id())
+            .await
+            .expect("load_conversations")
+            .conversation_ids()
+    }
+
+    // ── M4: multi-device enrollment + Secret-Key recovery (the code under test) ──
+
+    /// A FRESH device signing in against an EXISTING account's email. Runs
+    /// `request_otp` → `verify_otp`; `verify_otp` resolves to the existing
+    /// `user_id`, registers this device (session-gated), mints the in-memory
+    /// `enrollment_session`, and reports `enrollment_required = true`. Sets
+    /// `self.profile` but the device does NOT yet hold the account key.
+    pub async fn begin_enrollment(&mut self, email: &str) -> auth::UserProfile {
+        self.use_dir();
+        pollis_tui::auth::request_otp(&self.state, email)
+            .await
+            .unwrap_or_else(|e| panic!("request_otp({email}) on new device: {e}"));
+        let profile = pollis_tui::auth::verify_otp(&self.state, email, DEV_OTP)
+            .await
+            .unwrap_or_else(|e| panic!("verify_otp({email}) on new device: {e}"));
+        assert!(
+            profile.enrollment_required,
+            "a fresh device for an existing account must see enrollment_required=true",
+        );
+        self.profile = Some(profile.clone());
+        self.activate();
+        profile
+    }
+
+    /// New device: kick off an enrollment request (returns the handle carrying the
+    /// request id + verification code).
+    pub async fn request_enrollment(&self) -> pollis_tui::enroll::EnrollmentHandle {
+        self.activate();
+        pollis_tui::enroll::request_enrollment(&self.state, self.user_id().to_string())
+            .await
+            .expect("request_enrollment")
+    }
+
+    /// New device: poll the enrollment status once.
+    pub async fn enrollment_status(&self, request_id: &str) -> pollis_tui::enroll::EnrollmentStatus {
+        self.activate();
+        pollis_tui::enroll::enrollment_status(&self.state, request_id.to_string())
+            .await
+            .expect("enrollment_status")
+    }
+
+    /// Existing device: list open enrollment requests for this account.
+    pub async fn pending_enrollment_requests(
+        &self,
+    ) -> Vec<pollis_tui::enroll::PendingEnrollmentRequest> {
+        self.activate();
+        pollis_tui::enroll::pending_requests(&self.state, self.user_id().to_string())
+            .await
+            .expect("pending_requests")
+    }
+
+    /// Existing device: approve a pending request, confirming its code.
+    pub async fn approve_enrollment(&self, request_id: &str, verification_code: &str) {
+        self.activate();
+        pollis_tui::enroll::approve(
+            &self.state,
+            request_id.to_string(),
+            verification_code.to_string(),
+        )
+        .await
+        .expect("approve_enrollment");
+    }
+
+    /// New device: complete an enrollment/recovery after the account key is in
+    /// `AppState.unlock`. Mirrors what the desktop `App.tsx` runs after pin-create:
+    /// `set_pin` (opens the local DB) → `finalize` (cert/KPs/external-join) →
+    /// `initialize_identity`.
+    pub async fn finish_enrollment(&self) {
+        self.activate();
+        pin::set_pin(&self.state, None, TEST_PIN.to_string())
+            .await
+            .expect("set_pin on enrolled device");
+        pollis_tui::enroll::finalize(&self.state, self.user_id().to_string())
+            .await
+            .expect("finalize_device_enrollment");
+        auth::initialize_identity(&self.state, self.user_id().to_string())
+            .await
+            .expect("initialize_identity on enrolled device");
+    }
+
+    /// Poll to approval, then finish. Bounded loop — the approve write has already
+    /// committed by the time we get here, so this resolves on the first poll.
+    pub async fn await_approval_and_finish(&self, request_id: &str) {
+        use pollis_tui::enroll::EnrollmentStatus;
+        for attempt in 0..20 {
+            match self.enrollment_status(request_id).await {
+                EnrollmentStatus::Approved => break,
+                EnrollmentStatus::Pending if attempt < 19 => continue,
+                other => panic!("enrollment did not reach Approved; last status = {other:?}"),
+            }
+        }
+        self.finish_enrollment().await;
+    }
+
+    /// New device: Secret-Key recovery. Unwraps the account key with `secret_key`
+    /// (into `AppState.unlock`), then runs the same tail as enrollment: `set_pin`
+    /// → `finalize` → `initialize_identity`.
+    pub async fn recover(&self, secret_key: &str) {
+        self.activate();
+        pollis_tui::enroll::recover(
+            &self.state,
+            self.user_id().to_string(),
+            secret_key.to_string(),
+        )
+        .await
+        .expect("recover_with_secret_key");
+        self.finish_enrollment().await;
     }
 }

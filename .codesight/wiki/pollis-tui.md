@@ -9,9 +9,10 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
 - **Design contract:** [`docs/pollis-tui-spec.md`](../../docs/pollis-tui-spec.md) — authoritative.
 - **Status:** M0 (skeleton) + M1 (auth) + M2 (read core) + M2b (three-pane UI) +
   **M3 write CORE** (`src/send.rs`) + **M3b compose/create UI** (compose+send,
-  accept DM, create group/channel/DM, invite — the interactive layer on top of
-  `send.rs`) implemented. M4 (multi-device enrollment) is the follow-on
-  milestone in the spec.
+  accept DM, create group/channel/DM, invite) + **M4 DATA/SMOKE core**
+  (`src/enroll.rs` — multi-device enrollment + Secret-Key recovery library layer,
+  gated by two multi-device smokes) implemented. The interactive M4 screens (M4b)
+  are the follow-on milestone in the spec.
 
 ## Why a TUI
 
@@ -48,6 +49,7 @@ pollis-tui (binary `pollis`)
 | `src/auth.rs` | Thin wrappers over `pollis_core::commands::{auth,pin}` that encode the M1 call order. No forked logic. |
 | `src/data.rs` | Typed read layer: `load_conversations` (tree) + `channel_messages`/`dm_messages` (paginated). Shared by `sync.rs` and the Home UI. |
 | `src/send.rs` | **M3 write CORE.** Typed passthroughs over the exact core writes (`send_message`, `create_group`, `create_channel`, `create_dm_channel`, `accept_dm_request`, `invite_to_group`) + ergonomic shorthands with UI defaults baked in (`send_text`, `new_group`, `new_channel`, `start_dm`, `accept_dm`, `invite`). No forked logic — every write routes through the DS via the core fn. M3b calls one fn per action. |
+| `src/enroll.rs` | **M4 DATA core.** Typed, order-enforcing wrappers over `pollis_core::commands::device_enrollment` for the two "add a terminal to an existing account" flows: sibling-approval enrollment (`request_enrollment`/`enrollment_status`/`finalize` on the new device, `pending_requests`/`approve`/`reject` on the existing one) and Secret-Key recovery (`recover`, plus the last-resort `reset_and_recover`). No forked logic. Re-exports `EnrollmentHandle`/`EnrollmentStatus`/`PendingEnrollmentRequest` for the M4b UI. |
 | `src/sync.rs` | §6 poll loop: `sync_once`/`sync_rounds` + `spawn_loop` (cancelable background `SyncLoop`). |
 | `src/ui.rs` | Pure `render(frame, &app)` — header (identity · open-conversation name · sync spinner) / three-pane Home body / auth card / status line. |
 
@@ -154,6 +156,29 @@ cargo test -p pollis-tui        # unit tests + auth/sync smokes, all in-box
   `POLLIS_DATA_DIR` + libsql (`TestClient::{new_persistent,restart}` in the rig).
   `auth::boot` must report `Returning`, `auth::unlock` with the PIN succeeds, and
   after `sync_rounds` A can STILL read the pre-restart message.
+- `tests/enroll_smoke.rs` — **the M4 enrollment gate: second device via sibling
+  approval + working MLS leaf.** Device A (alice) is in a DM with Carol (a third
+  user) and has sent a message. A fresh device B (same user, **its own
+  `POLLIS_DATA_DIR`**) proves alice's email (`begin_enrollment`), requests
+  enrollment (`request_enrollment`), A confirms the verification code and
+  `approve`s, B polls to `Approved` and finishes (`set_pin` → `finalize` →
+  `initialize_identity`). B then **sends** a message that both Carol and A
+  receive + decrypt — proving B got a real leaf, not just an auth session.
+- `tests/recover_smoke.rs` — **the M4 Secret-Key recovery gate.** Same shape, but
+  B has no sibling to approve: it unwraps the account key from the server-stored
+  `account_recovery` blob with the Secret Key surfaced on A's first signup
+  (`verify_otp`'s `UserProfile.new_secret_key`), via `enroll::recover`. B then
+  sends a message Carol + A decrypt.
+
+Both M4 smokes need **per-device data dirs** — two devices of the same user
+would otherwise collide on `pollis_{user_id}.db`, the file keystore, and
+`accounts.json` (all keyed off `POLLIS_DATA_DIR`). The rig's
+`TestClient::new_persistent_in(world, name)` pins each device to its own subdir
+and repoints `POLLIS_DATA_DIR` just-in-time (`use_dir`, called from `activate`)
+before every on-disk touch; safe because a test drives its clients sequentially
+and each test file is its own process. The rig also wires the enrollment DS
+routes (`/v1/auth/enrollment-request` session-gated, `/v1/enrollment/{approve,
+reject}` device-signed, `/v1/security-events`).
 
 ## Sync model (M2, spec §6)
 
