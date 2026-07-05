@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "src-tauri",
     "pollis-core",
+    "pollis-tui",
     "pollis-capture-proto",
     "pollis-capture-linux",
     "pollis-capture-macos",

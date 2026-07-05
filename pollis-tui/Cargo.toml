@@ -1,0 +1,21 @@
+[package]
+name = "pollis-tui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+# Ships as the `pollis` terminal command.
+name = "pollis"
+path = "src/main.rs"
+
+[dependencies]
+# Media + os-keystore OFF: the TUI is headless (no LiveKit/libwebrtc/cpal, no
+# keyring/dbus). Auth/pin/mls/messages all compile media-off. See docs/pollis-tui-spec.md §9.
+pollis-core = { path = "../pollis-core", default-features = false }
+# Multi-thread runtime is REQUIRED: pollis-core's DB/keystore paths use
+# spawn_blocking, so a current-thread runtime deadlocks (spec §2).
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+ratatui = "0.28"
+crossterm = "0.28"
+anyhow = "1"
