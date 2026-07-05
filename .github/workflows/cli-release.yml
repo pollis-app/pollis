@@ -1,0 +1,271 @@
+name: CLI Release (pollis-tui)
+
+# Distribution pipeline for the `pollis` terminal client (the pollis-tui
+# crate, binary name `pollis` — issue #451). SEPARATE from
+# desktop-release.yml: it builds the headless CLI, uploads under a distinct
+# `cli/` prefix in R2, and never touches the desktop's install.sh /
+# latest.json / updater manifests.
+#
+# v1 is `workflow_dispatch` only — trigger it by hand to validate and
+# deploy without cutting a git tag or riding a full desktop release. A
+# `v*` tag trigger is intentionally NOT wired up yet (that would couple
+# CLI publishing to every desktop release before this pipeline is proven).
+#
+# Secret discipline mirrors desktop-release.yml exactly: the shipped client
+# holds the READ-ONLY main-DB token (TURSO_RO_TOKEN → TURSO_TOKEN) and the
+# READ-ONLY commit-log token. No READ-WRITE admin token (LOG_DB_ADMIN_TOKEN)
+# ever enters a client binary — writes go through the Delivery Service.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build & publish (defaults to the workspace version in Cargo.toml)"
+        required: false
+        default: ""
+
+jobs:
+  # Resolve the version once so every build/publish job agrees. Uses the
+  # dispatch input when given, else the [workspace.package] version in the
+  # root Cargo.toml (the binary does not embed CARGO_PKG_VERSION today, so
+  # this drives artifact naming and the R2 paths, not the binary itself).
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: resolve
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/version = "([^"]+)"/\1/')
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+  build-cli-linux:
+    needs: resolve-version
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      # Build-time deps for compiling SQLCipher + the vendored openssl-sys
+      # (libsqlite3-sys pulls openssl-src) from source. The resulting binary
+      # links only glibc — no runtime libssl/libcrypto/libsqlite (verified by
+      # ldd), so the installer needs no libcrypto check.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libssl-dev \
+            pkg-config \
+            build-essential \
+            perl
+
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          # Slice 3 (#419): the shipped client holds a READ-ONLY main-DB token — every
+          # write goes through the Delivery Service. The RW token never enters the binary.
+          echo "TURSO_TOKEN=${{ secrets.TURSO_RO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
+          # Commit-log DB: the client gets the URL + the READ-ONLY token only
+          # (option_env! bakes them into the binary). The READ-WRITE admin token
+          # (LOG_DB_ADMIN_TOKEN) is NEVER injected into a client build — it is
+          # migrations + the Delivery Service only. See docs/goal-a-deploy-runbook.md.
+          echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
+          echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      - name: Build CLI (Linux)
+        run: cargo build -p pollis-tui --release
+
+      - name: Upload Linux CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-cli-linux
+          if-no-files-found: error
+          path: target/release/pollis
+
+  build-cli-macos:
+    needs: resolve-version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Load production secrets
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          # Slice 3 (#419): the shipped client holds a READ-ONLY main-DB token — every
+          # write goes through the Delivery Service. The RW token never enters the binary.
+          echo "TURSO_TOKEN=${{ secrets.TURSO_RO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
+          # Commit-log DB: the client gets the URL + the READ-ONLY token only
+          # (option_env! bakes them into the binary). The READ-WRITE admin token
+          # (LOG_DB_ADMIN_TOKEN) is NEVER injected into a client build — it is
+          # migrations + the Delivery Service only. See docs/goal-a-deploy-runbook.md.
+          echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
+          echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      - name: Build CLI (macOS aarch64)
+        run: cargo build -p pollis-tui --release --target aarch64-apple-darwin
+
+      - name: Upload macOS CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-cli-macos
+          if-no-files-found: error
+          path: target/aarch64-apple-darwin/release/pollis
+
+  build-cli-windows:
+    needs: resolve-version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Load production secrets
+        shell: bash
+        run: |
+          echo "TURSO_URL=${{ secrets.TURSO_URL }}" >> $GITHUB_ENV
+          # Slice 3 (#419): the shipped client holds a READ-ONLY main-DB token — every
+          # write goes through the Delivery Service. The RW token never enters the binary.
+          echo "TURSO_TOKEN=${{ secrets.TURSO_RO_TOKEN }}" >> $GITHUB_ENV
+          echo "R2_S3_ENDPOINT=${{ secrets.R2_S3_ENDPOINT }}" >> $GITHUB_ENV
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}" >> $GITHUB_ENV
+          echo "R2_REGION=${{ secrets.R2_REGION }}" >> $GITHUB_ENV
+          echo "LIVEKIT_URL=${{ secrets.LIVEKIT_URL }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_KEY=${{ secrets.LIVEKIT_API_KEY }}" >> $GITHUB_ENV
+          echo "LIVEKIT_API_SECRET=${{ secrets.LIVEKIT_API_SECRET }}" >> $GITHUB_ENV
+          echo "POLLIS_DELIVERY_URL=${{ secrets.POLLIS_DELIVERY_URL }}" >> $GITHUB_ENV
+          # Commit-log DB: the client gets the URL + the READ-ONLY token only
+          # (option_env! bakes them into the binary). The READ-WRITE admin token
+          # (LOG_DB_ADMIN_TOKEN) is NEVER injected into a client build — it is
+          # migrations + the Delivery Service only. See docs/goal-a-deploy-runbook.md.
+          echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
+          echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      # libsqlite3-sys resolves openssl-sys through vcpkg on Windows (same as
+      # the desktop build), so a static-md OpenSSL must be present.
+      - name: Install OpenSSL via vcpkg
+        shell: bash
+        run: |
+          vcpkg install openssl:x64-windows-static-md
+          echo "OPENSSL_DIR=$VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md" >> $GITHUB_ENV
+          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
+
+      - name: Build CLI (Windows)
+        run: cargo build -p pollis-tui --release
+
+      - name: Upload Windows CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-cli-windows
+          if-no-files-found: error
+          path: target/release/pollis.exe
+
+  # Publish to R2 under a dedicated `cli/` prefix. Mirrors the desktop
+  # release job's aws-s3-to-R2 mechanics (same ENDPOINT, credentials env,
+  # bucket) but never touches releases/install.sh, releases/latest.json, or
+  # the updater manifests.
+  publish-cli:
+    needs: [resolve-version, build-cli-linux, build-cli-macos, build-cli-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load production secrets
+        run: |
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Debug artifact structure
+        run: |
+          echo "Listing artifact structure:"
+          find artifacts -type f
+
+      - name: Upload CLI binaries to R2
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp artifacts/pollis-cli-linux/pollis   "s3://pollis/releases/cli/${VERSION}/pollis-linux"       --endpoint-url "${ENDPOINT}"
+          aws s3 cp artifacts/pollis-cli-macos/pollis   "s3://pollis/releases/cli/${VERSION}/pollis-macos"       --endpoint-url "${ENDPOINT}"
+          aws s3 cp artifacts/pollis-cli-windows/pollis.exe "s3://pollis/releases/cli/${VERSION}/pollis-windows.exe" --endpoint-url "${ENDPOINT}"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Publish cli latest.json to R2
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.version }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BASE="https://cdn.pollis.com/releases/cli/${VERSION}"
+          echo "{\"version\":\"${VERSION}\",\"linux\":\"${BASE}/pollis-linux\",\"macos\":\"${BASE}/pollis-macos\",\"windows\":\"${BASE}/pollis-windows.exe\"}" > latest.json
+          aws s3 cp latest.json "s3://pollis/releases/cli/latest.json" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      - name: Upload cli install script to R2
+        run: |
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp website/cli-install.sh "s3://pollis/releases/cli-install.sh" \
+            --endpoint-url "${ENDPOINT}" \
+            --content-type "text/plain" \
+            --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
