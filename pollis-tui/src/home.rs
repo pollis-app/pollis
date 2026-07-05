@@ -27,6 +27,61 @@ pub enum Focus {
     Messages,
 }
 
+/// What a bottom-bar text prompt (a create/invite flow) is collecting. The
+/// active buffer lives on [`crate::app::App::input`] so rendering reads one
+/// field; this only records *which* action the collected text feeds and any
+/// context (the target group) the submit needs. Kept a small pure enum so its
+/// label + validation are unit-testable in isolation, like the rest of this
+/// module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PromptKind {
+    /// New group; the buffer is the group name.
+    NewGroup,
+    /// New channel in an existing group; the buffer is the channel name.
+    NewChannel { group_id: String, group_name: String },
+    /// Start a DM; the buffer is the other user's username/email.
+    StartDm,
+    /// Invite a user to a group; the buffer is the invitee's username/email.
+    Invite { group_id: String, group_name: String },
+}
+
+impl PromptKind {
+    /// The label shown on the bottom input bar, naming what's being collected.
+    pub fn label(&self) -> String {
+        match self {
+            PromptKind::NewGroup => "New group name".to_string(),
+            PromptKind::NewChannel { group_name, .. } => {
+                format!("New channel in {group_name}")
+            }
+            PromptKind::StartDm => "Start DM — username or email".to_string(),
+            PromptKind::Invite { group_name, .. } => {
+                format!("Invite to {group_name} — username or email")
+            }
+        }
+    }
+}
+
+/// How the Home screen is currently consuming keystrokes: navigating the tree,
+/// composing a message for the open conversation, or filling a create/invite
+/// prompt. The text buffer for the latter two lives on [`crate::app::App`].
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum HomeMode {
+    /// Navigation + command keys (the default).
+    #[default]
+    Navigate,
+    /// Typing a message into the open conversation.
+    Compose,
+    /// Filling a create/invite prompt (bottom input bar).
+    Prompt(PromptKind),
+}
+
+/// Whether a collected buffer is worth submitting: non-empty after trimming.
+/// Shared by compose (empty send is a no-op) and every prompt (empty submit is
+/// rejected), so an all-whitespace value can never reach the write layer.
+pub fn is_blank(s: &str) -> bool {
+    s.trim().is_empty()
+}
+
 /// The three kinds of thing the message pane can be showing, which decides
 /// whether we read via `data::channel_messages` or `data::dm_messages`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -106,6 +161,8 @@ pub struct HomeState {
     pub open: Option<OpenConversation>,
     /// Advances once per background-sync refresh — drives the sync spinner.
     pub refreshes: u64,
+    /// How the screen is currently consuming keystrokes (nav / compose / prompt).
+    pub mode: HomeMode,
 }
 
 impl HomeState {
@@ -149,6 +206,52 @@ impl HomeState {
     pub fn move_selection(&mut self, dir: i32) {
         self.selected = step_selection(&self.rows, self.selected, dir);
     }
+
+    /// The id of the selected sidebar row iff it's a **pending DM request** —
+    /// the target of the "accept" key. `None` for any other row.
+    pub fn selected_dm_request(&self) -> Option<String> {
+        match &self.current_row()?.target {
+            RowTarget::Open(conv) if conv.kind == ConvKind::DmRequest => Some(conv.id.clone()),
+            _ => None,
+        }
+    }
+
+    /// The (id, name) of the group that scopes a "new channel" / "invite"
+    /// action for the current selection: the nearest group heading at or above
+    /// the highlighted row. Returns `None` if the selection sits in the DM /
+    /// Requests sections (past a section header), where no group applies.
+    pub fn context_group(&self) -> Option<(String, String)> {
+        let tree = self.tree.as_ref()?;
+        context_group(&self.rows, tree, self.selected)
+    }
+}
+
+/// The group heading governing `selected`: walk up from the selection, resolving
+/// the first [`RowTarget::ToggleGroup`] against `tree.groups`, but stop (→ `None`)
+/// at a section header, so a DM/request selection has no group context. Pure so
+/// the walk-up + boundary rules are unit-tested.
+pub fn context_group(
+    rows: &[SidebarRow],
+    tree: &ConversationTree,
+    selected: usize,
+) -> Option<(String, String)> {
+    if rows.is_empty() {
+        return None;
+    }
+    let start = selected.min(rows.len() - 1);
+    for row in rows[..=start].iter().rev() {
+        match &row.target {
+            RowTarget::ToggleGroup(i) => {
+                let g = tree.groups.get(*i)?;
+                return Some((g.id.clone(), g.name.clone()));
+            }
+            // Crossed into the DM / Requests sections — no group applies.
+            RowTarget::Header => return None,
+            // A channel row under a group — keep walking up to its heading.
+            RowTarget::Open(_) => {}
+        }
+    }
+    None
 }
 
 /// Flatten a [`ConversationTree`] into the ordered list of sidebar rows given
@@ -504,6 +607,78 @@ mod tests {
         // No more history, or already loading → never.
         assert!(!should_load_older(46, 50, false, false));
         assert!(!should_load_older(46, 50, true, true));
+    }
+
+    #[test]
+    fn is_blank_rejects_empty_and_whitespace_only() {
+        assert!(is_blank(""));
+        assert!(is_blank("   "));
+        assert!(is_blank("\t \n"));
+        assert!(!is_blank("hi"));
+        assert!(!is_blank("  x  "));
+    }
+
+    #[test]
+    fn prompt_label_names_the_action_and_its_context() {
+        assert_eq!(PromptKind::NewGroup.label(), "New group name");
+        assert_eq!(
+            PromptKind::NewChannel {
+                group_id: "g1".into(),
+                group_name: "General".into(),
+            }
+            .label(),
+            "New channel in General"
+        );
+        assert!(PromptKind::StartDm.label().starts_with("Start DM"));
+        assert_eq!(
+            PromptKind::Invite {
+                group_id: "g1".into(),
+                group_name: "General".into(),
+            }
+            .label(),
+            "Invite to General — username or email"
+        );
+    }
+
+    #[test]
+    fn selected_dm_request_only_fires_on_a_pending_request_row() {
+        let mut home = HomeState::new();
+        home.set_tree(tree(), "me");
+        // Row layout (all groups expanded on first load):
+        // 0 group, 1 #welcome, 2 #random, 3 "Direct Messages", 4 @bob,
+        // 5 "Requests", 6 @eve (pending).
+        home.selected = 6;
+        assert_eq!(home.selected_dm_request().as_deref(), Some("r1"));
+        // A real DM (accepted) is not an acceptable target.
+        home.selected = 4;
+        assert_eq!(home.selected_dm_request(), None);
+        // A channel row is not either.
+        home.selected = 1;
+        assert_eq!(home.selected_dm_request(), None);
+    }
+
+    #[test]
+    fn context_group_resolves_from_headings_and_channels_but_not_dms() {
+        let mut home = HomeState::new();
+        home.set_tree(tree(), "me");
+        // Group heading itself → that group.
+        home.selected = 0;
+        assert_eq!(
+            home.context_group(),
+            Some(("g1".to_string(), "General".to_string()))
+        );
+        // A channel row resolves up to its parent group.
+        home.selected = 2;
+        assert_eq!(
+            home.context_group(),
+            Some(("g1".to_string(), "General".to_string()))
+        );
+        // A DM row (past the "Direct Messages" header) has no group context.
+        home.selected = 4;
+        assert_eq!(home.context_group(), None);
+        // A pending request row likewise.
+        home.selected = 6;
+        assert_eq!(home.context_group(), None);
     }
 
     #[test]

@@ -8,9 +8,10 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
 - **Crate:** `pollis-tui/` (workspace member). Binary name: `pollis`.
 - **Design contract:** [`docs/pollis-tui-spec.md`](../../docs/pollis-tui-spec.md) — authoritative.
 - **Status:** M0 (skeleton) + M1 (auth) + M2 (read core) + M2b (three-pane UI) +
-  **M3 write CORE** (the `src/send.rs` library layer + gates) implemented. The
-  interactive compose/create **UI is M3b** (a later pass — not built yet). M4
-  (multi-device enrollment) is the follow-on milestone in the spec.
+  **M3 write CORE** (`src/send.rs`) + **M3b compose/create UI** (compose+send,
+  accept DM, create group/channel/DM, invite — the interactive layer on top of
+  `send.rs`) implemented. M4 (multi-device enrollment) is the follow-on
+  milestone in the spec.
 
 ## Why a TUI
 
@@ -42,8 +43,8 @@ pollis-tui (binary `pollis`)
 |---|---|
 | `src/main.rs` | Entry. Multi-thread tokio runtime, `Config::from_env` → `AppState::new`, terminal setup, `tokio::select!` render/input loop (key input + UI-refresh tick), panic hook, clean sync-loop shutdown. |
 | `src/terminal.rs` | `TerminalGuard` — RAII enter/leave raw mode + alt screen; restores the terminal on **every** exit path (quit, `?`, panic). |
-| `src/app.rs` | `App` state machine: `Screen` enum, synchronous `on_key` (auth + Home navigation), async `run(Action) -> Option<Action>` (returns a follow-up action), background `SyncLoop` ownership + `shutdown()`. |
-| `src/home.rs` | The M2b three-pane model + **pure, unit-tested** helpers: sidebar flattening (`build_sidebar_rows`), selection movement (`step_selection`/`clamp_selection`), bottom-anchored scroll windowing (`visible_window`), scrollback prefetch (`should_load_older`), page merge/dedup (`merge_messages`). |
+| `src/app.rs` | `App` state machine: `Screen` enum, synchronous `on_key` (auth + Home navigation/compose/prompt), async `run(Action) -> Option<Action>` (returns a follow-up action), background `SyncLoop` ownership + `shutdown()`. M3b adds the `SendMessage`/`AcceptDm`/`SubmitPrompt` actions + the `begin_*`/`do_*` compose/create handlers. |
+| `src/home.rs` | The three-pane model + **pure, unit-tested** helpers: sidebar flattening (`build_sidebar_rows`), selection movement (`step_selection`/`clamp_selection`), bottom-anchored scroll windowing (`visible_window`), scrollback prefetch (`should_load_older`), page merge/dedup (`merge_messages`). M3b adds the input-mode model (`HomeMode` = Navigate/Compose/Prompt, `PromptKind` + its `label()`), the empty-input guard (`is_blank`), and the pure selection-context helpers (`selected_dm_request`, `context_group`). |
 | `src/auth.rs` | Thin wrappers over `pollis_core::commands::{auth,pin}` that encode the M1 call order. No forked logic. |
 | `src/data.rs` | Typed read layer: `load_conversations` (tree) + `channel_messages`/`dm_messages` (paginated). Shared by `sync.rs` and the Home UI. |
 | `src/send.rs` | **M3 write CORE.** Typed passthroughs over the exact core writes (`send_message`, `create_group`, `create_channel`, `create_dm_channel`, `accept_dm_request`, `invite_to_group`) + ergonomic shorthands with UI defaults baked in (`send_text`, `new_group`, `new_channel`, `start_dm`, `accept_dm`, `invite`). No forked logic — every write routes through the DS via the core fn. M3b calls one fn per action. |
@@ -241,6 +242,58 @@ across a render. Rather than reach into `sync.rs` for a notify channel, the UI
 polls the DB it already reads — a smaller, decoupled surface (the alternative §6
 allows).
 
+## The compose / create UI (M3b, spec §8/§11)
+
+The interactive write layer on top of `src/send.rs`. Home has **three input
+modes** (`HomeMode` in `home.rs`), and `on_home_key` dispatches to a per-mode
+handler; the text buffer for compose/prompt is `App::input` (reused — the auth
+screens don't run on Home). No modal overlays — every input is the bottom bar,
+the desktop app's "replace the input bar" pattern. Solid accent border, no glow.
+
+- **Navigate** (default) — tree movement + the command keys below. Reads that
+  need a round-trip (open conversation, page history) return an `Action`; the
+  write keys hand off to `begin_*` helpers that set the mode / queue an action.
+- **Compose** — typing a message into the open conversation. Enter sends via
+  `send::send_text` (empty/whitespace is a no-op), clears the buffer, pins to
+  newest and `refresh_open()`s so the just-sent message appears immediately (the
+  core stores it locally on send). Stays in compose on success (keep typing); a
+  failure keeps the text for a retry. Esc leaves. An **un-accepted DM request
+  can't compose** — the guard routes the user to accept it first.
+- **Prompt** — an inline bottom bar collecting one value for a create/invite
+  action (`PromptKind`). Enter submits (empty rejected), Esc cancels. `do_submit_prompt`
+  dispatches on the kind: `new_group` / `new_channel` (scoped to the selected
+  group via `context_group`) / `start_dm` (`search_user_by_username` →
+  `start_dm`, a miss is a clean status-line error, never a panic) / `invite`.
+  On success it `refresh_tree()`s so the new group/channel/DM surfaces; on
+  failure the error lands on the status line and the prompt stays open to retry.
+
+### Key bindings (Home)
+| Key | Mode | Action |
+|---|---|---|
+| `↑/↓`, `j/k` | Navigate | Move selection (sidebar) / scroll (message pane) |
+| `PageUp/Down` | Navigate | Scroll a screen |
+| `Tab` | Navigate | Cycle sidebar ↔ message pane focus |
+| `Enter` | Navigate | Sidebar: toggle group / open conversation. Message pane: start composing |
+| `i` | Navigate | Compose a message in the open conversation |
+| `a` | Navigate | Accept the highlighted pending DM request |
+| `g` | Navigate | New group (prompt: name) |
+| `c` | Navigate | New channel in the group in context (prompt: name) |
+| `d` | Navigate | Start a DM (prompt: username/email → search → create) |
+| `v` | Navigate | Invite to the group in context (prompt: username/email) |
+| `q` / `Ctrl-C` | Navigate | Quit (`Ctrl-C` quits from any mode) |
+| `Enter` | Compose/Prompt | Send / submit (empty is a no-op) |
+| `Esc` | Compose/Prompt | Cancel back to Navigate |
+
+The status line surfaces the mode's bindings when idle (`home_help`), so the
+compose/accept/create/invite/quit keys are discoverable in-app.
+
+**Pure, unit-tested M3b helpers** (`home.rs`): `is_blank` (empty-input guard),
+`PromptKind::label`, `selected_dm_request` (accept target), `context_group`
+(the group scoping new-channel/invite — walks up to the nearest heading, stops
+at a section header so DM/request rows have no group). The interactive terminal
+itself isn't in-box smoke-testable (no real TTY); correctness rides on these
+pure helpers + the already-gated `send_smoke` round-trip under the write path.
+
 ## Milestones
 - **M0** — skeleton: crate + workspace wiring, `AppState::new` boot, ratatui event
   loop, clean quit. ✅
@@ -256,8 +309,12 @@ allows).
 - **M3 (write CORE)** — the `src/send.rs` library layer (send, create
   group/channel, start/accept DM, invites) + gates: the bidirectional MLS
   round-trip (`send_smoke`) and the restart→unlock→resync cycle
-  (`restart_smoke`). ✅ The interactive compose/create **UI is M3b** — a
-  separate later pass, not yet built.
+  (`restart_smoke`). ✅
+- **M3b (compose/create UI)** — the interactive layer on `send.rs`: compose+send,
+  accept DM request, and the inline create/invite prompts (group/channel/DM/invite),
+  with mode-aware key hints. Pure input-mode + selection-context helpers are
+  unit-tested; the terminal interaction itself isn't in-box smoke-testable. See
+  the compose/create UI section above. ✅
 - **M4** — multi-device enrollment + Secret-Key recovery UX.
 
 See the spec for the full command-surface → screen map and the polling sync model.

@@ -12,10 +12,11 @@ use pollis_core::commands::auth::UserProfile;
 use pollis_core::state::AppState;
 
 use pollis_tui::auth::{self, Boot};
-use pollis_tui::{data, sync};
+use pollis_tui::{data, send, sync};
 
 use crate::home::{
-    should_load_older, ConvKind, ConvRef, Focus, HomeState, OpenConversation, RowTarget,
+    is_blank, should_load_older, ConvKind, ConvRef, Focus, HomeMode, HomeState, OpenConversation,
+    PromptKind, RowTarget,
 };
 
 /// Background-sync cadence (spec §6: ~3–5 s while foregrounded). The loop polls
@@ -61,6 +62,13 @@ pub enum Action {
     OpenSelected,
     /// Fetch the next older page of the open conversation (scrollback).
     LoadOlder,
+    /// Send the compose buffer to the open conversation (§8 "Send message").
+    SendMessage,
+    /// Accept the given pending DM request (§8 "Accept DM request").
+    AcceptDm(String),
+    /// Submit the active create/invite prompt (new group/channel, start DM,
+    /// invite), dispatching on the current [`HomeMode::Prompt`] kind.
+    SubmitPrompt,
 }
 
 pub struct App {
@@ -172,11 +180,23 @@ impl App {
         }
     }
 
-    /// Handle a key on the three-pane Home screen. Navigation (focus, selection,
-    /// group expansion, scrolling) is handled inline; the two things that need an
-    /// async DB round-trip — opening a conversation and paging older history —
-    /// return an [`Action`] for the caller to run after a redraw.
+    /// Handle a key on the three-pane Home screen. The screen has three input
+    /// modes — navigate, compose (typing a message), and prompt (a create/invite
+    /// bottom bar) — each with its own handler. Compose/prompt keystrokes edit
+    /// [`Self::input`]; the write-triggering keys return an [`Action`].
     fn on_home_key(&mut self, key: KeyEvent) -> Option<Action> {
+        match self.home.mode {
+            HomeMode::Navigate => self.on_home_nav_key(key),
+            HomeMode::Compose => self.on_compose_key(key),
+            HomeMode::Prompt(_) => self.on_prompt_key(key),
+        }
+    }
+
+    /// Navigate mode: tree movement + the command keys that open compose or a
+    /// create/invite prompt. The two async reads (open a conversation, page
+    /// history) return an [`Action`]; the write-triggering keys hand off to the
+    /// `begin_*` helpers.
+    fn on_home_nav_key(&mut self, key: KeyEvent) -> Option<Action> {
         match key.code {
             KeyCode::Char('q') => {
                 self.should_quit = true;
@@ -194,14 +214,164 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.on_home_down(1),
             KeyCode::PageUp => self.on_home_up(self.msg_height.max(1)),
             KeyCode::PageDown => self.on_home_down(self.msg_height.max(1)),
+            // `i` (or Enter on the message pane) enters compose for the open conv.
+            KeyCode::Char('i') => self.begin_compose(),
+            // `a` accepts the selected pending DM request.
+            KeyCode::Char('a') => self.begin_accept_dm(),
+            // Create/invite flows open an inline bottom-bar prompt.
+            KeyCode::Char('g') => self.begin_prompt(PromptKind::NewGroup),
+            KeyCode::Char('c') => self.begin_new_channel_prompt(),
+            KeyCode::Char('d') => self.begin_prompt(PromptKind::StartDm),
+            KeyCode::Char('v') => self.begin_invite_prompt(),
             KeyCode::Enter => {
                 if self.home.focus == Focus::Sidebar {
                     return self.activate_selection();
                 }
+                // Message pane focused → start composing.
+                self.begin_compose()
+            }
+            _ => None,
+        }
+    }
+
+    /// Compose mode: type into the buffer; Enter sends (empty is a no-op); Esc
+    /// leaves so navigation keys work again.
+    fn on_compose_key(&mut self, key: KeyEvent) -> Option<Action> {
+        match key.code {
+            KeyCode::Esc => {
+                self.leave_input_mode();
+                None
+            }
+            KeyCode::Enter => {
+                if is_blank(&self.input) {
+                    // Empty/whitespace-only input does not send.
+                    None
+                } else {
+                    self.status = Some("Sending…".to_string());
+                    Some(Action::SendMessage)
+                }
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+                None
+            }
+            KeyCode::Char(c) => {
+                self.input.push(c);
                 None
             }
             _ => None,
         }
+    }
+
+    /// Prompt mode: type into the buffer; Enter submits (empty is rejected with a
+    /// hint); Esc cancels.
+    fn on_prompt_key(&mut self, key: KeyEvent) -> Option<Action> {
+        match key.code {
+            KeyCode::Esc => {
+                self.leave_input_mode();
+                None
+            }
+            KeyCode::Enter => {
+                if is_blank(&self.input) {
+                    self.status = Some("Enter a value, or Esc to cancel.".to_string());
+                    None
+                } else {
+                    Some(Action::SubmitPrompt)
+                }
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+                None
+            }
+            KeyCode::Char(c) => {
+                self.input.push(c);
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Enter compose mode for the open conversation. Guards: nothing open →
+    /// guidance; an un-accepted DM request → tell the user to accept it first
+    /// (its MLS tree has no send path until accepted).
+    fn begin_compose(&mut self) -> Option<Action> {
+        match self.home.open.as_ref().map(|o| o.kind) {
+            None => {
+                self.status = Some("Open a conversation first (Enter on the sidebar).".to_string());
+            }
+            Some(Some(ConvKind::DmRequest)) => {
+                self.status =
+                    Some("Accept this request first (press a) before sending.".to_string());
+            }
+            Some(_) => {
+                self.home.mode = HomeMode::Compose;
+                self.home.focus = Focus::Messages;
+                self.input.clear();
+                self.status =
+                    Some("Composing — type a message, Enter to send, Esc to cancel.".to_string());
+            }
+        }
+        None
+    }
+
+    /// Accept the selected pending DM request, if the highlighted row is one.
+    fn begin_accept_dm(&mut self) -> Option<Action> {
+        match self.home.selected_dm_request() {
+            Some(id) => {
+                self.status = Some("Accepting…".to_string());
+                Some(Action::AcceptDm(id))
+            }
+            None => {
+                self.status =
+                    Some("Highlight a pending request (in Requests) to accept.".to_string());
+                None
+            }
+        }
+    }
+
+    /// Open a create/invite prompt (bottom input bar) collecting text for `kind`.
+    fn begin_prompt(&mut self, kind: PromptKind) -> Option<Action> {
+        self.status = Some(format!("{} — Enter to submit, Esc to cancel.", kind.label()));
+        self.home.mode = HomeMode::Prompt(kind);
+        self.input.clear();
+        None
+    }
+
+    /// Open the "new channel" prompt scoped to the selected group (or the group
+    /// owning the selected channel). Needs a group in context.
+    fn begin_new_channel_prompt(&mut self) -> Option<Action> {
+        match self.home.context_group() {
+            Some((group_id, group_name)) => self.begin_prompt(PromptKind::NewChannel {
+                group_id,
+                group_name,
+            }),
+            None => {
+                self.status =
+                    Some("Highlight a group (or one of its channels) first.".to_string());
+                None
+            }
+        }
+    }
+
+    /// Open the "invite to group" prompt scoped to the group in context.
+    fn begin_invite_prompt(&mut self) -> Option<Action> {
+        match self.home.context_group() {
+            Some((group_id, group_name)) => self.begin_prompt(PromptKind::Invite {
+                group_id,
+                group_name,
+            }),
+            None => {
+                self.status = Some("Highlight a group to invite someone to.".to_string());
+                None
+            }
+        }
+    }
+
+    /// Leave compose/prompt back to navigation, clearing the shared buffer.
+    fn leave_input_mode(&mut self) {
+        self.home.mode = HomeMode::Navigate;
+        self.input.clear();
+        self.status = None;
     }
 
     /// Up/`k` (or PageUp): in the sidebar move the highlight, in the message pane
@@ -368,8 +538,113 @@ impl App {
             }
             Action::OpenSelected => self.load_open_first_page().await,
             Action::LoadOlder => self.load_open_older().await,
+            Action::SendMessage => self.do_send().await,
+            Action::AcceptDm(id) => self.do_accept_dm(&id).await,
+            Action::SubmitPrompt => self.do_submit_prompt().await,
         }
         None
+    }
+
+    /// Send the compose buffer to the open conversation, then re-read its newest
+    /// page so the sent message appears immediately (the core stores it locally
+    /// on send). Stays in compose mode on success so the user can keep typing; a
+    /// failure surfaces on the status line and the text is preserved for a retry.
+    async fn do_send(&mut self) {
+        let Some(conv_id) = self.home.open.as_ref().map(|o| o.conv_id.clone()) else {
+            self.leave_input_mode();
+            return;
+        };
+        let text = self.input.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let user_id = self.user_id();
+        let username = self.identity().map(|s| s.to_string());
+        match send::send_text(&self.state, &user_id, username, &conv_id, &text).await {
+            Ok(_) => {
+                self.input.clear();
+                self.status = None;
+                // Pin to newest and surface the just-sent message.
+                if let Some(open) = self.home.open.as_mut() {
+                    open.scroll = 0;
+                }
+                self.refresh_open().await;
+            }
+            Err(e) => self.status = Some(format!("Send failed: {e}")),
+        }
+    }
+
+    /// Accept a pending DM request, then refresh the tree so it moves from
+    /// Requests to Direct Messages.
+    async fn do_accept_dm(&mut self, dm_id: &str) {
+        let user_id = self.user_id();
+        match send::accept_dm(&self.state, &user_id, dm_id).await {
+            Ok(()) => {
+                self.status = Some("Request accepted.".to_string());
+                self.refresh_tree().await;
+            }
+            Err(e) => self.status = Some(format!("Couldn't accept request: {e}")),
+        }
+    }
+
+    /// Dispatch the active create/invite prompt on its [`HomeMode::Prompt`] kind,
+    /// then refresh the tree so a new group/channel/DM appears. Any failure (user
+    /// not found, not an admin, …) lands on the status line — never a panic. The
+    /// buffer is consumed and the screen returns to navigation on success.
+    async fn do_submit_prompt(&mut self) {
+        let HomeMode::Prompt(kind) = self.home.mode.clone() else {
+            return;
+        };
+        let value = self.input.trim().to_string();
+        if value.is_empty() {
+            return;
+        }
+        let user_id = self.user_id();
+        let result: anyhow::Result<&'static str> = match kind {
+            PromptKind::NewGroup => send::new_group(&self.state, &user_id, &value)
+                .await
+                .map(|_| "Group created."),
+            PromptKind::NewChannel { group_id, .. } => {
+                send::new_channel(&self.state, &group_id, &user_id, &value)
+                    .await
+                    .map(|_| "Channel created.")
+            }
+            PromptKind::StartDm => self.resolve_and_start_dm(&user_id, &value).await,
+            PromptKind::Invite { group_id, .. } => {
+                send::invite(&self.state, &group_id, &user_id, &value)
+                    .await
+                    .map(|_| "Invite sent.")
+            }
+        };
+        match result {
+            Ok(done) => {
+                self.leave_input_mode();
+                self.status = Some(done.to_string());
+                self.refresh_tree().await;
+            }
+            // Stay in the prompt (buffer intact) so the user can correct + retry.
+            Err(e) => self.status = Some(format!("{e}")),
+        }
+    }
+
+    /// Look a user up by username/email, then open a DM to them. A miss is a
+    /// clean error, not a panic — the prompt stays open for a corrected try.
+    async fn resolve_and_start_dm(
+        &self,
+        user_id: &str,
+        identifier: &str,
+    ) -> anyhow::Result<&'static str> {
+        let found =
+            pollis_core::commands::user::search_user_by_username(identifier.to_string(), &self.state)
+                .await?;
+        let Some(other) = found else {
+            anyhow::bail!("No user found for “{identifier}”.");
+        };
+        if other.id == user_id {
+            anyhow::bail!("That's you — pick someone else.");
+        }
+        send::start_dm(&self.state, user_id, &other.id).await?;
+        Ok("DM started.")
     }
 
     /// Re-read the conversation tree from the local DB (populated by the sync

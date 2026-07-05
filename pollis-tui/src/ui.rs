@@ -12,7 +12,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Screen};
-use crate::home::{visible_window, ConvKind, Focus, HomeState};
+use crate::home::{visible_window, ConvKind, Focus, HomeMode, HomeState};
 
 /// A solid selection background (no glow — repo rule): reverse-style highlight.
 const SEL_BG: Color = Color::Rgb(45, 45, 52);
@@ -39,7 +39,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     render_header(frame, chunks[0], app);
     if app.screen == Screen::Home {
-        render_home(frame, chunks[1], &app.home);
+        render_home(frame, chunks[1], app);
     } else {
         render_auth_body(frame, chunks[1], app);
     }
@@ -102,18 +102,65 @@ fn sync_indicator(home: &HomeState) -> Vec<Span<'static>> {
 }
 
 /// The three-pane client body: sidebar tree on the left, message list on the
-/// right.
-fn render_home(frame: &mut Frame, area: Rect, home: &HomeState) {
+/// right, plus a bottom input bar (compose or create/invite prompt) when the
+/// screen is in an input mode — the desktop app's "replace the input bar"
+/// pattern, never a modal overlay.
+fn render_home(frame: &mut Frame, area: Rect, app: &App) {
+    let home = &app.home;
+    // Reserve a bottom bar for compose/prompt input when one is active.
+    let body = if home.mode == HomeMode::Navigate {
+        area
+    } else {
+        let rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .split(area);
+        render_input_bar(frame, rows[1], app);
+        rows[0]
+    };
+
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(SIDEBAR_WIDTH),
             Constraint::Min(10),
         ])
-        .split(area);
+        .split(body);
 
     render_sidebar(frame, cols[0], home);
     render_messages(frame, cols[1], home);
+}
+
+/// The bottom input bar: a solid-bordered line labeled with what it's collecting
+/// (compose = the conversation; prompt = the create/invite action), showing the
+/// live buffer with a caret. No glow — a plain accent border.
+fn render_input_bar(frame: &mut Frame, area: Rect, app: &App) {
+    let label = match &app.home.mode {
+        HomeMode::Compose => {
+            let name = app
+                .home
+                .open
+                .as_ref()
+                .map(|o| o.name.clone())
+                .unwrap_or_else(|| "Message".to_string());
+            format!(" Message {name} ")
+        }
+        HomeMode::Prompt(kind) => format!(" {} ", kind.label()),
+        HomeMode::Navigate => " Input ".to_string(),
+    };
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Rgb(90, 140, 200)))
+        .title(Span::styled(label, Style::default().add_modifier(Modifier::BOLD)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let line = Line::from(vec![
+        Span::styled("› ", Style::default().fg(Color::Cyan)),
+        Span::raw(app.input.clone()),
+        Span::styled("▏", Style::default().add_modifier(Modifier::SLOW_BLINK)),
+    ]);
+    frame.render_widget(Paragraph::new(line), inner);
 }
 
 fn render_sidebar(frame: &mut Frame, area: Rect, home: &HomeState) {
@@ -312,7 +359,7 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
     }
     if spans.is_empty() {
         let help = if app.screen == Screen::Home {
-            "↑/↓ move · Tab switch pane · Enter open · q quit"
+            home_help(&app.home.mode)
         } else {
             "Ctrl-C to quit"
         };
@@ -322,6 +369,18 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         Paragraph::new(Line::from(spans)).alignment(Alignment::Left),
         area,
     );
+}
+
+/// The status-bar key hints for the Home screen, per input mode — the in-app
+/// discovery surface for compose / accept / create / invite / quit.
+fn home_help(mode: &HomeMode) -> &'static str {
+    match mode {
+        HomeMode::Navigate => {
+            "↑/↓ move · Tab pane · Enter open · i compose · a accept · g group · c channel · d DM · v invite · q quit"
+        }
+        HomeMode::Compose => "Type · Enter send · Esc cancel",
+        HomeMode::Prompt(_) => "Type · Enter submit · Esc cancel",
+    }
 }
 
 /// Mask a PIN/secret as bullets so it never renders in the clear.
