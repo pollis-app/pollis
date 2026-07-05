@@ -240,6 +240,49 @@ main {
   background: rgba(253, 186, 116, 0.08);
 }
 
+/* ── Terminal client ─────────────────────────────────────────── */
+.terminal-section {
+  padding: 0 2rem 4rem;
+  width: 100%;
+  max-width: 800px;
+  text-align: center;
+}
+
+.terminal-heading {
+  font-size: 1.5rem;
+  margin-bottom: 1rem;
+  color: var(--c-text);
+}
+
+.terminal-desc {
+  color: var(--c-text-muted);
+  line-height: 1.6;
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+.terminal-section .install-block {
+  max-width: 560px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.terminal-desc code,
+.terminal-note code {
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  color: var(--c-accent);
+  background: rgba(253, 186, 116, 0.08);
+  padding: 0.05rem 0.3rem;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+
+.terminal-note {
+  color: var(--c-text-muted);
+  font-size: 0.85rem;
+  margin-top: 1.25rem;
+}
+
 /* ── Footer links (GitHub etc.) ──────────────────────────────── */
 .footer-links {
   display: flex;
