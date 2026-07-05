@@ -7,8 +7,9 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
 
 - **Crate:** `pollis-tui/` (workspace member). Binary name: `pollis`.
 - **Design contract:** [`docs/pollis-tui-spec.md`](../../docs/pollis-tui-spec.md) — authoritative.
-- **Status:** M0 (skeleton) + M1 (auth) implemented. M2 (read), M3 (write),
-  M4 (multi-device enrollment) are the follow-on milestones in the spec.
+- **Status:** M0 (skeleton) + M1 (auth) + M2 (read core) + M2b (three-pane UI)
+  implemented. M3 (write), M4 (multi-device enrollment) are the follow-on
+  milestones in the spec.
 
 ## Why a TUI
 
@@ -38,11 +39,14 @@ pollis-tui (binary `pollis`)
 ### Source layout
 | File | Role |
 |---|---|
-| `src/main.rs` | Entry. Multi-thread tokio runtime, `Config::from_env` → `AppState::new`, terminal setup, render/input loop, panic hook. |
+| `src/main.rs` | Entry. Multi-thread tokio runtime, `Config::from_env` → `AppState::new`, terminal setup, `tokio::select!` render/input loop (key input + UI-refresh tick), panic hook, clean sync-loop shutdown. |
 | `src/terminal.rs` | `TerminalGuard` — RAII enter/leave raw mode + alt screen; restores the terminal on **every** exit path (quit, `?`, panic). |
-| `src/app.rs` | `App` state machine: `Screen` enum, synchronous `on_key`, async `run(Action)`. |
+| `src/app.rs` | `App` state machine: `Screen` enum, synchronous `on_key` (auth + Home navigation), async `run(Action) -> Option<Action>` (returns a follow-up action), background `SyncLoop` ownership + `shutdown()`. |
+| `src/home.rs` | The M2b three-pane model + **pure, unit-tested** helpers: sidebar flattening (`build_sidebar_rows`), selection movement (`step_selection`/`clamp_selection`), bottom-anchored scroll windowing (`visible_window`), scrollback prefetch (`should_load_older`), page merge/dedup (`merge_messages`). |
 | `src/auth.rs` | Thin wrappers over `pollis_core::commands::{auth,pin}` that encode the M1 call order. No forked logic. |
-| `src/ui.rs` | Pure `render(frame, &app)` — header / body card / status line. |
+| `src/data.rs` | Typed read layer: `load_conversations` (tree) + `channel_messages`/`dm_messages` (paginated). Shared by `sync.rs` and the Home UI. |
+| `src/sync.rs` | §6 poll loop: `sync_once`/`sync_rounds` + `spawn_loop` (cancelable background `SyncLoop`). |
+| `src/ui.rs` | Pure `render(frame, &app)` — header (identity · open-conversation name · sync spinner) / three-pane Home body / auth card / status line. |
 
 ### Key design points (from the spec)
 - **Multi-thread runtime is mandatory.** `pollis-core`'s DB/keystore paths use
@@ -153,16 +157,86 @@ commits then replay into) and the message read runs **last** (it triggers the
 interleaved replay+decrypt that surfaces a peer's message). One round can leave a
 recovering member mid-handshake, so `sync_rounds` runs a fixed few (~4 settle an
 interleaved catch-up). `spawn_loop` runs `sync_once` on a 3–5 s cadence in a
-cancelable background task the M2b UI will own.
+cancelable background task the Home UI owns (see below).
+
+## The three-pane client UI (M2b, spec §8)
+
+`Screen::Home` renders a three-pane client, all state living in
+`HomeState` (`src/home.rs`) and rendered as a **pure function** of that state by
+`ui.rs` (ratatui immediate mode — no retained widgets, no mutation during draw):
+
+```
+┌ header: " pollis — <user> · <open-conv> "            "<spinner> sync · N conversations" ┐
+├───────────────┬──────────────────────────────────────────────────────────────────────┤
+│ Conversations │  <open conversation name>                                              │
+│  ▾ General    │  alice   hey there                                                     │
+│    # welcome  │  bob     morning                                                       │
+│    # random   │  …newest at the bottom…                                                │
+│  Direct Msgs  │                                                                        │
+│    @ bob      │                                                                        │
+│  Requests     │                                                                        │
+│    @ eve …    │                                                                        │
+├───────────────┴──────────────────────────────────────────────────────────────────────┤
+│ ↑/↓ move · Tab switch pane · Enter open · q quit                                       │
+└───────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Left pane** — the conversation tree from `data::load_conversations`, flattened
+  by `build_sidebar_rows` into groups (expandable to their `#` channels), a Direct
+  Messages section, and a pending Requests section. Selection/focus use **solid**
+  styling (a filled background, brighter when the pane is focused) — no glow, per
+  the repo rule. Section headers are dim and skipped by navigation.
+- **Main pane** — the open conversation's messages, oldest kept first and rendered
+  **newest-at-bottom** via `visible_window` (bottom-anchored, top-padded when the
+  buffer is short). Scrolling up past the loaded buffer prefetches the next older
+  page through `data::*_messages`' `next_cursor` (`should_load_older` +
+  `Action::LoadOlder`). Empty / first-load / pending-request / undecryptable states
+  are all handled explicitly.
+- **Header/status** — identity (username), the open conversation's name, and a
+  live sync spinner + conversation count; the status line shows the keybindings or
+  the latest transient status/error.
+
+**Keys:** `↑/↓` or `j/k` move (sidebar selection, or message scroll when the main
+pane is focused); `Tab` cycles focus; `Enter` toggles a group / opens a
+conversation; `PageUp`/`PageDown` scroll by a screen; `q` or `Ctrl-C` quit. No
+modal overlays — everything is a pane or a full-screen view.
+
+### Sync → UI refresh wiring (the M2b integration)
+
+The background `sync::spawn_loop` (4 s cadence) mutates the **local DB** off-thread;
+the UI is decoupled from it and re-reads on its **own** faster tick so a synced
+message surfaces within a frame:
+
+1. On reaching `Screen::Home`, `Action::EnterHome` starts the `SyncLoop` (held on
+   `App`) and queues the first `Action::Refresh`.
+2. `main.rs`'s run loop is a `tokio::select!` over **{key input mpsc, a
+   `UI_REFRESH` (750 ms) `tokio::time::interval`}**. A refresh tick (only while on
+   Home) queues `Action::Refresh`; key input never blocks on a slow sync round.
+3. `Action::Refresh` re-runs `data::load_conversations` (rebuilding the sidebar,
+   preserving selection/expansion) and re-reads the open conversation's newest page,
+   merging it in with `merge_messages` (dedup by id, incoming wins) so scrollback and
+   scroll position survive. The sync spinner advances one frame per refresh.
+4. On quit, `App::shutdown()` `cancel()`s the `SyncLoop` (letting the current round
+   finish, with a 2 s timeout) **before** the `TerminalGuard` restores the terminal.
+
+This satisfies §6's "a slow sync round must not freeze input": the loop and the UI
+communicate only through the local DB + a UI-side timer, never a shared lock held
+across a render. Rather than reach into `sync.rs` for a notify channel, the UI
+polls the DB it already reads — a smaller, decoupled surface (the alternative §6
+allows).
 
 ## Milestones
 - **M0** — skeleton: crate + workspace wiring, `AppState::new` boot, ratatui event
   loop, clean quit. ✅
 - **M1** — auth: first-device signup (OTP→PIN→`initialize_identity`) + returning
   `get_session`→`unlock`. ✅
-- **M2** — read: sync/read core done — `data.rs` (conversation tree + paginated
+- **M2** — read: sync/read core — `data.rs` (conversation tree + paginated
   message reads) + `sync.rs` (§6 poll loop), gated by the cross-client `sync_smoke`.
-  ✅ (M2b: the ratatui three-pane UI on top is the next pass.)
+  ✅
+- **M2b** — the ratatui three-pane client UI (`home.rs` + `ui.rs`) wired to the
+  M2 read/sync core, with the background sync → UI-refresh loop above. Pure
+  helpers (tree flattening, selection, scroll windowing, pagination merge) are
+  unit-tested; the interactive terminal itself isn't in-box smoke-testable. ✅
 - **M3** — write: send, create group/channel, start/accept DM, invites.
 - **M4** — multi-device enrollment + Secret-Key recovery UX.
 
