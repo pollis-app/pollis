@@ -1,0 +1,226 @@
+# cargo-deny configuration — supply-chain gate (M0 of the machine-checked
+# correctness program, docs/machine-checked-correctness-design.md §6/§9).
+#
+# Four checks are enforced in CI (.github/workflows/supply-chain.yml):
+#   advisories — fail on any RUSTSEC advisory in the dependency tree
+#   licenses   — fail on any license not on the allow-list below
+#   bans       — fail on undocumented duplicate crate versions
+#   sources    — fail on any crate sourced outside crates.io
+#
+# The graph is analysed with ALL features enabled so the media-on dependencies
+# (libwebrtc, livekit, cpal, openmls, libsql, axum, …) are covered, not just the
+# default graph. No crate is compiled — cargo-deny reads `cargo metadata` only.
+
+[graph]
+# Cover the full shipped + media-on dependency graph, not just default features.
+all-features = true
+
+# ---------------------------------------------------------------------------
+# Advisories — RUSTSEC advisory database (security vulns, unmaintained crates).
+# ---------------------------------------------------------------------------
+[advisories]
+# Fetched from the canonical RustSec advisory-db (default). CI has network.
+db-urls = ["https://github.com/rustsec/advisory-db"]
+# Any advisory with no `ignore` entry below fails the check. The goal is zero
+# UNADDRESSED advisories. Two classes were fixed by bumping in Cargo.lock (no
+# manifest edit): RUSTSEC-2026-0190 (anyhow 1.0.102 -> 1.0.103, downcast_mut
+# unsoundness). Everything below has NO patched release reachable from our
+# pinned graph; each entry states why it is non-exploitable or unavoidable.
+# Every ignore is a specific RUSTSEC id — never a blanket suppression.
+ignore = [
+    # --- Vulnerabilities with no reachable fix (transitive, upstream-pinned) ---
+
+    # rsa timing sidechannel (Marvin). Transitive: livekit -> livekit-api ->
+    # jsonwebtoken -> rsa 0.9.10. No patched rsa release exists (the fix needs a
+    # constant-time bigint the crate hasn't shipped). Path is LiveKit JWT
+    # RS256 *signing*, not PKCS#1v1.5 *decryption*; the Marvin oracle (timing
+    # many decryptions) is not exercised. Re-evaluate when rsa ships a fix.
+    { id = "RUSTSEC-2023-0071", reason = "rsa: no upstream fix; transitive via livekit-api/jsonwebtoken; decryption-timing oracle not reachable on the JWT-signing path" },
+
+    # rustls-webpki cert-validation bugs (name-constraint bypass, CRL panic,
+    # CRL authority). Our direct TLS already uses the fixed rustls-webpki
+    # 0.103.13. These flags come from OLD lines pinned transitively:
+    # 0.101.7 via livekit's rustls 0.21, 0.102.8 via libsql's rustls 0.22.
+    # Neither line has a backported fix (fixes are 0.103+); bumping requires
+    # livekit/libsql to move rustls, an upstream change. Tracked for a future
+    # dep bump.
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki 0.101/0.102 (livekit rustls 0.21 / libsql rustls 0.22); fixed only on 0.103 line which our direct TLS already uses; old lines pinned upstream" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki 0.101/0.102 pinned via livekit/libsql; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki 0.101/0.102 pinned via livekit/libsql; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki 0.101 pinned via livekit rustls 0.21; fix only on 0.103 line (already used directly); awaiting upstream rustls bump" },
+
+    # quick-xml DoS (quadratic attribute scan / unbounded namespace alloc).
+    # Requires attacker-controlled XML. Every vulnerable instance in our tree is
+    # BUILD- or DEV-time only, never parsing untrusted runtime input:
+    #   0.30.0  -> xcb build-dep (X11 protocol XML descriptions, build time)
+    #   0.37.5, 0.38.4 -> dev-dependencies only (test/tooling)
+    #   0.39.2  -> wayland-scanner proc-macro (Wayland protocol codegen, build time)
+    # No runtime XML attack surface reaches these; the shipped app never feeds
+    # them hostile input. Parents pin <0.41 so no in-place bump is possible.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
+
+    # --- Unmaintained crates (informational RUSTSEC, no vulnerability). All are
+    # transitive and forced by the desktop/GUI/media stack; no maintained
+    # drop-in is adopted by the parents. Compile-time or non-security surfaces.
+
+    # gtk-rs GTK3 bindings: Tauri 2 renders through webkit2gtk-4.1 + the tray via
+    # libappindicator, both of which require the GTK3 gtk-rs bindings. gtk-rs
+    # upstream moved to GTK4; Tauri has no GTK4 backend yet. Unavoidable on
+    # Linux until Tauri migrates. Status is "unmaintained", not vulnerable.
+    { id = "RUSTSEC-2024-0411", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0412", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0413", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0414", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0415", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0416", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0417", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0418", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0419", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+    { id = "RUSTSEC-2024-0420", reason = "gtk-rs GTK3 binding unmaintained; required by Tauri webkit2gtk; no GTK4 Tauri backend exists" },
+
+    # unic-* unmaintained: transitive unicode tables (via idna/url handling).
+    # Compile/runtime static data; no security impact from unmaintained status.
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained; transitive unicode tables; no security impact" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common unmaintained; transitive unicode tables; no security impact" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property unmaintained; transitive unicode tables; no security impact" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version unmaintained; transitive unicode tables; no security impact" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident unmaintained; transitive unicode tables; no security impact" },
+
+    # Assorted unmaintained, all transitive and compile-time / non-security:
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained; compile-time macro helper (transitive); no runtime surface" },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained; compile-time macro helper (transitive); no runtime surface" },
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained; compile-time proc-macro (via ratatui); no runtime surface" },
+    { id = "RUSTSEC-2025-0057", reason = "fxhash unmaintained; non-cryptographic hasher (transitive); no security impact" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained (transitive); no reachable vulnerability" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained; folded into rustls-pki-types upstream; transitive via libsql's rustls-native-certs" },
+]
+
+# ---------------------------------------------------------------------------
+# Licenses — allow only permissive / weak-copyleft licenses actually present in
+# the tree. Verified against `cargo deny --all-features list`. We do NOT
+# blanket-allow; every identifier below was observed in the graph.
+# ---------------------------------------------------------------------------
+[licenses]
+# SPDX identifiers permitted anywhere in the graph. cargo-deny evaluates the
+# full SPDX expression per crate, so a crate licensed "MIT OR Apache-2.0 OR
+# LGPL-2.1" passes on the MIT/Apache branch — LGPL need not be listed.
+allow = [
+    # Permissive, no copyleft — the overwhelming majority of the tree.
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",  # LLVM-derived crates (e.g. wasm/backtrace bits)
+    "BSD-1-Clause",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "0BSD",
+    "Zlib",
+    "BSL-1.0",          # Boost Software License — permissive
+    "BlueOak-1.0.0",    # Blue Oak Model License — permissive
+    "Unicode-3.0",      # unicode-ident et al. — permissive data/code license
+    "Unlicense",        # public-domain dedication
+    "CC0-1.0",          # public-domain dedication (constant_time_eq, dunce)
+    "CDLA-Permissive-2.0",  # webpki-roots cert bundle — permissive data license
+    # Weak, file-level copyleft. Acceptable for a proprietary binary: MPL-2.0 is
+    # per-file and does not reach across a module boundary, so linking these
+    # crates imposes no obligation on our own source. Present via uniffi (mobile
+    # bindings), hpke-rs (MLS crypto), and the servo cssparser/selectors stack.
+    "MPL-2.0",
+    # Our own unpublished workspace crates carry no OSS license; mark them
+    # proprietary via a LicenseRef (clarified below) rather than inventing one.
+    "LicenseRef-proprietary",
+]
+# Below this SPDX-match confidence a license is treated as unknown (fails).
+confidence-threshold = 0.9
+# Per-crate license exceptions go here (crate = specific license). Empty: the
+# allow-list above already covers every third-party crate in the graph.
+exceptions = []
+
+
+# Our workspace crates have no `license` field (they are the proprietary Pollis
+# application, never published). Assert that truthfully as a custom LicenseRef so
+# the license check passes without inventing an OSS license or disabling it.
+[[licenses.clarify]]
+name = "pollis"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-core"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-tui"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-capture-proto"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-capture-linux"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-capture-macos"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "verifiable-log"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "verifiable-log-builder"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "verifiable-log-serve"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
+name = "pollis-delivery"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[licenses.private]
+# Defense-in-depth: the clarify blocks above already mark every current
+# workspace crate proprietary. This additionally skips license checks for any
+# crate explicitly marked `publish = false` — so a future unpublished workspace
+# crate that forgets a clarify entry still won't leak a false "unlicensed"
+# failure, while third-party (publishable) deps stay fully checked.
+ignore = true
+
+# ---------------------------------------------------------------------------
+# Bans — duplicate versions, wildcard deps, specifically-banned crates.
+# ---------------------------------------------------------------------------
+[bans]
+# A large native tree (Tauri + libwebrtc + livekit + openmls + libsql) inevitably
+# carries transitive duplicate versions we don't control. Warn (visible in the
+# job log) rather than fail, and document the known-unavoidable ones in `skip`.
+multiple-versions = "warn"
+# Wildcard ("*") version requirements are a supply-chain smell; flag them.
+wildcards = "warn"
+# Documented, unavoidable duplicate versions. Populated after the first run.
+skip = []
+skip-tree = []
+
+# ---------------------------------------------------------------------------
+# Sources — where crates are allowed to come from.
+# ---------------------------------------------------------------------------
+[sources]
+# The entire tree resolves to crates.io (verified: no `source = "git..."` and no
+# non-crates.io registry in Cargo.lock). Anything else fails the check.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

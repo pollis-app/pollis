@@ -1,0 +1,47 @@
+name: Supply Chain
+
+# Dependency-supply-chain gate for the machine-checked-correctness program
+# (#452, M0). cargo-deny enforces advisories / licenses / bans / sources;
+# cargo-vet enforces per-crate review provenance. Both are metadata-only — no
+# crate compilation, so this job needs no native build deps and stays fast.
+# A new/bumped crate that trips an advisory, an unlisted license, an untrusted
+# source, or an unvetted review now fails the PR.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supply-chain-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Prebuilt binaries — no compile step, keeps the gate fast. Versions are
+      # PINNED: cargo-vet's imports.lock format is version-specific, so CI must
+      # run the same version that generated the committed supply-chain/ files
+      # (else --locked fails to parse). Bump these deliberately, regenerating
+      # supply-chain/ in the same commit.
+      - name: Install cargo-deny + cargo-vet
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.19.9,cargo-vet@0.10.2
+
+      # Advisories need the RustSec DB (fetched over the network on CI).
+      - name: cargo deny check
+        run: cargo deny check
+
+      # --locked: verify against the committed lockfile + pinned import audits.
+      - name: cargo vet
+        run: cargo vet --locked
