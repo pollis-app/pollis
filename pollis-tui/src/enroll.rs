@@ -44,7 +44,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use pollis_core::commands::device_enrollment;
+use pollis_core::commands::{auth, device_enrollment, pin};
 use pollis_core::state::AppState;
 
 // Re-export the DTOs so the M4b UI (and the smokes) can render/inspect them
@@ -84,6 +84,28 @@ pub async fn enrollment_status(
 /// DB (the account key is in `state.unlock` by then).
 pub async fn finalize(state: &Arc<AppState>, user_id: String) -> Result<()> {
     device_enrollment::finalize_device_enrollment(state, user_id).await?;
+    Ok(())
+}
+
+/// New device: the SetPin tail shared by BOTH the approval and recovery paths.
+/// Once the account key is in `state.unlock` (installed by an `Approved`
+/// [`enrollment_status`] poll or by [`recover`]), this device sets its OWN PIN —
+/// which opens the local SQLCipher DB — then [`finalize`]s (publishes its
+/// cross-signing cert + fresh key packages and external-joins every group/DM) and
+/// runs `initialize_identity`. Mirrors the rig's `finish_enrollment`; the ORDER
+/// (set_pin → finalize → initialize_identity) is load-bearing, exactly as the
+/// first-device tail is set_pin → initialize_identity.
+pub async fn set_pin_and_finalize(
+    state: &Arc<AppState>,
+    user_id: &str,
+    new_pin: &str,
+) -> Result<()> {
+    // old_pin = None: this device has never had a PIN. The key material comes
+    // from the account key already installed in `state.unlock`, not a bootstrap
+    // session, so `finalize` must follow before `initialize_identity`.
+    pin::set_pin(state, None, new_pin.to_string()).await?;
+    finalize(state, user_id.to_string()).await?;
+    auth::initialize_identity(state, user_id.to_string()).await?;
     Ok(())
 }
 

@@ -12,8 +12,10 @@ use pollis_core::commands::auth::UserProfile;
 use pollis_core::state::AppState;
 
 use pollis_tui::auth::{self, Boot};
+use pollis_tui::enroll::{self, EnrollmentHandle};
 use pollis_tui::{data, send, sync};
 
+use crate::enroll_flow::{poll_outcome, ApprovalState, EnrollChoice, PinFlow, PollOutcome};
 use crate::home::{
     is_blank, should_load_older, ConvKind, ConvRef, Focus, HomeMode, HomeState, OpenConversation,
     PromptKind, RowTarget,
@@ -34,10 +36,22 @@ pub enum Screen {
     Email,
     /// First-device signup: enter the OTP code.
     Otp,
-    /// First-device signup: choose a PIN.
+    /// Set a PIN for THIS device — shared by first-device signup and a second
+    /// device's enroll/recover tail (the flow is tracked by [`App::pin_flow`]).
     SetPin,
     /// Returning user: enter the PIN to unlock the local DB.
     Unlock,
+    /// Second device (M4b): this account already exists elsewhere — choose to
+    /// enroll via a sibling's approval or recover with the Secret Key.
+    EnrollChoice,
+    /// Second device (M4b): the enrollment request is out; show its verification
+    /// code and poll `enrollment_status` until approved/rejected.
+    EnrollWaiting,
+    /// Second device (M4b): enter the Secret Key (Emergency Kit) to recover.
+    RecoverKey,
+    /// Existing device (M4b): the "Pending device enrollments" list — approve or
+    /// reject other devices requesting to join this account.
+    PendingEnrollments,
     /// Signed in and unlocked — the three-pane client (M2b).
     Home,
     /// Unrecoverable boot/config error — show it and let the user quit.
@@ -69,6 +83,20 @@ pub enum Action {
     /// Submit the active create/invite prompt (new group/channel, start DM,
     /// invite), dispatching on the current [`HomeMode::Prompt`] kind.
     SubmitPrompt,
+
+    // ── M4b: multi-device enrollment / recovery ──────────────────────────────
+    /// New device: kick off a sibling-approval enrollment request.
+    RequestEnrollment,
+    /// New device: poll `enrollment_status` once for the open request.
+    PollEnrollment(String),
+    /// New device: unwrap the account key with the entered Secret Key.
+    Recover,
+    /// Existing device: (re)load the pending enrollment requests for this account.
+    LoadPendingEnrollments,
+    /// Existing device: approve a pending request, confirming its code.
+    ApproveEnrollment { request_id: String, code: String },
+    /// Existing device: reject a pending request.
+    RejectEnrollment(String),
 }
 
 pub struct App {
@@ -91,6 +119,21 @@ pub struct App {
 
     /// The three-pane client model (populated once [`Screen::Home`] is reached).
     pub home: HomeState,
+
+    // ── M4b enrollment / recovery state ──────────────────────────────────────
+    /// Which flow the [`Screen::SetPin`] success handler completes into.
+    pub pin_flow: PinFlow,
+    /// Highlighted option on the [`Screen::EnrollChoice`] screen.
+    pub enroll_choice: EnrollChoice,
+    /// The open enrollment request (new device): its `request_id` (polled) and
+    /// `verification_code` (shown for the sibling to confirm).
+    pub enroll_handle: Option<EnrollmentHandle>,
+    /// Set once a poll reaches a terminal non-approved state (rejected/expired),
+    /// so the waiting screen offers retry instead of continuing to poll.
+    pub enroll_stopped: bool,
+    /// Existing device: the pending-approvals list + highlight.
+    pub approvals: ApprovalState,
+
     /// The running background poll loop; cancelled on quit for a clean shutdown.
     sync_loop: Option<sync::SyncLoop>,
     /// Last-rendered height (in rows) of the message pane, so the key handler can
@@ -110,6 +153,11 @@ impl App {
             email: String::new(),
             profile: None,
             home: HomeState::new(),
+            pin_flow: PinFlow::FirstDevice,
+            enroll_choice: EnrollChoice::Approval,
+            enroll_handle: None,
+            enroll_stopped: false,
+            approvals: ApprovalState::default(),
             sync_loop: None,
             msg_height: 0,
         }
@@ -152,7 +200,161 @@ impl App {
             Screen::Otp => self.on_text_key(key, InputKind::Digits(6), Action::VerifyOtp),
             Screen::SetPin => self.on_text_key(key, InputKind::Digits(4), Action::SetPinAndInit),
             Screen::Unlock => self.on_text_key(key, InputKind::Digits(4), Action::Unlock),
+            Screen::EnrollChoice => self.on_enroll_choice_key(key),
+            Screen::EnrollWaiting => self.on_enroll_waiting_key(key),
+            Screen::RecoverKey => self.on_recover_key(key),
+            Screen::PendingEnrollments => self.on_pending_enrollments_key(key),
         }
+    }
+
+    /// Enroll-choice screen (second device): pick between sibling-approval and
+    /// Secret-Key recovery. ↑/↓ (or `1`/`2`) move the highlight, Enter commits.
+    fn on_enroll_choice_key(&mut self, key: KeyEvent) -> Option<Action> {
+        match key.code {
+            KeyCode::Up | KeyCode::Down | KeyCode::Char('k') | KeyCode::Char('j') => {
+                self.enroll_choice = self.enroll_choice.toggle();
+                None
+            }
+            KeyCode::Char('1') => {
+                self.enroll_choice = EnrollChoice::Approval;
+                self.commit_enroll_choice()
+            }
+            KeyCode::Char('2') => {
+                self.enroll_choice = EnrollChoice::Recover;
+                self.commit_enroll_choice()
+            }
+            KeyCode::Enter => self.commit_enroll_choice(),
+            KeyCode::Char('q') => {
+                self.should_quit = true;
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Act on the highlighted enroll choice: approval kicks off a request; recovery
+    /// opens the Secret-Key entry screen.
+    fn commit_enroll_choice(&mut self) -> Option<Action> {
+        match self.enroll_choice {
+            EnrollChoice::Approval => {
+                self.status = Some("Requesting approval from your other device…".to_string());
+                Some(Action::RequestEnrollment)
+            }
+            EnrollChoice::Recover => {
+                self.goto(
+                    Screen::RecoverKey,
+                    "Enter your Secret Key (Emergency Kit), then press Enter.",
+                );
+                None
+            }
+        }
+    }
+
+    /// Waiting-for-approval screen (second device). While polling, only Ctrl-C
+    /// quits. Once a poll comes back rejected/expired, Enter returns to the choice
+    /// screen to try again.
+    fn on_enroll_waiting_key(&mut self, key: KeyEvent) -> Option<Action> {
+        if self.enroll_stopped {
+            match key.code {
+                KeyCode::Enter => {
+                    self.enroll_handle = None;
+                    self.enroll_stopped = false;
+                    self.goto(Screen::EnrollChoice, "This account already exists on another device.");
+                }
+                KeyCode::Char('q') => self.should_quit = true,
+                _ => {}
+            }
+        }
+        None
+    }
+
+    /// Secret-Key entry (second device): a free-text field. Enter recovers; Esc
+    /// returns to the choice screen.
+    fn on_recover_key(&mut self, key: KeyEvent) -> Option<Action> {
+        match key.code {
+            KeyCode::Esc => {
+                self.goto(Screen::EnrollChoice, "This account already exists on another device.");
+                None
+            }
+            KeyCode::Enter => {
+                if is_blank(&self.input) {
+                    self.status = Some("Paste or type your Secret Key, or Esc to go back.".to_string());
+                    None
+                } else {
+                    self.status = Some("Recovering with your Secret Key…".to_string());
+                    Some(Action::Recover)
+                }
+            }
+            KeyCode::Backspace => {
+                self.input.pop();
+                None
+            }
+            KeyCode::Char(c) => {
+                // The Secret Key can carry any non-whitespace glyph (hyphens,
+                // mixed case); the core validates it on unwrap.
+                if !c.is_whitespace() {
+                    self.input.push(c);
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Pending-enrollments list (existing device): ↑/↓ move, `a` approves the
+    /// highlighted request (with its shown code), `r` rejects it, Esc/`q` returns
+    /// to Home. No modal — a full-screen list with an action line.
+    fn on_pending_enrollments_key(&mut self, key: KeyEvent) -> Option<Action> {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.status = None;
+                self.screen = Screen::Home;
+                None
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.approvals.move_selection(-1);
+                None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.approvals.move_selection(1);
+                None
+            }
+            KeyCode::Char('a') => match self.approvals.current() {
+                Some(req) => {
+                    self.status = Some(format!("Approving device {}…", req.new_device_id));
+                    Some(Action::ApproveEnrollment {
+                        request_id: req.request_id.clone(),
+                        code: req.verification_code.clone(),
+                    })
+                }
+                None => {
+                    self.status = Some("No pending requests to approve.".to_string());
+                    None
+                }
+            },
+            KeyCode::Char('r') => match self.approvals.current() {
+                Some(req) => {
+                    self.status = Some(format!("Rejecting device {}…", req.new_device_id));
+                    Some(Action::RejectEnrollment(req.request_id.clone()))
+                }
+                None => {
+                    self.status = Some("No pending requests to reject.".to_string());
+                    None
+                }
+            },
+            _ => None,
+        }
+    }
+
+    /// The poll action for the waiting screen's refresh tick, if a request is open
+    /// and hasn't already reached a terminal state. `None` pauses polling.
+    pub fn enrollment_poll_action(&self) -> Option<Action> {
+        if self.enroll_stopped {
+            return None;
+        }
+        self.enroll_handle
+            .as_ref()
+            .map(|h| Action::PollEnrollment(h.request_id.clone()))
     }
 
     /// Shared editing behaviour for the text-entry screens.
@@ -223,6 +425,13 @@ impl App {
             KeyCode::Char('c') => self.begin_new_channel_prompt(),
             KeyCode::Char('d') => self.begin_prompt(PromptKind::StartDm),
             KeyCode::Char('v') => self.begin_invite_prompt(),
+            // `E` opens the pending device-enrollments list (approve/reject a
+            // second device requesting to join this account).
+            KeyCode::Char('E') => {
+                self.status = Some("Loading pending device enrollments…".to_string());
+                self.screen = Screen::PendingEnrollments;
+                Some(Action::LoadPendingEnrollments)
+            }
             KeyCode::Enter => {
                 if self.home.focus == Focus::Sidebar {
                     return self.activate_selection();
@@ -490,8 +699,22 @@ impl App {
                 let code = self.input.trim().to_string();
                 match auth::verify_otp(&self.state, &self.email, &code).await {
                     Ok(profile) => {
+                        // The branch point (spec §7): a fresh device for an account
+                        // that already exists elsewhere must enroll/recover, not
+                        // run first-device signup.
+                        let enrollment_required = profile.enrollment_required;
                         self.profile = Some(profile);
-                        self.goto(Screen::SetPin, "Choose a 4-digit PIN to secure this device.");
+                        if enrollment_required {
+                            self.pin_flow = PinFlow::NewDevice;
+                            self.enroll_choice = EnrollChoice::Approval;
+                            self.goto(
+                                Screen::EnrollChoice,
+                                "This account already exists on another device.",
+                            );
+                        } else {
+                            self.pin_flow = PinFlow::FirstDevice;
+                            self.goto(Screen::SetPin, "Choose a 4-digit PIN to secure this device.");
+                        }
                     }
                     Err(e) => self.fail(format!("{e}")),
                 }
@@ -499,7 +722,16 @@ impl App {
             Action::SetPinAndInit => {
                 let pin = self.input.clone();
                 let user_id = self.user_id();
-                match auth::set_pin_and_init(&self.state, &user_id, &pin).await {
+                // First device: set_pin → initialize_identity. A second device
+                // (already holding the account key in `state.unlock`, via approval
+                // or recovery): set_pin → finalize → initialize_identity.
+                let result = match self.pin_flow {
+                    PinFlow::FirstDevice => auth::set_pin_and_init(&self.state, &user_id, &pin).await,
+                    PinFlow::NewDevice => {
+                        enroll::set_pin_and_finalize(&self.state, &user_id, &pin).await
+                    }
+                };
+                match result {
                     // Reaching Home starts the sync loop + first tree load.
                     Ok(()) => {
                         self.goto(Screen::Home, "You're signed in.");
@@ -541,8 +773,127 @@ impl App {
             Action::SendMessage => self.do_send().await,
             Action::AcceptDm(id) => self.do_accept_dm(&id).await,
             Action::SubmitPrompt => self.do_submit_prompt().await,
+            Action::RequestEnrollment => self.do_request_enrollment().await,
+            Action::PollEnrollment(request_id) => return self.do_poll_enrollment(&request_id).await,
+            Action::Recover => self.do_recover().await,
+            Action::LoadPendingEnrollments => self.do_load_pending_enrollments().await,
+            Action::ApproveEnrollment { request_id, code } => {
+                self.do_approve_enrollment(&request_id, &code).await
+            }
+            Action::RejectEnrollment(request_id) => self.do_reject_enrollment(&request_id).await,
         }
         None
+    }
+
+    /// New device: request sibling-approval enrollment. On success show the
+    /// verification code and start polling; on failure stay on the choice screen.
+    async fn do_request_enrollment(&mut self) {
+        let user_id = self.user_id();
+        match enroll::request_enrollment(&self.state, user_id).await {
+            Ok(handle) => {
+                self.enroll_handle = Some(handle);
+                self.enroll_stopped = false;
+                self.goto(
+                    Screen::EnrollWaiting,
+                    "Waiting for approval — enter the code below on your other device.",
+                );
+            }
+            Err(e) => {
+                self.screen = Screen::EnrollChoice;
+                self.status = Some(format!("Couldn't start enrollment: {e}"));
+            }
+        }
+    }
+
+    /// New device: poll the open request once. `Approved` advances to set this
+    /// device's PIN (which finalizes enrollment); `Rejected`/`Expired` stop the
+    /// poll and let the user retry; `Pending` keeps waiting. Returns a follow-up
+    /// action so an approval flows straight into the PIN step.
+    async fn do_poll_enrollment(&mut self, request_id: &str) -> Option<Action> {
+        match enroll::enrollment_status(&self.state, request_id.to_string()).await {
+            Ok(status) => match poll_outcome(&status) {
+                PollOutcome::KeepWaiting => {}
+                PollOutcome::Approved => {
+                    self.enroll_handle = None;
+                    // The account key is now in `state.unlock`; set this device's
+                    // own PIN, then finalize (via the NewDevice pin_flow tail).
+                    self.goto(
+                        Screen::SetPin,
+                        "Approved! Choose a 4-digit PIN to secure this device.",
+                    );
+                }
+                PollOutcome::Rejected => {
+                    self.enroll_stopped = true;
+                    self.status =
+                        Some("Enrollment was rejected. Press Enter to try again.".to_string());
+                }
+                PollOutcome::Expired => {
+                    self.enroll_stopped = true;
+                    self.status =
+                        Some("The request expired. Press Enter to try again.".to_string());
+                }
+            },
+            // A transient read error just leaves the waiting screen up; the next
+            // tick retries.
+            Err(e) => self.status = Some(format!("Still waiting… ({e})")),
+        }
+        None
+    }
+
+    /// New device: Secret-Key recovery. On success the account key is installed —
+    /// advance to set this device's PIN (finalize runs in the NewDevice pin tail).
+    /// A bad key surfaces the error and keeps the entry screen up.
+    async fn do_recover(&mut self) {
+        let user_id = self.user_id();
+        let secret_key = self.input.trim().to_string();
+        match enroll::recover(&self.state, user_id, secret_key).await {
+            Ok(()) => {
+                self.goto(
+                    Screen::SetPin,
+                    "Recovered! Choose a 4-digit PIN to secure this device.",
+                );
+            }
+            // Stay on RecoverKey (buffer intact) so the user can correct + retry.
+            Err(e) => self.status = Some(format!("Recovery failed: {e}")),
+        }
+    }
+
+    /// Existing device: load the account's pending enrollment requests, preserving
+    /// the highlight across a refresh.
+    async fn do_load_pending_enrollments(&mut self) {
+        let user_id = self.user_id();
+        match enroll::pending_requests(&self.state, user_id).await {
+            Ok(requests) => {
+                let count = requests.len();
+                self.approvals.set_requests(requests);
+                if count == 0 {
+                    self.status = Some("No devices are waiting for approval.".to_string());
+                }
+            }
+            Err(e) => self.status = Some(format!("Couldn't load requests: {e}")),
+        }
+    }
+
+    /// Existing device: approve a request (confirming its shown code), then reload.
+    async fn do_approve_enrollment(&mut self, request_id: &str, code: &str) {
+        match enroll::approve(&self.state, request_id.to_string(), code.to_string()).await {
+            Ok(()) => {
+                self.status = Some("Device approved.".to_string());
+                self.do_load_pending_enrollments().await;
+            }
+            Err(e) => self.status = Some(format!("Couldn't approve: {e}")),
+        }
+    }
+
+    /// Existing device: reject a request, then reload the list.
+    async fn do_reject_enrollment(&mut self, request_id: &str) {
+        match enroll::reject(&self.state, request_id.to_string()).await {
+            Ok(()) => {
+                self.status = Some("Device rejected.".to_string());
+                self.do_load_pending_enrollments().await;
+            }
+            Err(e) => self.status = Some(format!("Couldn't reject: {e}")),
+        }
     }
 
     /// Send the compose buffer to the open conversation, then re-read its newest

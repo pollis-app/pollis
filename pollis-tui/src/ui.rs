@@ -12,6 +12,7 @@ use ratatui::{
 };
 
 use crate::app::{App, Screen};
+use crate::enroll_flow::EnrollChoice;
 use crate::home::{visible_window, ConvKind, Focus, HomeMode, HomeState};
 
 /// A solid selection background (no glow — repo rule): reverse-style highlight.
@@ -38,10 +39,12 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(frame.area());
 
     render_header(frame, chunks[0], app);
-    if app.screen == Screen::Home {
-        render_home(frame, chunks[1], app);
-    } else {
-        render_auth_body(frame, chunks[1], app);
+    match app.screen {
+        Screen::Home => render_home(frame, chunks[1], app),
+        Screen::EnrollChoice => render_enroll_choice(frame, chunks[1], app),
+        Screen::EnrollWaiting => render_enroll_waiting(frame, chunks[1], app),
+        Screen::PendingEnrollments => render_pending_enrollments(frame, chunks[1], app),
+        _ => render_auth_body(frame, chunks[1], app),
     }
     render_status(frame, chunks[2], app);
 }
@@ -324,13 +327,23 @@ fn render_auth_body(frame: &mut Frame, area: Rect, app: &App) {
         Screen::Otp => ("Verify", "Code:", app.input.clone()),
         Screen::SetPin => ("Set PIN", "New PIN:", mask(&app.input)),
         Screen::Unlock => ("Unlock", "PIN:", mask(&app.input)),
+        // The Secret Key is long and pasted, not memorized — show it plainly so
+        // the user can spot a typo before submitting.
+        Screen::RecoverKey => ("Recover", "Secret Key:", app.input.clone()),
+        // Rendered by their own functions; these arms keep the match exhaustive.
+        Screen::EnrollChoice => ("Enroll", "", String::new()),
+        Screen::EnrollWaiting => ("Enroll", "", String::new()),
+        Screen::PendingEnrollments => ("Enrollments", "", String::new()),
         // Home is rendered by render_home; Fatal shows a simple message.
         Screen::Home => ("Home", "", String::new()),
         Screen::Fatal => ("Error", "Press any key to exit.", String::new()),
     };
 
     let mut lines = vec![Line::from(""), Line::from(prompt)];
-    if !matches!(app.screen, Screen::Booting | Screen::Home | Screen::Fatal) {
+    if !matches!(
+        app.screen,
+        Screen::Booting | Screen::Home | Screen::Fatal
+    ) {
         // Input line with a cursor caret.
         lines.push(Line::from(vec![
             Span::styled("  › ", Style::default().fg(Color::Cyan)),
@@ -349,6 +362,123 @@ fn render_auth_body(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(para, card);
 }
 
+/// Second device: the enroll-choice screen — a centered card listing the two
+/// paths (sibling approval / Secret-Key recovery) with the highlighted one shown
+/// selected. No modal; a plain bordered card like the other auth screens.
+fn render_enroll_choice(frame: &mut Frame, area: Rect, app: &App) {
+    let card = centered(area, 62, 9);
+    let mut lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  This account already exists on another device.",
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+    ];
+    for choice in EnrollChoice::ALL {
+        let selected = choice == app.enroll_choice;
+        let marker = if selected { "›" } else { " " };
+        let mut style = Style::default();
+        if selected {
+            style = style.bg(SEL_BG_FOCUSED).add_modifier(Modifier::BOLD);
+        }
+        lines.push(Line::from(Span::styled(
+            format!("  {marker} {}", choice.label()),
+            style,
+        )));
+    }
+
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " Add this device ",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    frame.render_widget(Paragraph::new(lines).block(block), card);
+}
+
+/// Second device: the waiting-for-approval screen — the verification code shown
+/// big and clear, with a prompt to enter it on the existing device.
+fn render_enroll_waiting(frame: &mut Frame, area: Rect, app: &App) {
+    let card = centered(area, 62, 11);
+    let code = app
+        .enroll_handle
+        .as_ref()
+        .map(|h| h.verification_code.clone())
+        .unwrap_or_default();
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Enter this code on your other device to approve:",
+            Style::default().fg(Color::Gray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            format!("      {code}"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            if app.enroll_stopped {
+                "  Not approved."
+            } else {
+                "  Waiting for approval…"
+            },
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " Enroll this device ",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    frame.render_widget(Paragraph::new(lines).block(block), card);
+}
+
+/// Existing device: the full-screen "Pending device enrollments" list. Each row
+/// shows the requesting device id and its verification code so the user can
+/// confirm the code matches the new device's screen before approving.
+fn render_pending_enrollments(frame: &mut Frame, area: Rect, app: &App) {
+    let block = Block::default().borders(Borders::ALL).title(Span::styled(
+        " Pending device enrollments ",
+        Style::default().add_modifier(Modifier::BOLD),
+    ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let requests = &app.approvals.requests;
+    if requests.is_empty() {
+        let hint = Paragraph::new("No devices are waiting for approval.\n\nEsc to go back.")
+            .style(Style::default().fg(Color::DarkGray))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(hint, inner);
+        return;
+    }
+
+    let lines: Vec<Line> = requests
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            let selected = i == app.approvals.selected;
+            let mut style = Style::default();
+            if selected {
+                style = style.bg(SEL_BG_FOCUSED).add_modifier(Modifier::BOLD);
+            }
+            let marker = if selected { "›" } else { " " };
+            Line::from(Span::styled(
+                format!(
+                    "{marker} device {}   code {}",
+                    r.new_device_id, r.verification_code
+                ),
+                style,
+            ))
+        })
+        .collect();
+
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
 fn render_status(frame: &mut Frame, area: Rect, app: &App) {
     let mut spans = Vec::new();
     if app.busy {
@@ -358,10 +488,13 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
         spans.push(Span::styled(status.clone(), Style::default().fg(Color::Gray)));
     }
     if spans.is_empty() {
-        let help = if app.screen == Screen::Home {
-            home_help(&app.home.mode)
-        } else {
-            "Ctrl-C to quit"
+        let help = match app.screen {
+            Screen::Home => home_help(&app.home.mode),
+            Screen::EnrollChoice => "↑/↓ choose · Enter continue · Ctrl-C quit",
+            Screen::EnrollWaiting => "Waiting for approval… · Ctrl-C quit",
+            Screen::RecoverKey => "Type/paste your Secret Key · Enter recover · Esc back",
+            Screen::PendingEnrollments => "↑/↓ move · a approve · r reject · Esc back",
+            _ => "Ctrl-C to quit",
         };
         spans.push(Span::styled(help, Style::default().fg(Color::DarkGray)));
     }
@@ -376,7 +509,7 @@ fn render_status(frame: &mut Frame, area: Rect, app: &App) {
 fn home_help(mode: &HomeMode) -> &'static str {
     match mode {
         HomeMode::Navigate => {
-            "↑/↓ move · Tab pane · Enter open · i compose · a accept · g group · c channel · d DM · v invite · q quit"
+            "↑/↓ move · Tab pane · Enter open · i compose · a accept · g group · c channel · d DM · v invite · E enroll · q quit"
         }
         HomeMode::Compose => "Type · Enter send · Esc cancel",
         HomeMode::Prompt(_) => "Type · Enter submit · Esc cancel",

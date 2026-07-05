@@ -7,12 +7,25 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
 
 - **Crate:** `pollis-tui/` (workspace member). Binary name: `pollis`.
 - **Design contract:** [`docs/pollis-tui-spec.md`](../../docs/pollis-tui-spec.md) — authoritative.
-- **Status:** M0 (skeleton) + M1 (auth) + M2 (read core) + M2b (three-pane UI) +
-  **M3 write CORE** (`src/send.rs`) + **M3b compose/create UI** (compose+send,
-  accept DM, create group/channel/DM, invite) + **M4 DATA/SMOKE core**
-  (`src/enroll.rs` — multi-device enrollment + Secret-Key recovery library layer,
-  gated by two multi-device smokes) implemented. The interactive M4 screens (M4b)
-  are the follow-on milestone in the spec.
+- **Status:** FEATURE-COMPLETE (M0–M4). M0 (skeleton) + M1 (auth) + M2 (read core)
+  + M2b (three-pane UI) + **M3 write CORE** (`src/send.rs`) + **M3b compose/create
+  UI** (compose+send, accept DM, create group/channel/DM, invite) + **M4 core**
+  (`src/enroll.rs` — multi-device enrollment + Secret-Key recovery, gated by two
+  multi-device smokes) + **M4b enrollment/recovery UI** (`src/enroll_flow.rs` +
+  screens). Text messaging only — attachments/media are intentionally out of scope
+  (this is an RCS-like text client). Remaining possible enhancement: realtime
+  (replace the poll loop with a LiveKit inbox).
+
+  **M4b screen flow** (spec §7): `verify_otp` returns `enrollment_required`. If
+  false → first-device `SetPin` (unchanged). If true → **EnrollChoice** (↑/↓ or
+  1/2): *Approval* → `request_enrollment` → **EnrollWaiting** (shows the
+  verification code, polls `enrollment_status` on a tick; retry on rejected/
+  expired) → on Approved, `SetPin` → `enroll::set_pin_and_finalize`; or *Recover*
+  → **RecoverKey** (Secret-Key entry) → `enroll::recover` → same finalize tail.
+  On an existing signed-in device, `E` opens **PendingEnrollments** (↑/↓, `a`
+  approve with the shown code, `r` reject). The pure branch/selection logic lives
+  in `src/enroll_flow.rs` (`PinFlow`/`EnrollChoice`/`PollOutcome`/`ApprovalState`,
+  unit-tested); async work is in `app.rs`.
 
 ## Why a TUI
 

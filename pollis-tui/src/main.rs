@@ -5,6 +5,7 @@
 // `auth`, `data` and `sync` live in the library crate (`pollis_tui`) so the
 // in-box smoke tests can link them; the binary reaches `auth` through the lib.
 mod app;
+mod enroll_flow;
 mod home;
 mod terminal;
 mod ui;
@@ -96,10 +97,16 @@ async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
                 None => break,
             },
             _ = refresh.tick() => {
-                // Only the live Home screen has anything to re-read.
-                if app.screen == Screen::Home {
-                    pending = Some(Action::Refresh);
-                }
+                // Screens with something to re-read on the timer: the live Home
+                // screen (background-synced data), the new device's enrollment
+                // wait (poll `enrollment_status`), and the existing device's
+                // pending-approvals list (surface newly-arrived requests).
+                pending = match app.screen {
+                    Screen::Home => Some(Action::Refresh),
+                    Screen::EnrollWaiting => app.enrollment_poll_action(),
+                    Screen::PendingEnrollments => Some(Action::LoadPendingEnrollments),
+                    _ => None,
+                };
             }
         }
     }
