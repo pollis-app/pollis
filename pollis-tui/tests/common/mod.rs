@@ -35,7 +35,7 @@ use pollis_core::commands::{auth, dm, messages};
 use pollis_core::config::Config;
 use pollis_core::db::remote::RemoteDb;
 use pollis_core::db::{BASELINE_SQL, LOG_DB_SCHEMA, POST_BASELINE_MIGRATIONS};
-use pollis_core::keystore::{InMemoryKeystore, Keystore};
+use pollis_core::keystore::{default_os_keystore, InMemoryKeystore, Keystore};
 use pollis_core::state::AppState;
 
 /// DEV_OTP short-circuits the email send in the DS and fixes the OTP so
@@ -1019,6 +1019,46 @@ impl TestClient {
         }
     }
 
+    /// Build a fresh, signed-out client whose keystore is the **file-backed**
+    /// `default_os_keystore` (persistent under `POLLIS_DATA_DIR`) rather than the
+    /// in-memory one. Needed by the restart/resync gate: the identity + session
+    /// must survive a `drop` of the `AppState`, which only a file keystore does.
+    /// Media/os-keystore are off under pollis-tui's build, so `default_os_keystore`
+    /// resolves to the file JSON store (spec §5) — no dbus, zero extra deps.
+    pub fn new_persistent(world: &World) -> Self {
+        let state = Arc::new(AppState::new_with_parts(
+            world.config.clone(),
+            Arc::new(world.main.query_only_view()),
+            world.log.clone(),
+            default_os_keystore(),
+        ));
+        Self {
+            state,
+            profile: None,
+        }
+    }
+
+    /// Simulate a quit→relaunch: drop the current `AppState` and rebuild a NEW
+    /// one on the SAME `POLLIS_DATA_DIR` + same libsql handles, with a FRESH
+    /// `default_os_keystore`. The profile is retained in-memory only as the
+    /// test's record of "who this device is" — the rebuilt state knows nothing
+    /// until `auth::boot` rehydrates it from the persisted accounts index +
+    /// keystore. Re-activates this user first so the accounts index's
+    /// `last_active_user` points back at them (a prior client's `activate` may
+    /// have moved it), which is what `get_session` keys off.
+    pub fn restart(&mut self, world: &World) {
+        self.activate();
+        // Replace the Arc: the old AppState (and its file keystore handle) drops
+        // when the last reference goes. The rebuilt state reads the same on-disk
+        // keystore + local SQLCipher DB the previous instance wrote.
+        self.state = Arc::new(AppState::new_with_parts(
+            world.config.clone(),
+            Arc::new(world.main.query_only_view()),
+            world.log.clone(),
+            default_os_keystore(),
+        ));
+    }
+
     pub fn user_id(&self) -> &str {
         &self.profile.as_ref().expect("not signed in").id
     }
@@ -1096,6 +1136,18 @@ impl TestClient {
         )
         .await
         .unwrap_or_else(|e| panic!("send_message({conversation_id}): {e}"));
+    }
+
+    /// Send a text message through the TUI's OWN write layer
+    /// (`pollis_tui::send::send_text`) — the code under test for the M3 gate —
+    /// rather than reaching into `pollis_core::commands` directly like [`send`].
+    /// Routes through the DS exactly the same way.
+    pub async fn send_text(&self, conversation_id: &str, content: &str) {
+        self.activate();
+        let username = self.profile.as_ref().map(|p| p.username.clone());
+        pollis_tui::send::send_text(&self.state, self.user_id(), username, conversation_id, content)
+            .await
+            .unwrap_or_else(|e| panic!("send_text({conversation_id}): {e}"));
     }
 
     /// Drive one full §6 sync pass for this client (the code under test).

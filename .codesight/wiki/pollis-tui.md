@@ -7,9 +7,10 @@ exact same `pollis_core::commands::*` surface the desktop app reaches over Tauri
 
 - **Crate:** `pollis-tui/` (workspace member). Binary name: `pollis`.
 - **Design contract:** [`docs/pollis-tui-spec.md`](../../docs/pollis-tui-spec.md) — authoritative.
-- **Status:** M0 (skeleton) + M1 (auth) + M2 (read core) + M2b (three-pane UI)
-  implemented. M3 (write), M4 (multi-device enrollment) are the follow-on
-  milestones in the spec.
+- **Status:** M0 (skeleton) + M1 (auth) + M2 (read core) + M2b (three-pane UI) +
+  **M3 write CORE** (the `src/send.rs` library layer + gates) implemented. The
+  interactive compose/create **UI is M3b** (a later pass — not built yet). M4
+  (multi-device enrollment) is the follow-on milestone in the spec.
 
 ## Why a TUI
 
@@ -45,6 +46,7 @@ pollis-tui (binary `pollis`)
 | `src/home.rs` | The M2b three-pane model + **pure, unit-tested** helpers: sidebar flattening (`build_sidebar_rows`), selection movement (`step_selection`/`clamp_selection`), bottom-anchored scroll windowing (`visible_window`), scrollback prefetch (`should_load_older`), page merge/dedup (`merge_messages`). |
 | `src/auth.rs` | Thin wrappers over `pollis_core::commands::{auth,pin}` that encode the M1 call order. No forked logic. |
 | `src/data.rs` | Typed read layer: `load_conversations` (tree) + `channel_messages`/`dm_messages` (paginated). Shared by `sync.rs` and the Home UI. |
+| `src/send.rs` | **M3 write CORE.** Typed passthroughs over the exact core writes (`send_message`, `create_group`, `create_channel`, `create_dm_channel`, `accept_dm_request`, `invite_to_group`) + ergonomic shorthands with UI defaults baked in (`send_text`, `new_group`, `new_channel`, `start_dm`, `accept_dm`, `invite`). No forked logic — every write routes through the DS via the core fn. M3b calls one fn per action. |
 | `src/sync.rs` | §6 poll loop: `sync_once`/`sync_rounds` + `spawn_loop` (cancelable background `SyncLoop`). |
 | `src/ui.rs` | Pure `render(frame, &app)` — header (identity · open-conversation name · sync spinner) / three-pane Home body / auth card / status line. |
 
@@ -137,6 +139,20 @@ cargo test -p pollis-tui        # unit tests + auth/sync smokes, all in-box
   opens a DM to B and sends while B is offline; B is driven *only* through
   `sync::sync_once` and must decrypt exactly A's message. Proves cross-client
   receive over real MLS.
+- `tests/send_smoke.rs` — **the M3 gate: full MLS round-trip BOTH directions**,
+  driven through the TUI's own `pollis_tui::send` write layer + `sync`. A sends
+  "ping from A" and B decrypts it (the M2 direction); then B replies "pong from
+  B" through the same send layer and A decrypts it (the NEW direction). Both
+  ends finish holding both messages in send order, and both main handles are
+  read-only — proving every write went through the DS. DM (not group) keeps the
+  DS surface small (`dm/create` + `dm/accept` + `messages/send`, all pre-wired).
+- `tests/restart_smoke.rs` — **restart→unlock→resync** (folds in #15; restores the
+  DoD's quit→relaunch→unlock→resync coverage consolidated away in M2a). A (a
+  **file-backed keystore** client, so its identity survives an `AppState` drop)
+  receives B's message, then its `AppState` is dropped and rebuilt on the SAME
+  `POLLIS_DATA_DIR` + libsql (`TestClient::{new_persistent,restart}` in the rig).
+  `auth::boot` must report `Returning`, `auth::unlock` with the PIN succeeds, and
+  after `sync_rounds` A can STILL read the pre-restart message.
 
 ## Sync model (M2, spec §6)
 
@@ -237,7 +253,11 @@ allows).
   M2 read/sync core, with the background sync → UI-refresh loop above. Pure
   helpers (tree flattening, selection, scroll windowing, pagination merge) are
   unit-tested; the interactive terminal itself isn't in-box smoke-testable. ✅
-- **M3** — write: send, create group/channel, start/accept DM, invites.
+- **M3 (write CORE)** — the `src/send.rs` library layer (send, create
+  group/channel, start/accept DM, invites) + gates: the bidirectional MLS
+  round-trip (`send_smoke`) and the restart→unlock→resync cycle
+  (`restart_smoke`). ✅ The interactive compose/create **UI is M3b** — a
+  separate later pass, not yet built.
 - **M4** — multi-device enrollment + Secret-Key recovery UX.
 
 See the spec for the full command-surface → screen map and the polling sync model.
