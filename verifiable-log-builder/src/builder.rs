@@ -7,11 +7,13 @@
 //! and `verifiable-log/fixtures/example.json`. No changes to the monitor are
 //! needed to verify what this produces.
 //!
-//! There are two tenants, each with its **own** tree and **own** bundle:
-//! [`build_bundle`] over the MLS commit log (default STH context) and
+//! There are three tenants, each with its **own** tree and **own** bundle:
+//! [`build_bundle`] over the MLS commit log (default STH context),
 //! [`build_account_bundle`] over the account-key directory (the domain-separated
-//! [`account_key::STH_CONTEXT`]). They share the STH/proof assembly ([`seal`])
-//! but never share a tree — see the account-key module for why.
+//! [`account_key::STH_CONTEXT`]), and [`build_binaries_bundle`] over the
+//! released-binaries tree (the domain-separated [`binaries::STH_CONTEXT`]). They
+//! share the STH/proof assembly ([`seal`]) but never share a tree — see the
+//! tenant modules for why.
 
 use ed25519_dalek::SigningKey;
 use serde::{Deserialize, Serialize};
@@ -20,6 +22,7 @@ use verifiable_log::{
 };
 
 use crate::account_key::{self, AccountKeyInvariant};
+use crate::binaries::{self, BinaryInvariant, BinaryRecord};
 use crate::commit_log::{CommitLogInvariant, TENANT};
 use crate::error::Result;
 use crate::source::{AccountKeyRow, CommitRow};
@@ -125,6 +128,41 @@ pub fn build_account_bundle(
         signing_key,
         timestamp,
         Some(account_key::STH_CONTEXT),
+    )
+}
+
+/// Build a signed bundle from binary records (assumed already in publish order).
+///
+/// The released-binaries tree is a **third** independent tenant with its **own**
+/// tree, so this builds an independent [`VerifiableLog`] with [`BinaryInvariant`]
+/// registered for [`binaries::TENANT`] — a fork (same released unit, different
+/// `artifact_sha256`), a tag reappearing out of publish order, or a `signed`
+/// leaf with no matching `payload` aborts the build rather than producing a
+/// bundle that hides it. Its STHs are signed under the domain-separated
+/// [`binaries::STH_CONTEXT`], so a binaries head can never be presented as a
+/// commit-log or account-key head even though the same key signs all three.
+pub fn build_binaries_bundle(
+    records: &[BinaryRecord],
+    signing_key: &SigningKey,
+    timestamp: u64,
+) -> Result<Bundle> {
+    let mut log = VerifiableLog::new();
+    log.register_invariant(binaries::TENANT, Box::new(BinaryInvariant));
+
+    let mut entries = Vec::with_capacity(records.len());
+    for record in records {
+        let entry = record.to_entry()?;
+        log.append(entry.clone())?;
+        entries.push(entry);
+    }
+
+    seal(
+        log,
+        entries,
+        &[binaries::TENANT.to_string()],
+        signing_key,
+        timestamp,
+        Some(binaries::STH_CONTEXT),
     )
 }
 

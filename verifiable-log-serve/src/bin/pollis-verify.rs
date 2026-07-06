@@ -8,7 +8,7 @@
 
 use clap::{Parser, Subcommand};
 use std::process::ExitCode;
-use verifiable_log_serve::{account, group, remote, ServeError};
+use verifiable_log_serve::{account, group, release, remote, ServeError};
 
 #[derive(Parser)]
 #[command(
@@ -54,6 +54,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Verify a released version's binaries: that every published artifact for a
+    /// tag is provably included in the signed binaries tree (under the binaries
+    /// domain-separated STH), the tree satisfies the binary invariant (no forked
+    /// re-issue, payload/signed pairing), and the recorded hashes match. Prints
+    /// the artifacts + hashes. Exits non-zero if invalid.
+    Release {
+        /// Base URL of the transparency log, e.g. https://verify.pollis.com
+        base_url: String,
+        /// Release tag to verify, e.g. v1.3.0.
+        release_tag: String,
+        /// Print the report as JSON instead of a human-readable summary.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 fn run() -> Result<bool, ServeError> {
@@ -82,6 +96,19 @@ fn run() -> Result<bool, ServeError> {
             json,
         } => {
             let report = account::verify_account(&base_url, &user_id)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                report.print();
+            }
+            Ok(report.chain_valid)
+        }
+        Command::Release {
+            base_url,
+            release_tag,
+            json,
+        } => {
+            let report = release::verify_release(&base_url, &release_tag)?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             } else {

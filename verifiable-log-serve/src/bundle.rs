@@ -148,3 +148,40 @@ pub struct AccountManifest {
     #[serde(default)]
     pub users: Vec<String>,
 }
+
+/// The discovery manifest for the **binaries** tree (binary transparency),
+/// served at `/v1/binaries/index.json`. It is the binaries tenant's analogue of
+/// [`Manifest`]/[`AccountManifest`]: same artifact bookkeeping (STH sizes, entry
+/// count, proofs), but it enumerates release `tags` (each with a precomputed
+/// `/verify/release/<tag>` report) instead of conversations or users. The
+/// binaries tree is a fully separate Merkle tree, so it carries its own manifest
+/// under its own path — `/v1/index.json` is never touched.
+///
+/// Like the others it *moves* as the log grows, so it is served short-cache.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BinaryManifest {
+    /// API version segment these artifacts live under (`"v1"`).
+    pub version: String,
+    /// Ed25519 log public key, lowercase hex. The same key signs all three
+    /// trees; the binaries tree's STHs are domain-separated by signing context.
+    pub public_key: String,
+    /// Number of binary-artifact entries in the tree.
+    pub entry_count: u64,
+    /// Largest tree size with a published binaries STH, or `null` for an empty
+    /// tree.
+    pub latest_tree_size: Option<u64>,
+    /// Every tree size with a `/v1/binaries/sth/<size>.json` artifact.
+    pub sth_sizes: Vec<u64>,
+    /// Every available inclusion proof.
+    pub inclusion: Vec<InclusionRef>,
+    /// Every available consistency proof.
+    pub consistency: Vec<ConsistencyRef>,
+    /// Tenants whose invariant a verifier enforces on replay (the binaries
+    /// tenant).
+    pub enforce_unique: Vec<String>,
+    /// Every release tag with a precomputed `/verify/release/<tag>` report,
+    /// sorted. Lets a client enumerate the per-release endpoints without scraping
+    /// every entry.
+    #[serde(default)]
+    pub tags: Vec<String>,
+}

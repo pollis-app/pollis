@@ -43,6 +43,7 @@ pub mod error;
 pub mod group;
 pub mod layout;
 pub mod live;
+pub mod release;
 pub mod remote;
 pub mod server;
 

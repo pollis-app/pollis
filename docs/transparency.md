@@ -57,17 +57,17 @@ published in multiple places. Trust rests on the signature and the proofs — ne
 on the server that hands them to you.
 
 > **Scope note.** This document describes the verifiable-log tooling shipped under
-> issue #330, now covering **both** published trees (the MLS commit log and the
-> account-key directory — see below). The end-to-end threat-model writeup lives
-> elsewhere and is out of scope here.
+> issue #330, now covering **three** published trees (the MLS commit log, the
+> account-key directory, and the released-binaries tree — see below). The
+> end-to-end threat-model writeup lives elsewhere and is out of scope here.
 
-## Two domain-separated trees
+## Three domain-separated trees
 
-The log actually publishes **two independent Merkle trees**, each with its own
+The log actually publishes **three independent Merkle trees**, each with its own
 entries, its own Signed Tree Heads, and its own append-only history:
 
 - **the MLS commit log** — every membership/key-change commit, the tree described
-  throughout this document; and
+  throughout this document;
 - **the account-key directory** — one leaf per account identity-key version
   (`user_id`, `identity_version`, the Ed25519 account public key), so anyone can
   audit that a user's published key history is append-only and that
@@ -77,14 +77,24 @@ entries, its own Signed Tree Heads, and its own append-only history:
   `/verify/account/<user_id>` report); the Pollis client self-audits the same
   way — `self_audit_account_key` for the running user, `audit_peer_account_key`
   for a TOFU-pinned contact — reusing the exact same `verify_account` function,
-  so the app and the CLI can never disagree.
+  so the app and the CLI can never disagree; and
+- **the released-binaries tree** (binary transparency) — one leaf per released
+  build artifact (`release_tag`, `platform`, `arch`, `bundle`, `layer`, a
+  content hash, and the full reproducibility recipe), so anyone can audit that
+  the binary they run is the one the log published for a tag and that its
+  reproducible payload was itself logged. A single release is verified with
+  `pollis-verify release <tag>` (against the precomputed `/verify/release/<tag>`
+  report), reusing the exact same `verify_release` function the static endpoint
+  calls, so the CLI and the served report can never disagree. The leaf commits to
+  a hash + recipe, **never** the binary bytes.
 
-The two trees are **never interleaved**. They are signed by the same Ed25519 key
+The three trees are **never interleaved**. They are signed by the same Ed25519 key
 but under **different domain-separation contexts** (`…:sth:v1` for the commit log,
-`…:sth:v1:account-keys` for the account keys), so an STH minted for one tree
-**cannot** be replayed as the other's — a verifier checks each head under its own
-context. The commit-log tree and every one of its `/v1/...` bytes are exactly as
-before; the account-key tree lives entirely under `/v1/account-keys/...`.
+`…:sth:v1:account-keys` for the account keys, `…:sth:v1:binaries` for the released
+binaries), so an STH minted for one tree **cannot** be replayed as another's — a
+verifier checks each head under its own context. The commit-log tree and every one
+of its `/v1/...` bytes are exactly as before; the account-key tree lives entirely
+under `/v1/account-keys/...` and the binaries tree under `/v1/binaries/...`.
 
 ## The four pieces
 
@@ -96,12 +106,12 @@ Each has its own README with the full detail; this is the map.
 | **monitor** | [`verifiable-log`](../verifiable-log/README.md) | The Merkle-log core **and** the fully offline verifier CLI. Verifies a downloaded bundle with no network and no database. |
 | **builder** | [`verifiable-log-builder`](../verifiable-log-builder/README.md) | Reads the real `mls_commit_log` from Turso/libSQL and emits a **signed bundle** the monitor verifies byte-for-byte. Hashes each commit blob and drops the raw bytes — they are never stored or logged. |
 | **serve** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | Turns a signed bundle into the immutable static `/v1/...` read API, plus a dev HTTP server and the `/verify/group/<id>` endpoint the explorer calls. |
-| **pollis-verify** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | The auditor CLI shipped to security analysts: a whole-log HTTP verifier (`pollis-verify remote`), a per-conversation verifier (`pollis-verify group`), and a per-user account-key-history verifier (`pollis-verify account <user_id>`). |
+| **pollis-verify** | [`verifiable-log-serve`](../verifiable-log-serve/README.md) | The auditor CLI shipped to security analysts: a whole-log HTTP verifier (`pollis-verify remote`), a per-conversation verifier (`pollis-verify group`), a per-user account-key-history verifier (`pollis-verify account <user_id>`), and a per-release binaries verifier (`pollis-verify release <tag>`). |
 | **website explorer** | [`website/transparency.html`](../website/transparency.html) | A browser convenience demo that calls the serve layer's `/verify/group/<id>` endpoint and visualizes the result. It is **not** the trust anchor — the trustworthy path is running the tool yourself. |
 
 Data flows one direction: `mls_commit_log` → **builder** signs a bundle →
 **serve** generates the static tree → **monitor** / **pollis-verify**
-(`remote` / `group` / `account`) / the explorer check it. The core Merkle, proof, signature, and
+(`remote` / `group` / `account` / `release`) / the explorer check it. The core Merkle, proof, signature, and
 invariant logic lives in `verifiable-log` and is **reused, never reimplemented**,
 by every layer — so the CLI, the HTTP endpoint, and the website can never reach
 different verdicts for the same input.
@@ -118,6 +128,26 @@ commits are replayed (the publicly-auditable mirror of the live DB's
 
 A fork or regression in the source data **aborts the build** rather than producing
 a bundle that hides it, and the verifiers re-check it independently on replay.
+
+### The binaries invariant
+
+The released-binaries tree enforces three rules over the whole tree when the
+`BinaryRecord` leaves are replayed (the publicly-auditable form of binary
+transparency's per-release rules):
+
+- **No silent re-issue (fork)** — no two leaves share
+  `(release_tag, platform, arch, bundle, layer)` but disagree on
+  `artifact_sha256`; a legitimate re-release must use a new tag.
+- **Monotonic releases** — `release_tag` is append-only in publish order: once a
+  newer tag has begun appearing, an earlier tag can never reappear.
+- **Payload/signed pairing** — every `layer:"signed"` leaf (a notarized/signed,
+  non-reproducible wrapper) must have a matching `layer:"payload"` leaf with equal
+  `payload_sha256` earlier in the tree, so the reproducible unit inside a signed
+  artifact is always itself published and independently reproducible.
+
+As with the other trees, a violation in the source records **aborts the build**,
+and `pollis-verify release <tag>` re-checks the invariant independently on replay
+(so a forked or unpaired tree the signature happens to cover is still rejected).
 
 ## The static read API (`/v1/...`)
 
@@ -137,6 +167,12 @@ served as plain static assets. The URL path mirrors the file path exactly.
 | `/v1/entries/<index>.json` | one entry | immutable |
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json` | inclusion proof | immutable |
 | `/v1/proof/consistency/<first>-<second>.json` | consistency proof | immutable |
+
+The account-key and binaries trees mirror this exact layout one level down, under
+`/v1/account-keys/...` and `/v1/binaries/...` respectively (their own
+`public_key.json`, `index.json`, `sth/`, `entries.json`, and proofs). The binaries
+tree additionally publishes a precomputed `/verify/release/<tag>` report per tag,
+just as the account tree publishes `/verify/account/<user_id>`.
 
 Only `latest.json` and `index.json` move as the log grows; everything else is
 write-once. The dev server (`serve serve`) additionally exposes the dynamic

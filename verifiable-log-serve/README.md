@@ -40,6 +40,10 @@ The file path under the output root mirrors the URL exactly (drop the leading
 | `/v1/proof/inclusion/<tree_size>/<leaf_index>.json`   | inclusion proof                     | immutable    |
 | `/v1/proof/consistency/<first>-<second>.json`         | consistency proof                   | immutable    |
 | `/verify/group/<conversation_id>`                     | precomputed per-group `GroupReport` | short        |
+| `/v1/account-keys/...`                                | the account-key tree, same layout   | mixed        |
+| `/verify/account/<user_id>`                           | precomputed per-user `AccountReport` | short       |
+| `/v1/binaries/...`                                    | the released-binaries tree, same layout | mixed    |
+| `/verify/release/<tag>`                               | precomputed per-release `ReleaseReport` | short    |
 
 All wire shapes (`Entry`, `Sth`, `InclusionProof`, `ConsistencyProof`) are the
 frozen contract documented in `verifiable-log/README.md`.
@@ -106,6 +110,12 @@ cargo build -p verifiable-log-serve
 #    `pollis-verify` is the auditor CLI; the `serve` binary carries the same
 #    verifiers for local dev.
 ./target/debug/pollis-verify remote http://127.0.0.1:8787
+
+# Or verify one tenant's slice: a conversation, a user's key history, or a
+# release's binaries (each trusts only the pinned key, under its own STH context).
+./target/debug/pollis-verify group   http://127.0.0.1:8787 conv-1
+./target/debug/pollis-verify account http://127.0.0.1:8787 u-alice
+./target/debug/pollis-verify release http://127.0.0.1:8787 v1.3.0
 ```
 
 `pollis-verify remote` fetches the public key and manifest, then every STH, the

@@ -14,11 +14,13 @@ use crate::hash::{from_hex, to_hex, Hash};
 /// context for the original (MLS commit-log) tree — already-published STHs were
 /// signed under it, so it must never change.
 ///
-/// A second tenant that wants its **own** tree (e.g. the account-key directory)
-/// must sign with a *different* context via [`Sth::create_with_context`] /
+/// A second (or third) tenant that wants its **own** tree must sign with a
+/// *different* context via [`Sth::create_with_context`] /
 /// [`Sth::verify_with_context`], so an STH minted for one log can never be
-/// replayed as the other's. See the builder's account-key module for the
-/// concrete account-keys context string.
+/// replayed as another's. The concrete context strings live next to their
+/// tenants in the builder: the account-key directory signs under
+/// `…:sth:v1:account-keys`, and the released-binaries tree (binary transparency)
+/// under `…:sth:v1:binaries`. One key, three trees, three contexts.
 const STH_DOMAIN: &[u8] = b"pollis-verifiable-log:sth:v1";
 
 /// A Signed Tree Head. Wire shape (see `README.md`): all binary fields are
@@ -147,6 +149,7 @@ mod tests {
 
     const TS: u64 = 1_700_000_000_000;
     const OTHER_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v1:account-keys";
+    const BINARIES_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v1:binaries";
 
     fn key() -> SigningKey {
         SigningKey::from_bytes(&[7u8; 32])
@@ -178,5 +181,28 @@ mod tests {
 
         assert!(account_sth.verify_with_context(&vk, OTHER_CONTEXT));
         assert!(!account_sth.verify(&vk));
+    }
+
+    #[test]
+    fn binaries_context_is_separated_from_the_other_trees() {
+        let vk = key().verifying_key();
+        // Same key + same (size, root, timestamp) across all three trees: each
+        // STH verifies ONLY under its own domain context.
+        let commit_sth = Sth::create(&key(), 5, [9u8; 32], TS);
+        let account_sth = Sth::create_with_context(&key(), 5, [9u8; 32], TS, OTHER_CONTEXT);
+        let binaries_sth = Sth::create_with_context(&key(), 5, [9u8; 32], TS, BINARIES_CONTEXT);
+
+        // The three signatures are over three different preimages.
+        assert_ne!(binaries_sth.signature, commit_sth.signature);
+        assert_ne!(binaries_sth.signature, account_sth.signature);
+
+        // The binaries head verifies under the binaries context only.
+        assert!(binaries_sth.verify_with_context(&vk, BINARIES_CONTEXT));
+        assert!(!binaries_sth.verify(&vk));
+        assert!(!binaries_sth.verify_with_context(&vk, OTHER_CONTEXT));
+
+        // ...and neither a commit-log nor an account head can stand in for it.
+        assert!(!commit_sth.verify_with_context(&vk, BINARIES_CONTEXT));
+        assert!(!account_sth.verify_with_context(&vk, BINARIES_CONTEXT));
     }
 }

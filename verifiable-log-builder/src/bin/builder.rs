@@ -2,6 +2,8 @@
 //!
 //! Subcommands:
 //! * `build` — read the DB, append every commit, sign STHs, write the bundle.
+//! * `build-binaries` — read a JSON file of `BinaryRecord`s and write a signed
+//!   binaries-tree bundle (binary transparency, Phase 1). No DB.
 //! * `keygen` — mint a throwaway Ed25519 keypair (hex) for dev.
 //!
 //! The emitted bundle is verified with `monitor verify <bundle.json>` from the
@@ -13,7 +15,9 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use verifiable_log_builder::error::{BuilderError, Result};
-use verifiable_log_builder::{build_account_bundle, build_bundle, keys, source};
+use verifiable_log_builder::{
+    build_account_bundle, build_binaries_bundle, build_bundle, keys, source, BinaryRecord,
+};
 
 #[derive(Parser)]
 #[command(
@@ -75,6 +79,36 @@ enum Command {
         #[arg(long)]
         signing_key_file: Option<PathBuf>,
     },
+    /// Read a JSON file of `BinaryRecord`s and write a signed binaries-tree
+    /// bundle. Unlike `build`, the binaries tenant's source of truth is a JSON
+    /// file (not the DB) in Phase 1, so this needs no database connection.
+    BuildBinaries {
+        /// Input path: a JSON array of `BinaryRecord`s in publish order (the
+        /// records the `attest-and-log` release job emits). Its `layer`,
+        /// `payload_sha256`, and tuple fields drive the `BinaryInvariant`.
+        #[arg(long)]
+        binaries_in: PathBuf,
+
+        /// Output path for the `binaries-bundle.json` (STH signed under the
+        /// binaries domain context).
+        #[arg(long)]
+        out: PathBuf,
+
+        /// STH timestamp, milliseconds since epoch. Supplied explicitly (the tag
+        /// commit timestamp) so the output is deterministic and an unchanged tree
+        /// re-emits byte-identically — never read from the system clock.
+        #[arg(long)]
+        timestamp: u64,
+
+        /// Env var holding the 32-byte hex Ed25519 signing key.
+        #[arg(long, default_value = "VLOG_SIGNING_KEY")]
+        signing_key_env: String,
+
+        /// Optional file holding the 32-byte hex signing key (used if the env
+        /// var is unset).
+        #[arg(long)]
+        signing_key_file: Option<PathBuf>,
+    },
     /// Mint a fresh Ed25519 keypair (hex) for dev/throwaway use.
     Keygen,
 }
@@ -98,6 +132,19 @@ fn main() -> ExitCode {
             account_out,
             timestamp,
             account_timestamp.unwrap_or(timestamp),
+            &signing_key_env,
+            signing_key_file.as_deref(),
+        ),
+        Command::BuildBinaries {
+            binaries_in,
+            out,
+            timestamp,
+            signing_key_env,
+            signing_key_file,
+        } => run_build_binaries(
+            binaries_in,
+            out,
+            timestamp,
             &signing_key_env,
             signing_key_file.as_deref(),
         ),
@@ -222,6 +269,44 @@ async fn run_build(
         );
     }
 
+    println!("public_key: {}", bundle.public_key);
+    Ok(())
+}
+
+/// Read `BinaryRecord`s from a JSON file and write a signed binaries bundle.
+/// Synchronous — the binaries tenant reads a file, not a DB, so there is no
+/// async runtime here (contrast [`run_build`]).
+fn run_build_binaries(
+    binaries_in: PathBuf,
+    out: PathBuf,
+    timestamp: u64,
+    signing_key_env: &str,
+    signing_key_file: Option<&std::path::Path>,
+) -> Result<()> {
+    // Resolve the signing key BEFORE reading input so a missing key fails fast.
+    let signing_key = keys::load_signing_key(signing_key_env, signing_key_file)?;
+
+    let raw = std::fs::read_to_string(&binaries_in)?;
+    let records: Vec<BinaryRecord> = serde_json::from_str(&raw)?;
+
+    if records.is_empty() {
+        eprintln!(
+            "notice: binaries records file is empty — writing an empty binaries bundle so \
+             `serve generate` still runs"
+        );
+    }
+
+    let bundle = build_binaries_bundle(&records, &signing_key, timestamp)?;
+    let json = serde_json::to_string_pretty(&bundle)?;
+    std::fs::write(&out, json)?;
+
+    println!(
+        "wrote binaries bundle: {} artifact(s), {} STH(s), {} inclusion proof(s) -> {}",
+        records.len(),
+        bundle.sths.len(),
+        bundle.inclusion.len(),
+        out.display()
+    );
     println!("public_key: {}", bundle.public_key);
     Ok(())
 }

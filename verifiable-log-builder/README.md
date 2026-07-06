@@ -90,6 +90,13 @@ TURSO_DATABASE_URL=libsql://... TURSO_AUTH_TOKEN=... VLOG_SIGNING_KEY=... \
   cargo run -p verifiable-log-builder --bin builder -- \
   build --out bundle.json --timestamp 1700000000000
 
+# Build the released-binaries tree (binary transparency) from a JSON file of
+# BinaryRecords — its own tree, STH signed under the `…:sth:v1:binaries` context.
+VLOG_SIGNING_KEY=<32-byte hex> \
+  cargo run -p verifiable-log-builder --bin builder -- \
+  build-binaries --binaries-in records.json --out binaries-bundle.json \
+  --timestamp 1700000000000
+
 # Verify with the UNCHANGED slice-1 monitor.
 cargo run -p verifiable-log --bin monitor -- verify bundle.json
 ```
@@ -98,12 +105,18 @@ cargo run -p verifiable-log --bin monitor -- verify bundle.json
 from `--signing-key-env` (default `VLOG_SIGNING_KEY`) or `--signing-key-file`; if
 neither is present the build **refuses** rather than inventing a key.
 
+The builder now emits **three** tenants, each its own domain-separated tree: the
+`mls-commit-log` tenant (above), the `account-key` tenant (`--account-out`, signed
+under `…:sth:v1:account-keys`), and the `binaries` tenant (`build-binaries`, signed
+under `…:sth:v1:binaries`). See the [`binaries`](src/binaries.rs) module for the
+`BinaryRecord` leaf encoding and the `BinaryInvariant` (no fork, monotonic release
+tags, payload/signed pairing).
+
 ## Out of scope (later slices)
 
-No HTTP/serve layer (slice 3); no real signing-key custody/HSM; no deep MLS
-authorization of committers (the `sender_id` is recorded but not validated); no
-account-key tenant; no browser/WASM explorer. Tests use a local fixture file
-only and never connect to a real/production database.
+No real signing-key custody/HSM; no deep MLS authorization of committers (the
+`sender_id` is recorded but not validated); no browser/WASM explorer. Tests use a
+local fixture file only and never connect to a real/production database.
 
 ## Tests
 

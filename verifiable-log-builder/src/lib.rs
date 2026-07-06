@@ -18,6 +18,11 @@
 //!   and [`account_key::AccountKeyInvariant`] (no duplicate or regressing
 //!   `identity_version` per user). Its own tree, signed under the
 //!   domain-separated [`account_key::STH_CONTEXT`]. Pure, no IO.
+//! * [`binaries`] — the **binaries** tenant (binary transparency, Phase 1): the
+//!   canonical [`binaries::BinaryRecord`] leaf encoding and
+//!   [`binaries::BinaryInvariant`] (no fork, monotonic release tags,
+//!   payload/signed pairing). Its own tree, signed under the domain-separated
+//!   [`binaries::STH_CONTEXT`]. Pure, no IO — records are read from JSON.
 //! * [`builder`] — appends every row to a [`verifiable_log::VerifiableLog`],
 //!   signs Signed Tree Heads, and emits the [`builder::Bundle`] — one per tenant.
 //!
@@ -25,6 +30,7 @@
 //! committers, the WASM explorer.
 
 pub mod account_key;
+pub mod binaries;
 pub mod builder;
 pub mod commit_log;
 pub mod error;
@@ -32,7 +38,8 @@ pub mod keys;
 pub mod source;
 
 pub use account_key::{AccountKeyInvariant, AccountKeyLeaf};
-pub use builder::{build_account_bundle, build_bundle, Bundle};
+pub use binaries::{BinaryInvariant, BinaryRecord, Layer, Toolchain};
+pub use builder::{build_account_bundle, build_binaries_bundle, build_bundle, Bundle};
 pub use commit_log::{CommitLeaf, CommitLogInvariant, TENANT};
 pub use error::{BuilderError, Result};
 pub use source::{
