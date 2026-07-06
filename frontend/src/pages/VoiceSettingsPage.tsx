@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { invoke } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
@@ -159,6 +159,154 @@ async function pushApmConfig(config: ApmConfig): Promise<void> {
   }
 }
 
+/** Human-readable reason for a failed camera preview, from a `getUserMedia`
+ *  DOMException. Unknown shapes fall through to the raw message so a novel
+ *  error is never hidden. */
+function friendlyPreviewError(err: unknown): string {
+  const name = err instanceof DOMException ? err.name : "";
+  switch (name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return "Camera access is blocked. Grant Pollis camera permission, then reopen this page.";
+    case "NotFoundError":
+    case "OverconstrainedError":
+      return "No webcam was found.";
+    case "NotReadableError":
+      return "The camera is in use by another app. Close it and try again.";
+    default:
+      return err instanceof Error ? err.message : "Could not start the camera preview.";
+  }
+}
+
+/**
+ * Live webcam preview + device picker for the settings page.
+ *
+ * Uses the WebView's MediaDevices API directly (WebRTC / media-stream is
+ * enabled on the Tauri webview) rather than the Rust capture pipeline: the
+ * backend's `start_camera` publishes a track into an *active voice room* and
+ * there is none on the settings page. `getUserMedia` also keeps enumeration
+ * and preview on the same device-id space, which the Rust path does not.
+ *
+ * The MediaStream is stopped on every device switch and on unmount, so
+ * leaving this page never leaves the camera indicator light on.
+ */
+const CameraPreview: React.FC = () => {
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [selected, setSelected] = useState<string>("default");
+  const [error, setError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const stopStream = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  };
+
+  // Open the selected camera (or the system default when none is picked yet),
+  // mirror it into the <video>, and refresh the device list — labels are only
+  // populated once a permission grant lets us read them. Reruns on every
+  // selection change; the cleanup stops the prior stream so only one camera is
+  // ever live, and unmount tears the last one down.
+  useEffect(() => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setError("This system doesn't expose a camera to Pollis.");
+      return;
+    }
+    let cancelled = false;
+    stopStream();
+    void (async () => {
+      try {
+        const video: MediaTrackConstraints | boolean =
+          selected === "default" ? true : { deviceId: { exact: selected } };
+        const stream = await navigator.mediaDevices.getUserMedia({ video });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+        setError(null);
+        const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        if (cancelled) {
+          return;
+        }
+        setCameras(devices.filter((d) => d.kind === "videoinput"));
+        // Pin the dropdown to whatever the default resolved to, so the shown
+        // device matches the live preview instead of falling back to the
+        // first <option>.
+        if (selected === "default" && activeId) {
+          setSelected(activeId);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(friendlyPreviewError(e));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      stopStream();
+    };
+  }, [selected]);
+
+  const options: AudioDevice[] = cameras.map((c, i) => ({
+    id: c.deviceId,
+    name: c.label || `Camera ${i + 1}`,
+    kind: "input",
+  }));
+
+  return (
+    <div className="flex flex-col gap-3">
+      <DeviceSelect
+        label="Camera"
+        devices={options}
+        value={selected}
+        onChange={setSelected}
+        fallbackLabel="Default camera"
+      />
+      <div
+        className="overflow-hidden"
+        style={{
+          maxWidth: 320,
+          aspectRatio: "16 / 9",
+          background: "var(--c-surface)",
+          border: "1px solid var(--c-border)",
+          borderRadius: "0.5rem",
+        }}
+      >
+        {error ? (
+          <div
+            data-testid="camera-preview-error"
+            className="w-full h-full flex items-center justify-center p-3 text-xs font-mono text-center"
+            style={{ color: "var(--c-text-muted)" }}
+          >
+            {error}
+          </div>
+        ) : (
+          // Mirrored like every other self-preview (Zoom/Discord convention).
+          <video
+            ref={videoRef}
+            data-testid="camera-preview"
+            autoPlay
+            muted
+            playsInline
+            className="w-full h-full"
+            style={{ objectFit: "cover", transform: "scaleX(-1)" }}
+          />
+        )}
+      </div>
+    </div>
+  );
+};
+
 export const VoiceSettingsPage: React.FC = () => {
   const preferences = usePreferences();
   const test = useVoiceTest();
@@ -239,7 +387,7 @@ export const VoiceSettingsPage: React.FC = () => {
   };
 
   return (
-    <PageShell title="Voice Settings" scrollable>
+    <PageShell title="Voice & Video" scrollable>
       <div className="flex justify-center px-6 py-8">
       <div className="flex flex-col gap-8 w-full max-w-md">
 
@@ -264,6 +412,7 @@ export const VoiceSettingsPage: React.FC = () => {
             onChange={setOutput}
             fallbackLabel="Default speaker"
           />
+          <CameraPreview />
         </section>
 
         <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">

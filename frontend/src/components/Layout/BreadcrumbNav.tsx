@@ -124,7 +124,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
       out.push({ label: "Security", to: "/security" });
     } else if (pathname === "/voice-settings") {
       out.push({ label: "Account", to: "/settings" });
-      out.push({ label: "Voice", to: "/voice-settings" });
+      out.push({ label: "Voice & Video", to: "/voice-settings" });
     } else if (pathname === "/invites") {
       out.push({ label: "Invites", to: "/invites" });
     } else if (pathname === "/join-requests") {
