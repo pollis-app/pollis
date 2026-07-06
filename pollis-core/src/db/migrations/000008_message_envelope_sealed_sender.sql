@@ -1,0 +1,16 @@
+-- Sealed sender v1 (issue #331, docs/metadata-minimization-design.md §2).
+--
+-- Additive, backward-compatible (CLAUDE.md migration constraint): a single new
+-- column with a DEFAULT, no DROP, no nullability tightening. `sender_id` stays
+-- NOT NULL; when sealing is enabled a sender writes a non-identifying sentinel
+-- into it (the true sender lives in the MLS credential inside the ciphertext),
+-- so the previously-shipped app's SQL that reads `sender_id` keeps working.
+--
+-- `sealed = 1` marks an envelope whose `sender_id` column is a blinded sentinel
+-- rather than the real sender. Old rows and unsealed sends stay `sealed = 0`.
+--
+-- Migration number: 000008. 000007 is deliberately skipped — it is a
+-- previously-reverted DS-trigger / commit-log-DB migration (see
+-- docs/goal-a-deploy-runbook.md "000007 hazard") and reusing that number would
+-- collide.
+ALTER TABLE message_envelope ADD COLUMN sealed INTEGER NOT NULL DEFAULT 0;

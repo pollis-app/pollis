@@ -22,6 +22,16 @@ pub struct Config {
     /// commit submission routes through the DS (serialized, race/gap-free);
     /// when `None`, commits write direct to Turso. See `commands::mls::delivery`.
     pub pollis_delivery_url: Option<String>,
+    /// Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2).
+    /// When true, outbound `message_envelope` rows are written with `sealed = 1`
+    /// and a non-identifying sentinel `sender_id` instead of the real sender — so
+    /// the stored envelope no longer reveals sender-per-message (at-rest / breach
+    /// / subpoena defense). Attribution is unaffected: recipients always take the
+    /// sender from the MLS credential inside the ciphertext (release N, already
+    /// shipped). Defaults OFF: landing the sending half == release N (reader on,
+    /// sealing off); flipping `POLLIS_SEAL_SENDER` on later == release N+1. This
+    /// is the additive two-release dance CLAUDE.md prescribes.
+    pub seal_sender: bool,
 }
 
 impl Config {
@@ -66,8 +76,23 @@ impl Config {
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("POLLIS_DELIVERY_URL").ok())
                 .filter(|s| !s.is_empty()),
+            // Optional boolean, default OFF (release N: reader on, sealing off).
+            seal_sender: option_env!("POLLIS_SEAL_SENDER")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("POLLIS_SEAL_SENDER").ok())
+                .map(|s| parse_env_bool(&s))
+                .unwrap_or(false),
         })
     }
+}
+
+/// Parse a boolean-ish env var: `1` / `true` / `yes` / `on` (case-insensitive)
+/// are true; everything else (including unset, handled by the caller) is false.
+fn parse_env_bool(s: &str) -> bool {
+    matches!(
+        s.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
 }
 
 fn require_env(key: &str, compiled: Option<&'static str>) -> Result<String> {
@@ -113,6 +138,9 @@ impl Config {
             // DS URL, so integration tests exercise the real (signed) DS write
             // path. There is no remaining direct-write path to exercise.
             pollis_delivery_url: None,
+            // Default OFF; the sealed-sender flows test flips this per-client to
+            // exercise the release-N+1 sealing path (see `TestClient::new_sealed`).
+            seal_sender: false,
         })
     }
 }

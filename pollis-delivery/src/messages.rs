@@ -215,7 +215,10 @@ fn chrono_like_now() -> String {
 pub struct SendMessageBody {
     pub id: String,
     pub conversation_id: String,
-    /// Bound to the authenticated user when signed; the no-auth fallback only.
+    /// Unsealed: bound to the authenticated user when signed (the no-auth
+    /// fallback only). Sealed (issue #331): a non-identifying sentinel the client
+    /// chose (e.g. the string `"sealed"`) — persisted as-is, NOT bound to the
+    /// auth user (see `apply_send_message`).
     #[serde(default)]
     pub sender_id: Option<String>,
     /// The `"mls:<hex>"` ciphertext string the client persists — plain text, not
@@ -224,6 +227,11 @@ pub struct SendMessageBody {
     #[serde(default)]
     pub reply_to_id: Option<String>,
     pub sent_at: String,
+    /// Sealed sender flag (issue #331, `docs/metadata-minimization-design.md`
+    /// §2). `1` → `sender_id` is a blinded sentinel; the true sender lives in the
+    /// MLS credential. Absent (old clients / unsealed sends) → `0`.
+    #[serde(default)]
+    pub sealed: i64,
 }
 
 pub async fn send_message(
@@ -245,31 +253,62 @@ pub async fn send_message(
     outcome_response(apply_send_message(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// INSERT a `type='message'` envelope (the send). Authz: the sender is a current
-/// member of the conversation, and a signed request may only send as itself.
+/// INSERT a `type='message'` envelope (the send). Authz: the authenticated user
+/// is a current member of the conversation.
+///
+/// Sender binding depends on sealing (issue #331,
+/// `docs/metadata-minimization-design.md` §2):
+///   - **Unsealed** (`sealed = 0`): unchanged — a signed request may only send as
+///     itself, so the stored `sender_id` is bound to the authenticated user via
+///     [`resolve_actor`].
+///   - **Sealed** (`sealed = 1`): the body's `sender_id` is a non-identifying
+///     sentinel, deliberately NOT the authenticated user, so the
+///     "send-as-yourself" equality check is relaxed and the sentinel is persisted
+///     as-is. Membership authz is UNCHANGED — we still verify the *authenticated*
+///     user is a member; sealing only blinds the stored sender column, it does
+///     not weaken who is allowed to write.
 pub async fn apply_send_message(
     conn: &Connection,
     authed: Option<&str>,
     body: &SendMessageBody,
 ) -> anyhow::Result<WriteOutcome> {
-    let sender = match resolve_actor(authed, body.sender_id.as_deref()) {
-        Ok(s) => s,
-        Err(o) => return Ok(o),
+    let sealed = body.sealed != 0;
+    // `member_check_user` is whose membership we verify; `stored_sender` is what
+    // lands in the `sender_id` column.
+    let (member_check_user, stored_sender) = if sealed {
+        match authed {
+            // Verify the authenticated writer's membership; store the blinded
+            // sentinel the client sent (never bind it to the auth user).
+            Some(u) => (u.to_string(), body.sender_id.clone().unwrap_or_default()),
+            // No-auth fallback: keep the body's sender for both.
+            None => {
+                let s = body.sender_id.clone().unwrap_or_default();
+                (s.clone(), s)
+            }
+        }
+    } else {
+        // Unsealed: bind the stored sender to the actor and require a signed
+        // request to send only as itself.
+        match resolve_actor(authed, body.sender_id.as_deref()) {
+            Ok(s) => (s.clone(), s),
+            Err(o) => return Ok(o),
+        }
     };
-    if authed.is_some() && !is_member(conn, &body.conversation_id, &sender).await? {
+    if authed.is_some() && !is_member(conn, &body.conversation_id, &member_check_user).await? {
         return Ok(WriteOutcome::Forbidden);
     }
     conn.execute(
         "INSERT INTO message_envelope \
-             (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             (id, conversation_id, sender_id, ciphertext, reply_to_id, sent_at, sealed) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         libsql::params![
             body.id.clone(),
             body.conversation_id.clone(),
-            sender,
+            stored_sender,
             body.ciphertext.clone(),
             body.reply_to_id.clone(),
             body.sent_at.clone(),
+            body.sealed,
         ],
     )
     .await?;

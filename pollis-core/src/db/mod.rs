@@ -49,6 +49,14 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "push_token",
         include_str!("migrations/000006_push_token.sql"),
     ),
+    // Note: version 7 (000007) is intentionally skipped — it was a
+    // previously-reverted DS-trigger / commit-log-DB migration (see
+    // docs/goal-a-deploy-runbook.md "000007 hazard"). Reusing it would collide.
+    (
+        8,
+        "message_envelope_sealed_sender",
+        include_str!("migrations/000008_message_envelope_sealed_sender.sql"),
+    ),
 ];
 
 pub mod queries {

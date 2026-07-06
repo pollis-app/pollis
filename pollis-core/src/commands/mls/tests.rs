@@ -145,10 +145,13 @@ fn encrypt_decrypt_roundtrip() {
         .expect("try_mls_encrypt failed");
 
     // Bob decrypts.
-    let decrypted = try_mls_decrypt(&bob_db, conv_id, &ciphertext)
+    let (decrypted, sender) = try_mls_decrypt(&bob_db, conv_id, &ciphertext)
         .expect("try_mls_decrypt failed");
 
     assert_eq!(decrypted, plaintext);
+    // Attribution comes from the MLS-authenticated credential, not any envelope
+    // column (sealed sender, `docs/metadata-minimization-design.md` §2).
+    assert_eq!(sender, "alice");
 }
 
 /// A solo group (no other members) returns None for decrypt — only a member
@@ -295,18 +298,18 @@ fn three_way_group_messaging() {
 
     // Alice sends → Bob and Carol both decrypt.
     let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"hello from alice").unwrap();
-    assert_eq!(try_mls_decrypt(&bob_db, conv_id, &alice_ct).unwrap(), b"hello from alice");
-    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap(), b"hello from alice");
+    assert_eq!(try_mls_decrypt(&bob_db, conv_id, &alice_ct).unwrap().0, b"hello from alice");
+    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap().0, b"hello from alice");
 
     // Bob sends → Alice and Carol both decrypt.
     let bob_ct = try_mls_encrypt(&bob_db, conv_id, b"hello from bob").unwrap();
-    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &bob_ct).unwrap(), b"hello from bob");
-    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &bob_ct).unwrap(), b"hello from bob");
+    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &bob_ct).unwrap().0, b"hello from bob");
+    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &bob_ct).unwrap().0, b"hello from bob");
 
     // Carol sends → Alice and Bob both decrypt.
     let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"hello from carol").unwrap();
-    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap(), b"hello from carol");
-    assert_eq!(try_mls_decrypt(&bob_db, conv_id, &carol_ct).unwrap(), b"hello from carol");
+    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap().0, b"hello from carol");
+    assert_eq!(try_mls_decrypt(&bob_db, conv_id, &carol_ct).unwrap().0, b"hello from carol");
 }
 
 /// After Bob is removed, messages Alice sends are encrypted at the new epoch.
@@ -327,7 +330,7 @@ fn removed_member_cannot_decrypt_new_messages() {
     // Confirm Bob can read messages before removal.
     let pre_remove_ct = try_mls_encrypt(&alice_db, conv_id, b"pre-removal").unwrap();
     assert_eq!(
-        try_mls_decrypt(&bob_db, conv_id, &pre_remove_ct).unwrap(),
+        try_mls_decrypt(&bob_db, conv_id, &pre_remove_ct).unwrap().0,
         b"pre-removal"
     );
 
@@ -371,7 +374,7 @@ fn new_member_cannot_read_history() {
     // But Bob can decrypt messages sent after he joined.
     let new_ct = try_mls_encrypt(&alice_db, conv_id, b"welcome bob").unwrap();
     assert_eq!(
-        try_mls_decrypt(&bob_db, conv_id, &new_ct).unwrap(),
+        try_mls_decrypt(&bob_db, conv_id, &new_ct).unwrap().0,
         b"welcome bob"
     );
 }
@@ -406,11 +409,11 @@ fn epoch_sync_via_commit_processing() {
     // Now all three members are at epoch 2 and can communicate.
     let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"carol here").unwrap();
     assert_eq!(
-        try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap(),
+        try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap().0,
         b"carol here"
     );
     assert_eq!(
-        try_mls_decrypt(&bob_db, conv_id, &carol_ct).unwrap(),
+        try_mls_decrypt(&bob_db, conv_id, &carol_ct).unwrap().0,
         b"carol here"
     );
 }
@@ -442,8 +445,8 @@ fn leave_group_remaining_members_communicate_then_new_member_joins() {
 
     // Verify all three can communicate before removal.
     let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"all three here").unwrap();
-    assert_eq!(try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap(), b"all three here");
-    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &pre_ct).unwrap(), b"all three here");
+    assert_eq!(try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap().0, b"all three here");
+    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &pre_ct).unwrap().0, b"all three here");
 
     // Alice removes Bob. Carol applies the commit.
     let remove_bob_commit = remove_member(&alice_db, conv_id, "bob");
@@ -451,10 +454,10 @@ fn leave_group_remaining_members_communicate_then_new_member_joins() {
 
     // Alice and Carol can still communicate.
     let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
-    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap(), b"bob is gone");
+    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap().0, b"bob is gone");
 
     let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"confirmed").unwrap();
-    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap(), b"confirmed");
+    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap().0, b"confirmed");
 
     // Bob cannot decrypt post-removal messages.
     assert!(
@@ -470,8 +473,8 @@ fn leave_group_remaining_members_communicate_then_new_member_joins() {
 
     // All three current members (Alice, Carol, Dave) can communicate.
     let dave_ct = try_mls_encrypt(&dave_db, conv_id, b"dave here").unwrap();
-    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &dave_ct).unwrap(), b"dave here");
-    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &dave_ct).unwrap(), b"dave here");
+    assert_eq!(try_mls_decrypt(&alice_db, conv_id, &dave_ct).unwrap().0, b"dave here");
+    assert_eq!(try_mls_decrypt(&carol_db, conv_id, &dave_ct).unwrap().0, b"dave here");
 
     // Bob still cannot decrypt.
     assert!(
@@ -510,7 +513,7 @@ fn key_rotation_across_multiple_membership_changes() {
     // Alice and Carol can communicate at epoch 3.
     let ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
     assert_eq!(
-        try_mls_decrypt(&carol_db, conv_id, &ct).unwrap(),
+        try_mls_decrypt(&carol_db, conv_id, &ct).unwrap().0,
         b"bob is gone"
     );
 
@@ -561,10 +564,10 @@ fn account_deletion_rotates_keys_for_remaining_members() {
 
     // Verify Bob can read in both groups before deletion.
     let pre_g1 = try_mls_encrypt(&alice_db, group1, b"pre-delete g1").unwrap();
-    assert_eq!(try_mls_decrypt(&bob_db, group1, &pre_g1).unwrap(), b"pre-delete g1");
+    assert_eq!(try_mls_decrypt(&bob_db, group1, &pre_g1).unwrap().0, b"pre-delete g1");
 
     let pre_g2 = try_mls_encrypt(&alice_db, group2, b"pre-delete g2").unwrap();
-    assert_eq!(try_mls_decrypt(&bob_db, group2, &pre_g2).unwrap(), b"pre-delete g2");
+    assert_eq!(try_mls_decrypt(&bob_db, group2, &pre_g2).unwrap().0, b"pre-delete g2");
 
     // --- Simulate account deletion for Bob ---
     // In production this would be done by delete_account iterating all
@@ -594,12 +597,12 @@ fn account_deletion_rotates_keys_for_remaining_members() {
     // --- Verify remaining members still work ---
     // Group 1: Alice and Carol can still communicate.
     assert_eq!(
-        try_mls_decrypt(&carol_db, group1, &post_g1).unwrap(),
+        try_mls_decrypt(&carol_db, group1, &post_g1).unwrap().0,
         b"post-delete g1"
     );
     let carol_msg = try_mls_encrypt(&carol_db, group1, b"carol still here").unwrap();
     assert_eq!(
-        try_mls_decrypt(&alice_db, group1, &carol_msg).unwrap(),
+        try_mls_decrypt(&alice_db, group1, &carol_msg).unwrap().0,
         b"carol still here"
     );
 }
@@ -776,11 +779,11 @@ fn multi_device_both_devices_decrypt() {
 
     // Both Alice devices decrypt.
     assert_eq!(
-        try_mls_decrypt(&alice_d1_db, conv_id, &bob_ct).unwrap(),
+        try_mls_decrypt(&alice_d1_db, conv_id, &bob_ct).unwrap().0,
         b"hello both alices"
     );
     assert_eq!(
-        try_mls_decrypt(&alice_d2_db, conv_id, &bob_ct).unwrap(),
+        try_mls_decrypt(&alice_d2_db, conv_id, &bob_ct).unwrap().0,
         b"hello both alices"
     );
 }
@@ -813,22 +816,22 @@ fn multi_device_batch_add_single_commit() {
     // Alice sends — both Bob devices decrypt.
     let ct = try_mls_encrypt(&alice_db, conv_id, b"hello bob devices").unwrap();
     assert_eq!(
-        try_mls_decrypt(&bob_d1_db, conv_id, &ct).unwrap(),
+        try_mls_decrypt(&bob_d1_db, conv_id, &ct).unwrap().0,
         b"hello bob devices"
     );
     assert_eq!(
-        try_mls_decrypt(&bob_d2_db, conv_id, &ct).unwrap(),
+        try_mls_decrypt(&bob_d2_db, conv_id, &ct).unwrap().0,
         b"hello bob devices"
     );
 
     // Bob device 1 sends — Alice and Bob device 2 both decrypt.
     let bob_ct = try_mls_encrypt(&bob_d1_db, conv_id, b"from bob d1").unwrap();
     assert_eq!(
-        try_mls_decrypt(&alice_db, conv_id, &bob_ct).unwrap(),
+        try_mls_decrypt(&alice_db, conv_id, &bob_ct).unwrap().0,
         b"from bob d1"
     );
     assert_eq!(
-        try_mls_decrypt(&bob_d2_db, conv_id, &bob_ct).unwrap(),
+        try_mls_decrypt(&bob_d2_db, conv_id, &bob_ct).unwrap().0,
         b"from bob d1"
     );
 }
@@ -894,7 +897,7 @@ fn second_device_joins_later_cannot_read_history() {
     // Messages sent before alice_d2 joins.
     let history_ct = try_mls_encrypt(&bob_db, conv_id, b"history msg").unwrap();
     assert_eq!(
-        try_mls_decrypt(&alice_d1_db, conv_id, &history_ct).unwrap(),
+        try_mls_decrypt(&alice_d1_db, conv_id, &history_ct).unwrap().0,
         b"history msg"
     );
 
@@ -914,11 +917,11 @@ fn second_device_joins_later_cannot_read_history() {
     // Both devices decrypt new messages.
     let new_ct = try_mls_encrypt(&bob_db, conv_id, b"new msg").unwrap();
     assert_eq!(
-        try_mls_decrypt(&alice_d1_db, conv_id, &new_ct).unwrap(),
+        try_mls_decrypt(&alice_d1_db, conv_id, &new_ct).unwrap().0,
         b"new msg"
     );
     assert_eq!(
-        try_mls_decrypt(&alice_d2_db, conv_id, &new_ct).unwrap(),
+        try_mls_decrypt(&alice_d2_db, conv_id, &new_ct).unwrap().0,
         b"new msg"
     );
 }
@@ -960,7 +963,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     // Verify Alice and Bob can talk.
     let pre_ct = try_mls_encrypt(&alice_db, conv_id, b"first life").unwrap();
     assert_eq!(
-        try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap(),
+        try_mls_decrypt(&bob_db, conv_id, &pre_ct).unwrap().0,
         b"first life"
     );
 
@@ -1050,12 +1053,12 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     // Alice and Bob-v2 can now send and receive.
     let hello = try_mls_encrypt(&alice_db, conv_id, b"welcome back bob").unwrap();
     assert_eq!(
-        try_mls_decrypt(&bob_db_v2, conv_id, &hello).unwrap(),
+        try_mls_decrypt(&bob_db_v2, conv_id, &hello).unwrap().0,
         b"welcome back bob"
     );
     let reply = try_mls_encrypt(&bob_db_v2, conv_id, b"thanks alice").unwrap();
     assert_eq!(
-        try_mls_decrypt(&alice_db, conv_id, &reply).unwrap(),
+        try_mls_decrypt(&alice_db, conv_id, &reply).unwrap().0,
         b"thanks alice"
     );
 }
@@ -1429,13 +1432,13 @@ fn reconcile_e2e_remove_then_communicate() {
     // Alice and Carol can communicate.
     let alice_ct = try_mls_encrypt(&alice_db, conv_id, b"bob is gone").unwrap();
     assert_eq!(
-        try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap(),
+        try_mls_decrypt(&carol_db, conv_id, &alice_ct).unwrap().0,
         b"bob is gone"
     );
 
     let carol_ct = try_mls_encrypt(&carol_db, conv_id, b"confirmed").unwrap();
     assert_eq!(
-        try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap(),
+        try_mls_decrypt(&alice_db, conv_id, &carol_ct).unwrap().0,
         b"confirmed"
     );
 

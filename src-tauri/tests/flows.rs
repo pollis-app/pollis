@@ -27,6 +27,8 @@ mod messages;
 mod model;
 #[path = "flows/rejoin.rs"]
 mod rejoin;
+#[path = "flows/sealed_sender.rs"]
+mod sealed_sender;
 #[path = "flows/security.rs"]
 mod security;
 // voice.rs compile-depends on the media command surface (voice_e2ee helpers +

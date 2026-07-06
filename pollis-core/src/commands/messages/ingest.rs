@@ -354,7 +354,10 @@ fn decrypt_and_persist_one(
     mls_group_id: &str,
     env: &EnvelopeRow,
 ) {
-    let (id, sender_id, ciphertext, reply_to_id, target_id, sent_at, env_type) = env;
+    // `sender_id` (the server-writable envelope column) is intentionally NOT
+    // read for attribution — the sender is taken from the MLS credential inside
+    // the ciphertext (sealed sender, `docs/metadata-minimization-design.md` §2).
+    let (id, _sender_id, ciphertext, reply_to_id, target_id, sent_at, env_type) = env;
     match env_type.as_str() {
         "message" => {
             let exists: bool = conn
@@ -373,16 +376,22 @@ fn decrypt_and_persist_one(
             let ct_bytes = ciphertext
                 .strip_prefix("mls:")
                 .and_then(|h| hex::decode(h).ok());
-            let plaintext = ct_bytes
+            // Attribute from the MLS-authenticated credential inside the
+            // ciphertext, NOT the server-writable `message_envelope.sender_id`
+            // tuple field (which may be a blinded sentinel under sealed sender).
+            // See `docs/metadata-minimization-design.md` §2.
+            let decrypted = ct_bytes
                 .as_ref()
                 .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, b))
-                .and_then(|b| String::from_utf8(b).ok());
-            if let (Some(text), Some(bytes)) = (plaintext, ct_bytes) {
+                .and_then(|(b, cred_sender)| {
+                    String::from_utf8(b).ok().map(|text| (text, cred_sender))
+                });
+            if let (Some((text, cred_sender)), Some(bytes)) = (decrypted, ct_bytes) {
                 let _ = conn.execute(
                     "INSERT OR IGNORE INTO message
                      (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    rusqlite::params![id, conversation_id, sender_id, bytes, text, reply_to_id, sent_at],
+                    rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, sent_at],
                 );
             }
             // Decrypt failed — leave the envelope in message_envelope for a
@@ -390,11 +399,13 @@ fn decrypt_and_persist_one(
         }
         "edit" => {
             if let Some(tid) = target_id.as_ref() {
+                // Edits update content only (no sender change); the credential
+                // sender from the decrypt is unused here.
                 let plaintext = ciphertext
                     .strip_prefix("mls:")
                     .and_then(|h| hex::decode(h).ok())
                     .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, &b))
-                    .and_then(|b| String::from_utf8(b).ok());
+                    .and_then(|(b, _cred_sender)| String::from_utf8(b).ok());
                 if let Some(text) = plaintext {
                     let now = chrono::Utc::now().to_rfc3339();
                     let _ = conn.execute(

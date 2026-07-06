@@ -13,7 +13,7 @@ use crate::error::Result;
 use crate::state::AppState;
 
 use super::device::{load_or_create_device_signer, verify_added_devices, VerifyOutcome};
-use super::provider::{make_credential, PollisProvider, CS};
+use super::provider::{make_credential, parse_credential_user_id, PollisProvider, CS};
 
 // ── GroupInfo publishing ─────────────────────────────────────────────────────
 
@@ -1274,14 +1274,25 @@ pub fn envelope_epoch(ciphertext: &[u8]) -> Option<u64> {
 /// Try to decrypt MLS ciphertext bytes for `conversation_id`.
 ///
 /// The bytes must be TLS-serialised `MlsMessageOut` (i.e. what we stored in
-/// `message_envelope.ciphertext` after `send_message` used MLS).  Returns
-/// the raw plaintext bytes on success, or `None` if the bytes are not a
-/// valid MLS `ApplicationMessage` or if decryption fails for any reason.
+/// `message_envelope.ciphertext` after `send_message` used MLS). Returns
+/// `Some((plaintext, credential_user_id))` on success, or `None` if the bytes
+/// are not a valid MLS `ApplicationMessage` or if decryption fails for any
+/// reason.
+///
+/// The second tuple element is the **MLS-authenticated** sender — the `user_id`
+/// parsed from the sender's `BasicCredential` inside the ciphertext
+/// (`{user_id}:{device_id}`). This is the load-bearing primitive of sealed
+/// sender (`docs/metadata-minimization-design.md` §2): attribution comes from
+/// this crypto-authenticated credential, NOT from the server-writable
+/// `message_envelope.sender_id` column. Returning both together makes it
+/// impossible to obtain plaintext without also obtaining the authenticated
+/// sender, so no caller can accidentally fall back to trusting the envelope
+/// column.
 pub fn try_mls_decrypt(
     conn: &rusqlite::Connection,
     conversation_id: &str,
     ciphertext: &[u8],
-) -> Option<Vec<u8>> {
+) -> Option<(Vec<u8>, String)> {
     let provider = PollisProvider::new(conn);
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
     let mut group = MlsGroup::load(provider.storage(), &group_id).ok()??;
@@ -1291,8 +1302,13 @@ pub fn try_mls_decrypt(
     let protocol_msg = msg_in.try_into_protocol_message().ok()?;
     let processed = group.process_message(&provider, protocol_msg).ok()?;
 
+    // Grab the authenticated sender credential BEFORE `into_content` consumes it.
+    let sender_user_id = parse_credential_user_id(processed.credential());
+
     match processed.into_content() {
-        ProcessedMessageContent::ApplicationMessage(app_msg) => Some(app_msg.into_bytes()),
+        ProcessedMessageContent::ApplicationMessage(app_msg) => {
+            Some((app_msg.into_bytes(), sender_user_id))
+        }
         _ => None,
     }
 }

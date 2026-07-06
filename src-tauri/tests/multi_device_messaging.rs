@@ -182,7 +182,9 @@ impl Device {
 
     /// Decrypt ciphertext.  Mirrors: try_mls_decrypt
     fn decrypt(&self, conv_id: &str, ciphertext: &[u8]) -> Vec<u8> {
-        try_mls_decrypt(&self.db, conv_id, ciphertext).expect("decrypt should succeed")
+        try_mls_decrypt(&self.db, conv_id, ciphertext)
+            .expect("decrypt should succeed")
+            .0
     }
 
     fn has_group(&self, conv_id: &str) -> bool {

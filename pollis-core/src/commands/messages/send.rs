@@ -6,6 +6,14 @@ use crate::state::AppState;
 
 use super::types::Message;
 
+/// Non-identifying placeholder written into the still-NOT-NULL
+/// `message_envelope.sender_id` column when sealed sender is enabled (issue
+/// #331). A fixed sentinel (rather than a per-message random token) carries zero
+/// joinable information and is smaller than a real ULID; the true sender lives in
+/// the MLS credential inside the ciphertext. See
+/// `docs/metadata-minimization-design.md` §2.1.
+pub const SEALED_SENDER_SENTINEL: &str = "sealed";
+
 pub async fn send_message(
     conversation_id: String,
     sender_id: String,
@@ -138,12 +146,38 @@ pub async fn send_message(
         mls_ct_str
     };
 
+    // Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2).
+    // When sealing is enabled we blind the server-visible `message_envelope`:
+    // `sealed = 1` and a fixed, non-identifying sentinel in the still-NOT-NULL
+    // `sender_id` column, so a Turso breach / subpoena of the stored table no
+    // longer reveals sender-per-message. Attribution is unaffected — recipients
+    // take the true sender from the MLS credential inside the ciphertext (the
+    // release-N reader, already shipped), so the sentinel never has to decode.
+    //
+    // Scope (be honest, §2.1): this defends the AT-REST envelope only. The DS
+    // still authenticates every write with an `X-Pollis-User` header and gates on
+    // membership, so a *live* DS operator still sees the sender in real time.
+    // Closing that axis is v1.5 (anonymous membership proof).
+    //
+    // The LOCAL `message` row (inserted above) deliberately keeps the real
+    // `sender_id`: it is the author's own decrypted copy on their trusted device,
+    // where the field is self-attribution and the at-rest server threat does not
+    // apply. Sealing it would mislabel the author's own message, since the send
+    // path writes attribution directly rather than re-deriving it from the
+    // credential the way the ingest reader does.
+    let (envelope_sender_id, sealed_flag): (&str, i64) = if state.config.seal_sender {
+        (SEALED_SENDER_SENTINEL, 1)
+    } else {
+        (sender_id.as_str(), 0)
+    };
+
     // Post to Turso for offline delivery. DS seam: route the envelope write
     // through the Delivery Service (the write API).
     let body = serde_json::json!({
         "id": id,
         "conversation_id": conversation_id,
-        "sender_id": sender_id,
+        "sender_id": envelope_sender_id,
+        "sealed": sealed_flag,
         "ciphertext": ciphertext_remote,
         "reply_to_id": reply_to_id,
         "sent_at": now,
