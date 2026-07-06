@@ -594,9 +594,12 @@ pub async fn forget_local_mls_group(
 /// Apply any commits from `mls_commit_log` that this member has not yet seen.
 ///
 /// Reads rows where `epoch >= current_local_epoch` in ascending order, applies
-/// each commit, and advances the local epoch.  An epoch gap (unexpected jump)
-/// stops processing and logs an error — this indicates a missed or reordered
-/// commit that would require manual intervention in a production system.
+/// each commit, and advances the local epoch.  An epoch gap (a missing interior
+/// commit while a higher epoch is present) does NOT wedge and needs no manual
+/// intervention: the member drops its stale local group and auto-recovers onto
+/// the current published epoch via external-join (the recovery block below /
+/// `may_rejoin_via_external_join`). Messages sealed at the jumped-over epochs are
+/// the only accepted loss.
 ///
 /// `mls_group_id` must already be resolved (group_id for channels,
 /// conversation_id for DMs).
@@ -627,11 +630,21 @@ pub async fn process_pending_commits_inner(
 /// squat an epoch and wedge the group under the UNIQUE(conversation_id, epoch)
 /// constraint.
 ///
-/// Fails OPEN (returns true) on a missing device_id or any query error: a
-/// transient inability to check must never lock a legitimate device out of
-/// recovery. The authoritative, fail-closed control is the inbound self-add
-/// rejection in `process_pending_commits_locked`; this is the cooperative
-/// "don't even try to climb back in" half.
+/// Fails CLOSED (returns false) on any conn/query error: a transient inability
+/// to confirm the device is still registered must NOT permit a rejoin. The DS
+/// `/v1/commits` endpoint does not itself gate submissions on device-revocation,
+/// so an errored check here is the only thing standing between a just-revoked
+/// device and a climb-back — treating "couldn't check" as "registered" is the
+/// same fail-OPEN hole `local_user_is_member` closes for membership. This is
+/// never a permanent lockout: a legitimate device recovers on the next catch-up
+/// pass once the (transient) read succeeds, and by the time control reaches this
+/// gate the same `remote_db` was already read successfully for the commit-log
+/// fetch, so an error here is vanishingly unlikely in practice.
+///
+/// The one fail-OPEN case is a missing local `device_id` (returns true): that is
+/// not a failed check but the absence of a device context (pre-enrollment), and
+/// a revoked device always HAS an id — its `user_device` row is what gets
+/// tombstoned — so it can never reach the tree through this branch.
 async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
     let device_id = match state.device_id.lock().await.clone() {
         Some(d) => d,
@@ -639,7 +652,7 @@ async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
     };
     let conn = match state.remote_db.conn().await {
         Ok(c) => c,
-        Err(_) => return true,
+        Err(_) => return false,
     };
     match conn
         .query(
@@ -650,7 +663,7 @@ async fn local_device_registered(state: &Arc<AppState>, user_id: &str) -> bool {
         .await
     {
         Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
-        Err(_) => true,
+        Err(_) => false,
     }
 }
 

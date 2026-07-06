@@ -1065,6 +1065,161 @@ async fn eviction_then_readd_has_provable_blackout() {
     drop(bob);
 }
 
+// ─── Scenario 4b — removed member RE-ROSTERED recovers via external-join ─────
+
+/// **Positive counterpart to the removed/revoked lockout tests (Scenarios 5, 7,
+/// 7b) — the recovery gate's deny must NOT be permanent.** Those prove a removed
+/// member (or a revoked device) is correctly GATED OUT of the external-join
+/// recovery path (`may_rejoin_via_external_join` → `false`). This proves the
+/// other half of that invariant: once the member is RE-ROSTERED, the very same
+/// gate must flip back to ALLOW and let them recover — a removal is a revocable
+/// state, not a tombstone.
+///
+/// The distinction from `eviction_then_readd_has_provable_blackout` (Scenario 4)
+/// is the RECOVERY SEAM. That test re-adds bob via a fresh Welcome, so bob never
+/// touches `may_rejoin_via_external_join`. Here bob's re-add Welcome is DROPPED
+/// (`DsFault::DropWelcome`), so — exactly like Scenario 3 — bob has no Welcome and
+/// no local group (he self-evicted on the removal) and can ONLY come back through
+/// the external-join gate. That gate is the one hardened to fail CLOSED on a
+/// transient check error; this test proves it still ALLOWS a *legitimate*
+/// re-rostered member (registered device, membership restored) — the fail-closed
+/// change did not over-reach into the happy path.
+///
+/// carol (a continuous member throughout) is the positive control that isolates
+/// every assertion to bob.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn removed_then_rerostered_member_recovers_via_external_join() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Reroster").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    bob.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // Baseline: bob decrypts while a genuine member — proving he had live ratchet
+    // state before the removal.
+    alice.send_channel_message(&channel_id, "pre-removal").await;
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"pre-removal".to_string()),
+        "bob must decrypt the pre-removal message while still a member"
+    );
+
+    // Remove bob; remaining members prune his leaf.
+    alice.remove_member(&group_id, bob_p.id.as_str()).await;
+    alice.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // A message sent while bob is OUT — the blackout probe. bob must never read it,
+    // even after he is re-rostered (he rejoins at a fresh leaf, not the old epoch).
+    alice.send_channel_message(&channel_id, "blackout").await;
+    carol.process_commits_for(&channel_id).await;
+
+    // bob comes online WHILE removed: he sees the removal commit, self-evicts
+    // (deletes his local group), and his external-join recovery is GATED OUT — he
+    // is no longer a current member. He is now out with no local group. This is the
+    // gate's deny half (the negative tests own it); here it just sets the stage.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+    let members_while_out = alice.group_member_ids(&group_id).await;
+    assert!(
+        !members_while_out.contains(&bob_p.id),
+        "bob must be out of the roster while removed, got: {members_while_out:?}"
+    );
+
+    // ── RE-ROSTER bob, but DROP his re-add Welcome so he can only come back through
+    //    the external-join gate (not a fresh Welcome). The add commit + GroupInfo
+    //    land; bob's Welcome never becomes fetchable (the Scenario 3 shape).
+    arm_ds_fault(DsFault::DropWelcome);
+    alice.invite(&group_id, &bob_p.username).await;
+    assert!(
+        !ds_fault_armed(),
+        "DropWelcome should have fired exactly once on bob's re-add"
+    );
+
+    // bob accepts (his group_member row is restored) and polls — no Welcome to
+    // drain and no local group, so his catch-up must external-join. With membership
+    // restored, may_rejoin_via_external_join now ALLOWS the rejoin.
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("bob should see a pending re-invite (only the Welcome was dropped)")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+
+    // alice reconciles bob's external-join (and prunes his stale add-leaf).
+    alice.process_commits_for(&channel_id).await;
+
+    // Roster lists bob exactly once after the re-roster recovery — no duplicate-leaf
+    // residue at the user level.
+    let members = alice.group_member_ids(&group_id).await;
+    assert_eq!(
+        members.iter().filter(|m| **m == bob_p.id).count(),
+        1,
+        "re-rostered bob must appear exactly once in the roster, got: {members:?}"
+    );
+
+    // Post-re-add traffic.
+    alice.send_channel_message(&channel_id, "post-readd").await;
+    bob.process_commits_for(&channel_id).await;
+    let bob_contents = contents(&bob, &channel_id).await;
+
+    // Positive control: carol (a continuous member) decrypts post-readd — it was
+    // genuinely delivered, isolating the invariant to bob.
+    carol.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"post-readd".to_string()),
+        "carol (a continuous member) must decrypt the post-readd message"
+    );
+
+    // LOAD-BEARING (the positive gate flip): re-rostered bob recovered through the
+    // external-join gate and decrypts post-re-add traffic. If the gate wrongly
+    // stayed CLOSED for a legitimate re-rostered member — or the fail-closed
+    // hardening over-reached the error branch into the happy path — bob would be
+    // permanently locked out and this fails.
+    assert!(
+        bob_contents.contains(&"post-readd".to_string()),
+        "RE-ROSTER LOCKOUT: bob was re-added to the group but never recovered through the \
+         external-join gate — a removal must be revocable, not a permanent lockout. \
+         bob view={bob_contents:?}"
+    );
+
+    // bob retains the pre-removal message he decrypted while a member (removal
+    // forgets MLS crypto state, not decrypted history).
+    assert!(
+        bob_contents.contains(&"pre-removal".to_string()),
+        "bob must retain the pre-removal message he decrypted while a member, got: {bob_contents:?}"
+    );
+
+    // PROVABLE BLACKOUT: the message sent while bob was OUT stays unreadable — he
+    // rejoined at a fresh leaf/epoch, never climbing back into the evicted one.
+    assert!(
+        !bob_contents.contains(&"blackout".to_string()),
+        "MEMBERSHIP LEAK: re-rostered bob decrypted the blackout message sent while he was \
+         removed — re-add must land a fresh leaf, not restore the evicted epoch. \
+         bob view={bob_contents:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 // ─── Scenario 5 — revoked-device lockout across every recovery path ─────────
 
 /// **Invalid state it attacks:** a revoked device climbing back into a group it
