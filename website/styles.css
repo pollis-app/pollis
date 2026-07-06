@@ -242,6 +242,7 @@ main {
 
 /* ── Terminal client ─────────────────────────────────────────── */
 .terminal-section {
+  margin-top: 4rem;
   padding: 0 2rem 4rem;
   width: 100%;
   max-width: 800px;
