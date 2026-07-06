@@ -4,6 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **Deep-dive docs:** See `.codesight/wiki/` for detailed documentation — database schemas, MLS flows, component inventory, and backend command reference. Start with `.codesight/wiki/index.md`. **Keep these docs updated** as features are developed — update the relevant wiki article alongside code changes without discussion.
 
+> **What ships & where:** [`docs/deployments.md`](docs/deployments.md) maps every product/service (desktop app, CLI, DS, LiveKit, transparency log, pollis-verify, website) to the directory/crate it builds from, its GitHub Actions build/deploy pipeline, and where it runs. Read it to know what a change actually deploys.
+
 ## Project Overview
 
 Pollis is a privacy-first desktop messaging app with end-to-end encryption using MLS (Message Layer Security). It's a **Tauri** app with a Rust core: the renderer (React) calls into the native Rust backend via Tauri's `invoke`, dispatched to command handlers in `src-tauri/src/commands` backed by the reusable `pollis-core` crate. Strong group encryption with Slack-style channels. The server never sees message plaintext.
