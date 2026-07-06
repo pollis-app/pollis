@@ -171,9 +171,30 @@ pub async fn fetch_commits(conn: &Connection, conversation_id: &str, since: i64)
 pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<SubmitResponse> {
     let commit = b64_decode(&body.commit)?;
 
+    // Decode the GroupInfo / Welcome blobs BEFORE opening the transaction so a
+    // malformed payload is the same clean `Err` it is today — no half-open
+    // transaction, and the caller's error/HTTP mapping is unchanged.
+    let group_info = body.group_info.as_deref().map(b64_decode).transpose()?;
+    let welcomes = body
+        .welcomes
+        .iter()
+        .map(|w| Ok((w, b64_decode(&w.welcome)?)))
+        .collect::<Result<Vec<_>>>()?;
+
+    // The commit, GroupInfo, and Welcome(s) for one submit are ONE bundle: they
+    // all-commit-or-all-rollback. A partial write (commit lands, Welcome fails)
+    // used to be possible and was only recoverable via the client's
+    // external-join fallback — the safety net was the exception path, not a
+    // guarantee. IMMEDIATE takes the write lock at BEGIN, so concurrent
+    // submitters serialize on it (busy_timeout) exactly as the bare conditional
+    // INSERT did — one winner per epoch, no fork.
+    let tx = conn
+        .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
+        .await?;
+
     // The atomic decision: insert this commit at `based_on_epoch` ONLY IF that
     // equals the current head. One statement → no read/write race.
-    let affected = conn
+    let affected = tx
         .execute(
             "INSERT INTO mls_commit_log \
                  (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
@@ -192,36 +213,43 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         .await?;
 
     if affected == 0 {
-        let head = head_epoch(conn, &body.conversation_id).await?;
-        let missing = fetch_commits(conn, &body.conversation_id, body.based_on_epoch).await?;
+        // Not at the head: nothing was written. Read the current head + the
+        // commits the client is missing within this same view, then roll back
+        // (no-op — the bundle wrote nothing) and reject.
+        let head = head_epoch(&tx, &body.conversation_id).await?;
+        let missing = fetch_commits(&tx, &body.conversation_id, body.based_on_epoch).await?;
+        tx.rollback().await?;
         return Ok(SubmitResponse::Rejected { head, missing });
     }
 
     // Won the epoch. Publish the resulting-epoch GroupInfo + any Welcomes so a
-    // future joiner / newly-added device can come online. (P1: best-effort
-    // after the commit lands; P2 makes the whole submit one transaction.)
-    if let Some(gi_b64) = &body.group_info {
-        let gi = b64_decode(gi_b64)?;
-        conn.execute(
+    // future joiner / newly-added device can come online. All part of the same
+    // transaction as the commit above, so a failure here rolls the commit back
+    // too — the recipient never sees a commit with no matching Welcome.
+    if let Some(gi) = &group_info {
+        // Epoch-monotone guard (matches the standalone /v1/group-info upsert in
+        // `writes::upsert_group_info`): an older epoch can never clobber a newer
+        // one, so both writers of `mls_group_info` obey one rule.
+        tx.execute(
             "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
              VALUES (?1, ?2, ?3, ?4) \
              ON CONFLICT(conversation_id) DO UPDATE SET \
                  epoch = excluded.epoch, \
                  group_info = excluded.group_info, \
                  updated_by_device_id = excluded.updated_by_device_id, \
-                 updated_at = datetime('now')",
+                 updated_at = datetime('now') \
+             WHERE excluded.epoch > mls_group_info.epoch",
             libsql::params![
                 body.conversation_id.clone(),
                 body.based_on_epoch + 1,
-                gi,
+                gi.clone(),
                 body.sender_id.clone(),
             ],
         )
         .await?;
     }
-    for w in &body.welcomes {
-        let welcome = b64_decode(&w.welcome)?;
-        conn.execute(
+    for (w, welcome) in &welcomes {
+        tx.execute(
             "INSERT INTO mls_welcome \
                  (id, conversation_id, recipient_id, welcome_data, recipient_device_id) \
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -229,12 +257,14 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
                 ulid::Ulid::new().to_string(),
                 body.conversation_id.clone(),
                 w.recipient_id.clone(),
-                welcome,
+                welcome.clone(),
                 w.recipient_device_id.clone(),
             ],
         )
         .await?;
     }
+
+    tx.commit().await?;
 
     Ok(SubmitResponse::Accepted {
         epoch: body.based_on_epoch,
