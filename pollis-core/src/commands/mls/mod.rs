@@ -7,6 +7,7 @@ mod delivery;
 mod device;
 mod ds_client;
 mod group_state;
+pub mod invariants;
 mod key_packages;
 mod provider;
 mod reconcile;

@@ -710,21 +710,29 @@ async fn may_rejoin_via_external_join(
     mls_group_id: &str,
     user_id: &str,
 ) -> bool {
-    if !local_device_registered(state, user_id).await {
+    // The two gates as booleans, then the (proved) pure conjunction. Each `false`
+    // still logs its specific reason so a skipped recovery is never a silent
+    // no-op, and the membership query is short-circuited when the device is
+    // already revoked (unchanged from the original). The AND itself is
+    // `invariants::may_rejoin`, proved by Kani to admit a rejoin ONLY for
+    // (registered && member) — a revoked or removed device can never climb back
+    // in (fuzzer finding #2).
+    let registered = local_device_registered(state, user_id).await;
+    if !registered {
         eprintln!(
             "[mls] external-join recovery for {mls_group_id}: device for {user_id} is no longer \
              registered (revoked) — staying out"
         );
-        return false;
+        return super::invariants::may_rejoin(false, false);
     }
-    if !local_user_is_member(state, mls_group_id, user_id).await {
+    let is_member = local_user_is_member(state, mls_group_id, user_id).await;
+    if !is_member {
         eprintln!(
             "[mls] external-join recovery for {mls_group_id}: {user_id} is no longer a group \
              member (removed) — staying out"
         );
-        return false;
     }
-    true
+    super::invariants::may_rejoin(registered, is_member)
 }
 
 /// Body of [`process_pending_commits_inner`]. Assumes the caller already holds
@@ -884,7 +892,12 @@ async fn process_pending_commits_locked_impl(
     let mut current_epoch = initial_epoch;
     let mut any_applied = false;
     for commit in pending {
-        if commit.epoch as u64 != current_epoch {
+        // Gap classification (I1), proved by Kani (`invariants::classify`) never
+        // to `Apply` across a gap: `Apply` iff this row's epoch is exactly
+        // `current_epoch`, else `GapRecover`.
+        if super::invariants::classify(current_epoch, Some(commit.epoch as u64))
+            != super::invariants::ReplayStep::Apply
+        {
             // The commit that would bridge `current_epoch` -> next is missing
             // from the log while a HIGHER epoch is present. The commit log is
             // append-only and Turso reads are consistent, so a missing-but-

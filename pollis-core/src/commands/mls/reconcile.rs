@@ -38,27 +38,43 @@ pub(super) async fn our_commit_is_canonical(
     epoch: i64,
     our_commit: &[u8],
 ) -> bool {
+    // Fetch the canonical bytes at this epoch, then run the Kani-proved
+    // adopt/rollback core. An ambiguous submit (LostRace or lost-response Failed)
+    // adopts IFF the log holds OUR exact bytes; a missing row / read failure →
+    // `None` → Rollback → `false` (fall back to the converge path), byte-for-byte
+    // the original behavior.
+    let stored = fetch_commit_at_epoch(state, conversation_id, epoch).await;
+    matches!(
+        crate::commands::mls::invariants::resolve(
+            crate::commands::mls::invariants::SubmitOutcome::LostRace,
+            our_commit,
+            stored.as_deref(),
+        ),
+        crate::commands::mls::invariants::Resolution::Adopt
+    )
+}
+
+/// The canonical commit bytes stored at `epoch` for `conversation_id`, or `None`
+/// if there is no such row or the read fails. The read-only commit-log lookup
+/// behind [`our_commit_is_canonical`]; separated so the adopt/rollback *decision*
+/// is the pure, Kani-proved `invariants::resolve` and this async fn is only I/O.
+async fn fetch_commit_at_epoch(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    epoch: i64,
+) -> Option<Vec<u8>> {
     // Read-only commit-log lookup → log_db (falls back to remote_db pre-cutover).
-    let conn = match state.log_db.conn().await {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    let mut rows = match conn
+    let conn = state.log_db.conn().await.ok()?;
+    let mut rows = conn
         .query(
             "SELECT commit_data FROM mls_commit_log WHERE conversation_id = ?1 AND epoch = ?2",
             libsql::params![conversation_id.to_string(), epoch],
         )
         .await
-    {
-        Ok(r) => r,
-        Err(_) => return false,
-    };
+        .ok()?;
     match rows.next().await {
-        Ok(Some(row)) => match row.get::<Vec<u8>>(0) {
-            Ok(stored) => stored == our_commit,
-            Err(_) => false,
-        },
-        _ => false,
+        Ok(Some(row)) => row.get::<Vec<u8>>(0).ok(),
+        _ => None,
     }
 }
 

@@ -94,16 +94,50 @@ fn b64_encode(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
 }
 
+/// The group's head epoch as a **pure** function of the log's current
+/// `MAX(epoch)`: `None` (empty log) → `0`, `Some(m)` → `m + 1`. This is the
+/// `COALESCE(MAX(epoch), -1) + 1` SQL lifted out of [`head_epoch`] so Kani can
+/// prove (a) the empty-log case yields `0` and **never underflows** `u64` (the
+/// SQL's transient `-1` never surfaces in the head), and (b) `Some(m)` gives
+/// `m + 1` with no wrap for any `m < u64::MAX` — a head that strictly exceeds the
+/// max epoch, keeping the head monotone and the log gapless by construction (I1).
+pub fn head_epoch_of(max_epoch: Option<u64>) -> u64 {
+    match max_epoch {
+        // Empty/unknown group: the first commit is built from epoch 0.
+        None => 0,
+        // A commit built from epoch `m` advances the group `m -> m + 1`, so the
+        // head — the next epoch a member may commit from — is `m + 1`.
+        Some(m) => m + 1,
+    }
+}
+
+/// The Delivery Service's accept decision as a **pure** predicate: a submitted
+/// commit is accepted IFF its `based_on_epoch` equals the current `head`. This
+/// models the atomic `WHERE ?2 = (SELECT COALESCE(MAX(epoch), -1) + 1 …)` guard
+/// in [`submit_commit`]. It is NOT wired into `submit_commit` — the real decision
+/// must stay inside the single conditional `INSERT` to be race-free (two racing
+/// writers are serialized by SQLite; a Rust-side check would reintroduce a
+/// read/write TOCTOU). It is proved here as the model of record: `accepts` is
+/// total, deterministic, and for a fixed head admits exactly ONE epoch, so no two
+/// distinct epochs are ever both accepted at one head — no fork.
+pub fn accepts(based_on_epoch: u64, head: u64) -> bool {
+    based_on_epoch == head
+}
+
 /// The group's head epoch = `MAX(epoch) + 1` (0 for an empty/unknown group).
+/// Reads `MAX(epoch)` and applies the pure, Kani-proved [`head_epoch_of`].
 pub async fn head_epoch(conn: &Connection, conversation_id: &str) -> Result<i64> {
     let mut rows = conn
         .query(
-            "SELECT COALESCE(MAX(epoch), -1) + 1 FROM mls_commit_log WHERE conversation_id = ?1",
+            "SELECT MAX(epoch) FROM mls_commit_log WHERE conversation_id = ?1",
             libsql::params![conversation_id],
         )
         .await?;
     let row = rows.next().await?.ok_or_else(|| anyhow!("no head row"))?;
-    Ok(row.get::<i64>(0)?)
+    // `MAX(epoch)` over an empty set is SQL NULL → `None` → head 0. Epochs are
+    // non-negative by construction, so the `i64 -> u64` mapping is exact.
+    let max_epoch: Option<u64> = row.get::<Option<i64>>(0)?.map(|m| m as u64);
+    Ok(head_epoch_of(max_epoch) as i64)
 }
 
 /// Commits with `epoch >= since`, contiguous, in apply order.
@@ -205,4 +239,75 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
     Ok(SubmitResponse::Accepted {
         epoch: body.based_on_epoch,
     })
+}
+
+// ─── Kani proof harnesses (I1 — DS head arithmetic + accept decision) ─────────
+//
+// Behind `#[cfg(kani)]` only. These prove the two pure functions above:
+// `head_epoch_of` never wraps (empty-log → 0, `Some(m)` → `m + 1`), and `accepts`
+// admits exactly one epoch per head (no fork). No `Vec`/`String`, no async, no DB
+// — pure integer reasoning, so CBMC is instantaneous.
+#[cfg(kani)]
+mod proofs {
+    use super::*;
+
+    /// I1: the head arithmetic never underflows/wraps. The empty-log case is `0`
+    /// (the SQL's transient `-1` never surfaces); `Some(m)` is `m + 1 > m` for
+    /// every representable `m` short of the single wrapping input.
+    #[kani::proof]
+    fn i1_head_epoch_no_wrap() {
+        // Empty log → head 0, no underflow.
+        assert!(head_epoch_of(None) == 0);
+
+        let m: u64 = kani::any();
+        // Real epochs sit far below u64::MAX; exclude only the lone wrapping input
+        // so `m + 1` is exercised across the entire remaining range.
+        kani::assume(m < u64::MAX);
+        let head = head_epoch_of(Some(m));
+        assert!(head == m + 1);
+        // The head strictly exceeds the max epoch: monotone head, no wrap.
+        assert!(head > m);
+    }
+
+    /// I1: the accept decision admits exactly one epoch per head — no two distinct
+    /// epochs are ever both accepted (no fork), and any stale/forward submit is
+    /// rejected.
+    #[kani::proof]
+    fn i1_accept_single_epoch() {
+        let head: u64 = kani::any();
+        let a: u64 = kani::any();
+        let b: u64 = kani::any();
+        kani::assume(head <= 3);
+        kani::assume(a <= 3);
+        kani::assume(b <= 3);
+
+        // Two accepted submits at one head must be the same epoch.
+        if accepts(a, head) && accepts(b, head) {
+            assert!(a == b);
+        }
+        // A stale (`based_on < head`) or forward-gap (`based_on > head`) submit is
+        // rejected — the only accepted epoch is the head itself.
+        if a != head {
+            assert!(!accepts(a, head));
+        }
+    }
+
+    /// Negative harness: a broken head calc that translates the SQL literally as
+    /// unsigned `(max.unwrap_or(u64::MAX)) + 1` — the empty-log `-1` underflow the
+    /// real `head_epoch_of(None) == 0` avoids. `should_panic`: Kani must find the
+    /// wrap (empty log → head 0 assertion fails, or arithmetic overflow).
+    fn head_epoch_of_mutant(max_epoch: Option<u64>) -> u64 {
+        // BUG: models `COALESCE(MAX, -1) + 1` by reusing u64::MAX as "-1" and
+        // adding 1 → wraps to 0 only after an overflowing add. On an empty log
+        // this overflows (`u64::MAX + 1`), which CBMC flags.
+        max_epoch.unwrap_or(u64::MAX) + 1
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i1_head_epoch_mutant_refuted() {
+        // Empty log drives the mutant's `u64::MAX + 1` overflow.
+        let head = head_epoch_of_mutant(None);
+        assert!(head == 0);
+    }
 }

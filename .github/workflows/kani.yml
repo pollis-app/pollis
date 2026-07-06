@@ -1,12 +1,18 @@
 # Machine-checked-correctness gate (docs/machine-checked-correctness-design.md).
 # Runs the Kani bounded-model-checking proofs on the load-bearing pure functions
-# of pollis-core. M1 covers the delivery-watermark no-skip invariant
-# (`next_watermark` in commands/messages/watermark.rs): P1 no-skip / P2 monotone
-# / P3 liveness + a should_panic mutant. Kani builds its own harness toolchain
-# (CBMC backend) and is slow, so this is a dedicated job. The proof HARNESSES are
-# pure, but compiling `pollis-core` (even `--no-default-features`) still links
-# glib-sys and friends, so the same system libs the flows gate installs are
-# required to build the crate before Kani can verify it.
+# of pollis-core + pollis-delivery.
+#   M1 — delivery-watermark no-skip (`next_watermark` in
+#        commands/messages/watermark.rs): P1 no-skip / P2 monotone / P3 liveness.
+#   M2 — the recovery gate, own-commit canonicalization, and gap detection
+#        (`may_rejoin` / `resolve` / `classify` in commands/mls/invariants.rs),
+#        plus the DS head arithmetic + accept decision (`head_epoch_of` /
+#        `accepts` in pollis-delivery/src/commit.rs). Each has a should_panic
+#        mutant proving the harness has teeth.
+# Kani builds its own harness toolchain (CBMC backend) and is slow, so this is a
+# dedicated job. The proof HARNESSES are pure, but compiling `pollis-core` (even
+# `--no-default-features`) still links glib-sys and friends, so the same system
+# libs the flows gate installs are required to build the crate before Kani can
+# verify it.
 name: Kani proofs
 
 on:
@@ -63,3 +69,13 @@ jobs:
         uses: model-checking/kani-github-action@v1
         with:
           args: '--package pollis-core --lib --no-default-features'
+
+      # The I1 DS-side head arithmetic + accept decision live in the Delivery
+      # Service crate, so they need a second Kani invocation. `--lib` scopes to
+      # the library target (the `pollis-delivery` bin is the axum server, which
+      # holds no harnesses). No `--no-default-features` — pollis-delivery has no
+      # feature-gated media stack; the harnesses are pure integer reasoning.
+      - name: Run Kani proofs (pollis-delivery)
+        uses: model-checking/kani-github-action@v1
+        with:
+          args: '--package pollis-delivery --lib'
