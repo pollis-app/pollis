@@ -11,6 +11,7 @@ mod read;
 mod retention;
 mod send;
 mod types;
+mod watermark;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{

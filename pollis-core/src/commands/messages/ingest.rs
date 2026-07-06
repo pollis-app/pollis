@@ -314,50 +314,29 @@ async fn ingest_group_envelopes_interleaved(
         }
     }
 
-    // Is this envelope definitively handled (so the watermark may advance over
-    // it), or must a later pass retry it? `max_fired_epoch` is group-wide.
-    let is_handled = |ep: Option<u64>, env_type: &str| -> bool {
-        match env_type {
-            "message" | "edit" => match (ep, max_fired_epoch) {
-                // Epoch within this pass's reach: decrypted now, or an
-                // unreachable pre-join epoch we will never decrypt. Either way,
-                // permanently handled — advancing past it can't drop a message.
-                (Some(e), Some(max)) => e <= max,
-                // Unparseable bytes are never MLS-decryptable → permanently
-                // handled (advancing past avoids wedging on a corrupt row).
-                (None, _) => true,
-                // The replay reached no epoch (no local group): nothing could be
-                // decrypted, so these must be retried once a group exists.
-                (Some(_), None) => false,
-            },
-            // delete tombstones / unknown types are epoch-independent.
-            _ => true,
-        }
-    };
-
-    // Compute each conversation's watermark independently over its own envelopes.
+    // Compute each conversation's watermark independently over its own
+    // envelopes, delegating to the PROVEN pure function (Kani P1/P2/P3 in
+    // `super::watermark`) — the "is this handled / how far may the cursor
+    // advance" decision is the message-delivery safety property, so the runtime
+    // path goes through the verified function, not a copy. Build the
+    // `(sent_at, EnvKind, Option<epoch>)` view from the existing envelope rows +
+    // pre-parsed `epoch_of`; `&str` keys avoid cloning every `sent_at`.
     let mut out: Vec<(String, Option<String>)> = Vec::with_capacity(per_conv.len());
     for (ci, (cid, envs)) in per_conv.iter().enumerate() {
-        // The sent_at of the first envelope we must retry is an EXCLUSIVE ceiling
-        // on the watermark: advancing to (or, via a sent_at tie, past) it would
-        // drop it from the next `sent_at > watermark` fetch.
-        let stop_at: Option<String> = envs
+        let items: Vec<(&str, super::watermark::EnvKind, Option<u64>)> = envs
             .iter()
             .enumerate()
-            .find(|(ei, env)| !is_handled(epoch_of[ci][*ei], env.6.as_str()))
-            .map(|(_, env)| env.5.clone());
-
-        let mut candidate: Option<String> = None;
-        for env in envs {
-            let sent_at = &env.5;
-            if let Some(stop) = stop_at.as_ref() {
-                if sent_at >= stop {
-                    break;
-                }
-            }
-            candidate = Some(sent_at.clone());
-        }
-        out.push((cid.clone(), candidate));
+            .map(|(ei, env)| {
+                (
+                    env.5.as_str(),
+                    super::watermark::EnvKind::from_type(env.6.as_str()),
+                    epoch_of[ci][ei],
+                )
+            })
+            .collect();
+        let watermark =
+            super::watermark::next_watermark(&items, max_fired_epoch).map(str::to_string);
+        out.push((cid.clone(), watermark));
     }
     Ok(out)
 }
