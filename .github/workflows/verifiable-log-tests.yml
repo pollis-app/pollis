@@ -1,0 +1,44 @@
+name: Verifiable-log tests
+
+# Unit + integration tests for the standalone transparency crates:
+# verifiable-log (core Merkle/STH/proofs), verifiable-log-builder (the commit-log
+# / account-key / binaries tenants + builders), and verifiable-log-serve (the
+# static read API + the `pollis-verify` auditor CLI). These are pure Rust with
+# rustls TLS and NO system libraries (no glib/gtk/openssl/alsa), so the job is
+# fast and needs no apt step.
+#
+# Why a dedicated job: mls-tests.yml triggers on these paths (it's paths-ignore)
+# but only exercises pollis-core / pollis-delivery — it NEVER runs these crates'
+# tests. Without this workflow the transparency-log guarantees (domain-separated
+# STHs, tenant invariants, inclusion proofs, `pollis-verify`) had no CI gate.
+
+on:
+  pull_request:
+    paths:
+      - 'verifiable-log/**'
+      - 'verifiable-log-builder/**'
+      - 'verifiable-log-serve/**'
+      - '.github/workflows/verifiable-log-tests.yml'
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verifiable-log-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo test (verifiable-log crates)
+        run: cargo test -p verifiable-log -p verifiable-log-builder -p verifiable-log-serve
