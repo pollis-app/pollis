@@ -489,6 +489,99 @@ pub async fn purge_welcomes(log_conn: &Connection, recipient: &str) -> anyhow::R
         .await?)
 }
 
+// ── POST /v1/welcomes/resubmit (issue #430 P2) ───────────────────────────────
+
+#[derive(Deserialize)]
+pub struct ResubmitBody {
+    pub conversation_id: String,
+    pub recipient_id: String,
+    pub recipient_device_id: String,
+    /// TLS-serialized MLS Welcome, base64 (STANDARD).
+    pub welcome: String,
+}
+
+/// POST /v1/welcomes/resubmit — idempotently (re)insert a single Welcome for
+/// `(conversation_id, recipient_id, recipient_device_id)`, so a recipient whose
+/// Welcome went missing can be re-driven WITHOUT depending solely on the client's
+/// external-join fallback. When auth is enforced, the authenticated user must be
+/// a current member of the conversation (mirrors `/v1/group-info` authz — only a
+/// member can re-drive a Welcome for the group they belong to).
+pub async fn welcomes_resubmit(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+
+    let parsed: ResubmitBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+
+    // Authz: a signed request may only resubmit for a conversation it belongs to.
+    // Skipped on the no-auth path (mirrors submit / group_info).
+    if let Some(user_id) = &authed {
+        let conn = state.db.conn()?;
+        if !is_member(&conn, &parsed.conversation_id, user_id).await? {
+            return Ok(AuthRejection::Forbidden.into_response());
+        }
+    }
+
+    let welcome = match b64_decode(&parsed.welcome) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid welcome")),
+    };
+
+    let conn = state.log_db.conn()?;
+    upsert_welcome(
+        &conn,
+        &parsed.conversation_id,
+        &parsed.recipient_id,
+        &parsed.recipient_device_id,
+        &welcome,
+    )
+    .await?;
+
+    Ok(ok_json(serde_json::json!({ "status": "ok" })))
+}
+
+/// Idempotent (re)insert of a Welcome, keyed on the UNIQUE
+/// `(conversation_id, recipient_id, recipient_device_id)` tuple added in
+/// migration 000002 (commit-log DB): a resend for the same tuple refreshes the blob and re-arms
+/// delivery (`delivered = 0`) rather than duplicating or erroring. Mirrors the
+/// inline Welcome insert in the commit bundle so both writers of `mls_welcome`
+/// obey one rule. Pure conn-level write reused by the harness.
+pub async fn upsert_welcome(
+    log_conn: &Connection,
+    conversation_id: &str,
+    recipient_id: &str,
+    recipient_device_id: &str,
+    welcome: &[u8],
+) -> anyhow::Result<u64> {
+    Ok(log_conn
+        .execute(
+            "INSERT INTO mls_welcome \
+                 (id, conversation_id, recipient_id, welcome_data, recipient_device_id, delivered) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0) \
+             ON CONFLICT(conversation_id, recipient_id, recipient_device_id) DO UPDATE SET \
+                 welcome_data = excluded.welcome_data, \
+                 delivered = 0",
+            libsql::params![
+                ulid::Ulid::new().to_string(),
+                conversation_id.to_string(),
+                recipient_id.to_string(),
+                welcome.to_vec(),
+                recipient_device_id.to_string(),
+            ],
+        )
+        .await?)
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {

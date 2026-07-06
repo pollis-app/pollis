@@ -60,6 +60,29 @@ CREATE TABLE mls_welcome (\
   created_at TEXT NOT NULL DEFAULT (datetime('now')),\
   recipient_device_id TEXT\
 );\
+CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);\
+CREATE TABLE group_member (\
+  group_id TEXT NOT NULL,\
+  user_id  TEXT NOT NULL,\
+  role     TEXT NOT NULL DEFAULT 'member',\
+  joined_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  PRIMARY KEY (group_id, user_id)\
+);\
+CREATE TABLE dm_channel_member (\
+  dm_channel_id TEXT NOT NULL,\
+  user_id       TEXT NOT NULL,\
+  added_by      TEXT NOT NULL DEFAULT '',\
+  added_at      TEXT NOT NULL DEFAULT (datetime('now')),\
+  accepted_at   TEXT,\
+  PRIMARY KEY (dm_channel_id, user_id)\
+);\
+CREATE TABLE channels (\
+  id       TEXT PRIMARY KEY,\
+  group_id TEXT NOT NULL,\
+  name     TEXT NOT NULL DEFAULT '',\
+  channel_type TEXT NOT NULL DEFAULT 'text',\
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))\
+);\
 CREATE TABLE user_device (\
   device_id   TEXT PRIMARY KEY,\
   user_id     TEXT NOT NULL,\
@@ -93,6 +116,19 @@ async fn seed_device(db: &Db, user_id: &str, device_id: &str, vk: &VerifyingKey)
     conn.execute(
         "INSERT INTO user_device (device_id, user_id, mls_signature_pub) VALUES (?1, ?2, ?3)",
         libsql::params![device_id, user_id, vk.to_bytes().to_vec()],
+    )
+    .await
+    .unwrap();
+}
+
+/// Seed `user_id` as a member of the group `conversation_id` so the commit
+/// submit path's `is_member` authz gate passes (a group id is a valid MLS
+/// conversation id — a group's text channels share one MLS group keyed by it).
+async fn seed_group_membership(db: &Db, conversation_id: &str, user_id: &str) {
+    let conn = db.conn().unwrap();
+    conn.execute(
+        "INSERT INTO group_member (group_id, user_id) VALUES (?1, ?2)",
+        libsql::params![conversation_id, user_id],
     )
     .await
     .unwrap();
@@ -171,12 +207,32 @@ async fn valid_signature_is_accepted() {
     let db = fresh_db().await;
     let sk = gen_signing_key();
     seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+    // alice must be a current member of the conversation to submit a commit.
+    seed_group_membership(&db, "conv1", "alice").await;
 
     let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
     let body = submit_body_json("conv1", 0, "alice");
     let req = signed_request("alice", "dev-alice", now(), &sk, &body, None);
 
     assert_eq!(status_of(router, req).await, StatusCode::OK);
+}
+
+/// Security gap (issue #430 P2): a validly-signed commit submit from someone who
+/// is NOT a current member of the conversation is Forbidden — the identity is
+/// authentic and matches `sender_id`, but membership is what authorizes writing
+/// to the group's commit log (mirrors `/v1/group-info`).
+#[tokio::test(flavor = "multi_thread")]
+async fn non_member_commit_is_forbidden_403() {
+    let db = fresh_db().await;
+    let sk = gen_signing_key();
+    // alice signs authentically as herself, but is seeded into NO conversation.
+    seed_device(&db, "alice", "dev-alice", &sk.verifying_key()).await;
+
+    let router = build_router_with_state(AppState::new(Arc::clone(&db), true));
+    let body = submit_body_json("conv1", 0, "alice");
+    let req = signed_request("alice", "dev-alice", now(), &sk, &body, None);
+
+    assert_eq!(status_of(router, req).await, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test(flavor = "multi_thread")]

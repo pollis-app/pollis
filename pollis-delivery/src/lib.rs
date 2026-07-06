@@ -165,6 +165,7 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/welcomes/ack", post(writes::welcomes_ack))
         .route("/v1/welcomes/reset", post(writes::welcomes_reset))
         .route("/v1/welcomes/purge", post(writes::welcomes_purge))
+        .route("/v1/welcomes/resubmit", post(writes::welcomes_resubmit))
         // Domain A (#419) — messages / envelopes / watermarks / reactions /
         // attachments. All land on the MAIN DB.
         .route("/v1/messages/send", post(messages::send_message))
@@ -321,6 +322,14 @@ async fn submit(
     // Identity binding: a validly-signed request may only write as itself.
     if let Some(user_id) = &authed_user {
         if parsed.sender_id != *user_id {
+            return Ok(AuthRejection::Forbidden.into_response());
+        }
+        // Authz: only a CURRENT member may submit a commit for this conversation
+        // — the committer must already be in the group (a commit that adds a new
+        // member is authored by an existing one). Mirrors `/v1/group-info`'s
+        // membership gate; skipped on the no-auth path.
+        let conn = state.db.conn()?;
+        if !writes::is_member(&conn, &parsed.conversation_id, user_id).await? {
             return Ok(AuthRejection::Forbidden.into_response());
         }
     }

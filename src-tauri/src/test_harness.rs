@@ -184,7 +184,9 @@ pub async fn invoke_unit(
 // captures the full current schema) on first run, and stamp
 // `schema_migrations` so the DB looks adopted.
 
-use pollis_core::db::{BASELINE_SQL as BASELINE, LOG_DB_SCHEMA, POST_BASELINE_MIGRATIONS};
+use pollis_core::db::{
+    BASELINE_SQL as BASELINE, LOG_DB_SCHEMA, POST_BASELINE_LOG_MIGRATIONS, POST_BASELINE_MIGRATIONS,
+};
 
 /// The three MLS control-plane tables that live ONLY on the commit-log DB.
 /// They are created by the main-DB baseline (for old shipped clients), then
@@ -198,6 +200,13 @@ pub const LOG_TABLES: [&str; 3] = ["mls_commit_log", "mls_welcome", "mls_group_i
 pub async fn bootstrap_log_schema(log: &crate::db::remote::RemoteDb) -> Result<()> {
     let conn = log.conn().await?;
     run_sql_script(&conn, LOG_DB_SCHEMA, "log-db schema").await?;
+    // Post-baseline log-DB migrations (mirrors db-apply.sh's second apply). The
+    // log DB is fresh per test run and each migration is idempotent
+    // (CREATE ... IF NOT EXISTS + a dedupe DELETE that's a no-op on empty data),
+    // so applying them unconditionally matches the prod schema without gating.
+    for (_version, description, sql) in POST_BASELINE_LOG_MIGRATIONS {
+        run_sql_script(&conn, sql, &format!("log migration {description}")).await?;
+    }
     Ok(())
 }
 

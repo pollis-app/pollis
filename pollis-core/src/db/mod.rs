@@ -15,6 +15,17 @@ pub const BASELINE_SQL: &str = include_str!("migrations/000000_baseline.sql");
 /// table on one shared file.
 pub const LOG_DB_SCHEMA: &str = include_str!("migrations-log/000001_commit_log_db.sql");
 
+/// Migrations applied on top of the commit-log DB schema, in version order.
+/// Mirrors CI's `db-apply.sh` second apply (MIGRATIONS_DIR=migrations-log) so
+/// the integration-test harness's log DB ends up with the same schema as prod.
+pub const POST_BASELINE_LOG_MIGRATIONS: &[(u32, &str, &str)] = &[
+    (
+        2,
+        "mls_welcome_unique_recipient",
+        include_str!("migrations-log/000002_mls_welcome_unique_recipient.sql"),
+    ),
+];
+
 /// Migrations applied on top of the baseline, in version order. CI's
 /// `db-apply.sh` is the production source of truth; this list mirrors it so
 /// the integration-test harness ends up with the same schema.

@@ -37,7 +37,8 @@ CREATE TABLE mls_welcome (\
   delivered INTEGER NOT NULL DEFAULT 0,\
   created_at TEXT NOT NULL DEFAULT (datetime('now')),\
   recipient_device_id TEXT\
-);";
+);\
+CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);";
 
 fn b64(b: &[u8]) -> String {
     base64::engine::general_purpose::STANDARD.encode(b)
@@ -203,7 +204,8 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
            created_at TEXT NOT NULL DEFAULT (datetime('now')),\
            recipient_device_id TEXT,\
            CHECK (recipient_id <> 'BOOM')\
-         );",
+         );\
+         CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);",
     )
     .await
     .expect("recreate mls_welcome with poison check");
@@ -238,6 +240,43 @@ async fn welcome_failure_rolls_back_commit_and_group_info() {
         other => panic!("expected Accepted after rollback, got {other:?}"),
     }
     assert_eq!(head_epoch(&conn, c).await.unwrap(), 1);
+}
+
+/// A re-sent Welcome for the same (conversation, recipient, device) is
+/// idempotent (issue #430 P2): the second submit's inline Welcome insert updates
+/// the existing row in place instead of erroring on the UNIQUE tuple or stacking
+/// a duplicate row.
+#[tokio::test(flavor = "multi_thread")]
+async fn duplicate_welcome_insert_is_idempotent() {
+    let db = fresh_db().await;
+    let conn = db.conn().unwrap();
+    let c = "dupe";
+
+    // A commit at head 0 carrying a Welcome to alice/dev1 wins and inserts it.
+    match submit_commit(&conn, &body_with_welcome(c, 0, "sender", "alice"))
+        .await
+        .unwrap()
+    {
+        SubmitResponse::Accepted { epoch } => assert_eq!(epoch, 0),
+        other => panic!("expected Accepted, got {other:?}"),
+    }
+    assert_eq!(count_for_conv(&db, "mls_welcome", c).await, 1);
+
+    // A second commit at the new head (epoch 1) carries the SAME recipient/device
+    // Welcome. Its inline insert conflicts on the UNIQUE tuple and updates in
+    // place — no error, still exactly one Welcome row.
+    match submit_commit(&conn, &body_with_welcome(c, 1, "sender", "alice"))
+        .await
+        .unwrap()
+    {
+        SubmitResponse::Accepted { epoch } => assert_eq!(epoch, 1),
+        other => panic!("expected Accepted, got {other:?}"),
+    }
+    assert_eq!(
+        count_for_conv(&db, "mls_welcome", c).await,
+        1,
+        "re-sent Welcome must update in place, not duplicate"
+    );
 }
 
 /// The inline GroupInfo write in the submit bundle obeys the SAME epoch-monotone

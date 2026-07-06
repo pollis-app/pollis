@@ -249,10 +249,18 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         .await?;
     }
     for (w, welcome) in &welcomes {
+        // Idempotent on the UNIQUE (conversation_id, recipient_id,
+        // recipient_device_id) tuple (migration 000002 (commit-log DB)): a re-sent Welcome for
+        // the same recipient/device refreshes the blob and re-arms delivery
+        // (`delivered = 0`) instead of erroring or stacking a duplicate row — so
+        // a resubmit/retry of this commit bundle can never wedge on a dup.
         tx.execute(
             "INSERT INTO mls_welcome \
-                 (id, conversation_id, recipient_id, welcome_data, recipient_device_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+                 (id, conversation_id, recipient_id, welcome_data, recipient_device_id, delivered) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0) \
+             ON CONFLICT(conversation_id, recipient_id, recipient_device_id) DO UPDATE SET \
+                 welcome_data = excluded.welcome_data, \
+                 delivered = 0",
             libsql::params![
                 ulid::Ulid::new().to_string(),
                 body.conversation_id.clone(),
