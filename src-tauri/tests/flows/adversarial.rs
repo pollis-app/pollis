@@ -347,6 +347,127 @@ async fn committer_does_not_strand_inbound_message() {
     drop(carol);
 }
 
+// ─── Scenario 9 — sweep backstops a dropped remove/eviction commit (#430 P1) ─
+
+/// **Deterministic repro for the eviction-side forward-secrecy gap (issue #430
+/// P1).** The MLS commit that evicts a removed member from the ratchet tree
+/// (`remove_member_from_group` → `reconcile`) is best-effort. If it is dropped,
+/// the DS deletes the member's `group_member` row but the removed device LINGERS
+/// in every remaining member's LOCAL tree — still a recipient of the seals for
+/// new messages — until some *unrelated* membership change happens to run
+/// reconcile again. That is the eviction-side analog of the bootstrap gap fixed
+/// in #427.
+///
+/// The fix is a reconcile backstop in the background sweep
+/// (`catch_up_all_mls_groups`): after catching a group up, the sweep retries a
+/// dropped remove so the stale leaf is actually pruned.
+///
+/// Sequence: alice, bob, carol are members; bob decrypts a pre-removal message
+/// (proving he was a genuine member with live ratchet state). We then simulate a
+/// DROPPED remove commit by deleting bob's `group_member` row directly on the
+/// server — exactly the state `remove_member_from_group` leaves behind when its
+/// best-effort reconcile post is lost: bob is off the roster but still in alice's
+/// local tree. alice runs the sweep, then sends a post-eviction message.
+///
+/// FORWARD-SECRECY INVARIANT: after the sweep, evicted bob must NOT decrypt the
+/// post-eviction message — the backstop pruned his leaf and re-sealed at a new
+/// epoch. carol (a continuous member) is the positive control: she MUST decrypt
+/// it, isolating the lockout to bob. WITHOUT the backstop bob's leaf never leaves
+/// alice's tree, so alice's post-eviction message is still sealed for him and he
+/// decrypts it — failing the invariant. This test is EXPECTED TO FAIL until the
+/// sweep reconcile backstop lands.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn sweep_backstops_dropped_remove_eviction() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("SweepEvict").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    bob.process_commits_for(&channel_id).await;
+    carol.process_commits_for(&channel_id).await;
+
+    // Baseline: bob decrypts while a genuine member — his leaf is in the tree and
+    // he holds live ratchet state.
+    alice.send_channel_message(&channel_id, "pre-removal").await;
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"pre-removal".to_string()),
+        "bob must decrypt the pre-removal message while still a member"
+    );
+
+    // Simulate a DROPPED remove/eviction commit: delete bob's group_member row
+    // server-side (the roster delete `/v1/members/remove` performs) WITHOUT
+    // running the best-effort reconcile that would prune his leaf. This is exactly
+    // the state remove_member_from_group leaves behind when its reconcile MLS post
+    // is lost: bob off the roster, but still in alice's local ratchet tree.
+    {
+        let remote = writable_remote().await;
+        let conn = remote.conn().await.expect("remote conn");
+        let affected = conn
+            .execute(
+                "DELETE FROM group_member WHERE group_id = ?1 AND user_id = ?2",
+                libsql::params![group_id.clone(), bob_p.id.clone()],
+            )
+            .await
+            .expect("delete bob's group_member row");
+        assert_eq!(affected, 1, "expected exactly one group_member row for bob to delete");
+    }
+
+    // The background sweep runs (cold-launch / reconnect). WITHOUT the reconcile
+    // backstop this leaves bob's leaf in alice's tree; WITH it, the sweep retries
+    // the dropped remove and prunes him.
+    alice.sweep().await;
+
+    // alice settles her own reconcile commit, then sends a post-eviction message.
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "post-eviction").await;
+
+    // Positive control: carol (a continuous member) decrypts post-eviction — it
+    // was genuinely delivered, isolating the question to bob.
+    carol.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&carol, &channel_id).await.contains(&"post-eviction".to_string()),
+        "carol (a continuous member) must decrypt the post-eviction message"
+    );
+
+    // Sanity: bob is no longer a current member.
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        !members.contains(&bob_p.id),
+        "bob should not be a current member after removal, got: {members:?}"
+    );
+
+    // bob attempts to catch up and read.
+    bob.poll().await;
+    bob.process_commits_for(&channel_id).await;
+    let bob_view = contents(&bob, &channel_id).await;
+
+    // FORWARD-SECRECY INVARIANT: the sweep's reconcile backstop evicted bob from
+    // the local tree, so a message sealed AFTER the backstop is unreadable to him.
+    // Fails without the backstop — bob's leaf never left alice's tree, so
+    // post-eviction is still sealed for him.
+    assert!(
+        !bob_view.contains(&"post-eviction".to_string()),
+        "EVICTION FORWARD-SECRECY GAP: removed bob decrypted a post-eviction message — the sweep \
+         reconcile backstop failed to prune his stale leaf after a dropped remove commit. \
+         bob view={bob_view:?}"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+}
+
 // ─── shared helpers ──────────────────────────────────────────────────────────
 
 /// Invite `member` to `group_id`, accept, drain the Welcome, and replay commits

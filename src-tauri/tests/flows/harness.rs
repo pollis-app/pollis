@@ -2492,6 +2492,21 @@ impl TestClient {
         .unwrap_or_else(|e| panic!("poll_mls_welcomes: {e}"));
     }
 
+    /// Run the cold-launch / post-reconnect MLS sweep for this client — catches
+    /// every group + DM up to head and runs the eviction/remove reconcile
+    /// backstop (issue #430 P1). Real clients fire this at AppShell mount.
+    #[allow(dead_code)]
+    pub(crate) async fn sweep(&self) {
+        self.activate();
+        let _: serde_json::Value = invoke(
+            &self.webview,
+            "catch_up_all_mls_groups",
+            json!({ "userId": self.user_id() }),
+        )
+        .await
+        .unwrap_or_else(|e| panic!("catch_up_all_mls_groups: {e}"));
+    }
+
     /// Drain pending MLS commits for a single channel. Must be called
     /// per-channel because commit processing is keyed by MLS group, which
     /// corresponds 1:1 with a conversation (channel or DM).
