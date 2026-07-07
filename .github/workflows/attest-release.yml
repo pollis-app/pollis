@@ -1,0 +1,102 @@
+name: Attest a released tag (binary transparency backfill)
+
+# Standalone re-attestation for binary transparency (#453 P2). The
+# desktop-release `attest-and-log` job runs at release time; this
+# `workflow_dispatch` re-runs the SAME attestation for an already-published tag
+# WITHOUT a rebuild — to backfill a release whose attest step failed, or to
+# verify/iterate the attest pipeline cheaply (~2 min vs a full ~40 min release).
+#
+# It uses main's CURRENT `scripts/attest-binaries.sh`, the TAG's commit
+# timestamp (deterministic SOURCE_DATE_EPOCH), the published release assets, and
+# the transparency bucket's own write credentials. Idempotent: a tag already in
+# the accumulator is a no-op.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published release tag to attest, e.g. v1.3.4"
+        required: true
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      # main = the current (fixed) attest-binaries.sh.
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag commit timestamp + sha
+        id: tag
+        run: |
+          set -euo pipefail
+          git fetch --depth 1 origin tag "${{ inputs.tag }}"
+          echo "epoch=$(git log -1 --format=%ct "${{ inputs.tag }}")" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse "${{ inputs.tag }}")" >> "$GITHUB_OUTPUT"
+
+      # The shipped installers, pulled from the GitHub release for the tag (same
+      # bytes published to cdn.pollis.com). attest-binaries.sh finds each by glob.
+      - name: Download the release's published installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          gh release download "${{ inputs.tag }}" --dir artifacts \
+            --pattern '*.dmg' --pattern '*.exe' --pattern '*.AppImage' \
+            --pattern '*.deb' --pattern '*.rpm'
+          ls -la artifacts
+
+      - name: Install extraction tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full jq
+
+      - name: Compute BinaryRecord leaves for this tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          COMMIT: ${{ steps.tag.outputs.sha }}
+          SOURCE_DATE_EPOCH: ${{ steps.tag.outputs.epoch }}
+          ARTIFACTS_DIR: artifacts
+          OUT: tag-records.json
+        run: |
+          set -euo pipefail
+          ./scripts/attest-binaries.sh
+          echo "per-tag BinaryRecord leaves:"
+          jq '.' tag-records.json
+
+      - name: Merge per-tag records into the R2 accumulator
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          # The accumulator lives in the transparency bucket — write it with the
+          # transparency bucket's own credentials (release-bucket keys 403 here).
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_TRANSPARENCY_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_TRANSPARENCY_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          set -euo pipefail
+          KEY="internal/binary-records.json"
+          if aws s3 cp "s3://${R2_BUCKET}/${KEY}" ./accumulator.json \
+               --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
+            [ -s ./accumulator.json ] || echo "[]" > ./accumulator.json
+          else
+            echo "no existing accumulator — starting from []"
+            echo "[]" > ./accumulator.json
+          fi
+          # Idempotent: skip a tag whose leaves are already accumulated.
+          existing="$(jq --arg t "$RELEASE_TAG" \
+            'map(select(.release_tag == $t)) | length' ./accumulator.json)"
+          if [ "${existing}" -gt 0 ]; then
+            echo "${RELEASE_TAG} already present (${existing} leaves) — nothing to do."
+            exit 0
+          fi
+          jq -s 'add' ./accumulator.json tag-records.json > ./merged.json
+          echo "accumulator: $(jq 'length' ./accumulator.json) + $(jq 'length' tag-records.json) = $(jq 'length' ./merged.json) records"
+          aws s3 cp ./merged.json "s3://${R2_BUCKET}/${KEY}" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "no-cache"
+          echo "attested ${RELEASE_TAG} -> s3://${R2_BUCKET}/${KEY}"

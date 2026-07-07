@@ -787,8 +787,13 @@ jobs:
       - name: Merge per-tag records into the R2 accumulator
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          # The accumulator lives in the TRANSPARENCY bucket (R2_TRANSPARENCY_*
+          # endpoint/bucket below), so it must be written with the transparency
+          # bucket's own credentials — the release-bucket R2_ACCESS_KEY_ID keys
+          # get AccessDenied here. These are the same creds transparency-publish.yml
+          # uses to write this bucket.
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_TRANSPARENCY_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_TRANSPARENCY_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           # Cloudflare R2 rejects the integrity checksums newer aws-cli v2 adds
           # by default; only send/verify them when the operation requires it.
