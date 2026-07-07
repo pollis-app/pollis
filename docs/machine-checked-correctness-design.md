@@ -1,6 +1,16 @@
 # Machine-Checked Correctness — Design
 
-> **Status:** design / decision-quality proposal. Governed by
+> **Status:** Partly shipped. **M0–M3 are SHIPPED** — supply-chain gating
+> (`cargo-deny` + `cargo-vet`, `deny.toml` / `supply-chain/`); the Kani watermark
+> proofs on the real production `next_watermark`
+> (`pollis-core/src/commands/messages/watermark.rs`, I3); the Kani gate +
+> canonicalization proofs `may_rejoin` / `resolve` / `classify`
+> (`pollis-core/src/commands/mls/invariants.rs`, I5/I2/I1), each paired with a
+> `should_panic` mutant certifying teeth; and the nightly `schedule:` marathon
+> soak with one-step failing-op-sequence → regression promotion. What shipped is
+> **Kani bounded proofs on the real pure functions + refuting mutants + a
+> continuous soak** — **not** the M4/M5 TLA+ exhaustive models or the Track-B
+> `cargo-fuzz`/OSS-Fuzz targets, which **remain deferred → #481**. Governed by
 > [`backend-core-invariants.md`](backend-core-invariants.md) ("invalid states are
 > unrepresentable") and composes with the verifiable-builds / transparency work
 > ([`transparency.md`](transparency.md)). Scope: the Pollis MLS control-plane and

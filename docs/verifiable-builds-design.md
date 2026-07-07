@@ -1,6 +1,6 @@
 # Verifiable / Reproducible Builds + Binary Transparency
 
-**Status:** design proposal (decision-quality spec).
+**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned Ed25519 key (`175ebfef…7148`). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P3 (cosign/SLSA keyless provenance), P4 (in-app "verify this build"), and P5 (full reproducibility + independent rebuilder) remain deferred → #484.** The full design of record follows.
 **Author lens:** performance, security, and *zero user burden* are first-class
 constraints, called out explicitly at each decision.
 **Audience:** maintainers deciding whether/how to build this, plus the security
