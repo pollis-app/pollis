@@ -34,7 +34,9 @@ use pollis_core::accounts;
 use pollis_core::commands::{auth, dm, messages, pin};
 use pollis_core::config::Config;
 use pollis_core::db::remote::RemoteDb;
-use pollis_core::db::{BASELINE_SQL, LOG_DB_SCHEMA, POST_BASELINE_MIGRATIONS};
+use pollis_core::db::{
+    BASELINE_SQL, LOG_DB_SCHEMA, POST_BASELINE_LOG_MIGRATIONS, POST_BASELINE_MIGRATIONS,
+};
 use pollis_core::keystore::{default_os_keystore, InMemoryKeystore, Keystore};
 use pollis_core::state::AppState;
 
@@ -107,6 +109,15 @@ async fn bootstrap_schema(remote: &RemoteDb) -> anyhow::Result<()> {
 async fn bootstrap_log_schema(log: &RemoteDb) -> anyhow::Result<()> {
     let conn = log.conn().await?;
     run_sql_script(&conn, LOG_DB_SCHEMA).await?;
+    // Post-baseline log-DB migrations (mirrors the flows harness + db-apply.sh's
+    // second apply). Without these the log DB is missing e.g. migration 000002's
+    // `mls_welcome` UNIQUE index, so the DS's idempotent welcome upsert
+    // (`ON CONFLICT`) errors and the recipient never gets welcomed (#487). The
+    // log DB is fresh per test and each migration is idempotent, so apply
+    // unconditionally.
+    for (_version, _description, sql) in POST_BASELINE_LOG_MIGRATIONS {
+        run_sql_script(&conn, sql).await?;
+    }
     Ok(())
 }
 

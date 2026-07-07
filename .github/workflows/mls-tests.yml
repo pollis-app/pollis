@@ -125,6 +125,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test -p pollis-core
 
+      # pollis-tui unit + smoke tests (the headless in-process-DS rig — no
+      # webkit/ALSA). Nothing ran these before, so DS-spine changes could regress
+      # the TUI's sync path unnoticed (#487). The smoke rig applies the same
+      # baseline + post-baseline log migrations as production.
+      - name: TUI unit + smoke tests (pollis-tui)
+        if: ${{ !cancelled() }}
+        run: cargo test -p pollis-tui
+
       # Multi-client integration harness against the real in-process Delivery
       # Service — the base for the adversarial recovery suite.
       - name: MLS integration flows harness
