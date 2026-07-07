@@ -24,8 +24,9 @@
 //!   strictly less than the first un-handled `sent_at`, even on a tie.
 //!
 //! The Kani harnesses at the bottom of this file prove exactly that (P1), plus
-//! monotonicity (P2) and handled-liveness (P3), and a deliberately-broken mutant
-//! demonstrates the harness has teeth.
+//! monotonicity (P2) and handled-liveness (P3). Each proof is paired with a
+//! deliberately-broken mutant harness (`p{1,2,3}_mutant_refuted`, all
+//! `#[kani::should_panic]`) demonstrating that proof still has teeth.
 
 /// The only distinction the watermark cares about: whether an envelope's
 /// deliverability is gated on reaching its MLS epoch this pass.
@@ -328,6 +329,115 @@ mod proofs {
             if let Some(w) = wm {
                 assert!(w < stop);
             }
+        }
+    }
+
+    // ─── Negative test for P2 (monotone) ─────────────────────────────────────
+    //
+    // A deliberately-broken variant that, on reaching the first un-handled
+    // envelope, BAILS OUT to `None` — discarding the fully-handled run below it —
+    // instead of returning that run's greatest `sent_at`. This is a plausible
+    // "over-conservative" bug: "if anything is un-handled, don't advance at all".
+    // It preserves P1 (returning `None` never skips past an un-handled envelope)
+    // and P3 (never triggers when all envelopes are handled), so ONLY P2 catches
+    // it: a prefix that stops short of the un-handled envelope keeps its cursor,
+    // while the full slice — which sees the un-handled envelope — collapses to
+    // `None`, making `wm_prefix > wm_full`. Test-only, unreachable from runtime.
+    fn next_watermark_p2_mutant<S: Ord + Clone>(
+        envs: &[(S, EnvKind, Option<u64>)],
+        max_fired_epoch: Option<u64>,
+    ) -> Option<S> {
+        let mut candidate: Option<S> = None;
+        for (sent_at, kind, epoch) in envs {
+            // BUG: abandon the good handled prefix instead of returning it.
+            if !is_handled(*kind, *epoch, max_fired_epoch) {
+                return None;
+            }
+            candidate = Some(sent_at.clone());
+        }
+        candidate
+    }
+
+    /// Asserts P2 on the P2-mutant. `#[kani::should_panic]`: PASSES exactly when
+    /// Kani finds a state where the mutant regresses the cursor across a superset
+    /// (a handled prefix followed by an un-handled envelope the prefix excluded),
+    /// certifying P2 has teeth. If the mutant ever stopped regressing, this would
+    /// FAIL (nothing panicked) — catching a vacuous monotonicity proof.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(5)]
+    fn p2_mutant_refuted() {
+        let (arr, len) = symbolic_envs(true);
+        let envs = &arr[..len];
+        let max_fired = symbolic_max_fired();
+
+        let cut: usize = kani::any();
+        kani::assume(cut <= envs.len());
+        let prefix = &envs[..cut];
+
+        let wm_prefix = next_watermark_p2_mutant(prefix, max_fired);
+        let wm_full = next_watermark_p2_mutant(envs, max_fired);
+
+        assert!(wm_prefix <= wm_full);
+    }
+
+    // ─── Negative test for P3 (handled-liveness) ─────────────────────────────
+    //
+    // A deliberately-broken variant with an off-by-one that refuses to advance
+    // ONTO the final envelope even when it is handled — the cursor lags one short
+    // of a fully-handled prefix. This preserves P1 (stopping short never skips an
+    // un-handled envelope), so ONLY P3 catches it: when every envelope is handled
+    // the watermark must equal the max `sent_at`, but the mutant returns the
+    // second-to-last (or `None` for a single element). Test-only.
+    fn next_watermark_p3_mutant<S: Ord + Clone>(
+        envs: &[(S, EnvKind, Option<u64>)],
+        max_fired_epoch: Option<u64>,
+    ) -> Option<S> {
+        let stop_at: Option<&S> = envs
+            .iter()
+            .find(|(_, kind, epoch)| !is_handled(*kind, *epoch, max_fired_epoch))
+            .map(|(sent_at, _, _)| sent_at);
+
+        let n = envs.len();
+        let mut candidate: Option<S> = None;
+        for (i, (sent_at, _, _)) in envs.iter().enumerate() {
+            if let Some(stop) = stop_at {
+                if sent_at >= stop {
+                    break;
+                }
+            }
+            // BUG: never adopt the last envelope, even when it is handled — the
+            // cursor gets stuck one below a fully-handled prefix.
+            if i + 1 == n {
+                break;
+            }
+            candidate = Some(sent_at.clone());
+        }
+        candidate
+    }
+
+    /// Asserts P3 on the P3-mutant. `#[kani::should_panic]`: PASSES exactly when
+    /// Kani finds an all-handled slice whose watermark falls short of the max
+    /// `sent_at`, certifying P3 has teeth. If the mutant ever stopped lagging,
+    /// this would FAIL (nothing panicked) — catching a vacuous liveness proof.
+    #[kani::proof]
+    #[kani::should_panic]
+    #[kani::unwind(5)]
+    fn p3_mutant_refuted() {
+        let (arr, len) = symbolic_envs(true);
+        let envs = &arr[..len];
+        let max_fired = symbolic_max_fired();
+
+        let all_handled = envs
+            .iter()
+            .all(|(_, kind, epoch)| is_handled(*kind, *epoch, max_fired));
+        kani::assume(all_handled);
+
+        let wm = next_watermark_p3_mutant(envs, max_fired);
+
+        match envs.last() {
+            Some((max_key, _, _)) => assert!(wm == Some(*max_key)),
+            None => assert!(wm.is_none()),
         }
     }
 }

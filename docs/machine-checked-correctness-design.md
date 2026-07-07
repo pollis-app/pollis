@@ -61,7 +61,7 @@ The current enforcement is split across three physical writers/checkers:
 | DB constraint | `UNIQUE(conversation_id, epoch)` | `pollis-core/src/db/migrations/000003_mls_commit_log_unique_epoch.sql:22` |
 | Serialization chokepoint | DS conditional-insert = head → append-only, gapless, one-per-epoch *by construction* | `pollis-delivery/src/commit.rs:137` (`submit_commit`) |
 | Client state machine | gap detection, own-commit adoption, external-join recovery, `#418` epoch-interleaved catch-up | `pollis-core/src/commands/mls/group_state.rs:770` (`process_pending_commits_locked_impl`) |
-| Client pure logic | watermark advance / stop-at ceiling | `pollis-core/src/commands/messages/ingest.rs:319` (`is_handled` + stop-at loop) |
+| Client pure logic | watermark advance / stop-at ceiling — **Kani-proved (I3)** | `pollis-core/src/commands/messages/watermark.rs` (`next_watermark`; P1/P2/P3 harnesses), called by `ingest.rs:337` |
 
 The doctrine explicitly prefers the lowest layer, but note the architecture
 decision in [`mls-reconcile-hardening.md:16`](mls-reconcile-hardening.md): the
@@ -83,16 +83,17 @@ work is.
 |---|---|---|---|---|
 | **I1** | commit log gapless, append-only, one-per-epoch | `UNIQUE` index + DS `submit_commit` conditional-insert (`commit.rs:137`); proptest never forks | **TLA+**: model the DS `submit_commit` as an atomic action over N clients racing at a head; model-check "no two distinct commits at one epoch ∧ no gap ∧ head monotone" exhaustively. **Kani** on `head_epoch` arithmetic + the accept/reject decision extracted as a pure fn. | Property holds *by construction in prose*; never mechanically checked. The `ON CONFLICT`+`WHERE ?2 = head` interaction is subtle enough to deserve a proof. |
 | **I2** | commits are a verifiable chain | MLS confirmation tag chains epochs (openmls); `our_commit_is_canonical` byte-compares (`reconcile.rs:35`) | Kani on the *canonicalization decision* (own-commit adoption vs rollback): given (submit outcome, stored bytes, our bytes), the adopt/rollback choice never adopts a foreign commit and never rolls back our own landed commit. | Adoption logic is scattered across `group_state.rs:403-440` + `reconcile.rs`; correctness argued in comments (#411), not proved. |
-| **I3** | delivery = monotonic per-(member,device) cursor; retention ≥ slowest member (no TTL) | watermark stop-at ceiling in `ingest.rs:319-361`; `envelope_cleanup_ttl_or_watermark` flow test | **Kani** on the watermark function: prove *monotonicity* (advance never regresses) and the **safety property** — the watermark never advances to/past an un-handled envelope's `sent_at` (the F3 message-loss guard). This is the single highest-ROI target. | Property is defended by one flow test + careful prose (the #442 oracle false-positive shows how easy it is to get the reasoning wrong). Not proved. |
+| **I3** | delivery = monotonic per-(member,device) cursor; retention ≥ slowest member (no TTL) | **Kani-proved** — `next_watermark` (`messages/watermark.rs`) called by the real ingest path (`ingest.rs:337`); plus the `envelope_cleanup_ttl_or_watermark` flow test | **Kani** on the watermark function: prove *monotonicity* (advance never regresses) and the **safety property** — the watermark never advances to/past an un-handled envelope's `sent_at` (the F3 message-loss guard). This is the single highest-ROI target. | ✅ **Proved (M1, #467/#468).** `next_watermark` extracted + wired into production; harnesses `p1_no_skip` (anti-F3), `p2_monotone`, `p3_handled_liveness`, each with a `should_panic` mutant (`p{1,2,3}_mutant_refuted`) certifying teeth. Retention floor (I4) still deferred — see that row. |
 | **I4** | commits + welcomes retained until slowest member consumed | commit-log pruning disabled; DS is sole writer, never deletes (`commit.rs:17`) | TLA+ retention model: with the cursor model, GC-below-floor is unreachable. Kani on the floor computation once it exists. | Retention floor is *deferred* (30-day envelope TTL still live per `mls-reconcile-hardening.md:141`). Model it before shipping the floor so the design is proved before the code. |
 | **I5** | historical membership derivable, not guessed | DS `is_member` / client `local_user_is_member` (`group_state.rs:679`) gate recovery | Kani on the recovery-gate decision: a revoked *or* removed device can never take a recovery path that re-enters the tree (fuzzer finding #2). | Gate is fail-closed prose (`group_state.rs:679-728`); proptest samples it. Provable as a pure predicate over (registered?, member?). |
 | **I6** | one schema, one apply path | harness embeds migrations + `apply_drift_fixups` (`testing.md:87-89`) | Property test / CI assertion: test schema == prod schema (structural diff), plus `schema_migrations` contiguity check. Not really formal-methods territory — a mechanical equality check. | Divergence caught only if someone looks; make it a gate. |
 
 **Gaps that machine checking closes, ranked by ROI:**
 
-1. **I3 watermark safety** (highest) — a pure function, a subtle safety property,
-   a *history of a real false-alarm* (#442) that ate real time. Kani proves the
-   real code, small bounded loop, no external deps.
+1. **I3 watermark safety** (highest) — ✅ **done (M1)**. A pure function, a subtle
+   safety property, a *history of a real false-alarm* (#442) that ate real time.
+   Kani proves the real code (`next_watermark`), small bounded loop, no external
+   deps.
 2. **I5 recovery-gate** — a two-bit predicate guarding a membership *leak*.
    Trivial to prove, high consequence.
 3. **I2 own-commit canonicalization** — the #411 adopt/rollback logic. Extractable
@@ -231,6 +232,18 @@ epochs/kinds via `kani::any()`):
 
 This is the single best use of the budget: real code, a subtle safety property, a
 documented near-miss, a tiny bounded loop, zero external dependencies.
+
+> **Status: shipped (M1, #467/#468).** `next_watermark` lives in
+> `pollis-core/src/commands/messages/watermark.rs` and is the exact function the
+> production ingest path calls (`ingest.rs:337`) — no forked copy. The harnesses
+> `p1_no_skip` / `p2_monotone` / `p3_handled_liveness` are bounded to
+> `envs.len() ≤ 4` (CBMC models `Vec`/`String` heap at ruinous cost, so inputs are
+> fixed-size stack arrays over a `0..=3` domain; the tie/no-skip counterexamples
+> are 2–3-element phenomena, so len-4 finds them). Each proof is paired with a
+> `#[kani::should_panic]` mutant harness (`p1_mutant_refuted`: `>` instead of `>=`
+> on a `sent_at` tie; `p2_mutant_refuted`: bail to `None` on the first un-handled
+> envelope, discarding the handled prefix; `p3_mutant_refuted`: an off-by-one that
+> never advances onto the final handled envelope) proving each property has teeth.
 
 ### 4.2 Gap detection + head arithmetic (I1)
 
