@@ -70,6 +70,15 @@ async fn main() -> Result<()> {
 /// Point fd 2 at `$POLLIS_DATA_DIR/pollis-tui.log` (fallback: the OS temp dir)
 /// for the lifetime of the process. Returns the log path, or `None` if the file
 /// couldn't be opened — in that case stderr is left alone rather than lost.
+///
+/// Unix only: it dup2's onto fd 2. On Windows this is a no-op stub (stderr left
+/// as-is) until a ConPTY-based redirect is wired, mirroring `terminal_windows.rs`.
+#[cfg(not(unix))]
+fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
+    None
+}
+
+#[cfg(unix)]
 fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
     use std::os::fd::AsRawFd;
 

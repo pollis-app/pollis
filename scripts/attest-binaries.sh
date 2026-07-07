@@ -88,7 +88,12 @@ if [ -n "${dmg:-}" ]; then
   art_sha="$(sha_file "$dmg")"
   ex="$work/dmg"; mkdir -p "$ex"
   # 7z reads the HFS filesystem inside the .dmg on Linux; extract the .app.
-  7z x -y -o"$ex" "$dmg" >/dev/null
+  # The .dmg carries the standard "drag to /Applications" symlink, on which
+  # p7zip prints "Dangerous link path was ignored" and returns a non-zero exit
+  # even though it correctly skips only that symlink and extracts the .app. We
+  # don't need that symlink, so tolerate the exit and let the .app-present check
+  # below be the real gate (a genuine extraction failure leaves no .app).
+  7z x -y -o"$ex" "$dmg" >/dev/null 2>&1 || true
   app="$(find "$ex" -maxdepth 4 -name '*.app' -type d | head -1 || true)"
   [ -n "${app:-}" ] || { echo "::error::attest: no .app payload found inside ${dmg}"; exit 1; }
   pay_sha="$(sha_tree "$app")"
