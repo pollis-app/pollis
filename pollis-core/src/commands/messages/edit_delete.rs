@@ -167,7 +167,6 @@ pub async fn delete_message(
             &group_id,
             Some(&conversation_id),
             None,
-            &user_id,
             &message_id,
         ).await {
             eprintln!("[realtime] delete_message: publish to group {group_id}: {e}");
@@ -496,7 +495,6 @@ pub async fn edit_message(
             &room_id,
             Some(&conversation_id),
             None,
-            &user_id,
             &message_id,
         ).await {
             eprintln!("[realtime] edit_message: publish to group {room_id}: {e}");
@@ -507,7 +505,6 @@ pub async fn edit_message(
             &room_id,
             None,
             Some(&conversation_id),
-            &user_id,
             &message_id,
         ).await {
             eprintln!("[realtime] edit_message: publish to DM room {room_id}: {e}");

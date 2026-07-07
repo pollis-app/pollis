@@ -21,6 +21,12 @@ pub mod livekit;
 // `livekit/jwt.rs` re-exports from here; mobile's `get_livekit_token` bridge
 // arm calls it directly.
 pub mod livekit_jwt;
+// LiveKit realtime signalling (wake-up) payload builders — pure serde_json,
+// no native deps, always compiled (same rationale as `livekit_jwt`). Both the
+// media `livekit::publish` and the headless `livekit_stub` build their wire
+// payloads here so the metadata-minimized shape (§5) has one source of truth
+// and unit-tests on every target.
+pub mod livekit_signalling;
 pub mod mls;
 // Push-notification backend (#344): token registration + the content-free
 // send_message fanout. Pure libsql + reqwest, so it compiles on every target.

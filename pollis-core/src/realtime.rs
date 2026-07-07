@@ -14,11 +14,12 @@ use crate::sink::EventSink;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RealtimeEvent {
+    /// A new message wake-up (§5 signalling minimization): routing only, no
+    /// sender. The recipient re-derives the sender from the MLS credential in
+    /// the decrypted envelope it fetches on ingest.
     NewMessage {
         channel_id: Option<String>,
         conversation_id: Option<String>,
-        sender_id: String,
-        sender_username: Option<String>,
     },
     /// Sent to a user's personal inbox room when a DM channel is created
     /// and they are a member, so they can fetch it without refreshing.
@@ -67,7 +68,6 @@ pub enum RealtimeEvent {
         channel_id: Option<String>,
         conversation_id: Option<String>,
         message_id: String,
-        sender_id: String,
     },
     /// Sent to a group room when an admin deletes another member's message,
     /// so connected clients soft-delete it from their cache immediately.
@@ -77,7 +77,6 @@ pub enum RealtimeEvent {
         channel_id: Option<String>,
         conversation_id: Option<String>,
         message_id: String,
-        deleted_by: String,
     },
     /// Sent to a user's personal inbox room when one of their OTHER devices
     /// has just posted a `device_enrollment_request` row and is waiting for

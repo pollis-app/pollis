@@ -71,6 +71,10 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
 
     match data.get("type").and_then(|v| v.as_str()) {
         Some("new_message") => {
+            // §5: the wake-up carries no sender — the recipient attributes the
+            // message from the MLS credential in the envelope it ingests. Tolerate
+            // an old client still sending `sender_id`/`sender_username` by simply
+            // ignoring those fields.
             let event = RealtimeEvent::NewMessage {
                 channel_id: data
                     .get("channel_id")
@@ -78,15 +82,6 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
                     .map(str::to_owned),
                 conversation_id: data
                     .get("conversation_id")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned),
-                sender_id: data
-                    .get("sender_id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_owned(),
-                sender_username: data
-                    .get("sender_username")
                     .and_then(|v| v.as_str())
                     .map(str::to_owned),
             };
@@ -153,12 +148,13 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
             }
         }
         Some("edited_message") => {
+            // §5: no `sender_id` — the editor is re-derived from the durable edit
+            // envelope on ingest. An old client's `sender_id` is ignored.
             if let Some(message_id) = data.get("message_id").and_then(|v| v.as_str()) {
                 let _ = channel.send(RealtimeEvent::EditedMessage {
                     channel_id: data.get("channel_id").and_then(|v| v.as_str()).map(str::to_owned),
                     conversation_id: data.get("conversation_id").and_then(|v| v.as_str()).map(str::to_owned),
                     message_id: message_id.to_owned(),
-                    sender_id: data.get("sender_id").and_then(|v| v.as_str()).unwrap_or_default().to_owned(),
                 });
             }
         }

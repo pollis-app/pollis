@@ -34,8 +34,8 @@ pub async fn connect_rooms(room_ids: Vec<String>, user_id: String, username: Str
 }
 
 #[tauri::command]
-pub async fn publish_ping(room_id: String, channel_id: Option<String>, conversation_id: Option<String>, sender_id: String, sender_username: Option<String>, state: State<'_, Arc<AppState>>) -> Result<()> {
-    pollis_core::commands::livekit::publish_ping(room_id, channel_id, conversation_id, sender_id, sender_username, &state).await
+pub async fn publish_ping(room_id: String, channel_id: Option<String>, conversation_id: Option<String>, state: State<'_, Arc<AppState>>) -> Result<()> {
+    pollis_core::commands::livekit::publish_ping(room_id, channel_id, conversation_id, &state).await
 }
 
 #[tauri::command]

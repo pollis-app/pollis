@@ -121,13 +121,15 @@ pub async fn publish_to_room_server(
 /// Publishes a new_message event to a LiveKit room that the current process
 /// is already connected to. Used by `send_message` to notify group channel members.
 /// Returns silently (non-fatal) if the room is not connected.
+///
+/// Metadata minimization (§5): the payload is a bare wake-up — conversation
+/// routing only, **no sender**. Recipients re-derive the sender from the MLS
+/// credential inside the decrypted envelope they fetch on ingest.
 pub async fn publish_new_message_to_room(
     state: &Arc<AppState>,
     room_id: &str,
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
-    sender_id: &str,
-    sender_username: Option<&str>,
 ) -> Result<()> {
     let room = {
         let lk = state.livekit.lock().await;
@@ -139,13 +141,10 @@ pub async fn publish_new_message_to_room(
         Some(r) => r,
     };
 
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "type": "new_message",
-        "channel_id": channel_id,
-        "conversation_id": conversation_id,
-        "sender_id": sender_id,
-        "sender_username": sender_username,
-    }))
+    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::new_message_payload(
+        channel_id,
+        conversation_id,
+    ))
     .map_err(Error::Serde)?;
 
     room.local_participant()
@@ -162,12 +161,14 @@ pub async fn publish_new_message_to_room(
 
 /// Broadcasts an `edited_message` event to a LiveKit room so other clients
 /// invalidate their message cache. Non-fatal — callers should log errors.
+///
+/// Metadata minimization (§5): no `sender_id` — the editor is re-derived from
+/// the durable edit envelope the recipient ingests.
 pub async fn publish_edited_message_to_room(
     livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
     room_id: &str,
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
-    sender_id: &str,
     message_id: &str,
 ) -> Result<()> {
     let room = {
@@ -180,13 +181,11 @@ pub async fn publish_edited_message_to_room(
         Some(r) => r,
     };
 
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "type": "edited_message",
-        "channel_id": channel_id,
-        "conversation_id": conversation_id,
-        "sender_id": sender_id,
-        "message_id": message_id,
-    }))
+    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::edited_message_payload(
+        channel_id,
+        conversation_id,
+        message_id,
+    ))
     .map_err(Error::Serde)?;
 
     room.local_participant()
@@ -205,12 +204,14 @@ pub async fn publish_edited_message_to_room(
 /// soft-delete the message from their cache without polling. Non-fatal —
 /// callers should log errors. The durable propagation path is the
 /// `type='delete'` envelope written to Turso.
+///
+/// Metadata minimization (§5): no `deleted_by` — the actor is re-derived from
+/// the authenticated tombstone envelope the recipient ingests.
 pub async fn publish_deleted_message_to_room(
     livekit: &Arc<tokio::sync::Mutex<crate::realtime::LiveKitState>>,
     room_id: &str,
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
-    deleted_by: &str,
     message_id: &str,
 ) -> Result<()> {
     let room = {
@@ -223,13 +224,11 @@ pub async fn publish_deleted_message_to_room(
         Some(r) => r,
     };
 
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "type": "deleted_message",
-        "channel_id": channel_id,
-        "conversation_id": conversation_id,
-        "message_id": message_id,
-        "deleted_by": deleted_by,
-    }))
+    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::deleted_message_payload(
+        channel_id,
+        conversation_id,
+        message_id,
+    ))
     .map_err(Error::Serde)?;
 
     room.local_participant()
@@ -260,10 +259,9 @@ pub async fn publish_membership_changed_to_room(
         Some(r) => r,
     };
 
-    let payload = serde_json::to_vec(&serde_json::json!({
-        "type": "membership_changed",
-        "group_id": group_id,
-    }))
+    let payload = serde_json::to_vec(
+        &crate::commands::livekit_signalling::membership_changed_payload(group_id),
+    )
     .map_err(Error::Serde)?;
 
     room.local_participant()
@@ -431,12 +429,13 @@ pub async fn publish_typing(
 
 /// Publishes a data ping to a LiveKit room.
 /// Called by the frontend after a message is successfully sent.
+///
+/// Metadata minimization (§5): same bare `new_message` wake-up as
+/// `publish_new_message_to_room` — conversation routing only, no sender.
 pub async fn publish_ping(
     room_id: String,
     channel_id: Option<String>,
     conversation_id: Option<String>,
-    sender_id: String,
-    sender_username: Option<String>,
     state: &Arc<AppState>,
 ) -> Result<()> {
     let room = {
@@ -450,23 +449,10 @@ pub async fn publish_ping(
         Some(r) => r,
     };
 
-    #[derive(Serialize)]
-    struct Ping<'a> {
-        #[serde(rename = "type")]
-        event_type: &'a str,
-        channel_id: Option<String>,
-        conversation_id: Option<String>,
-        sender_id: String,
-        sender_username: Option<String>,
-    }
-
-    let payload = serde_json::to_vec(&Ping {
-        event_type: "new_message",
-        channel_id,
-        conversation_id,
-        sender_id,
-        sender_username,
-    })
+    let payload = serde_json::to_vec(&crate::commands::livekit_signalling::new_message_payload(
+        channel_id.as_deref(),
+        conversation_id.as_deref(),
+    ))
     .map_err(Error::Serde)?;
 
     room.local_participant()

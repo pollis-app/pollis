@@ -171,16 +171,9 @@ pub async fn publish_new_message_to_room(
     room_id: &str,
     channel_id: Option<&str>,
     conversation_id: Option<&str>,
-    sender_id: &str,
-    sender_username: Option<&str>,
 ) -> Result<()> {
-    let payload = serde_json::json!({
-        "type": "new_message",
-        "channel_id": channel_id,
-        "conversation_id": conversation_id,
-        "sender_id": sender_id,
-        "sender_username": sender_username,
-    });
+    let payload =
+        crate::commands::livekit_signalling::new_message_payload(channel_id, conversation_id);
     send_data_to_room(&state.config, room_id.to_string(), payload).await
 }
 
@@ -197,7 +190,6 @@ pub async fn publish_edited_message_to_room(
     _room_id: &str,
     _channel_id: Option<&str>,
     _conversation_id: Option<&str>,
-    _sender_id: &str,
     _message_id: &str,
 ) -> Result<()> {
     Ok(())
@@ -208,7 +200,6 @@ pub async fn publish_deleted_message_to_room(
     _room_id: &str,
     _channel_id: Option<&str>,
     _conversation_id: Option<&str>,
-    _deleted_by: &str,
     _message_id: &str,
 ) -> Result<()> {
     Ok(())

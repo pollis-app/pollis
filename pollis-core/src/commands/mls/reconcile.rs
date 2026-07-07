@@ -901,37 +901,40 @@ pub async fn reconcile_group_mls_impl(
 
         // Local emit. The sink is None during early boot / signed-out;
         // dropping the send is the right behaviour there.
+        // The LOCAL sink keeps the full per-user / per-device diff so the acting
+        // client renders inline "X joined / X left" banners. Only the cleartext
+        // LiveKit broadcast below is minimized (§5.3).
         let sink = state.livekit.lock().await.channel.clone();
         if let Some(ch) = sink {
             let _ = ch.send(crate::realtime::RealtimeEvent::RosterChanged {
                 conversation_id: conversation_id.clone(),
                 epoch_before: outcome.epoch_before,
                 epoch_after: outcome.epoch_after,
-                joined_user_ids: joined_user_ids.clone(),
-                left_user_ids: left_user_ids.clone(),
-                devices_added: devices_added.clone(),
-                devices_removed: devices_removed.clone(),
+                joined_user_ids,
+                left_user_ids,
+                devices_added,
+                devices_removed,
             });
         }
 
-        // Room broadcast. Existing members already in the conversation
-        // room receive this data packet, parse the diff client-side
-        // (see `livekit/mod.rs` data-packet dispatch), and render the
-        // banner. Non-fatal: a flaky LiveKit blip mustn't fail the
-        // reconcile that already committed to Turso.
+        // Room broadcast. §5.3 metadata minimization: the LiveKit broadcast
+        // carries the routing handle + epochs ONLY — the per-user join/left and
+        // device id lists are deliberately omitted, since LiveKit forwards them
+        // in cleartext and they are a direct social-graph leak. The full lists
+        // stay on the LOCAL sink above (where the acting client renders inline
+        // banners). Remote peers receive the bare nudge and refetch the member
+        // list (`livekit/mod.rs` dispatch → member-list invalidation); they
+        // re-derive the diff from the authenticated MLS commit they process, not
+        // from this cleartext packet. Non-fatal: a flaky LiveKit blip mustn't
+        // fail the reconcile that already committed to Turso.
         if let Err(e) = crate::commands::livekit::publish_to_room_server(
             &state.config,
             &conversation_id,
-            serde_json::json!({
-                "type": "roster_changed",
-                "conversation_id": conversation_id.clone(),
-                "epoch_before": outcome.epoch_before,
-                "epoch_after": outcome.epoch_after,
-                "joined_user_ids": joined_user_ids,
-                "left_user_ids": left_user_ids,
-                "devices_added": devices_added,
-                "devices_removed": devices_removed,
-            }),
+            crate::commands::livekit_signalling::roster_changed_payload(
+                &conversation_id,
+                outcome.epoch_before,
+                outcome.epoch_after,
+            ),
         )
         .await
         {

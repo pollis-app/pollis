@@ -198,7 +198,8 @@ pub async fn send_message(
     crate::commands::mls::ds_post_ok(state, "/v1/messages/send", &body).await?;
 
     // Notify recipients via LiveKit. Non-fatal — errors are logged, not returned.
-    let uname = sender_username.as_deref();
+    // §5 signalling minimization: the wake-up carries conversation routing only,
+    // no sender — recipients attribute the message from the decrypted envelope.
     if is_channel {
         // One LiveKit room per group covers all its channels.
         // Receivers filter by channel_id in the event payload.
@@ -207,8 +208,6 @@ pub async fn send_message(
             &mls_group_id,
             Some(&conversation_id),
             None,
-            &sender_id,
-            uname,
         ).await {
             eprintln!("[realtime] send_message: publish to group {mls_group_id}: {e}");
         }
@@ -220,8 +219,6 @@ pub async fn send_message(
             &conversation_id,
             None,
             Some(&conversation_id),
-            &sender_id,
-            uname,
         ).await {
             eprintln!("[realtime] send_message: publish to DM room {conversation_id}: {e}");
         }
