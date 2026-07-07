@@ -18,6 +18,7 @@
 //!   image/audio/video, and keeps decryption in Rust where the keys
 //!   already live.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use axum::{
@@ -31,9 +32,30 @@ use axum::{
     routing::get,
     Router,
 };
+use bytes::Bytes;
 
 use crate::commands::r2 as r2cmd;
 use crate::state::AppState;
+
+/// Process-wide screenshare fan-out counters, so the zero-copy win (#480) is
+/// measurable before/after without wiring anything through `AppState`.
+///
+/// `FRAMES_SENT` — decoded frames handed to a WS client's socket (one increment
+/// per client per frame). `FRAMES_DROPPED` — frames a lagged/stalled webview
+/// never received because the broadcast channel overwrote them before that
+/// receiver caught up (latest-frame-wins; see `pump_frames`). Read them with
+/// [`frame_fanout_counters`].
+static FRAMES_SENT: AtomicU64 = AtomicU64::new(0);
+static FRAMES_DROPPED: AtomicU64 = AtomicU64::new(0);
+
+/// Snapshot of the screenshare fan-out counters as `(frames_sent,
+/// frames_dropped)`. Cheap relaxed loads — intended for a debug/metrics readout.
+pub fn frame_fanout_counters() -> (u64, u64) {
+    (
+        FRAMES_SENT.load(Ordering::Relaxed),
+        FRAMES_DROPPED.load(Ordering::Relaxed),
+    )
+}
 
 /// Spawn the loopback media server on an OS-assigned port. Returns the
 /// bound port so the caller can stash it in `AppState`. Server runs until
@@ -51,12 +73,12 @@ pub async fn spawn(state: Arc<AppState>) -> std::io::Result<u16> {
 
     let shutdown_signal = state.shutdown_signal.clone();
     let app = Router::new()
-        .route("/:token/:hash", get(serve_media))
+        .route("/{token}/{hash}", get(serve_media))
         // Decoded remote screenshare frames for the Tauri/WebKitGTK WebGL
         // render path (spike/tauri-revival). Token-gated like `serve_media`.
-        // 3 segments so it can't collide with the `/:token/:hash` media route
+        // 3 segments so it can't collide with the `/{token}/{hash}` media route
         // (matchit panics on static-vs-param conflicts at the same position).
-        .route("/ws/screenshare/:token", get(ws_screenshare))
+        .route("/ws/screenshare/{token}", get(ws_screenshare))
         .with_state(state);
 
     tokio::spawn(async move {
@@ -117,8 +139,14 @@ async fn serve_media(
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
     };
 
-    let plaintext = match r2cmd::cache_decrypt(&file_bytes, &db_key, hash.as_bytes()) {
-        Ok(p) => p,
+    // Decrypt once into an owned buffer, then wrap it in `Bytes` so the Range
+    // branch can hand back a sub-slice that SHARES this allocation instead of
+    // copying the range out (`slice.to_vec()`). Range reads are the video-seek
+    // path — warm during scrubbing, not per-frame, but the zero-copy slice is
+    // free now that `Bytes` is in hand (#480 item 3). `Bytes::from(Vec)` takes
+    // ownership without copying; the full-body path below moves it too.
+    let plaintext: Bytes = match r2cmd::cache_decrypt(&file_bytes, &db_key, hash.as_bytes()) {
+        Ok(p) => Bytes::from(p),
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
 
@@ -132,7 +160,8 @@ async fn serve_media(
         if let Ok(range_str) = range_hdr.to_str() {
             match parse_single_range(range_str, total_len) {
                 Ok(Some((start, end))) => {
-                    let slice = &plaintext[start as usize..=end as usize];
+                    // Zero-copy: shares `plaintext`'s allocation, no memcpy.
+                    let slice = plaintext.slice(start as usize..=end as usize);
                     let len = end - start + 1;
                     let mut resp = Response::builder()
                         .status(StatusCode::PARTIAL_CONTENT)
@@ -143,7 +172,7 @@ async fn serve_media(
                             format!("bytes {start}-{end}/{total_len}"),
                         )
                         .header(header::ACCEPT_RANGES, "bytes")
-                        .body(Body::from(slice.to_vec()))
+                        .body(Body::from(slice))
                         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
                     add_cors_headers(resp.headers_mut());
                     return resp;
@@ -273,9 +302,28 @@ async fn ws_screenshare(
     ws.on_upgrade(move |socket| pump_frames(socket, rx))
 }
 
+/// Owns a shared decoded frame so a [`Bytes`] can borrow its bytes without
+/// copying them out of the `Arc`. `Arc<Vec<u8>>` impls `AsRef<Vec<u8>>` but not
+/// `AsRef<[u8]>` (which `Bytes::from_owner` requires), so this thin newtype
+/// bridges the two. Dropping the last `Bytes` clone drops this, decrementing the
+/// `Arc` — the frame's memory frees exactly when no subscriber references it.
+struct SharedFrame(Arc<Vec<u8>>);
+
+impl AsRef<[u8]> for SharedFrame {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 /// Forward broadcast frames to one WebSocket client until either side
 /// closes. Lagged receivers (a stalled webview) drop the oldest frames
 /// rather than back-pressuring the decoder — latest-frame-wins.
+///
+/// Each frame is sent ZERO-COPY: the decoded I420 frame lives once behind an
+/// `Arc<Vec<u8>>` shared across every subscriber, and `Bytes::from_owner` hands
+/// axum a `Bytes` that borrows that shared buffer rather than memcpy-ing a
+/// full-res frame per client per frame (#480). The `Arc` refcount — not a copy —
+/// is what fans the frame out.
 async fn pump_frames(
     mut socket: WebSocket,
     mut rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
@@ -284,11 +332,19 @@ async fn pump_frames(
     loop {
         match rx.recv().await {
             Ok(frame) => {
-                if socket.send(Message::Binary(frame.to_vec())).await.is_err() {
+                let payload = Bytes::from_owner(SharedFrame(frame));
+                if socket.send(Message::Binary(payload)).await.is_err() {
                     break;
                 }
+                FRAMES_SENT.fetch_add(1, Ordering::Relaxed);
             }
-            Err(RecvError::Lagged(_)) => continue,
+            // The webview fell behind and the channel overwrote `skipped` frames
+            // before this receiver read them. Count them as dropped and keep
+            // going from the newest frame — never back-pressure the decoder.
+            Err(RecvError::Lagged(skipped)) => {
+                FRAMES_DROPPED.fetch_add(skipped, Ordering::Relaxed);
+                continue;
+            }
             Err(RecvError::Closed) => break,
         }
     }
@@ -354,5 +410,51 @@ mod tests {
         assert!(constant_time_eq(b"abc", b"abc"));
         assert!(!constant_time_eq(b"abc", b"abd"));
         assert!(!constant_time_eq(b"abc", b"abcd"));
+    }
+
+    // The whole point of #480: sending a frame to a subscriber must NOT copy the
+    // bytes out of the shared `Arc`. `Bytes::from_owner(SharedFrame(arc))` has to
+    // borrow the Arc's buffer in place — proven here by the payload pointing at
+    // the exact same address as the Arc's data.
+    #[test]
+    fn shared_frame_send_is_zero_copy() {
+        let frame = Arc::new(vec![1u8, 2, 3, 4, 5]);
+        let src_ptr = frame.as_ptr();
+
+        let payload = Bytes::from_owner(SharedFrame(Arc::clone(&frame)));
+
+        // Same contents...
+        assert_eq!(payload.as_ref(), &[1, 2, 3, 4, 5]);
+        // ...and, crucially, the SAME backing memory — no memcpy happened.
+        assert_eq!(payload.as_ptr(), src_ptr);
+    }
+
+    // The Arc must stay alive exactly as long as some subscriber's `Bytes` still
+    // references it, and free once the last one drops — no leak, no early free.
+    #[test]
+    fn shared_frame_holds_and_releases_the_arc() {
+        let frame = Arc::new(vec![9u8; 32]);
+        assert_eq!(Arc::strong_count(&frame), 1);
+
+        let payload = Bytes::from_owner(SharedFrame(Arc::clone(&frame)));
+        // The owner inside `payload` keeps the Arc alive.
+        assert_eq!(Arc::strong_count(&frame), 2);
+
+        // A cheap clone (a second WS client) shares the same buffer, not a copy.
+        let payload2 = payload.clone();
+        assert_eq!(payload2.as_ptr(), payload.as_ptr());
+
+        drop(payload);
+        drop(payload2);
+        // Every borrower gone → the Arc is back to just our test handle.
+        assert_eq!(Arc::strong_count(&frame), 1);
+    }
+
+    #[test]
+    fn fanout_counters_are_readable() {
+        // Relaxed snapshot; monotonic in the running server. Just prove the
+        // accessor wires to the two atomics without panicking.
+        let (sent, dropped) = frame_fanout_counters();
+        let _ = (sent, dropped);
     }
 }

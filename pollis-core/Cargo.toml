@@ -106,7 +106,16 @@ futures-util = "0.3"
 # `ws` feature: the loopback server also carries decoded screenshare frames
 # over a WebSocket (`/screenshare/<token>`) for the Tauri/WebKitGTK WebGL
 # render path — see `media_server.rs` and `commands/screenshare/remote_video.rs`.
-axum = { version = "0.7", features = ["ws"] }
+# 0.8 (vs the 0.7 the delivery/tauri crates use) so the screenshare WS send is
+# TRUE zero-copy: 0.8's `ws::Message::Binary` takes `bytes::Bytes`, letting us
+# fan one decoded frame out to every subscriber via `Bytes::from_owner` over the
+# shared `Arc<Vec<u8>>`. 0.7's `Message::Binary(Vec<u8>)` forces a full-res I420
+# memcpy per client per frame (#480). No axum type crosses this crate's public
+# boundary, so this version differing from the other crates' axum is harmless.
+axum = { version = "0.8", features = ["ws"] }
+# Zero-copy frame fan-out on the screenshare WS (see the axum note above): share
+# the decoded `Arc<Vec<u8>>` into a `Bytes` instead of copying per subscriber.
+bytes = "1"
 openmls = "0.8"
 openmls_traits = "0.5"
 openmls_rust_crypto = "0.5"
