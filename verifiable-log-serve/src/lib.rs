@@ -48,12 +48,12 @@ pub mod remote;
 pub mod server;
 
 pub use account::{verify_account, verify_account_in_bundle, AccountKeyVersion, AccountReport};
-pub use bundle::{AccountManifest, Bundle, Manifest, PublicKeyDoc};
+pub use bundle::{AccountManifest, BinaryManifest, Bundle, Manifest, PublicKeyDoc};
 pub use error::{Result, ServeError};
 pub use group::{verify_group, verify_group_in_bundle, GroupCommit, GroupReport};
 pub use layout::{
-    generate, generate_account, generate_account_artifacts, generate_artifacts, load_bundle,
-    ACCOUNT_API_PREFIX, API_VERSION,
+    generate, generate_account, generate_account_artifacts, generate_artifacts, generate_binaries,
+    generate_binaries_artifacts, load_bundle, ACCOUNT_API_PREFIX, API_VERSION, BINARIES_API_PREFIX,
 };
 pub use live::LiveServer;
 pub use remote::{verify_remote, Report};

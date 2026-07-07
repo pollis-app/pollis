@@ -45,6 +45,12 @@ enum Command {
         /// emitted under `/v1/account-keys/...` alongside the commit-log tree.
         #[arg(long)]
         account_bundle: Option<PathBuf>,
+        /// Optional path to the binaries bundle JSON (output of
+        /// `builder build-binaries`). When given, the binaries tree (binary
+        /// transparency) is emitted under `/v1/binaries/...` alongside the
+        /// commit-log and account-key trees.
+        #[arg(long)]
+        binaries_bundle: Option<PathBuf>,
         /// Output directory root; the `/v1/...` tree is written under it.
         #[arg(long)]
         out: PathBuf,
@@ -116,8 +122,14 @@ fn main() -> ExitCode {
         Command::Generate {
             bundle,
             account_bundle,
+            binaries_bundle,
             out,
-        } => match run_generate(&bundle, account_bundle.as_deref(), &out) {
+        } => match run_generate(
+            &bundle,
+            account_bundle.as_deref(),
+            binaries_bundle.as_deref(),
+            &out,
+        ) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => fail(e),
         },
@@ -159,6 +171,7 @@ fn main() -> ExitCode {
 fn run_generate(
     bundle_path: &PathBuf,
     account_bundle_path: Option<&std::path::Path>,
+    binaries_bundle_path: Option<&std::path::Path>,
     out: &PathBuf,
 ) -> Result<()> {
     let bundle = layout::load_bundle(bundle_path)?;
@@ -185,6 +198,22 @@ fn run_generate(
             account_manifest.consistency.len(),
             account_manifest.users.len(),
             out.join(layout::ACCOUNT_API_PREFIX).display()
+        );
+    }
+
+    // Binaries tree (binary transparency — a third separate tree, domain-
+    // separated STH) — only when asked.
+    if let Some(binaries_path) = binaries_bundle_path {
+        let binaries_bundle = layout::load_bundle(binaries_path)?;
+        let binaries_manifest = layout::generate_binaries(&binaries_bundle, out)?;
+        println!(
+            "generated binaries tree: {} entries, {} STH(s), {} inclusion + {} consistency proof(s), {} release report(s) -> {}",
+            binaries_manifest.entry_count,
+            binaries_manifest.sth_sizes.len(),
+            binaries_manifest.inclusion.len(),
+            binaries_manifest.consistency.len(),
+            binaries_manifest.tags.len(),
+            out.join(layout::BINARIES_API_PREFIX).display()
         );
     }
 

@@ -21,13 +21,15 @@
 //!   (d) a forked tree (same released unit, different bytes) is caught on the
 //!       verifier's independent invariant replay.
 
+use std::path::Path;
+
 use ed25519_dalek::SigningKey;
 use verifiable_log::{Entry, Sth, VerifiableLog};
 use verifiable_log_builder::account_key::STH_CONTEXT as ACCOUNT_STH_CONTEXT;
 use verifiable_log_builder::binaries::{self, BinaryRecord, Layer, Toolchain};
-use verifiable_log_builder::build_binaries_bundle;
+use verifiable_log_builder::{build_binaries_bundle, build_bundle, CommitRow};
 use verifiable_log_serve::bundle::{Bundle, InclusionCheck};
-use verifiable_log_serve::release;
+use verifiable_log_serve::{layout, release, remote, DevServer};
 
 const TS: u64 = 1_700_000_000_000;
 
@@ -250,5 +252,111 @@ fn forked_tree_fails_the_verifiers_independent_replay() {
         report.violations.iter().any(|v| v.contains("fork")),
         "expected a fork violation on replay; got: {:?}",
         report.violations
+    );
+}
+
+// ── Static-tree generation + remote self-audit (the P2 publish/verify path) ──
+
+/// `verify_remote`'s prerequisites are the commit-log tree's `public_key.json` +
+/// `index.json`, so a minimal (empty) commit-log tree must exist for a
+/// whole-log audit to run. Emit one alongside whatever else the test writes.
+fn generate_commit_tree(root: &Path) {
+    let empty: Vec<CommitRow> = Vec::new();
+    let builder_bundle = build_bundle(&empty, &signing_key(), TS).unwrap();
+    let bundle = to_serve_bundle(&builder_bundle);
+    layout::generate(&bundle, root).unwrap();
+}
+
+/// Generate the binaries tree into `root` from the real builder's fixture bundle.
+fn generate_binaries_tree(root: &Path) {
+    let builder_bundle = build_binaries_bundle(&fixture_records(), &signing_key(), TS).unwrap();
+    let bundle = to_serve_bundle(&builder_bundle);
+    layout::generate_binaries(&bundle, root).unwrap();
+}
+
+#[test]
+fn binaries_tree_generates_documented_files() {
+    let dir = tempfile::tempdir().unwrap();
+    generate_binaries_tree(dir.path());
+
+    let bin = dir.path().join("v1").join("binaries");
+    // The binaries subtree mirrors the other trees one level down.
+    assert!(bin.join("public_key.json").is_file());
+    assert!(bin.join("index.json").is_file());
+    assert!(bin.join("sth").join("latest.json").is_file());
+    assert!(bin.join("entries.json").is_file());
+    // A five-leaf fixture → a midpoint + final STH and a consistency proof.
+    assert!(bin.join("sth").join("5.json").is_file());
+
+    // The precomputed per-release report exists with no extension (file IS URL).
+    let report_path = dir.path().join("verify").join("release").join("v1.3.0");
+    assert!(report_path.is_file());
+
+    // The manifest advertises the release tag and enforces the binaries invariant.
+    let manifest: verifiable_log_serve::BinaryManifest =
+        serde_json::from_str(&std::fs::read_to_string(bin.join("index.json")).unwrap()).unwrap();
+    assert_eq!(manifest.entry_count, fixture_records().len() as u64);
+    assert_eq!(manifest.tags, vec!["v1.3.0".to_string()]);
+    assert_eq!(manifest.enforce_unique, vec![binaries::TENANT.to_string()]);
+    assert_eq!(manifest.latest_tree_size, Some(5));
+
+    // The precomputed report is byte-identical to the shared verdict core.
+    let served: release::ReleaseReport =
+        serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
+    assert!(served.chain_valid && served.found);
+    assert_eq!(served.artifacts.len(), 5);
+}
+
+#[test]
+fn remote_verify_covers_the_binaries_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    // The commit-log tree is a prerequisite for whole-log remote verification;
+    // the binaries tree is the third tenant served alongside it.
+    generate_commit_tree(dir.path());
+    generate_binaries_tree(dir.path());
+
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+
+    // Whole-log remote verification now covers the binaries tree and passes.
+    let report = remote::verify_remote(&server.base_url()).unwrap();
+    assert!(report.ok, "all trees should verify; checks: {:?}", report.checks);
+    let binaries_checks = report
+        .checks
+        .iter()
+        .filter(|(_, label)| label.starts_with("binaries:"))
+        .count();
+    assert!(binaries_checks >= 4, "expected binaries checks, got {binaries_checks}");
+    // Present tree → no "absent" note about binaries.
+    assert!(
+        !report.notes.iter().any(|n| n.contains("binaries")),
+        "unexpected binaries note: {:?}",
+        report.notes
+    );
+
+    // And the CLI's per-release verifier passes over HTTP against the same tree.
+    let release_report = release::verify_release(&server.base_url(), "v1.3.0").unwrap();
+    assert!(
+        release_report.chain_valid,
+        "release verify must pass; violations: {:?}",
+        release_report.violations
+    );
+    assert_eq!(release_report.artifacts.len(), 5);
+}
+
+#[test]
+fn remote_verify_notes_absent_binaries_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    // Only the commit-log tree — no binaries subtree published yet.
+    generate_commit_tree(dir.path());
+
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+    let report = remote::verify_remote(&server.base_url()).unwrap();
+
+    // An absent binaries tree is a note, not a failure.
+    assert!(report.ok, "absent binaries tree must not fail the audit");
+    assert!(
+        report.notes.iter().any(|n| n.contains("binaries")),
+        "expected an absent-binaries note; got: {:?}",
+        report.notes
     );
 }

@@ -165,8 +165,14 @@ fn remote_verifies_both_trees_and_account_chain() {
         .filter(|(_, label)| label.starts_with("account-keys:"))
         .count();
     assert!(account_checks >= 4, "expected account-keys checks, got {account_checks}");
-    // No "absent" note when the tree is present.
-    assert!(report.notes.is_empty(), "unexpected notes: {:?}", report.notes);
+    // No "absent" note about the account tree when it is present. (The binaries
+    // tree — a third tenant — is not generated in this test, so its own absent
+    // note is expected and does not concern the account-tree assertion here.)
+    assert!(
+        !report.notes.iter().any(|n| n.contains("account")),
+        "unexpected account-tree note: {:?}",
+        report.notes
+    );
 
     // One user's full key history verifies.
     let alice = account::verify_account(&server.base_url(), "u-alice").unwrap();

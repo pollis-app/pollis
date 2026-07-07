@@ -722,3 +722,111 @@ jobs:
             git commit -m "Update to v${VERSION}"
             git push
           fi
+
+  # Binary transparency (issue #453, Phase 2). Compute payload+artifact hashes
+  # for every shipped installer (scripts/attest-binaries.sh) and MERGE the
+  # per-tag BinaryRecord leaves into the accumulating records JSON on R2, which
+  # transparency-publish.yml (daily cron / "rebuild now" dispatch) consumes to
+  # build and publish the /v1/binaries tree.
+  #
+  # Ordering & failure isolation: this `needs: [release]`, so by the time it
+  # runs the installers, updater manifests, latest.json and GitHub release are
+  # already out. A failure here therefore CANNOT corrupt a shipped release — it
+  # only means the binaries tree lags one release until the next successful run.
+  # It is logged loudly, never silently swallowed, and the release stands.
+  attest-and-log:
+    needs: [release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+
+      # The tag commit is HEAD after checkout; its unix timestamp is the
+      # deterministic SOURCE_DATE_EPOCH the attest script stamps into each leaf
+      # and uses for the reproducible payload-tree hash (not `now`).
+      - name: Resolve tag commit timestamp
+        id: srcdate
+        run: echo "epoch=$(git log -1 --format=%ct)" >> "$GITHUB_OUTPUT"
+
+      # Same all-artifacts download the release job uses — pollis-macos/,
+      # pollis-windows/, pollis-linux/ under artifacts/; the script finds each
+      # installer recursively.
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # 7z reads the HFS payload inside the .dmg and the NSIS installer's file
+      # tree on this Linux runner; jq builds and merges the records JSON.
+      - name: Install extraction tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y p7zip-full jq
+
+      - name: Compute BinaryRecord leaves for this tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          COMMIT: ${{ github.sha }}
+          SOURCE_DATE_EPOCH: ${{ steps.srcdate.outputs.epoch }}
+          ARTIFACTS_DIR: artifacts
+          OUT: tag-records.json
+        run: |
+          set -euo pipefail
+          ./scripts/attest-binaries.sh
+          echo "per-tag BinaryRecord leaves:"
+          jq '.' tag-records.json
+
+      # Merge into the accumulating records JSON transparency-publish.yml reads.
+      # Producer (here) and consumer (transparency-publish.yml) reference the
+      # SAME object: s3://${R2_TRANSPARENCY_BUCKET}/internal/binary-records.json
+      # at ${R2_TRANSPARENCY_ENDPOINT}. Creds are the release workflow's
+      # account-wide R2_* keys — per transparency-publish.yml's header note the
+      # bare R2_* names are account-wide and owned by the release workflows, so
+      # they can write the transparency bucket's internal/ prefix (the
+      # namespaced R2_TRANSPARENCY_* creds are the daily publisher's).
+      - name: Merge per-tag records into the R2 accumulator
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+          # Cloudflare R2 rejects the integrity checksums newer aws-cli v2 adds
+          # by default; only send/verify them when the operation requires it.
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
+        run: |
+          set -euo pipefail
+          KEY="internal/binary-records.json"
+
+          # Pull the current accumulator; a missing object (first-ever attest)
+          # starts from an empty array.
+          if aws s3 cp "s3://${R2_BUCKET}/${KEY}" ./accumulator.json \
+               --endpoint-url "${R2_ENDPOINT}" 2>/dev/null; then
+            [ -s ./accumulator.json ] || echo "[]" > ./accumulator.json
+          else
+            echo "no existing accumulator at ${KEY} — starting from []"
+            echo "[]" > ./accumulator.json
+          fi
+
+          # Idempotent on re-run: if this tag's leaves are already accumulated,
+          # do nothing (re-appending would double the tag's leaves in the tree).
+          existing="$(jq --arg t "$RELEASE_TAG" \
+            'map(select(.release_tag == $t)) | length' ./accumulator.json)"
+          if [ "${existing}" -gt 0 ]; then
+            echo "${RELEASE_TAG} already present in accumulator (${existing} leaves) — nothing to merge."
+            exit 0
+          fi
+
+          # Append this tag's leaves in publish order (existing first, new last).
+          jq -s 'add' ./accumulator.json tag-records.json > ./merged.json
+          echo "accumulator: $(jq 'length' ./accumulator.json) + $(jq 'length' tag-records.json) = $(jq 'length' ./merged.json) records"
+
+          # Write back to the EXACT key the consumer reads. no-cache: it is a
+          # build input for the publisher, never a served/immutable artifact.
+          aws s3 cp ./merged.json "s3://${R2_BUCKET}/${KEY}" \
+            --endpoint-url "${R2_ENDPOINT}" \
+            --content-type "application/json" \
+            --cache-control "no-cache"
+          echo "merged records uploaded to s3://${R2_BUCKET}/${KEY}"

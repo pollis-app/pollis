@@ -72,6 +72,8 @@ jobs:
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           LOG_DB_URL: ${{ secrets.LOG_DB_URL }}
           LOG_DB_AUTH_TOKEN: ${{ secrets.LOG_DB_AUTH_TOKEN }}
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
         run: |
           set -euo pipefail
 
@@ -88,6 +90,8 @@ jobs:
           published="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/sth/latest.json \
             | jq -r '.tree_size' 2>/dev/null || echo "")"
           published_acct="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/account-keys/sth/latest.json \
+            | jq -r '.tree_size' 2>/dev/null || echo "")"
+          published_bin="$(curl -fsS --max-time 20 https://verify.pollis.com/v1/binaries/sth/latest.json \
             | jq -r '.tree_size' 2>/dev/null || echo "")"
 
           # Live counts via Turso's HTTP (Hrana) pipeline API. The DB URL is
@@ -112,14 +116,34 @@ jobs:
           count="$(query_count "$log_http" "$log_db_token" 'SELECT COUNT(*) FROM mls_commit_log')"
           acct_count="$(query_count "$main_http" "$TURSO_AUTH_TOKEN" 'SELECT COUNT(*) FROM account_key_log')"
 
+          # Binaries tree: its source of truth is the accumulating BinaryRecord
+          # JSON on R2 (written by desktop-release.yml's attest-and-log job), not
+          # a DB table — Phase 1 is file-backed. Its length is the tree's "live"
+          # size. Absent object (no releases attested yet) reads as 0.
+          bin_count="$(aws s3 cp "s3://${R2_BUCKET}/internal/binary-records.json" - \
+            --endpoint-url "${R2_ENDPOINT}" 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
+          [ -n "${bin_count}" ] || bin_count=0
+
           echo "commit-log:  published ${published:-<none>} | live ${count}"
           echo "account-key: published ${published_acct:-<none>} | live ${acct_count}"
+          echo "binaries:    published ${published_bin:-<none>} | live ${bin_count}"
 
-          # Rebuild if EITHER tree is behind (or absent). Both must be present
-          # AND equal to skip.
+          # The binaries tree is "up to date" if there are no records yet
+          # (bin_count 0 → nothing to publish) OR its published head matches the
+          # record count. Only force a rebuild on its account when it is behind.
+          bin_ok=true
+          if [ "${bin_count}" != "0" ]; then
+            if [ -z "${published_bin}" ] || [ "${published_bin}" != "${bin_count}" ]; then
+              bin_ok=false
+            fi
+          fi
+
+          # Rebuild if ANY tree is behind (or absent). All must be present AND
+          # equal (binaries: current per bin_ok) to skip.
           if [ -n "${published}" ] && [ "${published}" = "${count}" ] \
-             && [ -n "${published_acct}" ] && [ "${published_acct}" = "${acct_count}" ]; then
-            echo "Both trees already up to date — nothing to publish."
+             && [ -n "${published_acct}" ] && [ "${published_acct}" = "${acct_count}" ] \
+             && [ "${bin_ok}" = "true" ]; then
+            echo "All trees already up to date — nothing to publish."
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
@@ -154,6 +178,9 @@ jobs:
           LOG_DB_AUTH_TOKEN: ${{ secrets.LOG_DB_AUTH_TOKEN }}
           # The builder's default --signing-key-env. The key never leaves CI.
           VLOG_SIGNING_KEY: ${{ secrets.STH_SIGNING_KEY }}
+          # R2: the binaries tree reads its accumulating records JSON from here.
+          R2_ENDPOINT: ${{ secrets.R2_TRANSPARENCY_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_TRANSPARENCY_BUCKET }}
         run: |
           set -euo pipefail
           base="https://verify.pollis.com"
@@ -202,6 +229,18 @@ jobs:
           account_ts="$(frozen_or_now "${base}/v1/account-keys/sth/latest.json" "${base}/v1/account-keys/sth" "$(live_count "$main_http" "$TURSO_AUTH_TOKEN" 'SELECT COUNT(*) FROM account_key_log')")"
           echo "commit-log STH ts=${commit_ts}  account-keys STH ts=${account_ts}  (now=${now})"
 
+          # Binaries tree (third tenant): its source of truth is the accumulating
+          # BinaryRecord JSON on R2 (written by desktop-release.yml). Pull it; an
+          # absent object (no releases attested yet) → empty list → no tree.
+          # Its length is the tree's live size, used to reuse a frozen STH ts.
+          aws s3 cp "s3://${R2_BUCKET}/internal/binary-records.json" ./binary-records.json \
+            --endpoint-url "${R2_ENDPOINT}" 2>/dev/null || echo "[]" > ./binary-records.json
+          [ -s ./binary-records.json ] || echo "[]" > ./binary-records.json
+          bin_count="$(jq 'length' ./binary-records.json 2>/dev/null || echo 0)"
+          [ -n "${bin_count}" ] || bin_count=0
+          binaries_ts="$(frozen_or_now "${base}/v1/binaries/sth/latest.json" "${base}/v1/binaries/sth" "${bin_count}")"
+          echo "binaries STH ts=${binaries_ts}  (records=${bin_count})"
+
           # Build BOTH bundles: the commit log AND (via --account-out) the
           # account-key directory — its own tree, signed under its own domain
           # context with the same key. Goal A split: --log-db reads
@@ -215,13 +254,30 @@ jobs:
             --log-db "${log_db_url}" \
             --out bundle.json --account-out account-bundle.json \
             --timestamp "${commit_ts}" --account-timestamp "${account_ts}"
-          # generate emits both trees into ./site (the account tree under
-          # v1/account-keys/ plus verify/account/<id> reports).
+
+          # Binaries bundle (third tree) — only when there are records to log. The
+          # BinaryInvariant runs inside build-binaries, so a forked / out-of-order
+          # / unpaired records set aborts here rather than publishing a bad tree.
+          BIN_ARG=()
+          if [ "${bin_count}" != "0" ]; then
+            ./target/release/builder build-binaries \
+              --binaries-in ./binary-records.json \
+              --out binaries-bundle.json \
+              --timestamp "${binaries_ts}"
+            BIN_ARG=(--binaries-bundle binaries-bundle.json)
+          else
+            echo "no released-binary records yet — skipping the binaries tree"
+          fi
+
+          # generate emits every tree into ./site (the account tree under
+          # v1/account-keys/ + verify/account/<id>; the binaries tree under
+          # v1/binaries/ + verify/release/<tag>, when present).
           ./target/release/serve generate --bundle bundle.json \
-            --account-bundle account-bundle.json --out ./site
+            --account-bundle account-bundle.json "${BIN_ARG[@]}" --out ./site
           # The bundles carry hashed commit identities / public keys only — no
-          # plaintext — but remove them anyway so they can never be synced.
-          rm -f bundle.json account-bundle.json
+          # plaintext — but remove them anyway so they can never be synced. The
+          # records JSON is a build input, never part of the published tree.
+          rm -f bundle.json account-bundle.json binaries-bundle.json binary-records.json
 
       # (d) Two-pass R2 sync with the cache split. Immutable artifacts go up
       #     first so the mutable head/reports published last never reference a
@@ -250,7 +306,10 @@ jobs:
             --exclude "verify/group/*" \
             --exclude "v1/account-keys/sth/latest.json" \
             --exclude "v1/account-keys/index.json" \
-            --exclude "verify/account/*"
+            --exclude "verify/account/*" \
+            --exclude "v1/binaries/sth/latest.json" \
+            --exclude "v1/binaries/index.json" \
+            --exclude "verify/release/*"
 
       - name: Publish mutable head + reports (pass 2)
         if: steps.decide.outputs.build == 'true'
