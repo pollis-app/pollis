@@ -104,6 +104,21 @@ work is.
    suite. Do **not** try to formally model async I/O, openmls internals, or the DB
    driver.
 
+**Milestone status (roadmap §8).** The recommended M0–M3 cut is now **shipped**:
+
+- ✅ **M0 — supply chain**: `cargo-deny` + `cargo-vet` gated in CI (`deny.toml`,
+  `supply-chain/`).
+- ✅ **M1 — Kani watermark (I3)**: `next_watermark` proofs
+  (`pollis-core/src/commands/messages/watermark.rs`).
+- ✅ **M2 — Kani gate + canonicalization (I5/I2/I1)**: `may_rejoin` / `resolve` /
+  `classify` proofs (`pollis-core/src/commands/mls/invariants.rs`).
+- ✅ **M3 — continuous soak (Track A)**: the marathon runs nightly on a
+  `schedule:` and a failing op sequence is captured as a durable CI artifact for
+  one-step promotion to a deterministic regression — see §5.4.
+
+**M4/M5 (TLA+ specs, Track-B fuzz targets) remain future work**, per the
+recommended cut.
+
 ---
 
 ## 3. Layer 1 — Formal model of the epoch/delivery invariants (TLA+)
@@ -378,6 +393,63 @@ soak/OSS-Fuzz failure
   → Track B: minimized byte input → new #[test] over the pure fn + (usually) a Kani harness for the class
   → root-cause the invariant it violated (I1..I6) → update the coverage map (§2)
 ```
+
+### 5.4 M3 — the continuous soak + one-step promotion (IMPLEMENTED)
+
+Track A is now wired into CI. The marathon soak
+(`model_marathon_convergence`, `src-tauri/tests/flows/model.rs`) runs on a
+**nightly `schedule:`** in `.github/workflows/mls-tests.yml` (07:00 UTC) at a
+meaningful size — **`MARATHON_OPS=500`, `MARATHON_ACTORS=8`** — in addition to
+the existing manual `workflow_dispatch`. The scheduled run has no dispatch
+inputs, so the step's `${{ github.event.inputs.marathon_ops || '500' }}` /
+`|| '8'` fallbacks pin the nightly size; a manual dispatch still uses its own
+inputs (300/6 defaults). A marathon failure fails the job **red** (the run is
+`set -o pipefail`-guarded so the `tee` can't swallow the non-zero exit) — no
+silent green.
+
+**What is captured.** The soak's stdout/stderr is teed to `marathon-soak.log`.
+On failure a follow-up step distils the panic's embedded op sequence (the
+`op sequence (N ops): [...]` line — the repro of record, since MLS keygen uses
+the OS RNG and is **not** seedable, so a byte seed would not replay) into
+`marathon-failing-op-sequence.txt`, and both files are uploaded as the
+`marathon-failing-op-sequence` artifact (`actions/upload-artifact`,
+`if: failure()`, 90-day retention).
+
+**Scope, stated honestly.** This is a *replayable uploaded artifact + a
+documented promotion*, **not** an auto-PR bot. Nothing opens a regression PR by
+itself; a human copies the captured sequence into a deterministic test. That is
+the deliberate M3 cut — the feedback loop is closed by a one-step manual
+promotion, not automation.
+
+**One-step promotion (soak failure → permanent regression).**
+
+1. Open the failed nightly run, download the `marathon-failing-op-sequence`
+   artifact, and read `marathon-failing-op-sequence.txt`. It contains the exact
+   `Op` vector, e.g. `op sequence (500 ops): [Send(0), Add(1), Fault(1),
+   Remove(1), Sync(2), ...]`.
+2. In `src-tauri/tests/flows/model.rs`, add a fixed-sequence regression that
+   reuses the existing case body — no new harness surface:
+
+   ```rust
+   #[tokio::test(flavor = "multi_thread")]
+   #[serial]
+   async fn regression_soak_2026_07_07() {
+       // Pasted verbatim from the marathon-failing-op-sequence artifact of
+       // <run URL>. `nactors` = the pool the soak used (MARATHON_ACTORS=8).
+       let ops = vec![Op::Send(0), Op::Add(1), Op::Fault(1), Op::Remove(1) /* … */];
+       run_case(&ops, 8).await.expect("regression must converge");
+   }
+   ```
+
+   Because the oracle asserts *semantic* delivery/membership (not bitwise key
+   equality), replaying the same adds/removes/sends/faults **in the same order**
+   is a valid regression even though the MLS bytes differ run to run — the
+   op sequence, not a seed, is the deterministic repro. (A hand-authored
+   `adversarial.rs` scenario is the alternative when the sequence shrinks to a
+   handful of ops worth naming.)
+3. Confirm it reproduces (fails), fix the invariant it violated, confirm it
+   passes, and keep it committed as a permanent guard. Update the §2 coverage
+   map with the invariant (I1..I6) it exercised.
 
 ### Effort & in-box testability
 

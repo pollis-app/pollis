@@ -545,6 +545,15 @@ fn model_based_convergence_is_bulletproof() {
 /// e.g. `MARATHON_OPS=800 MARATHON_ACTORS=8 cargo test --features test-harness \
 ///        --test flows -- --ignored --nocapture model_marathon_convergence`
 ///
+/// CONTINUOUS SOAK (M3): this runs nightly on a `schedule:` in
+/// `.github/workflows/mls-tests.yml` (MARATHON_OPS=500, MARATHON_ACTORS=8). On
+/// failure the job goes red and uploads the failing op sequence printed below
+/// (`fail_msg`) as a durable CI artifact. To turn a captured failure into a
+/// PERMANENT regression, paste its op vector into a fixed-sequence
+/// `#[tokio::test]` that calls `run_case(&ops, nactors)` — the one-step promotion
+/// runbook is `docs/machine-checked-correctness-design.md` §5.4. (The op sequence,
+/// not a seed, is the repro of record: MLS keygen uses the un-seedable OS RNG.)
+///
 /// No shrinking (`max_shrink_iters = 0`): shrinking a several-hundred-op MLS
 /// sequence is prohibitively slow and, per the module header, MLS RNG isn't
 /// seedable — the printed op sequence on failure is the repro of record.

@@ -31,6 +31,13 @@ on:
         description: "Marathon soak: actor pool size"
         required: false
         default: "6"
+  # Nightly continuous soak (M3, docs/machine-checked-correctness-design.md §5.4).
+  # Runs the marathon at a meaningful size (500 ops / 8 actors — see the marathon
+  # step's env fallbacks) so deep-churn divergence gets soaked every night; a
+  # failure fails the job red and uploads the failing op sequence as a durable
+  # artifact for one-step promotion to a deterministic regression.
+  schedule:
+    - cron: "0 7 * * *"
 
 concurrency:
   group: mls-tests-${{ github.ref }}
@@ -127,13 +134,62 @@ jobs:
 
       # Marathon soak: ONE crazy-long generated sequence (hundreds of ops, larger
       # actor pool, messages + churn + faults) through the shadow-oracle
-      # convergence check. Manual-only (workflow_dispatch) — too heavy for the
-      # per-PR gate; the test is `#[ignore]`d so normal runs skip it. Tune via the
-      # workflow inputs above.
+      # convergence check. Runs on manual dispatch AND on the nightly `schedule:`
+      # above (the M3 continuous soak) — too heavy for the per-PR gate; the test is
+      # `#[ignore]`d so normal runs skip it.
+      #
+      # Sizing: `workflow_dispatch` uses the input defaults (300/6, or whatever the
+      # operator typed). Scheduled runs have no inputs, so `github.event.inputs.*`
+      # is empty and the `||` fallbacks pin the nightly soak at 500 ops / 8 actors.
+      #
+      # `set -o pipefail` so a marathon failure survives the `tee` and the step
+      # (and the job) goes RED — no silent swallow. The full stdout/stderr is teed
+      # to a log so the panic's embedded failing op sequence (the repro of record —
+      # MLS RNG isn't seedable, so the op sequence, not a seed, is what replays) can
+      # be uploaded and promoted to a deterministic regression.
       - name: MLS marathon soak
-        if: ${{ github.event_name == 'workflow_dispatch' && !cancelled() }}
+        id: marathon
+        if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && !cancelled() }}
         working-directory: src-tauri
         env:
-          MARATHON_OPS: ${{ github.event.inputs.marathon_ops }}
-          MARATHON_ACTORS: ${{ github.event.inputs.marathon_actors }}
-        run: cargo test --features test-harness --test flows -- --ignored --nocapture model_marathon_convergence
+          MARATHON_OPS: ${{ github.event.inputs.marathon_ops || '500' }}
+          MARATHON_ACTORS: ${{ github.event.inputs.marathon_actors || '8' }}
+        run: |
+          set -o pipefail
+          cargo test --features test-harness --test flows -- \
+            --ignored --nocapture model_marathon_convergence 2>&1 \
+            | tee marathon-soak.log
+
+      # On a marathon FAILURE, distil the failing op sequence out of the teed log
+      # into its own file (the panic message embeds it as `op sequence (N ops):
+      # [...]`). Both the raw log and the distilled sequence are uploaded below.
+      # Promotion runbook: docs/machine-checked-correctness-design.md §5.4.
+      - name: Extract failing op sequence
+        if: ${{ failure() && steps.marathon.outcome == 'failure' }}
+        working-directory: src-tauri
+        run: |
+          {
+            echo "# Marathon soak failure — failing op sequence (the repro of record)."
+            echo "# Promote per docs/machine-checked-correctness-design.md §5.4:"
+            echo "# paste the Op vector below into a fixed-sequence regression in"
+            echo "# src-tauri/tests/flows/model.rs (or adversarial.rs)."
+            echo
+            grep -F 'op sequence' marathon-soak.log || \
+              echo "(no 'op sequence' line found — see marathon-soak.log for the raw failure)"
+          } > marathon-failing-op-sequence.txt
+          cat marathon-failing-op-sequence.txt
+
+      # Durable CI artifact so the failing sequence outlives the runner and can be
+      # promoted to a deterministic regression. `if: failure()` gated on the
+      # marathon step specifically, so an unrelated earlier-step failure doesn't
+      # upload a stale/empty log.
+      - name: Upload marathon failure artifact
+        if: ${{ failure() && steps.marathon.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: marathon-failing-op-sequence
+          path: |
+            src-tauri/marathon-failing-op-sequence.txt
+            src-tauri/marathon-soak.log
+          retention-days: 90
+          if-no-files-found: warn
