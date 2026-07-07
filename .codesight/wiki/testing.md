@@ -47,6 +47,16 @@ never touches the shell or media surface, so coverage is identical; the
 `pollis-core` has the matching `media`/`os-keystore` features (headless builds
 use the file-backed keystore automatically).
 
+### pollis-tui in CI (#487)
+
+`.github/workflows/mls-tests.yml` also runs `cargo test -p pollis-tui` — the
+terminal client's unit tests plus its headless in-process-DS **smoke rig**. The
+TUI drives `pollis-core`'s sync path directly (no Tauri/IPC), so a change to that
+path could regress it unnoticed; gating it in CI catches that. The smoke rig
+applies the same `POST_BASELINE_LOG_MIGRATIONS` (the post-baseline commit-log-DB
+migrations) as the app, so it exercises the current log-DB schema rather than a
+stale baseline. See [pollis-tui.md](./pollis-tui.md).
+
 ## `.env.test`
 
 Tests require a disposable Turso database. Create `.env.test` at the repo root:
@@ -365,6 +375,36 @@ Knobs: `MARATHON_OPS` (default 300), `MARATHON_ACTORS` (default 6). Composes
 with the headless build above, so the soak runs on any headless Linux box.
 MLS keygen uses the OS RNG and is not seedable — on failure the printed **op
 sequence** is the repro of record, not a proptest seed.
+
+**Nightly CI (#452 M3).** `.github/workflows/mls-tests.yml` runs the marathon at a
+meaningful size (`MARATHON_OPS=500`, `MARATHON_ACTORS=8`) on a schedule. On
+failure it distils the failing op sequence out of the teed log into
+`marathon-failing-op-sequence.txt` and uploads it as an artifact — the op sequence
+being the only repro of record for a non-seedable run.
+
+## Machine-checked proofs (Kani, #452)
+
+Beyond the tests, the **pure** correctness cores of the MLS/DS state machine are
+proven exhaustively with the [Kani](https://model-checking.github.io/kani/)
+model checker (CBMC backend). Each proof is lifted to a side-effect-free function
+(no `Vec`/`String` on the hot path, no async, no DB) so CBMC reasons over the whole
+input space, and each is **paired with a deliberately-broken mutant** harness
+(`#[kani::should_panic]`) that Kani must refute — a proof that never fails is
+worthless, so the mutant guarantees the property has teeth. Proven functions:
+
+| Property | Function | File |
+|---|---|---|
+| **Watermark advance** never skips an un-handled envelope; is monotone (P2) and live (P3) | `advance_to` / `EnvelopeKind` | `messages/watermark.rs` |
+| **Gap classification** never applies a commit across a gap (a missing bridging commit while a higher epoch is present → recover, never replay) | `classify` | `mls/invariants.rs` |
+| **Own-commit resolution** — adopt IFF the log's bytes at this epoch are byte-for-byte ours (no phantom epoch/fork; never discard a landed own commit → no wedge); the #411 core | adopt/rollback decision | `mls/invariants.rs` |
+| **Revoked/removed-device gate** — the only input that admits an external-join rebuild is `(registered ∧ member)`; a revoked or removed device can never climb back (fuzzer-finding #2) | `may_rejoin` conjunction | `mls/invariants.rs` |
+| **DS head arithmetic + accept decision** — head never underflows/wraps; at any head exactly one epoch is accepted (no fork), stale/forward submits rejected (I1) | `head_epoch_of` / `accepts` | `pollis-delivery/src/commit.rs` |
+
+The proofs are the pure *model of record*: e.g. `accepts` is NOT wired into the
+real `submit_commit` (the race-free decision must stay inside the single
+conditional INSERT), it is proved alongside as the specification the SQL
+implements. Honest scope: this is machine-checked proof of these pure functions,
+**not** a TLA+/whole-protocol model (tracked in #481).
 
 ## Behaviors the scenarios exercise
 

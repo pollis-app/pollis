@@ -125,10 +125,16 @@ snapshot: a user with no prior leaves who gains one is a *join*; a user with
 prior leaves who gains one is a *device add*; the inverse for removes.
 
 Locally the reconciler emits via the LiveKit sink so its own UI picks the
-banner up immediately. It also broadcasts via `publish_to_room_server` so
-other already-connected room members see the same banner without a refetch.
-New joiners don't see banners for themselves (the Welcome path doesn't go
-through this hook), and the frontend filters self-actions defensively.
+banner up immediately with the full per-user diff. It also broadcasts via
+`publish_to_room_server` so other already-connected room members refetch — but
+that cleartext `roster_changed` wake-up ping now carries **only** the
+`conversation_id` + `epoch_before`/`epoch_after`, **not** the
+`joined`/`left`/device-id lists (metadata minimization #331 v2 §5.3,
+`livekit_signalling.rs::roster_changed_payload`). Remote peers re-derive the diff
+from the authenticated MLS commit + a member refetch rather than trusting a
+cleartext identity list on the wire. New joiners don't see banners for themselves
+(the Welcome path doesn't go through this hook), and the frontend filters
+self-actions defensively. See [mls.md](./mls.md#metadata-minimized-signalling-331-v2).
 
 Renderer plumbing:
 
@@ -153,10 +159,10 @@ Renderer plumbing:
 
 ## Key transparency (verifiable logs)
 
-Implemented in #330 (was the top Roadmap item below). Two append-only,
+Implemented in #330 (was the top Roadmap item below). Append-only,
 Ed25519-signed Merkle trees (RFC 6962/9162) published at
 **https://verify.pollis.com**, domain-separated by STH context so a head for one
-tree can never stand in for the other:
+tree can never stand in for another:
 
 - **Commit-log tenant** (`pollis-verifiable-log:sth:v1`) — one leaf per MLS
   commit. Closes server-side fork / epoch-regression / replay on the MLS commit
@@ -170,6 +176,22 @@ tree can never stand in for the other:
   monotonic, so a server-swapped `account_id_pub` can no longer hide — it is
   either absent from the published history (caught) or a visible, accountable
   rotation.
+
+- **Binaries tenant** (`pollis-verifiable-log:sth:v1:binaries`, #453) — one leaf
+  per released build artifact on the SAME log infrastructure, a third independent
+  tenant with its own tree and domain-separated STH context (so a binaries head
+  can never be presented as a commit-log or account-key head). Each leaf commits
+  to an artifact's reproducible pre-signature payload hash + its signed sha256
+  (`BinaryRecord` / `BinaryInvariant` in `verifiable-log-builder`). The release
+  pipeline attests-and-logs every artifact; `pollis-verify release <tag>` verifies
+  that every published artifact for a tag is provably included in the signed
+  binaries tree at verify.pollis.com (`/v1/binaries`).
+
+  **Honest scope.** This is P2 — leaf structure, hashes, and pipeline wiring. It
+  is **not** full bit-for-bit reproducibility, cosign, or in-app verification;
+  those are tracked in #484. Logging that a signed artifact was published is a
+  transparency/accountability property, not (yet) a proof that the artifact was
+  built from the published source.
 
 This is the scalable backstop the TOFU layer above always wanted: TOFU catches a
 swap only on the next message and only for keys *this* device has seen; the log
@@ -217,6 +239,21 @@ lookups — keys are public by design; VRF is the upgrade path); single first-pa
 log + auditor (anyone can run their own via the released `pollis-verify`);
 CI/GitHub in the publishing TCB (signing key in Actions secrets). Full
 threat-model writeup: whitepaper §6.9 / §13 item 10.
+
+## Account reset (pre-enrollment soft reset, #492)
+
+A user who has lost their Secret Key resets from a **pre-enrollment** device — one
+sitting on the login/OTP gate that has no device signing key yet, so it cannot
+produce a signature the DS would accept. The identity-reset writes it drives —
+`POST /v1/account/rotate-identity` (bump `identity_version`, append to
+`account_key_log`, rewrap `account_recovery`), `POST /v1/account/reset-recover`
+(the membership/device wipe), and the accompanying `POST /v1/welcomes/purge` —
+therefore accept **either** a device signature **or** a verified-OTP session
+(`gate_or_session` in `pollis-delivery`). Every op stays SELF-scoped: the target
+user is bound from the session record, never re-derived from a client-supplied id.
+The `account_key_log` append is still CAS-guarded (one head per user, no fork/gap),
+so a reset produces a visible, accountable rotation in the account-key tenant
+above rather than a hidden key swap. Properties: `pollis-delivery/tests/reset_session.rs`.
 
 ## Roadmap
 

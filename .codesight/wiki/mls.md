@@ -43,7 +43,7 @@ Steps:
 5. **Claim KPs** only for devices not in the tree
 6. **Diff**: desired set vs actual tree → compute adds and removes
 7. **Build and stage commit** with both add and remove proposals — do NOT `merge_pending_commit` yet
-8. **Write to Turso on a fresh connection**: commit to `mls_commit_log`, welcome(s) to `mls_welcome`
+8. **Submit the commit bundle to the DS on a fresh connection**: commit + GroupInfo + Welcome(s) are one **atomic** `POST /v1/commits` — the DS writes all three in a single libsql transaction (see "MLS durability hardening" below), so a recipient never sees a commit with no matching Welcome
 9. **On success**: `merge_pending_commit` locally → advance the local epoch
 10. **On failure**: `clear_pending_commit` → leave local state at the prior epoch; caller can retry
 11. **Publish GroupInfo** so external-join works
@@ -61,7 +61,7 @@ See commit `83df6ef` for the rationale; breaking this ordering re-introduces the
 
 When device A commits a membership change:
 1. The commit is written to `mls_commit_log`
-2. A `membership_changed` LiveKit event notifies online devices (convenience, not required)
+2. A `membership_changed` LiveKit event notifies online devices (convenience, not required). Like every realtime wake-up ping it carries **no sender/actor identity** — just the routing handle (see "Metadata-minimized signalling" below)
 3. Other devices call `process_pending_commits_inner` which:
    - Fetches commits from `mls_commit_log` at `epoch >= local_epoch`
    - Applies them sequentially
@@ -177,6 +177,48 @@ The membership check uses `state.remote_db.conn()` directly (a separate
 connection), NOT the `mls_group_lock` — safe to call from inside
 `process_pending_commits_locked_impl`, which already holds that lock.
 
+The `local_device_registered` gate here is the client half of the same
+fail-closed logic the DS enforces server-side: the external-join **recovery** path
+in `group_state.rs` treats a transient error as "cannot confirm membership → do
+NOT rebuild" (a real member simply recovers on the next pass), so a blip can never
+climb a removed device back into the tree (#430 P2).
+
+## MLS durability hardening (#430)
+
+A cluster of fixes that make membership state durable against dropped writes,
+races, and duplicate deliveries. All are additive to the flows above.
+
+- **Atomic DS commit bundle (P0).** `submit_commit` (`pollis-delivery/src/commit.rs`)
+  writes the commit, its resulting-epoch GroupInfo, and any Welcomes inside **one**
+  `IMMEDIATE` libsql transaction: all-commit-or-all-rollback. A partial write
+  (commit lands, Welcome lost) used to be possible and recoverable only via the
+  client's external-join fallback — the safety net was the exception path, not a
+  guarantee. `IMMEDIATE` takes the write lock at BEGIN, so concurrent submitters
+  still serialize exactly as the bare conditional INSERT did (one winner per epoch,
+  no fork). The accept decision remains the single conditional
+  `INSERT … SELECT … WHERE based_on = head … ON CONFLICT DO NOTHING`.
+- **Eviction/remove reconcile backstop (P1).** The MLS post that evicts a removed
+  member is best-effort; if dropped, the removed device is gone from the server
+  roster but LINGERS in every remaining member's LOCAL tree (still a recipient of
+  new-message seals) until some unrelated membership change re-runs reconcile — a
+  forward-secrecy gap. The cold-launch/reconnect sweep now runs a backstop
+  (`mls/sweep.rs`) after catching each group up: a cheap local-tree-vs-roster
+  pre-check (`local_tree_has_stale_leaf`, two SELECTs + a local MLS load) and, only
+  if a stale leaf remains, a `reconcile_group_mls_impl` retry that actually prunes
+  it. Steady state (tree already matches roster) costs only the pre-check.
+- **Welcome dedupe + idempotent resubmit (P2).** A `UNIQUE (conversation_id,
+  recipient_id, recipient_device_id)` index on `mls_welcome` (commit-log-DB
+  migration 000002) plus `ON CONFLICT … DO UPDATE` upserts in the submit bundle
+  and the new `POST /v1/welcomes/resubmit` endpoint mean a re-sent Welcome
+  refreshes the blob and re-arms delivery instead of stacking a duplicate row — so
+  a retried commit bundle can never wedge on a dup. See
+  [database.md](./database.md#mls_welcome-migration-3--11-now-on-the-commit-log-db).
+- **`is_member` gate on `POST /v1/commits` (P2).** The commit-submit handler now
+  verifies the authenticated committer is a **current** member of the conversation
+  (`writes::is_member`) before accepting — mirroring `/v1/group-info`'s gate. This
+  is the server half of the client-side membership gate above; together they make
+  "a removed member climbs back via external-join" unrepresentable on both sides.
+
 ## Multi-Device Enrollment
 
 When a new device (deviceC) enrolls for an existing user:
@@ -230,6 +272,51 @@ message must be decrypted while the local group is still AT its epoch (see
 ## Credential Format
 
 Each device's MLS credential is `{user_id}:{device_id}` encoded as a `BasicCredential`. Parsed by `parse_credential_user_id` and `parse_credential_device_id`.
+
+## Sealed sender (#331)
+
+Message attribution is taken from the **MLS credential inside the ciphertext**,
+never from the server-writable `message_envelope.sender_id` column. On ingest
+(`messages/ingest.rs`), `try_mls_decrypt` returns `(plaintext, cred_sender)` and
+the local `message` row is written with `cred_sender` — the tuple's `sender_id` is
+deliberately *not* read for attribution. This is **always on**: because the
+sender is authenticated by MLS, a server that rewrites `sender_id` can neither
+forge authorship nor learn it from that column.
+
+On top of that, **envelope-sender blinding** can make the stored `sender_id`
+non-identifying. When `state.config.seal_sender` is set (env `POLLIS_SEAL_SENDER`,
+default **OFF**), `send_message` posts `sealed = 1` and a fixed sentinel
+(`SEALED_SENDER_SENTINEL = "sealed"`) as the envelope's `sender_id` instead of the
+real user id, so a Turso breach/subpoena of `message_envelope` reveals nothing
+about who sent which message. The local `message` row keeps the real `sender_id`
+(it's the author's own copy on a trusted device; the send path writes
+self-attribution directly rather than re-deriving from the credential). The DS
+relaxes its "send-as-yourself" equality check for sealed sends but keeps the
+membership authz unchanged — it still verifies the *authenticated* writer is a
+member (`apply_send_message` in `pollis-delivery/src/messages.rs`).
+
+**Honest scope (§2.1).** This is an **at-rest** defense. The DS authenticates
+every write with an `X-Pollis-User` header and gates on membership, so a *live* DS
+operator still sees the sender in real time. Closing that axis is v1.5
+anonymous-membership (not shipped — tracked in #489). See
+`docs/metadata-minimization-design.md` §2.
+
+## Metadata-minimized signalling (#331 v2)
+
+The LiveKit realtime wake-up pings (`new_message` / `edited_message` /
+`deleted_message` / `membership_changed` / `roster_changed`) are only a **hint to
+fetch**. LiveKit forwards them in cleartext, so they deliberately carry **no
+sender/actor identity** — no `sender_id`, `sender_username`, `deleted_by`, or (for
+`roster_changed`) the per-user `joined`/`left`/device-id lists. The recipient
+re-derives the true sender from the MLS credential in the envelope it then fetches
+(sealed sender, above). Payload builders and a test that fails if any identifying
+field reappears live in `pollis-core/src/commands/livekit_signalling.rs`
+(`docs/metadata-minimization-design.md` §5).
+
+The reconciling client still emits the full `joined`/`left`/device-id diff to its
+**own local sink** so it renders inline roster banners immediately; remote peers
+re-derive the diff from the authenticated MLS commit + a member refetch. See
+`.codesight/wiki/safety.md` → "Roster-change banners".
 
 ## GroupInfo Publishing
 

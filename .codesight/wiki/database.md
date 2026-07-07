@@ -73,11 +73,30 @@ Source: `pollis-core/src/db/migrations/000000_baseline.sql` + numbered migration
 ### message_envelope
 - `id` TEXT PK
 - `conversation_id` TEXT NOT NULL _(channel ID or DM channel ID)_
-- `sender_id` TEXT NOT NULL
+- `sender_id` TEXT NOT NULL _(server-writable; NOT trusted for attribution — see below)_
 - `ciphertext` TEXT NOT NULL _(MLS-encrypted, hex-prefixed with `mls:`)_
 - `reply_to_id` TEXT
 - `sent_at` TEXT NOT NULL
 - `delivered` INTEGER NOT NULL DEFAULT 0
+- `sealed` INTEGER NOT NULL DEFAULT 0 _(migration 000008; sealed sender, #331)_
+
+**Sealed sender (#331).** Attribution is taken from the MLS credential inside the
+ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))
+decrypts and reads the credential's `{user_id}:{device_id}`, so a server-written
+`sender_id` cannot forge or reveal authorship. This is **always on**. `sealed = 1`
+additionally marks an envelope whose `sender_id` column is a non-identifying
+sentinel (the string `"sealed"`) rather than the real sender — envelope-sender
+*blinding*, so a Turso breach/subpoena of the stored table reveals nothing about
+who sent which message. Blinding is gated behind `POLLIS_SEAL_SENDER` (default
+**OFF**, dormant); the column and both code paths ship now so flipping it on later
+is a config change, not a migration. `sender_id` stays `NOT NULL` and the sentinel
+is a valid value, so the previously-shipped app keeps working (see migration
+000008's backward-compat note; version 000007 is deliberately skipped).
+
+Honest scope: this is an **at-rest** defense only. The DS still authenticates
+every write with an `X-Pollis-User` header and gates on membership, so a *live* DS
+operator still sees the sender in real time. Closing that axis is v1.5
+anonymous-membership (not shipped — tracked in #489).
 
 ### dm_channel
 - `id` TEXT PK
@@ -186,7 +205,7 @@ that class of bug.
 - `added_user_id` TEXT _(migration 14, NULL if no adds)_
 - `added_device_ids` TEXT _(migration 14, comma-separated)_
 
-### mls_welcome _(migration 3 + 11)_
+### mls_welcome _(migration 3 + 11; now on the commit-log DB)_
 - `id` TEXT PK _(ULID)_
 - `conversation_id` TEXT NOT NULL
 - `recipient_id` TEXT NOT NULL FK users
@@ -194,6 +213,13 @@ that class of bug.
 - `delivered` INTEGER NOT NULL DEFAULT 0
 - `created_at` TEXT NOT NULL DEFAULT now
 - `recipient_device_id` TEXT _(migration 11)_
+- UNIQUE INDEX `idx_mls_welcome_recipient` on `(conversation_id, recipient_id, recipient_device_id)` _(commit-log-DB migration 000002, #430 P2)_ — one live Welcome per recipient device. It is the conflict target the DS submit bundle's and `/v1/welcomes/resubmit`'s idempotent `ON CONFLICT … DO UPDATE` upserts key on, so a re-sent Welcome refreshes the blob and re-arms delivery (`delivered = 0`) instead of stacking a duplicate row. The migration collapses any pre-existing duplicates (keeping the newest per tuple) before adding the index.
+
+`mls_welcome`, `mls_commit_log`, and `mls_group_info` live on the **separate
+commit-log Turso DB** (`LOG_DB_URL`) post-#420, where the Delivery Service holds
+the only read-write token and clients hold a read-only token. Their migrations are
+numbered independently in `pollis-core/src/db/migrations-log/` and applied by the
+desktop-release workflow's second `db-apply` step (`MIGRATIONS_DIR=…/migrations-log`).
 
 ### mls_group_info _(migration 13)_
 - `conversation_id` TEXT PK
