@@ -260,6 +260,10 @@ fn capture_loop(
             Ok(v) => v,
             Err(e) => return Err(anyhow!("dequeue frame: {e}")),
         };
+        // Stamp at dequeue, not at enqueue-to-socket: the timestamp should
+        // reflect when the sensor frame left the driver, so decode/convert
+        // time shows up as measurable latency instead of hiding.
+        let captured_us = now_us();
         let used = (meta.bytesused as usize).min(buf.len());
         let data = &buf[..used];
 
@@ -294,7 +298,7 @@ fn capture_loop(
             width: even_w,
             height: even_h,
             stride,
-            timestamp_us: now_us(),
+            timestamp_us: captured_us,
             bgrx: bgrx.clone(),
         });
     }

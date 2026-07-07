@@ -76,12 +76,19 @@ fn stage_capture_helper() {
     // CI's helper job uploads only the sidecar artifact (see
     // .github/workflows/desktop-release.yml — the build-capture-helper
     // job runs on ubuntu-24.04 to get PipeWire 1.0 headers, the app job
-    // on 22.04 can't compile libspa). If we required both copies before
-    // skipping the rebuild, the app job would always fall through into
-    // an unbuildable nested cargo invocation. Treat the sidecar as the
-    // authoritative pre-staged artifact: when it's present, mirror it to
-    // the dev path (if missing) and skip the inner build entirely.
-    if sidecar.exists() {
+    // on 22.04 can't compile libspa). There the pre-staged sidecar is
+    // authoritative: mirror it to the dev path and skip the inner build,
+    // which the app job couldn't run anyway.
+    //
+    // Only in CI, though. On a dev machine an existing sidecar must NOT
+    // short-circuit the rebuild: `binaries/` is gitignored, and `tauri dev`
+    // re-copies the sidecar over target/<profile>/<helper> on every launch
+    // (externalBin staging), so a stale sidecar would silently pin every
+    // dev run to whatever helper was first staged — that's how a pre-#394
+    // helper without `--mode camera` kept resurrecting itself. Locally we
+    // always rebuild (incremental, own target dir) and overwrite both
+    // staged copies so they can never diverge from the source tree.
+    if sidecar.exists() && std::env::var_os("CI").is_some() {
         if !dev_copy.exists() {
             if let Some(parent) = dev_copy.parent() {
                 std::fs::create_dir_all(parent).ok();

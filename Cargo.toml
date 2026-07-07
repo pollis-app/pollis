@@ -21,6 +21,20 @@ rust-version = "1.77"
 [profile.dev]
 incremental = true
 
+# The capture helpers do per-pixel work in Rust on the frame hot path
+# (MJPEG decode via zune-jpeg, YUYV/RGB → BGRx packing). At opt-level 0
+# that's ~220ms per 720p frame — the camera drops from 30fps to ~4.5fps
+# and frames queue up seconds of latency in the V4L2 ring. Dev builds of
+# everything else stay unoptimized; the helper + its decoder must not.
+[profile.dev.package.pollis-capture-linux]
+opt-level = 3
+[profile.dev.package.pollis-capture-macos]
+opt-level = 3
+[profile.dev.package.zune-jpeg]
+opt-level = 3
+[profile.dev.package.zune-core]
+opt-level = 3
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
