@@ -210,6 +210,44 @@
       </div>
 
       <div class="faq-item">
+        <div class="faq-question">Can the server tell who sent a message?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Not from what it stores. The saved record of a message no longer says who sent it — only the people in the conversation can tell, from the sealed contents. So a database breach, or a legal demand for stored data, can't reveal who said what.</p>
+            <p>One honest caveat, stated plainly: at the instant you hit send, the delivery server still checks that you're allowed to post in that conversation, so in that moment it does see it's you. Removing even that is future work.</p>
+          </div>
+          <div class="dev">
+            <p>Sealed sender (shipped). MLS already authenticates the sender inside the ciphertext via the message's <code>BasicCredential</code> (<code>{user_id}:{device_id}</code>), so the plaintext <code>sender_id</code> the server used to store was cryptographically redundant. The stored envelope is now sealed (migration <code>000008_message_envelope_sealed_sender.sql</code>) and the recipient attributes the message from the MLS credential on decrypt, not from a server column.</p>
+            <p>Scope is at-rest only: the Delivery Service still authenticates the send with an <code>X-Pollis-User</code> header, so it sees the sender at the live moment. Anonymous membership proofs — which would remove even that — are future work, not shipped.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Does the length of my messages give anything away?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>No. Every text message is padded out to a standard size before it's sealed, so its length reveals nothing — the server can't tell a one-word reply from a long paragraph by measuring it. (Attachments are handled separately and aren't padded.)</p>
+          </div>
+          <div class="dev">
+            <p>Text plaintext is padded to fixed size buckets before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>), so ciphertext size no longer correlates with message length. Attachments are the exception — they're shared via convergent encryption keyed on real file size, so they aren't bucketed.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">Do notifications leak who's messaging me?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>No. The real-time "new message" ping that tells your app to go fetch something no longer carries who sent it. It's just a nudge — your device learns the real sender only after it opens the sealed message.</p>
+          </div>
+          <div class="dev">
+            <p>The realtime signalling payload for <code>new_message</code> is stripped of <code>sender_id</code> — it's a wake-up ping only, and the recipient re-derives the sender from the decrypted MLS envelope. Same metadata-minimization work as sealed sender.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
         <div class="faq-question">What happens if someone's cryptographic key changes?</div>
         <div class="faq-answer">
           <div class="plain">
@@ -268,6 +306,20 @@
           </div>
           <div class="dev">
             <p>Source lives at <a href="https://github.com/actuallydan/pollis" target="_blank" rel="noopener noreferrer">github.com/actuallydan/pollis</a>. Check the repo for the current license.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-question">How do I know the app I downloaded hasn't been tampered with?</div>
+        <div class="faq-answer">
+          <div class="plain">
+            <p>Pollis publishes a fingerprint of every version it releases into a public, tamper-evident log. A small tool, <code>pollis-verify</code>, lets anyone confirm that the app they're running is one Pollis has publicly published — so nobody can quietly slip a single person a tampered build without it either showing up in that public log forever or being conspicuously missing from it.</p>
+            <p>Honest caveat: this proves the app matches what Pollis published, not yet that those bytes were built from the public source. Letting outsiders rebuild it byte-for-byte and confirm the match is still being worked on.</p>
+          </div>
+          <div class="dev">
+            <p>Binary transparency (shipped). Each released artifact's hashes plus its build recipe are appended to an append-only log at <code>verify.pollis.com/v1/binaries</code>, anchored to a pinned Ed25519 key (<code>175ebfef…7148</code>). <code>pollis-verify release &lt;tag&gt;</code> checks a build against the log, trusting only that key rather than Pollis's word.</p>
+            <p>Not yet shipped: byte-for-byte reproducible builds, a second Pollis-independent signature anchor, and an in-app "verify this build" button.</p>
           </div>
         </div>
       </div>
