@@ -384,7 +384,11 @@ fn decrypt_and_persist_one(
                 .as_ref()
                 .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, b))
                 .and_then(|(b, cred_sender)| {
-                    String::from_utf8(b).ok().map(|text| (text, cred_sender))
+                    // Strip size padding (issue #331 v2, §4.1). `strip` is a
+                    // no-op for legacy unpadded sends and for attachment
+                    // envelopes, so old and new clients interoperate.
+                    let plaintext = super::framing::strip(&b);
+                    String::from_utf8(plaintext).ok().map(|text| (text, cred_sender))
                 });
             if let (Some((text, cred_sender)), Some(bytes)) = (decrypted, ct_bytes) {
                 let _ = conn.execute(
@@ -405,7 +409,10 @@ fn decrypt_and_persist_one(
                     .strip_prefix("mls:")
                     .and_then(|h| hex::decode(h).ok())
                     .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, &b))
-                    .and_then(|(b, _cred_sender)| String::from_utf8(b).ok());
+                    // Strip size padding (§4.1); no-op for legacy/unpadded edits.
+                    .and_then(|(b, _cred_sender)| {
+                        String::from_utf8(super::framing::strip(&b)).ok()
+                    });
                 if let Some(text) = plaintext {
                     let now = chrono::Utc::now().to_rfc3339();
                     let _ = conn.execute(

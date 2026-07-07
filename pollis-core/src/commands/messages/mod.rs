@@ -5,6 +5,7 @@
 //! `pollis_core::commands::messages::*`.
 
 mod edit_delete;
+pub(crate) mod framing;
 mod ingest;
 mod reactions;
 mod read;

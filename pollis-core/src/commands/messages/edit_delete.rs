@@ -266,6 +266,15 @@ fn parse_attachment_refs(raw: &str) -> Vec<AttachmentRef> {
         .collect()
 }
 
+/// True when a message's plaintext `content` carries attachment refs (a valid
+/// `_att` array) rather than being plain text. Size-padding (issue #331 v2,
+/// `docs/metadata-minimization-design.md` §4.1) is scoped to TEXT envelopes
+/// only — an attachment blob's size is inherent and R2 dedup depends on it — so
+/// the send/edit path leaves attachment envelopes unpadded.
+pub(crate) fn is_attachment_content(content: &str) -> bool {
+    !parse_attachment_refs(content).is_empty()
+}
+
 /// Return the subset of the given attachments that are not referenced by any
 /// of the user's other non-deleted local messages. Scans the sender's local
 /// message cache only — cross-user references are invisible because
@@ -436,7 +445,15 @@ pub async fn edit_message(
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, new_content.as_bytes())
+        // Size padding (issue #331 v2, §4.1) — same scheme as the send path:
+        // pad TEXT edits to a size bucket; leave attachment edits unpadded.
+        let plaintext: Vec<u8> = if is_attachment_content(&new_content) {
+            new_content.as_bytes().to_vec()
+        } else {
+            super::framing::pad(new_content.as_bytes())
+        };
+
+        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
                 "MLS group not initialized for conversation {conversation_id}"
             )))?;

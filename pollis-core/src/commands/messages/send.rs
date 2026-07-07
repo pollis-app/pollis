@@ -130,7 +130,20 @@ pub async fn send_message(
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
 
-        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, content.as_bytes())
+        // Size padding (issue #331 v2, `docs/metadata-minimization-design.md`
+        // §4.1). Pad TEXT plaintext to a size bucket before encryption so the
+        // ciphertext length in `message_envelope` no longer reveals the message
+        // length. The framing (version byte + length prefix) lives inside the
+        // MLS ciphertext, so only members see it and there's no schema/server
+        // change. Attachment envelopes are left unpadded — their R2 blob size is
+        // inherent and dedup depends on it.
+        let plaintext: Vec<u8> = if super::edit_delete::is_attachment_content(&content) {
+            content.as_bytes().to_vec()
+        } else {
+            super::framing::pad(content.as_bytes())
+        };
+
+        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
             .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
                 "MLS group not initialized for conversation {conversation_id}"
             )))?;

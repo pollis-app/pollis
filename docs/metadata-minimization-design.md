@@ -142,11 +142,21 @@ Ship **pseudonymous per-conversation membership handles as v3, gated on demand**
 
 ### 4.1 Ciphertext size — pad to buckets (cheap, invisible)
 
+**Status: SHIPPED (issue #331 v2, this slice).** Text plaintext is padded to size
+buckets before `try_mls_encrypt` and stripped after `try_mls_decrypt`. Framing
+module: `pollis-core/src/commands/messages/framing.rs`; padding applied at the
+send/edit encrypt sites (`messages/send.rs`, `messages/edit_delete.rs`) and
+stripped at the ingest decrypt sites (`messages/ingest.rs`, both the `message`
+and `edit` paths). Attachment envelopes are left unpadded (scoped via
+`edit_delete::is_attachment_content`). Sealed sender (v1) shipped earlier; the
+rest of v2 (LiveKit signalling minimization) and v1.5/v3/v4 remain unbuilt.
+
 MLS application ciphertext length tracks plaintext length, so the server (and anyone reading `message_envelope`) learns approximate message length — enough to distinguish "ok" from a paragraph, to fingerprint forwarded content, or to correlate a send with a receive by size.
 
-- **Fix:** pad plaintext to fixed **size buckets** before `try_mls_encrypt` (`group_state.rs:1229`). A padding scheme like padmé (log-bucketed, ~12% overhead worst case) or simple power-of-two/fixed-step buckets (e.g. 256 B / 1 KiB / 4 KiB / 16 KiB steps) collapses most messages into a handful of observable sizes. Strip padding after decrypt (length-prefix the real plaintext inside the padded buffer).
-- **Cost:** a few hundred bytes average bandwidth per message; **zero latency, zero UX**. Attachments already ride convergent-encrypted R2 blobs whose size is inherent (dedup depends on it) — padding there would break dedup, so scope size-padding to **text envelopes only**.
-- **Additive:** pure client-side change to the plaintext framing inside the MLS ciphertext; no schema change, no server change. Old and new clients interoperate (padding is inside the encrypted payload; a reader that doesn't strip padding would show garbage, so this rides the same "teach readers first" dance — but since padding is *inside* the ciphertext, only members decrypt it, and we gate on a framing version byte).
+- **Fix (implemented):** pad plaintext to fixed **size buckets** before `try_mls_encrypt` (`group_state.rs:1229`). The shipped scheme is **PADMÉ** (log-bucketed, ~12% overhead worst case) above a 256 B floor bucket, so every short message (empty, "ok", a single emoji) collapses to one observable 256 B size and larger messages land in coarse power-of-two-ish bands. Padding is stripped after decrypt via a length prefix on the real plaintext inside the padded buffer.
+- **Framing (implemented).** Inside the MLS ciphertext the padded buffer is `[version byte 0xF5][u32 LE real length][real plaintext][zero padding to bucket]`. The version byte is chosen from `0xF5..=0xFF` — bytes that can never begin a valid UTF-8 string — so a **legacy unpadded** message (always valid UTF-8) and an **unpadded attachment envelope** (JSON beginning with `{`) are both detected by their first byte and returned verbatim by `strip`. This is the version-byte back-compat gate: old and new clients interoperate, and a future v2 framing (`0xF6`) stays unambiguous.
+- **Cost:** a few hundred bytes average bandwidth per message; **zero latency, zero UX**. Attachments already ride convergent-encrypted R2 blobs whose size is inherent (dedup depends on it) — padding there would break dedup, so size-padding is scoped to **text envelopes only**.
+- **Additive:** pure client-side change to the plaintext framing inside the MLS ciphertext; no schema change, no server change. Old and new clients interoperate (padding is inside the encrypted payload; only members decrypt it, and the framing version byte gates the strip).
 
 ### 4.2 Commit/welcome timing — decouple submission (v3+)
 

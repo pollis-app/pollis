@@ -154,6 +154,85 @@ fn encrypt_decrypt_roundtrip() {
     assert_eq!(sender, "alice");
 }
 
+/// The full text-message path through the real MLS crypto: pad the plaintext,
+/// encrypt, decrypt, strip the padding — and get the EXACT original back, for a
+/// spread of sizes. Also proves version-byte back-compat: an OLD, unpadded send
+/// (raw bytes through `try_mls_encrypt`) still decodes when the new reader runs
+/// `strip`. (Issue #331 v2, `docs/metadata-minimization-design.md` §4.1.)
+#[test]
+fn padded_text_roundtrip_through_mls() {
+    use crate::commands::messages::framing;
+
+    let conv_id = "01JTEST00000000000000000EF";
+
+    let alice_db = make_db();
+    let bob_db = make_db();
+
+    create_group(&alice_db, conv_id, "alice");
+    let bob_kp_bytes = gen_key_package(&bob_db, "bob");
+
+    // Alice adds Bob.
+    let welcome_bytes: Vec<u8> = {
+        let alice_provider = PollisProvider::new(&alice_db);
+        let (mut alice_group, alice_signer) =
+            load_group_with_signer(&alice_provider, conv_id).unwrap();
+        let mut kp_reader: &[u8] = &bob_kp_bytes;
+        let kp_in = KeyPackageIn::tls_deserialize(&mut kp_reader).unwrap();
+        let kp = kp_in.validate(alice_provider.crypto(), ProtocolVersion::Mls10).unwrap();
+        let (_commit, welcome_msg, _) =
+            alice_group.add_members(&alice_provider, &alice_signer, &[kp]).unwrap();
+        alice_group.merge_pending_commit(&alice_provider).unwrap();
+        welcome_msg.tls_serialize_detached().unwrap()
+    };
+
+    // Bob joins.
+    {
+        let bob_provider = PollisProvider::new(&bob_db);
+        let mut reader: &[u8] = &welcome_bytes;
+        let msg_in = MlsMessageIn::tls_deserialize(&mut reader).unwrap();
+        let welcome = match msg_in.extract() {
+            MlsMessageBodyIn::Welcome(w) => w,
+            _ => panic!("expected Welcome"),
+        };
+        StagedWelcome::new_from_welcome(&bob_provider, &MlsGroupJoinConfig::default(), welcome, None)
+            .unwrap()
+            .into_group(&bob_provider)
+            .unwrap();
+    }
+
+    // Padded path: exact round-trip AND same ciphertext-driving bucket for
+    // very different plaintext lengths.
+    let short = "ok".as_bytes();
+    let long = "x".repeat(200);
+    let short_ct = {
+        let padded = framing::pad(short);
+        try_mls_encrypt(&alice_db, conv_id, &padded).expect("encrypt short")
+    };
+    let long_ct = {
+        let padded = framing::pad(long.as_bytes());
+        try_mls_encrypt(&alice_db, conv_id, &padded).expect("encrypt long")
+    };
+    // Two very different plaintext lengths collapse to one ciphertext size.
+    assert_eq!(
+        short_ct.len(),
+        long_ct.len(),
+        "padding must collapse distinct plaintext lengths to one ciphertext size"
+    );
+
+    let (short_pt, _) = try_mls_decrypt(&bob_db, conv_id, &short_ct).expect("decrypt short");
+    assert_eq!(framing::strip(&short_pt), short);
+    let (long_pt, sender) = try_mls_decrypt(&bob_db, conv_id, &long_ct).expect("decrypt long");
+    assert_eq!(framing::strip(&long_pt), long.as_bytes());
+    assert_eq!(sender, "alice");
+
+    // Back-compat: an OLD client sends unpadded bytes. The new reader's `strip`
+    // must leave them untouched.
+    let legacy_plain = "legacy unpadded message".as_bytes();
+    let legacy_ct = try_mls_encrypt(&alice_db, conv_id, legacy_plain).expect("encrypt legacy");
+    let (legacy_pt, _) = try_mls_decrypt(&bob_db, conv_id, &legacy_ct).expect("decrypt legacy");
+    assert_eq!(framing::strip(&legacy_pt), legacy_plain);
+}
+
 /// A solo group (no other members) returns None for decrypt — only a member
 /// of the group can decrypt.  But the creator can still encrypt successfully.
 #[test]

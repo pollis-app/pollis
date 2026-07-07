@@ -208,7 +208,7 @@ Both peers compute the same 32-byte key because both hold the same exporter secr
 
 **Send** (`send_message`):
 1. Poll welcomes → interleaved ingesting catch-up (`catch_up_mls_group_interleaved`) to reach the current epoch while decrypting any current-epoch inbound message first, so this device's own send can't strand it (#440)
-2. `try_mls_encrypt(local_db, group_id, plaintext)` → MLS ciphertext
+2. For a TEXT message, pad the plaintext to a size bucket (`messages::framing::pad`) so the ciphertext length no longer leaks the message length (metadata minimization, issue #331 v2, `docs/metadata-minimization-design.md` §4.1). Attachment envelopes are left unpadded. Then `try_mls_encrypt(local_db, group_id, plaintext)` → MLS ciphertext
 3. Store ciphertext in `message_envelope` (remote) and `message` (local)
 
 **Receive** (`get_channel_messages` / `get_dm_messages`):
@@ -217,7 +217,9 @@ Both peers compute the same 32-byte key because both hold the same exporter secr
    its un-ingested `message_envelope` rows from Turso, and replay commits ONCE
    for the shared group, decrypting each conversation's envelopes at the epoch
    they were sealed at (via `try_mls_decrypt`) *before* advancing past it
-3. Cache decrypted content in the local `message` table; advance each
+3. Strip size padding (`messages::framing::strip`) — a no-op for legacy/unpadded
+   sends and attachment envelopes, detected by the framing version byte — then
+   cache decrypted content in the local `message` table; advance each
    conversation's watermark independently
 4. Read the requested conversation's page from the local `message` table
 
