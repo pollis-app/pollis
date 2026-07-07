@@ -74,6 +74,42 @@ pub(crate) async fn gate(
     }
 }
 
+/// [`gate`], extended to ALSO accept a verified OTP session (`X-Pollis-Session`)
+/// as the authenticating credential — for the account-lifecycle writes reachable
+/// from a PRE-ENROLLMENT device (the soft reset offered on the login gate). Such
+/// a device by definition has no registered `mls_signature_pub` to sign with:
+/// its proof of authorization is the verified-OTP session, exactly like the
+/// bootstrap endpoints (`crate::bootstrap`), and `user_id` binds from the
+/// session record, never the body. The soft reset was always email-OTP
+/// authorized by design — this enforces that server-side instead of trusting
+/// the client's direct write.
+///
+/// A request carrying the signature header goes through the signature gate
+/// unconditionally, so an enrolled caller keeps the stronger credential and a
+/// bad signature is never "rescued" by a session token.
+pub(crate) async fn gate_or_session(
+    state: &AppState,
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &Uri,
+    body: &Bytes,
+) -> Result<Result<Authed, Response>, AppError> {
+    if !state.require_auth {
+        return Ok(Ok(None));
+    }
+    if headers.contains_key(auth::H_SIGNATURE) {
+        return gate(state, headers, method, uri, body).await;
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match crate::session::verify_session(headers, &state.sessions, now) {
+        Ok(claims) => Ok(Ok(Some(claims.user_id))),
+        Err(rej) => Ok(Err(rej.into_response())),
+    }
+}
+
 /// Resolve the recipient/owner a welcome op targets.
 ///
 ///   - auth ON  → the authenticated user. If the body also carries `user_id`,
@@ -452,7 +488,7 @@ pub async fn welcomes_purge(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+    let authed = match gate_or_session(&state, &headers, &method, &uri, &body).await? {
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };

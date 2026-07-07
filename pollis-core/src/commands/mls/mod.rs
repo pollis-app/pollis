@@ -25,6 +25,7 @@ pub use device::{ensure_device_cert, load_or_create_device_signer, resign_stale_
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
 pub(crate) use ds_client::{
     ds_claim_key_package, ds_post, ds_post_ok, ds_post_plain, ds_post_session_ok,
+    ds_post_signed_or_session, ds_post_signed_or_session_ok,
 };
 
 // ── Key packages ─────────────────────────────────────────────────────────────

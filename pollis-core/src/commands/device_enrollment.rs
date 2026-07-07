@@ -720,19 +720,21 @@ pub async fn reset_identity_and_recover(
         // domains E+G) as ONE transaction when configured: the group-ownership
         // handoff, the group/DM membership + key-package deletes, and the
         // other-device orphaning all commit together or not at all — a
-        // half-cleaned account is a corrupt state. The current device CAN sign
-        // here: it was enrolled before the reset, so its `mls_signature_pub`
-        // survives the account-key rotation (the local DB is wiped only below).
+        // half-cleaned account is a corrupt state. Credential: an enrolled
+        // caller (reset from a signed-in session) device-signs; the primary
+        // caller — a PRE-ENROLLMENT device on the login gate, which has no
+        // signing key and no open local DB — authenticates with the
+        // verified-OTP bootstrap session instead (the DS's `gate_or_session`).
         let body = serde_json::json!({ "current_device_id": current_device_id });
-        crate::commands::mls::ds_post_ok(state, "/v1/account/reset-recover", &body).await?;
+        crate::commands::mls::ds_post_signed_or_session_ok(state, "/v1/account/reset-recover", &body)
+            .await?;
 
         // Delete pending MLS welcomes (W8 seam). Route through the Delivery
-        // Service (sole writer of the log DB). The local device row + its
-        // `mls_signature_pub` still exist here (the wipe happens below), so the
-        // signed purge authenticates against the registered device key.
+        // Service (sole writer of the log DB), with the same signed-or-session
+        // credential as the reset-recover write above.
         {
             let body = serde_json::json!({});
-            match crate::commands::mls::ds_post(state, "/v1/welcomes/purge", &body).await {
+            match crate::commands::mls::ds_post_signed_or_session(state, "/v1/welcomes/purge", &body).await {
                 Ok(resp) if resp.status().is_success() => {}
                 Ok(resp) => {
                     let s = resp.status();

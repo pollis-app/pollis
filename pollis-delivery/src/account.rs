@@ -32,6 +32,12 @@
 //! is scoped `WHERE … user_id = actor` (or, for the enrollment rows, the request
 //! must belong to the actor). Nothing is re-derived from client-supplied ids.
 //!
+//! **Credential**: device signature, except `rotate-identity` and
+//! `reset-recover`, which take the signature OR a verified-OTP session
+//! (`gate_or_session`) — the soft reset runs from a PRE-ENROLLMENT device on
+//! the login gate, which has no signing key; its authorization has always been
+//! the email OTP (see `tests/reset_session.rs` for the properties).
+//!
 //! ## The two hard requirements
 //!
 //! 1. **`account_key_log` CAS.** `account_key_log` is an append-only, seq-ordered
@@ -91,7 +97,7 @@ use libsql::Connection;
 use serde::Deserialize;
 
 use crate::error::{AppError, AuthRejection};
-use crate::writes::{bad_request, gate, ok_json, outcome_response, resolve_actor, WriteOutcome};
+use crate::writes::{bad_request, gate, gate_or_session, ok_json, outcome_response, resolve_actor, WriteOutcome};
 use crate::AppState;
 
 fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
@@ -144,7 +150,7 @@ pub async fn rotate_identity(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+    let authed = match gate_or_session(&state, &headers, &method, &uri, &body).await? {
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };
@@ -611,7 +617,7 @@ pub async fn reset_recover(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, AppError> {
-    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+    let authed = match gate_or_session(&state, &headers, &method, &uri, &body).await? {
         Ok(a) => a,
         Err(resp) => return Ok(resp),
     };

@@ -520,7 +520,8 @@ pub async fn reset_identity(state: &Arc<AppState>, user_id: &str) -> Result<Stri
             "wrapped_key": b64.encode(&wrapped),
         });
         let resp =
-            crate::commands::mls::ds_post(state, "/v1/account/rotate-identity", &body).await?;
+            crate::commands::mls::ds_post_signed_or_session(state, "/v1/account/rotate-identity", &body)
+                .await?;
         let status = resp.status();
         if status.as_u16() == 409 {
             // A concurrent rotation already won this version. Refuse rather

@@ -75,7 +75,7 @@ pub const REPLAY_WINDOW_SECS: i64 = 300;
 const H_USER: &str = "x-pollis-user";
 const H_DEVICE: &str = "x-pollis-device";
 const H_TIMESTAMP: &str = "x-pollis-timestamp";
-const H_SIGNATURE: &str = "x-pollis-signature";
+pub(crate) const H_SIGNATURE: &str = "x-pollis-signature";
 
 /// The four headers parsed off an authenticated request, plus the
 /// authenticated identity once the signature checks out.

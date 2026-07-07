@@ -206,6 +206,46 @@ pub async fn ds_post_ok(state: &Arc<AppState>, path: &str, body: &serde_json::Va
     Ok(())
 }
 
+/// [`ds_post`] when this device can sign (local DB open, device key enrolled);
+/// otherwise fall back to the verified-OTP bootstrap session ([`ds_post_session`]
+/// with `state.bootstrap_session`). For the account-lifecycle writes reachable
+/// from a PRE-ENROLLMENT device — the soft reset offered on the login gate —
+/// where no signing key exists yet and the user's authorization is the email
+/// OTP they just verified. The DS accepts either credential on these endpoints
+/// (`gate_or_session`).
+pub async fn ds_post_signed_or_session(
+    state: &Arc<AppState>,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response> {
+    let can_sign = state.local_db.lock().await.is_some();
+    if can_sign {
+        return ds_post(state, path, body).await;
+    }
+    let token = state.bootstrap_session.lock().await.clone().ok_or_else(|| {
+        Error::Other(anyhow::anyhow!(
+            "not signed in and no verified-email session — verify your email again, then retry"
+        ))
+    })?;
+    ds_post_session(state, path, &token, body).await
+}
+
+/// [`ds_post_signed_or_session`] for writes that must NOT silently fail: any
+/// non-2xx becomes an `Err` carrying the status + body.
+pub async fn ds_post_signed_or_session_ok(
+    state: &Arc<AppState>,
+    path: &str,
+    body: &serde_json::Value,
+) -> Result<()> {
+    let resp = ds_post_signed_or_session(state, path, body).await?;
+    if !resp.status().is_success() {
+        let s = resp.status();
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!("ds_post {path} {s}: {txt}")));
+    }
+    Ok(())
+}
+
 /// Resolve the DS base URL or error if it isn't configured. Shared by the
 /// unauthenticated + session-bearer bootstrap clients below.
 fn delivery_base(state: &Arc<AppState>) -> Result<String> {
