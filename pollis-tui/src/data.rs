@@ -36,7 +36,7 @@ pub const DEFAULT_PAGE: i64 = 50;
 /// DM *requests* are included deliberately: a member added to a DM sees it as a
 /// pending request until they accept, but the MLS group already exists and may
 /// have commits/messages to catch up on — so the sync loop must process it too.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ConversationTree {
     pub groups: Vec<GroupWithChannels>,
     pub dm_channels: Vec<DmChannel>,

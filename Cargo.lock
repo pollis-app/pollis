@@ -6380,6 +6380,7 @@ dependencies = [
  "axum 0.7.9",
  "base64 0.22.1",
  "crossterm",
+ "libc",
  "libsql",
  "pollis-core",
  "pollis-delivery",

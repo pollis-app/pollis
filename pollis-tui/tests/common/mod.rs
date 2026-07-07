@@ -247,6 +247,9 @@ pub async fn spawn_world() -> World {
         livekit_api_key: String::new(),
         livekit_api_secret: String::new(),
         pollis_delivery_url: Some(delivery_url),
+        // Sealed Sender off: the smoke rig exercises sync/enroll flows, not
+        // envelope blinding (mirrors the flows harness default).
+        seal_sender: false,
     };
 
     World {

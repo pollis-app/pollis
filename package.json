@@ -7,12 +7,14 @@
     "dev": "WEBKIT_DISABLE_COMPOSITING_MODE=1 GDK_BACKEND=x11 pnpm tauri dev",
     "dev:tauri": "pnpm dev",
     "dev:frontend": "pnpm --filter frontend dev",
+    "cli": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; export POLLIS_DATA_DIR=\"${POLLIS_DATA_DIR:-$HOME/.local/share/pollis-tui}\"; cargo run -p pollis-tui --bin pollis'",
+    "dev:cli": "pnpm cli",
     "lint": "pnpm --filter frontend lint",
     "clean": "pnpm --filter frontend clean && cargo clean",
-    "build:tauri": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build'",
-    "build:tauri:linux": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-unknown-linux-gnu'",
-    "build:tauri:macos": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target universal-apple-darwin'",
-    "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . .env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'"
+    "build:tauri": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build'",
+    "build:tauri:linux": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target x86_64-unknown-linux-gnu'",
+    "build:tauri:macos": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target universal-apple-darwin'",
+    "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

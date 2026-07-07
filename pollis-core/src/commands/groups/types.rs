@@ -9,7 +9,7 @@ pub struct Group {
     pub created_at: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Channel {
     pub id: String,
     pub group_id: String,
@@ -20,7 +20,7 @@ pub struct Channel {
     pub channel_type: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GroupWithChannels {
     pub id: String,
     pub name: String,

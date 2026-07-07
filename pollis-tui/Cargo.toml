@@ -26,6 +26,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 ratatui = "0.28"
 crossterm = "0.28"
 anyhow = "1"
+# fd-level stderr redirect (pollis-core's eprintln! must not scroll the TUI).
+libc = "0.2"
 
 [dev-dependencies]
 # Re-declare pollis-core with `test-harness` so the smoke tests get the

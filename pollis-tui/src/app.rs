@@ -99,6 +99,19 @@ pub enum Action {
     RejectEnrollment(String),
 }
 
+impl Action {
+    /// Actions the UI refresh tick fires on its own. They run without the
+    /// "working…" busy hint — flashing it on a 750ms timer strobes the status
+    /// line (and for [`Action::Refresh`], the work is a cheap in-memory
+    /// snapshot read anyway).
+    pub fn is_background(&self) -> bool {
+        matches!(
+            self,
+            Action::Refresh | Action::PollEnrollment(_) | Action::LoadPendingEnrollments
+        )
+    }
+}
+
 pub struct App {
     state: Arc<AppState>,
     pub screen: Screen,
@@ -136,6 +149,10 @@ pub struct App {
 
     /// The running background poll loop; cancelled on quit for a clean shutdown.
     sync_loop: Option<sync::SyncLoop>,
+    /// The last sync round whose snapshot the UI consumed. A refresh tick only
+    /// does work when the loop has completed a newer round — the tick itself
+    /// must never issue remote queries (that's the sync loop's job).
+    last_sync_round: u64,
     /// Last-rendered height (in rows) of the message pane, so the key handler can
     /// scroll by whole pages. Updated by the renderer via [`Self::set_msg_height`].
     msg_height: usize,
@@ -159,6 +176,7 @@ impl App {
             enroll_stopped: false,
             approvals: ApprovalState::default(),
             sync_loop: None,
+            last_sync_round: 0,
             msg_height: 0,
         }
     }
@@ -752,21 +770,38 @@ impl App {
                 }
             }
             Action::EnterHome => {
-                // Start the background poll loop (spec §6). It mutates the local
-                // DB; the UI's refresh tick re-reads from it.
+                // Start the background poll loop (spec §6). It does the remote
+                // work and publishes a per-round snapshot; the UI's refresh tick
+                // consumes that snapshot without issuing queries of its own.
                 if self.sync_loop.is_none() {
                     let user_id = self.user_id();
                     self.sync_loop =
                         Some(sync::spawn_loop(self.state.clone(), user_id, SYNC_CADENCE));
                 }
-                // Load the tree once immediately so the sidebar isn't empty while
-                // the first background round runs.
-                return Some(Action::Refresh);
+                // Load the tree once immediately (user-initiated, so a visible
+                // "working…" is fine) so the sidebar isn't empty while the first
+                // background round runs.
+                self.refresh_tree().await;
             }
             Action::Refresh => {
-                self.refresh_tree().await;
-                self.refresh_open().await;
-                self.home.refreshes = self.home.refreshes.wrapping_add(1);
+                // Timer-driven and must stay cheap: consume the sync loop's
+                // latest snapshot; if no new round completed since the last
+                // tick there is nothing to do. The only remote call is the
+                // open conversation's newest-page read, and only once per
+                // completed sync round.
+                let snapshot = self
+                    .sync_loop
+                    .as_ref()
+                    .and_then(|l| l.snapshot.borrow().clone());
+                if let Some(snap) = snapshot {
+                    if snap.round > self.last_sync_round {
+                        self.last_sync_round = snap.round;
+                        let user_id = self.user_id();
+                        self.home.set_tree(snap.tree.clone(), &user_id);
+                        self.refresh_open().await;
+                        self.home.refreshes = self.home.refreshes.wrapping_add(1);
+                    }
+                }
             }
             Action::OpenSelected => self.load_open_first_page().await,
             Action::LoadOlder => self.load_open_older().await,

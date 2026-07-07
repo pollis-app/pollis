@@ -35,11 +35,12 @@ use tokio::task::JoinHandle;
 use crate::data;
 
 /// Run one full welcomes → commits(all conversations) → read(all) pass for
-/// `user_id` (§6). Idempotent and safe to call in a loop; returns once the pass
-/// completes. Errors from an individual conversation's commit/read are
-/// surfaced — a broken conversation should be visible, not silently swallowed
-/// (the "messages must work" doctrine).
-pub async fn sync_once(state: &Arc<AppState>, user_id: &str) -> Result<()> {
+/// `user_id` (§6). Idempotent and safe to call in a loop; returns the
+/// conversation tree the round enumerated, so callers (the loop's snapshot,
+/// the UI) can reuse it without re-querying remote. Errors from an individual
+/// conversation's commit/read are surfaced — a broken conversation should be
+/// visible, not silently swallowed (the "messages must work" doctrine).
+pub async fn sync_once(state: &Arc<AppState>, user_id: &str) -> Result<data::ConversationTree> {
     // 1. Welcomes first — draining them may join brand-new groups/DMs, which the
     //    enumeration below then picks up.
     poll_mls_welcomes(state, user_id.to_string()).await?;
@@ -64,7 +65,7 @@ pub async fn sync_once(state: &Arc<AppState>, user_id: &str) -> Result<()> {
         data::dm_messages(state, user_id, &dm.id, None).await?;
     }
 
-    Ok(())
+    Ok(tree)
 }
 
 /// Run [`sync_once`] up to `rounds` times, stopping early once a round makes no
@@ -80,12 +81,23 @@ pub async fn sync_rounds(state: &Arc<AppState>, user_id: &str, rounds: usize) ->
     Ok(rounds)
 }
 
+/// What a completed sync round produced: a monotonically-increasing round
+/// number and the conversation tree that round enumerated. Published over a
+/// `watch` channel so the UI can re-read state the loop already fetched
+/// instead of issuing its own remote queries on every refresh tick.
+pub struct SyncSnapshot {
+    pub round: u64,
+    pub tree: data::ConversationTree,
+}
+
 /// A running background sync loop and its shutdown switch. Dropping it does
 /// **not** stop the task — call [`SyncLoop::cancel`] (graceful, lets the current
 /// round finish) or [`SyncLoop::abort`] (immediate) on shutdown.
 pub struct SyncLoop {
     handle: JoinHandle<()>,
     shutdown: watch::Sender<bool>,
+    /// Latest completed round's snapshot; `None` until the first round lands.
+    pub snapshot: watch::Receiver<Option<Arc<SyncSnapshot>>>,
 }
 
 impl SyncLoop {
@@ -109,17 +121,25 @@ impl SyncLoop {
 /// separate signal. Returns a [`SyncLoop`] handle to cancel it on shutdown.
 pub fn spawn_loop(state: Arc<AppState>, user_id: String, cadence: Duration) -> SyncLoop {
     let (shutdown, mut rx) = watch::channel(false);
+    let (snapshot_tx, snapshot) = watch::channel(None);
     let handle = tokio::spawn(async move {
         let mut ticker = tokio::time::interval(cadence);
         // Skip the immediate first tick's burst semantics on lag — we only care
         // about steady cadence, not catching up missed ticks.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut round: u64 = 0;
         loop {
             tokio::select! {
                 _ = ticker.tick() => {
-                    if let Err(e) = sync_once(&state, &user_id).await {
+                    match sync_once(&state, &user_id).await {
+                        Ok(tree) => {
+                            round += 1;
+                            // Ignore send errors: no receiver just means the UI
+                            // is gone, and the shutdown switch will follow.
+                            let _ = snapshot_tx.send(Some(Arc::new(SyncSnapshot { round, tree })));
+                        }
                         // A failed round is logged, not fatal — the next tick retries.
-                        eprintln!("[sync] round for {user_id} failed: {e}");
+                        Err(e) => eprintln!("[sync] round for {user_id} failed: {e}"),
                     }
                 }
                 changed = rx.changed() => {
@@ -131,7 +151,7 @@ pub fn spawn_loop(state: Arc<AppState>, user_id: String, cadence: Duration) -> S
             }
         }
     });
-    SyncLoop { handle, shutdown }
+    SyncLoop { handle, shutdown, snapshot }
 }
 
 #[cfg(test)]
@@ -160,7 +180,8 @@ mod tests {
                 }
             }
         });
-        let loop_ = SyncLoop { handle, shutdown };
+        let (_snapshot_tx, snapshot) = watch::channel(None);
+        let loop_ = SyncLoop { handle, shutdown, snapshot };
         // Graceful cancel returns the join handle; it should complete promptly.
         let joined = loop_.cancel();
         tokio::time::timeout(Duration::from_secs(5), joined)

@@ -14,7 +14,7 @@ use crate::state::AppState;
 /// block status.
 pub const BLOCK_ERR: &str = "message request pending";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DmChannel {
     pub id: String,
     pub created_by: String,
@@ -22,7 +22,7 @@ pub struct DmChannel {
     pub members: Vec<DmChannelMember>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DmChannelMember {
     pub user_id: String,
     pub username: Option<String>,

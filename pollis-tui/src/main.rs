@@ -44,6 +44,13 @@ async fn main() -> Result<()> {
             .context("connecting AppState (Turso + keystore)")?,
     );
 
+    // pollis-core logs with bare `eprintln!` (fine under the desktop shell,
+    // where stderr is a dev terminal). Here stderr IS the UI's terminal — any
+    // write scrolls the screen under ratatui and corrupts the layout — so
+    // redirect fd 2 to a log file for the whole session. This also catches
+    // native-library chatter (e.g. libsql) that no Rust-level capture could.
+    let log_path = redirect_stderr_to_log();
+
     // Restore the terminal even if the render loop panics, so a crash never
     // strands the user in raw mode.
     install_panic_hook();
@@ -53,7 +60,39 @@ async fn main() -> Result<()> {
     // Explicit restore before printing any error to the (now-normal) terminal.
     drop(guard);
 
+    if let Some(path) = log_path {
+        println!("logs: {}", path.display());
+    }
+
     result
+}
+
+/// Point fd 2 at `$POLLIS_DATA_DIR/pollis-tui.log` (fallback: the OS temp dir)
+/// for the lifetime of the process. Returns the log path, or `None` if the file
+/// couldn't be opened — in that case stderr is left alone rather than lost.
+fn redirect_stderr_to_log() -> Option<std::path::PathBuf> {
+    use std::os::fd::AsRawFd;
+
+    let dir = std::env::var_os("POLLIS_DATA_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    // First run: the data dir may not exist yet (pollis-core creates it later,
+    // during identity setup) — without this the redirect would silently no-op
+    // and the whole first session would render over log spam.
+    std::fs::create_dir_all(&dir).ok();
+    let path = dir.join("pollis-tui.log");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .ok()?;
+    // SAFETY: dup2 onto fd 2 is the standard daemon-style redirect; the source
+    // fd stays open (leaked) so fd 2 never dangles.
+    if unsafe { libc::dup2(file.as_raw_fd(), 2) } == -1 {
+        return None;
+    }
+    std::mem::forget(file);
+    Some(path)
 }
 
 /// The render/input loop. Owns an input thread that forwards key presses over an
@@ -80,10 +119,15 @@ async fn run(guard: &mut TerminalGuard, state: Arc<AppState>) -> Result<()> {
         }
 
         // A queued async action runs after a "working…" frame is painted. Its
-        // follow-up (if any) is processed on the next iteration.
+        // follow-up (if any) is processed on the next iteration. Timer-driven
+        // actions skip the busy hint: painting "working…" every refresh tick
+        // strobes the status line.
         if let Some(action) = pending.take() {
-            app.busy = true;
-            draw(guard, &mut app)?;
+            let background = action.is_background();
+            if !background {
+                app.busy = true;
+                draw(guard, &mut app)?;
+            }
             pending = app.run(action).await;
             app.busy = false;
             continue;
