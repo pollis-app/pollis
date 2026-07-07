@@ -331,7 +331,10 @@ jobs:
             --include "verify/group/*" \
             --include "v1/account-keys/sth/latest.json" \
             --include "v1/account-keys/index.json" \
-            --include "verify/account/*"
+            --include "verify/account/*" \
+            --include "v1/binaries/sth/latest.json" \
+            --include "v1/binaries/index.json" \
+            --include "verify/release/*"
 
       # (e) Post-publish self-audit: verify what is ACTUALLY served at the live
       #     domain (both trees), and run an across-run equivocation tripwire. The
@@ -408,6 +411,10 @@ jobs:
           # prior STH was cached.
           check_tree "account-key" ".sth-prev/account-latest.json" \
             "${base}/v1/account-keys/sth" "${base}/v1/account-keys/sth/latest.json" || rc=1
+          # The binaries tree is likewise only present once a release has been
+          # attested; tripwire only if a prior STH was cached.
+          check_tree "binaries" ".sth-prev/binaries-latest.json" \
+            "${base}/v1/binaries/sth" "${base}/v1/binaries/sth/latest.json" || rc=1
           if [ "${rc}" -ne 0 ]; then
             echo "Equivocation tripwire FAILED."
             exit 1
@@ -419,6 +426,9 @@ jobs:
           curl -fsS --max-time 20 "${base}/v1/account-keys/sth/latest.json" \
             -o .sth-prev/account-latest.json \
             || echo "account latest not yet visible — will seed next run"
+          curl -fsS --max-time 20 "${base}/v1/binaries/sth/latest.json" \
+            -o .sth-prev/binaries-latest.json \
+            || echo "binaries latest not yet visible — will seed next run"
 
       - name: Save published STHs for next run's tripwire
         if: steps.decide.outputs.build == 'true'
