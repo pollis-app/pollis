@@ -15,6 +15,11 @@
     },
     "ios": {
       "supportsTablet": true,
+      "icon": {
+        "light": "./assets/ios-light.png",
+        "dark": "./assets/ios-dark.png",
+        "tinted": "./assets/ios-tinted.png"
+      },
       "infoPlist": {
         "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop."
       },
@@ -23,7 +28,8 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0a0907"
+        "monochromeImage": "./assets/adaptive-monochrome.png",
+        "backgroundColor": "#FABF5A"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
