@@ -1,21 +1,26 @@
-// Pollis "Ask about how this works" assistant — Phase 0 (retrieval + curated canned answers only).
+// Pollis "Ask about how this works" assistant — retrieval + curated canned answers, with an
+// optional tiny SEMANTIC re-ranker (Phase 1, extractive — still no generative model).
 //
-// This is the zero-hallucination-risk floor. It runs ENTIRELY from static JSON already shipped with
-// the page: no LLM, no model download, no WebGPU/WASM runtime, no embeddings, and no network calls of
-// any kind at query time. The two JSON files are loaded once as JSON modules (no fetch, no CDN, no
-// dynamic import) and everything after that is plain in-JS lexical matching.
-//
-// Answers come from two places, in this order of preference:
+// The always-on floor runs ENTIRELY from static JSON shipped with the page: no LLM, no generative
+// model, no WebGPU/WASM runtime, no network calls at query time. Answers come from two places:
 //   1. a curated canned-answer map (assistant-answers.json) — the doc-faithful, hand-checked path;
-//   2. a simple lexical search over a chunked corpus (assistant-corpus.json), returning source excerpts.
-// If neither is confident, the assistant says it does not know and points at the closest page. It never
-// synthesizes prose of its own — it only ever surfaces text a human authored and cited.
+//   2. a lexical search over a chunked corpus (assistant-corpus.json), returning source excerpts.
+// If neither is confident, it says it does not know and points at the closest page. It NEVER
+// synthesizes prose of its own — it only surfaces text a human authored and cited.
 //
-// Phase 1 (a WebGPU generative mode, with a WASM fallback) will add a generative path here later; it is
-// intentionally OUT OF SCOPE for this file. The natural seam is `handleQuery()` below.
+// The optional semantic tier improves *which* answer/excerpt is surfaced for paraphrased questions.
+// It is the all-MiniLM-L6-v2 sentence embedder (int8 ONNX) running ENTIRELY in the browser via a
+// VENDORED transformers.js + ONNX-Runtime-Web (assistant-embed.js) — an EXTRACTIVE re-ranker, NOT a
+// generative model. It is loaded LAZILY the first time the panel opens, from same-origin static assets
+// only (never a remote/CDN, and the query text never leaves the device). Until it loads (or if it
+// fails), behaviour is exactly the lexical floor. Semantic scores are FUSED with lexical scores, and a
+// paraphrase can be routed to a doc-exact canned answer only above a validated high-precision cosine
+// floor. The result stays fully extractive and cited.
 
 import corpusDoc from './assistant-corpus.json' with { type: 'json' };
 import answersDoc from './assistant-answers.json' with { type: 'json' };
+import vectorsDoc from './assistant-vectors.json' with { type: 'json' };
+import { cosine, decodeI8Unit, loadExtractor, embed } from './assistant-embed.js';
 
 const CORPUS = Array.isArray(corpusDoc.chunks) ? corpusDoc.chunks : [];
 const ANSWERS = Array.isArray(answersDoc.answers) ? answersDoc.answers : [];
@@ -34,6 +39,19 @@ const SUGGESTED_IDS = [
 const MIN_LEXICAL_SCORE = 2.0;
 // At most this many source chunks per non-canned answer.
 const MAX_CHUNKS = 3;
+
+// ── Semantic tier tuning (only used once the MiniLM embedder has loaded) ──
+// A canned answer whose (question+answer) embedding is at least this cosine-similar to the query may
+// be surfaced even if lexical matching wasn't confident (recovers paraphrased questions). Calibrated
+// against a held-out paraphrase set: at 0.40, correct matches fire with zero wrong answers and
+// off-topic questions (max observed cosine ~0.14) never clear the floor.
+const SEM_CANNED_FLOOR = 0.4;
+// A corpus chunk this cosine-similar to the query may be surfaced when lexical search abstained.
+// Kept above the off-topic cosine band so unrelated questions abstain rather than surfacing a
+// tangential excerpt.
+const SEM_CHUNK_FLOOR = 0.45;
+// Fusion weight of the semantic score against the (normalized) lexical score when both are present.
+const SEM_WEIGHT = 0.5;
 
 const DISCLAIMER =
   'This assistant is generated from Pollis’s public docs. It can be wrong, and it is not a ' +
@@ -110,8 +128,63 @@ const ANSWER_INDEX = ANSWERS.map((answer) => {
   return { answer, tokens, normalizedPhrases };
 });
 
-// Try to match a curated canned answer. Returns the answer object or null.
-function matchCanned(query) {
+// ── Semantic tier: lazily-loaded MiniLM re-ranker (extractive, no generative model) ──
+// SEM is null until the model loads. When present:
+//   { extractor, dim, answerVecs: Map<id,Float32Array>, chunkVecs: Map<id,Float32Array> }
+let SEM = null;
+let semPromise = null;
+
+// Embed the query with MiniLM (async; runs in-browser via ONNX-Runtime-Web, query never leaves the
+// device). Returns a Promise<number[]>.
+function embedQuery(query) {
+  return embed(SEM.extractor, query);
+}
+
+// Kick off the one-time lazy load. Safe to call repeatedly. On any failure, SEM stays null and the
+// assistant keeps working as the plain lexical floor.
+function ensureEmbedder() {
+  if (SEM || semPromise) {
+    return semPromise;
+  }
+  if (typeof fetch !== 'function') {
+    return null;
+  }
+  semPromise = loadExtractor()
+    .then((extractor) => installSemantic({ extractor, dim: vectorsDoc.dim }))
+    .catch(() => {
+      // Stay on the lexical floor; the model is a bonus, never a dependency.
+      SEM = null;
+    });
+  return semPromise;
+}
+
+// Decode the precomputed answer/chunk vectors and activate the semantic tier with the given extractor.
+// Exported so tests can inject an extractor + dim without a network fetch.
+export function installSemantic(model) {
+  const dim = model.dim || vectorsDoc.dim || 384;
+  const answerVecs = new Map();
+  for (const answer of ANSWERS) {
+    const b64 = vectorsDoc.answers && vectorsDoc.answers[answer.id];
+    if (b64) {
+      answerVecs.set(answer.id, decodeI8Unit(b64, dim));
+    }
+  }
+  const chunkVecs = new Map();
+  for (const chunk of CORPUS) {
+    const b64 = vectorsDoc.chunks && vectorsDoc.chunks[chunk.id];
+    if (b64) {
+      chunkVecs.set(chunk.id, decodeI8Unit(b64, dim));
+    }
+  }
+  SEM = { extractor: model.extractor, dim, answerVecs, chunkVecs };
+  return SEM;
+}
+
+// Try to match a curated canned answer. `qVec` is the query embedding when the semantic tier is
+// loaded, else null (pure-lexical behaviour — identical to the always-on floor). Returns the answer
+// object or null. Semantic scoring only ADDS recall: the lexical-confidence path is unchanged, and an
+// exact alias hit (lexComponent 100) always outranks any semantic-only candidate.
+function matchCanned(query, qVec) {
   const qNorm = normalize(query);
   const qTokens = tokenize(query);
   if (qTokens.length === 0) {
@@ -120,7 +193,7 @@ function matchCanned(query) {
   const qTokenSet = new Set(qTokens);
 
   let best = null;
-  let bestScore = 0;
+  let bestScore = -1;
 
   for (const entry of ANSWER_INDEX) {
     // A strong signal: a known phrasing appears inside the question, or the question inside a phrasing.
@@ -139,14 +212,25 @@ function matchCanned(query) {
       }
     }
     const ratio = overlap / qTokenSet.size;
+    const lexConfident = aliasHit || overlap >= 3 || (overlap >= 2 && ratio >= 0.5);
 
-    // Confidence: an alias/phrase hit, or a solid keyword overlap.
-    const confident = aliasHit || overlap >= 3 || (overlap >= 2 && ratio >= 0.5);
-    if (!confident) {
+    let sem = 0;
+    if (qVec) {
+      const v = SEM.answerVecs.get(entry.answer.id);
+      if (v) {
+        sem = cosine(qVec, v);
+      }
+    }
+    const semConfident = qVec && sem >= SEM_CANNED_FLOOR;
+
+    // A candidate must clear lexical confidence OR strong semantic similarity.
+    if (!lexConfident && !semConfident) {
       continue;
     }
 
-    const score = (aliasHit ? 100 : 0) + overlap + ratio;
+    // Fused rank: exact-alias dominates; otherwise semantic (scaled to ~0..50) leads keyword overlap.
+    const lexComponent = (aliasHit ? 100 : 0) + overlap + ratio;
+    const score = qVec ? lexComponent + SEM_WEIGHT * 100 * sem : lexComponent;
     if (score > bestScore) {
       bestScore = score;
       best = entry.answer;
@@ -156,42 +240,77 @@ function matchCanned(query) {
   return best;
 }
 
-// Lexical search over the corpus. Returns { chunks: [...], closest: chunkOrNull }.
-function lexicalSearch(query) {
+// Lexical (or lexical+semantic, when `qVec` is provided) search over the corpus.
+// Returns { chunks: [...], closest: chunkOrNull }.
+function lexicalSearch(query, qVec) {
   const qTokens = tokenize(query);
   const scored = [];
+  let maxLex = MIN_LEXICAL_SCORE;
   for (const entry of CHUNK_INDEX) {
-    let score = 0;
+    let lex = 0;
     for (const tok of qTokens) {
       const tf = entry.freq.get(tok);
       if (tf) {
-        score += tf * idf(tok);
+        lex += tf * idf(tok);
       }
     }
-    if (score > 0) {
-      scored.push({ chunk: entry.chunk, score });
+    let sem = 0;
+    if (qVec) {
+      const v = SEM.chunkVecs.get(entry.chunk.id);
+      if (v) {
+        sem = cosine(qVec, v);
+      }
     }
+    if (lex > maxLex) {
+      maxLex = lex;
+    }
+    scored.push({ chunk: entry.chunk, lex, sem });
   }
-  scored.sort((a, b) => b.score - a.score);
 
-  const closest = scored.length > 0 ? scored[0].chunk : null;
-  if (scored.length === 0 || scored[0].score < MIN_LEXICAL_SCORE) {
+  // Pure-lexical floor (semantic tier not loaded): behave exactly as before.
+  if (!qVec) {
+    const lexRanked = scored.filter((s) => s.lex > 0).sort((a, b) => b.lex - a.lex);
+    const closestLex = lexRanked.length > 0 ? lexRanked[0].chunk : null;
+    if (lexRanked.length === 0 || lexRanked[0].lex < MIN_LEXICAL_SCORE) {
+      return { chunks: [], closest: closestLex };
+    }
+    const cut = Math.max(MIN_LEXICAL_SCORE, lexRanked[0].lex * 0.5);
+    return {
+      chunks: lexRanked.filter((s) => s.lex >= cut).slice(0, MAX_CHUNKS).map((s) => s.chunk),
+      closest: closestLex,
+    };
+  }
+
+  // Hybrid: fuse normalized lexical with semantic; a chunk is eligible if lexical cleared the floor
+  // OR it is strongly semantically similar (recovers paraphrased questions lexical missed).
+  for (const s of scored) {
+    s.fused = SEM_WEIGHT * Math.max(0, s.sem) + (1 - SEM_WEIGHT) * (s.lex / maxLex);
+    s.eligible = s.lex >= MIN_LEXICAL_SCORE || s.sem >= SEM_CHUNK_FLOOR;
+  }
+  const byFused = scored.slice().sort((a, b) => b.fused - a.fused);
+  const closest = byFused.length > 0 ? byFused[0].chunk : null;
+  const eligible = byFused.filter((s) => s.eligible);
+  if (eligible.length === 0) {
     return { chunks: [], closest };
   }
-
-  const cutoff = Math.max(MIN_LEXICAL_SCORE, scored[0].score * 0.5);
-  const chunks = scored.filter((s) => s.score >= cutoff).slice(0, MAX_CHUNKS).map((s) => s.chunk);
+  const cutoff = eligible[0].fused * 0.6;
+  const chunks = eligible.filter((s) => s.fused >= cutoff).slice(0, MAX_CHUNKS).map((s) => s.chunk);
   return { chunks, closest };
 }
 
-// The one resolution entry point. Phase 1's generative mode would branch from here (e.g. when a model
-// is loaded, hand the retrieved chunks to it as grounding). Phase 0 stays fully extractive.
-function handleQuery(query) {
-  const canned = matchCanned(query);
+// The one resolution entry point. Embeds the query once (when the semantic tier is loaded) and fuses
+// that signal into both the canned matcher and the corpus search. Still fully extractive: every
+// surfaced sentence was authored by a human and is shown with its citation.
+async function handleQuery(query) {
+  const qVec = SEM ? await embedQuery(query) : null;
+  // With MiniLM loaded, a paraphrase may route to a doc-exact canned answer, but only above a
+  // high-precision cosine floor validated to fire correct answers with zero wrong ones (and to leave
+  // off-topic questions below the floor). Without the model, this is the unchanged lexical-only path.
+  const canned = matchCanned(query, qVec);
   if (canned) {
     return { kind: 'canned', answer: canned };
   }
-  const { chunks, closest } = lexicalSearch(query);
+  const { chunks, closest } = lexicalSearch(query, qVec);
   if (chunks.length > 0) {
     return { kind: 'chunks', chunks };
   }
@@ -289,7 +408,8 @@ function renderUnknown(container, closest) {
 
 // ── Widget construction ──
 
-const REDUCED_MOTION = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const REDUCED_MOTION = typeof window !== 'undefined' && window.matchMedia &&
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function buildWidget(mount) {
   const panelId = 'assistant-panel';
@@ -369,7 +489,7 @@ function buildWidget(mount) {
   answer.setAttribute('role', 'status');
   panel.appendChild(answer);
 
-  function ask(query) {
+  async function ask(query) {
     const trimmed = String(query || '').trim();
     answer.textContent = '';
     if (trimmed.length === 0) {
@@ -379,7 +499,21 @@ function buildWidget(mount) {
       answer.appendChild(hint);
       return;
     }
-    const result = handleQuery(trimmed);
+    // Brief pending state — resolving is async when the MiniLM re-ranker is loaded.
+    const pending = document.createElement('p');
+    pending.className = 'assistant-answer-body assistant-pending';
+    pending.textContent = 'Searching the docs…';
+    answer.appendChild(pending);
+    submit.disabled = true;
+
+    let result;
+    try {
+      result = await handleQuery(trimmed);
+    } catch (err) {
+      result = { kind: 'unknown', closest: null };
+    }
+    submit.disabled = false;
+    answer.textContent = '';
     if (result.kind === 'canned') {
       renderCanned(answer, result.answer);
     } else if (result.kind === 'chunks') {
@@ -401,6 +535,9 @@ function buildWidget(mount) {
     panel.hidden = false;
     launcher.setAttribute('aria-expanded', 'true');
     input.focus();
+    // Warm the optional semantic re-ranker in the background. If it never finishes (slow link, fetch
+    // blocked, unsupported), queries simply use the instant lexical floor — no worse than before.
+    ensureEmbedder();
   }
 
   function collapse() {
@@ -438,8 +575,13 @@ function init() {
   buildWidget(mount);
 }
 
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
-} else {
-  init();
+// Export the resolution entry point for testing; the DOM bootstrap only runs in a browser.
+export { handleQuery };
+
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 }

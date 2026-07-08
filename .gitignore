@@ -91,3 +91,8 @@ db-backups/
 # local env backups (never commit — contain real tokens)
 .env.*.bak*
 *.bak-rw
+
+# Assistant (#508): the in-browser MiniLM runtime + model are intentionally vendored into the
+# static site (user chose self-contained over CDN). Exempt them from the blanket vendor/ ignore.
+!website/vendor/
+!website/vendor/**
