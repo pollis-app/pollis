@@ -187,11 +187,13 @@ tree can never stand in for another:
   that every published artifact for a tag is provably included in the signed
   binaries tree at verify.pollis.com (`/v1/binaries`).
 
-  **Honest scope.** This is P2 — leaf structure, hashes, and pipeline wiring. It
-  is **not** full bit-for-bit reproducibility, cosign, or in-app verification;
-  those are tracked in #484. Logging that a signed artifact was published is a
-  transparency/accountability property, not (yet) a proof that the artifact was
-  built from the published source.
+  **Honest scope.** P2 (leaf structure, hashes, pipeline wiring) plus **P4 — the
+  optional in-app "Verify this build" check (`verify_own_build`, #484)** are
+  shipped. It is **not** yet full bit-for-bit reproducibility or a cosign/SLSA
+  anchor (still tracked in #484). Logging that a signed artifact was published —
+  and confirming this build's fingerprint is in that log — is a
+  transparency/accountability property, **not** (yet) a proof that the artifact
+  was built from the published source; that step is the independent rebuilders'.
 
 This is the scalable backstop the TOFU layer above always wanted: TOFU catches a
 swap only on the next message and only for keys *this* device has seen; the log
@@ -209,6 +211,18 @@ makes every user's full history auditable by anyone.
   pinned key present in the published history → `ok` (notes a newer version as a
   rotation); pinned key absent from a verifying history → `alarm` (the server
   showed a key it never published).
+- `verify_own_build` (#484, binaries tenant) — the in-app "Verify this build"
+  check. Computes the running binary's payload hash best-effort per-platform
+  (exact for the Linux AppImage via `$APPIMAGE`; deferred for `.app`/NSIS/deb/rpm
+  until reproducibility lands), pins the served binaries key, then runs the SAME
+  `verifiable_log_serve::release::verify_release` the `pollis-verify release` CLI
+  runs. The pure `derive_build_verify` maps the report to `verified` (our hash is
+  a published payload leaf for `v{version}`) / `pending` (tag not yet republished)
+  / `mismatch` (tag present but our hash absent, or the tree/served key failed the
+  trust check — the targeted-backdoor signal) / `unavailable` (couldn't check).
+  The version/commit are baked in (`pollis-core/build.rs`, commit omitted if
+  absent). On-demand only (a mutation, never auto-run) and advisory — it never
+  gates launch or update.
 
 Statuses are `ok` / `pending` / `alarm` / `unavailable`. The log's public key is
 pinned in the client; a served key ≠ the pin is a hard `alarm` (any key can sign

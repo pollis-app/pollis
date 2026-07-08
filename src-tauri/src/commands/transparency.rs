@@ -23,3 +23,8 @@ pub async fn audit_peer_account_key(
 ) -> Result<PeerAuditReport> {
     pollis_core::commands::transparency::audit_peer_account_key(&state, peer_user_id).await
 }
+
+#[tauri::command]
+pub async fn verify_own_build() -> Result<BuildVerifyReport> {
+    pollis_core::commands::transparency::verify_own_build().await
+}

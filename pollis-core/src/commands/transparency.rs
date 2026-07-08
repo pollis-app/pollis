@@ -28,7 +28,9 @@
 use std::sync::Arc;
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
+use verifiable_log_serve::release::{verify_release, ReleaseReport};
 use verifiable_log_serve::{AccountKeyVersion, AccountReport};
 
 use crate::error::{Error, Result};
@@ -111,6 +113,48 @@ pub struct PeerAuditReport {
     pub report: Option<AccountReport>,
 }
 
+/// Verdict of an in-app "verify this build" check. Serialized snake_case so the
+/// renderer can switch on it directly, mirroring [`AuditStatus`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BuildVerifyStatus {
+    /// This build's payload fingerprint is published in the binaries transparency
+    /// log for its release tag — the honest, publicly-attested build.
+    Verified,
+    /// The running release tag is not in the published binaries tree yet — the
+    /// tree republishes after each release, so a very fresh build is invisible
+    /// until then. Advisory; absence of the tag alone is NOT an alarm.
+    Pending,
+    /// The tag IS in the log but this build's payload fingerprint is absent, or
+    /// the served tree failed verification / the served key does not match the
+    /// pin. The loud, targeted-backdoor signal: the running binary is not one
+    /// Pollis publicly attested.
+    Mismatch,
+    /// The log host was unreachable or the local payload could not be hashed.
+    /// Advisory — "couldn't check", not "failed".
+    Unavailable,
+}
+
+/// Result of [`verify_own_build`]: the running build's identity, the payload hash
+/// this device computed, the verified release report, and the derived verdict.
+#[derive(Debug, Clone, Serialize)]
+pub struct BuildVerifyReport {
+    pub status: BuildVerifyStatus,
+    /// One-line, human-readable explanation of `status` (shown verbatim in UI).
+    pub detail: String,
+    /// This build's package version (`CARGO_PKG_VERSION`), e.g. `1.1.0`.
+    pub version: String,
+    /// The exact source commit, baked at build time; `None` if it wasn't baked
+    /// (source checkout without git). Never fabricated.
+    pub commit: Option<String>,
+    /// The reproducible payload hash this device computed for its own binary,
+    /// lowercase hex — the value compared against the log's payload leaves.
+    pub my_payload_sha256: String,
+    /// The verified release report from the binaries log, or `None` when
+    /// unavailable / the served key was not the pinned one.
+    pub report: Option<ReleaseReport>,
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 /// Self-audit: verify OWN account-key history against the published log, then
@@ -176,6 +220,87 @@ pub async fn audit_peer_account_key(
     }
 }
 
+/// Verify THIS build against the published binaries transparency log: compute
+/// the running binary's reproducible payload hash, fetch + verify the release
+/// tree for its tag (trusting only the pinned key), and report whether the hash
+/// is publicly attested.
+///
+/// Reuses the EXACT `verifiable_log_serve::release::verify_release` the
+/// `pollis-verify release` CLI runs — no verifier is reimplemented — run on the
+/// blocking pool like [`self_audit_account_key`]. Advisory only: it never gates
+/// launch or update, matching the account-key self-audit policy.
+pub async fn verify_own_build() -> Result<BuildVerifyReport> {
+    let version = env!("CARGO_PKG_VERSION").to_string();
+    // Baked by `build.rs`; `None` when this build had no git checkout.
+    let commit = option_env!("POLLIS_GIT_COMMIT").map(str::to_string);
+    // The attest job tags leaves with the git tag (`github.ref_name`, e.g.
+    // `v1.1.0`); the package version drops the `v`, so re-add it to match.
+    let release_tag = format!("v{version}");
+
+    let mk_unavailable = |detail: String, my_hash: String| BuildVerifyReport {
+        status: BuildVerifyStatus::Unavailable,
+        detail,
+        version: version.clone(),
+        commit: commit.clone(),
+        my_payload_sha256: my_hash,
+        report: None,
+    };
+
+    // Hash our own binary (blocking file IO) on the blocking pool.
+    let my_hash = match tokio::task::spawn_blocking(compute_my_payload_sha256).await {
+        Ok(Ok(hash)) => hash,
+        Ok(Err(detail)) => return Ok(mk_unavailable(detail, String::new())),
+        Err(e) => {
+            return Ok(mk_unavailable(
+                format!("hashing this build failed: {e}"),
+                String::new(),
+            ))
+        }
+    };
+
+    let base = transparency_base_url();
+
+    // Pin the served binaries-log key FIRST. `verify_release` folds whatever key
+    // the host serves into its verdict, so an unpinned key could sign a
+    // self-consistent forged tree that "verifies" — the same trap the account
+    // self-audit guards against. A served key ≠ the pin is the loud case.
+    match fetch_served_binaries_public_key(&base).await {
+        Ok(served) if !served_key_matches_pin(&served) => {
+            return Ok(BuildVerifyReport {
+                status: BuildVerifyStatus::Mismatch,
+                detail: pin_mismatch_detail(&served),
+                version,
+                commit,
+                my_payload_sha256: my_hash,
+                report: None,
+            });
+        }
+        Ok(_) => {}
+        Err(detail) => return Ok(mk_unavailable(detail, my_hash)),
+    }
+
+    // The shared verifier — the SAME function `pollis-verify release` runs. Its
+    // HTTP is blocking (ureq), so it runs on the blocking pool.
+    let base_owned = base.clone();
+    let tag_owned = release_tag.clone();
+    match tokio::task::spawn_blocking(move || verify_release(&base_owned, &tag_owned)).await {
+        Ok(Ok(report)) => Ok(derive_build_verify(
+            &report,
+            &my_hash,
+            &version,
+            commit.as_deref(),
+        )),
+        Ok(Err(e)) => Ok(mk_unavailable(
+            format!("verifying the binaries log failed: {e}"),
+            my_hash,
+        )),
+        Err(e) => Ok(mk_unavailable(
+            format!("release verifier task failed: {e}"),
+            my_hash,
+        )),
+    }
+}
+
 // ── Network (the only IO; everything below derive_* is pure) ──────────────────
 
 /// Fetch the served public key and run the shared account verifier for
@@ -227,6 +352,68 @@ async fn fetch_served_public_key(base: &str) -> Result<String> {
         .json()
         .await?;
     Ok(doc.public_key.to_lowercase())
+}
+
+/// Fetch `/v1/binaries/public_key.json` and return its key (lowercase hex). The
+/// binaries tree's key is the same pinned Ed25519 key as the account tree, but
+/// served under the binaries subtree; the caller pin-checks it before trusting
+/// any release verdict. Returns `Err(detail)` on transport/parse failure.
+async fn fetch_served_binaries_public_key(
+    base: &str,
+) -> std::result::Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct PublicKeyDoc {
+        public_key: String,
+    }
+    let url = format!("{}/v1/binaries/public_key.json", base.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let doc: PublicKeyDoc = client
+        .get(&url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("could not fetch the binaries log's public key: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("could not parse the binaries log's public key: {e}"))?;
+    Ok(doc.public_key.to_lowercase())
+}
+
+/// Compute this build's reproducible payload hash, best-effort per-platform, with
+/// the SAME method `scripts/attest-binaries.sh` logs — so a genuine build's hash
+/// matches its published `payload` leaf.
+///
+/// - **Linux AppImage:** the shipped bytes ARE the reproducible payload (the
+///   script's `sha_file` of the `.AppImage`). The AppImage runtime exports
+///   `APPIMAGE` pointing at the mounted `.AppImage`, so we hash exactly what was
+///   logged — an exact match.
+/// - **Other shapes** (Linux deb/rpm, macOS `.app`, Windows NSIS): the logged
+///   payload is a directory tree or installer the already-installed process
+///   can't reconstruct byte-for-byte without the original installer and the
+///   build's `SOURCE_DATE_EPOCH` (design §4.2 calls this out as best-effort).
+///   We hash the running executable so the check still runs and returns an
+///   honest verdict; an exact match for those platforms lands with the
+///   reproducible-build work (Phase 5).
+fn compute_my_payload_sha256() -> std::result::Result<String, String> {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(appimage) = std::env::var_os("APPIMAGE") {
+            return sha256_file(std::path::Path::new(&appimage));
+        }
+    }
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("could not locate the running executable: {e}"))?;
+    sha256_file(&exe)
+}
+
+/// Stream a file through SHA-256, returning the lowercase-hex digest.
+fn sha256_file(path: &std::path::Path) -> std::result::Result<String, String> {
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| format!("could not open {} for hashing: {e}", path.display()))?;
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)
+        .map_err(|e| format!("could not read {} for hashing: {e}", path.display()))?;
+    Ok(hex::encode(hasher.finalize()))
 }
 
 /// Read the TOFU-pinned `(account_id_pub, identity_version)` for a peer from the
@@ -419,6 +606,82 @@ pub fn derive_peer_audit(
     mk(AuditStatus::Ok, detail, key_rotated)
 }
 
+/// Derive the build-verify verdict from a verified release report, this build's
+/// computed payload hash, and its version/commit. Pure — no IO. The pin check on
+/// the served key happens at the network boundary in [`verify_own_build`]; here
+/// the report is already anchored to the pinned key.
+///
+/// Verdict:
+/// - `chain_valid == false` → **Mismatch** (the published tree failed
+///   verification under the trusted key — loud, like the self-audit alarm).
+/// - tag not found (no artifacts for this release) → **Pending** (the tree
+///   republishes after each release; a fresh build is invisible until then).
+/// - our payload hash present among the tag's leaves → **Verified**.
+/// - tag present but our hash absent → **Mismatch** (the targeted-backdoor
+///   signal: the running binary is not one Pollis publicly attested).
+pub fn derive_build_verify(
+    report: &ReleaseReport,
+    my_payload_sha256: &str,
+    version: &str,
+    commit: Option<&str>,
+) -> BuildVerifyReport {
+    let mk = |status, detail: String| BuildVerifyReport {
+        status,
+        detail,
+        version: version.to_string(),
+        commit: commit.map(str::to_string),
+        my_payload_sha256: my_payload_sha256.to_string(),
+        report: Some(report.clone()),
+    };
+
+    // A head/proof/invariant we can't verify is worth nothing — loud.
+    if !report.chain_valid {
+        return mk(
+            BuildVerifyStatus::Mismatch,
+            first_release_violation(report, "the published binaries tree failed verification"),
+        );
+    }
+
+    // Tree verifies, but this release tag has no artifacts published yet.
+    if !report.found {
+        return mk(
+            BuildVerifyStatus::Pending,
+            format!(
+                "release {} is not published in the binaries transparency log yet — the log \
+                 republishes after each release",
+                report.release_tag
+            ),
+        );
+    }
+
+    // Payload and signed leaves share `payload_sha256`, and the invariant forces
+    // every signed leaf to pair with a payload leaf, so a match on any of the
+    // tag's artifacts confirms our payload is the published, reproducible one.
+    let published = report
+        .artifacts
+        .iter()
+        .any(|a| a.payload_sha256.eq_ignore_ascii_case(my_payload_sha256));
+    if published {
+        mk(
+            BuildVerifyStatus::Verified,
+            format!(
+                "this build's payload fingerprint is published in the public binaries \
+                 transparency log for {}",
+                report.release_tag
+            ),
+        )
+    } else {
+        mk(
+            BuildVerifyStatus::Mismatch,
+            format!(
+                "this build's payload fingerprint is NOT in the published binaries log for {} — \
+                 the running binary is not one Pollis publicly attested",
+                report.release_tag
+            ),
+        )
+    }
+}
+
 /// True iff the served key equals the pinned key (case-insensitive hex).
 fn served_key_matches_pin(served: &str) -> bool {
     served.eq_ignore_ascii_case(PINNED_LOG_PUBLIC_KEY)
@@ -432,6 +695,16 @@ fn latest_version(report: &AccountReport) -> Option<&AccountKeyVersion> {
 
 /// The first verifier-reported violation, or a fallback if (somehow) empty.
 fn first_violation_detail(report: &AccountReport, fallback: &str) -> String {
+    report
+        .violations
+        .first()
+        .cloned()
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+/// The first verifier-reported release violation, or a fallback if (somehow)
+/// empty. Mirrors [`first_violation_detail`] for the account report.
+fn first_release_violation(report: &ReleaseReport, fallback: &str) -> String {
     report
         .violations
         .first()
@@ -608,5 +881,93 @@ mod tests {
         let r = report(vec![version(1, 0, KEY_A)], false);
         let out = derive_peer_audit(&r, PINNED_LOG_PUBLIC_KEY, "peer", Some((KEY_A, 1)));
         assert_eq!(out.status, AuditStatus::Alarm);
+    }
+
+    // ── build-verify ────────────────────────────────────────────────────────
+
+    const HASH_MINE: &str = "1111111111111111111111111111111111111111111111111111111111111111";
+    const HASH_OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+
+    // Build a fixture ReleaseReport by deserializing JSON, so the test never
+    // needs to name `Layer` (owned by verifiable-log-builder, not a pollis-core
+    // dep). `payloads` become one `payload` leaf each; the whole tree's
+    // validity and whether the tag is found are set explicitly.
+    fn release_report(
+        tag: &str,
+        found: bool,
+        chain_valid: bool,
+        payloads: &[&str],
+    ) -> ReleaseReport {
+        let artifacts: Vec<serde_json::Value> = payloads
+            .iter()
+            .map(|h| {
+                serde_json::json!({
+                    "platform": "linux",
+                    "arch": "x86_64",
+                    "bundle": "appimage",
+                    "layer": "payload",
+                    "artifact_name": "pollis-linux.AppImage",
+                    "payload_sha256": h,
+                    "artifact_sha256": h,
+                    "provenance_uri": "cdn.pollis.com/x.intoto.jsonl",
+                    "included": true,
+                })
+            })
+            .collect();
+        let value = serde_json::json!({
+            "release_tag": tag,
+            "found": found,
+            "sth_tree_size": 10,
+            "root_hex": "deadbeef",
+            "artifacts": artifacts,
+            "chain_valid": chain_valid,
+            "violations": if chain_valid {
+                Vec::<String>::new()
+            } else {
+                vec!["binaries STH signature is invalid".to_string()]
+            },
+        });
+        serde_json::from_value(value).expect("fixture ReleaseReport deserializes")
+    }
+
+    #[test]
+    fn build_verified_when_my_hash_is_published() {
+        let r = release_report("v1.1.0", true, true, &[HASH_OTHER, HASH_MINE]);
+        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", Some("abc1234"));
+        assert_eq!(out.status, BuildVerifyStatus::Verified);
+        assert_eq!(out.commit.as_deref(), Some("abc1234"));
+    }
+
+    #[test]
+    fn build_verified_is_case_insensitive_on_hash() {
+        let r = release_report("v1.1.0", true, true, &[HASH_MINE]);
+        let out = derive_build_verify(&r, &HASH_MINE.to_uppercase(), "1.1.0", None);
+        assert_eq!(out.status, BuildVerifyStatus::Verified);
+        assert_eq!(out.commit, None);
+    }
+
+    #[test]
+    fn build_mismatch_when_tag_present_but_hash_absent() {
+        // The deliberately-wrong-local-hash case (design §6 Phase 4 acceptance):
+        // the tag is in the log, but our payload hash is not among its leaves.
+        let r = release_report("v1.1.0", true, true, &[HASH_OTHER]);
+        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", Some("abc1234"));
+        assert_eq!(out.status, BuildVerifyStatus::Mismatch);
+    }
+
+    #[test]
+    fn build_pending_when_tag_not_in_log_yet() {
+        let r = release_report("v1.1.0", false, true, &[]);
+        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", None);
+        assert_eq!(out.status, BuildVerifyStatus::Pending);
+    }
+
+    #[test]
+    fn build_mismatch_when_tree_fails_verification() {
+        // A tampered/forked tree (chain_valid == false) is loud, not pending —
+        // even if our hash happens to appear among the untrusted leaves.
+        let r = release_report("v1.1.0", true, false, &[HASH_MINE]);
+        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", None);
+        assert_eq!(out.status, BuildVerifyStatus::Mismatch);
     }
 }

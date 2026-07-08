@@ -255,6 +255,54 @@ export interface PeerAuditReport {
   report: AccountReport | null;
 }
 
+// Verdict of an in-app "verify this build" check (issue #484). Kept in sync with
+// the Rust `BuildVerifyStatus` enum (snake_case).
+//   verified — this build's payload fingerprint is published in the binaries log
+//   pending  — the release tag isn't in the published tree yet (advisory)
+//   mismatch — tag present but our hash absent, or the tree/served key failed the
+//              trust check; the loud, targeted-backdoor signal
+//   unavailable — the log host was unreachable / the local hash couldn't be taken
+export type BuildVerifyStatus =
+  | "verified"
+  | "pending"
+  | "mismatch"
+  | "unavailable";
+
+// One released artifact in a tag's set, mirroring the Rust `ReleaseArtifact`.
+export interface ReleaseArtifact {
+  platform: string; // darwin | windows | linux
+  arch: string; // aarch64 | x86_64
+  bundle: string; // dmg | app | nsis | appimage | deb | rpm
+  layer: "payload" | "signed";
+  artifact_name: string;
+  payload_sha256: string; // lowercase hex
+  artifact_sha256: string; // lowercase hex
+  provenance_uri: string;
+  included: boolean; // inclusion proof verified against the latest binaries STH
+}
+
+// Result of verifying a single release tag's binaries, mirroring the Rust
+// `ReleaseReport` (`verifiable_log_serve::release`).
+export interface ReleaseReport {
+  release_tag: string;
+  found: boolean;
+  sth_tree_size: number;
+  root_hex: string;
+  artifacts: ReleaseArtifact[];
+  chain_valid: boolean;
+  violations: string[];
+}
+
+// Result of `verify_own_build`. Kept in sync with the Rust `BuildVerifyReport`.
+export interface BuildVerifyReport {
+  status: BuildVerifyStatus;
+  detail: string; // one-line, human-readable explanation
+  version: string; // package version, e.g. "1.1.0"
+  commit: string | null; // exact source commit, or null if not baked in
+  my_payload_sha256: string; // the payload hash this device computed
+  report: ReleaseReport | null; // null when unavailable
+}
+
 export interface AppState {
   // Current user
   currentUser: User | null;

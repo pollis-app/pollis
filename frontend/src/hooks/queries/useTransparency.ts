@@ -1,8 +1,12 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
-import type { PeerAuditReport, SelfAuditReport } from "../../types";
+import type {
+  BuildVerifyReport,
+  PeerAuditReport,
+  SelfAuditReport,
+} from "../../types";
 
 // React Query keys for the account-key transparency audits (issue #330).
 export const transparencyQueryKeys = {
@@ -44,5 +48,17 @@ export function usePeerAuditAccountKey(peerUserId: string) {
     enabled: !!peerUserId,
     staleTime: 1000 * 60 * 5,
     refetchOnWindowFocus: false,
+  });
+}
+
+// On-demand "verify this build" (issue #484). A mutation, NOT a query, so it
+// only runs when the user clicks the button — never on page mount, respecting
+// the zero-burden + perf constraint (it hashes the local binary and fetches the
+// binaries tree). Advisory only; it never blocks anything.
+export function useVerifyOwnBuild() {
+  return useMutation({
+    mutationFn: async (): Promise<BuildVerifyReport> => {
+      return await invoke<BuildVerifyReport>("verify_own_build");
+    },
   });
 }

@@ -449,6 +449,7 @@ pub fn run() {
             commands::safety::list_peer_verifications,
             commands::transparency::self_audit_account_key,
             commands::transparency::audit_peer_account_key,
+            commands::transparency::verify_own_build,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,

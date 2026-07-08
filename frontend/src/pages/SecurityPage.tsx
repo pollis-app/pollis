@@ -10,7 +10,9 @@ import { observer } from "mobx-react-lite";
 import type { RouterContext } from "../types/router";
 import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
-import { useSelfAuditAccountKey } from "../hooks/queries";
+import { BuildVerifyLine } from "../components/Security/BuildVerifyLine";
+import { useSelfAuditAccountKey, useVerifyOwnBuild } from "../hooks/queries";
+import { getVersion } from "../bridge";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import {
   useMediaPermissions,
@@ -101,6 +103,9 @@ export const SecurityPage: React.FC = observer(() => {
   const { onDeleteAccount } = router.options.context as RouterContext;
   const { currentUser } = appStore;
   const { data: selfAudit } = useSelfAuditAccountKey();
+  // "This build" verification is on-demand (a mutation), never run on mount.
+  const buildVerify = useVerifyOwnBuild();
+  const [appVersion, setAppVersion] = useState<string | null>(null);
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -128,6 +133,24 @@ export const SecurityPage: React.FC = observer(() => {
       setRevokeMediaOnExit(prefsQuery.data.revoke_media_on_exit);
     }
   }, [prefsQuery.data, currentUser?.id]);
+
+  // The running app version, shown in the "This build" section. Cheap and
+  // local — no transparency-log network call happens until the user clicks.
+  useEffect(() => {
+    let cancelled = false;
+    getVersion()
+      .then((v) => {
+        if (!cancelled) {
+          setAppVersion(v);
+        }
+      })
+      .catch(() => {
+        // Non-fatal — the section still renders and the verify button works.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleRevokeMediaOnExit = (val: boolean) => {
     setRevokeMediaOnExit(val);
@@ -258,6 +281,66 @@ export const SecurityPage: React.FC = observer(() => {
                 testId="self-account-key-audit"
               />
             )}
+          </section>
+
+          {/* This build — optional, on-demand check that this running build's
+              fingerprint is published in the public binaries transparency log
+              (#484). Never mandatory, never gates launch/update. */}
+          <section className="flex flex-col gap-4 mb-12" data-testid="this-build-section">
+            <h2 className={sectionHeaderClass} style={sectionHeaderStyle}>
+              This build
+            </h2>
+            <p className="text-xs" style={{ color: "var(--c-text-muted)", lineHeight: 1.5 }}>
+              Every release Pollis ships is fingerprinted into the same public,
+              append-only log. This confirms the build you're running is one
+              Pollis published there and independently verified by third-party
+              rebuilders — it does not by itself prove the build matches the
+              source, since a tampered app could lie about its own fingerprint.
+            </p>
+
+            {/* Version + commit of the running build. Commit is only shown once
+                the check has run (it's baked into the report), and only if this
+                build actually baked one in. */}
+            <div className="flex flex-col gap-0.5 text-xs" style={{ color: "var(--c-text-dim)" }}>
+              <span data-testid="build-version">
+                Version {buildVerify.data?.version ?? appVersion ?? "—"}
+              </span>
+              {buildVerify.data?.commit && (
+                <span data-testid="build-commit">
+                  Commit {shortId(buildVerify.data.commit)}
+                </span>
+              )}
+            </div>
+
+            {buildVerify.data && (
+              <BuildVerifyLine
+                status={buildVerify.data.status}
+                detail={buildVerify.data.detail}
+                testId="own-build-verify"
+              />
+            )}
+
+            {buildVerify.isError && (
+              <p
+                data-testid="build-verify-error"
+                className="text-xs"
+                style={{ color: "var(--c-danger)" }}
+              >
+                Couldn't check this build right now. Try again in a moment.
+              </p>
+            )}
+
+            <div className="self-start">
+              <Button
+                data-testid="verify-build-button"
+                variant="secondary"
+                isLoading={buildVerify.isPending}
+                loadingText="Verifying…"
+                onClick={() => buildVerify.mutate()}
+              >
+                Verify this build
+              </Button>
+            </div>
           </section>
 
           {/* PIN */}

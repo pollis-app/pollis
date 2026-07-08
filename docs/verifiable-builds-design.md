@@ -1,6 +1,6 @@
 # Verifiable / Reproducible Builds + Binary Transparency
 
-**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned Ed25519 key (`175ebfef…7148`). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P3 (cosign/SLSA keyless provenance), P4 (in-app "verify this build"), and P5 (full reproducibility + independent rebuilder) remain deferred → #484.** The full design of record follows.
+**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned Ed25519 key (`175ebfef…7148`). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P3 (cosign/SLSA keyless provenance) and P5 (full reproducibility + independent rebuilder) remain deferred → #484.** The full design of record follows.
 **Author lens:** performance, security, and *zero user burden* are first-class
 constraints, called out explicitly at each decision.
 **Audience:** maintainers deciding whether/how to build this, plus the security
@@ -442,6 +442,12 @@ different stage and is verified by a different party. Crucially:
 
 ## 4. In-app verification surface (zero mandatory burden)
 
+**Status: SHIPPED (P4).** `verify_own_build` in
+`pollis-core/src/commands/transparency.rs` (with the pure, unit-tested
+`derive_build_verify` verdict fn), the `verify_own_build` Tauri shim, the
+`useVerifyOwnBuild` on-demand hook, `BuildVerifyLine`, and the "This build"
+section on `SecurityPage` implement exactly the affordance below.
+
 The design constraint is absolute: **the user does nothing.** Verification is
 either fully automatic in the background, or a single optional click for the
 curious/auditors. The vast majority of users benefit purely from the *existence*
@@ -608,14 +614,19 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
   artifact using only the GitHub Actions OIDC identity + Rekor (no Pollis key).
   **CI-only** (needs the runner's OIDC token).
 
-### Phase 4 — In-app "Verify this build" (in-box for logic, runner for real hashes)
-- `verify_own_build` in `pollis-core` (reuses the account-key verify path);
-  `BuildVerifyLine` + section on `SecurityPage`; wire `usePreferences`-style hook.
-- **Acceptance:** with a fixture binaries tree, the command returns
-  verified/pending/mismatch correctly; the Security page renders the three states;
-  a deliberately-wrong local hash yields **Mismatch**. **`pollis-core` logic +
-  the three-state UI are in-box-testable** via the headless harness; end-to-end
-  against a *real* release needs a signed build.
+### Phase 4 — In-app "Verify this build" (in-box for logic, runner for real hashes) — SHIPPED
+- `verify_own_build` in `pollis-core` (reuses the account-key verify path, running
+  the SAME `verifiable_log_serve::release::verify_release` on the blocking pool and
+  pinning the served binaries key); the pure `derive_build_verify` verdict fn;
+  `BuildVerifyLine` + "This build" section on `SecurityPage`; the on-demand
+  `useVerifyOwnBuild` hook (a mutation — never auto-runs on mount). The running
+  commit is baked by `pollis-core/build.rs` (omitted gracefully if absent).
+- **Acceptance (met):** the pure `derive_build_verify` unit tests cover
+  verified/pending/mismatch/tree-invalid with fixture `ReleaseReport`s (no network,
+  no DB) — a deliberately-wrong local hash yields **Mismatch**; the Security page
+  renders the states via `BuildVerifyLine`. End-to-end against a *real* release
+  still needs a signed build (the per-platform payload hashing is best-effort:
+  exact for the Linux AppImage, deferred for `.app`/NSIS/deb/rpm — §4.2).
 
 ### Phase 5 — Full reproducibility hardening + independent rebuilder (mixed)
 - Close the §1.5 gaps as far as practical (vendor bindgen output, pin native
