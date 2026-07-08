@@ -5,7 +5,9 @@
   "description": "End-to-end tests that drive the real Tauri desktop app via WebDriver (tauri-driver + WebKitWebDriver).",
   "type": "commonjs",
   "scripts": {
-    "test": "node ./e2e.js"
+    "test": "node ./e2e.js",
+    "smoke": "node ./smoke.js",
+    "invalid-otp": "node ./invalid-otp.js"
   },
   "devDependencies": {
     "dotenv": "^16",

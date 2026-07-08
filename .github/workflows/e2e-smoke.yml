@@ -1,0 +1,100 @@
+# On-demand WebDriver smoke test: does the real Tauri app still launch and
+# show the login screen? Runs e2e/smoke.js, which is the only e2e/ script
+# with no delivery-service / shared-Turso dependency (see e2e/README.md and
+# .codesight/wiki/testing.md "WebDriver E2E tests") — the logged-out path
+# resolves entirely from local Tauri commands, so this workflow needs
+# nothing beyond a built `pollis` binary and a virtual display.
+#
+# Manual trigger only (not on every push): a full cargo build + a real
+# (virtual) WebKitGTK window is much heavier than the rest of CI. Run it from
+# the Actions tab when you want a launch/regression smoke check — e.g. before
+# a release, or after touching the auth screen / app bootstrap path.
+name: E2E smoke (login screen)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    # Same rationale as mls-tests.yml: src-tauri/build.rs compiles
+    # pollis-capture-linux inline, whose libspa 0.9 bindgen needs PipeWire
+    # >= 1.0 headers, which ubuntu-24.04 ships and ubuntu-22.04 doesn't.
+    runs-on: ubuntu-24.04
+    env:
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            src-tauri
+
+      # Same list as mls-tests.yml (webkit/gtk for Tauri, alsa/pulse/pipewire
+      # + libva for the media stack pollis-core links even when unused, meson
+      # deps for webrtc-audio-processing-sys's vendored C++ build), plus
+      # webkit2gtk-driver (ships the WebKitWebDriver binary tauri-driver
+      # talks to) and xvfb (no real X server on the runner).
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            webkit2gtk-driver \
+            xvfb \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libpipewire-0.3-dev \
+            libva-dev \
+            libdbus-1-dev \
+            cmake \
+            clang \
+            ninja-build
+
+      - name: Install meson (newer than apt)
+        run: |
+          python3 -m pip install --user 'meson>=1.3'
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Clean env: pollis-core/src/config.rs reads config with option_env!,
+      # which bakes values in at compile time. smoke.js never calls the
+      # delivery service or Turso before the login screen renders, so no
+      # .env.test / secrets are needed at all — a completely bare build is
+      # correct here (see e2e/README.md Prerequisites).
+      - name: Build pollis (debug)
+        run: cargo build -p pollis
+
+      - name: Run e2e smoke test
+        working-directory: e2e
+        run: xvfb-run --auto-servernum pnpm smoke
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-failure
+          path: |
+            e2e/artifacts/FAIL.png
+            e2e/artifacts/FAIL.html
+          if-no-files-found: ignore
