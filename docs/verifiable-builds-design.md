@@ -1,6 +1,6 @@
 # Verifiable / Reproducible Builds + Binary Transparency
 
-**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned Ed25519 key (`175ebfef…7148`). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P3 (cosign/SLSA keyless provenance) and P5 (full reproducibility + independent rebuilder) remain deferred → #484.** The full design of record follows.
+**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned Ed25519 key (`175ebfef…7148`). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P5 (full reproducibility + independent rebuilder) is SHIPPED for Linux (#484)** — see §1.5 / §6 Phase 5. **P3 (cosign/SLSA keyless provenance) is now SHIPPED (#484)** — every released installer + updater bundle carries a keyless SLSA build-provenance attestation *and* a cosign signature anchored in the **public Rekor** log via the GitHub Actions OIDC identity (no Pollis key on that verification path), a second independent anchor; see §3 / §6 Phase 3. The full design of record follows.
 **Author lens:** performance, security, and *zero user burden* are first-class
 constraints, called out explicitly at each decision.
 **Audience:** maintainers deciding whether/how to build this, plus the security
@@ -414,6 +414,21 @@ that already backs the account-key tree.
 
 ## 3. Provenance (SLSA + sigstore/cosign)
 
+**Status: SHIPPED (P3, #484).** The `provenance` job in
+`.github/workflows/desktop-release.yml` (`needs: [release]`, permissions
+`id-token: write` + `attestations: write` + `contents: read`) does exactly what
+this section specifies: `actions/attest-build-provenance` emits SLSA v1 in-toto
+provenance for every released installer + updater bundle, keyless via Fulcio and
+recorded in Rekor; `cosign sign-blob --yes` (cosign installed via the pinned
+`sigstore/cosign-installer` action) signs each artifact keylessly. Both are
+published to `cdn.pollis.com/releases/<tag>/` next to the artifact — the
+attestation at exactly the path each `BinaryRecord` leaf records in
+`provenance_uri` (`${PROVENANCE_BASE}/${artifact_name}.intoto.jsonl`, emitted by
+`scripts/attest-binaries.sh`), the cosign `.sig` + `.pem` beside it. The verify
+recipe is in `docs/verify-transparency-log.md` §6. It is an **additional,
+optional** anchor: the minisign updater flow and OS code-signing are untouched
+and it never gates install or auto-update.
+
 Reproducibility answers "is this the honest source?"; provenance answers "was it
 built where and how it claims?" — and provides a **keyless, publicly-anchored**
 signature independent of Pollis's own signing keys, which matters precisely
@@ -427,12 +442,24 @@ because the threat model includes *compelled Pollis keys*.
   Actions workflow) with the signature recorded in the **Rekor** public
   transparency log. This gives a *second, independent* transparency anchor
   (Rekor) that Pollis does not control — defense in depth against a compromised
-  Pollis STH key.
+  Pollis STH key. (Implementation note: the release-wide attestation carries each
+  artifact as an in-toto subject and is published at each artifact's recorded
+  `provenance_uri`; a verifier resolves that URI and checks the specific
+  artifact's digest against the attestation's subjects — so every leaf's
+  `provenance_uri` resolves and verifies the byte-exact artifact it names.)
 - **cosign on the raw artifacts.** `cosign sign-blob --yes` each installer +
   updater bundle keylessly; publish the `.sig` + `.pem` (or bundle) next to the
   artifact on `cdn.pollis.com`. `cosign verify-blob` lets anyone confirm the
   artifact was signed by the Pollis GitHub Actions identity, checked against
   Rekor, with **no Pollis-held key on the verification path.**
+
+**Honest limits (P3).** This proves *build provenance* (these bytes came from
+this workflow at this commit) and adds a *non-Pollis* transparency anchor
+(Rekor). It does **not**, by itself, prove reproducibility — that the logged
+payload rebuilds byte-for-byte from public source is the separate P5 story
+(§1.5, `docs/reproducible-builds-residuals.md`). Provenance and reproducibility
+are complementary: provenance says "the Pollis CI built this"; reproducibility
+says "and public source produces the same bytes."
 
 ### 3.1 Composition with existing signing (this is the subtle part)
 
@@ -627,12 +654,25 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
   covers the binaries STH. **Needs release runners** for the real signed
   artifacts; the *builder/serve/verify* half is in-box-testable with fixtures.
 
-### Phase 3 — SLSA + cosign provenance (CI-only, low risk)
-- `actions/attest-build-provenance` + keyless `cosign sign-blob` per artifact;
-  publish attestations to `cdn.pollis.com`; `provenance_uri` populated in leaves.
+### Phase 3 — SLSA + cosign provenance (CI-only, low risk) — SHIPPED (#484)
+- **Shipped:** the `provenance` job in `desktop-release.yml` (`needs: [release]`,
+  `permissions: id-token: write` + `attestations: write` + `contents: read`) runs
+  `actions/attest-build-provenance@v2` (SLSA v1 in-toto, keyless Fulcio/Rekor)
+  over every released installer + updater bundle, and `cosign sign-blob --yes`
+  (cosign from the pinned `sigstore/cosign-installer@v3`) on each. It publishes,
+  next to the artifact on `cdn.pollis.com/releases/<tag>/`, the `.intoto.jsonl`
+  attestation at exactly the `provenance_uri` each `BinaryRecord` leaf records
+  (`scripts/attest-binaries.sh` → `${PROVENANCE_BASE}/${artifact_name}.intoto.jsonl`)
+  plus the cosign `.sig` + `.pem`. It never gates install/auto-update — the
+  minisign updater flow and OS code-signing are untouched.
 - **Acceptance:** `cosign verify-blob` + a SLSA verifier pass against a released
-  artifact using only the GitHub Actions OIDC identity + Rekor (no Pollis key).
-  **CI-only** (needs the runner's OIDC token).
+  artifact using only the GitHub Actions OIDC identity + Rekor (no Pollis key) —
+  the exact invocations are documented in `docs/verify-transparency-log.md` §6.
+  **CI-only / exercisable only on a real signed release runner** (needs the
+  runner's OIDC token; cosign/attestation cannot be run end-to-end off-CI). In
+  box: the workflow wiring (permissions, pinned actions, path consistency) and
+  YAML validity are verified; the keyless signing + Rekor upload run only on a
+  release.
 
 ### Phase 4 — In-app "Verify this build" (in-box for logic, runner for real hashes) — SHIPPED
 - `verify_own_build` in `pollis-core` (reuses the account-key verify path, running

@@ -244,6 +244,84 @@ As with the HTTP path, a tampered leaf, forged proof, broken consistency, bad
 signature, or equivocation makes `verify` print a `FAIL` report and **exit
 non-zero**. Same checks, same trust model — just no network.
 
+## 6. Verify the keyless build provenance yourself — cosign + SLSA (no Pollis key)
+
+The transparency log above (steps 1–5) is anchored by **Pollis's own** Ed25519
+key. Released artifacts carry a **second, independent** anchor that Pollis does
+**not** control: a keyless **cosign** signature and a **SLSA build-provenance**
+attestation, both bound to Pollis's **GitHub Actions OIDC identity** via
+sigstore/Fulcio and recorded in the **public Rekor** log. Verifying them trusts
+**only** the GitHub Actions identity + Rekor — *no Pollis-held key is on this
+path at all*, which is the point: it holds even against a compromised or
+compelled Pollis signing key.
+
+Both live next to each artifact on the CDN. For a release `vX.Y.Z` and, say, the
+Linux AppImage:
+
+```bash
+BASE=https://cdn.pollis.com/releases/vX.Y.Z
+ART=pollis-vX.Y.Z-linux.AppImage
+curl -sSLO "$BASE/$ART"                 # the artifact
+curl -sSLO "$BASE/$ART.sig"             # cosign detached signature
+curl -sSLO "$BASE/$ART.pem"             # cosign signing certificate
+curl -sSLO "$BASE/$ART.intoto.jsonl"    # SLSA build-provenance attestation
+```
+
+### cosign — confirm the raw bytes were signed by the Pollis workflow
+
+`cosign verify-blob` checks the signature + certificate against Rekor and
+asserts the signing identity is the Pollis release workflow. Trust is pinned by
+the `--certificate-identity-regexp` (the workflow that is allowed to sign) and
+`--certificate-oidc-issuer` (GitHub's OIDC issuer) — nothing else:
+
+```bash
+cosign verify-blob \
+  --certificate-identity-regexp '^https://github.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --signature   "$ART.sig" \
+  --certificate "$ART.pem" \
+  "$ART"
+```
+
+A passing run prints `Verified OK` and exits `0`. If the bytes were tampered
+with, or signed by any identity other than the Pollis `desktop-release.yml`
+workflow, verification fails and the command exits non-zero. Note there is **no
+`--key` flag** — verification rests entirely on the Fulcio certificate's OIDC
+identity and the Rekor transparency-log inclusion, not on any Pollis key.
+
+### SLSA provenance — confirm where and how it was built
+
+The `.intoto.jsonl` is a SLSA v1 in-toto build-provenance attestation produced by
+`actions/attest-build-provenance` (a single release-wide attestation carrying
+each artifact as a subject). Verify the artifact against it offline with the
+GitHub CLI, trusting only the GitHub Actions identity + issuer:
+
+```bash
+gh attestation verify "$ART" \
+  --bundle "$ART.intoto.jsonl" \
+  --repo actuallydan/pollis \
+  --cert-identity-regexp '^https://github.com/actuallydan/pollis/\.github/workflows/desktop-release\.yml@refs/tags/v.*$' \
+  --cert-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+It confirms the artifact's digest is a subject of a provenance statement signed
+by the pinned Pollis workflow and logged in Rekor, and prints the source repo +
+commit + workflow it was built from. (`slsa-verifier verify-artifact
+--provenance-path "$ART.intoto.jsonl" --source-uri github.com/actuallydan/pollis
+--source-tag vX.Y.Z "$ART"` is an equivalent check with the standalone SLSA
+verifier.)
+
+> **What this proves — and what it does not.** cosign + SLSA prove **build
+> provenance**: these exact bytes were produced by the pinned Pollis GitHub
+> Actions workflow at a specific commit, recorded in a public log Pollis does not
+> control. They do **not**, by themselves, prove the bytes **reproduce from
+> source** — that is the reproducible-build story (`docs/reproducible-builds-residuals.md`
+> + the independent rebuilder in `.github/workflows/rebuild-verify.yml`, asserted
+> for the Linux payload). The two anchors are complementary: the binaries
+> transparency log + rebuilder say "the honest source produces these bytes";
+> cosign/SLSA say "the Pollis CI built them, provably, in a log no single party
+> owns."
+
 ## The website explorer is a convenience, not the trust anchor
 
 The page at [`website/transparency.html`](../website/transparency.html) lets you

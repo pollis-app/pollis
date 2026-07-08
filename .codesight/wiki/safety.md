@@ -187,13 +187,23 @@ tree can never stand in for another:
   that every published artifact for a tag is provably included in the signed
   binaries tree at verify.pollis.com (`/v1/binaries`).
 
-  **Honest scope.** P2 (leaf structure, hashes, pipeline wiring) plus **P4 — the
-  optional in-app "Verify this build" check (`verify_own_build`, #484)** are
-  shipped. It is **not** yet full bit-for-bit reproducibility or a cosign/SLSA
-  anchor (still tracked in #484). Logging that a signed artifact was published —
-  and confirming this build's fingerprint is in that log — is a
-  transparency/accountability property, **not** (yet) a proof that the artifact
-  was built from the published source; that step is the independent rebuilders'.
+  **Honest scope.** P2 (leaf structure, hashes, pipeline wiring), **P4 — the
+  optional in-app "Verify this build" check (`verify_own_build`, #484)**, **P5 —
+  Linux payload reproducibility + independent rebuilder (#484)**, and **P3 — a
+  keyless cosign/SLSA provenance anchor (#484)** are shipped. On every release the
+  `provenance` job in `desktop-release.yml` (permissions `id-token`/`attestations`
+  write) emits a keyless **SLSA v1 build-provenance attestation**
+  (`actions/attest-build-provenance`) and a **cosign** signature per installer +
+  updater bundle — both anchored in the **public Rekor** log via Pollis's GitHub
+  Actions OIDC identity, with **no Pollis key on that verification path** — and
+  publishes them next to each artifact on `cdn.pollis.com` (the `.intoto.jsonl` at
+  exactly the `provenance_uri` each leaf records). Verify recipe:
+  `docs/verify-transparency-log.md` §6. What is still **not** proven by the log +
+  provenance alone is bit-for-bit reproducibility of *every* platform (asserted
+  for the Linux payload only): logging that a signed artifact was published — and
+  confirming this build's fingerprint is in the log with a non-Pollis Rekor anchor
+  — is a transparency/accountability property, not a proof the macOS/Windows bytes
+  were built from the published source; that step is the independent rebuilders'.
 
 This is the scalable backstop the TOFU layer above always wanted: TOFU catches a
 swap only on the next message and only for keys *this* device has seen; the log

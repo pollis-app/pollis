@@ -764,6 +764,147 @@ jobs:
             git push
           fi
 
+  # Keyless build provenance (issue #484, Phase 3). A SECOND, independent
+  # transparency anchor — sigstore Fulcio/Rekor — that Pollis does NOT control,
+  # cryptographically bound to the GitHub Actions OIDC identity of THIS workflow,
+  # as defense in depth against a compromised or compelled Pollis signing key.
+  # For every released installer + updater bundle it publishes, NEXT TO the
+  # artifact on cdn.pollis.com:
+  #   * a SLSA v1 in-toto build-provenance attestation (.intoto.jsonl) at the
+  #     EXACT path scripts/attest-binaries.sh records in each BinaryRecord leaf's
+  #     `provenance_uri` (${PROVENANCE_BASE}/${artifact_name}.intoto.jsonl), and
+  #   * a cosign keyless signature (.sig) + signing certificate (.pem),
+  # so `cosign verify-blob` / a SLSA verifier confirm the bytes were built by the
+  # Pollis GitHub Actions identity and recorded in the PUBLIC Rekor log, with NO
+  # Pollis-held key on the verification path.
+  #
+  # This is an ADDITIONAL, OPTIONAL layer: it NEVER gates install or auto-update.
+  # The minisign updater flow (update-*.json + .sig, Tauri updater) and OS
+  # code-signing are untouched — provenance only adds a non-Pollis anchor. Like
+  # `attest-and-log` it `needs: [release]`, so the installers, updater manifests,
+  # latest.json and GitHub release are already out by the time it runs; a failure
+  # here therefore CANNOT corrupt a shipped release — provenance just lags a
+  # release until the next successful run.
+  provenance:
+    needs: [release]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      # Minimum scopes for keyless attestation: an OIDC token for Fulcio
+      # (id-token), permission to write the attestation to the GH attestations
+      # store (attestations), and repo read for checkout (contents). Deliberately
+      # NOT contents: write — this job never creates a release or pushes; the
+      # `release` job (which does) keeps its own contents: write.
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load production secrets
+        run: |
+          echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
+          echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+
+      # Same all-artifacts download the release / attest jobs use — the built +
+      # signed installers and updater bundles under artifacts/pollis-{macos,
+      # windows,linux}/. Provenance runs over the SHIPPED bytes.
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Stage each shipped file under the EXACT canonical name the release job
+      # uploads to R2 and scripts/attest-binaries.sh records — so the provenance
+      # subject digest is bound to the name auditors resolve, and the published
+      # .intoto.jsonl path equals each leaf's `provenance_uri` character-for-
+      # character. The macOS updater bundle (.tar.gz) keeps its real basename
+      # (the updater manifest references it by that name).
+      - name: Stage artifacts under canonical names
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          mkdir -p prov
+          cp "$(find artifacts/pollis-macos   -name '*.dmg'      | head -1)" "prov/pollis-${VERSION}-macos.dmg"
+          cp "$(find artifacts/pollis-windows -name '*.exe'      | head -1)" "prov/pollis-${VERSION}-windows.exe"
+          cp "$(find artifacts/pollis-linux   -name '*.AppImage' | head -1)" "prov/pollis-${VERSION}-linux.AppImage"
+          cp "$(find artifacts/pollis-linux   -name '*.deb'      | head -1)" "prov/pollis-${VERSION}-linux.deb"
+          cp "$(find artifacts/pollis-linux   -name '*.rpm'      | head -1)" "prov/pollis-${VERSION}-linux.rpm"
+          # macOS updater bundle — provenance + cosign cover it under its own name.
+          MAC_TAR="$(find artifacts/pollis-macos -name '*.tar.gz' | head -1 || true)"
+          if [ -n "${MAC_TAR:-}" ]; then
+            cp "$MAC_TAR" "prov/$(basename "$MAC_TAR")"
+          fi
+          echo "staged provenance subjects:"
+          ls -1 prov
+
+      # SLSA v1 in-toto build provenance for every staged artifact, signed
+      # keylessly via Fulcio (OIDC identity == this workflow) and recorded in the
+      # public Rekor log. A single release-wide attestation carries each artifact
+      # as a subject; it is published below at each artifact's recorded
+      # provenance_uri and verifies that specific artifact by its digest.
+      - name: Generate SLSA build provenance (keyless, Fulcio/Rekor)
+        id: attest
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: prov/*
+
+      # Pinned installer action — never an unpinned curl. Puts the `cosign` CLI
+      # on the runner for the sign-blob pass below.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      # cosign sign-blob each staged artifact keylessly (Fulcio/Rekor, ambient
+      # GitHub Actions OIDC — no Pollis key). Emits a detached .sig + the signing
+      # .pem certificate per artifact, published next to the artifact so `cosign
+      # verify-blob` confirms the bytes against Rekor with no Pollis key on the
+      # verification path. The `prov/*` glob expands once, so the .sig/.pem this
+      # loop writes are not themselves re-signed.
+      - name: cosign sign-blob each artifact
+        run: |
+          set -euo pipefail
+          for f in prov/*; do
+            base="$(basename "$f")"
+            cosign sign-blob --yes \
+              --output-signature "prov/${base}.sig" \
+              --output-certificate "prov/${base}.pem" \
+              "$f"
+          done
+
+      # Publish the attestation + cosign sig/cert NEXT TO each artifact on R2
+      # (cdn.pollis.com/releases/<tag>/...). The .intoto.jsonl object key is
+      # EXACTLY ${PROVENANCE_BASE}/${artifact_name}.intoto.jsonl — the same string
+      # scripts/attest-binaries.sh stamps into each BinaryRecord leaf, so a leaf's
+      # provenance_uri resolves. PROVENANCE_BASE defaults to
+      # cdn.pollis.com/releases/${RELEASE_TAG}; RELEASE_TAG == github.ref_name ==
+      # this VERSION, so producer and consumer agree character-for-character.
+      - name: Publish provenance + cosign signatures to R2
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BUNDLE="${{ steps.attest.outputs.bundle-path }}"
+          for f in prov/*; do
+            base="$(basename "$f")"
+            # Skip the cosign outputs; only iterate the artifacts themselves.
+            case "$base" in
+              *.sig|*.pem|*.intoto.jsonl) continue ;;
+            esac
+            # SLSA build-provenance attestation for this artifact.
+            aws s3 cp "$BUNDLE" "s3://pollis/releases/${VERSION}/${base}.intoto.jsonl" \
+              --endpoint-url "${ENDPOINT}" --content-type "application/json"
+            # cosign detached signature + signing certificate.
+            aws s3 cp "prov/${base}.sig" "s3://pollis/releases/${VERSION}/${base}.sig" \
+              --endpoint-url "${ENDPOINT}" --content-type "text/plain"
+            aws s3 cp "prov/${base}.pem" "s3://pollis/releases/${VERSION}/${base}.pem" \
+              --endpoint-url "${ENDPOINT}" --content-type "application/x-pem-file"
+          done
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
   # Binary transparency (issue #453, Phase 2). Compute payload+artifact hashes
   # for every shipped installer (scripts/attest-binaries.sh) and MERGE the
   # per-tag BinaryRecord leaves into the accumulating records JSON on R2, which
