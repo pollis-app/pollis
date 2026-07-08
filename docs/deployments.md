@@ -65,9 +65,11 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 
 ### Delivery Service (DS) — the API server
 - **From:** `pollis-delivery/`
-- **Pipeline:** `.github/workflows/delivery-deploy-prod.yml` and `delivery-deploy-dev.yml` — `workflow_dispatch` (`-f ref=main`). Builds the image on GitHub runners (off the VPS to avoid LiveKit CPU contention), pushes to **GHCR** (`:prod` / `:dev`), then pokes a token-gated **Watchtower** endpoint on the VPS which pulls the new digest and recreates the container.
-- **Runs at:** VPS (`downpage`-class) → **api.pollis.com** (prod) / **api-dev.pollis.com** (dev). Health: `/health`.
-- **Role:** sole writer to Turso; clients hold read-only tokens and write only via the DS (structural commit-log integrity, #419/#420).
+- **Code deploys:** `.github/workflows/delivery-deploy-prod.yml` and `delivery-deploy-dev.yml` — `workflow_dispatch` (`-f ref=main`). Builds the image on GitHub runners (off the VPS to avoid LiveKit CPU contention) with the git SHA baked in (`--build-arg GIT_SHA`), pushes to **GHCR** (`:prod` / `:dev`), pokes a token-gated **Watchtower** endpoint on the VPS which recreates the container **preserving its env**, then **verifies the new build is actually live** by polling `/version` until it reports the built SHA (fails the deploy otherwise). No secrets ever touch GitHub.
+  - ⚠️ The Watchtower poke is **unfiltered** on purpose. Its HTTP-API `?image=` filter matches nothing here and silently no-op'd every deploy for weeks (found 2026-07-08 — both containers were 11 days stale) until the `/version` check surfaced it. Only `delivery`/`delivery-dev` carry the `com.centurylinklabs.watchtower.enable` label and track distinct tags, so an unfiltered poke updates just the one env's container.
+- **Env / secret changes (rare):** run `deploy/delivery.sh dev|prod` **on the VPS** — it `doppler run`s the full env from Doppler (`dev_personal` / `prd_prod`) and recreates the container. This is the ONE place DS runtime env is injected; Watchtower preserves it across subsequent code deploys. (Doppler is the complete source of truth: `TURSO_*`, `LOG_DB_*`, `RESEND_API_KEY`, `LIVEKIT_*`, `R2_*` incl. `R2_BUCKET`, `TURSO_PLATFORM_TOKEN/ORG/DB`, `PORT`, `POLLIS_DS_REQUIRE_AUTH`, dev `DEV_OTP`.)
+- **Runs at:** VPS (`downpage`-class) → **api.pollis.com** (prod) / **api-dev.pollis.com** (dev). Health: `/health`; build SHA: `/version`.
+- **Role:** sole writer to Turso; clients hold read-only tokens and write only via the DS (structural commit-log integrity, #419/#420). Also the authorized-secrets broker (`/v1/livekit/*`, `/v1/r2/presign`, `/v1/turso/token` — #393).
 
 ### LiveKit + nginx — media SFU (voice / video / screenshare)
 - **From:** `livekit/` (compose + nginx ingress; runs **upstream** LiveKit images, not our build)

@@ -159,6 +159,7 @@ pub fn build_router_with_log_db(db: Arc<Db>, log_db: Arc<Db>) -> Router {
 pub fn build_router_with_state(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/version", get(version))
         .route("/v1/commits", post(submit))
         .route("/v1/commits/:conversation_id", get(commits))
         .route("/v1/group-info", post(writes::group_info))
@@ -272,6 +273,24 @@ pub fn build_router_with_state(state: AppState) -> Router {
 
 async fn health() -> impl IntoResponse {
     (StatusCode::OK, "ok")
+}
+
+/// The git SHA this binary was built from, baked in at compile time by the
+/// Docker build (`ARG GIT_SHA` → `ENV GIT_SHA` → `option_env!`). `"unknown"` for
+/// local `cargo` builds. Exposed at `/version` so a deploy can confirm the new
+/// image is actually LIVE (not merely built) — otherwise a silently no-op'd
+/// recreate leaves the service running an old version indefinitely.
+pub const GIT_SHA: &str = match option_env!("GIT_SHA") {
+    Some(s) => s,
+    None => "unknown",
+};
+
+/// GET /version — the running build's git SHA. Open (no auth), like `/health`.
+async fn version() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "service": "pollis-delivery", "sha": GIT_SHA })),
+    )
 }
 
 /// POST /v1/commits — submit a commit. When auth is enforced, the request must

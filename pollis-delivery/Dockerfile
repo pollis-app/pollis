@@ -17,6 +17,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
 COPY . .
+# Bake the source git SHA into the binary (via `option_env!("GIT_SHA")`, exposed
+# at `/version`) so a deploy can verify the new image is actually running.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
 RUN cargo build --release -p pollis-delivery \
     && strip target/release/pollis-delivery
 
