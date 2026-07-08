@@ -298,10 +298,16 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           )}
         </div>
 
-        {/* ---------- footer (fixed height) ---------- */}
+        {/* ---------- footer (fixed height) ----------
+            Only the default call-tray footer is gated on a completed join
+            (matching the global VoiceBar, which mounts on
+            voiceState.kind === 'joined', not during 'joining'). The
+            not-joined preview keeps its own "Join Voice" CTA in the body, so
+            hiding this bar until connected strands nothing. A `footer`
+            override (e.g. the admin pending-delete bar) always renders. */}
         {footer ? (
           footer
-        ) : (
+        ) : voiceState.kind === "joined" ? (
           <div className="vs-foot">
             <div className="vs-foot-side">
               {isInCall ? (
@@ -361,7 +367,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               </button>
             </div>
           </div>
-        )}
+        ) : null}
       </div>
     );
   },

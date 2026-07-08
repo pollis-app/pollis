@@ -585,8 +585,9 @@ const ChatInputInner: React.ForwardRefRenderFunction<ChatInputHandle, ChatInputP
         </div>
       )}
 
-      {/* Input row */}
-      <div className="flex items-start gap-1 px-2 py-1.5">
+      {/* Input row — floor its height on the shared chrome-bar token so the
+          composer, in-channel voice bar, and sidebar Close all match. */}
+      <div className="flex items-start gap-1 px-2 py-1.5 min-h-bar">
         <button
           onClick={handlePickFiles}
           disabled={disabled || attachments.length >= maxAttachments}
