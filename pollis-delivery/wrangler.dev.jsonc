@@ -1,0 +1,61 @@
+{
+  // Cloudflare Worker + Container config for the DEV Delivery Service.
+  // Deploy: `wrangler deploy -c wrangler.dev.jsonc` (see delivery-deploy-dev.yml).
+  // A SEPARATE config from prod (not wrangler environments) so a dev deploy is
+  // structurally incapable of touching prod (#515).
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pollis-delivery-dev",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-08",
+  // The single serialized DS container. instance_type `basic` (1 GiB/4 GB);
+  // image built from the repo Dockerfile with the repo root as build context
+  // (the cargo workspace must resolve — same context as the old GHCR build).
+  "containers": [
+    {
+      "class_name": "PollisDelivery",
+      "image": "./Dockerfile",
+      "image_build_context": "../",
+      // Baked into the binary (option_env! -> /version) so the deploy can verify
+      // the new build is live. The deploy workflow rewrites "unknown" to the
+      // built commit SHA before `wrangler deploy` (jsonc-safe string replace).
+      "image_vars": { "GIT_SHA": "unknown" },
+      "instance_type": "basic",
+      "max_instances": 1,
+      "name": "pollis-delivery-dev"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "POLLIS_DELIVERY", "class_name": "PollisDelivery" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PollisDelivery"] }],
+  // Non-secret container config. Secret env is injected at container start from
+  // the Secrets Store bindings below (see worker/index.ts).
+  "vars": {
+    "PORT": "8788",
+    "POLLIS_DS_REQUIRE_AUTH": "true"
+  },
+  // Doppler is the source of truth; the deploy workflow syncs each key into the
+  // account's single Secrets Store under a DS_DEV_ prefix. Binding name == the
+  // OS env var the DS reads.
+  "secrets_store_secrets": [
+    { "binding": "TURSO_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_TURSO_URL" },
+    { "binding": "TURSO_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_TURSO_TOKEN" },
+    { "binding": "LOG_DB_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LOG_DB_URL" },
+    { "binding": "LOG_DB_ADMIN_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LOG_DB_ADMIN_TOKEN" },
+    { "binding": "RESEND_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_RESEND_API_KEY" },
+    { "binding": "LIVEKIT_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LIVEKIT_API_KEY" },
+    { "binding": "LIVEKIT_API_SECRET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LIVEKIT_API_SECRET" },
+    { "binding": "LIVEKIT_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_LIVEKIT_URL" },
+    { "binding": "R2_S3_ENDPOINT", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_S3_ENDPOINT" },
+    { "binding": "R2_ACCESS_KEY_ID", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_ACCESS_KEY_ID" },
+    { "binding": "R2_SECRET_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_SECRET_KEY" },
+    { "binding": "R2_BUCKET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_R2_BUCKET" },
+    { "binding": "TURSO_PLATFORM_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_TURSO_PLATFORM_TOKEN" },
+    { "binding": "TURSO_ORG", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_TURSO_ORG" },
+    { "binding": "TURSO_DB", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_TURSO_DB" },
+    { "binding": "DEV_OTP", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_DEV_DEV_OTP" }
+  ],
+  // Custom-domain cutover (route, not NS — zone already on CF). Attached only
+  // once the container is smoke-tested; rollback = flip this DNS back to the VPS.
+  "routes": [{ "pattern": "api-dev.pollis.com", "custom_domain": true }]
+}

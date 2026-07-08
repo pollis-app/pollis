@@ -1,10 +1,8 @@
-# Manual deploy of the Delivery Service to PROD.
-# Builds the pollis-delivery image on GitHub runners (off the VPS — no LiveKit
-# CPU contention), pushes it to GHCR as :prod, then pokes the token-gated
-# Watchtower endpoint on the VPS, which pulls the new digest and recreates the
-# `delivery` container in place (env/network/restart-policy preserved).
+# Deploy the Delivery Service to PROD — Cloudflare Containers (#515).
 #
-# Manual only — no push/tag trigger. See issue #406 (deploy-button pattern).
+# Same mechanical path as dev (Doppler -> Secrets Store, wrangler deploy, verify
+# /version) but MANUAL ONLY (workflow_dispatch) and against a SEPARATE wrangler
+# config, so a dev merge can never reach prod. No DEV_OTP in prod.
 name: Deploy Delivery (prod)
 
 on:
@@ -17,76 +15,72 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: delivery-deploy-prod
   cancel-in-progress: false
 
-env:
-  IMAGE: ghcr.io/actuallydan/pollis-delivery:prod
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     environment: delivery-prod
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      STORE_ID: ${{ vars.SECRETS_STORE_ID }}
+      SECRET_PREFIX: DS_PROD_
+      WRANGLER_CONFIG: wrangler.prod.jsonc
+      VERSION_URL: https://api.pollis.com/version
     steps:
       - name: Checkout ${{ inputs.ref }}
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
 
-      # Resolve the exact commit built, so we can bake it into the image and then
-      # verify that same SHA is actually serving after the recreate.
       - name: Resolve build SHA
         id: sha
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          node-version: 22
+          cache: pnpm
 
-      # docker-container driver — required for the gha cache backend below
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Install Worker toolchain
+        run: pnpm install --filter pollis-delivery-worker
 
-      - name: Build and push ${{ env.IMAGE }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: pollis-delivery/Dockerfile
-          push: true
-          tags: ${{ env.IMAGE }}
-          build-args: |
-            GIT_SHA=${{ steps.sha.outputs.sha }}
-          cache-from: type=gha,scope=pollis-delivery
-          cache-to: type=gha,scope=pollis-delivery,mode=max
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v3
 
-      # NO `image=` filter: Watchtower's HTTP-API image filter matches nothing
-      # here (it silently no-op'd every deploy — issue found 2026-07-08). An
-      # unfiltered poke updates all label-enabled containers; only `delivery` and
-      # `delivery-dev` carry the label and they track distinct tags (:prod/:dev),
-      # so a :prod push only recreates delivery.
-      - name: Trigger Watchtower (recreate prod container)
+      # DOPPLER_TOKEN is a service token scoped to pollis/prd_prod (set in the
+      # delivery-prod env). No DEV_OTP synced (INCLUDE_DEV_OTP unset).
+      - name: Sync secrets Doppler -> Secrets Store
+        working-directory: pollis-delivery
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: bash ../.github/scripts/sync-ds-secrets.sh
+
+      - name: Stamp GIT_SHA into container build args
+        working-directory: pollis-delivery
         run: |
-          curl -fsS -G "${{ vars.WATCHTOWER_URL }}/v1/update" \
-            -H "Authorization: Bearer ${{ secrets.WATCHTOWER_TOKEN }}"
+          sed -i "s|\"GIT_SHA\": \"unknown\"|\"GIT_SHA\": \"${{ steps.sha.outputs.sha }}\"|" "$WRANGLER_CONFIG"
+          grep -n '"GIT_SHA"' "$WRANGLER_CONFIG"
 
-      # Do NOT trust "built OK" — confirm the new binary is actually SERVING.
-      # Poll /version until it reports the SHA we just built; fail otherwise, so a
-      # no-op'd recreate can never again leave prod silently versions behind.
+      - name: Deploy (wrangler)
+        working-directory: pollis-delivery
+        run: pnpm exec wrangler deploy -c "$WRANGLER_CONFIG"
+
+      # The #509 tripwire, kept verbatim: confirm the running binary is the new
+      # build before calling the deploy done.
       - name: Verify new image is live
         run: |
           EXPECTED='${{ steps.sha.outputs.sha }}'
-          URL='https://api.pollis.com/version'
-          echo "Waiting for $URL to report sha=$EXPECTED"
+          echo "Waiting for $VERSION_URL to report sha=$EXPECTED"
           for i in $(seq 1 40); do
-            GOT="$(curl -fsS -m 10 "$URL" | jq -r '.sha' 2>/dev/null || echo '')"
+            GOT="$(curl -fsS -m 10 "$VERSION_URL" | jq -r '.sha' 2>/dev/null || echo '')"
             if [ "$GOT" = "$EXPECTED" ]; then echo "✓ live sha=$GOT"; exit 0; fi
             echo "[$((i*6))s] live sha=$GOT (want $EXPECTED)"; sleep 6
           done
-          echo "::error::Delivery (prod) did not report the new SHA within 240s — the Watchtower recreate did not take effect."
+          echo "::error::Delivery (prod) did not report the new SHA within 240s — the deploy did not take effect."
           exit 1
