@@ -1,2 +1,4 @@
 artifacts/
 .tmp-data/
+.tmp-data-smoke/
+.tmp-data-invalid-otp/

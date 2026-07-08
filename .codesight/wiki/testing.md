@@ -1,9 +1,10 @@
 # Testing
 
-Pollis has two tiers of automated tests:
+Pollis has three tiers of automated tests:
 
 1. **Unit tests** (in-crate `#[cfg(test)]` modules) — pure logic, in-memory rusqlite schemas, no I/O.
-2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. This document covers the harness.
+2. **Integration harness** (`src-tauri/tests/flows.rs`) — drives the real `pollis-core` commands end-to-end against a disposable test Turso database. Most of this document covers the harness.
+3. **WebDriver E2E tests** (`e2e/`) — drives the real shipped Tauri app (native WebKitGTK WebView, real Rust core) via `tauri-driver`. See [WebDriver E2E tests](#webdriver-e2e-tests-e2e) below.
 
 > The harness is built on top of Tauri's test machinery (`tauri::test::get_ipc_response` + `MockRuntime`). Tauri is the shipping shell, so the harness drives the real command logic through the same dispatch path the app uses, headlessly — `pollis-core` is the unit under test, reached through the `#[tauri::command]` shims exactly as at runtime.
 
@@ -418,3 +419,39 @@ implements. Honest scope: this is machine-checked proof of these pure functions,
 ## Known flakes
 
 - **`channel_message_round_trip`** can fail with "stream not found" during `send_group_invite`'s MLS reconcile — a libsql hrana stream timeout. It passes reliably in isolation and in the current suite, but is sensitive to connection state accumulation. If it flakes again, the first suspect is stream lifetime, not test logic.
+
+## WebDriver E2E tests (`e2e/`)
+
+The only tier that drives the **actual shipped app** — the real WebKitGTK
+WebView inside the Tauri shell, real Rust core, real Tauri IPC — rather than
+`MockRuntime` or a browser build of the frontend. Three scripts under `e2e/`,
+sharing `e2e/lib/harness.js` for the `tauri-driver`/WebKitWebDriver plumbing
+(raw `webdriverio` `remote()` calls, not the wdio test runner — the runner
+intermittently stalls the first WebView command against this webkit2gtk
+build):
+
+| script | proves | needs delivery service / Turso? |
+|---|---|---|
+| `smoke.js` | app launches, login screen renders | no |
+| `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes (writable test Turso) |
+| `invalid-otp.js` | wrong OTP code is rejected, doesn't advance past code entry | yes (writable test Turso) |
+
+```bash
+pnpm --filter @pollis/e2e smoke        # fast, no external deps
+pnpm --filter @pollis/e2e test         # full signup flow
+pnpm --filter @pollis/e2e invalid-otp
+```
+
+`smoke.js` is the CI-friendly one: the logged-out path
+(`checkStoredSession()` in `frontend/src/App.tsx`) resolves entirely from
+local Tauri commands, so it never calls out to the delivery service or
+Turso. `.github/workflows/e2e-smoke.yml` runs it on `workflow_dispatch`. The
+other two need a writable disposable test Turso with the schema applied
+(`scripts/db-apply.sh` against `.env.test` — see `e2e/README.md` for the
+full prerequisites and gotchas) and are for local use / not yet wired into
+CI.
+
+Full details — how the stack is stood up, `.env.test` schema bootstrap,
+`data-testid` conventions, and the WebKitWebDriver quirks (native `.click()`
+doesn't fire React handlers, IPv6-only Vite loopback, orphan-process
+reaping) — live in `e2e/README.md`, not duplicated here.
