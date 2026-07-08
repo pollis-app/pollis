@@ -17,7 +17,7 @@ use livekit::{
 
 use crate::{
     commands::{
-        livekit::{lookup_avatar_url, lookup_avatar_url_for_identity, make_token},
+        livekit::{lookup_avatar_url, lookup_avatar_url_for_identity},
         voice_apm,
         voice_denoiser,
         voice_e2ee,
@@ -116,16 +116,17 @@ pub async fn prepare_voice_connection(
         }
     }
 
-    // Identity must match the one `join_voice_channel` will mint, or the
-    // warmed token is useless. device_id is stable for the process lifetime,
-    // so it doesn't need to be part of the warmup cache key above.
-    let device_id = state.device_id.lock().await.clone();
-    let token = make_token(
-        &state.config,
-        &channel_id,
-        &voice_identity(&user_id, device_id.as_deref()),
-        &display_name,
-    )?;
+    // Pre-fetch (and cache) the DS-minted voice token so the JWT round-trip is
+    // already paid by the time the user clicks Join. Identity (`voice-{user}:
+    // {device}`) is derived server-side from the verified signer — the LiveKit
+    // API secret is no longer on the client. Non-fatal: warmup is best-effort.
+    let token = match crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await {
+        Ok((t, _url)) => t,
+        Err(e) => {
+            eprintln!("[voice] warmup token error (non-fatal): {e}");
+            return Ok(());
+        }
+    };
 
     // Fire the DNS/TLS warmup in the background. If the user immediately
     // clicks Join, they'll race this — that's fine, the worst case is a
@@ -288,13 +289,12 @@ pub async fn join_voice_channel(
             t
         }
         None => {
+            // DS-minted (identity derived server-side; matches `local_identity`
+            // because the DS builds `voice-{user}:{device}` from this device's
+            // verified signature). Now a network round-trip, not a local sign —
+            // still on the join hot path, so it stays phase-timed.
             let jwt_start = Instant::now();
-            let t = make_token(
-                &state.config,
-                &channel_id,
-                &local_identity,
-                &display_name,
-            )?;
+            let (t, _url) = crate::commands::mls::ds_livekit_token(state, &channel_id, "voice").await?;
             jwt_mint_ms = jwt_start.elapsed().as_millis() as u64;
             t
         }

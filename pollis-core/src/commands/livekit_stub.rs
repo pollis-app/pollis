@@ -17,146 +17,55 @@
 //! `commands::livekit::publish::publish_to_user_inbox` on desktop.
 
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use base64::Engine as _;
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-use serde::Serialize;
-
-use crate::config::Config;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::realtime::LiveKitState;
 use crate::state::AppState;
 
 type LiveKit = Arc<tokio::sync::Mutex<LiveKitState>>;
 
-// ── Server-side data publish (Twirp RoomService/SendData) ───────────────────
+// ── Server-side data publish (DS SendData broker) ───────────────────────────
+//
+// Mobile has no Rust-side `Room`, so pushes to a room this process isn't joined
+// to go through the DS's server-side `RoomService/SendData` broker (#393). The
+// LiveKit admin secret used to be signed on-device (the leak); now the DS holds
+// it and the client just names a room + content-free payload. Mirrors desktop's
+// `commands::livekit::publish_*`.
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AdminGrants {
-    room_admin: bool,
-    room_list: bool,
-    room: Option<String>,
-}
-
-#[derive(Serialize)]
-struct AdminClaims {
-    iss: String,
-    sub: String,
-    iat: u64,
-    exp: u64,
-    nbf: u64,
-    video: AdminGrants,
-}
-
-/// Mint a short-lived admin JWT scoped to `room`, granting the
-/// `RoomService/SendData` call. Pure `jsonwebtoken` — no native deps.
-fn make_admin_token(config: &Config, room: &str) -> Result<String> {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| Error::Other(anyhow::anyhow!("{e}")))?
-        .as_secs();
-    let claims = AdminClaims {
-        iss: config.livekit_api_key.clone(),
-        sub: "pollis-mobile".to_string(),
-        iat: now,
-        exp: now + 300,
-        nbf: now,
-        video: AdminGrants {
-            room_admin: true,
-            room_list: true,
-            room: Some(room.to_string()),
-        },
-    };
-    let mut header = Header::new(Algorithm::HS256);
-    header.typ = Some("JWT".to_string());
-    let key = EncodingKey::from_secret(config.livekit_api_secret.as_bytes());
-    encode(&header, &claims, &key).map_err(|e| Error::Other(anyhow::anyhow!("JWT sign: {e}")))
-}
-
-/// The server API is a Twirp-over-HTTPS endpoint, distinct from the `wss://`
-/// URL the client SDK dials. Translate the configured client URL into it.
-fn twirp_base(livekit_url: &str) -> String {
-    if let Some(rest) = livekit_url.strip_prefix("wss://") {
-        format!("https://{rest}")
-    } else if let Some(rest) = livekit_url.strip_prefix("ws://") {
-        format!("http://{rest}")
-    } else {
-        livekit_url.to_string()
-    }
-}
-
-/// Fire-and-forget `RoomService/SendData` to `room_name`. Non-fatal: a 404
-/// just means the room currently has no participants (the recipient picks the
-/// change up via its poll fallback when it next comes online), so we log only
-/// genuine errors and never block the caller.
+/// Fire-and-forget SendData to `room_name` via the DS. Non-fatal — the DS treats
+/// a room with no participants (404) as success and errors are only logged.
 async fn send_data_to_room(
-    config: &Config,
+    state: &Arc<AppState>,
     room_name: String,
     payload: serde_json::Value,
 ) -> Result<()> {
-    if config.livekit_url.is_empty() || config.livekit_api_key.is_empty() {
-        return Ok(());
-    }
-
-    let token = make_admin_token(config, &room_name)?;
-    let url = format!(
-        "{}/twirp/livekit.RoomService/SendData",
-        twirp_base(&config.livekit_url)
-    );
-    let raw = serde_json::to_vec(&payload).map_err(Error::Serde)?;
-    let body = serde_json::json!({
-        "room": room_name,
-        "data": base64::engine::general_purpose::STANDARD.encode(&raw),
-        "kind": "RELIABLE",
-    });
-
+    let state = Arc::clone(state);
     tokio::spawn(async move {
-        match reqwest::Client::new()
-            .post(&url)
-            .bearer_auth(&token)
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                // Log every outcome (incl. 404 = room currently has no
-                // participants) with the room name, so realtime delivery can be
-                // diagnosed from the device log.
-                if status.is_success() {
-                    eprintln!("[realtime] SendData -> {room_name}: ok");
-                } else {
-                    let body_text = resp.text().await.unwrap_or_default();
-                    eprintln!("[realtime] SendData -> {room_name}: {status} {body_text}");
-                }
-            }
-            Err(e) => eprintln!("[realtime] SendData -> {room_name}: http error: {e}"),
+        if let Err(e) = crate::commands::mls::ds_livekit_send_data(&state, &room_name, payload).await {
+            eprintln!("[realtime] SendData -> {room_name} error (non-fatal): {e}");
         }
     });
-
     Ok(())
 }
 
 /// Push a JSON event to a user's personal inbox room (`inbox-{user_id}`).
 /// Real on mobile — this is the path enrollment + call invites rely on.
 pub async fn publish_to_user_inbox(
-    config: &Config,
+    state: &Arc<AppState>,
     user_id: &str,
     payload: serde_json::Value,
 ) -> Result<()> {
-    send_data_to_room(config, format!("inbox-{user_id}"), payload).await
+    send_data_to_room(state, format!("inbox-{user_id}"), payload).await
 }
 
 /// Push a JSON event to an arbitrary room the caller is not joined to (e.g. a
 /// user accepting a group invite notifying existing members). Real on mobile.
 pub async fn publish_to_room_server(
-    config: &Config,
+    state: &Arc<AppState>,
     room_name: &str,
     payload: serde_json::Value,
 ) -> Result<()> {
-    send_data_to_room(config, room_name.to_string(), payload).await
+    send_data_to_room(state, room_name.to_string(), payload).await
 }
 
 /// Notify a conversation's room of a new message. Mobile has no Rust-side
@@ -174,7 +83,7 @@ pub async fn publish_new_message_to_room(
 ) -> Result<()> {
     let payload =
         crate::commands::livekit_signalling::new_message_payload(channel_id, conversation_id);
-    send_data_to_room(&state.config, room_id.to_string(), payload).await
+    send_data_to_room(state, room_id.to_string(), payload).await
 }
 
 // ── Connected-room pushes — still no-op on mobile ───────────────────────────
@@ -213,7 +122,7 @@ pub async fn publish_membership_changed_to_room(
 }
 
 pub async fn publish_join_requests_changed_to_room(
-    _config: &Config,
+    _state: &Arc<AppState>,
     _group_id: &str,
 ) -> Result<()> {
     Ok(())

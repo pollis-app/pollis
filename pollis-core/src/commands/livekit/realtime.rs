@@ -8,7 +8,6 @@ use crate::realtime::RealtimeEvent;
 use crate::state::AppState;
 
 use super::identity::user_id_from_identity;
-use super::jwt::make_token;
 
 /// Called once by the frontend on startup. Stores the typed Channel used to
 /// push RealtimeEvents to the frontend. Safe to call again on re-login.
@@ -27,18 +26,17 @@ pub async fn subscribe_realtime(
 pub async fn connect_rooms(
     room_ids: Vec<String>,
     user_id: String,
-    username: String,
+    // Display name is now derived server-side by the DS token endpoint; the arg
+    // is kept for command-signature stability with the frontend/shim.
+    _username: String,
     state: &Arc<AppState>,
 ) -> Result<()> {
     let url = state.config.livekit_url.clone();
     let livekit_arc = Arc::clone(&state.livekit);
 
-    // Build a per-device identity so multiple devices for the same user can
-    // coexist in the same LiveKit room without kicking each other.
-    let identity = match state.device_id.lock().await.clone() {
-        Some(did) => format!("{user_id}:{did}"),
-        None => user_id.clone(),
-    };
+    // Per-device identity (`{user}:{device}`, so a user's devices coexist in a
+    // room instead of kicking each other) is now built server-side by the DS from
+    // the verified signer — the client no longer mints it.
 
     // Compute the diff while holding the lock briefly, then release.
     // Include rooms that are mid-connection to prevent duplicate connects.
@@ -79,8 +77,11 @@ pub async fn connect_rooms(
     // Connect new rooms in parallel — each room gets its own task so a timeout
     // or failure on one room does not delay or block the others.
     for room_id in to_connect {
-        let token = match make_token(&state.config, &room_id, &identity, &username) {
-            Ok(t) => t,
+        // Participant token now minted by the DS (identity derived server-side
+        // from the verified signer); the LiveKit API secret is no longer on the
+        // client. See `commands::mls::ds_livekit_token` / `pollis-delivery::broker`.
+        let token = match crate::commands::mls::ds_livekit_token(state, &room_id, "realtime").await {
+            Ok((t, _url)) => t,
             Err(e) => {
                 eprintln!("[realtime] token error for room {room_id}: {e}");
                 let mut lk = livekit_arc.lock().await;
@@ -91,10 +92,7 @@ pub async fn connect_rooms(
 
         let url_owned = url.clone();
         let lk_arc_connect = Arc::clone(&livekit_arc);
-        let config = state.config.clone();
-        let identity_owned = identity.clone();
         let user_id_owned = user_id.clone();
-        let username_owned = username.clone();
         let app_state_connect = Arc::clone(state);
 
         eprintln!("[realtime] connecting room {room_id}");
@@ -224,8 +222,8 @@ pub async fn connect_rooms(
                                 }
                             }
 
-                            let token = match make_token(&config, &room_id_owned, &identity_owned, &username_owned) {
-                                Ok(t) => t,
+                            let token = match crate::commands::mls::ds_livekit_token(&app_state_task, &room_id_owned, "realtime").await {
+                                Ok((t, _url)) => t,
                                 Err(e) => {
                                     eprintln!("[realtime] reconnect token error for room {room_id_owned}: {e}");
                                     backoff = (backoff * 2).min(300);

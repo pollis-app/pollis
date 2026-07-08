@@ -154,7 +154,7 @@ pub async fn create_dm_channel(
     });
     for member in members.iter().filter(|m| m.user_id != creator_id) {
         if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-            &state.config, &member.user_id, inbox_payload.clone(),
+            state, &member.user_id, inbox_payload.clone(),
         ).await {
             eprintln!("[inbox] create_dm_channel: notify {} failed: {e}", member.user_id);
         }
@@ -385,7 +385,7 @@ pub async fn leave_dm_channel(
 
     // Signal remaining members to reconcile (removes the leaver's stale leaf).
     if let Err(e) = crate::commands::livekit::publish_to_room_server(
-        &state.config,
+        state,
         &dm_channel_id,
         serde_json::json!({"type": "membership_changed", "conversation_id": dm_channel_id}),
     ).await {

@@ -68,8 +68,9 @@ pub struct BrokerConfig {
     pub livekit_api_secret: Option<String>,
     /// LiveKit ws URL handed back to the client (env `LIVEKIT_URL`).
     pub livekit_url: Option<String>,
-    /// R2 S3 endpoint, e.g. `https://<acct>.r2.cloudflarestorage.com`
-    /// (env `R2_ENDPOINT`).
+    /// R2 S3 endpoint, e.g. `https://<acct>.r2.cloudflarestorage.com` (a trailing
+    /// `/<bucket>` path segment is fine — the presigner uses only the host). Read
+    /// from `R2_ENDPOINT`, falling back to the established `R2_S3_ENDPOINT`.
     pub r2_endpoint: Option<String>,
     /// R2 region — SigV4 scope; defaults to `auto` (env `R2_REGION`).
     pub r2_region: String,
@@ -77,9 +78,17 @@ pub struct BrokerConfig {
     pub r2_bucket: Option<String>,
     /// R2 access key id (env `R2_ACCESS_KEY_ID`).
     pub r2_access_key_id: Option<String>,
-    /// R2 secret access key — SigV4 signing secret (env `R2_SECRET_ACCESS_KEY`).
+    /// R2 secret access key — SigV4 signing secret. Read from
+    /// `R2_SECRET_ACCESS_KEY`, falling back to the established `R2_SECRET_KEY`.
     /// NEVER logged.
     pub r2_secret_access_key: Option<String>,
+    /// Turso Platform API token (env `TURSO_PLATFORM_TOKEN`) — bearer for
+    /// api.turso.tech, used to mint short-TTL read-only DB tokens. NEVER logged.
+    pub turso_platform_token: Option<String>,
+    /// Turso organization slug (env `TURSO_ORG`).
+    pub turso_org: Option<String>,
+    /// Turso database name to mint read-only tokens for (env `TURSO_DB`).
+    pub turso_db: Option<String>,
 }
 
 impl BrokerConfig {
@@ -91,11 +100,17 @@ impl BrokerConfig {
             livekit_api_key: var("LIVEKIT_API_KEY"),
             livekit_api_secret: var("LIVEKIT_API_SECRET"),
             livekit_url: var("LIVEKIT_URL"),
-            r2_endpoint: var("R2_ENDPOINT"),
+            // Accept the established client env names (`R2_S3_ENDPOINT` /
+            // `R2_SECRET_KEY`) so the DS reuses the same Doppler secrets instead
+            // of duplicating them under new keys.
+            r2_endpoint: var("R2_ENDPOINT").or_else(|| var("R2_S3_ENDPOINT")),
             r2_region: var("R2_REGION").unwrap_or_else(|| "auto".to_string()),
             r2_bucket: var("R2_BUCKET"),
             r2_access_key_id: var("R2_ACCESS_KEY_ID"),
-            r2_secret_access_key: var("R2_SECRET_ACCESS_KEY"),
+            r2_secret_access_key: var("R2_SECRET_ACCESS_KEY").or_else(|| var("R2_SECRET_KEY")),
+            turso_platform_token: var("TURSO_PLATFORM_TOKEN"),
+            turso_org: var("TURSO_ORG"),
+            turso_db: var("TURSO_DB"),
         }
     }
 
@@ -115,6 +130,15 @@ impl BrokerConfig {
             self.r2_bucket.as_deref()?,
             self.r2_access_key_id.as_deref()?,
             self.r2_secret_access_key.as_deref()?,
+        ))
+    }
+
+    /// All three Turso Platform fields present → the token endpoint can mint.
+    fn turso_ready(&self) -> Option<(&str, &str, &str)> {
+        Some((
+            self.turso_platform_token.as_deref()?,
+            self.turso_org.as_deref()?,
+            self.turso_db.as_deref()?,
         ))
     }
 }
@@ -156,14 +180,23 @@ fn not_configured(what: &str) -> Response {
 pub struct LivekitTokenBody {
     /// The LiveKit room to mint a token for.
     pub room: String,
-    /// `true` → the screenshare `:view` participant variant (identity suffixed
-    /// `:view`, `canPublishData=false`). Default `false`.
+    /// Identity scheme (default `realtime`). The user + device halves are ALWAYS
+    /// taken from the verified signer — `kind` only picks the prefix/suffix so a
+    /// single endpoint serves every on-device scheme:
+    ///   - `realtime` → `{user}:{device}`        (data-only realtime/inbox)
+    ///   - `voice`    → `voice-{user}:{device}`   (voice participant)
+    ///   - `view`     → `{user}:{device}:view`    (screenshare receive; no data)
     #[serde(default)]
-    pub view: bool,
+    pub kind: Option<String>,
     /// No-auth path only: the user to mint for. IGNORED when auth is enforced
-    /// (the identity comes from the verified signer there).
+    /// (the user comes from the verified signer there).
     #[serde(default)]
     pub user_id: Option<String>,
+    /// No-auth path only: the device id half of the identity. IGNORED when auth
+    /// is enforced (the device comes from the signature-verified `X-Pollis-Device`
+    /// header there — a client cannot claim another device's identity).
+    #[serde(default)]
+    pub device_id: Option<String>,
 }
 
 /// LiveKit JWT claims — byte-identical to pollis-core's `livekit_jwt::make_token`
@@ -228,11 +261,17 @@ pub async fn livekit_token(
     };
 
     // Room authz — only on the signed path (mirrors the other handlers, which
-    // skip authz when auth is disabled). The user's own inbox room is always
-    // allowed; everything else demands current membership.
+    // skip authz when auth is disabled). Allowed to mint a JOIN token for:
+    //   - the user's own inbox room (`inbox-<user_id>`),
+    //   - any `call-<ulid>` room — the ULID is an unguessable capability handed
+    //     out via the callee's inbox; there is no membership row for it, and
+    //     voice is MLS/E2EE'd so the room ACL isn't the confidentiality boundary,
+    //   - any conversation the user is a current member of (`is_member` covers
+    //     groups, DMs, and channels — the latter being the voice-room case).
     if authed.is_some() {
         let inbox = format!("inbox-{user_id}");
-        if parsed.room != inbox {
+        let is_call = parsed.room.starts_with("call-");
+        if parsed.room != inbox && !is_call {
             let conn = state.db.conn()?;
             if !is_member(&conn, &parsed.room, &user_id).await? {
                 return Ok(AuthRejection::Forbidden.into_response());
@@ -247,12 +286,31 @@ pub async fn livekit_token(
         lookup_username(&conn, &user_id).await?.unwrap_or_else(|| user_id.clone())
     };
 
-    // `:view` is a hidden screenshare publisher — identity suffixed, no data
-    // channel (mirrors pollis-core's `make_view_token`).
-    let identity = if parsed.view {
-        format!("{user_id}:view")
+    // Device half: on the signed path it's the header the signature was verified
+    // against (gate proved the key registered for THIS device signed the request),
+    // so it's trustworthy without re-checking; on the no-auth path take the body.
+    let device_id = if authed.is_some() {
+        headers
+            .get("x-pollis-device")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string()
     } else {
+        parsed.device_id.clone().unwrap_or_default()
+    };
+    // `{user}:{device}` when a device is known, else the legacy bare `{user}`.
+    let base = if device_id.is_empty() {
         user_id.clone()
+    } else {
+        format!("{user_id}:{device_id}")
+    };
+    // `view` is the screenshare-receive variant: identity suffixed `:view`, no
+    // data channel (mirrors pollis-core's old `make_view_token`). `voice` gets
+    // the `voice-` prefix (mirrors `voice_identity`). Everything else is realtime.
+    let (identity, can_publish_data) = match parsed.kind.as_deref() {
+        Some("voice") => (format!("voice-{base}"), true),
+        Some("view") => (format!("{base}:view"), false),
+        _ => (base, true),
     };
 
     let token = sign_livekit_token(
@@ -261,7 +319,7 @@ pub async fn livekit_token(
         &parsed.room,
         &identity,
         &display_name,
-        !parsed.view,
+        can_publish_data,
         now_unix(),
     )?;
 
@@ -315,11 +373,356 @@ pub fn sign_livekit_token(
     Ok(encode(&header, &claims, &key)?)
 }
 
+// ── 1b. LiveKit server (RoomService) API — admin token + Twirp ────────────────
+//
+// `RoomService/SendData` (fan out a control payload to a room the caller isn't
+// joined to) and `RoomService/ListParticipants` (voice roster) each need a
+// short-lived **admin** JWT (`roomAdmin`) — signed with the LiveKit API secret.
+// On-device that secret was the leak; here the DS signs and makes the Twirp call
+// so the client only names a room + payload. Mirrors pollis-core's old
+// `livekit/admin_api.rs` (`make_admin_token` / `twirp_base`).
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdminGrants {
+    room_admin: bool,
+    room_list: bool,
+    room: String,
+}
+
+#[derive(Serialize)]
+struct AdminClaims {
+    iss: String,
+    sub: String,
+    iat: u64,
+    nbf: u64,
+    exp: u64,
+    video: AdminGrants,
+}
+
+/// Sign a short-lived (`+300s`) HS256 admin JWT scoped to `room`, granting the
+/// `RoomService` calls. `now` injected for testability. Pure.
+pub fn sign_livekit_admin_token(
+    api_key: &str,
+    api_secret: &str,
+    room: &str,
+    now: u64,
+) -> anyhow::Result<String> {
+    let claims = AdminClaims {
+        iss: api_key.to_string(),
+        sub: "pollis-ds".to_string(),
+        iat: now,
+        nbf: now,
+        exp: now + 300,
+        video: AdminGrants {
+            room_admin: true,
+            room_list: true,
+            room: room.to_string(),
+        },
+    };
+    let mut header = Header::new(Algorithm::HS256);
+    header.typ = Some("JWT".to_string());
+    let key = EncodingKey::from_secret(api_secret.as_bytes());
+    Ok(encode(&header, &claims, &key)?)
+}
+
+/// The Twirp server API is a separate HTTPS endpoint from the `wss://` SDK URL.
+/// Translate one to the other (`wss`→`https`, `ws`→`http`).
+fn twirp_base(livekit_url: &str) -> String {
+    if let Some(rest) = livekit_url.strip_prefix("wss://") {
+        format!("https://{rest}")
+    } else if let Some(rest) = livekit_url.strip_prefix("ws://") {
+        format!("http://{rest}")
+    } else {
+        livekit_url.to_string()
+    }
+}
+
+fn bad_gateway(what: impl std::fmt::Display) -> Response {
+    (
+        StatusCode::BAD_GATEWAY,
+        Json(serde_json::json!({ "error": what.to_string() })),
+    )
+        .into_response()
+}
+
+// ── POST /v1/livekit/send-data ────────────────────────────────────────────────
+//
+// Authz: an authenticated device is required (`gate`). Beyond that ANY room is
+// allowed — deliberately. The payloads are **content-free control nudges**
+// (new-message pings, call invites, membership-changed, enrollment approvals);
+// recipients always re-fetch through independently-authenticated, MLS-encrypted
+// paths, so a spoofed nudge costs at most an unnecessary refetch or a dismissable
+// ring. That is exactly the capability every client already had via the embedded
+// secret — requiring a signed device is strictly stronger. Per-room authz
+// (membership / inbox-target) is possible future hardening.
+
+#[derive(Deserialize)]
+pub struct LivekitSendDataBody {
+    /// The room to publish into (`inbox-<user>`, a group id, `call-<ulid>`, …).
+    pub room: String,
+    /// The JSON control payload — serialized + base64'd server-side into the
+    /// Twirp `data` field. The client never touches the admin token or wire form.
+    pub payload: serde_json::Value,
+    /// No-auth path only; ignored when auth is enforced.
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
+/// POST /v1/livekit/send-data — fan out a control payload to a LiveKit room via
+/// server-side `RoomService/SendData`. A 404 (room currently has no
+/// participants) is success, mirroring the client's fire-and-forget semantics.
+pub async fn livekit_send_data(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+
+    let parsed: LivekitSendDataBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    if parsed.room.trim().is_empty() {
+        return Ok(bad_request("room required"));
+    }
+    // Validate the no-auth body shape (identity is unused — SendData is a server
+    // action, not a participant action).
+    if let Err(resp) = resolve_user(&authed, parsed.user_id.as_deref()) {
+        return Ok(resp);
+    }
+
+    let (api_key, api_secret, url) = match state.broker.livekit_ready() {
+        Some(t) => t,
+        None => return Ok(not_configured("livekit")),
+    };
+
+    let raw = serde_json::to_vec(&parsed.payload).unwrap_or_default();
+    let data_b64 = {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(&raw)
+    };
+    let token = sign_livekit_admin_token(api_key, api_secret, &parsed.room, now_unix())?;
+    let endpoint = format!("{}/twirp/livekit.RoomService/SendData", twirp_base(url));
+
+    let sent = reqwest::Client::new()
+        .post(&endpoint)
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "room": parsed.room,
+            "data": data_b64,
+            "kind": "RELIABLE",
+        }))
+        .send()
+        .await;
+
+    match sent {
+        Ok(r) if r.status().is_success() || r.status() == StatusCode::NOT_FOUND => {
+            Ok(ok_json(serde_json::json!({ "ok": true })))
+        }
+        Ok(r) => {
+            let status = r.status();
+            let text = r.text().await.unwrap_or_default();
+            Ok(bad_gateway(format!("SendData {status}: {text}")))
+        }
+        Err(e) => Ok(bad_gateway(format!("SendData: {e}"))),
+    }
+}
+
+// ── POST /v1/livekit/participants ─────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct LivekitParticipantsBody {
+    /// The room whose voice roster to list (a group id).
+    pub room: String,
+    /// No-auth path only; ignored when auth is enforced.
+    #[serde(default)]
+    pub user_id: Option<String>,
+}
+
+/// POST /v1/livekit/participants — return the voice roster for `room` via
+/// server-side `RoomService/ListParticipants`. Same room authz as the token
+/// endpoint (own inbox always ok, else current membership). Internal
+/// participants (`server` / `pollis-*` / `:view`) are filtered out. A 404 (room
+/// doesn't exist yet) returns an empty roster.
+pub async fn livekit_participants(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    let authed = match gate(&state, &headers, &method, &uri, &body).await? {
+        Ok(a) => a,
+        Err(resp) => return Ok(resp),
+    };
+
+    let parsed: LivekitParticipantsBody = match serde_json::from_slice(&body) {
+        Ok(b) => b,
+        Err(_) => return Ok(bad_request("invalid body")),
+    };
+    if parsed.room.trim().is_empty() {
+        return Ok(bad_request("room required"));
+    }
+
+    let (api_key, api_secret, url) = match state.broker.livekit_ready() {
+        Some(t) => t,
+        None => return Ok(not_configured("livekit")),
+    };
+
+    let user_id = match resolve_user(&authed, parsed.user_id.as_deref()) {
+        Ok(u) => u,
+        Err(resp) => return Ok(resp),
+    };
+    // Roster is a read — gate it to members (own inbox is always ok), mirroring
+    // the token endpoint. Only enforced on the signed path.
+    if authed.is_some() {
+        let inbox = format!("inbox-{user_id}");
+        if parsed.room != inbox {
+            let conn = state.db.conn()?;
+            if !is_member(&conn, &parsed.room, &user_id).await? {
+                return Ok(AuthRejection::Forbidden.into_response());
+            }
+        }
+    }
+
+    let token = sign_livekit_admin_token(api_key, api_secret, &parsed.room, now_unix())?;
+    let endpoint = format!("{}/twirp/livekit.RoomService/ListParticipants", twirp_base(url));
+
+    let listed = reqwest::Client::new()
+        .post(&endpoint)
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "room": parsed.room }))
+        .send()
+        .await;
+
+    #[derive(Deserialize)]
+    struct RsResp {
+        #[serde(default)]
+        participants: Vec<RsParticipant>,
+    }
+    #[derive(Deserialize)]
+    struct RsParticipant {
+        #[serde(default)]
+        identity: String,
+        #[serde(default)]
+        name: String,
+    }
+
+    match listed {
+        Ok(r) if r.status() == StatusCode::NOT_FOUND => {
+            Ok(ok_json(serde_json::json!({ "participants": [] })))
+        }
+        Ok(r) if r.status().is_success() => {
+            let parsed_resp: RsResp = match r.json().await {
+                Ok(p) => p,
+                Err(e) => return Ok(bad_gateway(format!("ListParticipants decode: {e}"))),
+            };
+            let out: Vec<serde_json::Value> = parsed_resp
+                .participants
+                .into_iter()
+                .filter(|p| {
+                    p.identity != "server"
+                        && p.identity != "pollis-backend"
+                        && p.identity != "pollis-ds"
+                        && !p.identity.ends_with(":view")
+                })
+                .map(|p| {
+                    let name = if p.name.is_empty() { p.identity.clone() } else { p.name.clone() };
+                    serde_json::json!({ "identity": p.identity, "name": name })
+                })
+                .collect();
+            Ok(ok_json(serde_json::json!({ "participants": out })))
+        }
+        Ok(r) => {
+            let status = r.status();
+            let text = r.text().await.unwrap_or_default();
+            Ok(bad_gateway(format!("ListParticipants {status}: {text}")))
+        }
+        Err(e) => Ok(bad_gateway(format!("ListParticipants: {e}"))),
+    }
+}
+
+// ── POST /v1/turso/token ──────────────────────────────────────────────────────
+//
+// Mint a SHORT-TTL, READ-ONLY Turso DB token so the client stops shipping a
+// long-lived read token in its bundle (#393). The DS holds the Turso Platform
+// API token and calls api.turso.tech to mint a per-session read-only JWT scoped
+// to the shared DB, handing only that back. A leaked client token's blast radius
+// shrinks from "forever" to the TTL. 503 when unconfigured — the client falls
+// back to its baked read-only token, so an unconfigured deploy still reads.
+
+/// Read-only Turso token lifetime. The duration string is what the Platform API
+/// `expiration` query param wants; the seconds mirror it for the `expires_in`
+/// hint handed to the client's refresh timer. Keep the two in sync.
+const TURSO_TOKEN_EXPIRATION: &str = "2h";
+const TURSO_TOKEN_EXPIRATION_SECS: u64 = 2 * 60 * 60;
+
+/// POST /v1/turso/token — mint a short-TTL read-only Turso token for the
+/// authenticated device. Identity is irrelevant (the token is whole-DB
+/// read-only); the gate only proves a real device is asking.
+pub async fn turso_token(
+    State(state): State<AppState>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Response, AppError> {
+    // Require a valid device signature (or pass-through when auth is disabled).
+    if let Err(resp) = gate(&state, &headers, &method, &uri, &body).await? {
+        return Ok(resp);
+    }
+
+    let (platform_token, org, db) = match state.broker.turso_ready() {
+        Some(t) => t,
+        None => return Ok(not_configured("turso")),
+    };
+
+    let endpoint = format!(
+        "https://api.turso.tech/v1/organizations/{org}/databases/{db}/auth/tokens\
+?expiration={TURSO_TOKEN_EXPIRATION}&authorization=read-only"
+    );
+    let minted = reqwest::Client::new()
+        .post(&endpoint)
+        .bearer_auth(platform_token)
+        .send()
+        .await;
+
+    match minted {
+        Ok(r) if r.status().is_success() => {
+            #[derive(Deserialize)]
+            struct MintResp {
+                jwt: String,
+            }
+            let parsed: MintResp = match r.json().await {
+                Ok(p) => p,
+                Err(e) => return Ok(bad_gateway(format!("turso token decode: {e}"))),
+            };
+            Ok(ok_json(serde_json::json!({
+                "token": parsed.jwt,
+                "expires_in": TURSO_TOKEN_EXPIRATION_SECS,
+            })))
+        }
+        Ok(r) => {
+            let status = r.status();
+            let text = r.text().await.unwrap_or_default();
+            Ok(bad_gateway(format!("turso mint {status}: {text}")))
+        }
+        Err(e) => Ok(bad_gateway(format!("turso mint: {e}"))),
+    }
+}
+
 // ── 2. POST /v1/r2/presign ───────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct R2PresignBody {
-    /// `"get"` → presign a GET (download); `"put"` → presign a PUT (upload).
+    /// `"get"` → presign a GET (download); `"put"` → presign a PUT (upload);
+    /// `"delete"` → presign a DELETE (attachment cleanup).
     pub operation: String,
     /// The R2 object key (within the bucket), e.g. `media/<hash>/<file>.enc`.
     pub key: String,
@@ -363,7 +766,8 @@ pub async fn r2_presign(
     let http_method = match parsed.operation.as_str() {
         "get" => "GET",
         "put" => "PUT",
-        _ => return Ok(bad_request("operation must be \"get\" or \"put\"")),
+        "delete" => "DELETE",
+        _ => return Ok(bad_request("operation must be \"get\", \"put\", or \"delete\"")),
     };
     if parsed.key.trim().is_empty() {
         return Ok(bad_request("key required"));

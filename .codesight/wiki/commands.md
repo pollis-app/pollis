@@ -94,13 +94,14 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `reset_identity(user_id)` → new secret key
 
 ## livekit (`commands/livekit.rs`)
-- `get_livekit_token(room_id, user_id, username)` → token string
+- Tokens are minted by the DS now (#393) — no on-device signer. `get_livekit_token` and friends call `ds_livekit_token` (`POST /v1/livekit/token`); server-side fan-out/roster go through `ds_livekit_send_data` / `ds_livekit_participants`. The client holds no LiveKit API secret.
+- `get_livekit_token(room_id, user_id, username)` → token string (identity/name derived server-side; the args are ignored)
 - `subscribe_realtime(on_event: Channel)`
 - `connect_rooms(room_ids, user_id, username)`
 
 ## voice (`commands/voice.rs`)
 **Participant identity** is per-device: `voice-{user_id}:{device_id}` (device_id from `AppState.device_id`; falls back to legacy `voice-{user_id}` pre-login). This lets two devices of the same user coexist in one room instead of colliding on the SFU (#140) — mirrors the realtime/inbox scheme in `livekit/realtime.rs`. Parse the user back out with `voice::user_id_from_voice_identity` (Rust) / `voice/identity.ts` (frontend). The voice event loop **does not play back** audio tracks whose parsed user_id is the local user's (self-hear mute) but still shows them as participants. `RoomEvent::Disconnected` now fully tears down the room + mic stream via `release_voice_resources` (previously leaked).
-- `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Mints + caches a LiveKit token (with the per-device identity, so it matches the join) and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
+- `prepare_voice_connection(channel_id, user_id, display_name)` — best-effort warmup fired on user "intent" (hover, route entry). Pre-fetches + caches the DS-minted voice token (identity derived server-side, so it matches the join) and runs a one-shot HTTPS probe to warm DNS / TLS / connection pool. Idempotent; safe to call eagerly. Consumed by the next `join_voice_channel` for the same channel + identity.
 - `join_voice_channel(channel_id, user_id, display_name, input_device, output_device, audio_processing)` — connect to LiveKit and publish the local mic. `audio_processing` is the `ApmConfig` struct (AGC + NS + AEC settings) — see [Audio Processing](./audio-processing.md). Consumes a fresh warmup if present and runs `Room::connect` + cpal mic init concurrently to minimise cold-start latency.
 - `leave_voice_channel()`
 - `toggle_voice_mute()`
@@ -115,7 +116,7 @@ Every path that produces a fresh `account_id_key` (signup, approval, Secret-Key 
 - `download_file(key)` → bytes
 - `presign_upload(key, content_type)` → presigned URL
 - `upload_media(path, filename, content_type)` / `download_media(r2_key, content_hash)` — convergent-encryption media path; dedups via `attachment_object` on Turso.
-- Internal: `delete_r2_object(state, r2_key)` — SigV4 DELETE used by `delete_message` to purge orphaned attachments. Treats 404 as success.
+- Internal: `delete_r2_object(state, r2_key)` — DS-presigned DELETE (via `presign_r2`) used by `delete_message` to purge orphaned attachments. Treats 404 as success. The client holds no R2 credentials — every get/put/delete is presigned by the DS secrets broker (`POST /v1/r2/presign`, #393).
 
 ---
 _Back to [index.md](./index.md)_

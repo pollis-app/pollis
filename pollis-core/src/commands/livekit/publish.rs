@@ -3,118 +3,44 @@ use std::sync::Arc;
 use livekit::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
-use super::admin_api::{make_admin_token, twirp_base};
-use super::jwt::make_token;
-
-/// Sends a JSON event to a user's personal inbox LiveKit room by making a
-/// one-shot room connection. Joins `inbox-{user_id}` as identity "server",
-/// publishes the data packet, then drops the room (auto-disconnects).
-/// Spawned in a background task so callers are never blocked.
-/// Non-fatal — errors are only logged.
+/// Sends a JSON event to a user's personal inbox LiveKit room via the DS's
+/// server-side `RoomService/SendData` (the admin secret stays server-side, #393).
+/// Spawned in a background task so callers are never blocked. Non-fatal — the DS
+/// treats an empty room (user offline) as success and errors are only logged.
 pub async fn publish_to_user_inbox(
-    config: &Config,
+    state: &Arc<AppState>,
     user_id: &str,
     payload: serde_json::Value,
 ) -> Result<()> {
-    if config.livekit_url.is_empty() || config.livekit_api_key.is_empty() {
-        return Ok(());
-    }
-
-    let room_name = format!("inbox-{}", user_id);
-    let token = make_admin_token(config, Some(&room_name))?;
-    let url = format!(
-        "{}/twirp/livekit.RoomService/SendData",
-        twirp_base(&config.livekit_url)
-    );
-
-    let raw = serde_json::to_vec(&payload).map_err(Error::Serde)?;
-    let body = serde_json::json!({
-        "room": room_name,
-        "data": base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &raw),
-        "kind": "RELIABLE",
-    });
-
-    // Fire-and-forget over HTTP — a single Twirp POST instead of a full
-    // Room::connect + DTLS + ICE round trip (which was costing ~2-5s of
-    // ring latency). The HTTP path is what `publish_ping` / `publish_typing`
-    // can't use (they ride the already-connected Room), but for inbox
-    // wakeups (call invites, etc.) where no persistent connection exists,
-    // SendData is the right tool.
+    let room_name = format!("inbox-{user_id}");
+    let state = Arc::clone(state);
     tokio::spawn(async move {
-        match reqwest::Client::new()
-            .post(&url)
-            .bearer_auth(&token)
-            .json(&body)
-            .send()
-            .await
-        {
-            Ok(resp) => {
-                let status = resp.status();
-                if !status.is_success() {
-                    // 404 → room doesn't exist (user offline). Treat as advisory.
-                    if status != reqwest::StatusCode::NOT_FOUND {
-                        let body_text = resp.text().await.unwrap_or_default();
-                        eprintln!("[inbox] SendData {status}: {body_text}");
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("[inbox] SendData http error: {e}");
-            }
+        if let Err(e) = crate::commands::mls::ds_livekit_send_data(&state, &room_name, payload).await {
+            eprintln!("[inbox] SendData error (non-fatal): {e}");
         }
     });
-
     Ok(())
 }
 
-/// Connects to a LiveKit room as a temporary "server" participant and publishes
-/// a data packet. Used when the caller is not already in the room (e.g. a user
-/// accepting an invite needs to notify existing group members).
+/// Publishes a data packet to a room the caller is NOT joined to (e.g. a user
+/// accepting an invite needs to notify existing group members). Now a DS
+/// server-side SendData — no more temporary `Room::connect` (which cost a full
+/// DTLS/ICE round trip and required an on-device participant token).
 pub async fn publish_to_room_server(
-    config: &Config,
+    state: &Arc<AppState>,
     room_name: &str,
     payload: serde_json::Value,
 ) -> Result<()> {
-    if config.livekit_url.is_empty() || config.livekit_api_key.is_empty() {
-        return Ok(());
-    }
-
-    let token = make_token(config, room_name, "server", "server")?;
-    let url = config.livekit_url.clone();
-    let room_owned = room_name.to_owned();
-
+    let room_name = room_name.to_owned();
+    let state = Arc::clone(state);
     tokio::spawn(async move {
-        match Room::connect(&url, &token, RoomOptions::default()).await {
-            Ok((room, _events)) => {
-                let raw = match serde_json::to_vec(&payload) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("[room-server] serialize error for {room_owned}: {e}");
-                        return;
-                    }
-                };
-                let result = room
-                    .local_participant()
-                    .publish_data(DataPacket {
-                        payload: raw,
-                        reliable: true,
-                        ..Default::default()
-                    })
-                    .await;
-                if let Err(e) = result {
-                    eprintln!("[room-server] publish_data to {room_owned} failed: {e}");
-                }
-            }
-            Err(e) => {
-                eprintln!("[room-server] connect to {room_owned} failed: {e}");
-            }
+        if let Err(e) = crate::commands::mls::ds_livekit_send_data(&state, &room_name, payload).await {
+            eprintln!("[room-server] SendData to {room_name} error (non-fatal): {e}");
         }
     });
-
     Ok(())
 }
 
@@ -280,15 +206,14 @@ pub async fn publish_membership_changed_to_room(
 /// connected admins refetch the pending join-request list when a new request
 /// arrives. Unlike `publish_membership_changed_to_room`, the requester is NOT
 /// a member of the group and is therefore not connected to its room, so this
-/// rides the server-side `publish_to_room_server` path (a temporary "server"
-/// participant) rather than a locally-connected room. Best-effort and
-/// fire-and-forget — callers should log errors.
+/// rides the server-side `publish_to_room_server` (DS SendData) path rather than
+/// a locally-connected room. Best-effort and fire-and-forget — callers log errors.
 pub async fn publish_join_requests_changed_to_room(
-    config: &Config,
+    state: &Arc<AppState>,
     group_id: &str,
 ) -> Result<()> {
     publish_to_room_server(
-        config,
+        state,
         group_id,
         serde_json::json!({
             "type": "join_requests_changed",
@@ -503,7 +428,7 @@ pub async fn start_call(
         "caller_username": caller_username,
     });
 
-    publish_to_user_inbox(&state.config, &callee_id, payload).await?;
+    publish_to_user_inbox(state, &callee_id, payload).await?;
 
     Ok(StartCallResult { call_id, room_name })
 }
@@ -525,7 +450,7 @@ pub async fn cancel_call(
         "call_id": call_id,
     });
 
-    publish_to_user_inbox(&state.config, &other_user_id, payload).await?;
+    publish_to_user_inbox(state, &other_user_id, payload).await?;
 
     Ok(())
 }
@@ -560,7 +485,7 @@ pub async fn dismiss_call_on_my_devices(
         "call_id": call_id,
     });
 
-    publish_to_user_inbox(&state.config, &user_id, payload).await?;
+    publish_to_user_inbox(state, &user_id, payload).await?;
 
     Ok(())
 }

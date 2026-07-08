@@ -66,7 +66,7 @@ pub async fn request_group_access(
     // room, so this rides the server-side publish path. Best-effort — a flaky
     // LiveKit blip must not fail the request.
     if let Err(e) = crate::commands::livekit::publish_join_requests_changed_to_room(
-        &state.config,
+        state,
         &group_id,
     ).await {
         eprintln!("[realtime] request_group_access: notify group {group_id}: {e}");
@@ -206,7 +206,7 @@ pub async fn approve_join_request(
     // `kind: "approval"` keeps this silent on the requester's device — they
     // initiated the request, so an unsolicited ping isn't warranted.
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-        &state.config,
+        state,
         &requester_id,
         serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "approval"}),
     ).await {

@@ -928,7 +928,7 @@ pub async fn reconcile_group_mls_impl(
         // from this cleartext packet. Non-fatal: a flaky LiveKit blip mustn't
         // fail the reconcile that already committed to Turso.
         if let Err(e) = crate::commands::livekit::publish_to_room_server(
-            &state.config,
+            state,
             &conversation_id,
             crate::commands::livekit_signalling::roster_changed_payload(
                 &conversation_id,

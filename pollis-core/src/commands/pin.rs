@@ -426,6 +426,10 @@ pub async fn set_pin(
 
     let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
 
+    // Move remote_db onto a DS-minted short-TTL read-only token (#393). Idempotent
+    // + best-effort: keeps the baked read-only token if the DS can't mint one.
+    crate::commands::turso_token::spawn_turso_token_refresh(state);
+
     if let Some(device_id) = state.device_id.lock().await.clone() {
         if let Err(e) =
             crate::commands::mls::ensure_device_cert(state, &user_id, &device_id).await
@@ -533,6 +537,10 @@ pub async fn unlock(
         .await;
 
     let mls_was_empty = state.load_user_db_with_key(&user_id, &db_key).await?;
+
+    // Move remote_db onto a DS-minted short-TTL read-only token (#393). Idempotent
+    // + best-effort: keeps the baked read-only token if the DS can't mint one.
+    crate::commands::turso_token::spawn_turso_token_refresh(state);
 
     if let Some(device_id) = state.device_id.lock().await.clone() {
         if let Err(e) =

@@ -13,7 +13,7 @@
 
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
-use pollis_delivery::broker::{presign_r2_url, sign_livekit_token};
+use pollis_delivery::broker::{presign_r2_url, sign_livekit_admin_token, sign_livekit_token};
 use sha2::Sha256;
 
 // ── LiveKit JWT ────────────────────────────────────────────────────────────
@@ -112,6 +112,26 @@ fn livekit_view_variant_disables_publish_data() {
     assert_hs256_signature(&token, LK_SECRET);
 }
 
+#[test]
+fn livekit_admin_token_grants_room_admin_and_verifies() {
+    // The admin token (SendData / ListParticipants) must carry roomAdmin +
+    // roomList scoped to the room, a short (+300s) expiry, and verify against the
+    // secret. `sub` is the internal DS identity (filtered out of rosters).
+    let now = 1_700_000_000u64;
+    let token = sign_livekit_admin_token(LK_KEY, LK_SECRET, "inbox-u_123", now).unwrap();
+    let (header, payload, _) = split_jwt(&token);
+    assert_eq!(header["alg"], "HS256");
+    assert_eq!(payload["iss"], LK_KEY);
+    assert_eq!(payload["sub"], "pollis-ds");
+    assert_eq!(payload["exp"], now + 300);
+    assert_eq!(payload["video"]["roomAdmin"], true);
+    assert_eq!(payload["video"]["roomList"], true);
+    assert_eq!(payload["video"]["room"], "inbox-u_123");
+    // Must NOT carry participant grants (it never joins as a participant).
+    assert!(payload["video"].get("roomJoin").is_none());
+    assert_hs256_signature(&token, LK_SECRET);
+}
+
 // ── R2 SigV4 presign (known-answer) ─────────────────────────────────────────
 //
 // Every input pinned so the signature is reproducible. Endpoint/bucket/key/
@@ -179,6 +199,30 @@ fn presign_put_encodes_key_slash_and_space() {
 &X-Amz-Expires=3600\
 &X-Amz-SignedHeaders=host\
 &X-Amz-Signature=faa8c97256a7f4a8a79ac5481e9f46233e1511fd1a4ce181dc0f6859dee14afb"
+    );
+}
+
+#[test]
+fn presign_delete_signature_binds_the_method() {
+    // DELETE (attachment cleanup) presign — the HTTP method is part of the SigV4
+    // canonical request, so a DELETE URL must carry a signature distinct from an
+    // otherwise-identical GET. Guards against the handler ever mapping delete to
+    // the wrong verb.
+    let common = |method| {
+        presign_r2_url(
+            R2_ENDPOINT, R2_BUCKET, R2_REGION, R2_ACCESS, R2_SECRET, method,
+            "media/abc123/file.enc", 900, R2_DATE,
+        )
+    };
+    let del = common("DELETE");
+    let get = common("GET");
+    let sig = |u: &str| u.rsplit_once("X-Amz-Signature=").unwrap().1.to_string();
+    assert_ne!(sig(&del), sig(&get), "DELETE must not reuse the GET signature");
+    // Everything up to the signature (path + canonical query) is method-agnostic,
+    // so the two URLs are identical there.
+    assert_eq!(
+        del.split_once("&X-Amz-Signature=").unwrap().0,
+        get.split_once("&X-Amz-Signature=").unwrap().0,
     );
 }
 

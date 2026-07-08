@@ -260,7 +260,7 @@ pub async fn start_device_enrollment(
         "verification_code": verification_code,
     });
     if let Err(e) =
-        crate::commands::livekit::publish_to_user_inbox(&state.config, &user_id, payload).await
+        crate::commands::livekit::publish_to_user_inbox(state, &user_id, payload).await
     {
         eprintln!("[enrollment] inbox publish failed (non-fatal): {e}");
     }

@@ -91,14 +91,14 @@ export function setNativeBridge(bridge: NativeBridge): void {
 export interface InitConfig {
   tursoUrl: string;
   tursoToken: string;
+  // R2 access credentials moved server-side to the DS secrets broker (#393); the
+  // bundle no longer carries them. Only the non-secret endpoint/public URL remain.
   r2Endpoint?: string;
-  r2AccessKeyId?: string;
-  r2SecretAccessKey?: string;
-  r2Region?: string;
   r2PublicUrl?: string;
+  // LiveKit API key/secret moved server-side to the DS broker (#393); the bundle
+  // no longer carries them. Only the non-secret ws URL remains (the SFU dial URL,
+  // also returned by the DS token endpoint).
   livekitUrl?: string;
-  livekitApiKey?: string;
-  livekitApiSecret?: string;
   resendApiKey?: string;
 }
 
@@ -131,13 +131,8 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     turso_token: config.tursoToken,
     data_dir: dataDir,
     r2_endpoint: config.r2Endpoint ?? "",
-    r2_access_key_id: config.r2AccessKeyId ?? "",
-    r2_secret_access_key: config.r2SecretAccessKey ?? "",
-    r2_region: config.r2Region ?? "auto",
     r2_public_url: config.r2PublicUrl ?? "",
     livekit_url: config.livekitUrl ?? "",
-    livekit_api_key: config.livekitApiKey ?? "",
-    livekit_api_secret: config.livekitApiSecret ?? "",
     resend_api_key: config.resendApiKey ?? "",
   });
   await pollisNative.initPollis(configJson);

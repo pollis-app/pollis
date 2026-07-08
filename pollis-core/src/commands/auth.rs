@@ -1100,7 +1100,7 @@ pub async fn delete_account(
 
         for dm_id in &dm_ids {
             if let Err(e) = crate::commands::livekit::publish_to_room_server(
-                &state.config,
+                state,
                 dm_id,
                 serde_json::json!({"type": "membership_changed", "conversation_id": dm_id}),
             ).await {
@@ -1325,7 +1325,7 @@ pub async fn revoke_device(
         "user_id": user_id,
     });
     if let Err(e) =
-        crate::commands::livekit::publish_to_user_inbox(&state.config, &user_id, payload).await
+        crate::commands::livekit::publish_to_user_inbox(state, &user_id, payload).await
     {
         eprintln!("[revoke_device] inbox nudge failed (non-fatal): {e}");
     }

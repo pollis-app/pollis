@@ -251,7 +251,7 @@ pub async fn send_message(
         });
         for uid in member_ids {
             if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-                &state.config,
+                state,
                 &uid,
                 payload.clone(),
             ).await {

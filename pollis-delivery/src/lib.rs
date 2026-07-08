@@ -263,6 +263,9 @@ pub fn build_router_with_state(state: AppState) -> Router {
         // presign an R2 GET/PUT. Secrets live in DS env, never the client
         // bundle. See `broker` module docs + `docs/secrets-broker.md`.
         .route("/v1/livekit/token", post(broker::livekit_token))
+        .route("/v1/livekit/send-data", post(broker::livekit_send_data))
+        .route("/v1/livekit/participants", post(broker::livekit_participants))
+        .route("/v1/turso/token", post(broker::turso_token))
         .route("/v1/r2/presign", post(broker::r2_presign))
         .with_state(state)
 }

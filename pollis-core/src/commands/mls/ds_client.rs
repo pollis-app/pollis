@@ -191,6 +191,118 @@ pub async fn ds_claim_key_package(
     Ok(Some(bytes))
 }
 
+/// Ask the DS to mint a LiveKit **participant** token for `room`. `kind` selects
+/// the identity scheme (`"realtime"` / `"voice"` / `"view"`) — the user+device
+/// halves are always derived server-side from the verified signer, so a client
+/// cannot mint a token as another user/device. Device-signed via [`ds_post`].
+/// Returns `(token, ws_url)`. Replaces the on-device `livekit_jwt::make_token`
+/// (which held the LiveKit API secret).
+pub async fn ds_livekit_token(
+    state: &Arc<AppState>,
+    room: &str,
+    kind: &str,
+) -> Result<(String, String)> {
+    let body = serde_json::json!({ "room": room, "kind": kind });
+    let resp = ds_post(state, "/v1/livekit/token", &body).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!("ds_livekit_token {status}: {txt}")));
+    }
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        token: String,
+        url: String,
+    }
+    let parsed: Resp = resp
+        .json()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_token decode: {e}")))?;
+    Ok((parsed.token, parsed.url))
+}
+
+/// Fan out a **content-free** control `payload` to a LiveKit `room` via the DS's
+/// server-side `RoomService/SendData` (the admin secret stays server-side).
+/// Replaces the on-device `make_admin_token` + Twirp POST. Best-effort — the DS
+/// treats a room with no participants (404) as success.
+pub async fn ds_livekit_send_data(
+    state: &Arc<AppState>,
+    room: &str,
+    payload: serde_json::Value,
+) -> Result<()> {
+    let body = serde_json::json!({ "room": room, "payload": payload });
+    let resp = ds_post(state, "/v1/livekit/send-data", &body).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "ds_livekit_send_data {status}: {txt}"
+        )));
+    }
+    Ok(())
+}
+
+/// List a voice room's roster via the DS (server-side `ListParticipants`).
+/// Returns `(identity, display_name)` pairs; internal participants are already
+/// filtered server-side. Replaces `room_service_list_participants`. Desktop-only
+/// — mobile has no Rust-side voice roster (see `livekit_stub`).
+#[cfg(feature = "media")]
+pub async fn ds_livekit_participants(
+    state: &Arc<AppState>,
+    room: &str,
+) -> Result<Vec<(String, String)>> {
+    let body = serde_json::json!({ "room": room });
+    let resp = ds_post(state, "/v1/livekit/participants", &body).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!(
+            "ds_livekit_participants {status}: {txt}"
+        )));
+    }
+    #[derive(serde::Deserialize)]
+    struct P {
+        identity: String,
+        name: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        participants: Vec<P>,
+    }
+    let parsed: Resp = resp
+        .json()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_livekit_participants decode: {e}")))?;
+    Ok(parsed
+        .participants
+        .into_iter()
+        .map(|p| (p.identity, p.name))
+        .collect())
+}
+
+/// Mint a short-TTL **read-only** Turso token via the DS. Returns `(token,
+/// expires_in_secs)`. Device-signed. Any error (incl. 503 when the DS has no
+/// Turso Platform credentials) lets the caller fall back to the baked read-only
+/// token, so an unconfigured deploy still reads. See #393.
+pub async fn ds_turso_token(state: &Arc<AppState>) -> Result<(String, u64)> {
+    let resp = ds_post(state, "/v1/turso/token", &serde_json::json!({})).await?;
+    let status = resp.status();
+    if !status.is_success() {
+        let txt = resp.text().await.unwrap_or_default();
+        return Err(Error::Other(anyhow::anyhow!("ds_turso_token {status}: {txt}")));
+    }
+    #[derive(serde::Deserialize)]
+    struct Resp {
+        token: String,
+        expires_in: u64,
+    }
+    let parsed: Resp = resp
+        .json()
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("ds_turso_token decode: {e}")))?;
+    Ok((parsed.token, parsed.expires_in))
+}
+
 /// [`ds_post`] for writes that must NOT silently fail: any non-2xx becomes an
 /// `Err` carrying the status + body. Use this when the direct-write path it
 /// replaces propagated its error (`conn.execute(...).await?`). For best-effort

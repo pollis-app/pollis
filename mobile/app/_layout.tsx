@@ -46,12 +46,8 @@ export default function RootLayout() {
       tursoUrl: process.env.EXPO_PUBLIC_TURSO_URL ?? "",
       tursoToken: process.env.EXPO_PUBLIC_TURSO_TOKEN ?? "",
       r2Endpoint: process.env.EXPO_PUBLIC_R2_ENDPOINT,
-      r2AccessKeyId: process.env.EXPO_PUBLIC_R2_ACCESS_KEY_ID,
-      r2SecretAccessKey: process.env.EXPO_PUBLIC_R2_SECRET_KEY,
       r2PublicUrl: process.env.EXPO_PUBLIC_R2_PUBLIC_URL,
       livekitUrl: process.env.EXPO_PUBLIC_LIVEKIT_URL,
-      livekitApiKey: process.env.EXPO_PUBLIC_LIVEKIT_API_KEY,
-      livekitApiSecret: process.env.EXPO_PUBLIC_LIVEKIT_API_SECRET,
       resendApiKey: process.env.EXPO_PUBLIC_RESEND_API_KEY,
     })
       .then(() => setBridgeReady(true))

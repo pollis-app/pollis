@@ -3,9 +3,12 @@
 //! and the connect/reconnect loop that keeps each group/inbox room
 //! subscribed.
 //!
+//! LiveKit tokens + RoomService admin calls are minted **server-side** by the
+//! Delivery Service now (#393) — this module holds no LiveKit API secret. Token
+//! requests go through `commands::mls::ds_livekit_token`; SendData / roster go
+//! through `ds_livekit_send_data` / `ds_livekit_participants`.
+//!
 //! Submodules:
-//!   - `jwt`           — participant JWT helpers (`make_token`, `make_view_token`).
-//!   - `admin_api`     — Twirp admin token + RoomService `ListParticipants`.
 //!   - `identity`      — parse a LiveKit identity into a Pollis user_id +
 //!                       avatar lookups against the remote DB.
 //!   - `participants`  — `list_voice_participants` / `list_voice_room_counts`.
@@ -27,9 +30,7 @@ use crate::realtime::RealtimeEvent;
 
 // ── Submodules ───────────────────────────────────────────────────────────
 
-mod admin_api;
 mod identity;
-mod jwt;
 mod legacy;
 mod participants;
 mod publish;
@@ -38,7 +39,6 @@ mod realtime;
 // ── Public surface ───────────────────────────────────────────────────────
 
 pub(crate) use identity::{lookup_avatar_url, lookup_avatar_url_for_identity};
-pub(crate) use jwt::make_token;
 
 pub use legacy::{get_livekit_token, get_livekit_url, get_livekit_view_token};
 pub use participants::{

@@ -250,13 +250,8 @@ pub async fn spawn_world() -> World {
         log_db_url: None,
         log_db_token: None,
         r2_endpoint: String::new(),
-        r2_access_key_id: String::new(),
-        r2_secret_access_key: String::new(),
-        r2_region: "auto".to_string(),
         r2_public_url: String::new(),
         livekit_url: String::new(),
-        livekit_api_key: String::new(),
-        livekit_api_secret: String::new(),
         pollis_delivery_url: Some(delivery_url),
         // Sealed Sender off: the smoke rig exercises sync/enroll flows, not
         // envelope blinding (mirrors the flows harness default).

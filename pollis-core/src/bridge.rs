@@ -117,19 +117,9 @@ struct InitConfig {
     #[serde(default)]
     r2_endpoint: String,
     #[serde(default)]
-    r2_access_key_id: String,
-    #[serde(default)]
-    r2_secret_access_key: String,
-    #[serde(default)]
-    r2_region: Option<String>,
-    #[serde(default)]
     r2_public_url: String,
     #[serde(default)]
     livekit_url: String,
-    #[serde(default)]
-    livekit_api_key: String,
-    #[serde(default)]
-    livekit_api_secret: String,
     /// Optional Delivery Service base URL. Absent → direct Turso writes.
     #[serde(default)]
     pollis_delivery_url: Option<String>,
@@ -160,13 +150,8 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 log_db_url: parsed.log_db_url.filter(|s| !s.is_empty()),
                 log_db_token: parsed.log_db_token.filter(|s| !s.is_empty()),
                 r2_endpoint: parsed.r2_endpoint,
-                r2_access_key_id: parsed.r2_access_key_id,
-                r2_secret_access_key: parsed.r2_secret_access_key,
-                r2_region: parsed.r2_region.unwrap_or_else(|| "auto".into()),
                 r2_public_url: parsed.r2_public_url,
                 livekit_url: parsed.livekit_url,
-                livekit_api_key: parsed.livekit_api_key,
-                livekit_api_secret: parsed.livekit_api_secret,
                 pollis_delivery_url: parsed.pollis_delivery_url.filter(|s| !s.is_empty()),
                 seal_sender: parsed.seal_sender,
             };
@@ -796,31 +781,16 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
         // ----- livekit (realtime token) -----
         // Mobile joins the same SFU rooms as desktop via the JS LiveKit SDK
         // (data-only, see mobile/lib/realtime/). It only passes the room name;
-        // identity + display name are derived from the session here so the
-        // participant identity matches desktop's `connect_rooms` scheme
-        // (`{user_id}:{device_id}`), letting multiple devices coexist.
+        // the DS mints the token, deriving identity server-side from this
+        // device's verified signature — matching desktop's `connect_rooms`
+        // scheme (`{user_id}:{device_id}`), so multiple devices coexist. The
+        // LiveKit API secret is no longer on the client (#393).
         "get_livekit_token" => {
             let room: String = arg(&args, "room")?;
             let st = state()?;
-            let profile = auth::get_session(&st).await?.ok_or_else(|| {
-                BridgeError::Bridge("get_livekit_token: not signed in".into())
-            })?;
-            let user_id = profile.id;
-            let display_name = if profile.username.is_empty() {
-                user_id.clone()
-            } else {
-                profile.username
-            };
-            let identity = match st.device_id.lock().await.clone() {
-                Some(did) => format!("{user_id}:{did}"),
-                None => user_id.clone(),
-            };
-            ok(crate::commands::livekit_jwt::make_token(
-                &st.config,
-                &room,
-                &identity,
-                &display_name,
-            )?)
+            let (token, _url) =
+                crate::commands::mls::ds_livekit_token(&st, &room, "realtime").await?;
+            ok(token)
         }
 
         // ----- media -----

@@ -16,11 +16,9 @@ pub mod livekit;
 #[cfg(not(feature = "media"))]
 #[path = "livekit_stub.rs"]
 pub mod livekit;
-// LiveKit access-token minting — pure jsonwebtoken, no native deps, so it
-// compiles on every target (unlike the `livekit` module above). Desktop's
-// `livekit/jwt.rs` re-exports from here; mobile's `get_livekit_token` bridge
-// arm calls it directly.
-pub mod livekit_jwt;
+// LiveKit tokens are minted server-side by the DS now (#393); no on-device
+// signer remains. Token/SendData/roster requests go through the DS client
+// helpers in `commands::mls` (`ds_livekit_*`).
 // LiveKit realtime signalling (wake-up) payload builders — pure serde_json,
 // no native deps, always compiled (same rationale as `livekit_jwt`). Both the
 // media `livekit::publish` and the headless `livekit_stub` build their wire
@@ -34,6 +32,7 @@ pub mod push;
 pub mod r2;
 pub mod safety;
 pub mod transparency;
+pub mod turso_token;
 #[cfg(feature = "media")]
 pub mod sfx;
 // Terminal pane: real PTY backend on Unix desktop, Windows stub until

@@ -112,7 +112,7 @@ pub async fn send_group_invite(
     // `kind: "invite"` lets the frontend raise a ping/OS notification — a
     // generic membership_changed (kind: null) would only invalidate queries.
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
-        &state.config,
+        state,
         &invitee_id,
         serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "invite"}),
     ).await {
@@ -185,7 +185,7 @@ pub async fn accept_group_invite(
     // The accepting user isn't connected to the group room yet, so use
     // the server-side publish to reach existing members.
     if let Err(e) = crate::commands::livekit::publish_to_room_server(
-        &state.config,
+        state,
         &group_id,
         serde_json::json!({"type": "membership_changed", "group_id": group_id}),
     ).await {

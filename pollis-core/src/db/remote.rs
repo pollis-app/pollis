@@ -28,6 +28,12 @@ pub struct RemoteDb {
     /// production never sets it (the real read-only token enforces this server
     /// side). Used by the flows harness to prove the client is read-only-safe.
     query_only: bool,
+    /// A DS-minted short-TTL read-only token that supersedes the baked
+    /// `Backend::Remote` token once available (#393). `None` → use the baked
+    /// token (pre-mint window / unconfigured DS / local backend). Set via
+    /// [`set_remote_token`](RemoteDb::set_remote_token); read on every
+    /// [`reconnect`](RemoteDb::reconnect).
+    token_override: Arc<RwLock<Option<String>>>,
 }
 
 impl RemoteDb {
@@ -44,6 +50,7 @@ impl RemoteDb {
                 token: token.to_string(),
             },
             query_only: false,
+            token_override: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -68,6 +75,7 @@ impl RemoteDb {
             db: Arc::new(RwLock::new(db)),
             backend: Backend::Local { path },
             query_only: false,
+            token_override: Arc::new(RwLock::new(None)),
         })
     }
 
@@ -93,6 +101,7 @@ impl RemoteDb {
             db: Arc::clone(&self.db),
             backend: self.backend.clone(),
             query_only: true,
+            token_override: Arc::clone(&self.token_override),
         }
     }
 
@@ -124,15 +133,33 @@ impl RemoteDb {
     pub async fn reconnect(&self) -> Result<()> {
         let new_db = match &self.backend {
             Backend::Remote { url, token } => {
-                Builder::new_remote(url.clone(), token.clone())
-                    .build()
-                    .await?
+                // Prefer a DS-minted short-TTL token when one has been set;
+                // otherwise the baked read-only token (pre-mint / unconfigured).
+                let effective = self
+                    .token_override
+                    .read()
+                    .await
+                    .clone()
+                    .unwrap_or_else(|| token.clone());
+                Builder::new_remote(url.clone(), effective).build().await?
             }
             Backend::Local { path } => Builder::new_local(path).build().await?,
         };
         let mut db = self.db.write().await;
         *db = new_db;
         Ok(())
+    }
+
+    /// Swap in a DS-minted short-TTL read-only token (#393) and rebuild the
+    /// underlying handle so every subsequent connection uses it. No-op for the
+    /// local test backend (which has no token). On mint failure the caller keeps
+    /// the current (baked) token, so reads never break.
+    pub async fn set_remote_token(&self, token: String) -> Result<()> {
+        if matches!(self.backend, Backend::Local { .. }) {
+            return Ok(());
+        }
+        *self.token_override.write().await = Some(token);
+        self.reconnect().await
     }
 
     /// Cheap round-trip to verify the connection is alive. Used by the

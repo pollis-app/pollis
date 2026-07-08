@@ -24,9 +24,13 @@ pub use device::{ensure_device_cert, load_or_create_device_signer, resign_stale_
 
 // ── Signed Delivery-Service write client (4 `X-Pollis-*` headers) ────────────
 pub(crate) use ds_client::{
-    ds_claim_key_package, ds_post, ds_post_ok, ds_post_plain, ds_post_session_ok,
-    ds_post_signed_or_session, ds_post_signed_or_session_ok,
+    ds_claim_key_package, ds_livekit_send_data, ds_livekit_token, ds_post, ds_post_ok,
+    ds_post_plain, ds_post_session_ok, ds_post_signed_or_session, ds_post_signed_or_session_ok,
+    ds_turso_token,
 };
+// Desktop-only (voice roster); mobile has no Rust-side participants path.
+#[cfg(feature = "media")]
+pub(crate) use ds_client::ds_livekit_participants;
 
 // ── Key packages ─────────────────────────────────────────────────────────────
 pub use key_packages::{ensure_mls_key_package, validate_key_package};

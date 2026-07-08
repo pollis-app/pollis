@@ -262,13 +262,13 @@ Current state:
 
 ### Still pending (need the native build env to compile/verify)
 
-- ~~**`get_livekit_token` bridge command**~~ — **DONE.** The pure-JWT mint now
-  lives in the always-compiled `pollis-core/src/commands/livekit_jwt.rs`
-  (desktop's `livekit/jwt.rs` re-exports it); the `get_livekit_token` arm in
-  `bridge.rs` derives identity from the session (`{user_id}:{device_id}`,
-  matching desktop's `connect_rooms`) and mints the token. Compiles clean for
-  both host and `aarch64-apple-ios-sim`. Activates foreground realtime once
-  `EXPO_PUBLIC_LIVEKIT_URL` is set (#185). On-device verification still pending.
+- ~~**`get_livekit_token` bridge command**~~ — **DONE.** The `get_livekit_token`
+  arm in `bridge.rs` now calls `ds_livekit_token` (`POST /v1/livekit/token`); the
+  DS derives the `{user_id}:{device_id}` identity from this device's verified
+  signature (matching desktop's `connect_rooms`) and returns the JWT. No on-device
+  signer — the LiveKit API secret was removed from the bundle (#393). Activates
+  foreground realtime once `EXPO_PUBLIC_LIVEKIT_URL` is set (#185). On-device
+  verification still pending.
 - **Push backend (code DONE; credentials pending).** The Rust side is wired and
   compiles for host + `aarch64-apple-ios-sim`:
   - `push_token` Turso table — migration `000006_push_token.sql` (additive
@@ -299,11 +299,22 @@ Local dev currently feeds real credentials to the Rust bridge via
 the APK/IPA in plaintext — `unzip` + grep recovers them. This is fine for a dev
 build on a trusted device; it is **not shippable**. What leaks today:
 
-- **Turso token** — full read/write to the production DB (all users' metadata,
-  membership, message envelopes). The worst one.
-- **LiveKit API secret** — lets anyone mint a join token for any room.
-- **Resend key** — send email as Pollis.
-- (R2 keys too, once media is configured.)
+- ✅ **Resend key** — DONE, moved server-side (OTP runs on the DS).
+- ✅ **R2 keys** — DONE (#393). `r2_access_key_id` / `r2_secret_access_key` are
+  gone from the bundle; `commands/r2.rs` presigns every get/put/delete via the DS
+  (`POST /v1/r2/presign`) and only the non-secret `EXPO_PUBLIC_R2_ENDPOINT` /
+  `_R2_PUBLIC_URL` remain. Never re-add the R2 secret env vars here.
+- ✅ **LiveKit API secret** — DONE (#393). `livekit_api_key` / `livekit_api_secret`
+  are deleted from the client; tokens come from `POST /v1/livekit/token` and
+  server-side fan-out/roster from `/v1/livekit/send-data` + `/v1/livekit/participants`.
+  Only the non-secret `EXPO_PUBLIC_LIVEKIT_URL` remains. Never re-add the API
+  key/secret env vars here.
+- 🟡 **Turso token** — the leak is closed (client holds a **read-only** token;
+  writes go through the DS). `commands/turso_token.rs` now moves it onto a
+  DS-minted **short-TTL** read-only token (`/v1/turso/token`), shrinking blast
+  radius from "forever" to the TTL. Reads are load-bearing, so the baked read-only
+  token stays as a fail-soft fallback until DS minting is live in prod. True
+  per-user row scoping needs per-user DBs (#261, separate).
 
 The fix is an **authorized-secrets broker** — a thin server-side endpoint (a
 Cloudflare Worker fits; CF is already in the stack) that holds the real secrets
@@ -312,13 +323,11 @@ and never ships them to the client:
 1. **Bootstrap (pre-auth):** `POST /otp/request` + `/otp/verify` run server-side
    (server calls Resend). The phone never holds the Resend key.
 2. **Post-auth, scoped + short-lived creds:**
-   - **Turso:** mint per-user, short-TTL **scoped** DB tokens (or proxy DB
-     access) instead of the master token — blast radius shrinks from "whole DB
-     forever" to "this user, for minutes".
-   - **LiveKit:** the server signs the room JWT (the API secret stays
-     server-side); the phone calls `/livekit/token?room=…` with its session and
-     gets back only the JWT. This moves `get_livekit_token`'s signing off-device.
-   - **R2:** server returns presigned URLs (already the right shape).
+   - **Turso:** ✅ DONE — `commands/turso_token.rs` mints a short-TTL read-only
+     token via the DS (`/v1/turso/token`); baked token is a fail-soft fallback.
+   - **LiveKit:** ✅ DONE — the DS signs the JWT (`/v1/livekit/token`) and does
+     server-side SendData/ListParticipants; the client holds no API secret.
+   - **R2:** ✅ DONE — the DS returns presigned URLs; the client holds no R2 keys.
 
 Note the tension with the repo's "no backend server — Rust talks to Turso
 directly (1 hop)" principle (root `CLAUDE.md`). That model is tenable for a
