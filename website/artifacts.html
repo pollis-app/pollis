@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pollis — Artifacts &amp; Proofs</title>
+  <meta name="description"
+    content="A live dashboard of every public Pollis output — desktop app, CLI, verifier — and the transparency-log proof that each shipped byte hasn't been tampered with." />
+  <meta name="theme-color" content="#0f1117" />
+
+  <meta property="og:title" content="Pollis — Artifacts &amp; Proofs" />
+  <meta property="og:description"
+    content="Every public Pollis output and its append-only transparency-log proof, in one live dashboard." />
+  <meta property="og:type" content="website" />
+
+  <link rel="icon" type="image/svg+xml" href="favicon.svg" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible+Next:wght@400;700&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="styles.css" />
+
+  <style>
+    .art-main {
+      width: 100%;
+      max-width: 860px;
+      padding: 4rem 2rem 2rem;
+      position: relative;
+      z-index: 1;
+    }
+
+    .art-back {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      color: var(--c-text-muted);
+      text-decoration: none;
+      font-size: 0.85rem;
+      margin-bottom: 2rem;
+      transition: color 0.15s;
+    }
+
+    .art-back:hover {
+      color: var(--c-accent);
+    }
+
+    .art-header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    .art-title {
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      color: var(--c-accent);
+      margin-bottom: 0.75rem;
+    }
+
+    .art-subtitle {
+      color: var(--c-accent);
+      font-size: 0.95rem;
+      line-height: 1.6;
+    }
+
+    .art-explainer {
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+      font-size: 0.9rem;
+      line-height: 1.7;
+      color: var(--c-text);
+      background: #000;
+    }
+
+    .art-explainer strong {
+      color: var(--c-text);
+    }
+
+    .art-explainer a,
+    .art-note a,
+    .art-card a.art-inline,
+    .art-key-block a {
+      color: var(--c-accent);
+      text-decoration: underline;
+      text-decoration-color: rgba(253, 186, 116, 0.4);
+      text-underline-offset: 2px;
+    }
+
+    .art-explainer a:hover,
+    .art-note a:hover,
+    .art-card a.art-inline:hover,
+    .art-key-block a:hover {
+      text-decoration-color: var(--c-accent);
+    }
+
+    /* ── Sections ─────────────────────────────────────────────── */
+    .art-section {
+      margin-bottom: 2.5rem;
+    }
+
+    .art-section-title {
+      font-size: 1.25rem;
+      color: var(--c-text);
+      margin-bottom: 0.35rem;
+    }
+
+    .art-section-lede {
+      font-size: 0.9rem;
+      color: var(--c-text-muted);
+      line-height: 1.6;
+      margin-bottom: 1.25rem;
+    }
+
+    /* ── Card ─────────────────────────────────────────────────── */
+    .art-card {
+      background: #000;
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .art-card-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    .art-card-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: var(--c-text);
+    }
+
+    .art-card-ver {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.85rem;
+      color: var(--c-accent);
+    }
+
+    .art-card-desc {
+      font-size: 0.85rem;
+      color: var(--c-text-muted);
+      line-height: 1.6;
+      margin-bottom: 1rem;
+    }
+
+    /* ── Download / link pills ────────────────────────────────── */
+    .art-links {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .art-link-pill {
+      font-size: 0.8rem;
+      font-weight: 700;
+      padding: 0.4rem 0.9rem;
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      text-decoration: none;
+      color: var(--c-text-muted);
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .art-link-pill:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+
+    /* ── Badge (solid, no glow) ───────────────────────────────── */
+    .art-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.25rem 0.7rem;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 0.75rem;
+      border: 2px solid var(--c-border);
+      white-space: nowrap;
+    }
+
+    .art-badge--pass {
+      color: #0f1117;
+      background: #7bd88f;
+      border-color: #7bd88f;
+    }
+
+    .art-badge--fail {
+      color: #0f1117;
+      background: #f1707b;
+      border-color: #f1707b;
+    }
+
+    .art-badge--info {
+      color: var(--c-text);
+      background: transparent;
+      border-color: var(--c-border);
+    }
+
+    /* ── Meta line (tree size, root) ──────────────────────────── */
+    .art-meta {
+      font-size: 0.78rem;
+      color: var(--c-text-muted);
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      word-break: break-all;
+      margin: 1rem 0 0.5rem;
+    }
+
+    .art-meta div {
+      margin-bottom: 0.25rem;
+    }
+
+    /* ── Artifact / tree table ────────────────────────────────── */
+    .art-table-wrap {
+      overflow-x: auto;
+    }
+
+    .art-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.78rem;
+      margin-top: 0.75rem;
+    }
+
+    .art-table th {
+      text-align: left;
+      font-weight: 700;
+      color: var(--c-text-muted);
+      padding: 0.5rem 0.75rem 0.5rem 0;
+      border-bottom: 1px solid var(--c-border);
+      white-space: nowrap;
+    }
+
+    .art-table td {
+      padding: 0.55rem 0.75rem 0.55rem 0;
+      border-bottom: 1px solid var(--c-border);
+      vertical-align: middle;
+      color: var(--c-text);
+    }
+
+    .art-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    .art-mono {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      color: var(--c-text-muted);
+    }
+
+    /* ── Copy chip ────────────────────────────────────────────── */
+    .art-copy {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: inherit;
+      color: var(--c-text);
+      background: transparent;
+      border: 1px solid var(--c-border);
+      border-radius: 5px;
+      padding: 0.2rem 0.5rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .art-copy:hover {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+
+    .art-copy--copied {
+      border-color: #7bd88f;
+      color: #7bd88f;
+    }
+
+    /* ── Tree rows ────────────────────────────────────────────── */
+    .art-tree {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      padding: 0.85rem 0;
+      border-bottom: 1px solid var(--c-border);
+    }
+
+    .art-tree:last-child {
+      border-bottom: none;
+    }
+
+    .art-tree-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .art-tree-name {
+      font-weight: 700;
+      color: var(--c-text);
+      font-size: 0.95rem;
+    }
+
+    .art-tree-time {
+      font-size: 0.78rem;
+      color: var(--c-text-muted);
+    }
+
+    .art-tree-detail {
+      font-size: 0.78rem;
+      color: var(--c-text-muted);
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      word-break: break-all;
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    /* ── Key block ────────────────────────────────────────────── */
+    .art-key-block {
+      font-size: 0.85rem;
+      color: var(--c-text-muted);
+      line-height: 1.7;
+    }
+
+    .art-key-hex {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin: 0.75rem 0 1rem;
+    }
+
+    .art-key-label {
+      font-size: 0.75rem;
+      color: var(--c-text-muted);
+      letter-spacing: 0.03em;
+    }
+
+    .art-cmds {
+      list-style: none;
+      margin: 0.75rem 0 0;
+      padding: 0;
+    }
+
+    .art-cmds li {
+      margin-bottom: 0.5rem;
+    }
+
+    .art-cmd {
+      display: block;
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.8rem;
+      color: var(--c-text);
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      overflow-x: auto;
+      white-space: nowrap;
+    }
+
+    .art-cmd-note {
+      font-size: 0.75rem;
+      color: var(--c-text-muted);
+      margin-top: 0.15rem;
+    }
+
+    /* ── Note / caveat ────────────────────────────────────────── */
+    .art-note {
+      font-size: 0.82rem;
+      color: var(--c-text-muted);
+      line-height: 1.7;
+    }
+
+    .art-note--strong {
+      border-left: 2px solid var(--c-accent);
+      padding-left: 1rem;
+      margin-top: 1rem;
+    }
+
+    .art-loading {
+      font-size: 0.85rem;
+      color: var(--c-text-muted);
+      font-style: italic;
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Dot matrix background -->
+  <div id="dot-matrix-bg"></div>
+
+  <main>
+    <div class="art-main">
+      <a href="index.html" class="art-back">&larr; Back to Pollis</a>
+
+      <div class="art-header">
+        <h1 class="art-title">Artifacts &amp; Proofs</h1>
+        <p class="art-subtitle">
+          Every public thing Pollis ships — desktop app, terminal client, verifier — and the append-only
+          transparency-log proof that the bytes you download are the exact bytes we published.
+        </p>
+      </div>
+
+      <div class="art-explainer">
+        This page is a <strong>live demonstration</strong>. Everything below is fetched fresh on load from our
+        <strong>server-computed</strong> verification API — the browser here <strong>verifies nothing</strong> except
+        one local string comparison (the pinned signing key). You don't have to take our word for any of it: re-run the
+        exact same checks yourself with our
+        <a href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
+          rel="noopener noreferrer">open-source <code>pollis-verify</code> command-line tool</a>, or query the
+        <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
+          rel="noopener noreferrer">public verification API</a> directly (rate limits apply). Only the CLI gives you a
+        trustless verdict.
+      </div>
+
+      <!-- B. Latest releases -->
+      <section class="art-section">
+        <h2 class="art-section-title">Latest releases</h2>
+        <p class="art-section-lede">
+          The current version of each public output and where to get it. For the desktop app, the table shows every
+          shipped installer and whether its bytes are provably committed to the public binaries transparency log.
+        </p>
+
+        <!-- Desktop app card -->
+        <div class="art-card" id="art-desktop">
+          <p class="art-loading">Loading desktop release…</p>
+        </div>
+
+        <!-- Desktop artifact proofs -->
+        <div class="art-card" id="art-release-proofs">
+          <p class="art-loading">Loading release proofs…</p>
+        </div>
+
+        <!-- CLI card -->
+        <div class="art-card" id="art-cli">
+          <p class="art-loading">Loading CLI release…</p>
+        </div>
+
+        <!-- Verification CLI card (static) -->
+        <div class="art-card">
+          <div class="art-card-head">
+            <span class="art-card-name">pollis-verify (auditor CLI)</span>
+            <span class="art-badge art-badge--info">build from source</span>
+          </div>
+          <p class="art-card-desc">
+            This is the tool auditors run to independently re-check everything on this page — trusting only the one
+            pinned key, with no server on the path. It does <strong>not</strong> ship as a prebuilt download; you build
+            it from the open-source repo so you can read exactly what it does first.
+          </p>
+          <ul class="art-cmds">
+            <li>
+              <code class="art-cmd">cargo build -p verifiable-log-serve --bin pollis-verify</code>
+              <span class="art-cmd-note">produces <code>./target/debug/pollis-verify</code></span>
+            </li>
+          </ul>
+          <div class="art-links" style="margin-top: 1rem;">
+            <a class="art-link-pill"
+              href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
+              rel="noopener noreferrer">Source &amp; README</a>
+            <a class="art-link-pill"
+              href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
+              rel="noopener noreferrer">Verification docs</a>
+          </div>
+        </div>
+      </section>
+
+      <!-- C. Daily transparency self-audit -->
+      <section class="art-section">
+        <h2 class="art-section-title">Daily transparency self-audit</h2>
+        <p class="art-section-lede">
+          Pollis publishes three separate append-only Merkle logs: the <strong>commit log</strong> (conversation
+          history), <strong>account keys</strong> (published identity keys), and <strong>binaries</strong> (shipped
+          release hashes). A scheduled job re-audits all three every day and republishes their signed tree heads. Those
+          signed heads are what prove each log is append-only and fork-free — no rollback, no equivocation — trusting
+          <strong>only</strong> the one pinned Ed25519 key. This displays the current published heads; it does not, and
+          cannot, prove consistency in your browser — the
+          <a class="art-inline" href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            target="_blank" rel="noopener noreferrer">verification docs</a> and the
+          <a class="art-inline"
+            href="https://github.com/actuallydan/pollis/blob/main/.github/workflows/transparency-publish.yml"
+            target="_blank" rel="noopener noreferrer">transparency-publish workflow / run logs</a> show how to check
+          that yourself.
+        </p>
+        <div class="art-card" id="art-trees">
+          <p class="art-loading">Loading signed tree heads…</p>
+        </div>
+      </section>
+
+      <!-- D. The one key you trust -->
+      <section class="art-section">
+        <h2 class="art-section-title">The one key you trust</h2>
+        <p class="art-section-lede">
+          All of the above trusts exactly one thing: a single pinned Ed25519 public key. Every signature — on every
+          tree head, on every release — is checked against it. If you trust this key, you can verify everything; if you
+          don't, verify nothing.
+        </p>
+        <div class="art-card">
+          <div class="art-key-block">
+            <span class="art-key-label">PINNED ED25519 PUBLIC KEY</span>
+            <div class="art-key-hex" id="art-key-hex">
+              <p class="art-loading">Checking served key against the pinned constant…</p>
+            </div>
+            <p class="art-note">
+              The check above is the <strong>only</strong> verification your browser performs: it fetches the key the
+              server serves and compares it, character by character, to the constant baked into this page. Everything
+              else on this page is a <strong>server-computed</strong> verdict — re-run it with <code>pollis-verify</code>
+              to make it trustless.
+            </p>
+
+            <p class="art-key-label" style="margin-top: 1.5rem;">WHAT AN AUDITOR RUNS</p>
+            <ul class="art-cmds">
+              <li>
+                <code class="art-cmd">pollis-verify remote https://verify.pollis.com</code>
+                <span class="art-cmd-note">re-audit all three whole logs over HTTP</span>
+              </li>
+              <li>
+                <code class="art-cmd" id="art-cmd-release">pollis-verify release &lt;tag&gt; --base https://verify.pollis.com</code>
+                <span class="art-cmd-note">verify one release's shipped binaries are in the log</span>
+              </li>
+              <li>
+                <code class="art-cmd">pollis-verify group &lt;conversation_id&gt; --base https://verify.pollis.com</code>
+                <span class="art-cmd-note">verify one conversation's commit history is fork-free</span>
+              </li>
+              <li>
+                <code class="art-cmd">pollis-verify account &lt;user_id&gt; --base https://verify.pollis.com</code>
+                <span class="art-cmd-note">verify one user's published key history</span>
+              </li>
+            </ul>
+
+            <p class="art-key-label" style="margin-top: 1.5rem;">VERIFICATION API</p>
+            <p class="art-note">
+              Base: <code>https://verify.pollis.com</code>. Example read endpoints anyone can fetch:
+              <code>/v1/sth/latest.json</code>, <code>/v1/binaries/sth/latest.json</code>, and
+              <code>/verify/release/&lt;tag&gt;</code>.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <!-- Honest scope -->
+      <section class="art-section">
+        <div class="art-note art-note--strong">
+          <p><strong>What these proofs do and don't say — precisely:</strong></p>
+          <p style="margin-top: 0.6rem;">
+            The binaries log and payload hashes prove the <strong>published bytes match</strong> and are committed to a
+            public append-only log. That is <strong>not</strong> a claim that every platform is byte-for-byte
+            reproducible from source. Linux payload reproduction is documented
+            (<a class="art-inline"
+              href="https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md"
+              target="_blank" rel="noopener noreferrer">reproducible-builds-residuals.md</a>); macOS and Windows are
+            published-bytes-match only.
+          </p>
+          <p style="margin-top: 0.6rem;">
+            The transparency logs prove <strong>no fork, no rollback, no equivocation</strong> of commit history and
+            published keys and binaries, trusting only the one pinned Ed25519 key — nothing more. They do
+            <strong>not</strong> prove the server behaves correctly in real time, and they are <strong>not</strong>
+            anonymity.
+          </p>
+          <p style="margin-top: 0.6rem;">
+            The Delivery Service exposes no build or version endpoint by design (metadata minimization), so it isn't
+            listed here. The browser on this page verifies nothing but the local pinned-key string match; treat every
+            other verdict as server-computed until you re-check it with the CLI.
+          </p>
+        </div>
+      </section>
+
+      <div class="footer-links">
+        <a href="index.html" class="footer-link">Home</a>
+        <a href="security.html" class="footer-link">Security</a>
+        <a href="faq.html" class="footer-link">FAQ</a>
+        <a href="transparency.html" class="footer-link">Transparency</a>
+        <a href="artifacts.html" class="footer-link">Artifacts</a>
+        <a href="https://github.com/actuallydan/pollis" class="footer-link" target="_blank" rel="noopener noreferrer">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="20" height="20" aria-hidden="true">
+            <g transform="translate(-140,-7559)">
+              <g transform="translate(56,160)">
+                <path
+                  d="M94,7399 C99.523,7399 104,7403.59 104,7409.253 C104,7413.782 101.138,7417.624 97.167,7418.981 C96.66,7419.082 96.48,7418.762 96.48,7418.489 C96.48,7418.151 96.492,7417.047 96.492,7415.675 C96.492,7414.719 96.172,7414.095 95.813,7413.777 C98.04,7413.523 100.38,7412.656 100.38,7408.718 C100.38,7407.598 99.992,7406.684 99.35,7405.966 C99.454,7405.707 99.797,7404.664 99.252,7403.252 C99.252,7403.252 98.414,7402.977 96.505,7404.303 C95.706,7404.076 94.85,7403.962 94,7403.958 C93.15,7403.962 92.295,7404.076 91.497,7404.303 C89.586,7402.977 88.746,7403.252 88.746,7403.252 C88.203,7404.664 88.546,7405.707 88.649,7405.966 C88.01,7406.684 87.619,7407.598 87.619,7408.718 C87.619,7412.646 89.954,7413.526 92.175,7413.785 C91.889,7414.041 91.63,7414.493 91.54,7415.156 C90.97,7415.418 89.522,7415.871 88.63,7414.304 C88.63,7414.304 88.101,7413.319 87.097,7413.247 C87.097,7413.247 86.122,7413.234 87.029,7413.87 C87.029,7413.87 87.684,7414.185 88.139,7415.37 C88.139,7415.37 88.726,7417.2 91.508,7416.58 C91.513,7417.437 91.522,7418.245 91.522,7418.489 C91.522,7418.76 91.338,7419.077 90.839,7418.982 C86.865,7417.627 84,7413.783 84,7409.253 C84,7403.59 88.478,7399 94,7399" />
+              </g>
+            </g>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+  </main>
+
+  <footer>
+    <p id="year-copyright"></p>
+  </footer>
+
+  <script src="script.js"></script>
+  <script src="artifacts.js"></script>
+  <script>
+    document.getElementById("year-copyright").textContent =
+      "© " + new Date().getFullYear() + " Pollis. All rights reserved.";
+  </script>
+</body>
+
+</html>
