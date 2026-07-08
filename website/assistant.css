@@ -1,0 +1,235 @@
+/* Pollis "Ask about how this works" assistant — Phase 0 styling.
+   Inline accordion panel in the page flow. No modal, no fixed-position bubble, no overlay, no glow —
+   solid borders and backgrounds only, using the site's --c-* tokens and Atkinson Hyperlegible font.
+   Scalable sizes are in rem so they track the user's font setting; 1px is only for hairline borders. */
+
+.assistant {
+  display: block;
+  width: 100%;
+  margin: 2rem 0;
+}
+
+.assistant-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  justify-content: space-between;
+  padding: 0.85rem 1.1rem;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 1rem;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.assistant-launcher::after {
+  content: '+';
+  color: var(--c-accent);
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.assistant-launcher[aria-expanded='true']::after {
+  content: '\2212';
+}
+
+.assistant-launcher:hover {
+  border-color: var(--c-accent);
+  background: rgba(253, 186, 116, 0.05);
+}
+
+.assistant-launcher:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.assistant-panel {
+  margin-top: 0.75rem;
+  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.assistant-disclaimer {
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--c-border);
+  border-left: 3px solid var(--c-accent);
+  border-radius: 6px;
+  color: var(--c-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.assistant-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.assistant-chip {
+  padding: 0.4rem 0.9rem;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.assistant-chip:hover {
+  border-color: var(--c-accent);
+  color: var(--c-accent);
+  background: rgba(253, 186, 116, 0.06);
+}
+
+.assistant-chip:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.assistant-form {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.assistant-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.85rem;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-family: inherit;
+  font-size: 0.9rem;
+}
+
+.assistant-input::placeholder {
+  color: var(--c-text-muted);
+}
+
+.assistant-input:focus {
+  outline: none;
+  border-color: var(--c-accent);
+}
+
+.assistant-submit {
+  flex-shrink: 0;
+  padding: 0.6rem 1.1rem;
+  border: 1px solid var(--c-accent);
+  border-radius: 6px;
+  background: var(--c-accent);
+  color: var(--c-bg);
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.assistant-submit:hover {
+  background: #fcd9a0;
+}
+
+.assistant-submit:focus-visible {
+  outline: 2px solid var(--c-text);
+  outline-offset: 2px;
+}
+
+.assistant-answer {
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: var(--c-text);
+}
+
+.assistant-answer:empty {
+  display: none;
+}
+
+.assistant-answer-body p + p {
+  margin-top: 0.6rem;
+}
+
+.assistant-answer-intro {
+  color: var(--c-text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.assistant-chunk {
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.75rem;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+}
+
+.assistant-chunk-title {
+  font-weight: 700;
+  color: var(--c-accent);
+  margin-bottom: 0.4rem;
+}
+
+.assistant-chunk-text {
+  margin-bottom: 0.5rem;
+}
+
+.assistant-cites {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}
+
+.assistant-cites-label {
+  color: var(--c-text-muted);
+}
+
+.assistant-cite {
+  color: var(--c-accent);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(253, 186, 116, 0.3);
+}
+
+.assistant-cite:hover {
+  border-bottom-color: var(--c-accent);
+}
+
+.assistant-cite:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+}
+
+.assistant-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-launcher,
+  .assistant-chip,
+  .assistant-submit,
+  .assistant-input {
+    transition: none;
+  }
+}

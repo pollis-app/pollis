@@ -21,6 +21,7 @@
     rel="stylesheet" />
 
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="assistant.css" />
 
   <style>
     .security-main {
@@ -199,6 +200,9 @@
         <button type="button" data-tier="whitepaper" aria-pressed="false">Whitepaper</button>
       </div>
 
+      <!-- Phase 0 "how this works" assistant — populated by assistant.js from static JSON. -->
+      <section id="pollis-assistant" class="assistant" aria-label="Ask about how Pollis works"></section>
+
       <article class="security-tier" data-tier="simple">
         <h1>For a friend</h1>
 
@@ -334,6 +338,8 @@
       });
     })();
   </script>
+
+  <script type="module" src="assistant.js" defer></script>
 </body>
 
 </html>

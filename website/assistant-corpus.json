@@ -1,0 +1,286 @@
+{
+  "version": 1,
+  "note": "Phase 0 retrieval corpus for the Pollis 'how this works' assistant. Chunked faithfully from Pollis public docs. Text is short and quoted/paraphrased from the source; anchors point at the authoritative page. Never edit to add a guarantee the source does not make.",
+  "chunks": [
+    {
+      "id": "sec-cant-read",
+      "title": "The server can't read your messages",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Pollis is a messaging app whose operators can't read what you write. Before a message leaves your computer it is locked inside a digital envelope that only the people you're writing to can open. Even if Pollis's offices were broken into, the messages stay unreadable. Groups work the same way: only the people currently in a group can open its messages."
+    },
+    {
+      "id": "sec-groups-join-later",
+      "title": "Joining a group later",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Someone who joins a group later can read what's said from the moment they joined onward, but not what came before. That is on purpose — it is a consequence of the forward secrecy MLS provides."
+    },
+    {
+      "id": "sec-sealed-sender",
+      "title": "Sealed sender protects stored records, not the live send moment",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "The stored record of a message no longer notes who sent it — only the people in the conversation can work that out from the sealed contents — so a stolen or subpoenaed database wouldn't show who said what. The honest caveat: at the exact moment you hit send, the delivery server still checks you're allowed to post in that conversation, so in that instant it does see it's you. Removing even that (anonymous membership proofs) is future work."
+    },
+    {
+      "id": "sec-padding-text-only",
+      "title": "Text messages are padded; files are not",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Every text message is padded out to one of a few fixed sizes before it is sealed, so its length gives nothing away — the server can't tell a one-word reply from a long paragraph by measuring it. Files are the exception: they are shared in a way that depends on their real size, so they are not padded."
+    },
+    {
+      "id": "sec-key-change-shield",
+      "title": "Silent key changes are detected",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "If someone's cryptographic key changes silently — the swap a server-side attacker would attempt — Pollis catches it. A red shield badge appears next to their name in every conversation you share, plus an inline notice in the chat, so you can verify them again out-of-band. You only need to verify a person once; the green shield then follows them everywhere they appear in your account."
+    },
+    {
+      "id": "sec-pin-backup",
+      "title": "Sign-in, PIN, and backup code",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "You sign in with your email (a one-time code) and pick a four-digit PIN. The PIN unlocks the app on your computer; after enough wrong guesses it erases your messages on that device. You also get a long backup code — save it somewhere safe. If you lose your computer or forget your PIN, that code is the only way back in, and Pollis keeps no copy."
+    },
+    {
+      "id": "sec-multidevice-empty",
+      "title": "New devices start empty",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "You can use Pollis on more than one device. A new device starts empty — it doesn't get your old messages — but from then on both devices receive everything going forward. There is no message-history backup by design."
+    },
+    {
+      "id": "sec-files-voice-sealed",
+      "title": "Files and voice are end-to-end encrypted too",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Files like pictures, documents, and voice notes are sealed the same way as text. Voice chat too: audio is sealed on your computer before it goes to the voice servers, and only the other people in the channel can open it. The servers route packets they cannot listen to. The same group keys that protect text produce the voice key."
+    },
+    {
+      "id": "sec-tradeoffs",
+      "title": "Honest trade-offs",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Because Pollis can't read your messages, it can't get them back for you if you lose everything. The server can still see which conversations exist, who's in them, and roughly when they're busy — that's how routing works. If someone steals your computer while it's already unlocked, they can read your messages, because at that point it thinks they're you. And the privacy is only as strong as the people you're talking to."
+    },
+    {
+      "id": "sec-trust-model",
+      "title": "Who you have to trust",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "With Pollis you trust your own device and the version of the app you installed. After that you do not have to trust the servers. The remote database, file storage, voice routing, and email service can be operated by people you've never met, and the design assumes they are watching. Everything sensitive happens on your device before anything goes anywhere; private keys are generated on your device and never leave it in readable form."
+    },
+    {
+      "id": "sec-metadata-server-sees",
+      "title": "What metadata the server sees",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "The server sees who is in which group, who is talking to whom, and how big messages are — the way a mail carrier sees the addresses on envelopes. It does not see what is inside. Server sees: user IDs, group/channel membership, timestamps, sizes (text sizes are padded), public keys, voice presence and routing metadata. Server does not see: message plaintext, file contents, voice audio, or private keys."
+    },
+    {
+      "id": "sec-mls-suite1",
+      "title": "MLS and cipher suite 1",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Pollis encrypts group chat with MLS (Messaging Layer Security, RFC 9420), implemented with the Rust library openmls, using what MLS calls cipher suite one. That suite combines X25519 (key agreement), HKDF-SHA256, AES-128-GCM (the cipher, with a built-in tamper check), and Ed25519 (signatures). These are classical algorithms — this is not post-quantum cryptography."
+    },
+    {
+      "id": "sec-safety-numbers",
+      "title": "Safety numbers and trust-on-first-use",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Each pair of users has a sixty-digit safety number derived from both account identity public keys. If you read the same number aloud or scan each other's QR code, you've confirmed no one in the middle swapped a key. Until you verify manually, a contact's key is pinned the first time your device sees it (trust-on-first-use); a later server-side swap shows up as a red shield on the next exchange."
+    },
+    {
+      "id": "sec-secret-key-recovery",
+      "title": "The Secret Key and account recovery",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "The Secret Key is a one-time recovery string with about 150 bits of entropy that recovers your account on a brand-new device when no other device is signed in. The server stores your account identity key only inside an encrypted box the Secret Key opens; the server does not have that key. If you lose the Secret Key and every device, the account is gone — there is no support line that can recover it."
+    },
+    {
+      "id": "sec-local-encryption",
+      "title": "Your local data is encrypted on disk",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "The local database (decrypted messages, group state, caches) is opened through SQLCipher — AES-256-CBC with HMAC-SHA512 per page. Its key is a random 32-byte value stored only in the OS keystore as ciphertext under the PIN-derived key. If someone copies your drive while the app is locked, they get bytes indistinguishable from random noise."
+    },
+    {
+      "id": "sec-convergent-files",
+      "title": "How files are encrypted (convergent encryption)",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Files use convergent encryption: the app hashes the file (SHA-256), derives a key from that hash, and encrypts with AES-256-GCM in 4 MB chunks before uploading to Cloudflare R2, which only ever holds ciphertext. The trade-off is that two people uploading the same file dedup to one object, and someone who already has a candidate file can confirm whether it was uploaded — they can't read it, only confirm its presence."
+    },
+    {
+      "id": "sec-voice-e2ee",
+      "title": "Voice is end-to-end encrypted",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Voice adds a second layer of encryption on each audio frame after Opus compression and before it leaves the device, via libwebrtc's FrameCryptor with AES-128-GCM. The LiveKit SFU routes RTP packets but forwards ciphertext it can't open. The voice key is derived from the channel's MLS group exporter secret and rotates on every MLS epoch change, so removed members lose access to the next frame."
+    },
+    {
+      "id": "sec-limitations",
+      "title": "Documented limitations",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Some bearer tokens the desktop app uses are baked into the binary; anyone taking the app apart can read metadata at the level the server already sees, but still can't decrypt anything. Cross-signing verification on inbound commits currently logs a warning rather than refusing. There is no automatic periodic key rotation when a group is idle, and no backup of message history of any kind — a new device can't read messages from before it joined. These are deliberate trade-offs."
+    },
+    {
+      "id": "sec-build-verify-caveat",
+      "title": "Verifiable builds: what is and isn't proven",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Pollis publishes a fingerprint of every release into a public append-only log at verify.pollis.com, anchored to a single pinned key. The tool pollis-verify release confirms your build is one Pollis publicly recorded. Being honest about the edges: this proves what Pollis published for a release, not yet that those bytes were built byte-for-byte from the public source. Independent reproducibility everywhere, a second signature anchor, and an in-app verify button are still being built."
+    },
+    {
+      "id": "sec-comparison",
+      "title": "How Pollis compares to other apps",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "Signal and WhatsApp are end-to-end encrypted but use the older Signal Protocol; Pollis uses the newer MLS, better suited to large groups and multiple devices. Slack and Microsoft Teams don't end-to-end encrypt messages at all — the server reads everything. Matrix/Element encrypt group chat with Megolm, which trades some post-compromise security for server-side history backup, which Pollis intentionally does not do. Wire is the closest in cryptographic shape (also MLS); Slack is the closest in product shape."
+    },
+    {
+      "id": "faq-what-is-pollis",
+      "title": "What is Pollis?",
+      "source": "FAQ (pollis.com)",
+      "anchor": "faq.html",
+      "text": "A desktop messaging app with group channels and direct messages, like Slack, but your messages are encrypted on your device before they leave it, so the people running Pollis can't read them. It's a Tauri desktop client with a React UI and a Rust core, connecting directly to a Turso backend that only stores ciphertext envelopes plus routing metadata."
+    },
+    {
+      "id": "faq-really-e2ee",
+      "title": "Is it really end-to-end encrypted?",
+      "source": "FAQ (pollis.com)",
+      "anchor": "faq.html",
+      "text": "Yes. Messages, files, and voice are all encrypted on your device using MLS; private keys live in the OS keystore and never leave. The server can see who is messaging when, but not what. It sees user IDs, membership, timestamps, sizes, public keys, and voice routing metadata — never plaintext, file contents, voice audio, or private keys."
+    },
+    {
+      "id": "faq-open-source",
+      "title": "Is Pollis open source?",
+      "source": "FAQ (pollis.com)",
+      "anchor": "faq.html",
+      "text": "The source is public on GitHub at github.com/actuallydan/pollis. You can read it, build it, and check the work. See the repo for the current license."
+    },
+    {
+      "id": "faq-audited",
+      "title": "Is Pollis audited? Should I trust it with my life?",
+      "source": "FAQ (pollis.com)",
+      "anchor": "faq.html",
+      "text": "Pollis is in open preview and has not been independently audited. Its protocol choices target a Slack-style workspace threat model, not a nation-state adversary. If your physical safety depends on unbreakable communication, use a mature, audited tool built for that threat model."
+    },
+    {
+      "id": "faq-platforms",
+      "title": "Which platforms are supported?",
+      "source": "FAQ (pollis.com)",
+      "anchor": "faq.html",
+      "text": "macOS (universal), Windows x64, and Linux (.deb, .rpm, .AppImage, AUR). There is no iOS or Android app: voice and media are implemented directly in Rust rather than in the webview, so mobile would require native clients, not a UI-only port."
+    },
+    {
+      "id": "faq-history-new-device",
+      "title": "Do I get my message history on a new device?",
+      "source": "FAQ (pollis.com)",
+      "anchor": "faq.html",
+      "text": "No, by design. A new device only sees messages sent after it's added, and resetting your account wipes prior messages. Pollis does not back up history to the cloud (no Megolm-style key backup), because that would be a target for attackers and subpoenas. If you need a permanent archive of everything you've said, Pollis isn't the right tool."
+    },
+    {
+      "id": "faq-server-down",
+      "title": "What happens if the server goes down?",
+      "source": "FAQ (pollis.com)",
+      "anchor": "faq.html",
+      "text": "You won't be able to send or receive new messages until it's back, but you can still open the app and read what you already have. A server outage is a reachability problem, never a privacy one — the server can't decrypt anything, so downtime has no confidentiality impact."
+    },
+    {
+      "id": "trans-what-it-is",
+      "title": "What the transparency log is",
+      "source": "Key Transparency (docs/transparency.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md",
+      "text": "Pollis publishes an append-only transparency log of every MLS commit, so anyone can prove the server has not quietly rewritten a conversation's history. The server can't decrypt anything, but it coordinates group ordering, and could try to fork a conversation (show two people different histories), roll an epoch back, or equivocate. The log closes this: every commit is a leaf in a Merkle tree whose signed tree head lets anyone demand inclusion and consistency proofs."
+    },
+    {
+      "id": "trans-trust-model",
+      "title": "Transparency log trust model",
+      "source": "Key Transparency (docs/transparency.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md",
+      "text": "A verifier trusts only the log's published Ed25519 public key, plus the signed tree head and the Merkle proofs checked against it — nothing else: not the server, not the database, not the host, not the network. If a single byte of an entry, proof, or head is altered, a signature or proof check fails and the verifier exits non-zero. The read API is public and unauthenticated by design. The pinned key is 175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148."
+    },
+    {
+      "id": "trans-three-trees",
+      "title": "Three domain-separated trees",
+      "source": "Key Transparency (docs/transparency.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md",
+      "text": "The log publishes three independent Merkle trees: the MLS commit log (every membership/key-change commit), the account-key directory (one leaf per account identity-key version, so key history is append-only and identity_version never regresses), and the released-binaries tree (one leaf per released artifact). They are signed by the same key but under different domain-separation contexts, so a head minted for one tree can't be replayed as another's."
+    },
+    {
+      "id": "trans-binaries-leaf",
+      "title": "What a binaries leaf commits to",
+      "source": "Key Transparency (docs/transparency.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md",
+      "text": "Each released-binaries leaf records a release tag, platform, arch, bundle, layer, a content hash, and the reproducibility recipe — it commits to a hash plus recipe, never the binary bytes. Invariants enforced over the tree: no silent re-issue (a re-release must use a new tag), monotonic release tags, and payload/signed pairing (every signed wrapper must have a matching reproducible payload leaf earlier in the tree)."
+    },
+    {
+      "id": "trans-invariants",
+      "title": "Commit-log invariant: no fork, no rollback",
+      "source": "Key Transparency (docs/transparency.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md",
+      "text": "Beyond raw Merkle inclusion, the commit log enforces two rules per conversation on replay: no fork (no two commits share the same conversation_id and epoch) and no epoch regression / replay (epoch strictly increases in sequence order). A fork or regression in the source data aborts the build rather than producing a bundle that hides it, and verifiers re-check it independently."
+    },
+    {
+      "id": "verify-remote",
+      "title": "Verify the whole log — pollis-verify remote",
+      "source": "Verify the log (docs/verify-transparency-log.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md",
+      "text": "The auditor CLI pollis-verify needs no credentials. `pollis-verify remote https://verify.pollis.com` fetches the entire public log over HTTP and verifies every tree-head signature, that there's no equivocation across heads, that each entry replays to the signed root, and every inclusion and consistency proof — trusting only the published public key. A passing run exits 0; any tampering makes it exit non-zero, and that exit code is computed from the signatures and proofs, not from anything the server said."
+    },
+    {
+      "id": "verify-group-account",
+      "title": "Verify one conversation or one user",
+      "source": "Verify the log (docs/verify-transparency-log.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md",
+      "text": "`pollis-verify group <base-url> <conversation-id>` checks a single conversation's commit chain: STH signature first, then each commit's inclusion proof, then the no-fork / no-epoch-regression invariant. `pollis-verify account <base-url> <user-id>` checks a user's key history is append-only with no version regression. The Pollis app runs the same verifier internally, so the client and an independent auditor reach the identical verdict."
+    },
+    {
+      "id": "verify-cosign-slsa",
+      "title": "Keyless build provenance — cosign + SLSA",
+      "source": "Verify the log (docs/verify-transparency-log.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md",
+      "text": "Released artifacts carry a second, independent anchor Pollis does not control: a keyless cosign signature and a SLSA build-provenance attestation, both bound to Pollis's GitHub Actions OIDC identity via sigstore/Fulcio and recorded in the public Rekor log. Verifying them trusts only the GitHub Actions identity plus Rekor — no Pollis-held key is on this path, so it holds even against a compromised or compelled Pollis signing key. It proves build provenance, not by itself source-reproducibility."
+    },
+    {
+      "id": "verify-explorer-not-anchor",
+      "title": "The website explorer is a convenience, not the trust anchor",
+      "source": "Verify the log (docs/verify-transparency-log.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md",
+      "text": "The transparency.html explorer lets you type a conversation id and see its commit chain rendered, but the browser does no verification itself — it calls the serve layer's endpoint, which runs the same code the CLI does, and visualizes the result. It is exactly as trustworthy as the server hosting it. The trustworthy path is running pollis-verify or monitor yourself, so the verdict rests on signatures and proofs you checked locally."
+    },
+    {
+      "id": "repro-linux-unit",
+      "title": "The Linux AppImage payload is the reproducible unit",
+      "source": "Reproducible-build residuals (docs/reproducible-builds-residuals.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md",
+      "text": "The Linux AppImage payload is the reproducible unit: the deterministic output of `cargo build --locked` + `vite build` + Tauri's AppImage bundling, with the toolchain pinned, absolute paths remapped, SOURCE_DATE_EPOCH set to the tag commit, and JS inputs frozen. Its payload hash is what the release pipeline logs into the transparency tree and what the independent rebuild-verify workflow recomputes and asserts is present."
+    },
+    {
+      "id": "repro-not-everywhere",
+      "title": "macOS/Windows are best-effort; the signed wrapper isn't reproducible",
+      "source": "Reproducible-build residuals (docs/reproducible-builds-residuals.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md",
+      "text": "Reproducibility is not promised everywhere. You cannot bit-reproduce a macOS or Windows payload on a Linux runner; those payloads are logged with the correct structure but reproduction is best-effort on a matching runner, not asserted by the shipped reproducer. The signed/notarized outer wrapper (Apple CMS, Authenticode timestamp, updater signature) is non-reproducible by construction; it is transparency-logged and cryptographically bound to the reproducible payload."
+    },
+    {
+      "id": "repro-log-token",
+      "title": "The optional log token is the remaining secretless-repro blocker",
+      "source": "Reproducible-build residuals (docs/reproducible-builds-residuals.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md",
+      "text": "The client bakes a few build-config values via option_env!. Most are non-secret (public URLs, a read-only Turso token) and are published as a recipe. As of #506 no R2 or LiveKit credentials are baked at all. The one remaining blocker for a fully-secretless third-party rebuild is the optional observability LOG_DB_TOKEN: when a release bakes it, only a party holding the recipe can bit-reproduce the Linux payload. It does not weaken log-inclusion verification, which needs no build inputs."
+    },
+    {
+      "id": "repro-verifier-meaning",
+      "title": "What reproducibility means for a verifier",
+      "source": "Reproducible-build residuals (docs/reproducible-builds-residuals.md)",
+      "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md",
+      "text": "Log inclusion always verifies, for everyone: pollis-verify release proves every published artifact for a tag is in the append-only log under the pinned key, with no fork or re-issue, needing no build inputs or secrets. Bit-for-bit Linux reproduction verifies for a party holding the build recipe on a matching runner image. macOS/Windows reproduction is best-effort. A divergence in a documented residual is expected, not tampering."
+    }
+  ]
+}

@@ -21,6 +21,7 @@
     rel="stylesheet" />
 
   <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="assistant.css" />
 
   <style>
     .faq-main {
@@ -169,6 +170,9 @@
         <button type="button" data-mode="plain" class="active" aria-pressed="true">Plain</button>
         <button type="button" data-mode="dev" aria-pressed="false">Dev</button>
       </div>
+
+      <!-- Phase 0 "how this works" assistant — populated by assistant.js from static JSON. -->
+      <section id="pollis-assistant" class="assistant" aria-label="Ask about how Pollis works"></section>
 
       <div class="faq-item">
         <div class="faq-question">What is Pollis?</div>
@@ -461,6 +465,8 @@
       });
     })();
   </script>
+
+  <script type="module" src="assistant.js" defer></script>
 </body>
 
 </html>
