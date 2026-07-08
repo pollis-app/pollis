@@ -1,0 +1,21 @@
+# Pinned Rust toolchain — the foundation of reproducible builds
+# (docs/verifiable-builds-design.md §1.1). The release pipeline previously used
+# `dtolnay/rust-toolchain@stable`, which FLOATS: two builds of the same commit a
+# few weeks apart could compile with different rustc versions and emit different
+# bytes. Pinning an EXACT version makes rustc a content-addressed, independently
+# installable input, so a third-party rebuilder installs the same compiler
+# byte-for-byte.
+#
+# This is the version this repository is known to build on; it is also recorded
+# in each transparency-log BinaryRecord's `toolchain.rustc` field, so the pinned
+# compiler is part of the public, verifiable build recipe.
+#
+# NOTE: `targets` is intentionally NOT set here. Cross-compile targets
+# (aarch64-apple-darwin, x86_64-pc-windows-msvc, …) are installed per-job by the
+# `dtolnay/rust-toolchain@1.96.0` action in .github/workflows/desktop-release.yml
+# so that a plain `cargo` on a Linux dev box (or the headless CI test build) does
+# not try to download every platform's std. Bump this in lockstep with the
+# `dtolnay/rust-toolchain@<version>` refs in the desktop-release workflow.
+[toolchain]
+channel = "1.96.0"
+profile = "minimal"

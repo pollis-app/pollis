@@ -45,17 +45,14 @@ trap 'rm -rf "$work"' EXIT
 
 records="[]"
 
-# sha256 of a single file, lowercase hex.
-sha_file() { sha256sum "$1" | awk '{print $1}'; }
-
-# Deterministic sha256 of a directory tree: a sorted tar with fixed mtime/owner
-# so the hash depends only on the payload contents, not on filesystem or
-# extraction-order noise. (SOURCE_DATE_EPOCH is the tag commit timestamp.)
-sha_tree() {
-  tar --sort=name --mtime="@${SOURCE_DATE_EPOCH}" \
-      --owner=0 --group=0 --numeric-owner \
-      -cf - -C "$1" . | sha256sum | awk '{print $1}'
-}
+# sha_file / sha_tree — the ONE canonical payload-hashing implementation, shared
+# byte-for-byte with the independent rebuilder (.github/workflows/rebuild-verify.yml)
+# via this sourced helper. The party that LOGS a hash and the party that
+# INDEPENDENTLY RECOMPUTES it MUST hash identically, or a rebuilder cries wolf on
+# an incidental formatting difference. One copy, sourced here and there.
+# (sha_tree reads SOURCE_DATE_EPOCH — already required above.)
+# shellcheck source=scripts/lib/payload-hash.sh
+. "$(dirname "$0")/lib/payload-hash.sh"
 
 # emit <platform> <arch> <bundle> <artifact_name> <layer> <payload_sha> <artifact_sha> <runner_image>
 emit() {

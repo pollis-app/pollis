@@ -38,7 +38,13 @@ jobs:
           node-version: "20"
           cache: "pnpm"
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the EXACT version in rust-toolchain.toml (1.96.0) — not
+      # `@stable`, which floats and would let two builds of the same commit
+      # compile with different rustc versions and emit different bytes. Bump
+      # both in lockstep. (macOS reproducibility is best-effort — see
+      # docs/reproducible-builds-residuals.md — but a pinned compiler is a
+      # prerequisite for it and for a stable recorded build recipe.)
+      - uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: aarch64-apple-darwin
 
@@ -127,7 +133,9 @@ jobs:
           node-version: "20"
           cache: "pnpm"
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
+      # float on @stable, or the same commit can produce different bytes.
+      - uses: dtolnay/rust-toolchain@1.96.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -265,7 +273,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
+      # float on @stable, or the same commit can produce different bytes.
+      - uses: dtolnay/rust-toolchain@1.96.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -315,7 +325,9 @@ jobs:
           node-version: "20"
           cache: "pnpm"
 
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to rust-toolchain.toml's 1.96.0 (see the macOS job note) — never
+      # float on @stable, or the same commit can produce different bytes.
+      - uses: dtolnay/rust-toolchain@1.96.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -384,8 +396,11 @@ jobs:
           echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
 
+      # --frozen-lockfile: fail (don't silently re-resolve) if pnpm-lock.yaml
+      # drifted — the Linux payload is the reproducible unit, so its JS inputs
+      # must be pinned, not floated (docs/verifiable-builds-design.md §1.2/§1.4).
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       # The screen-capture helper is a separate workspace binary that Tauri
       # bundles as a sidecar (externalBin in tauri.linux.conf.json). It is
@@ -403,11 +418,37 @@ jobs:
       - name: Mark screen-capture helper executable
         run: chmod +x src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
 
+      # Determinism inputs for the reproducible Linux payload (P5, #484):
+      #   * SOURCE_DATE_EPOCH — the tag commit's unix seconds. Deterministic and
+      #     independently recoverable from `git` by any rebuilder (NOT `now`), so
+      #     anything that would otherwise embed wall-clock time (archive mtimes,
+      #     resource stamps) resolves to a stable value. This is the SAME epoch
+      #     the attest leaf and the rebuild-verify workflow derive.
+      #   * RUSTFLAGS --remap-path-prefix — strips absolute build paths (home,
+      #     cargo home, workspace root) out of the binary's debug info / panic
+      #     strings so two different hosts building this commit emit the same
+      #     bytes. Linux has NO per-target rustflags in .cargo/config.toml
+      #     (only macOS/Windows do), so exporting RUSTFLAGS here is purely
+      #     additive — it does not clobber any configured flags. Order matters:
+      #     the most general prefix ($HOME) is listed first and the more specific
+      #     ones after it, because rustc applies the LAST matching remap.
+      - name: Configure reproducible build flags (Linux payload)
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+          CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+          echo "RUSTFLAGS=--remap-path-prefix=${HOME}=/pollis-home --remap-path-prefix=${CARGO_HOME_DIR}=/pollis-cargo --remap-path-prefix=${GITHUB_WORKSPACE}=/pollis-src" >> "$GITHUB_ENV"
+
+      # `-- --locked` forwards to the underlying `cargo build`: a drifted
+      # Cargo.lock FAILS the build instead of silently resolving new crate
+      # versions (the transparency build already builds --locked; the desktop
+      # build must too — §1.2). SOURCE_DATE_EPOCH + RUSTFLAGS come from the step
+      # above via $GITHUB_ENV.
       - name: Build Linux
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: pnpm build:tauri:linux
+        run: pnpm tauri build --target x86_64-unknown-linux-gnu -- --locked
 
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4

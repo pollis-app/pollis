@@ -1,0 +1,279 @@
+name: Rebuild & Verify (independent reproducer)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The THIRD-PARTY VERIFICATION ANCHOR for Pollis's binary-transparency program
+# (issue #484, docs/verifiable-builds-design.md §6 Phase 5).
+#
+# What it is: a rebuilder that a completely SEPARATE trust domain can run — from
+# a fork, on their own GitHub account — to independently rebuild the Linux
+# AppImage payload for a released tag and confirm that the payload hash it
+# reproduces is the one Pollis published into the public, append-only, Ed25519
+# transparency log. It closes the loop that code-signing alone cannot: signing
+# proves "the holder of Pollis's key produced these bytes"; this proves "those
+# bytes are the honest build of this public source, and everyone can see it."
+#
+# Separate trust domain — by construction:
+#   * It uses NO Pollis `secrets`. Nothing here references `secrets.*`. A forker
+#     needs no credentials from Pollis to run it.
+#   * It only READS the public log at https://verify.pollis.com and rebuilds
+#     PUBLIC source at the tag. It never writes anything, anywhere.
+#   * It trusts ONLY the pinned Ed25519 log key
+#     175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148
+#     — not Pollis, not Turso, not the host serving verify.pollis.com. The key
+#     is asserted against the served public_key.json before any verdict is
+#     trusted, so a substituted key is caught, not silently believed.
+#
+# HONEST LIMIT — the "reproducible modulo a documented list" caveat is real and
+# lives in docs/reproducible-builds-residuals.md. The single biggest residual:
+# the client bakes build-recipe values via `option_env!` at compile time
+# (pollis-core/src/config.rs), and SOME of them are presently SECRET
+# (R2_SECRET_KEY, LIVEKIT_API_SECRET). A truly secretless third party therefore
+# cannot yet bit-reproduce the shipped payload — the baked bytes differ. Until
+# the client stops baking secrets (tracked in the residuals doc), this workflow:
+#   (a) ALWAYS proves LOG INCLUSION for everyone (the `pollis-verify release`
+#       step needs no build inputs at all); and
+#   (b) proves bit-for-bit REPRODUCTION for a party who supplies the published
+#       build recipe as repository/environment `vars` (non-secret) — Pollis, or
+#       an auditor Pollis has handed the recipe. Supply them under
+#       Settings → Secrets and variables → Actions → Variables. Any left unset
+#       bake as absent and (legitimately) diverge the hash; the rebuild step
+#       then fails loudly, which is the correct, non-lying behaviour.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Released git tag to rebuild & verify (e.g. v1.3.0)"
+        required: true
+        type: string
+
+# Pinned so the reproduced key can never silently change under us.
+env:
+  VERIFY_BASE_URL: "https://verify.pollis.com"
+  PINNED_LOG_KEY: "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
+
+jobs:
+  # Mirror the release's build-capture-helper job EXACTLY: the Linux
+  # screen-capture sidecar is compiled on ubuntu-24.04 (PipeWire 1.0 headers)
+  # and staged into the app build, because the app build runs on ubuntu-22.04
+  # (PipeWire 0.3) and cannot compile the helper there. To reproduce the same
+  # AppImage bytes the rebuilder must stage the same sidecar the same way.
+  # (The helper's bindgen output is itself a documented residual — see
+  # docs/reproducible-builds-residuals.md.)
+  rebuild-capture-helper:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      - name: Install PipeWire build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpipewire-0.3-dev \
+            libxcb1-dev \
+            libxcb-shm0-dev \
+            libxcb-randr0-dev \
+            clang \
+            pkg-config
+
+      # Same determinism inputs as the release (SOURCE_DATE_EPOCH from the tag
+      # commit; path remapping so absolute build paths don't leak).
+      - name: Configure reproducible build flags
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+          CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+          echo "RUSTFLAGS=--remap-path-prefix=${HOME}=/pollis-home --remap-path-prefix=${CARGO_HOME_DIR}=/pollis-cargo --remap-path-prefix=${GITHUB_WORKSPACE}=/pollis-src" >> "$GITHUB_ENV"
+
+      - name: Rebuild and stage screen-capture helper
+        run: |
+          cargo build --release --locked --target x86_64-unknown-linux-gnu -p pollis-capture-linux
+          mkdir -p src-tauri/binaries
+          cp target/x86_64-unknown-linux-gnu/release/pollis-capture-linux \
+             src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
+          chmod +x src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
+
+      - name: Upload screen-capture helper
+        uses: actions/upload-artifact@v4
+        with:
+          name: pollis-capture-linux
+          if-no-files-found: error
+          path: src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
+
+  rebuild-linux:
+    needs: rebuild-capture-helper
+    # ubuntu-22.04 to match the release build-linux runner (low glibc floor).
+    # Reproducibility is per-target: the reproducer must match the OS image.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      - uses: dtolnay/rust-toolchain@1.96.0
+
+      # Same system deps as the release build-linux job.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            libasound2-dev \
+            libpulse-dev \
+            libpipewire-0.3-dev \
+            libva-dev \
+            libdbus-1-dev \
+            rpm \
+            cmake \
+            clang \
+            ninja-build
+
+      - name: Install meson (newer than apt)
+        run: |
+          python3 -m pip install --user 'meson>=1.3'
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download screen-capture helper
+        uses: actions/download-artifact@v4
+        with:
+          name: pollis-capture-linux
+          path: src-tauri/binaries
+
+      - name: Mark screen-capture helper executable
+        run: chmod +x src-tauri/binaries/pollis-capture-linux-x86_64-unknown-linux-gnu
+
+      # Determinism inputs — byte-identical to the release build-linux job:
+      # SOURCE_DATE_EPOCH from the tag commit + --remap-path-prefix (home, cargo
+      # home, workspace root, most-general-first because rustc applies the LAST
+      # matching remap).
+      - name: Configure reproducible build flags
+        run: |
+          set -euo pipefail
+          echo "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+          CARGO_HOME_DIR="${CARGO_HOME:-$HOME/.cargo}"
+          echo "RUSTFLAGS=--remap-path-prefix=${HOME}=/pollis-home --remap-path-prefix=${CARGO_HOME_DIR}=/pollis-cargo --remap-path-prefix=${GITHUB_WORKSPACE}=/pollis-src" >> "$GITHUB_ENV"
+
+      # The published, NON-SECRET build recipe (see the header). These are read
+      # from repository/environment `vars` — never `secrets` — so this file
+      # stays fork-runnable. `option_env!` bakes each into the binary at compile
+      # time (pollis-core/src/config.rs); to bit-reproduce the shipped payload a
+      # reproducer must supply the same values Pollis baked. Any left unset bake
+      # as absent and legitimately diverge the hash (documented residual — the
+      # currently-secret R2_SECRET_KEY / LIVEKIT_API_SECRET cannot be supplied by
+      # a secretless third party at all yet).
+      - name: Rebuild Linux AppImage payload
+        env:
+          TURSO_URL: ${{ vars.TURSO_URL }}
+          TURSO_TOKEN: ${{ vars.TURSO_RO_TOKEN }}
+          R2_S3_ENDPOINT: ${{ vars.R2_S3_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ vars.R2_ACCESS_KEY_ID }}
+          R2_SECRET_KEY: ${{ vars.R2_SECRET_KEY }}
+          R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
+          R2_REGION: ${{ vars.R2_REGION }}
+          LIVEKIT_URL: ${{ vars.LIVEKIT_URL }}
+          LIVEKIT_API_KEY: ${{ vars.LIVEKIT_API_KEY }}
+          LIVEKIT_API_SECRET: ${{ vars.LIVEKIT_API_SECRET }}
+          POLLIS_DELIVERY_URL: ${{ vars.POLLIS_DELIVERY_URL }}
+          LOG_DB_URL: ${{ vars.LOG_DB_URL }}
+          LOG_DB_TOKEN: ${{ vars.LOG_DB_TOKEN }}
+        # --locked: a drifted Cargo.lock fails the build rather than silently
+        # resolving new versions — same as the release desktop build.
+        run: pnpm tauri build --target x86_64-unknown-linux-gnu -- --locked
+
+      # Recompute payload_sha256 with the IDENTICAL method the release attest job
+      # uses — scripts/lib/payload-hash.sh, sourced by both, so the reproducer
+      # and the logger can never disagree by an incidental formatting difference.
+      # The Linux AppImage's minisign signature is DETACHED (.AppImage.sig), so
+      # the shipped .AppImage file IS the reproducible payload: sha_file over it.
+      - name: Recompute reproduced payload hash
+        id: rehash
+        run: |
+          set -euo pipefail
+          . scripts/lib/payload-hash.sh
+          appimage="$(find target/x86_64-unknown-linux-gnu/release/bundle/appimage -name '*.AppImage' | head -1)"
+          if [ -z "${appimage:-}" ]; then
+            echo "::error::rebuild produced no .AppImage under the expected bundle path"
+            exit 1
+          fi
+          hash="$(sha_file "$appimage")"
+          echo "reproduced payload_sha256: ${hash}  ($(basename "$appimage"))"
+          echo "hash=${hash}" >> "$GITHUB_OUTPUT"
+
+      # Build pollis-verify FROM THE TAG'S OWN SOURCE (no prebuilt binary to
+      # trust) so the verifier code is itself part of what was rebuilt.
+      - name: Build pollis-verify from source
+        run: cargo build --release --locked -p verifiable-log-serve --bin pollis-verify
+
+      # Trust anchor: assert the log key the server serves is the pinned key
+      # BEFORE trusting any verdict computed against it. A host that substituted
+      # its own key is caught here, not silently believed.
+      - name: Assert the served log key is the pinned key
+        run: |
+          set -euo pipefail
+          served="$(curl -fsSL "${VERIFY_BASE_URL}/v1/binaries/public_key.json" | jq -r '.public_key')"
+          echo "served binaries log key: ${served}"
+          if [ "${served}" != "${PINNED_LOG_KEY}" ]; then
+            echo "::error::served log key ${served} != pinned ${PINNED_LOG_KEY} — refusing to trust this log"
+            exit 1
+          fi
+          echo "served key matches the pinned Ed25519 key."
+
+      # Log-inclusion proof for the tag: pollis-verify checks every artifact for
+      # the tag is included under the binaries-domain STH, the tree satisfies the
+      # binary invariant, and the recorded hashes are internally consistent.
+      # Exits non-zero (fails the job) if the log itself doesn't verify.
+      - name: Verify the tag is included in the transparency log
+        run: |
+          set -euo pipefail
+          ./target/release/pollis-verify release "${VERIFY_BASE_URL}" "${{ inputs.tag }}" --json \
+            > release-report.json
+          echo "── transparency log report for ${{ inputs.tag }} ──"
+          jq '.' release-report.json
+
+      # The verdict that makes this a REBUILDER, not just a log reader: assert
+      # the hash we independently reproduced is present in the log as the Linux
+      # AppImage payload for this tag. Absent/mismatched → loud failure.
+      - name: Assert reproduced hash is the logged Linux payload
+        run: |
+          set -euo pipefail
+          HASH="${{ steps.rehash.outputs.hash }}"
+          match="$(jq -r --arg h "$HASH" \
+            '[.artifacts[]
+               | select(.platform == "linux" and .bundle == "appimage"
+                        and .layer == "payload" and .payload_sha256 == $h)]
+             | length' release-report.json)"
+          if [ "${match}" -ge 1 ]; then
+            echo "✅ REPRODUCED: ${HASH}"
+            echo "   is present in the public transparency log as the Linux"
+            echo "   AppImage payload for ${{ inputs.tag }}, verified against the"
+            echo "   pinned key ${PINNED_LOG_KEY}."
+          else
+            echo "::error::reproduced Linux AppImage payload hash ${HASH} is NOT the"
+            echo "::error::logged payload for ${{ inputs.tag }}. Either the build did not"
+            echo "::error::reproduce (see docs/reproducible-builds-residuals.md — e.g. a"
+            echo "::error::build-recipe var left unset) or the shipped payload diverges"
+            echo "::error::from this source. Logged Linux payload hashes for the tag:"
+            jq -r '.artifacts[] | select(.platform=="linux" and .layer=="payload")
+                   | "  \(.bundle): \(.payload_sha256)"' release-report.json || true
+            exit 1
+          fi

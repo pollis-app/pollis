@@ -15,6 +15,28 @@ export default defineConfig({
   base: './',
   // Load VITE_* env vars from the monorepo root so we only need a single .env.development
   envDir: '..',
+  // Reproducible frontend bundle (docs/verifiable-builds-design.md §1.4). The
+  // Vite/Rollup output that `tauri build` embeds is an input to the hashed
+  // Linux payload, so it must be a pure function of source + the frozen
+  // lockfile — no host-specific or wall-clock inputs:
+  //   * sourcemap: false — source maps bake absolute host paths into their
+  //     `sources`/`sourceRoot`, leaking the builder's filesystem into the
+  //     shipped bundle and differing host-to-host.
+  //   * asset file names use Rollup's content hash (its default) — a pure
+  //     function of chunk bytes. Stated explicitly so it is never "tuned" into
+  //     a timestamp/counter scheme later.
+  // Chunk ordering + hashing are otherwise already deterministic given the
+  // frozen lockfile, and this config injects no `Date.now()`/random `define`.
+  build: {
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/[name].[hash].js',
+        chunkFileNames: 'assets/[name].[hash].js',
+        assetFileNames: 'assets/[name].[hash][extname]',
+      },
+    },
+  },
   resolve: isPlaywright
     ? {
         alias: {

@@ -166,6 +166,23 @@ The known non-determinism sources and their fixes:
 This is where a rigorous spec earns its keep. Not everything is cheaply
 reproducible, and pretending otherwise would be dishonest to auditors.
 
+> **Shipped status (P5, #484).** The Linux AppImage payload is now hardened to
+> be reproducible *modulo a documented residual list*: the toolchain is pinned
+> (`rust-toolchain.toml` → `1.96.0`, `dtolnay/rust-toolchain@1.96.0` in CI),
+> absolute build paths are remapped (`--remap-path-prefix` for `$HOME`, cargo
+> home, workspace root), `SOURCE_DATE_EPOCH` is the tag commit's seconds, JS
+> inputs are frozen (`--frozen-lockfile`), and the desktop build runs `cargo
+> build --locked`. The published, itemized residual list lives in
+> **`docs/reproducible-builds-residuals.md`** and an independent, fork-runnable
+> reproducer lives in **`.github/workflows/rebuild-verify.yml`**. The items below
+> remain best-effort exactly as this section describes; the residual doc is their
+> canonical, per-release-auditable form. **Biggest residual (call it out):** the
+> client still bakes some build-recipe inputs as *secrets* via `option_env!`
+> (`R2_SECRET_KEY`, `LIVEKIT_API_SECRET`), so a *fully secretless* third party
+> cannot yet bit-reproduce even the Linux payload — only a party holding the
+> published recipe can. Stripping secrets from the client binary is the next
+> reproducibility milestone.
+
 1. **Code-signing is non-reproducible *by construction*.** A notarized `.dmg`
    embeds an Apple timestamp + a CMS signature; an Authenticode `.exe` embeds an
    RFC 3161 timestamp from `timestamp.acs.microsoft.com` (mandatory — Azure certs
@@ -213,7 +230,10 @@ artifacts is not achievable and not the goal. The goal is a **reproducible
 payload per platform**, with signing/notarization cleanly separated as a
 non-reproducible outer layer that is itself transparency-logged and bound to the
 payload. This is exactly how Signal, Tor Browser, and reproducible-builds.org
-frame it, and it is honest.
+frame it, and it is honest. **As of P5 this framing is shipped for Linux** (the
+reproducible unit), with the non-reproducible layers enumerated and per-release
+auditable in `docs/reproducible-builds-residuals.md`; macOS/Windows payload
+reproduction stays best-effort pending a matching-runner reproducer.
 
 ---
 
@@ -628,12 +648,25 @@ needs the **release runners** (macOS/Windows/Linux signing hardware).
   still needs a signed build (the per-platform payload hashing is best-effort:
   exact for the Linux AppImage, deferred for `.app`/NSIS/deb/rpm — §4.2).
 
-### Phase 5 — Full reproducibility hardening + independent rebuilder (mixed)
-- Close the §1.5 gaps as far as practical (vendor bindgen output, pin native
-  toolchains, remap all paths, `SOURCE_DATE_EPOCH` everywhere, pinned runner
-  digests); publish the itemized residual-nondeterminism list.
-- Stand up a **third-party-runnable** rebuilder Action (separate trust domain)
-  that rebuilds each tag and asserts the payload hash is in the log.
+### Phase 5 — Full reproducibility hardening + independent rebuilder (mixed) — **shipped for Linux (#484)**
+- **Shipped:** exact toolchain pin (`rust-toolchain.toml` 1.96.0 +
+  `dtolnay/rust-toolchain@1.96.0` across every release job), `--remap-path-prefix`
+  for `$HOME`/cargo-home/workspace on the Linux build, `SOURCE_DATE_EPOCH` from
+  the tag commit on the Linux compile/bundle steps, `pnpm install
+  --frozen-lockfile` + `cargo build --locked` on the desktop build, Vite bundle
+  determinism (no source-map host paths, content-hashed assets), the shared
+  payload-hashing helper (`scripts/lib/payload-hash.sh`) sourced by both the
+  attest job and the reproducer, the published itemized residual list
+  (`docs/reproducible-builds-residuals.md`), and the third-party-runnable
+  reproducer (`.github/workflows/rebuild-verify.yml`, separate trust domain, no
+  Pollis secrets, trusts only the pinned key).
+- **Still best-effort (in the residual list, not yet closed):** vendoring the
+  capture-helper bindgen output; pinning native `meson`/`clang` and runner
+  images by *digest* (labels only today); and — the top item — stripping the
+  still-baked *secret* `option_env!` inputs so a fully secretless third party can
+  bit-reproduce the Linux payload (today only a party given the published recipe
+  can). macOS/Windows payload reproduction is best-effort pending a
+  matching-runner reproducer.
 - **Acceptance:** an *independent* party reproduces the Linux payload bit-for-bit
   (or modulo the documented list) and confirms its hash is logged; the reproduced
   set is published. Reproducibility of **macOS/Windows payloads** is
