@@ -1,0 +1,204 @@
+{
+  "version": 1,
+  "note": "Phase 0 curated canned answers — the zero-hallucination-risk path. Every answer is doc-faithful and MUST obey the NEVER-CLAIM list in issue #508: not post-quantum; sealed sender protects stored records not the live send moment; padding is text-only; binary transparency proves published-bytes-match not full source-reproducibility everywhere; no anonymity / no IP-hiding; the log trusts only the pinned Ed25519 key; no message-history backup by design; servers hold ciphertext + metadata, never plaintext or keys.",
+  "answers": [
+    {
+      "id": "can-read-messages",
+      "question": "Can Pollis read my messages?",
+      "aliases": ["can pollis read my messages", "can you read my messages", "can the server read messages", "does pollis see my messages", "who can read my messages", "can operators read messages", "are messages private", "can the company read my chats"],
+      "answer": "No. Messages are end-to-end encrypted with MLS (RFC 9420) on your device before they leave it, so the servers only ever hold ciphertext envelopes plus routing metadata — never message plaintext or your private keys. And you don't have to take that on faith: the append-only transparency log and verifiable builds let you check the server hasn't tampered with things. The server still sees metadata (who is in a group, timing, sizes), just not what you say.",
+      "cites": [
+        {"title": "The server can't read your messages", "source": "security.html"},
+        {"title": "What metadata the server sees", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "quantum-safe",
+      "question": "Is Pollis quantum-safe / post-quantum?",
+      "aliases": ["is it quantum safe", "is it post quantum", "post-quantum", "quantum resistant", "pqc", "quantum computer", "quantum proof", "is pollis pq", "future quantum attacks"],
+      "answer": "No. Pollis uses classical cryptography today — MLS cipher suite 1, built on X25519, HKDF-SHA256, AES-128-GCM, and Ed25519. None of these are post-quantum. A hybrid post-quantum MLS design is documented as future, aspirational work, but it is not shipped. If a large quantum computer existed, the key-agreement step (X25519) would not be safe against it.",
+      "cites": [
+        {"title": "MLS and cipher suite 1", "source": "security.html"},
+        {"title": "PQ-hybrid MLS design (future/aspirational)", "source": "https://github.com/actuallydan/pollis/blob/main/docs/pq-hybrid-mls-design.md"}
+      ]
+    },
+    {
+      "id": "sealed-sender",
+      "question": "Does sealed sender hide who I talk to from the server?",
+      "aliases": ["sealed sender", "does the server know who i talk to", "does the server see who sent", "hide sender", "sender anonymity", "who sent the message", "does pollis hide the sender", "is the sender hidden"],
+      "answer": "Only partly, and it's important to be precise. Sealed sender protects the stored records at rest: the saved copy of a message no longer names who sent it, so a stolen or subpoenaed database wouldn't show who said what. It does not hide the live send moment — when you hit send, the delivery service still checks you're a member of the conversation, so in that instant it does see it's you. Full sender-anonymity against the server (anonymous membership proofs) is future work, not shipped. So no, it is not true that the server never knows who you're talking to.",
+      "cites": [
+        {"title": "Sealed sender protects stored records, not the live send moment", "source": "security.html"},
+        {"title": "Can the server tell who sent a message?", "source": "faq.html"}
+      ]
+    },
+    {
+      "id": "attachments-padded",
+      "question": "Are my files / attachments padded or size-hidden?",
+      "aliases": ["are attachments padded", "are files padded", "is file size hidden", "attachment size", "do files leak size", "are my files size hidden", "padding files", "message padding attachments"],
+      "answer": "No. Message padding covers text messages only — text is padded to fixed size buckets before encryption, so the server can't tell a short reply from a long paragraph. Attachments are the exception: they're shared via convergent encryption keyed on the file's real size, so their sizes are not padded and the server can see roughly how big a file is.",
+      "cites": [
+        {"title": "Text messages are padded; files are not", "source": "security.html"},
+        {"title": "How files are encrypted (convergent encryption)", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "reproducible-builds",
+      "question": "Are the builds fully reproducible?",
+      "aliases": ["are builds reproducible", "reproducible builds", "can i rebuild the app", "byte for byte", "build from source", "is the build reproducible", "verify the binary matches source", "deterministic build"],
+      "answer": "Not fully, and Pollis is explicit about that. Binary transparency proves the published bytes match an append-only log under a single pinned key (no fork, no rollback, no re-issue) — it is not a claim of full source-reproducibility on every platform. The Linux AppImage payload is the one reproducible unit, and even it needs the published build recipe (an optional observability log token can still block a fully-secretless rebuild). macOS and Windows payload reproduction is best-effort on a matching runner, and the signed/notarized wrapper is non-reproducible by construction. So it is not correct to say Pollis has 'fully reproducible builds' yet.",
+      "cites": [
+        {"title": "The Linux AppImage payload is the reproducible unit", "source": "https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md"},
+        {"title": "What reproducibility means for a verifier", "source": "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md"}
+      ]
+    },
+    {
+      "id": "hide-ip-anonymous",
+      "question": "Does Pollis hide my IP or make me anonymous?",
+      "aliases": ["does pollis hide my ip", "am i anonymous", "is it anonymous", "hide ip address", "is it like tor", "does it use tor", "ip hiding", "anonymity", "does the server see my ip", "mixnet"],
+      "answer": "No. The server sees your IP address and connection metadata, just like any normal internet service. Pollis is not Tor and not a mixnet — it does not hide your network identity or your location. What it protects is the content of your messages (end-to-end encrypted) and, at rest, who sent a stored message; it does not provide network-level anonymity.",
+      "cites": [
+        {"title": "Honest trade-offs", "source": "security.html"},
+        {"title": "Who you have to trust", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "transparency-log-proves",
+      "question": "What does the transparency log actually prove?",
+      "aliases": ["what does the transparency log prove", "what is the transparency log", "what does the log prove", "key transparency", "merkle log", "append only log", "what does verify prove", "transparency proofs"],
+      "answer": "It proves no-fork, no-rollback, and no-equivocation of three append-only histories: the MLS commit log, the directory of published account keys, and the released binaries. A verifier trusts only the log's pinned Ed25519 public key (175ebfef…7148), the signed tree head, and the Merkle proofs checked against it — nothing else: not the server, not the database, not the host, not the network. If a single byte is altered, a proof or signature fails and the verifier exits non-zero. That's all it proves; it is not itself a claim about source-reproducibility.",
+      "cites": [
+        {"title": "Transparency log trust model", "source": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"},
+        {"title": "Three domain-separated trees", "source": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"}
+      ]
+    },
+    {
+      "id": "secret-group-add",
+      "question": "Can Pollis secretly add someone to my group?",
+      "aliases": ["can pollis add someone to my group", "secret group member", "hidden member", "can the server add someone", "ghost user", "can they add a member secretly", "silent add to group", "eavesdrop by adding member"],
+      "answer": "Membership changes are MLS commits, and every commit is recorded as a leaf in the append-only transparency log. A hidden or backdated change would have to fork or equivocate that history, which your client can detect when it verifies the log against the pinned Ed25519 key. So this is best described as auditable and detectable rather than impossible: the log makes a silent addition surface as a proof that fails to verify, not something that can never be attempted. You can also compare safety numbers to confirm each contact's key hasn't been swapped.",
+      "cites": [
+        {"title": "Commit-log invariant: no fork, no rollback", "source": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"},
+        {"title": "Verify one conversation or one user", "source": "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md"}
+      ]
+    },
+    {
+      "id": "forward-secrecy",
+      "question": "What is forward secrecy — what if my keys are stolen?",
+      "aliases": ["forward secrecy", "what if my keys are stolen", "post compromise security", "what if my key is compromised", "does the group heal", "key compromise", "future secrecy", "past messages protected"],
+      "answer": "MLS uses a key ratchet that gives forward secrecy — past messages stay protected even if a current key is later compromised — and post-compromise security, meaning the group heals: once new commits happen, an attacker who grabbed old key material is locked back out. One honest caveat from the docs: there is no automatic periodic key rotation when a group is idle, so post-compromise healing depends on the group being actively used.",
+      "cites": [
+        {"title": "MLS and cipher suite 1", "source": "security.html"},
+        {"title": "Documented limitations", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "history-new-device",
+      "question": "Do I get my message history on a new device?",
+      "aliases": ["message history on new device", "do i keep my messages", "new device history", "will i lose my messages", "history backup", "do messages sync to new device", "restore messages", "backup my messages", "reset account messages"],
+      "answer": "No, by design. A new device starts empty and only receives messages sent after it joins; messages sent before you joined a group aren't retrievable. Pollis keeps no cloud backup of message history (no Megolm-style key backup), because such a backup would be a target for attackers and subpoenas. If you need a permanent archive of everything you've said, Pollis isn't the right tool.",
+      "cites": [
+        {"title": "New devices start empty", "source": "security.html"},
+        {"title": "Do I get my message history on a new device?", "source": "faq.html"}
+      ]
+    },
+    {
+      "id": "verify-yourself",
+      "question": "How do I verify any of this myself?",
+      "aliases": ["how do i verify", "how can i check this myself", "verify it yourself", "pollis-verify", "how to audit", "run the verifier", "verification cli", "check the log myself", "how do i verify the build"],
+      "answer": "Run the pollis-verify CLI yourself: `pollis-verify remote https://verify.pollis.com` checks the whole log (every signature and proof, trusting only the pinned public key), `pollis-verify group <id>` checks one conversation's commit chain, and `pollis-verify release <tag>` checks a build is in the log. Released artifacts also carry keyless cosign + SLSA provenance you can verify against GitHub's OIDC identity and the public Rekor log, with no Pollis key involved. The Artifacts and Transparency pages on this site are convenience views — the trustworthy path is running the tool yourself.",
+      "cites": [
+        {"title": "Verify the whole log — pollis-verify remote", "source": "https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md"},
+        {"title": "Artifacts & proofs dashboard", "source": "artifacts.html"}
+      ]
+    },
+    {
+      "id": "what-is-e2ee",
+      "question": "What does end-to-end encrypted actually mean here?",
+      "aliases": ["what is end to end encryption", "what does e2ee mean", "what is e2ee", "how is it encrypted", "encryption meaning", "what encryption does pollis use", "is it encrypted"],
+      "answer": "It means your message is turned into ciphertext on your own device, and only the devices of the people in the conversation hold the keys to turn it back into readable text. Pollis implements this with MLS (RFC 9420) via the openmls library, using cipher suite 1 (X25519, HKDF-SHA256, AES-128-GCM, Ed25519). The servers in between only ever see ciphertext plus routing metadata — never plaintext and never your private keys.",
+      "cites": [
+        {"title": "Is it really end-to-end encrypted?", "source": "faq.html"},
+        {"title": "MLS and cipher suite 1", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "what-metadata",
+      "question": "What metadata can the server see?",
+      "aliases": ["what metadata does the server see", "what can the server see", "what does the server know", "metadata leak", "what info does the server have", "does the server see who is in my group", "server metadata"],
+      "answer": "The server sees routing metadata, the way a mail carrier sees the addresses on envelopes: user IDs, group and channel membership, message timestamps, message sizes (text sizes are padded to fixed buckets; file sizes are not), public keys, and voice presence and routing metadata. It also sees your IP and connection metadata. It does not see message plaintext, file contents, voice audio, or private keys.",
+      "cites": [
+        {"title": "What metadata the server sees", "source": "security.html"},
+        {"title": "Sealed sender protects stored records, not the live send moment", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "what-is-mls",
+      "question": "What is MLS, and why not the Signal Protocol?",
+      "aliases": ["what is mls", "why mls", "messaging layer security", "why not signal protocol", "rfc 9420", "what protocol does pollis use", "mls vs signal"],
+      "answer": "MLS (Messaging Layer Security, RFC 9420, finalized 2023) is a public standard for encrypting messages in groups that change over time. Pollis uses it because it's built around group chat: it provides a single group key ratchet with efficient membership changes, whereas Signal's Double Ratchet pairwise-ratchets between every member and gets expensive at group scale. Pollis implements MLS with the Rust library openmls.",
+      "cites": [
+        {"title": "MLS and cipher suite 1", "source": "security.html"},
+        {"title": "Why MLS instead of Signal Protocol?", "source": "faq.html"}
+      ]
+    },
+    {
+      "id": "open-source",
+      "question": "Is Pollis open source?",
+      "aliases": ["is pollis open source", "is it open source", "can i see the source", "is the code public", "github", "where is the code", "open source"],
+      "answer": "The source is public on GitHub at github.com/actuallydan/pollis — you can read it, build it, and check the work. See the repo for the current license.",
+      "cites": [
+        {"title": "Is Pollis open source?", "source": "faq.html"}
+      ]
+    },
+    {
+      "id": "who-runs-servers",
+      "question": "Who runs the servers, and do I have to trust them?",
+      "aliases": ["who runs the servers", "do i trust the server", "server trust", "what do i have to trust", "trust model", "who operates pollis", "can i trust the operators"],
+      "answer": "You trust your own device and the version of the app you installed. After that you do not have to trust the servers: the remote database, file storage, voice routing, and email service can be run by people you've never met, and the design assumes they are watching. Everything sensitive happens on your device before anything is sent, and your private keys never leave it in readable form. What the servers can see is metadata, not content.",
+      "cites": [
+        {"title": "Who you have to trust", "source": "security.html"},
+        {"title": "What metadata the server sees", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "audited",
+      "question": "Has Pollis been audited?",
+      "aliases": ["is pollis audited", "has it been audited", "security audit", "third party audit", "is it safe enough for high risk", "can i trust it with my life", "independent audit"],
+      "answer": "No — Pollis is in open preview and has not had an independent third-party cryptographic audit. Its protocol choices target a Slack-style workspace threat model, not a nation-state adversary. If your physical safety depends on unbreakable communication, use a mature, audited tool built for that threat model.",
+      "cites": [
+        {"title": "Is Pollis audited? Should I trust it with my life?", "source": "faq.html"}
+      ]
+    },
+    {
+      "id": "is-voice-encrypted",
+      "question": "Is voice / audio encrypted?",
+      "aliases": ["is voice encrypted", "is audio encrypted", "voice call privacy", "can the server hear my voice", "is voice end to end encrypted", "voice channel encryption"],
+      "answer": "Yes. On top of the normal WebRTC transport encryption, Pollis adds a second layer on each audio frame (via libwebrtc's FrameCryptor, AES-128-GCM) after Opus compression and before it leaves your device. The LiveKit server routes the packets but forwards ciphertext it can't open. The voice key is derived from the channel's MLS group and rotates on every membership change, so a removed member loses access to the next frame.",
+      "cites": [
+        {"title": "Voice is end-to-end encrypted", "source": "security.html"},
+        {"title": "Files and voice are end-to-end encrypted too", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "key-change-detect",
+      "question": "What happens if someone's key changes?",
+      "aliases": ["what if someones key changes", "key change", "safety number", "red shield", "verify a contact", "man in the middle", "mitm", "key swap", "how do i know keys are real"],
+      "answer": "Pollis pins each contact's key the first time it sees it (trust-on-first-use). If the key later changes silently — the swap a server-side attacker would try — a red shield appears next to that person in every conversation you share, plus an inline notice, so you can re-verify them out-of-band. You can compare a 60-digit safety number (read aloud or by QR) to confirm no one swapped the key. Verify a person once and the green shield follows them everywhere.",
+      "cites": [
+        {"title": "Silent key changes are detected", "source": "security.html"},
+        {"title": "Safety numbers and trust-on-first-use", "source": "security.html"}
+      ]
+    },
+    {
+      "id": "lost-pin",
+      "question": "What if I forget my PIN or lose my device?",
+      "aliases": ["forgot my pin", "lost my device", "account recovery", "backup code", "secret key", "recover my account", "cant get in", "forgot pin lost secret key"],
+      "answer": "Signing in uses an email one-time code, then a local four-digit PIN that unlocks the app on that device (too many wrong guesses erases that device's messages). To recover on a brand-new device with no other device signed in, you use your one-time Secret Key (about 150 bits of entropy). Pollis stores your account key only inside an encrypted box the Secret Key opens and keeps no copy of the key itself — so if you lose both the Secret Key and every device, the account is unrecoverable by design.",
+      "cites": [
+        {"title": "Sign-in, PIN, and backup code", "source": "security.html"},
+        {"title": "The Secret Key and account recovery", "source": "security.html"}
+      ]
+    }
+  ]
+}
