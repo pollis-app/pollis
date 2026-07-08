@@ -61,28 +61,40 @@ Apple's notary service staples a ticket **after** the build, changing the shippe
 bytes. We log the pre-staple payload hash and treat the staple as part of the
 non-reproducible signed-wrapper layer.
 
-### 4. Baked `option_env!` build recipe — **[blocks Linux payload]** for a secretless third party
+### 4. Baked `option_env!` build recipe — **[blocks Linux payload]** for a secretless third party, via the optional log token only
 The client bakes build-configuration values into the binary at compile time via
 `option_env!` (`pollis-core/src/config.rs`): `TURSO_URL`, the **read-only**
-`TURSO_TOKEN`, `R2_S3_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_KEY`,
-`R2_PUBLIC_URL`, `R2_REGION`, `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
-`LIVEKIT_API_SECRET`, `POLLIS_DELIVERY_URL`, `LOG_DB_URL`, `LOG_DB_TOKEN`. These
-bytes are part of the reproducible payload, so a reproducer must bake the
-**identical** values or its hash legitimately diverges.
+`TURSO_TOKEN`, `LOG_DB_URL`, `LOG_DB_TOKEN`, `R2_S3_ENDPOINT`, `R2_PUBLIC_URL`,
+`LIVEKIT_URL`, `POLLIS_DELIVERY_URL`, and `POLLIS_SEAL_SENDER`. These bytes are
+part of the reproducible payload, so a reproducer must bake the **identical**
+values or its hash legitimately diverges.
 
-- Most are **non-secret by design** (public URLs, the RO token) and can be
-  published as a build recipe; `rebuild-verify.yml` reads them from non-secret
-  repository/environment `vars`.
-- But **`R2_SECRET_KEY` and `LIVEKIT_API_SECRET` are genuine secrets** that a
-  secretless third party cannot obtain. Until the client stops baking secrets
-  into the shipped binary (or these are proven unused in the client build and
-  removed), a fully-independent, zero-secret party **cannot bit-reproduce the
-  Linux payload** — only a party holding the recipe can. This is the single
-  largest reproducibility gap today. It does **not** weaken log-inclusion
+- Most are **non-secret by design** (public URLs, a boolean flag, the RO token)
+  and can be published as a build recipe; `rebuild-verify.yml` reads them from
+  non-secret repository/environment `vars`.
+- **As of #506 (secrets-broker cutover, finishing #393) the client bakes no R2 or
+  LiveKit credentials at all.** `R2_ACCESS_KEY_ID`, `R2_SECRET_KEY`, `R2_REGION`,
+  `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` are no longer read anywhere in the
+  client — media upload (R2) and LiveKit token minting now go through the Delivery
+  Service / broker, not the shipped binary — so they are **no longer compiled in**.
+  (The desktop-release workflow still exports `R2_SECRET_KEY` and
+  `LIVEKIT_API_SECRET` into the build env, but the client no longer reads them, so
+  they are dead build-env vars; that workflow cleanup is out of scope here.) This
+  closes what was the single largest secretless-reproduction gap.
+- The only baked **credentials** that remain are the publishable read-only
+  `TURSO_TOKEN` (it reads already-public metadata and encrypted envelopes, never
+  plaintext or keys, so it can be published in the recipe and is **not** a
+  secretless-repro blocker) and the **optional** observability `LOG_DB_TOKEN` (a
+  bearer token to the log DB, consumed at `pollis-core/src/state.rs`; when a
+  release bakes it — `desktop-release.yml` still does — a fully-independent,
+  zero-secret party **cannot bit-reproduce the Linux payload**, only a party
+  holding the recipe can). That optional log token is now the remaining
+  secretless-repro blocker, and a much smaller surface than the media secrets it
+  replaces at the top of this list. It does **not** weaken log-inclusion
   verification, which needs no build inputs at all.
-- Tracked future work: strip secret-shaped inputs from the client binary and
-  publish the remaining recipe as a stable per-release manifest (§1.3 of the
-  design doc).
+- Tracked future work: scope/cut over `LOG_DB_TOKEN` so no secret-shaped input is
+  baked into the client binary, and publish the remaining recipe as a stable
+  per-release manifest (§1.3 of the design doc).
 
 ### 5. `bindgen` host-header layout (Linux capture helper) — best-effort
 `pollis-capture-linux` links `libspa-sys`, whose `bindgen` step generates Rust
