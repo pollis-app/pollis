@@ -221,6 +221,8 @@ async fn request_otp_is_ip_rate_limited() {
             request_otp_window_secs: 600,
             verify_otp_max: 30,
             verify_otp_window_secs: 600,
+            write_max: 1200,
+            write_window_secs: 60,
         });
 
     // First two requests from one IP pass; the third is throttled.
@@ -241,6 +243,60 @@ async fn request_otp_is_ip_rate_limited() {
     let (s, _) =
         send_ip(&state, "/v1/auth/request-otp", serde_json::json!({ "email": "a@x.com" }), "203.0.113.2").await;
     assert_eq!(s, StatusCode::OK, "a different IP is unaffected");
+}
+
+// #345: every DS response carries the baseline security headers — including the
+// rate-limiter's own 429 (which proves the header middleware wraps the limiter).
+#[tokio::test(flavor = "multi_thread")]
+async fn security_headers_on_every_response_including_429() {
+    let db = fresh_db().await;
+    let state = AppState::new(Arc::clone(&db), false)
+        .with_otp_config(OtpConfig {
+            resend_api_key: None,
+            dev_otp: Some(DEV_CODE.to_string()),
+            ttl_secs: 600,
+            session_ttl_secs: 600,
+            resend_throttle_secs: 0,
+            max_attempts: 5,
+        })
+        .with_ratelimit_config(RateLimitConfig {
+            request_otp_max: 1,
+            request_otp_window_secs: 600,
+            verify_otp_max: 30,
+            verify_otp_window_secs: 600,
+            write_max: 1200,
+            write_window_secs: 60,
+        });
+
+    async fn hit(state: &AppState, ip: &str) -> (StatusCode, axum::http::HeaderMap) {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/v1/auth/request-otp")
+            .header("content-type", "application/json")
+            .header("CF-Connecting-IP", ip)
+            .body(Body::from(serde_json::to_vec(&serde_json::json!({ "email": "h@x.com" })).unwrap()))
+            .unwrap();
+        let resp = build_router_with_state(state.clone()).oneshot(req).await.unwrap();
+        (resp.status(), resp.headers().clone())
+    }
+
+    let assert_headers = |h: &axum::http::HeaderMap| {
+        assert_eq!(h.get("cache-control").unwrap(), "no-store");
+        assert_eq!(h.get("x-content-type-options").unwrap(), "nosniff");
+        assert_eq!(h.get("referrer-policy").unwrap(), "no-referrer");
+        assert_eq!(h.get("x-frame-options").unwrap(), "DENY");
+    };
+
+    // First request (200) carries the headers.
+    let (s, h) = hit(&state, "198.51.100.5").await;
+    assert_eq!(s, StatusCode::OK);
+    assert_headers(&h);
+
+    // Second request from the same IP is rate-limited (429) — and STILL carries the
+    // headers, proving the header middleware wraps the rate limiter.
+    let (s, h) = hit(&state, "198.51.100.5").await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+    assert_headers(&h);
 }
 
 /// Run request-otp + verify-otp for `email`/`device_id`, returning the verify-otp

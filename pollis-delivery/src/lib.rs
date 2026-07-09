@@ -30,10 +30,12 @@ pub mod devices;
 pub mod email_change;
 pub mod error;
 pub mod groups;
+pub mod headers;
 pub mod messages;
 pub mod otp;
 pub mod profile;
 pub mod ratelimit;
+pub mod redact;
 pub mod session;
 pub mod writes;
 
@@ -43,6 +45,7 @@ use axum::{
     body::Bytes,
     extract::{Path, Query, State},
     http::{HeaderMap, Method, StatusCode, Uri},
+    middleware::{from_fn, from_fn_with_state},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -284,6 +287,11 @@ pub fn build_router_with_state(state: AppState) -> Router {
         .route("/v1/livekit/participants", post(broker::livekit_participants))
         .route("/v1/turso/token", post(broker::turso_token))
         .route("/v1/r2/presign", post(broker::r2_presign))
+        // Hardening middleware (#345). Rate limiting runs first (inner); security
+        // headers are added last so they wrap every response, including the
+        // rate-limiter's own 429s and any error replies.
+        .layer(from_fn_with_state(state.clone(), ratelimit::rate_limit))
+        .layer(from_fn(headers::security_headers))
         .with_state(state)
 }
 

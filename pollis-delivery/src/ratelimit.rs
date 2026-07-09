@@ -24,8 +24,17 @@
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::http::HeaderMap;
+use axum::{
+    extract::{Request, State},
+    http::{HeaderMap, Method, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+    Json,
+};
+
+use crate::AppState;
 
 /// Rate-limit tunables for the OTP endpoints, read from DS env in
 /// [`RateLimitConfig::from_env`]. Windows are per client IP.
@@ -39,6 +48,12 @@ pub struct RateLimitConfig {
     pub verify_otp_max: u32,
     /// `verify-otp` window length, seconds.
     pub verify_otp_window_secs: u64,
+    /// Max other (authenticated) write calls per IP per window — a generous
+    /// backstop against a flood from one client; device-signed writes are already
+    /// credential-gated, so this only catches egregious volume.
+    pub write_max: u32,
+    /// Authenticated-write window length, seconds.
+    pub write_window_secs: u64,
 }
 
 impl Default for RateLimitConfig {
@@ -50,6 +65,8 @@ impl Default for RateLimitConfig {
             request_otp_window_secs: 600,
             verify_otp_max: 30,
             verify_otp_window_secs: 600,
+            write_max: 1200,
+            write_window_secs: 60,
         }
     }
 }
@@ -71,6 +88,12 @@ impl RateLimitConfig {
         }
         if let Some(v) = env_u64("RL_VERIFY_OTP_WINDOW_SECS") {
             cfg.verify_otp_window_secs = v;
+        }
+        if let Some(v) = env_u32("RL_WRITE_MAX") {
+            cfg.write_max = v;
+        }
+        if let Some(v) = env_u64("RL_WRITE_WINDOW_SECS") {
+            cfg.write_window_secs = v;
         }
         cfg
     }
@@ -167,6 +190,66 @@ fn header_str<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .and_then(|v| v.to_str().ok())
         .map(str::trim)
         .filter(|s| !s.is_empty())
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// The 429 body for the per-IP throttle — distinct from the per-email lockout's
+/// "too many attempts" so the two limits are tellable apart in logs/clients.
+pub fn too_many_requests() -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(serde_json::json!({ "error": "too many requests" })),
+    )
+        .into_response()
+}
+
+/// Pick the rate-limit tier for a request, or `None` to exempt it. One place
+/// decides policy for the whole service, so no handler re-implements throttling.
+/// Reads (`GET`) and the health/version probes are exempt (cheap, idempotent,
+/// and DDoS-fronted by Cloudflare); the unauthenticated OTP endpoints get tight
+/// limits (the cheap-abuse surface); every other write gets a generous backstop.
+fn classify(method: &Method, path: &str, cfg: &RateLimitConfig) -> Option<(&'static str, u32, u64)> {
+    if method == Method::GET || method == Method::HEAD || method == Method::OPTIONS {
+        return None;
+    }
+    match path {
+        "/v1/auth/request-otp" => Some((
+            "otp_request",
+            cfg.request_otp_max,
+            cfg.request_otp_window_secs,
+        )),
+        "/v1/auth/verify-otp"
+        | "/v1/auth/request-email-change-otp"
+        | "/v1/auth/verify-email-change" => {
+            Some(("otp_verify", cfg.verify_otp_max, cfg.verify_otp_window_secs))
+        }
+        _ => Some(("write", cfg.write_max, cfg.write_window_secs)),
+    }
+}
+
+/// Axum middleware: per-IP rate limiting for the whole service, keyed by
+/// `{tier}:{ip}` so each tier has its own budget. Runs before the handler and
+/// short-circuits to 429 when a client exceeds its tier. Replaces per-handler
+/// checks so throttling lives in exactly one place (#345).
+pub async fn rate_limit(State(state): State<AppState>, req: Request, next: Next) -> Response {
+    if let Some((tier, max, window)) = classify(req.method(), req.uri().path(), &state.ratelimit_config)
+    {
+        let ip = client_ip(req.headers());
+        if state
+            .ratelimit
+            .check(&format!("{tier}:{ip}"), max, window, now_unix())
+            == RateLimitOutcome::Limited
+        {
+            return too_many_requests();
+        }
+    }
+    next.run(req).await
 }
 
 #[cfg(test)]
