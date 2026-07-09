@@ -53,27 +53,44 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@v3
 
+      # Skip as a green no-op until the env is configured (see dev workflow).
+      - name: Deploy configured?
+        id: guard
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$DOPPLER_TOKEN" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::CLOUDFLARE_API_TOKEN / DOPPLER_TOKEN not set in the delivery-prod environment — skipping deploy (no-op)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # DOPPLER_TOKEN is a service token scoped to pollis/prd_prod (set in the
       # delivery-prod env). No DEV_OTP synced (INCLUDE_DEV_OTP unset).
       - name: Sync secrets Doppler -> Secrets Store
+        if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
         run: bash ../.github/scripts/sync-ds-secrets.sh
 
       - name: Stamp GIT_SHA into container build args
+        if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
         run: |
           sed -i "s|\"GIT_SHA\": \"unknown\"|\"GIT_SHA\": \"${{ steps.sha.outputs.sha }}\"|" "$WRANGLER_CONFIG"
           grep -n '"GIT_SHA"' "$WRANGLER_CONFIG"
 
       - name: Deploy (wrangler)
+        if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
         run: pnpm exec wrangler deploy -c "$WRANGLER_CONFIG"
 
       # The #509 tripwire, kept verbatim: confirm the running binary is the new
       # build before calling the deploy done.
       - name: Verify new image is live
+        if: steps.guard.outputs.ok == 'true'
         run: |
           EXPECTED='${{ steps.sha.outputs.sha }}'
           echo "Waiting for $VERSION_URL to report sha=$EXPECTED"

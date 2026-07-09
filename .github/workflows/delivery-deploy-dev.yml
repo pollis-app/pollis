@@ -62,10 +62,26 @@ jobs:
       - name: Install Doppler CLI
         uses: dopplerhq/cli-action@v3
 
+      # Skip the deploy as a green no-op until the env is configured with
+      # CLOUDFLARE_API_TOKEN + DOPPLER_TOKEN — so merging the migration doesn't
+      # red-X on an unconfigured environment. Adding both secrets enables it.
+      - name: Deploy configured?
+        id: guard
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$DOPPLER_TOKEN" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::CLOUDFLARE_API_TOKEN / DOPPLER_TOKEN not set in the delivery-dev environment — skipping deploy (no-op)."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Doppler is the single source of truth. Pull the DS config and upsert each
       # key into Secrets Store under the DS_DEV_ prefix. DOPPLER_TOKEN is a
       # service token scoped to pollis/dev_personal (set in the delivery-dev env).
       - name: Sync secrets Doppler -> Secrets Store
+        if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
         env:
           DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
@@ -73,12 +89,14 @@ jobs:
         run: bash ../.github/scripts/sync-ds-secrets.sh
 
       - name: Stamp GIT_SHA into container build args
+        if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
         run: |
           sed -i "s|\"GIT_SHA\": \"unknown\"|\"GIT_SHA\": \"${{ steps.sha.outputs.sha }}\"|" "$WRANGLER_CONFIG"
           grep -n '"GIT_SHA"' "$WRANGLER_CONFIG"
 
       - name: Deploy (wrangler)
+        if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
         run: pnpm exec wrangler deploy -c "$WRANGLER_CONFIG"
 
@@ -86,6 +104,7 @@ jobs:
       # Poll /version until it reports the SHA we just built; fail otherwise. This
       # is the #509 tripwire, target-agnostic and kept verbatim.
       - name: Verify new image is live
+        if: steps.guard.outputs.ok == 'true'
         run: |
           EXPECTED='${{ steps.sha.outputs.sha }}'
           echo "Waiting for $VERSION_URL to report sha=$EXPECTED"
