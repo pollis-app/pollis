@@ -23,8 +23,16 @@ pub enum RealtimeEvent {
     },
     /// Sent to a user's personal inbox room when a DM channel is created
     /// and they are a member, so they can fetch it without refreshing.
+    ///
+    /// `sender_username` is the creator's public username, carried so the
+    /// recipient's status-bar alert can name the requester (a DM request is a
+    /// pre-MLS-join event — there's no credential to re-derive the name from,
+    /// unlike `NewMessage`). Public directory metadata, already returned by the
+    /// DM-request query. Optional: null if the creator's user row is missing.
     DmCreated {
         conversation_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sender_username: Option<String>,
     },
     /// Sent to a user's personal inbox room when they are added to a group
     /// (via invite acceptance or join-request approval), or to a group room
@@ -39,6 +47,14 @@ pub enum RealtimeEvent {
         conversation_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         kind: Option<String>,
+        /// Inviter's public username and the group's name, carried on the
+        /// `invite` kind so the invitee's status-bar alert can name who invited
+        /// them and to where. Public directory metadata, already returned by
+        /// `get_pending_invites`. Absent on non-invite membership changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inviter_username: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group_name: Option<String>,
     },
     /// Sent to a group room when a user joins a voice channel in that group.
     VoiceJoined {

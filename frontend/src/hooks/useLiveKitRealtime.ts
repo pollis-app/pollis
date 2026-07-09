@@ -51,6 +51,8 @@ type RealtimeEvent =
   | {
     type: 'dm_created';
     conversation_id: string;
+    // Creator's public username, so the DM-request alert can name the requester.
+    sender_username?: string | null;
   }
   | {
     type: 'membership_changed';
@@ -59,6 +61,9 @@ type RealtimeEvent =
     // 'approval' = your join request was approved (silent)
     // omitted = generic reconcile (silent — refetch only)
     kind?: 'invite' | 'approval' | null;
+    // Present on the 'invite' kind: who invited you and to which group.
+    inviter_username?: string | null;
+    group_name?: string | null;
   }
   | {
     type: 'voice_joined';
@@ -319,8 +324,10 @@ export function useLiveKitRealtime() {
         notify('dm_request', {
           roomId: event.conversation_id,
           title: 'New conversation',
-          body: 'Someone started a conversation with you',
-          senderUsername: 'New DM',
+          body: event.sender_username
+            ? `${event.sender_username} started a conversation with you`
+            : 'Someone started a conversation with you',
+          senderUsername: event.sender_username ?? 'Someone',
         });
         return;
       }
@@ -355,10 +362,14 @@ export function useLiveKitRealtime() {
         // Only invites raise a user-facing notification. Approvals and
         // generic reconciles are silent — query invalidation handles them.
         if (event.kind === 'invite') {
+          const groupPart = event.group_name ? ` to ${event.group_name}` : '';
           notify('group_invite', {
             roomId: event.conversation_id ?? undefined,
             title: 'New group invite',
-            body: 'You have been invited to a group',
+            body: event.inviter_username
+              ? `${event.inviter_username} invited you${groupPart}`
+              : 'You have been invited to a group',
+            senderUsername: event.inviter_username ?? 'Someone',
           });
         }
         return;

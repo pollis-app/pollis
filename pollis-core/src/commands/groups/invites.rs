@@ -108,18 +108,54 @@ pub async fn send_group_invite(
         eprintln!("[mls] send_group_invite: reconcile for group {group_id}: {e}");
     }
 
+    // Inviter's username + group name for the invitee's status-bar alert, so it
+    // can name who invited them and to where (issue #396). Public directory
+    // metadata — the same fields `get_pending_invites` already returns. The DS
+    // write above has already landed the invite, so this lookup is best-effort:
+    // a failure degrades the alert to a generic name, it never fails the invite.
+    let (inviter_username, group_name): (Option<String>, Option<String>) =
+        match fetch_invite_alert_names(&conn, &group_id, &inviter_id).await {
+            Ok(pair) => pair,
+            Err(e) => {
+                eprintln!("[inbox] send_group_invite: alert-name lookup failed (non-fatal): {e}");
+                (None, None)
+            }
+        };
+
     // Notify invitee via their inbox so the pending invite appears immediately.
     // `kind: "invite"` lets the frontend raise a ping/OS notification — a
     // generic membership_changed (kind: null) would only invalidate queries.
     if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
         state,
         &invitee_id,
-        serde_json::json!({"type": "membership_changed", "group_id": group_id, "kind": "invite"}),
+        crate::commands::livekit_signalling::group_invite_inbox_payload(
+            &group_id,
+            inviter_username.as_deref(),
+            group_name.as_deref(),
+        ),
     ).await {
         eprintln!("[inbox] send_group_invite: notify {invitee_id} failed: {e}");
     }
 
     Ok(())
+}
+
+/// Look up the inviter's username and the group's name for a group-invite alert.
+/// Public directory metadata only. Returns `(None, None)` for either field that
+/// can't be resolved (missing user/group row).
+async fn fetch_invite_alert_names(
+    conn: &libsql::Connection,
+    group_id: &str,
+    inviter_id: &str,
+) -> Result<(Option<String>, Option<String>)> {
+    let mut rows = conn.query(
+        "SELECT u.username, g.name FROM groups g LEFT JOIN users u ON u.id = ?2 WHERE g.id = ?1",
+        libsql::params![group_id.to_string(), inviter_id.to_string()],
+    ).await?;
+    match rows.next().await? {
+        Some(row) => Ok((row.get(0)?, row.get(1)?)),
+        None => Ok((None, None)),
+    }
 }
 
 /// Get all pending invites for the given user.

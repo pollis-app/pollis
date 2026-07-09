@@ -81,6 +81,41 @@ pub fn roster_changed_payload(conversation_id: &str, epoch_before: u64, epoch_af
     })
 }
 
+/// `dm_created` wake-up sent to a user's PRIVATE inbox room (`inbox-{userId}`,
+/// single-subscriber). Unlike the group-room broadcasts above, this MAY carry
+/// the creator's public username: only the recipient subscribes to their own
+/// inbox, and the username is the same public directory metadata the DM-request
+/// query already returns — naming the requester in the status-bar alert is the
+/// point (issue #396). This is deliberately NOT subject to the §5 routing-only
+/// rule that governs shared-room broadcasts.
+pub fn dm_created_inbox_payload(conversation_id: &str, sender_username: Option<&str>) -> Value {
+    json!({
+        "type": "dm_created",
+        "conversation_id": conversation_id,
+        "sender_username": sender_username,
+    })
+}
+
+/// `membership_changed` / `kind: "invite"` wake-up sent to the invitee's PRIVATE
+/// inbox room. Like [`dm_created_inbox_payload`], MAY carry the inviter's public
+/// username + group name so the invitee's alert can name who invited them and to
+/// where (issue #396) — the same fields `get_pending_invites` returns. Distinct
+/// from [`membership_changed_payload`], which is the routing-only GROUP-ROOM
+/// broadcast and must never carry identity.
+pub fn group_invite_inbox_payload(
+    group_id: &str,
+    inviter_username: Option<&str>,
+    group_name: Option<&str>,
+) -> Value {
+    json!({
+        "type": "membership_changed",
+        "group_id": group_id,
+        "kind": "invite",
+        "inviter_username": inviter_username,
+        "group_name": group_name,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,5 +182,34 @@ mod tests {
         assert_eq!(p["conversation_id"], "conv-1");
         assert_eq!(p["epoch_after"], 5);
         assert_no_identity(&p);
+    }
+
+    /// Private-inbox pings are the intentional exception to §5: they DO carry the
+    /// counterparty's public username so a pre-MLS-join alert (DM request / group
+    /// invite) can name them. These assertions exist so a future §5 sweep doesn't
+    /// strip the username thinking it's a leak — it isn't, the inbox room is
+    /// single-subscriber and the username is public directory metadata.
+    #[test]
+    fn dm_created_inbox_ping_carries_sender_username() {
+        let p = dm_created_inbox_payload("conv-1", Some("alice"));
+        assert_eq!(p["type"], "dm_created");
+        assert_eq!(p["conversation_id"], "conv-1");
+        assert_eq!(p["sender_username"], "alice");
+    }
+
+    #[test]
+    fn dm_created_inbox_ping_tolerates_missing_username() {
+        let p = dm_created_inbox_payload("conv-1", None);
+        assert!(p["sender_username"].is_null());
+    }
+
+    #[test]
+    fn group_invite_inbox_ping_carries_inviter_and_group() {
+        let p = group_invite_inbox_payload("group-1", Some("bob"), Some("Design"));
+        assert_eq!(p["type"], "membership_changed");
+        assert_eq!(p["group_id"], "group-1");
+        assert_eq!(p["kind"], "invite");
+        assert_eq!(p["inviter_username"], "bob");
+        assert_eq!(p["group_name"], "Design");
     }
 }

@@ -147,11 +147,17 @@ pub async fn create_dm_channel(
     }
 
     // Notify non-creator members via their personal inbox rooms so they see
-    // the new DM channel immediately without needing to refresh.
-    let inbox_payload = serde_json::json!({
-        "type": "dm_created",
-        "conversation_id": id,
-    });
+    // the new DM channel immediately without needing to refresh. Carry the
+    // creator's username so the recipient's status-bar alert can name the
+    // requester instead of a placeholder (issue #396).
+    let creator_username = members
+        .iter()
+        .find(|m| m.user_id == creator_id)
+        .and_then(|m| m.username.clone());
+    let inbox_payload = crate::commands::livekit_signalling::dm_created_inbox_payload(
+        &id,
+        creator_username.as_deref(),
+    );
     for member in members.iter().filter(|m| m.user_id != creator_id) {
         if let Err(e) = crate::commands::livekit::publish_to_user_inbox(
             state, &member.user_id, inbox_payload.clone(),

@@ -48,7 +48,7 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   voice_self_join:   { sound: 'join'                                                              },
   voice_self_leave:  { sound: 'leave'                                                             },
   dm_request:        { sound: 'ping',  osNotif: true,               alert: true                   },
-  group_invite:      { sound: 'ping',  osNotif: true                                              },
+  group_invite:      { sound: 'ping',  osNotif: true,               alert: true                   },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
   incoming_call:     {                  osNotif: true,                            honorsRingtonePref: true },
   // @all in a group: the one channel event that DOES raise an OS ping (unlike

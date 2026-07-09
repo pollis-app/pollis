@@ -46,7 +46,7 @@ const CATEGORIES: Record<Category, CategoryConfig> = {
   voice_self_join:   { sound: 'join'                                                              },
   voice_self_leave:  { sound: 'leave'                                                             },
   dm_request:        { sound: 'ping',  osNotif: true,               alert: true                   },
-  group_invite:      { sound: 'ping',  osNotif: true                                              },
+  group_invite:      { sound: 'ping',  osNotif: true,               alert: true                   },
   enrollment:        { sound: 'ping',  osNotif: true,                            overlay: true    },
 };
 ```
@@ -91,9 +91,16 @@ The membership handler reads the `kind` discriminator (see below):
 
 ```ts
 if (event.kind === 'invite') {
-  notify('group_invite', { roomId: event.conversation_id, title: 'New group invite', body: '...' });
+  notify('group_invite', {
+    roomId: event.conversation_id,
+    title: 'New group invite',
+    body: `${event.inviter_username} invited you to ${event.group_name}`,
+    senderUsername: event.inviter_username ?? 'Someone',
+  });
 }
 ```
+
+`group_invite`'s `alert` needs a `senderUsername` to fire the status-bar alert (the gate is `alert && roomId && senderUsername`). Both the invite and DM-request pings carry the counterparty's public username on the wire — see the payload note below. Before #396 the DM-request alert showed a `'New DM'` placeholder and group invites raised no status-bar alert at all.
 
 ## Pref + permission flow
 
@@ -125,15 +132,28 @@ MembershipChanged {
     conversation_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     kind: Option<String>,
+    // Present on the `invite` kind (issue #396): who invited you, to where.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    inviter_username: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    group_name: Option<String>,
 },
 ```
 
-Wire dispatch (`pollis-core/src/commands/livekit.rs`) reads the `kind` field from the JSON payload. Publishers set it via `serde_json::json!({"type": "membership_changed", ..., "kind": "invite"})`.
+Wire dispatch (`pollis-core/src/commands/livekit/mod.rs`) reads `kind` from the JSON payload. The two **private-inbox** pings are built by dedicated helpers in `livekit_signalling.rs` — `group_invite_inbox_payload` and `dm_created_inbox_payload` — rather than inline JSON, so their identity-bearing shape is unit-tested next to the `assert_no_identity` §5 tests.
+
+**§5 exception — private inbox may carry identity.** The metadata-minimization rule (no sender/actor in a realtime ping) governs *shared-room* broadcasts. `dm_created` and the `invite` kind are sent to the recipient's single-subscriber inbox room (`inbox-{userId}`), so they deliberately carry the counterparty's **public** username (`sender_username` / `inviter_username`) + `group_name` — the same directory metadata `get_pending_invites` and the DM-request query already return. `membership_changed_payload` (the group-room broadcast) stays routing-only.
 
 The frontend type narrows it:
 
 ```ts
-| { type: 'membership_changed'; conversation_id?: string | null; kind?: 'invite' | 'approval' | null }
+| {
+    type: 'membership_changed';
+    conversation_id?: string | null;
+    kind?: 'invite' | 'approval' | null;
+    inviter_username?: string | null;
+    group_name?: string | null;
+  }
 ```
 
 When adding a new use of `MembershipChanged`, decide whether the receiver wants a notification. If yes, define a new `kind` value, set it on the publisher, and add the corresponding `notify(...)` call in the membership handler. If no, omit `kind` and the receiver will silently invalidate queries.

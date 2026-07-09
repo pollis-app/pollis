@@ -95,6 +95,10 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
             {
                 let _ = channel.send(RealtimeEvent::DmCreated {
                     conversation_id: conversation_id.to_owned(),
+                    sender_username: data
+                        .get("sender_username")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_owned),
                 });
             }
         }
@@ -109,6 +113,14 @@ pub(super) fn dispatch_data(payload: &[u8], channel: &dyn crate::sink::EventSink
             let _ = channel.send(RealtimeEvent::MembershipChanged {
                 conversation_id: conv_id.clone(),
                 kind,
+                inviter_username: data
+                    .get("inviter_username")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
+                group_name: data
+                    .get("group_name")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned),
             });
             return conv_id;
         }
