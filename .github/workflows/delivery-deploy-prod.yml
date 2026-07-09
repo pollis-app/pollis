@@ -12,6 +12,11 @@ on:
         description: Git ref to build (branch, tag, or SHA)
         required: false
         default: main
+      force_restart:
+        description: Force a container roll with no code change (e.g. after rotating a Doppler/Secrets Store value) — bumps BUILD_NONCE so a new image digest deploys and the container re-reads secrets.
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -80,7 +85,14 @@ jobs:
         working-directory: pollis-delivery
         run: |
           sed -i "s|\"GIT_SHA\": \"unknown\"|\"GIT_SHA\": \"${{ steps.sha.outputs.sha }}\"|" "$WRANGLER_CONFIG"
-          grep -n '"GIT_SHA"' "$WRANGLER_CONFIG"
+          # Secret-only rotation: no code change → same image digest → CF won't
+          # roll. force_restart bumps BUILD_NONCE to a unique value so a new
+          # digest deploys and the container re-reads Secrets Store on restart.
+          if [ "${{ inputs.force_restart }}" = "true" ]; then
+            sed -i "s|\"BUILD_NONCE\": \"0\"|\"BUILD_NONCE\": \"${{ github.run_id }}\"|" "$WRANGLER_CONFIG"
+            echo "force_restart: bumped BUILD_NONCE to force a new image digest"
+          fi
+          grep -nE '"GIT_SHA"|"BUILD_NONCE"' "$WRANGLER_CONFIG"
 
       - name: Deploy (wrangler)
         if: steps.guard.outputs.ok == 'true'
@@ -91,13 +103,25 @@ jobs:
       # build before calling the deploy done.
       - name: Verify new image is live
         if: steps.guard.outputs.ok == 'true'
+        working-directory: pollis-delivery
+        env:
+          APP: pollis-delivery-prod
         run: |
           EXPECTED='${{ steps.sha.outputs.sha }}'
+          # The old instance now exits promptly on SIGTERM (main.rs shutdown
+          # handler), so settle first rather than polling mid-drain and keeping
+          # it warm. /version stays authoritative; on a genuine stall we dump the
+          # control plane for diagnosis.
+          echo "Settling ~8s for the rollout to begin…"; sleep 8
           echo "Waiting for $VERSION_URL to report sha=$EXPECTED"
-          for i in $(seq 1 40); do
+          for i in $(seq 1 20); do
             GOT="$(curl -fsS -m 10 "$VERSION_URL" | jq -r '.sha' 2>/dev/null || echo '')"
             if [ "$GOT" = "$EXPECTED" ]; then echo "✓ live sha=$GOT"; exit 0; fi
             echo "[$((i*6))s] live sha=$GOT (want $EXPECTED)"; sleep 6
           done
-          echo "::error::Delivery (prod) did not report the new SHA within 240s — the deploy did not take effect."
+          echo "::error::Delivery (prod) did not report the new SHA in ~120s — the rollout stalled."
+          echo "---- control-plane diagnostics ----"
+          pnpm exec wrangler containers list || true
+          APP_ID="$(pnpm exec wrangler containers list --json 2>/dev/null | jq -r --arg n "$APP" '.[]|select(.name==$n).id' 2>/dev/null || echo '')"
+          [ -n "$APP_ID" ] && pnpm exec wrangler containers instances "$APP_ID" || true
           exit 1

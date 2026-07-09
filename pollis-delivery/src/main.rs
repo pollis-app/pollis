@@ -87,7 +87,42 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Resolve when the process is asked to terminate — SIGTERM (orchestrator) or
+/// SIGINT (local `ctrl_c`).
+///
+/// Cloudflare Containers do drain-then-replace: on a deploy they SIGTERM the
+/// running instance, wait up to ~15 min for a graceful exit, then SIGKILL, then
+/// start the new one. This binary is PID 1 in the container, so with no SIGTERM
+/// handler the kernel does NOT apply the default terminate action — SIGTERM is
+/// IGNORED and the OLD instance keeps serving for the full grace window,
+/// stalling the swap (and holding the sole-writer role) for up to 15 minutes.
+/// Awaiting SIGTERM here collapses that to seconds.
+///
+/// Once a signal arrives we also arm a detached hard-exit backstop: axum's
+/// graceful drain waits for in-flight requests, and a single slow/hung request
+/// must not keep the OLD writer alive — that is exactly the stale-instance
+/// failure. Cutting an in-flight request is safe: commit writes are atomic
+/// IMMEDIATE transactions against remote Turso, so an uncommitted tx simply
+/// never commits and the client retries — no corruption (the commit-log CAS
+/// rejects any stale/out-of-order write regardless).
+#[cfg(unix)]
+async fn shutdown_signal() {
+    use tokio::signal::unix::{signal, SignalKind};
+    let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = sigterm.recv() => {}
+    }
+    tracing::info!("shutdown signal received; draining (hard-exit in 5s)");
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tracing::warn!("graceful drain deadline hit; forcing exit");
+        std::process::exit(0);
+    });
+}
+
+#[cfg(not(unix))]
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
-    tracing::info!("shutting down");
+    tracing::info!("shutdown signal received");
 }
