@@ -6,8 +6,8 @@ proprietary server in the middle), and nothing stops you from pointing the app
 at infrastructure you own and running the whole thing end to end.
 
 This guide is the honest version of "don't trust us — check." You provision your
-own database, your own media server, and your own file storage, build the real
-client from this source tree, and watch it work. Because the security model
+own database, your own delivery service, your own media server, and your own file
+storage, build the real client from this source tree, and watch it work. Because the security model
 assumes the server is hostile (see [security-explained.md](security-explained.md)
 and [security-whitepaper.md](security-whitepaper.md)), running *your own* server
 is exactly the adversarial position: if the operator could read messages or hear
@@ -23,11 +23,12 @@ audio, you — now the operator — would be able to, and you can confirm you ca
 | Piece | Role | Self-host option |
 |---|---|---|
 | **Turso (libSQL)** | Stores encrypted message envelopes + group/channel metadata. Never sees plaintext. | Turso Cloud free tier, or self-hosted `sqld` |
+| **Delivery Service (DS)** | Sole writer to Turso — serializes MLS commits so the log stays append-only. Never sees plaintext. | Plain Docker image (`pollis-delivery/`) behind any reverse proxy |
 | **LiveKit SFU** | Routes voice/screenshare RTP. Forwards ciphertext frames it cannot decode. | Self-host via [`livekit/`](../livekit/), or LiveKit Cloud |
 | **Cloudflare R2** | Stores encrypted file/image blobs. | Any S3-compatible bucket |
 | **Resend** | Delivers the email OTP sign-in code. | Optional — bypass with `DEV_OTP` |
 
-The point of running all four yourself: every byte these services hold is
+The point of running all of it yourself: every byte these services hold is
 ciphertext, and the keys that open it never leave the device. You can inspect
 the Turso rows, record the LiveKit stream server-side, and read the R2 objects —
 and confirm none of it is intelligible without the client-held MLS keys.
@@ -80,25 +81,58 @@ docker compose -f livekit/docker-compose.yml up -d
 ```
 
 > **Heads-up on `nginx.conf`:** the committed `livekit/nginx.conf` is Pollis's
-> *production* ingress — it has server blocks for `rtc`/`downpage`/`api`/`api-dev`/
-> `deploy.pollis.com`, proxies to the `delivery`/`watchtower` containers, and
-> references Pollis's Let's Encrypt + Cloudflare-origin certs. For your own SFU
-> you only need the LiveKit block: keep the single `server { … proxy_pass
+> *production* ingress and still carries legacy `api`/`api-dev`/`deploy.pollis.com`
+> server blocks (proxying to `delivery`/`watchtower`) from when the Delivery
+> Service ran on this box. It no longer does — prod's DS moved to Cloudflare
+> Containers (see step 4), so the VPS now fronts only LiveKit. For your own SFU you
+> only need the LiveKit block: keep the single `server { … proxy_pass
 > http://livekit:7880; }` (and the `:80` redirect), point `server_name` and the
-> cert paths at your domain, and delete the rest. (Pollis itself no longer
-> deploys this by hand — `livekit/DEPLOY.md` documents the `workflow_dispatch`
-> deploy button — but `docker compose up -d` on your box works exactly the same.)
+> cert paths at your domain, and delete the `delivery`/`watchtower`/`api` blocks.
+> (Pollis deploys LiveKit via the `workflow_dispatch` button in `livekit/DEPLOY.md`,
+> but `docker compose up -d` on your box works exactly the same.)
 
 Note the `wss://` URL and the API key/secret — they go in your `.env` next. For a
 purely local sanity check you can also run `livekit-server --dev` and use its
 well-known dev key/secret, but TURN/TLS won't be set up.
 
-## 4. Create an R2 bucket (or any S3-compatible store)
+## 4. Run the Delivery Service (DS)
+
+The DS (`pollis-delivery/`) is the **sole writer to Turso**: clients hold
+read-only Turso tokens and POST every write (MLS commits, welcomes, membership)
+to the DS, which serializes them so the commit log stays append-only. It's a
+plain Rust HTTP server in a Docker image that reads plain env vars — no
+Cloudflare (or any cloud) SDK is baked in. Build and run it from the repo root:
+
+```bash
+docker build -f pollis-delivery/Dockerfile -t pollis-delivery .
+docker run -p 8788:8788 \
+  -e TURSO_URL=libsql://pollis-selfhost-....turso.io \
+  -e TURSO_TOKEN=<a read-write Turso token> \
+  pollis-delivery
+```
+
+Only `TURSO_URL` + `TURSO_TOKEN` are required (`PORT` defaults to 8788). To let
+the DS also broker LiveKit tokens and R2 presigns server-side — so those secrets
+never ship in the client — pass the same `LIVEKIT_*` / `R2_*` vars you set in
+step 6. Put it behind any reverse proxy that terminates TLS (nginx, Caddy,
+Traefik, a tunnel — anything), then point the client at it with
+`POLLIS_DELIVERY_URL` in step 6.
+
+> **How the maintainers host prod — and why it doesn't constrain you.** Pollis's
+> own prod/dev DS runs on [Cloudflare Containers](https://developers.cloudflare.com/containers/)
+> (a Worker + Durable Object fronting this exact image) behind api.pollis.com /
+> api-dev.pollis.com, with secrets synced from Doppler into Wrangler's Secrets
+> Store. That's a hosting *choice*, not a requirement: the image is
+> cloud-agnostic, so `docker run` behind your own proxy is the same server doing
+> the same thing. Prod's orchestration (Wrangler deploys, scale-to-zero) differs
+> from this self-host shape by design — the container inside is identical.
+
+## 5. Create an R2 bucket (or any S3-compatible store)
 
 From the Cloudflare dashboard: create an R2 bucket, generate an S3 access
 key/secret, and note the S3 endpoint and a public URL for serving objects.
 
-## 5. Configure credentials
+## 6. Configure credentials
 
 Copy the sample and fill in everything you provisioned:
 
@@ -110,8 +144,10 @@ cp .env.example .env.development
 TURSO_URL=libsql://pollis-selfhost-....turso.io
 TURSO_TOKEN=<token from step 2>
 
-R2_ACCESS_KEY_ID=<from step 4>
-R2_SECRET_KEY=<from step 4>
+POLLIS_DELIVERY_URL=https://<your-ds-domain>   # the reverse proxy in front of step 4
+
+R2_ACCESS_KEY_ID=<from step 5>
+R2_SECRET_KEY=<from step 5>
 R2_S3_ENDPOINT=https://<account>.r2.cloudflarestorage.com/<bucket>
 R2_PUBLIC_URL=https://<your-public-r2-url>
 
@@ -127,7 +163,7 @@ DEV_OTP=000000          # skip the email send; type 000000 as the OTP code
 (See [`pollis-core/src/config.rs`](../pollis-core/src/config.rs) for the exact
 variables the core reads.)
 
-## 6. Run it
+## 7. Run it
 
 ```bash
 pnpm dev
@@ -151,7 +187,7 @@ POLLIS_DATA_DIR=/tmp/pollis-2 DEV_EMAIL=other@example.com pnpm dev
 Both hit your Turso DB and your LiveKit SFU, so you can create a group, exchange
 messages, and start a voice call between them.
 
-## 7. Build a real installer
+## 8. Build a real installer
 
 ```bash
 pnpm build:tauri          # current platform; outputs per src-tauri/tauri.conf.json

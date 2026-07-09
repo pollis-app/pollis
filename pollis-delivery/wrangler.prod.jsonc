@@ -1,0 +1,51 @@
+{
+  // Cloudflare Worker + Container config for the PROD Delivery Service.
+  // Deploy: `wrangler deploy -c wrangler.prod.jsonc` (manual, see
+  // delivery-deploy-prod.yml). A SEPARATE config from dev so a dev deploy is
+  // structurally incapable of touching prod (#515). No DEV_OTP in prod.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pollis-delivery-prod",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-07-08",
+  "containers": [
+    {
+      "class_name": "PollisDelivery",
+      "image": "./Dockerfile",
+      "image_build_context": "../",
+      // Baked into the binary (option_env! -> /version) so the deploy can verify
+      // the new build is live. The deploy workflow rewrites "unknown" to the
+      // built commit SHA before `wrangler deploy` (jsonc-safe string replace).
+      "image_vars": { "GIT_SHA": "unknown" },
+      "instance_type": "basic",
+      "max_instances": 1,
+      "name": "pollis-delivery-prod"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "POLLIS_DELIVERY", "class_name": "PollisDelivery" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PollisDelivery"] }],
+  "vars": {
+    "PORT": "8788",
+    "POLLIS_DS_REQUIRE_AUTH": "true"
+  },
+  // Synced from Doppler prd_prod into the account Secrets Store under DS_PROD_.
+  "secrets_store_secrets": [
+    { "binding": "TURSO_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_URL" },
+    { "binding": "TURSO_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_TOKEN" },
+    { "binding": "LOG_DB_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LOG_DB_URL" },
+    { "binding": "LOG_DB_ADMIN_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LOG_DB_ADMIN_TOKEN" },
+    { "binding": "RESEND_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_RESEND_API_KEY" },
+    { "binding": "LIVEKIT_API_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LIVEKIT_API_KEY" },
+    { "binding": "LIVEKIT_API_SECRET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LIVEKIT_API_SECRET" },
+    { "binding": "LIVEKIT_URL", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_LIVEKIT_URL" },
+    { "binding": "R2_S3_ENDPOINT", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_S3_ENDPOINT" },
+    { "binding": "R2_ACCESS_KEY_ID", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_ACCESS_KEY_ID" },
+    { "binding": "R2_SECRET_KEY", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_SECRET_KEY" },
+    { "binding": "R2_BUCKET", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_R2_BUCKET" },
+    { "binding": "TURSO_PLATFORM_TOKEN", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_PLATFORM_TOKEN" },
+    { "binding": "TURSO_ORG", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_ORG" },
+    { "binding": "TURSO_DB", "store_id": "f179e06e701a464290063d96d674010c", "secret_name": "DS_PROD_TURSO_DB" }
+  ],
+  "routes": [{ "pattern": "api.pollis.com", "custom_domain": true }]
+}

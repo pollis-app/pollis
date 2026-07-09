@@ -1,6 +1,7 @@
 packages:
   - frontend
   - e2e
+  - pollis-delivery
 
 ignoredBuiltDependencies:
   - esbuild

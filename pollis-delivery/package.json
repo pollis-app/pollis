@@ -1,0 +1,19 @@
+{
+  "name": "pollis-delivery-worker",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cloudflare Worker + Container front-door for the Pollis Delivery Service",
+  "type": "module",
+  "scripts": {
+    "deploy:dev": "wrangler deploy -c wrangler.dev.jsonc",
+    "deploy:prod": "wrangler deploy -c wrangler.prod.jsonc",
+    "dev": "wrangler dev -c wrangler.dev.jsonc"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "^0.3.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "wrangler": "^4.107.1"
+  }
+}

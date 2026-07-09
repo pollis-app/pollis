@@ -29,5 +29,11 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/pollis-delivery /usr/local/bin/pollis-delivery
+# Cache-bust arg: bumping it yields a new image digest with no code change, which
+# is the only way to force a Cloudflare Container to roll (e.g. to re-read a
+# rotated Secrets Store value — CF does not roll on secret-only changes). Runtime
+# no-op. Set via the container `image_vars.BUILD_NONCE` in the wrangler config.
+ARG BUILD_NONCE=0
+RUN echo "$BUILD_NONCE" > /etc/pollis-build-nonce
 EXPOSE 8788
 ENTRYPOINT ["/usr/local/bin/pollis-delivery"]
