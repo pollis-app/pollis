@@ -3,17 +3,12 @@
 # Replaces the old GHCR-build + Watchtower-poke path (which silently no-op'd for
 # 11 days). Now: sync secrets Doppler -> Wrangler Secrets Store, then
 # `wrangler deploy` (versioned, health-gated), then verify the running /version
-# reports the built SHA. Dev auto-deploys on merge to main touching
-# pollis-delivery/** — safe because dev and prod are SEPARATE wrangler configs,
-# so this can never touch prod.
+# reports the built SHA. MANUAL ONLY (workflow_dispatch) — deploys are fired at
+# will, not on every merge, so a batch of merges doesn't churn CI. Dev and prod
+# are SEPARATE wrangler configs, so a dev deploy can never touch prod.
 name: Deploy Delivery (dev)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "pollis-delivery/**"
-      - ".github/workflows/delivery-deploy-dev.yml"
   workflow_dispatch:
     inputs:
       ref:
