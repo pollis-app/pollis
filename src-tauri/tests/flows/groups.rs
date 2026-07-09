@@ -1,4 +1,4 @@
-use crate::harness::{wipe, TestClient};
+use crate::harness::{wipe, world, TestClient};
 use serde_json::json;
 use serial_test::serial;
 
@@ -264,6 +264,110 @@ async fn removed_member_loses_access() {
     assert_eq!(ids, vec![alice_profile.id.clone()]);
     assert!(!bob.list_group_ids().await.contains(&group_id));
 
+    drop(alice);
+    drop(bob);
+}
+
+// ─── #261 Phase 2: directory-index equivalence ──────────────────────────────
+
+/// After a representative membership-churn sequence, the directory index
+/// (`user_groups` / `user_dms`) is an EXACT projection of the authoritative
+/// `group_member` / `dm_channel_member` tables: every membership row is faithfully
+/// projected (matching role, group name, accepted-state) and there are no orphan
+/// index rows. This is the dual-write equivalence guard (#261 spec, acceptance D.1)
+/// — it fails loudly if any DS write path forgets to maintain the index.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn directory_index_matches_membership() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    // Group churn: create, invite + accept (add member), promote to admin.
+    let group_id = alice.create_group("Directory Index").await;
+    alice.invite(&group_id, &bob_profile.username).await;
+    let invite = bob.first_pending_invite().await.expect("pending invite");
+    let invite_id = invite["id"].as_str().expect("invite id").to_string();
+    bob.accept_invite(&invite_id).await;
+    alice
+        .set_member_role(&group_id, &bob_profile.id, "admin")
+        .await;
+
+    // DM churn: create a request, accept it.
+    let dm_id = alice.create_dm(&[bob_profile.id.as_str()]).await;
+    bob.accept_dm_request(&dm_id).await;
+
+    // Read raw state through the writable remote handle (sees every DS write).
+    let conn = world().await.remote.conn().await.expect("remote conn");
+    let count = |sql: &'static str| {
+        let conn = &conn;
+        async move {
+            let mut rows = conn.query(sql, ()).await.expect("query");
+            rows.next()
+                .await
+                .expect("rows")
+                .expect("count row")
+                .get::<i64>(0)
+                .expect("i64")
+        }
+    };
+
+    // Sanity: the churn actually produced index rows (no vacuous pass).
+    assert!(count("SELECT COUNT(*) FROM user_groups").await >= 2, "user_groups populated");
+    assert!(count("SELECT COUNT(*) FROM user_dms").await >= 2, "user_dms populated");
+
+    // Every group_member row is faithfully projected (role + group name).
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM group_member gm JOIN groups g ON g.id = gm.group_id \
+             WHERE NOT EXISTS ( \
+                 SELECT 1 FROM user_groups ug \
+                 WHERE ug.user_id = gm.user_id AND ug.group_id = gm.group_id \
+                   AND ug.role = gm.role AND ug.group_name = g.name)"
+        )
+        .await,
+        0,
+        "every group_member row must be faithfully projected into user_groups"
+    );
+    // No orphan user_groups rows.
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM user_groups ug WHERE NOT EXISTS ( \
+                 SELECT 1 FROM group_member gm \
+                 WHERE gm.user_id = ug.user_id AND gm.group_id = ug.group_id)"
+        )
+        .await,
+        0,
+        "no orphan user_groups rows"
+    );
+    // Every dm_channel_member row is faithfully projected (NULL-safe accepted_at).
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM dm_channel_member dcm WHERE NOT EXISTS ( \
+                 SELECT 1 FROM user_dms ud \
+                 WHERE ud.user_id = dcm.user_id AND ud.dm_channel_id = dcm.dm_channel_id \
+                   AND ud.accepted_at IS dcm.accepted_at)"
+        )
+        .await,
+        0,
+        "every dm_channel_member row must be faithfully projected into user_dms"
+    );
+    // No orphan user_dms rows.
+    assert_eq!(
+        count(
+            "SELECT COUNT(*) FROM user_dms ud WHERE NOT EXISTS ( \
+                 SELECT 1 FROM dm_channel_member dcm \
+                 WHERE dcm.user_id = ud.user_id AND dcm.dm_channel_id = ud.dm_channel_id)"
+        )
+        .await,
+        0,
+        "no orphan user_dms rows"
+    );
+
+    let _ = alice_profile;
     drop(alice);
     drop(bob);
 }
