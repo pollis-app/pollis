@@ -33,6 +33,7 @@ pub mod groups;
 pub mod messages;
 pub mod otp;
 pub mod profile;
+pub mod ratelimit;
 pub mod session;
 pub mod writes;
 
@@ -76,6 +77,11 @@ pub struct AppState {
     /// Authorized-secrets broker config (#393) — LiveKit + R2 secrets read from
     /// DS env. Default all-`None`; the matching endpoint 503s until configured.
     pub broker: broker::BrokerConfig,
+    /// In-memory per-IP rate limiter for the signup-OTP endpoints. Shallow-`Clone`
+    /// (shared `Arc`), so every `AppState` clone shares the same counters.
+    pub ratelimit: ratelimit::RateLimiter,
+    /// Per-IP rate-limit tunables (DS env).
+    pub ratelimit_config: ratelimit::RateLimitConfig,
 }
 
 impl AppState {
@@ -98,6 +104,8 @@ impl AppState {
             otp_config: otp::OtpConfig::default(),
             email_change: email_change::EmailChangeStore::default(),
             broker: broker::BrokerConfig::default(),
+            ratelimit: ratelimit::RateLimiter::default(),
+            ratelimit_config: ratelimit::RateLimitConfig::default(),
         }
     }
 
@@ -113,6 +121,13 @@ impl AppState {
     /// [`Self::with_otp_config`].
     pub fn with_broker_config(mut self, config: broker::BrokerConfig) -> Self {
         self.broker = config;
+        self
+    }
+
+    /// Override the per-IP rate-limit config. Builder so `main` can thread DS env
+    /// (and tests can set tiny windows), mirroring [`Self::with_otp_config`].
+    pub fn with_ratelimit_config(mut self, config: ratelimit::RateLimitConfig) -> Self {
+        self.ratelimit_config = config;
         self
     }
 }
@@ -150,7 +165,8 @@ pub fn build_router_with_log_db(db: Arc<Db>, log_db: Arc<Db>) -> Router {
     );
     let state = AppState::new_with_log_db(db, log_db, require_auth)
         .with_otp_config(otp::OtpConfig::from_env())
-        .with_broker_config(broker::BrokerConfig::from_env());
+        .with_broker_config(broker::BrokerConfig::from_env())
+        .with_ratelimit_config(ratelimit::RateLimitConfig::from_env());
     build_router_with_state(state)
 }
 
