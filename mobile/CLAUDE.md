@@ -240,15 +240,26 @@ Current state:
   (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, since
   OTP bootstrap + all remote writes go through the DS, not direct Turso. Full
   sign-in verified end-to-end on an Android emulator against the live dev DS.
-- **Keystore-at-rest (Android):** the file-backed keystore (used in place of
+- **Keystore-at-rest (Android + iOS):** the file-backed keystore (used in place of
   desktop's OS keychain when built `--no-default-features`, i.e. no `os-keystore`)
   envelope-encrypts its contents with an AES-256-GCM master key held in the
-  **AndroidKeyStore** — see the `android_kek` module in `pollis-core/src/keystore.rs`
-  (JNI-from-Rust: `JNI_OnLoad` captures the `JavaVM`; system `KeyStore`/`KeyGenerator`/
-  `Cipher`, alias `pollis_keystore_kek`). On-disk `dev-keystore.json` is `iv(12)||gcm-ct`,
-  not plaintext. Identity keypair + session survive a cold process kill and decrypt
-  behind the device PIN. (`accounts.json` beside it is a public-metadata index only —
-  no secrets.)
+  platform secure store — same on-disk blob (`iv(12)||gcm-ct`, `dev-keystore.json`)
+  on both platforms:
+  - **Android** — `android_kek` in `pollis-core/src/keystore.rs`: non-exportable
+    key in the **AndroidKeyStore** (JNI-from-Rust: `JNI_OnLoad` captures the
+    `JavaVM`; system `KeyStore`/`KeyGenerator`/`Cipher`, alias `pollis_keystore_kek`).
+    Runtime-verified on an emulator (full sign-in, cold-relaunch unlock).
+  - **iOS** — `ios_kek` in the same file: 32-byte master key as a Keychain
+    generic-password item (service `pollis`, account `pollis_keystore_kek`,
+    `AccessibleAfterFirstUnlockThisDeviceOnly` → excluded from all backups),
+    AES-GCM done in Rust (`kek_envelope`, host-unit-tested). Works in the
+    simulator (Secure-Enclave-resident keys deliberately not used — no simulator
+    support; possible later hardening). **On-device/simulator verification
+    pending** (needs the Tahoe/Xcode-26 machine — see iOS dev loop above).
+  Identity keypair + session survive a cold process kill and decrypt behind the
+  device PIN. (`accounts.json` beside it is a public-metadata index only — no
+  secrets.) Both `#[cfg]` branches are CI-gated by `mobile-core-check.yml`
+  (android + ios cross-compile jobs).
 - **Media:** `get_media_path` decrypts an R2 object to a sandbox `file://` for
   `expo-image` — mobile can't run desktop's loopback media server. See `lib/media/`.
 - **Foreground realtime (scaffold):** mobile joins the same SFU rooms as desktop

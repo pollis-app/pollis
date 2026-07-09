@@ -6388,6 +6388,7 @@ dependencies = [
  "reqwest 0.12.28",
  "rodio",
  "rusqlite",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "sha2",

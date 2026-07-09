@@ -1,19 +1,20 @@
-# Mobile cross-compile gate: does `pollis-core` still build for Android?
+# Mobile cross-compile gate: does `pollis-core` still build for Android + iOS?
 #
 # The mobile app consumes pollis-core via uniffi. Everything desktop-only
 # (terminal, host audio/voice, the Rust LiveKit/libwebrtc engine) is gated out
 # on mobile with `cfg(not(any(target_os = "ios", target_os = "android")))` and
 # `#[path]`-swapped stubs. A desktop-only `cargo check` cannot catch a broken
-# gate — the mobile build only fails on a real cross-compile. This job runs that
-# cross-compile so mobile `#[cfg]` rot becomes red CI, not a latent defect
+# gate — the mobile build only fails on a real cross-compile. These jobs run
+# that cross-compile so mobile `#[cfg]` rot becomes red CI, not a latent defect
 # discovered on the next `ubrn build` (issue #185 cross-cutting).
 #
 # Mobile builds with `--no-default-features` (drops `media` -> no webrtc-sys, and
-# `os-keystore` -> file/Android-keystore path), matching the ubrn build.
-# aarch64 alone covers every `target_os = "android"` gate (gating is per-OS, not
-# per-ABI). iOS is a separate `target_os` branch and needs a macOS runner — a
-# follow-up once iOS native builds are back in reach (see mobile/CLAUDE.md).
-name: Mobile core (android cross-compile)
+# `os-keystore` -> the keystore-encrypted file path), matching the ubrn build.
+# One aarch64 target per OS covers every `target_os = "android"` / `"ios"` gate
+# (gating is per-OS, not per-ABI). The iOS job needs a macOS runner for the
+# Apple SDK; it gates the `ios_kek` Keychain path the same way the android job
+# gates the JNI path.
+name: Mobile core (cross-compile)
 
 on:
   pull_request:
@@ -59,3 +60,21 @@ jobs:
           export AR_aarch64_linux_android="$TC/llvm-ar"
           export RANLIB_aarch64_linux_android="$TC/llvm-ranlib"
           cargo check -p pollis-core --no-default-features --target aarch64-linux-android
+
+  ios-check:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add ios rust target
+        run: rustup target add aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-aarch64
+
+      # The macOS runner ships Xcode + the iPhoneOS SDK; cargo/cc pick them up
+      # via xcrun with no extra env. Gates the `target_os = "ios"` branches
+      # (ios_kek Keychain seal, mobile stubs) exactly like the android job.
+      - name: Cross-compile pollis-core for ios
+        run: cargo check -p pollis-core --no-default-features --target aarch64-apple-ios

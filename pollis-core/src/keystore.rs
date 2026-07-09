@@ -1,4 +1,4 @@
-use crate::error::{Error, Result};
+use crate::error::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -226,6 +226,136 @@ mod android_kek {
     }
 }
 
+// ── iOS: encrypt the keystore file at rest under a Keychain-held key ─────────
+//
+// Mirror of `android_kek` for iOS (issue #185 Section A): the file-backed
+// store's bytes are AES-256-GCM-encrypted under a 32-byte master key held in
+// the iOS **Keychain** (a generic-password item). Keychain items are encrypted
+// at rest by the OS under Secure-Enclave-protected class keys;
+// `AccessibleAfterFirstUnlockThisDeviceOnly` keeps the key out of ALL backups
+// (iCloud + local) and available across relaunches — so identity + session
+// survive a relaunch while the on-disk ciphertext is useless off-device.
+// Same blob layout as Android: iv(12) || gcm-ciphertext(+16 tag).
+//
+// Unlike AndroidKeyStore, the DEK crosses into process memory (Keychain
+// generic-password items are readable by the owning app). That matches the
+// threat model both platforms defend against here — off-device file theft via
+// backups or sandbox reads — since on either platform an on-device attacker
+// with app privileges can simply call unseal. Secure-Enclave-resident,
+// non-extractable keys (ECIES) are a possible hardening later; they don't work
+// in the iOS simulator, which is what the dev loop runs on.
+//
+// The AES envelope itself is platform-neutral Rust (`kek_envelope` below) so
+// the seal/unseal round-trip and blob layout are unit-tested on every host.
+#[cfg(target_os = "ios")]
+mod ios_kek {
+    use super::kek_envelope;
+    use crate::error::{Error, Result};
+    use security_framework::access_control::{ProtectionMode, SecAccessControl};
+    use security_framework::passwords::{get_generic_password, set_generic_password_options};
+    use security_framework::passwords_options::PasswordOptions;
+    use std::sync::Mutex;
+
+    const SERVICE: &str = "pollis";
+    const ACCOUNT: &str = "pollis_keystore_kek";
+    /// `errSecItemNotFound` — Security.framework's "no such keychain item".
+    const ERR_SEC_ITEM_NOT_FOUND: i32 = -25300;
+
+    /// Process-local cache of the master key. Also serializes get-or-create so
+    /// two concurrent first writes can't each mint a different key (the second
+    /// `SecItemAdd` silently *updates* on duplicate, which would orphan the
+    /// first writer's ciphertext).
+    static MASTER: Mutex<Option<[u8; 32]>> = Mutex::new(None);
+
+    fn keychain_err(ctx: &str, err: security_framework::base::Error) -> Error {
+        Error::Keystore(format!("ios keychain {ctx}: {err}"))
+    }
+
+    /// Get-or-create the 32-byte master key in the iOS Keychain.
+    fn master_key() -> Result<[u8; 32]> {
+        let mut guard = MASTER
+            .lock()
+            .map_err(|_| Error::Keystore("ios kek mutex poisoned".into()))?;
+        if let Some(k) = *guard {
+            return Ok(k);
+        }
+
+        let key: [u8; 32] = match get_generic_password(SERVICE, ACCOUNT) {
+            Ok(bytes) => bytes.try_into().map_err(|_| {
+                // A wrong-sized item means the entry was tampered with or
+                // written by something else. Refuse — regenerating would orphan
+                // every sealed byte on disk (identity keys included).
+                Error::Keystore("ios keychain kek has unexpected size; refusing to overwrite".into())
+            })?,
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => {
+                let mut fresh = [0u8; 32];
+                rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut fresh);
+                let mut opts = PasswordOptions::new_generic_password(SERVICE, ACCOUNT);
+                let protection = SecAccessControl::create_with_protection(
+                    Some(ProtectionMode::AccessibleAfterFirstUnlockThisDeviceOnly),
+                    0,
+                )
+                .map_err(|x| keychain_err("access control", x))?;
+                opts.set_access_control(protection);
+                set_generic_password_options(&fresh, opts)
+                    .map_err(|x| keychain_err("store kek", x))?;
+                fresh
+            }
+            Err(e) => return Err(keychain_err("read kek", e)),
+        };
+
+        *guard = Some(key);
+        Ok(key)
+    }
+
+    /// Encrypt: returns iv(12) || gcm-ciphertext(+16 tag).
+    pub fn seal(plaintext: &[u8]) -> Result<Vec<u8>> {
+        kek_envelope::seal_with(&master_key()?, plaintext)
+    }
+
+    /// Decrypt a blob produced by [`seal`].
+    pub fn unseal(blob: &[u8]) -> Result<Vec<u8>> {
+        kek_envelope::unseal_with(&master_key()?, blob)
+    }
+}
+
+// AES-256-GCM envelope shared by the iOS path. Platform-neutral on purpose:
+// compiled (and unit-tested) on every target so the blob layout — iv(12) ||
+// ciphertext(+16 tag), byte-compatible with `android_kek`'s Java output — is
+// pinned by host tests instead of only exercised on a device.
+#[cfg(any(target_os = "ios", test))]
+mod kek_envelope {
+    use crate::error::{Error, Result};
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Key, Nonce};
+
+    const IV_LEN: usize = 12;
+
+    pub fn seal_with(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>> {
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+        let mut iv = [0u8; IV_LEN];
+        rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut iv);
+        let ct = cipher
+            .encrypt(Nonce::from_slice(&iv), plaintext)
+            .map_err(|_| Error::Keystore("keystore seal failed".into()))?;
+        let mut blob = Vec::with_capacity(IV_LEN + ct.len());
+        blob.extend_from_slice(&iv);
+        blob.extend_from_slice(&ct);
+        Ok(blob)
+    }
+
+    pub fn unseal_with(key: &[u8; 32], blob: &[u8]) -> Result<Vec<u8>> {
+        if blob.len() < IV_LEN {
+            return Err(Error::Keystore("keystore blob too short".into()));
+        }
+        let (iv, ct) = blob.split_at(IV_LEN);
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+        cipher
+            .decrypt(Nonce::from_slice(iv), ct)
+            .map_err(|_| Error::Keystore("keystore unseal failed (wrong key or tampered blob)".into()))
+    }
+}
+
 // ── File-backed keystore: plain JSON file (no keychain, no OS prompts) ──────
 //
 // Selected for debug builds (no OS prompts during dev/test) AND whenever the
@@ -268,9 +398,10 @@ mod backend {
                 PathBuf::from(appdata).join("pollis")
             }
         };
-        // Mobile uses the OS secure store for real (iOS Keychain / Android
-        // Keystore — issue #185). This file-backed path is a compile-complete
-        // fallback; the bridge passes POLLIS_DATA_DIR (app sandbox) when wired.
+        // Mobile: this file IS the store, but its bytes are AES-GCM ciphertext
+        // under an OS-secured master key (AndroidKeyStore / iOS Keychain — see
+        // `android_kek` / `ios_kek`, issue #185 Section A). The bridge passes
+        // POLLIS_DATA_DIR (app sandbox).
         #[cfg(any(target_os = "ios", target_os = "android"))]
         let base = {
             if let Ok(dir) = std::env::var("POLLIS_DATA_DIR") {
@@ -282,15 +413,21 @@ mod backend {
         base.join("dev-keystore.json")
     }
 
-    // On Android the file holds AES-GCM ciphertext (see `super::android_kek`);
-    // everywhere else it's plaintext JSON. These convert between the on-disk
-    // bytes and the JSON string.
+    // On mobile the file holds AES-GCM ciphertext (see `super::android_kek` /
+    // `super::ios_kek`); on desktop it's plaintext JSON (debug builds only —
+    // release desktop uses the OS keychain backend below). These convert
+    // between the on-disk bytes and the JSON string.
     #[cfg(target_os = "android")]
     fn decode_file(raw: &[u8]) -> Result<String> {
         let plain = super::android_kek::unseal(raw)?;
         String::from_utf8(plain).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    fn decode_file(raw: &[u8]) -> Result<String> {
+        let plain = super::ios_kek::unseal(raw)?;
+        String::from_utf8(plain).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn decode_file(raw: &[u8]) -> Result<String> {
         String::from_utf8(raw.to_vec()).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
     }
@@ -298,7 +435,11 @@ mod backend {
     fn encode_file(json: &str) -> Result<Vec<u8>> {
         super::android_kek::seal(json.as_bytes())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    fn encode_file(json: &str) -> Result<Vec<u8>> {
+        super::ios_kek::seal(json.as_bytes())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     fn encode_file(json: &str) -> Result<Vec<u8>> {
         Ok(json.as_bytes().to_vec())
     }
@@ -582,5 +723,44 @@ mod tests {
         ks.store_for_user("session", "bob", b"b").await.unwrap();
         assert_eq!(ks.load_for_user("session", "alice").await.unwrap().as_deref(), Some(&b"a"[..]));
         assert_eq!(ks.load_for_user("session", "bob").await.unwrap().as_deref(), Some(&b"b"[..]));
+    }
+
+    // ── kek_envelope (the iOS at-rest cipher) — host-testable on purpose ────
+
+    #[test]
+    fn kek_envelope_roundtrip() {
+        let key = [7u8; 32];
+        let blob = kek_envelope::seal_with(&key, b"identity keys + session").unwrap();
+        assert_eq!(
+            kek_envelope::unseal_with(&key, &blob).unwrap(),
+            b"identity keys + session"
+        );
+    }
+
+    #[test]
+    fn kek_envelope_blob_layout_is_iv12_ct_tag16() {
+        // Pins the on-disk layout shared with android_kek: iv(12) || ct || tag(16).
+        let key = [1u8; 32];
+        let pt = b"0123456789";
+        let blob = kek_envelope::seal_with(&key, pt).unwrap();
+        assert_eq!(blob.len(), 12 + pt.len() + 16);
+        // Fresh random IV per seal — two seals of the same plaintext differ.
+        let blob2 = kek_envelope::seal_with(&key, pt).unwrap();
+        assert_ne!(blob[..12], blob2[..12], "IV must be random per seal");
+    }
+
+    #[test]
+    fn kek_envelope_rejects_wrong_key_and_tamper() {
+        let key = [2u8; 32];
+        let blob = kek_envelope::seal_with(&key, b"secret").unwrap();
+        // Wrong key.
+        assert!(kek_envelope::unseal_with(&[3u8; 32], &blob).is_err());
+        // Bit-flip in the ciphertext body → GCM auth failure.
+        let mut tampered = blob.clone();
+        let last = tampered.len() - 1;
+        tampered[last] ^= 1;
+        assert!(kek_envelope::unseal_with(&key, &tampered).is_err());
+        // Truncated below the IV → structured error, not a panic.
+        assert!(kek_envelope::unseal_with(&key, &blob[..8]).is_err());
     }
 }

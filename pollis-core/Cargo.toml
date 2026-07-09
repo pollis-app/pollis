@@ -160,6 +160,13 @@ webrtc-audio-processing = { version = "2", features = ["bundled"], optional = tr
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher-vendored-openssl"] }
 
+# iOS-only: Keychain Services so the file-backed keystore's master key lives in
+# the iOS Keychain (SEP-encrypted at rest, ThisDeviceOnly → excluded from
+# backups), mirroring the Android Keystore path below (issue #185 Section A).
+# Version 3.x is already in the workspace lock via desktop transitives.
+[target.'cfg(target_os = "ios")'.dependencies]
+security-framework = "3"
+
 # Android-only: JNI to the Android Keystore so the file-backed keystore's bytes
 # are encrypted at rest under a hardware-backed AES key (issue #185 Section A).
 # Only reaches the JVM (no app classes) so it needs no Context / classloader.
