@@ -12,6 +12,7 @@
 set -euo pipefail
 
 : "${DOPPLER_TOKEN:?}" "${STORE_ID:?}" "${SECRET_PREFIX:?}"
+: "${CLOUDFLARE_ACCOUNT_ID:?}" "${CLOUDFLARE_API_TOKEN:?}"
 
 # Keys the DS reads (pollis-delivery/src: main.rs direct reads + broker.rs
 # from_env). All optional in the DS except TURSO_URL/TURSO_TOKEN; a key unset in
@@ -30,13 +31,23 @@ fi
 
 SECRETS_JSON="$(doppler secrets download --no-file --format json)"
 
+# Snapshot existing secrets (name -> id) once. `wrangler secrets-store secret
+# update` takes --secret-id (NOT --name), so we must resolve the id for an
+# existing entry; a fresh entry is created by name. Without this, a re-sync of
+# an already-populated store fails (update rejects --name, create rejects a
+# duplicate).
+EXISTING_JSON="$(curl -fsS \
+  "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/secrets_store/stores/${STORE_ID}/secrets?per_page=100" \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")"
+
 upsert() {
-  local name="$1" value="$2"
+  local name="$1" value="$2" sid
   # Mask so the value never lands in workflow logs.
   echo "::add-mask::$value"
-  # Upsert: update if it exists, else create. Scope to workers (the only reader).
-  if pnpm exec wrangler secrets-store secret update "$STORE_ID" \
-        --name "$name" --value "$value" --scopes workers --remote >/dev/null 2>&1; then
+  sid="$(printf '%s' "$EXISTING_JSON" | jq -r --arg n "$name" 'first(.result[]? | select(.name==$n) | .id) // empty')"
+  if [ -n "$sid" ]; then
+    pnpm exec wrangler secrets-store secret update "$STORE_ID" \
+        --secret-id "$sid" --value "$value" --scopes workers --remote >/dev/null
     echo "updated $name"
   else
     pnpm exec wrangler secrets-store secret create "$STORE_ID" \
