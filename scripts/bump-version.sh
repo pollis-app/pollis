@@ -67,6 +67,17 @@ done
 jq --arg v "$VERSION" '.version = $v' src-tauri/tauri.conf.json > src-tauri/tauri.conf.json.tmp
 mv src-tauri/tauri.conf.json.tmp src-tauri/tauri.conf.json
 
+# Cargo.lock records every workspace member's version, so bumping
+# [workspace.package].version above leaves the lock stale. Sync it here, or the
+# Linux release build — which passes `--locked` for reproducibility — fails with
+# "cannot update the lock file because --locked was passed". `--workspace` only
+# rewrites the workspace members' own entries; external crates stay pinned, so
+# reproducibility is unaffected. (macOS/Windows don't pass `--locked`, which is
+# why this only bit the Linux build.)
+if command -v cargo >/dev/null 2>&1; then
+  cargo update --workspace >/dev/null
+fi
+
 echo
 echo "Stamped ${VERSION} into:"
 grep -H '^version = ' Cargo.toml | sed 's/^/  /'
