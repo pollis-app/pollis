@@ -236,22 +236,27 @@ pub async fn apply_verify_email_change(
         _ => return Ok(EmailChangeOutcome::Mismatch),
     }
 
-    match store.otp.verify(trimmed, code, cfg.max_attempts, now_unix()) {
+    // Validate WITHOUT consuming (see `OtpStore::check`): the code stays valid until
+    // the `users.email` write below succeeds, so a transient/config DB failure
+    // returns a clean 5xx and the same code still works on retry instead of being
+    // burned and disguised as "invalid code" (#518). Wrong-guess accounting stands.
+    match store.otp.check(trimmed, code, cfg.max_attempts, now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => {
-            // The code is spent + locked; drop the binding so a retry must
-            // re-request.
+            // check() already deleted the code on lockout; drop the binding too so a
+            // retry must re-request.
             store.clear(trimmed);
             return Ok(EmailChangeOutcome::LockedOut);
         }
         VerifyOutcome::Invalid | VerifyOutcome::Expired | VerifyOutcome::NotFound => {
-            // Wrong-but-not-locked: keep the binding so the caller can retry.
+            // Wrong-but-not-locked: keep the code + binding so the caller can retry.
             return Ok(EmailChangeOutcome::InvalidCode);
         }
     }
 
     // Race-close: between request and verify, someone else could have claimed this
-    // email. Reject if so — mirrors pollis-core `verify_email_change`.
+    // email. Reject if so — mirrors pollis-core `verify_email_change`. A DB error on
+    // this read `?`-propagates to a 5xx WITHOUT consuming the code.
     let mut rows = conn
         .query(
             "SELECT 1 FROM users WHERE email = ?1 AND id != ?2",
@@ -259,6 +264,9 @@ pub async fn apply_verify_email_change(
         )
         .await?;
     if rows.next().await?.is_some() {
+        // Correct code, but the target email is taken. Consume it (the binding is
+        // dropped, so a retry must re-request anyway) and report the conflict.
+        store.otp.consume(trimmed);
         store.clear(trimmed);
         return Ok(EmailChangeOutcome::EmailTaken);
     }
@@ -268,6 +276,8 @@ pub async fn apply_verify_email_change(
         libsql::params![trimmed.to_string(), authed.to_string()],
     )
     .await?;
+    // Applied: consume the code (single-use) now that the write has succeeded.
+    store.otp.consume(trimmed);
     store.clear(trimmed);
     Ok(EmailChangeOutcome::Updated)
 }

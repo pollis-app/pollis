@@ -180,11 +180,15 @@ impl OtpStore {
         PrepareOutcome::Send(code.to_string())
     }
 
-    /// Verify a submitted `code` against the stored record. Constant-time
-    /// compare; increments the attempt counter on a wrong guess and locks out +
-    /// deletes past `max_attempts`; deletes the record on success (single-use)
-    /// and on expiry.
-    pub fn verify(&self, email: &str, code: &str, max_attempts: u32, now: u64) -> VerifyOutcome {
+    /// Check a submitted `code` against the stored record WITHOUT consuming it on
+    /// success. Constant-time compare; on a WRONG guess it increments the attempt
+    /// counter and locks out + deletes past `max_attempts`; it deletes an expired
+    /// record. On a CORRECT code the record is **left in place** — the caller must
+    /// call [`OtpStore::consume`] only after the dependent account-write + session
+    /// mint succeed, so a transient/config failure downstream (e.g. a bad DB token)
+    /// can't permanently burn a valid code and masquerade as "invalid code" (#518).
+    /// Wrong-guess accounting (attempts + lockout) is never rolled back.
+    pub fn check(&self, email: &str, code: &str, max_attempts: u32, now: u64) -> VerifyOutcome {
         let key = normalize_email(email);
         let mut guard = self.inner.lock().expect("otp store mutex poisoned");
         let rec = match guard.get_mut(&key) {
@@ -200,8 +204,8 @@ impl OtpStore {
         }
         let provided = salted_hash(&rec.salt, code);
         if constant_time_eq(&provided, &rec.code_hash) {
-            // Single-use: a correct code can never be replayed.
-            guard.remove(&key);
+            // Correct: leave the record so a failed downstream write doesn't burn
+            // it. `consume` enforces single-use once the write has succeeded.
             return VerifyOutcome::Ok;
         }
         rec.attempts += 1;
@@ -211,6 +215,16 @@ impl OtpStore {
             return VerifyOutcome::LockedOut;
         }
         VerifyOutcome::Invalid
+    }
+
+    /// Consume (single-use) the OTP for `email` once the dependent account-write +
+    /// session mint have succeeded. Idempotent — a no-op if the record is already
+    /// gone. Pairs with [`OtpStore::check`] to make consumption contingent on the
+    /// whole verify-otp operation succeeding (#518).
+    pub fn consume(&self, email: &str) {
+        let key = normalize_email(email);
+        let mut guard = self.inner.lock().expect("otp store mutex poisoned");
+        guard.remove(&key);
     }
 }
 
@@ -381,7 +395,12 @@ pub async fn apply_verify_otp(
     code: &str,
     device_id: &str,
 ) -> anyhow::Result<VerifyOtpResult> {
-    match otp.verify(email, code, cfg.max_attempts, now_unix()) {
+    // Validate WITHOUT consuming: a correct code stays valid until the account-write
+    // and session mint below succeed, so a transient/config DB failure returns a
+    // clean 5xx and the *same* code still works on retry, instead of being burned
+    // and disguised as "invalid code" (#518). Wrong/expired/locked codes are
+    // rejected here and their attempt accounting stands.
+    match otp.check(email, code, cfg.max_attempts, now_unix()) {
         VerifyOutcome::Ok => {}
         VerifyOutcome::LockedOut => return Ok(VerifyOtpResult::LockedOut),
         VerifyOutcome::Invalid | VerifyOutcome::Expired | VerifyOutcome::NotFound => {
@@ -391,7 +410,8 @@ pub async fn apply_verify_otp(
 
     // Code is good: create or load the account. Mirrors pollis-core
     // `auth::verify_otp` — server-gen ULID id + a default username from the email
-    // prefix plus a 4-char ULID suffix for uniqueness.
+    // prefix plus a 4-char ULID suffix for uniqueness. Any error here
+    // `?`-propagates to a 5xx WITHOUT consuming the code (the retry then heals).
     let mut rows = conn
         .query(
             "SELECT id, username, account_id_pub FROM users WHERE email = ?1",
@@ -426,6 +446,10 @@ pub async fn apply_verify_otp(
 
     let now = now_unix();
     let session_token = sessions.mint(&user_id, email, device_id, cfg.session_ttl_secs, now);
+
+    // Single-use: consume ONLY now that the account exists and the session is
+    // minted — everything that can fail has already succeeded (#518).
+    otp.consume(email);
 
     Ok(VerifyOtpResult::Ok {
         user_id,
@@ -491,17 +515,45 @@ fn internal(e: anyhow::Error) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::Db;
+    use crate::session::SessionStore;
+
+    // Minimal `users` schema the account-write path reads/writes (id, email UNIQUE,
+    // username, account_id_pub). Matches the columns `apply_verify_otp` touches.
+    const USERS_SCHEMA: &str = "CREATE TABLE users (\
+        id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, username TEXT, account_id_pub BLOB);";
+
+    // A local libsql connection for the account-write path. `with_users` toggles
+    // whether the `users` table exists — omitting it makes the write fail, which is
+    // exactly the transient/config DB failure #518 is about.
+    async fn conn_with(with_users: bool) -> (Db, libsql::Connection) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("otp-test.db");
+        std::mem::forget(dir);
+        let db = Db::connect_local(path.to_str().unwrap()).await.expect("local db");
+        let conn = db.conn().unwrap();
+        if with_users {
+            conn.execute_batch(USERS_SCHEMA).await.unwrap();
+        }
+        (db, conn)
+    }
 
     #[test]
-    fn single_use_then_replay_fails() {
+    fn check_does_not_consume_a_correct_code_consume_does() {
         let store = OtpStore::default();
         store.prepare("a@x.com", "123456", 600, 0, 1000);
-        assert_eq!(store.verify("a@x.com", "123456", 5, 1000), VerifyOutcome::Ok);
-        // Replay: the record was deleted on success.
+        // A correct code checks Ok — and stays valid; checking again still Ok (the
+        // #518 fix: check alone must not burn the code).
+        assert_eq!(store.check("a@x.com", "123456", 5, 1000), VerifyOutcome::Ok);
+        assert_eq!(store.check("a@x.com", "123456", 5, 1000), VerifyOutcome::Ok);
+        // Single-use is enforced by consume, not by check.
+        store.consume("a@x.com");
         assert_eq!(
-            store.verify("a@x.com", "123456", 5, 1000),
+            store.check("a@x.com", "123456", 5, 1000),
             VerifyOutcome::NotFound
         );
+        // consume is idempotent.
+        store.consume("a@x.com");
     }
 
     #[test]
@@ -511,20 +563,17 @@ mod tests {
         // 5 wrong guesses are merely invalid.
         for _ in 0..5 {
             assert_eq!(
-                store.verify("a@x.com", "000000", 5, 1000),
+                store.check("a@x.com", "000000", 5, 1000),
                 VerifyOutcome::Invalid
             );
         }
         // The 6th locks out and deletes the code.
         assert_eq!(
-            store.verify("a@x.com", "000000", 5, 1000),
+            store.check("a@x.com", "000000", 5, 1000),
             VerifyOutcome::LockedOut
         );
         // The correct code no longer works.
-        assert_ne!(
-            store.verify("a@x.com", "123456", 5, 1000),
-            VerifyOutcome::Ok
-        );
+        assert_ne!(store.check("a@x.com", "123456", 5, 1000), VerifyOutcome::Ok);
     }
 
     #[test]
@@ -532,7 +581,7 @@ mod tests {
         let store = OtpStore::default();
         store.prepare("a@x.com", "123456", 600, 0, 1000);
         assert_eq!(
-            store.verify("a@x.com", "123456", 5, 2000),
+            store.check("a@x.com", "123456", 5, 2000),
             VerifyOutcome::Expired
         );
     }
@@ -548,5 +597,75 @@ mod tests {
             store.prepare("a@x.com", "222222", 600, 30, 1010),
             PrepareOutcome::Throttled
         ));
+    }
+
+    // #518: a correct code + a failing account-write must surface as an error (5xx),
+    // NOT "invalid code", and must leave the code usable so an immediate retry
+    // succeeds once the DB is healthy.
+    #[tokio::test]
+    async fn correct_code_with_failing_db_write_errors_then_retry_succeeds() {
+        let (_db, conn) = conn_with(false).await; // no `users` table → the write fails
+        let otp = OtpStore::default();
+        let sessions = SessionStore::default();
+        let cfg = OtpConfig::default();
+        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, now_unix());
+
+        let first =
+            apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
+        assert!(
+            first.is_err(),
+            "a failed account-write must surface as an error (5xx), not consume the code"
+        );
+
+        // Heal the DB and retry the SAME code — it must succeed (was not burned).
+        conn.execute_batch(USERS_SCHEMA).await.unwrap();
+        let second =
+            apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
+        assert!(
+            matches!(second, Ok(VerifyOtpResult::Ok { is_new_account: true, .. })),
+            "the same code must verify once the DB write can succeed"
+        );
+    }
+
+    // On the success path the code is consumed exactly once — a replay is rejected.
+    #[tokio::test]
+    async fn correct_code_is_single_use_on_success() {
+        let (_db, conn) = conn_with(true).await;
+        let otp = OtpStore::default();
+        let sessions = SessionStore::default();
+        let cfg = OtpConfig::default();
+        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, now_unix());
+
+        let first =
+            apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
+        assert!(matches!(first, Ok(VerifyOtpResult::Ok { .. })));
+        // Replay of the now-consumed code is rejected.
+        let replay =
+            apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
+        assert!(matches!(replay, Ok(VerifyOtpResult::InvalidCode)));
+    }
+
+    // Wrong guesses still count toward lockout and are never rolled back, even
+    // though the account-write (which would fail here) is never reached for them.
+    #[tokio::test]
+    async fn wrong_guesses_still_lock_out_regardless_of_db() {
+        let (_db, conn) = conn_with(false).await; // a correct code's write would fail
+        let otp = OtpStore::default();
+        let sessions = SessionStore::default();
+        let cfg = OtpConfig::default();
+        otp.prepare("a@x.com", "123456", cfg.ttl_secs, 0, now_unix());
+
+        for _ in 0..cfg.max_attempts {
+            let r =
+                apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "000000", "dev-1").await;
+            assert!(matches!(r, Ok(VerifyOtpResult::InvalidCode)));
+        }
+        let locked =
+            apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "000000", "dev-1").await;
+        assert!(matches!(locked, Ok(VerifyOtpResult::LockedOut)));
+        // The correct code is gone too (record deleted on lockout).
+        let after =
+            apply_verify_otp(&conn, &otp, &sessions, &cfg, "a@x.com", "123456", "dev-1").await;
+        assert!(matches!(after, Ok(VerifyOtpResult::InvalidCode)));
     }
 }
