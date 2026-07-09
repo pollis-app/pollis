@@ -92,7 +92,7 @@ pub async fn get_channel_messages(
     ingest_channel_envelopes_inner(state, &user_id, &channel_id).await?;
 
     let mut messages = read_local_channel_page(state, &channel_id, &cursor, limit).await?;
-    attach_sender_usernames(state, &mut messages).await?;
+    attach_sender_usernames_local(state, &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
@@ -173,45 +173,6 @@ async fn read_local_channel_page(
     }
 
     Ok(rows)
-}
-
-/// Batch-resolve sender usernames from the remote `users` table and attach
-/// them to the page. A missing user (deleted, never existed) simply stays as
-/// `None` on that message.
-async fn attach_sender_usernames(
-    state: &Arc<AppState>,
-    messages: &mut [ChannelMessage],
-) -> Result<()> {
-    if messages.is_empty() {
-        return Ok(());
-    }
-    let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for m in messages.iter() {
-        ids.insert(m.sender_id.clone());
-    }
-    let ids_vec: Vec<String> = ids.into_iter().collect();
-    let placeholders = (1..=ids_vec.len())
-        .map(|i| format!("?{i}"))
-        .collect::<Vec<_>>()
-        .join(",");
-    let sql = format!("SELECT id, username FROM users WHERE id IN ({placeholders})");
-    let params: Vec<libsql::Value> = ids_vec
-        .iter()
-        .map(|s| libsql::Value::Text(s.clone()))
-        .collect();
-
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn.query(&sql, libsql::params_from_iter(params)).await?;
-    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    while let Some(row) = rows.next().await? {
-        let id: String = row.get(0)?;
-        let name: String = row.get(1)?;
-        map.insert(id, name);
-    }
-    for m in messages.iter_mut() {
-        m.sender_username = map.get(&m.sender_id).cloned();
-    }
-    Ok(())
 }
 
 /// Attach sender usernames from the local `user_cache` table; for any
@@ -418,7 +379,7 @@ pub async fn get_dm_messages(
     ingest_dm_envelopes_inner(state, &user_id, &dm_channel_id).await?;
 
     let mut messages = read_local_channel_page(state, &dm_channel_id, &cursor, limit).await?;
-    attach_sender_usernames(state, &mut messages).await?;
+    attach_sender_usernames_local(state, &mut messages).await?;
 
     let next_cursor = if messages.len() == limit as usize {
         messages.last().map(|m| MessageCursor {
