@@ -18,7 +18,7 @@
       // Baked into the binary (option_env! -> /version) so the deploy can verify
       // the new build is live. The deploy workflow rewrites "unknown" to the
       // built commit SHA before `wrangler deploy` (jsonc-safe string replace).
-      "image_vars": { "GIT_SHA": "unknown" },
+      "image_vars": { "GIT_SHA": "unknown", "BUILD_NONCE": "0" },
       "instance_type": "basic",
       "max_instances": 1,
       // Single instance: roll 100% in one step so a deploy replaces the running
