@@ -1,7 +1,8 @@
 # Deploy the Delivery Service to DEV — Cloudflare Containers (#515).
 #
 # Replaces the old GHCR-build + Watchtower-poke path (which silently no-op'd for
-# 11 days). Now: sync secrets Doppler -> Wrangler Secrets Store, then
+# 11 days). Now: apply pending DB migrations (migrate-then-ship, so the DS never
+# runs ahead of its schema), sync secrets Doppler -> Wrangler Secrets Store, then
 # `wrangler deploy` (versioned, health-gated), then verify the running /version
 # reports the built SHA. MANUAL ONLY (workflow_dispatch) — deploys are fired at
 # will, not on every merge, so a batch of merges doesn't churn CI. Dev and prod
@@ -76,6 +77,35 @@ jobs:
             echo "::notice::CLOUDFLARE_API_TOKEN / DOPPLER_TOKEN not set in the delivery-dev environment — skipping deploy (no-op)."
             echo "ok=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Migrate-then-ship: apply pending DB migrations BEFORE the new DS code goes
+      # live, so the service can never run ahead of its schema. The DS writes the
+      # new tables a migration adds, so shipping DS code before its migration lands
+      # 500s every write — this step closes that ordering hazard structurally.
+      # Safe to run here: db-apply.sh is idempotent (tracks schema_migrations) and
+      # migrations are additive + backward-compatible, so applying pending ones is
+      # a no-op for the still-running old instance. Fail-fast — a failed migration
+      # fails the deploy rather than shipping code ahead of its schema. Mirrors
+      # desktop-release's two db-apply calls (main dir → main DB, migrations-log →
+      # log DB). Uses an admin (DDL-capable) token from Doppler — the DS runtime
+      # token may be data-only — falling back to the runtime token where it is
+      # full-access (e.g. prod's).
+      - name: Apply pending DB migrations (main + commit-log)
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+        run: |
+          get()   { doppler secrets get "$1" --plain; }
+          admin() { doppler secrets get "$1" --plain 2>/dev/null || get "$2"; }
+          echo "── main DB ──"
+          TURSO_URL="$(get TURSO_URL)" \
+          TURSO_TOKEN="$(admin TURSO_ADMIN_TOKEN TURSO_TOKEN)" \
+            ./scripts/db-apply.sh
+          echo "── commit-log DB ──"
+          TURSO_URL="$(get LOG_DB_URL)" \
+          TURSO_TOKEN="$(admin LOG_DB_ADMIN_TOKEN LOG_DB_TOKEN)" \
+          MIGRATIONS_DIR=pollis-core/src/db/migrations-log \
+            ./scripts/db-apply.sh
 
       # Doppler is the single source of truth. Pull the DS config and upsert each
       # key into Secrets Store under the DS_DEV_ prefix. DOPPLER_TOKEN is a
