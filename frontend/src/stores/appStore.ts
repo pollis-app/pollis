@@ -3,6 +3,7 @@ import type { AppState, User, Group, Channel, DMConversation, MessageQueueItem, 
 import type { VoiceState } from '../types/voice-state';
 import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
+import { isSpeaking } from '../voice/participantAudio';
 
 type ScreenShareRemote = { trackKey: string; width: number; height: number };
 type CameraRemote = { trackKey: string; width: number; height: number };
@@ -55,14 +56,11 @@ class AppStore implements AppState {
   // the next join attempt.
   voiceError: string | null = null;
 
-  // True when local participant's mic is actively picking up audio.
-  // Derived from LiveKit speaker events; not part of the lifecycle union.
-  isLocalSpeaking = false;
-
   // Live voice channel participants — driven by LiveKit events.
-  // Collection data, kept separate from the lifecycle union.
+  // Collection data, kept separate from the lifecycle union. Each carries a
+  // `ParticipantAudio` DU; speaker state is DERIVED from it below (#385) so it
+  // can't drift from the participant's own mute/speaking state.
   voiceParticipants: VoiceParticipant[] = [];
-  voiceActiveSpeakerIds: string[] = [];
 
   /** Active remote screenshares keyed by participant identity. */
   screenShareRemotes: Record<string, ScreenShareRemote> = {};
@@ -432,16 +430,23 @@ class AppStore implements AppState {
     this.voiceError = message;
   }
 
-  setIsLocalSpeaking(speaking: boolean) {
-    this.isLocalSpeaking = speaking;
-  }
-
   setVoiceParticipants(participants: VoiceParticipant[]) {
     this.voiceParticipants = participants;
   }
 
-  setVoiceActiveSpeakerIds(ids: string[]) {
-    this.voiceActiveSpeakerIds = ids;
+  // Derived, not stored — a getter so makeAutoObservable treats it as a
+  // computed. Identities of participants whose audio DU says `speaking`; can't
+  // drift from the participant list the way a mirrored array could (#385).
+  get voiceActiveSpeakerIds(): string[] {
+    return this.voiceParticipants
+      .filter((p) => isSpeaking(p.audio))
+      .map((p) => p.identity);
+  }
+
+  // Derived computed: true when the local participant is speaking.
+  get isLocalSpeaking(): boolean {
+    const local = this.voiceParticipants.find((p) => p.isLocal);
+    return local ? isSpeaking(local.audio) : false;
   }
 
   /** Replace the whole remote-screenshare map wholesale. Used by the LiveKit
@@ -534,9 +539,7 @@ class AppStore implements AppState {
     this.voiceState = { kind: 'idle' };
     this.statusBarAlert = null;
     this.voiceError = null;
-    this.isLocalSpeaking = false;
     this.voiceParticipants = [];
-    this.voiceActiveSpeakerIds = [];
     this.screenShareRemotes = {};
     this.cameraRemotes = {};
     this.viewingScreenShareTrackKey = null;

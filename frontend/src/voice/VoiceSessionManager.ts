@@ -6,6 +6,7 @@ import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
 import { audioLevels } from './audioLevels';
+import { audioSetMuted, audioSetSpeaking } from './participantAudio';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -71,9 +72,10 @@ export interface VoiceSessionState {
    *  derivation resolves the same group the Rust voice path picked. */
   counterpartyUserId: string | null;
   participants: VoiceParticipant[];
-  activeSpeakerIds: string[];
+  /** Local mic-mute intent, mirrored onto `voiceState.micMuted`. Separate from
+   *  a participant's audio DU — this is the local user's toggle, not a
+   *  speaking-derived value. */
   isMuted: boolean;
-  isLocalSpeaking: boolean;
   /** Last error from a failed join. Cleared on the next intent change. */
   error: string | null;
 }
@@ -112,9 +114,7 @@ const INITIAL_STATE: VoiceSessionState = {
   groupId: null,
   counterpartyUserId: null,
   participants: [],
-  activeSpeakerIds: [],
   isMuted: false,
-  isLocalSpeaking: false,
   error: null,
 };
 
@@ -278,7 +278,7 @@ class VoiceSessionManager {
       const localIdentity = this.localIdentity;
       const participants = localIdentity
         ? this.state.participants.map((p) =>
-            p.identity === localIdentity ? { ...p, isMuted: muted } : p,
+            p.identity === localIdentity ? { ...p, audio: audioSetMuted(p.audio, muted) } : p,
           )
         : this.state.participants;
       this.setState({ isMuted: muted, participants });
@@ -393,17 +393,15 @@ class VoiceSessionManager {
       groupId: target.groupId,
       counterpartyUserId: target.counterpartyUserId ?? null,
       isMuted: false,
-      isLocalSpeaking: false,
       participants: [
         {
           identity: localIdentity,
           name: displayName,
-          isMuted: false,
+          audio: { kind: 'idle' },
           isLocal: true,
           avatarKey,
         },
       ],
-      activeSpeakerIds: [],
       error: null,
     });
 
@@ -434,9 +432,7 @@ class VoiceSessionManager {
         counterpartyUserId: null,
         groupId: null,
         participants: [],
-        activeSpeakerIds: [],
         isMuted: false,
-        isLocalSpeaking: false,
         error: msg,
       });
       return false;
@@ -458,9 +454,7 @@ class VoiceSessionManager {
         counterpartyUserId: null,
         groupId: null,
         participants: [],
-        activeSpeakerIds: [],
         isMuted: false,
-        isLocalSpeaking: false,
       });
       return true;
     }
@@ -523,9 +517,7 @@ class VoiceSessionManager {
       counterpartyUserId: null,
       groupId: null,
       participants: [],
-      activeSpeakerIds: [],
       isMuted: false,
-      isLocalSpeaking: false,
     });
 
     if (left) {
@@ -589,7 +581,7 @@ class VoiceSessionManager {
         const next: VoiceParticipant = {
           identity: event.identity,
           name: event.name,
-          isMuted: event.is_muted,
+          audio: event.is_muted ? { kind: 'muted' } : { kind: 'idle' },
           isLocal: event.identity === localIdentity,
           avatarKey: event.avatar_url ?? null,
         };
@@ -599,59 +591,44 @@ class VoiceSessionManager {
       case 'participant_left': {
         audioLevels.clear(event.identity);
         const participants = this.state.participants.filter((p) => p.identity !== event.identity);
-        const wasSpeaker = this.state.activeSpeakerIds.includes(event.identity);
-        const activeSpeakerIds = wasSpeaker
-          ? this.state.activeSpeakerIds.filter((id) => id !== event.identity)
-          : this.state.activeSpeakerIds;
-        this.setState({ participants, activeSpeakerIds });
+        // No separate speaker list to prune — the store derives speakers from
+        // `participants`, so dropping the participant removes them.
+        this.setState({ participants });
         break;
       }
       case 'muted':
       case 'unmuted': {
-        const isMuted = event.type === 'muted';
+        const muted = event.type === 'muted';
         const participants = this.state.participants.map((p) =>
-          p.identity === event.identity ? { ...p, isMuted } : p,
+          p.identity === event.identity ? { ...p, audio: audioSetMuted(p.audio, muted) } : p,
         );
         const patch: Partial<VoiceSessionState> = { participants };
         if (event.identity === localIdentity) {
-          patch.isMuted = isMuted;
+          patch.isMuted = muted;
         }
-        // A muted participant can't be an active speaker. Speaking is derived
-        // from audio frames, which simply stop on mute — so no SpeakingStopped
-        // arrives and the speaker would otherwise stay stuck in activeSpeakerIds
-        // (e.g. the voice bar's "current speaker"), only clearing when someone
-        // else overwrites it. Enforce the muted ⇒ not-speaking invariant here.
-        if (isMuted && this.state.activeSpeakerIds.includes(event.identity)) {
-          patch.activeSpeakerIds = this.state.activeSpeakerIds.filter(
-            (id) => id !== event.identity,
-          );
-          if (event.identity === localIdentity) {
-            patch.isLocalSpeaking = false;
-          }
-        }
+        // No muted ⇒ not-speaking band-aid needed (was ec00fc6): muting sets
+        // audio to `{kind:'muted'}` (already not-speaking), and audioSetSpeaking
+        // no-ops while muted, so a stuck active speaker is now unrepresentable.
         this.setState(patch);
         break;
       }
-      case 'speaking_started': {
-        if (this.state.activeSpeakerIds.includes(event.identity)) {
-          break;
-        }
-        this.setState({
-          activeSpeakerIds: [...this.state.activeSpeakerIds, event.identity],
-          isLocalSpeaking:
-            event.identity === localIdentity ? true : this.state.isLocalSpeaking,
-        });
-        break;
-      }
+      case 'speaking_started':
       case 'speaking_stopped': {
-        if (!this.state.activeSpeakerIds.includes(event.identity)) {
+        const speaking = event.type === 'speaking_started';
+        const idx = this.state.participants.findIndex((p) => p.identity === event.identity);
+        if (idx === -1) {
           break;
         }
-        this.setState({
-          activeSpeakerIds: this.state.activeSpeakerIds.filter((id) => id !== event.identity),
-          isLocalSpeaking:
-            event.identity === localIdentity ? false : this.state.isLocalSpeaking,
-        });
+        const current = this.state.participants[idx];
+        const audio = audioSetSpeaking(current.audio, speaking);
+        // No-op if the DU didn't move (already in that state, or muted-so-
+        // ignored) — avoids a needless re-render, matching the old dedup.
+        if (audio.kind === current.audio.kind) {
+          break;
+        }
+        const participants = this.state.participants.slice();
+        participants[idx] = { ...current, audio };
+        this.setState({ participants });
         break;
       }
       case 'audio_bands': {
@@ -860,15 +837,11 @@ voiceSession.subscribe(() => {
     }
   }
 
-  // Collection / derived fields stay as direct sets through store actions.
+  // The participant list is the source of truth; the store DERIVES
+  // `voiceActiveSpeakerIds` / `isLocalSpeaking` as computeds off it (#385), so
+  // there is nothing to mirror for those any more.
   if (store.voiceParticipants !== s.participants) {
     store.setVoiceParticipants(s.participants);
-  }
-  if (store.voiceActiveSpeakerIds !== s.activeSpeakerIds) {
-    store.setVoiceActiveSpeakerIds(s.activeSpeakerIds);
-  }
-  if (store.isLocalSpeaking !== s.isLocalSpeaking) {
-    store.setIsLocalSpeaking(s.isLocalSpeaking);
   }
   // Join errors mirror through the store's separate voiceError field;
   // the union's idle state doesn't carry the error itself.

@@ -80,6 +80,16 @@ export type CameraState =
     }
   | { kind: 'failed'; error: string };
 
+/** A voice participant's audio state. Modelled as a discriminated union so
+ *  that "muted ⇒ not speaking" is a type-level guarantee (#385): there is no
+ *  `{ muted: true, speaking: true }` to construct. `idle` = unmuted, not
+ *  speaking. All transitions go through `voice/participantAudio.ts`, which is
+ *  the single place the invariant lives. */
+export type ParticipantAudio =
+  | { kind: 'muted' }
+  | { kind: 'idle' }
+  | { kind: 'speaking' };
+
 /** Helpers — read-only narrowings that consumers reach for a lot. */
 
 export function voiceChannelId(s: VoiceState): string | null {
