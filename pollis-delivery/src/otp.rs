@@ -28,6 +28,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use ulid::Ulid;
 
+use crate::redact::mask_email;
 use crate::session::SessionStore;
 use crate::writes::bad_request;
 use crate::AppState;
@@ -277,17 +278,17 @@ pub async fn process_request_otp(otp: &OtpStore, cfg: &OtpConfig, email: &str) {
         PrepareOutcome::Send(code) => {
             // DEV_OTP: skip the real send entirely.
             if cfg.dev_otp.is_some() {
-                tracing::info!("DEV_OTP active — skipping email send for {email}");
+                tracing::info!("DEV_OTP active — skipping email send for {}", mask_email(email));
                 return;
             }
             if let Some(key) = &cfg.resend_api_key {
                 if let Err(e) = send_otp_email(key, email, &code).await {
                     // A send failure leaks nothing about account existence; log
                     // and still 200 so the response is uniform.
-                    tracing::error!("OTP email send failed for {email}: {e:#}");
+                    tracing::error!("OTP email send failed for {}: {e:#}", mask_email(email));
                 }
             } else {
-                tracing::warn!("RESEND_API_KEY unset — OTP email NOT sent for {email}");
+                tracing::warn!("RESEND_API_KEY unset — OTP email NOT sent for {}", mask_email(email));
             }
         }
     }

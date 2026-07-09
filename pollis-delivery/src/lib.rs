@@ -35,6 +35,7 @@ pub mod messages;
 pub mod otp;
 pub mod profile;
 pub mod ratelimit;
+pub mod redact;
 pub mod session;
 pub mod writes;
 
