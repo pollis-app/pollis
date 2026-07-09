@@ -7,6 +7,7 @@ import { VoiceMemberTile } from "./VoiceMemberTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 import { ScreenSharePicker } from "./ScreenSharePicker";
 import { shareOf } from "../../types/voice-state";
+import { isMuted } from "../../voice/participantAudio";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
 import { voiceUserKey } from "../../voice/identity";
 
@@ -109,10 +110,10 @@ export const VoiceChannelView: React.FC = observer(() => {
               identity={p.identity}
               name={displayNames.get(p.identity) ?? p.name}
               avatarKey={p.avatarKey ?? null}
-              isMuted={p.isMuted}
+              isMuted={isMuted(p.audio)}
               isLocal={isLocal}
               isSpeaking={
-                voiceActiveSpeakerIds.includes(p.identity) && !p.isMuted
+                voiceActiveSpeakerIds.includes(p.identity) && !isMuted(p.audio)
               }
               focused={focused}
               connectionQuality={p.connectionQuality}

@@ -24,6 +24,7 @@ import { ArrowLeft, Volume2, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
 import { shareOf, cameraOf } from "../../../types/voice-state";
+import { isMuted } from "../../../voice/participantAudio";
 import { LOCAL_PREVIEW_KEY } from "../../../screenshare/screenShareSession";
 import { toggleScreenShare } from "../../../screenshare/screenShareActions";
 import { LOCAL_CAMERA_PREVIEW_KEY } from "../../../camera/cameraSession";
@@ -174,9 +175,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         identity: p.identity,
         name: displayNames.get(p.identity) ?? p.name,
         avatarKey: p.avatarKey ?? null,
-        isMuted: p.isMuted,
+        isMuted: isMuted(p.audio),
         isLocal: p.isLocal,
-        isSpeaking: speakingUsers.has(userIdFromVoiceIdentity(p.identity)) && !p.isMuted,
+        isSpeaking: speakingUsers.has(userIdFromVoiceIdentity(p.identity)) && !isMuted(p.audio),
         connectionQuality: p.connectionQuality,
         streamTrackKey,
         streamWidth,
