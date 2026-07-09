@@ -68,6 +68,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "message_envelope_sealed_sender",
         include_str!("migrations/000008_message_envelope_sealed_sender.sql"),
     ),
+    (
+        9,
+        "directory_index",
+        include_str!("migrations/000009_directory_index.sql"),
+    ),
 ];
 
 pub mod queries {

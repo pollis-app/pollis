@@ -312,6 +312,9 @@ pub async fn apply_send_message(
         ],
     )
     .await?;
+    // Directory index (#261): bump the conversation's last-activity so the sidebar
+    // orders it most-recent-first. Resolves channel→group / dm internally.
+    crate::directory::bump_activity(conn, &body.conversation_id, &body.sent_at).await?;
     Ok(WriteOutcome::Ok)
 }
 

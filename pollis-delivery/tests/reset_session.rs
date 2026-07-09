@@ -89,6 +89,24 @@ CREATE TABLE dm_channel_member (\
   accepted INTEGER NOT NULL DEFAULT 0,\
   PRIMARY KEY (dm_channel_id, user_id)\
 );\
+CREATE TABLE user_groups (\
+  user_id TEXT NOT NULL,\
+  group_id TEXT NOT NULL,\
+  group_name TEXT NOT NULL,\
+  role TEXT NOT NULL DEFAULT 'member',\
+  joined_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  last_activity_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  PRIMARY KEY (user_id, group_id)\
+);\
+CREATE TABLE user_dms (\
+  user_id TEXT NOT NULL,\
+  dm_channel_id TEXT NOT NULL,\
+  created_by TEXT NOT NULL,\
+  added_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  accepted_at TEXT,\
+  last_activity_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  PRIMARY KEY (user_id, dm_channel_id)\
+);\
 CREATE TABLE mls_key_package (\
   id INTEGER PRIMARY KEY AUTOINCREMENT,\
   user_id TEXT NOT NULL,\
