@@ -246,9 +246,12 @@ pub async fn apply_block_user(
             AND dm_channel_id IN ( \
                 SELECT dm_channel_id FROM dm_channel_member WHERE user_id = ?2 \
             )",
-        libsql::params![blocker, body.blocked_id.clone()],
+        libsql::params![blocker.clone(), body.blocked_id.clone()],
     )
     .await?;
+    // Directory index (#261): re-project the blocker's accepted_at across all
+    // their DMs (the UPDATE above reset it on those shared with the blocked user).
+    crate::directory::resync_dm_accepted_for_user(&tx, &blocker).await?;
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
@@ -404,6 +407,10 @@ pub async fn apply_create_dm(
         )
         .await?;
     }
+    // Directory index (#261): project every member's DM membership.
+    for member in std::iter::once(&creator).chain(others.iter()) {
+        crate::directory::sync_dm_member(&tx, &body.id, member).await?;
+    }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
@@ -457,9 +464,11 @@ pub async fn apply_accept_dm(
           WHERE dm_channel_id = ?1 \
             AND user_id = ?2 \
             AND accepted_at IS NULL",
-        libsql::params![body.dm_channel_id.clone(), user, body.accepted_at.clone()],
+        libsql::params![body.dm_channel_id.clone(), user.clone(), body.accepted_at.clone()],
     )
     .await?;
+    // Directory index (#261): re-project the accepter's accepted_at.
+    crate::directory::sync_dm_member(conn, &body.dm_channel_id, &user).await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -557,6 +566,8 @@ pub async fn apply_add_dm_member(
         libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // Directory index (#261): project the new member's DM membership.
+    crate::directory::sync_dm_member(&tx, &body.dm_channel_id, &body.user_id).await?;
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
@@ -632,6 +643,8 @@ pub async fn apply_remove_dm_member(
         libsql::params![body.dm_channel_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // Directory index (#261): drop the removed member's DM row.
+    crate::directory::remove_dm_member(conn, &body.dm_channel_id, &body.user_id).await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -681,9 +694,11 @@ pub async fn apply_leave_dm(
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM dm_channel_member WHERE dm_channel_id = ?1 AND user_id = ?2",
-        libsql::params![body.dm_channel_id.clone(), user],
+        libsql::params![body.dm_channel_id.clone(), user.clone()],
     )
     .await?;
+    // Directory index (#261): drop the leaver's DM row.
+    crate::directory::remove_dm_member(&tx, &body.dm_channel_id, &user).await?;
     // If no members remain, clean up the channel and all associated data.
     let mut rows = tx
         .query(
@@ -707,6 +722,8 @@ pub async fn apply_leave_dm(
             libsql::params![body.dm_channel_id.clone()],
         )
         .await?;
+        // Directory index (#261): DM is gone — clear any remaining index rows.
+        crate::directory::remove_dm(&tx, &body.dm_channel_id).await?;
     }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)

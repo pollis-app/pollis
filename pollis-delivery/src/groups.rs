@@ -115,6 +115,11 @@ async fn add_member_rows(conn: &Connection, group_id: &str, user_id: &str) -> an
             libsql::params![user_id.to_string(), group_id.to_string()],
         )
         .await;
+    // Directory index (#261): project this membership into `user_groups`. Runs
+    // for both add sites (accept-invite, approve-join-request) since both go
+    // through here. The group_member row was just written, so the projection
+    // reads the correct role.
+    crate::directory::sync_group_member(conn, group_id, user_id).await?;
     Ok(())
 }
 
@@ -202,6 +207,10 @@ pub async fn apply_create_group(
         )
         .await?;
     }
+    // Directory index (#261): project the creator's admin membership into
+    // `user_groups`. The group_member row above is in this tx, so the projection
+    // sees it.
+    crate::directory::sync_group_member(&tx, &body.id, &owner).await?;
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
 }
@@ -259,6 +268,8 @@ pub async fn apply_update_group(
             libsql::params![n.clone(), body.group_id.clone()],
         )
         .await?;
+        // Directory index (#261): re-project the new name onto every member's row.
+        crate::directory::rename_group(conn, &body.group_id).await?;
     }
     if let Some(d) = &body.description {
         conn.execute(
@@ -323,6 +334,9 @@ pub async fn apply_delete_group(
         libsql::params![body.group_id.clone()],
     )
     .await?;
+    // Directory index (#261): drop every member's row for this group. Explicit —
+    // FK cascade is off on the DS connection.
+    crate::directory::remove_group(conn, &body.group_id).await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -376,6 +390,8 @@ pub async fn apply_leave_group(
         libsql::params![body.group_id.clone(), user.clone()],
     )
     .await?;
+    // Directory index (#261): drop the leaver's row.
+    crate::directory::remove_group_member(&tx, &body.group_id, &user).await?;
     let mut count_rows = tx
         .query(
             "SELECT COUNT(*) FROM group_member WHERE group_id = ?1",
@@ -393,6 +409,8 @@ pub async fn apply_leave_group(
             libsql::params![body.group_id.clone()],
         )
         .await?;
+        // Group is gone — clear any remaining index rows for it.
+        crate::directory::remove_group(&tx, &body.group_id).await?;
     }
     tx.commit().await?;
     Ok(WriteOutcome::Ok)
@@ -644,6 +662,8 @@ pub async fn apply_remove_member(
         libsql::params![body.group_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // Directory index (#261): drop the removed member's row.
+    crate::directory::remove_group_member(conn, &body.group_id, &body.user_id).await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -708,6 +728,8 @@ pub async fn apply_set_member_role(
         libsql::params![body.role.clone(), body.group_id.clone(), body.user_id.clone()],
     )
     .await?;
+    // Directory index (#261): re-project the new role onto the member's row.
+    crate::directory::sync_group_member(conn, &body.group_id, &body.user_id).await?;
     Ok(WriteOutcome::Ok)
 }
 
