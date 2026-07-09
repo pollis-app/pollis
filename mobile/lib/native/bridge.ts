@@ -100,6 +100,9 @@ export interface InitConfig {
   // also returned by the DS token endpoint).
   livekitUrl?: string;
   resendApiKey?: string;
+  // Delivery Service base URL (api-dev.pollis.com / api.pollis.com). Required —
+  // OTP bootstrap and every remote write go through the DS, not direct Turso.
+  pollisDeliveryUrl?: string;
 }
 
 let initialized = false;
@@ -134,6 +137,7 @@ export async function initializeNativeBridge(config: InitConfig): Promise<void> 
     r2_public_url: config.r2PublicUrl ?? "",
     livekit_url: config.livekitUrl ?? "",
     resend_api_key: config.resendApiKey ?? "",
+    pollis_delivery_url: config.pollisDeliveryUrl ?? "",
   });
   await pollisNative.initPollis(configJson);
   setNativeBridge(pollisNativeBridge);

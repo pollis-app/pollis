@@ -235,7 +235,20 @@ Current state:
   restore via `get_session`); every tab/group/DM/chat/self screen consumes real
   React Query hooks (no hardcoded mock arrays); message send / receive / ingest /
   reactions / edit / delete; profile, devices, blocking, safety numbers,
-  preferences. `bridge.rs` covers ~every command the hooks call.
+  preferences. `bridge.rs` covers ~every command the hooks call. The DS base URL
+  is threaded through `initializeNativeBridge` as `pollis_delivery_url`
+  (`EXPO_PUBLIC_POLLIS_DELIVERY_URL`, dev → api-dev.pollis.com) — required, since
+  OTP bootstrap + all remote writes go through the DS, not direct Turso. Full
+  sign-in verified end-to-end on an Android emulator against the live dev DS.
+- **Keystore-at-rest (Android):** the file-backed keystore (used in place of
+  desktop's OS keychain when built `--no-default-features`, i.e. no `os-keystore`)
+  envelope-encrypts its contents with an AES-256-GCM master key held in the
+  **AndroidKeyStore** — see the `android_kek` module in `pollis-core/src/keystore.rs`
+  (JNI-from-Rust: `JNI_OnLoad` captures the `JavaVM`; system `KeyStore`/`KeyGenerator`/
+  `Cipher`, alias `pollis_keystore_kek`). On-disk `dev-keystore.json` is `iv(12)||gcm-ct`,
+  not plaintext. Identity keypair + session survive a cold process kill and decrypt
+  behind the device PIN. (`accounts.json` beside it is a public-metadata index only —
+  no secrets.)
 - **Media:** `get_media_path` decrypts an R2 object to a sandbox `file://` for
   `expo-image` — mobile can't run desktop's loopback media server. See `lib/media/`.
 - **Foreground realtime (scaffold):** mobile joins the same SFU rooms as desktop

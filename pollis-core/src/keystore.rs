@@ -23,6 +23,209 @@ fn namespaced(key: &str) -> String {
     }
 }
 
+// ── Android: encrypt the keystore file at rest under a hardware-backed key ───
+//
+// The "file-backed" store below is plaintext on disk. On Android that file
+// lives in the app sandbox — readable by root / a compromised backup. Here we
+// wrap its bytes with AES-256-GCM under a NON-EXPORTABLE key held in the
+// Android Keystore (hardware-backed / StrongBox where available). The key is
+// system-managed and persists across app relaunches, so identity + session
+// survive a relaunch (issue #185 Section A) while the on-disk ciphertext is
+// useless without the device.
+//
+// Reaches only JVM *system* classes (java.security.*, javax.crypto.*), which
+// are loadable from any thread's bootstrap classloader — so this needs no
+// Android `Context` and no app classloader, just a `JavaVM` captured in
+// JNI_OnLoad. Secrets never cross the RN JS bridge (matches desktop).
+#[cfg(target_os = "android")]
+mod android_kek {
+    use crate::error::{Error, Result};
+    use jni::objects::{JByteArray, JObject, JValue};
+    use jni::{JNIEnv, JavaVM};
+    use std::sync::OnceLock;
+
+    static VM: OnceLock<JavaVM> = OnceLock::new();
+    const ALIAS: &str = "pollis_keystore_kek";
+    const GCM_TAG_BITS: i32 = 128;
+    const IV_LEN: usize = 12;
+    // KeyProperties.PURPOSE_ENCRYPT (1) | PURPOSE_DECRYPT (2)
+    const PURPOSE_ENCRYPT_DECRYPT: i32 = 3;
+    // Cipher.ENCRYPT_MODE / DECRYPT_MODE
+    const ENCRYPT_MODE: i32 = 1;
+    const DECRYPT_MODE: i32 = 2;
+
+    /// Captured when Android loads the native library — gives us a JVM handle to
+    /// attach any thread and reach the Android Keystore.
+    #[no_mangle]
+    pub extern "system" fn JNI_OnLoad(vm: JavaVM, _reserved: *mut std::ffi::c_void) -> jni::sys::jint {
+        let _ = VM.set(vm);
+        jni::sys::JNI_VERSION_1_6
+    }
+
+    fn e(ctx: &str, err: jni::errors::Error) -> Error {
+        Error::Keystore(format!("android keystore {ctx}: {err}"))
+    }
+
+    fn to_bytes(env: &mut JNIEnv, obj: JObject) -> Result<Vec<u8>> {
+        let arr: JByteArray = obj.into();
+        env.convert_byte_array(arr).map_err(|x| e("read byte[]", x))
+    }
+
+    /// Get-or-create the AES-256-GCM master key in the Android Keystore.
+    fn master_key<'a>(env: &mut JNIEnv<'a>) -> Result<JObject<'a>> {
+        let provider = env.new_string("AndroidKeyStore").map_err(|x| e("provider str", x))?;
+        let ks = env
+            .call_static_method(
+                "java/security/KeyStore",
+                "getInstance",
+                "(Ljava/lang/String;)Ljava/security/KeyStore;",
+                &[JValue::Object(&provider)],
+            )
+            .and_then(|v| v.l())
+            .map_err(|x| e("KeyStore.getInstance", x))?;
+        env.call_method(
+            &ks,
+            "load",
+            "(Ljava/security/KeyStore$LoadStoreParameter;)V",
+            &[JValue::Object(&JObject::null())],
+        )
+        .map_err(|x| e("KeyStore.load", x))?;
+
+        let alias = env.new_string(ALIAS).map_err(|x| e("alias str", x))?;
+        let exists = env
+            .call_method(&ks, "containsAlias", "(Ljava/lang/String;)Z", &[JValue::Object(&alias)])
+            .and_then(|v| v.z())
+            .map_err(|x| e("containsAlias", x))?;
+        if exists {
+            return env
+                .call_method(
+                    &ks,
+                    "getKey",
+                    "(Ljava/lang/String;[C)Ljava/security/Key;",
+                    &[JValue::Object(&alias), JValue::Object(&JObject::null())],
+                )
+                .and_then(|v| v.l())
+                .map_err(|x| e("getKey", x));
+        }
+
+        // new KeyGenParameterSpec.Builder(alias, ENCRYPT|DECRYPT)
+        let builder = env
+            .new_object(
+                "android/security/keystore/KeyGenParameterSpec$Builder",
+                "(Ljava/lang/String;I)V",
+                &[JValue::Object(&alias), JValue::Int(PURPOSE_ENCRYPT_DECRYPT)],
+            )
+            .map_err(|x| e("new Builder", x))?;
+        let ret_builder = "Landroid/security/keystore/KeyGenParameterSpec$Builder;";
+        // .setBlockModes("GCM")
+        let gcm = env.new_string("GCM").map_err(|x| e("GCM str", x))?;
+        let block_modes = env.new_object_array(1, "java/lang/String", &gcm).map_err(|x| e("modes[]", x))?;
+        let builder = env
+            .call_method(&builder, "setBlockModes", &format!("([Ljava/lang/String;){ret_builder}"), &[JValue::Object(&block_modes)])
+            .and_then(|v| v.l())
+            .map_err(|x| e("setBlockModes", x))?;
+        // .setEncryptionPaddings("NoPadding")
+        let nopad = env.new_string("NoPadding").map_err(|x| e("NoPadding str", x))?;
+        let paddings = env.new_object_array(1, "java/lang/String", &nopad).map_err(|x| e("pads[]", x))?;
+        let builder = env
+            .call_method(&builder, "setEncryptionPaddings", &format!("([Ljava/lang/String;){ret_builder}"), &[JValue::Object(&paddings)])
+            .and_then(|v| v.l())
+            .map_err(|x| e("setEncryptionPaddings", x))?;
+        // .setKeySize(256)
+        let builder = env
+            .call_method(&builder, "setKeySize", &format!("(I){ret_builder}"), &[JValue::Int(256)])
+            .and_then(|v| v.l())
+            .map_err(|x| e("setKeySize", x))?;
+        // spec = builder.build()
+        let spec = env
+            .call_method(&builder, "build", "()Landroid/security/keystore/KeyGenParameterSpec;", &[])
+            .and_then(|v| v.l())
+            .map_err(|x| e("build", x))?;
+        // KeyGenerator kg = KeyGenerator.getInstance("AES", "AndroidKeyStore")
+        let aes = env.new_string("AES").map_err(|x| e("AES str", x))?;
+        let provider2 = env.new_string("AndroidKeyStore").map_err(|x| e("provider2 str", x))?;
+        let kg = env
+            .call_static_method(
+                "javax/crypto/KeyGenerator",
+                "getInstance",
+                "(Ljava/lang/String;Ljava/lang/String;)Ljavax/crypto/KeyGenerator;",
+                &[JValue::Object(&aes), JValue::Object(&provider2)],
+            )
+            .and_then(|v| v.l())
+            .map_err(|x| e("KeyGenerator.getInstance", x))?;
+        env.call_method(&kg, "init", "(Ljava/security/spec/AlgorithmParameterSpec;)V", &[JValue::Object(&spec)])
+            .map_err(|x| e("KeyGenerator.init", x))?;
+        env.call_method(&kg, "generateKey", "()Ljavax/crypto/SecretKey;", &[])
+            .and_then(|v| v.l())
+            .map_err(|x| e("generateKey", x))
+    }
+
+    fn cipher<'a>(env: &mut JNIEnv<'a>) -> Result<JObject<'a>> {
+        let t = env.new_string("AES/GCM/NoPadding").map_err(|x| e("transform str", x))?;
+        env.call_static_method(
+            "javax/crypto/Cipher",
+            "getInstance",
+            "(Ljava/lang/String;)Ljavax/crypto/Cipher;",
+            &[JValue::Object(&t)],
+        )
+        .and_then(|v| v.l())
+        .map_err(|x| e("Cipher.getInstance", x))
+    }
+
+    fn vm() -> Result<&'static JavaVM> {
+        VM.get().ok_or_else(|| Error::Keystore("JNI_OnLoad not called (no JavaVM)".into()))
+    }
+
+    /// Encrypt: returns iv(12) || gcm-ciphertext(+16 tag).
+    pub fn seal(plaintext: &[u8]) -> Result<Vec<u8>> {
+        let mut env = vm()?.attach_current_thread().map_err(|x| e("attach", x))?;
+        let key = master_key(&mut env)?;
+        let c = cipher(&mut env)?;
+        env.call_method(&c, "init", "(ILjava/security/Key;)V", &[JValue::Int(ENCRYPT_MODE), JValue::Object(&key)])
+            .map_err(|x| e("Cipher.init encrypt", x))?;
+        let iv_obj = env.call_method(&c, "getIV", "()[B", &[]).and_then(|v| v.l()).map_err(|x| e("getIV", x))?;
+        let iv = to_bytes(&mut env, iv_obj)?;
+        let input = env.byte_array_from_slice(plaintext).map_err(|x| e("input[]", x))?;
+        let ct_obj = env
+            .call_method(&c, "doFinal", "([B)[B", &[JValue::Object(&input)])
+            .and_then(|v| v.l())
+            .map_err(|x| e("doFinal encrypt", x))?;
+        let ct = to_bytes(&mut env, ct_obj)?;
+        let mut blob = Vec::with_capacity(iv.len() + ct.len());
+        blob.extend_from_slice(&iv);
+        blob.extend_from_slice(&ct);
+        Ok(blob)
+    }
+
+    /// Decrypt a blob produced by [`seal`].
+    pub fn unseal(blob: &[u8]) -> Result<Vec<u8>> {
+        if blob.len() < IV_LEN {
+            return Err(Error::Keystore("keystore blob too short".into()));
+        }
+        let (iv, ct) = blob.split_at(IV_LEN);
+        let mut env = vm()?.attach_current_thread().map_err(|x| e("attach", x))?;
+        let key = master_key(&mut env)?;
+        let c = cipher(&mut env)?;
+        let iv_arr = env.byte_array_from_slice(iv).map_err(|x| e("iv[]", x))?;
+        let spec = env
+            .new_object("javax/crypto/spec/GCMParameterSpec", "(I[B)V", &[JValue::Int(GCM_TAG_BITS), JValue::Object(&iv_arr)])
+            .map_err(|x| e("new GCMParameterSpec", x))?;
+        env.call_method(
+            &c,
+            "init",
+            "(ILjava/security/Key;Ljava/security/spec/AlgorithmParameterSpec;)V",
+            &[JValue::Int(DECRYPT_MODE), JValue::Object(&key), JValue::Object(&spec)],
+        )
+        .map_err(|x| e("Cipher.init decrypt", x))?;
+        let ct_arr = env.byte_array_from_slice(ct).map_err(|x| e("ct[]", x))?;
+        let pt_obj = env
+            .call_method(&c, "doFinal", "([B)[B", &[JValue::Object(&ct_arr)])
+            .and_then(|v| v.l())
+            .map_err(|x| e("doFinal decrypt", x))?;
+        to_bytes(&mut env, pt_obj)
+    }
+}
+
 // ── File-backed keystore: plain JSON file (no keychain, no OS prompts) ──────
 //
 // Selected for debug builds (no OS prompts during dev/test) AND whenever the
@@ -79,13 +282,35 @@ mod backend {
         base.join("dev-keystore.json")
     }
 
+    // On Android the file holds AES-GCM ciphertext (see `super::android_kek`);
+    // everywhere else it's plaintext JSON. These convert between the on-disk
+    // bytes and the JSON string.
+    #[cfg(target_os = "android")]
+    fn decode_file(raw: &[u8]) -> Result<String> {
+        let plain = super::android_kek::unseal(raw)?;
+        String::from_utf8(plain).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
+    }
+    #[cfg(not(target_os = "android"))]
+    fn decode_file(raw: &[u8]) -> Result<String> {
+        String::from_utf8(raw.to_vec()).map_err(|e| Error::Keystore(format!("keystore utf8: {e}")))
+    }
+    #[cfg(target_os = "android")]
+    fn encode_file(json: &str) -> Result<Vec<u8>> {
+        super::android_kek::seal(json.as_bytes())
+    }
+    #[cfg(not(target_os = "android"))]
+    fn encode_file(json: &str) -> Result<Vec<u8>> {
+        Ok(json.as_bytes().to_vec())
+    }
+
     fn read_map() -> Result<HashMap<String, String>> {
         let path = store_path();
-        let data = match std::fs::read_to_string(&path) {
+        let raw = match std::fs::read(&path) {
             Ok(d) => d,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(HashMap::new()),
             Err(e) => return Err(Error::Keystore(format!("read dev-keystore.json: {e}"))),
         };
+        let data = decode_file(&raw)?;
         match serde_json::from_str(&data) {
             Ok(m) => Ok(m),
             Err(parse_err) => {
@@ -120,8 +345,10 @@ mod backend {
             std::fs::create_dir_all(parent)
                 .map_err(|e| Error::Keystore(format!("create dir: {e}")))?;
         }
-        let data = serde_json::to_string(map)
+        let json = serde_json::to_string(map)
             .map_err(|e| Error::Keystore(format!("serialize: {e}")))?;
+        // Plaintext bytes on desktop; AES-GCM ciphertext on Android.
+        let data = encode_file(&json)?;
 
         // Atomic write: tempfile + fsync + rename. A crash before the rename
         // leaves the old file intact. Without this, a crash mid-write turned
@@ -130,7 +357,7 @@ mod backend {
         {
             let mut f = std::fs::File::create(&tmp)
                 .map_err(|e| Error::Keystore(format!("open dev-keystore.json.tmp: {e}")))?;
-            f.write_all(data.as_bytes())
+            f.write_all(&data)
                 .map_err(|e| Error::Keystore(format!("write dev-keystore.json.tmp: {e}")))?;
             f.sync_all()
                 .map_err(|e| Error::Keystore(format!("fsync dev-keystore.json.tmp: {e}")))?;

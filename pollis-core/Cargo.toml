@@ -160,6 +160,12 @@ webrtc-audio-processing = { version = "2", features = ["bundled"], optional = tr
 [target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 rusqlite = { version = "0.31", features = ["bundled-sqlcipher-vendored-openssl"] }
 
+# Android-only: JNI to the Android Keystore so the file-backed keystore's bytes
+# are encrypted at rest under a hardware-backed AES key (issue #185 Section A).
+# Only reaches the JVM (no app classes) so it needs no Context / classloader.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
 # macOS screen capture (ScreenCaptureKit) no longer lives in this
 # process — issue #283 Phase 2 moved it into the `pollis-capture-macos`
 # helper subprocess for the same uncatchable-ObjC-throw reason Linux
