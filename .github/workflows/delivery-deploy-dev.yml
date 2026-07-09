@@ -93,7 +93,7 @@ jobs:
       - name: Deploy (wrangler)
         if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
-        run: pnpm exec wrangler deploy -c "$WRANGLER_CONFIG"
+        run: pnpm exec wrangler deploy -c "$WRANGLER_CONFIG" --containers-rollout immediate
 
       # Do NOT trust "deployed OK" — confirm the new binary is actually SERVING.
       # Poll /version until it reports the SHA we just built; fail otherwise. This

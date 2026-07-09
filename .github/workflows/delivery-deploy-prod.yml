@@ -85,7 +85,7 @@ jobs:
       - name: Deploy (wrangler)
         if: steps.guard.outputs.ok == 'true'
         working-directory: pollis-delivery
-        run: pnpm exec wrangler deploy -c "$WRANGLER_CONFIG"
+        run: pnpm exec wrangler deploy -c "$WRANGLER_CONFIG" --containers-rollout immediate
 
       # The #509 tripwire, kept verbatim: confirm the running binary is the new
       # build before calling the deploy done.

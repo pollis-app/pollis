@@ -21,6 +21,10 @@
       "image_vars": { "GIT_SHA": "unknown" },
       "instance_type": "basic",
       "max_instances": 1,
+      // Single instance: roll 100% in one step so a deploy replaces the running
+      // instance immediately (gradual rollout stalls with max_instances 1, so the
+      // /version gate never sees the new build).
+      "rollout_step_percentage": 100,
       "name": "pollis-delivery-dev"
     }
   ],
