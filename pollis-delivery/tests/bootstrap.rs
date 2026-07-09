@@ -16,6 +16,7 @@ use ed25519_dalek::{Signer, SigningKey};
 use http_body_util::BodyExt as _;
 use pollis_delivery::db::Db;
 use pollis_delivery::otp::OtpConfig;
+use pollis_delivery::ratelimit::RateLimitConfig;
 use pollis_delivery::{build_router_with_state, AppState};
 use rand_core::{OsRng, RngCore as _};
 use tower::ServiceExt as _;
@@ -171,6 +172,75 @@ async fn send(
         serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
     };
     (status, val)
+}
+
+/// Like [`send`], but stamps a `CF-Connecting-IP` header so the per-IP rate
+/// limiter (#345) sees a specific client IP.
+async fn send_ip(
+    state: &AppState,
+    path: &str,
+    body: serde_json::Value,
+    ip: &str,
+) -> (StatusCode, serde_json::Value) {
+    let req = Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("content-type", "application/json")
+        .header("CF-Connecting-IP", ip)
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap();
+    let resp = build_router_with_state(state.clone()).oneshot(req).await.unwrap();
+    let status = resp.status();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let val = if bytes.is_empty() {
+        serde_json::Value::Null
+    } else {
+        serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+    };
+    (status, val)
+}
+
+// #345: request-otp is per-IP rate limited (email-bomb / mass-enumeration
+// defense), and the throttle is scoped to the client IP — a different IP is
+// unaffected, and a 429 leaks nothing about account existence.
+#[tokio::test(flavor = "multi_thread")]
+async fn request_otp_is_ip_rate_limited() {
+    let db = fresh_db().await;
+    let state = AppState::new(Arc::clone(&db), false)
+        .with_otp_config(OtpConfig {
+            resend_api_key: None,
+            dev_otp: Some(DEV_CODE.to_string()),
+            ttl_secs: 600,
+            session_ttl_secs: 600,
+            // No per-email throttle, so only the per-IP limit is under test.
+            resend_throttle_secs: 0,
+            max_attempts: 5,
+        })
+        .with_ratelimit_config(RateLimitConfig {
+            request_otp_max: 2,
+            request_otp_window_secs: 600,
+            verify_otp_max: 30,
+            verify_otp_window_secs: 600,
+        });
+
+    // First two requests from one IP pass; the third is throttled.
+    for _ in 0..2 {
+        let (s, _) =
+            send_ip(&state, "/v1/auth/request-otp", serde_json::json!({ "email": "a@x.com" }), "203.0.113.1").await;
+        assert_eq!(s, StatusCode::OK);
+    }
+    let (s, _) =
+        send_ip(&state, "/v1/auth/request-otp", serde_json::json!({ "email": "a@x.com" }), "203.0.113.1").await;
+    assert_eq!(
+        s,
+        StatusCode::TOO_MANY_REQUESTS,
+        "the 3rd request from the same IP is throttled"
+    );
+
+    // A different client IP has its own budget — the limit is per-IP, not global.
+    let (s, _) =
+        send_ip(&state, "/v1/auth/request-otp", serde_json::json!({ "email": "a@x.com" }), "203.0.113.2").await;
+    assert_eq!(s, StatusCode::OK, "a different IP is unaffected");
 }
 
 /// Run request-otp + verify-otp for `email`/`device_id`, returning the verify-otp
