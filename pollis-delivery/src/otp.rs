@@ -18,7 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
@@ -28,7 +28,6 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use ulid::Ulid;
 
-use crate::ratelimit::{client_ip, RateLimitOutcome};
 use crate::session::SessionStore;
 use crate::writes::bad_request;
 use crate::AppState;
@@ -247,25 +246,7 @@ pub struct RequestOtpBody {
 /// Resend. **Always 200** regardless of whether the email maps to an account
 /// (anti-enumeration). Honors `DEV_OTP` (skip send, force the code) so the
 /// harness/local dev work without a mailbox.
-pub async fn request_otp(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    // Per-IP throttle FIRST — this endpoint sends email, so it's the email-bombing
-    // / mass-enumeration surface. A 429 here is keyed only on the client IP, so it
-    // reveals nothing about whether the address maps to an account (#345).
-    let ip = client_ip(&headers);
-    let rl = &state.ratelimit_config;
-    if state.ratelimit.check(
-        &format!("request-otp:{ip}"),
-        rl.request_otp_max,
-        rl.request_otp_window_secs,
-        now_unix(),
-    ) == RateLimitOutcome::Limited
-    {
-        return too_many_requests();
-    }
+pub async fn request_otp(State(state): State<AppState>, body: axum::body::Bytes) -> Response {
     let parsed: RequestOtpBody = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return bad_request("invalid body"),
@@ -352,25 +333,7 @@ pub struct VerifyOtpBody {
 /// `{user_id, username, is_new_account, has_identity, session_token,
 /// session_expires_at}`. A wrong/expired/locked code → 401/429; never touches
 /// the account on a failed code.
-pub async fn verify_otp(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    body: axum::body::Bytes,
-) -> Response {
-    // Per-IP throttle FIRST — the per-email lockout stops guessing one address, but
-    // not one IP trying codes across many addresses. Independent of email, so no
-    // account-existence leak (#345).
-    let ip = client_ip(&headers);
-    let rl = &state.ratelimit_config;
-    if state.ratelimit.check(
-        &format!("verify-otp:{ip}"),
-        rl.verify_otp_max,
-        rl.verify_otp_window_secs,
-        now_unix(),
-    ) == RateLimitOutcome::Limited
-    {
-        return too_many_requests();
-    }
+pub async fn verify_otp(State(state): State<AppState>, body: axum::body::Bytes) -> Response {
     let parsed: VerifyOtpBody = match serde_json::from_slice(&body) {
         Ok(b) => b,
         Err(_) => return bad_request("invalid body"),
@@ -538,16 +501,6 @@ pub fn verify_otp_response(result: VerifyOtpResult) -> Response {
 
 fn ok_200() -> Response {
     (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
-}
-
-/// 429 for the per-IP throttle. Distinct body from the per-email lockout's "too
-/// many attempts" so the two limits are tellable apart in logs/clients.
-fn too_many_requests() -> Response {
-    (
-        StatusCode::TOO_MANY_REQUESTS,
-        Json(serde_json::json!({ "error": "too many requests" })),
-    )
-        .into_response()
 }
 
 fn internal(e: anyhow::Error) -> Response {
