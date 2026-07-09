@@ -1,0 +1,96 @@
+# Auto-apply pending DB migrations to the shared DEV databases (main + commit-log).
+#
+# The dev DBs silently drifted behind prod (e.g. `account_key_log`, migration
+# 000005, was never hand-applied → the DS `establish-identity` handler 500'd and
+# blocked signup). This gives dev the same idempotent, replay-safe migration
+# deploy prod already has (`apply-migrations` in desktop-release.yml), so a
+# migration that lands on `main` is applied to dev automatically instead of
+# waiting to be run by hand.
+#
+# Reuses `scripts/db-apply.sh` verbatim (env-agnostic: TURSO_URL / TURSO_TOKEN /
+# MIGRATIONS_DIR, tracks `schema_migrations`) — same two calls prod makes, just
+# pointed at the dev DBs. Dev and prod are SEPARATE secrets/URLs, so a dev run can
+# never touch prod.
+#
+# Triggers: manual (workflow_dispatch, the #406 deploy-button pattern) AND a push
+# to `main` that actually changes a migration (path-filtered) — the auto-apply
+# that kills the drift. It "won't change often," so it's near-silent.
+#
+# One-time PREREQUISITE (cannot be done from CI): dev's `schema_migrations` is
+# currently inconsistent (a version looked recorded but its table was missing).
+# db-apply.sh trusts `schema_migrations`, so a recorded-but-unapplied migration is
+# SKIPPED. Reconcile dev's recorded versions against reality ONCE before relying on
+# this, or the drift persists. (db-apply.sh's adoption logic only covers the v0 /
+# greenfield case, not recorded-but-missing tables.)
+name: Migrate DB (dev)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to apply migrations from (branch, tag, or SHA)
+        required: false
+        default: main
+  push:
+    branches: [main]
+    paths:
+      - pollis-core/src/db/migrations/**
+      - pollis-core/src/db/migrations-log/**
+      - scripts/db-apply.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: db-migrate-dev
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    # Carries the dev Turso secrets (synced from Doppler dev). Use `db-dev`; if it
+    # isn't configured yet the guard below turns this into a green no-op.
+    environment: db-dev
+    steps:
+      - name: Checkout ${{ inputs.ref || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      # Green no-op until the db-dev environment has all four secrets, so merging
+      # this workflow (or a migration) doesn't red-X on an unconfigured env — same
+      # idiom as delivery-deploy-dev.yml. Adding the secrets enables it.
+      - name: Secrets configured?
+        id: guard
+        env:
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_ADMIN_TOKEN: ${{ secrets.TURSO_ADMIN_TOKEN }}
+          LOG_DB_URL: ${{ secrets.LOG_DB_URL }}
+          LOG_DB_ADMIN_TOKEN: ${{ secrets.LOG_DB_ADMIN_TOKEN }}
+        run: |
+          if [ -n "$TURSO_URL" ] && [ -n "$TURSO_ADMIN_TOKEN" ] \
+             && [ -n "$LOG_DB_URL" ] && [ -n "$LOG_DB_ADMIN_TOKEN" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::db-dev secrets not set (need TURSO_URL, TURSO_ADMIN_TOKEN, LOG_DB_URL, LOG_DB_ADMIN_TOKEN) — skipping dev migrate (no-op). Add them to enable."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Main DB — default migrations dir. Read-write admin token (migrations write).
+      - name: Apply pending migrations — dev main DB
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          TURSO_URL: ${{ secrets.TURSO_URL }}
+          TURSO_TOKEN: ${{ secrets.TURSO_ADMIN_TOKEN }}
+        run: ./scripts/db-apply.sh
+
+      # Commit-log DB — its own dedicated migrations dir (issue #420, Goal A). Only
+      # runs if the main-DB apply above succeeded (steps are fail-fast). Mirrors the
+      # prod `apply-migrations` second call exactly.
+      - name: Apply pending migrations — dev commit-log DB
+        if: steps.guard.outputs.ok == 'true'
+        env:
+          TURSO_URL: ${{ secrets.LOG_DB_URL }}
+          TURSO_TOKEN: ${{ secrets.LOG_DB_ADMIN_TOKEN }}
+          MIGRATIONS_DIR: pollis-core/src/db/migrations-log
+        run: ./scripts/db-apply.sh
