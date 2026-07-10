@@ -26,7 +26,27 @@ on:
       - "v*"
 
 jobs:
+  # This workflow builds + publishes a FULL versioned release (installers, prod DB
+  # migrations, SLSA/cosign provenance, binary-transparency log) — all keyed on the
+  # tag name (`github.ref_name`). So it must be triggered by pushing a `v*` tag, not
+  # by a bare workflow_dispatch (where the ref is a branch and the version stamp
+  # would be a non-semver branch name). This guard fails such a run in seconds with
+  # the exact command, instead of a cryptic "not strict semver" error deep in a build.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a version tag
+        run: |
+          if [ "${{ github.ref_type }}" != "tag" ] || [[ "${{ github.ref_name }}" != v* ]]; then
+            echo "::error title=Desktop Release is tag-driven::Push a version tag to release — do not use workflow_dispatch."
+            echo "This job publishes a full versioned release keyed on the tag name, so it needs a v* tag." >&2
+            echo "To release:  git tag vX.Y.Z <sha> && git push origin vX.Y.Z" >&2
+            exit 1
+          fi
+          echo "Releasing ${{ github.ref_name }}"
+
   build-macos:
+    needs: preflight
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,6 +142,7 @@ jobs:
             target/aarch64-apple-darwin/release/bundle/macos/*.sig
 
   build-windows:
+    needs: preflight
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -258,6 +279,7 @@ jobs:
             target/x86_64-pc-windows-msvc/release/bundle/nsis/*.sig
 
   build-capture-helper:
+    needs: preflight
     # The Linux screen-capture helper (pollis-capture-linux) links the
     # `pipewire` 0.9 crate, whose libspa-sys bindgen step generates
     # `spa_video_info_raw` from the build host's *system* PipeWire headers
