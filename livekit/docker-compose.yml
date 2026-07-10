@@ -1,12 +1,11 @@
 # LiveKit + nginx ingress stack for the Pollis VPS.
 #
-# Scope: this compose manages ONLY `livekit` and the shared `nginx` ingress.
-# The `delivery`, `delivery-dev`, and `watchtower` containers are deployed
-# independently by the Delivery Service workflows (#407, delivery-deploy-*.yml)
-# via Watchtower, and run as standalone containers on the same `livekit_default`
-# network. nginx reaches them by network alias (see nginx.conf api/api-dev/deploy
-# server blocks), so they must be up before nginx starts/reloads — nginx resolves
-# proxy_pass upstreams at config load and will refuse to start if one is missing.
+# Scope: this compose manages `livekit` and the `nginx` ingress in front of it.
+# nginx now serves ONLY the LiveKit endpoints (rtc.pollis.com / downpage.xyz →
+# livekit:7880). The Delivery Service moved to Cloudflare Containers (#515), so the
+# old `delivery` / `delivery-dev` / `watchtower` containers no longer run on this
+# VPS and were removed from nginx.conf — a dangling upstream fails `nginx -t` and
+# blocks the whole deploy. api(-dev).pollis.com now resolve to Cloudflare directly.
 #
 # Images are pinned by digest (no `:latest`) so a deploy is reproducible; the
 # human-readable tag is cosmetic when an @sha256 digest is present. Bump these
