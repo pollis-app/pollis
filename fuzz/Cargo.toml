@@ -31,6 +31,12 @@ arbitrary = { version = "1", features = ["derive"] }
 path = "../pollis-core"
 default-features = false
 
+# The `prune_floor` target fuzzes the retention floor, which lives in the
+# Delivery Service crate (the sole writer that owns the prune). Pure integer fn —
+# the DS deps it drags in are only needed to build, never exercised by the fuzzer.
+[dependencies.pollis-delivery]
+path = "../pollis-delivery"
+
 # Deliberate-mutant switch (teeth demonstration). OFF by default — the committed
 # targets call the REAL production functions. Turn it on with
 # `--cfg fuzz_mutant` (see scripts/fuzz-check.sh / the fuzz README) to make each
@@ -66,6 +72,13 @@ bench = false
 [[bin]]
 name = "may_rejoin"
 path = "fuzz_targets/may_rejoin.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "prune_floor"
+path = "fuzz_targets/prune_floor.rs"
 test = false
 doc = false
 bench = false

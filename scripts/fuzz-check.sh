@@ -4,7 +4,7 @@
 # NIGHTLY, out of band from the pinned-stable release build. A crash = a property
 # violation (P1/P2/P3 no-skip, no-gap-apply, no-foreign-adopt, recovery-gate).
 #
-#   ./scripts/fuzz-check.sh                # smoke: build + short-run all 4 targets
+#   ./scripts/fuzz-check.sh                # smoke: build + short-run all targets
 #   FUZZ_MUTANT=1 ./scripts/fuzz-check.sh  # teeth: build each target's mutant and
 #                                          # confirm the fuzzer trips it fast
 #
@@ -16,7 +16,7 @@ set -euo pipefail
 
 # Nightly toolchain to use. Overridable; defaults to the rustup `nightly` channel.
 NIGHTLY="${NIGHTLY:-nightly}"
-TARGETS=(next_watermark classify resolve may_rejoin)
+TARGETS=(next_watermark classify resolve may_rejoin prune_floor)
 # Short per-target budget for a smoke run; override for a deeper local soak.
 RUNS="${FUZZ_RUNS:-200000}"
 MAX_TIME="${FUZZ_MAX_TOTAL_TIME:-20}"

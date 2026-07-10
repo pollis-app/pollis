@@ -565,6 +565,164 @@ mod proofs {
         let head = head_epoch_of_mutant(None);
         assert!(head == 0);
     }
+
+    // ─── I4 — retention-floor harnesses (prune_floor) ─────────────────────────
+    //
+    // Prove the REAL `prune_floor` (no forked copy): the floor is non-negative
+    // (P1), Tier 1 never prunes past the slowest current member except when the
+    // documented Tier-2 cap binds (P2 — the code-level Spec-B
+    // `NoLossForCurrentMember`), and an unreported roster disables Tier 1
+    // entirely (P3). Pure integer arithmetic — no `Vec`/`String`, no loops — so
+    // CBMC is instantaneous. Each harness is paired with a `#[kani::should_panic]`
+    // mutant (a deliberately-broken local copy of the floor logic) that VIOLATES
+    // the property, proving the harness has teeth.
+    //
+    // BOUND NOTE: symbolic epochs sit in `0..=EPOCH_MAX`. `EPOCH_MAX` MUST exceed
+    // `PRUNE_MAX_BEHIND_HEAD` (512) so Tier 2 can actually bind above a member's
+    // epoch — otherwise P2's `floor > m` antecedent is unreachable and the proof
+    // goes vacuous. `1024` keeps the space small (CBMC reasons symbolically over
+    // pure arithmetic, so the range costs nothing) while exercising both tiers.
+    const EPOCH_MAX: i64 = 1024;
+
+    /// A symbolic `min_since`: `None`, or `Some(m)` with `0 <= m <= EPOCH_MAX`
+    /// (epochs are non-negative by construction).
+    fn symbolic_min_since() -> Option<i64> {
+        if kani::any() {
+            let m: i64 = kani::any();
+            kani::assume((0..=EPOCH_MAX).contains(&m));
+            Some(m)
+        } else {
+            None
+        }
+    }
+
+    /// P1 (floor_non_negative): `prune_floor(..) >= 0` for ALL inputs — the
+    /// `.max(0)` clamps mean a short log or an empty roster never yields a
+    /// negative floor (a negative floor would be a meaningless/underflowing
+    /// `epoch < floor` DELETE bound).
+    #[kani::proof]
+    fn i4_floor_non_negative() {
+        let min_since = symbolic_min_since();
+        let all_reported: bool = kani::any();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor(min_since, all_reported, head);
+        assert!(floor >= 0);
+    }
+
+    /// P2 (tier1_never_past_slowest = Spec-B `NoLossForCurrentMember`): with the
+    /// whole roster reported and `min_since == Some(m)`, the ONLY way the floor
+    /// can exceed `m` — the slowest current member's applied epoch — is Tier 2
+    /// binding (`head - PRUNE_MAX_BEHIND_HEAD > m`, the documented accepted-loss
+    /// path). Tier 1 alone is always `<= m`, so no commit a current member still
+    /// needs is ever pruned by Tier 1.
+    #[kani::proof]
+    fn i4_tier1_never_past_slowest() {
+        let m: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&m));
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor(Some(m), true, head);
+        if floor > m {
+            assert!(head - PRUNE_MAX_BEHIND_HEAD > m);
+        }
+    }
+
+    /// P3 (unreported_disables_tier1): when `all_reported == false`, the floor is
+    /// EXACTLY Tier 2 (`(head - PRUNE_MAX_BEHIND_HEAD).max(0)`) for ANY
+    /// `min_since` — an unreported current member can never contribute to
+    /// pruning, because `min_since` is not then a safe lower bound over the
+    /// roster.
+    #[kani::proof]
+    fn i4_unreported_disables_tier1() {
+        let min_since = symbolic_min_since();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor(min_since, false, head);
+        assert!(floor == (head - PRUNE_MAX_BEHIND_HEAD).max(0));
+    }
+
+    // ─── Mutants (teeth) ──────────────────────────────────────────────────────
+
+    /// P1 mutant: the raw Tier-2 expression with NO `.max(0)` clamp and no Tier 1
+    /// — a short log (`head < PRUNE_MAX_BEHIND_HEAD`) yields a negative floor.
+    fn prune_floor_p1_mutant(_min_since: Option<i64>, _all_reported: bool, head: i64) -> i64 {
+        // BUG: dropped the `.max(0)` floor — returns `head - 512`, negative for a
+        // short log.
+        head - PRUNE_MAX_BEHIND_HEAD
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_floor_non_negative_mutant_refuted() {
+        let min_since = symbolic_min_since();
+        let all_reported: bool = kani::any();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor_p1_mutant(min_since, all_reported, head);
+        // A short log drives the mutant negative → Kani finds the violation.
+        assert!(floor >= 0);
+    }
+
+    /// P2 mutant: `+ PRUNE_SLACK_EPOCHS` instead of `-` — retains the slack ABOVE
+    /// the slowest member, so Tier 1 alone exceeds `m` and prunes commits a
+    /// current member still needs, with Tier 2 not even binding. (This is the
+    /// spec's refuted "prune past the member" variant.)
+    fn prune_floor_p2_mutant(min_since: Option<i64>, all_reported: bool, head: i64) -> i64 {
+        let tier1 = match (all_reported, min_since) {
+            // BUG: `+ SLACK` prunes SLACK epochs PAST the slowest member.
+            (true, Some(m)) => (m + PRUNE_SLACK_EPOCHS).max(0),
+            _ => 0,
+        };
+        let tier2 = (head - PRUNE_MAX_BEHIND_HEAD).max(0);
+        tier1.max(tier2)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_tier1_never_past_slowest_mutant_refuted() {
+        let m: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&m));
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor_p2_mutant(Some(m), true, head);
+        // With a small head (Tier 2 idle) the mutant floor is `m + 8 > m`, so the
+        // Tier-2 justification is false → Kani finds the violation.
+        if floor > m {
+            assert!(head - PRUNE_MAX_BEHIND_HEAD > m);
+        }
+    }
+
+    /// P3 mutant: ignores `all_reported` — an unreported roster still lets Tier 1
+    /// prune off `min_since`, so a member we cannot bound gets pruned past.
+    fn prune_floor_p3_mutant(min_since: Option<i64>, all_reported: bool, head: i64) -> i64 {
+        // BUG: dropped the `all_reported` guard.
+        let _ = all_reported;
+        let tier1 = match min_since {
+            Some(m) => (m - PRUNE_SLACK_EPOCHS).max(0),
+            None => 0,
+        };
+        let tier2 = (head - PRUNE_MAX_BEHIND_HEAD).max(0);
+        tier1.max(tier2)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_unreported_disables_tier1_mutant_refuted() {
+        let min_since = symbolic_min_since();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor_p3_mutant(min_since, false, head);
+        // A reported `min_since` above the Tier-2 cap makes the mutant floor
+        // exceed `(head - 512).max(0)` → Kani finds the violation.
+        assert!(floor == (head - PRUNE_MAX_BEHIND_HEAD).max(0));
+    }
 }
 
 // ─── Retention-floor unit tests (I4, issue #539) ─────────────────────────────
