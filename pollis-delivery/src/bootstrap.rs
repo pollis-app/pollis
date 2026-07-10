@@ -528,7 +528,26 @@ pub async fn enrollment_request(
     )
     .await
     {
-        Ok(()) => ok_status(),
+        Ok(()) => {
+            // Notify the user's already-enrolled devices via their inbox room.
+            // The requesting device can't send this itself — it is
+            // pre-enrollment (no signing credential, local DB closed), so its
+            // client-side device-signed send-data fails with "not signed in".
+            // The DS holds the LiveKit admin secret, so it emits the nudge here.
+            // Best-effort: a miss is covered by the sibling's login-time
+            // `list_pending_enrollment_requests` poll.
+            let inbox = format!("inbox-{}", claims.user_id);
+            let event = serde_json::json!({
+                "type": "enrollment_requested",
+                "request_id": parsed.request_id,
+                "new_device_id": claims.device_id,
+                "verification_code": parsed.verification_code,
+            });
+            if let Err(e) = crate::broker::room_send_data(&state, &inbox, &event).await {
+                tracing::warn!("enrollment-request inbox notify failed (non-fatal): {e}");
+            }
+            ok_status()
+        }
         Err(e) => internal(e),
     }
 }

@@ -18,6 +18,7 @@ import { presenceStore } from '../stores/presenceStore';
 import { keyChangeStore } from '../stores/keyChangeStore';
 import { rosterChangeStore, type RosterBanner } from '../stores/rosterChangeStore';
 import { peerVerificationKeys } from './queries/useUserProfile';
+import { listPendingEnrollmentRequests } from '../services/api';
 
 // Mirrors the RealtimeEvent enum in pollis-core/src/realtime.rs.
 // Add new variants here as new event types are added on the Rust side.
@@ -261,6 +262,45 @@ export function useLiveKitRealtime() {
       setNotifyPrefs({ allowSound, allowOsNotif, osPermissionGranted: false, allowCallRingtone });
     });
   }, [isTauriReady, prefsQuery.data?.allow_sound_effects, prefsQuery.data?.allow_desktop_notifications, currentUser?.id]);
+
+  // ── Enrollment poll fallback ────────────────────────────────────────────
+  // The enrollment-request inbox nudge is emitted server-side by the DS (the
+  // requesting device is pre-enrollment and can't sign a client-side
+  // send-data). But if THIS already-enrolled device was offline when a sibling
+  // requested enrollment, the live nudge was missed. Surface any still-pending
+  // request once, right after sign-in. One-shot (keyed on user id) — it's the
+  // documented "fallback in case the inbox push was missed" path, event-driven
+  // rather than an interval, so it respects the no-periodic-polling rule.
+  useEffect(() => {
+    if (!isTauriReady || !currentUser) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const pending = await listPendingEnrollmentRequests(currentUser.id);
+        if (cancelled || pending.length === 0) {
+          return;
+        }
+        // Most recent first (the Rust query orders by created_at DESC).
+        const r = pending[0];
+        notify('enrollment', {
+          title: 'New device sign-in',
+          body: 'A new device is requesting access to your account',
+          enrollment: {
+            requestId: r.request_id,
+            newDeviceId: r.new_device_id,
+            verificationCode: r.verification_code,
+          },
+        });
+      } catch (err) {
+        console.warn('[realtime] enrollment poll fallback failed:', err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isTauriReady, currentUser?.id]);
 
   // ── Subscribe: open a typed Tauri Channel, wire handler, register with Rust ─
   // Recreated if the user identity changes (e.g. logout → login as someone else).

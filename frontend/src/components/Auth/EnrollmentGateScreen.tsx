@@ -234,16 +234,24 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
               />
             )}
 
-            {state.phase === "error" && (
-              <ResultPane
-                heading="Something went wrong"
-                body={state.message}
-                actionLabel="Try again"
-                onAction={restart}
-                onCancel={onCancel}
-                tone="error"
-              />
-            )}
+            {state.phase === "error" && (() => {
+              // A missing/expired OTP session (reaching this gate without a
+              // fresh verify — e.g. after an app relaunch) can't be retried
+              // in place: `start_device_enrollment` needs a live enrollment
+              // session, which only a fresh sign-in mints. Route those to
+              // sign-in rather than a "Try again" that just fails identically.
+              const needsResignin = /session|sign in/i.test(state.message);
+              return (
+                <ResultPane
+                  heading="Something went wrong"
+                  body={state.message}
+                  actionLabel={needsResignin ? "Sign in again" : "Try again"}
+                  onAction={needsResignin ? onCancel : restart}
+                  onCancel={onCancel}
+                  tone="error"
+                />
+              );
+            })()}
           </div>
         </Card>
       </div>
