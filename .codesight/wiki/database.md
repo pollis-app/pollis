@@ -270,12 +270,8 @@ global ordering + a UNIQUE index enforcing the per-subject invariant).
 - UNIQUE INDEX `idx_account_key_log_user_version` on `(user_id, identity_version)` — one row per version per user; a duplicate INSERT conflicts rather than silently forking the history.
 - Dual-written in lock-step with `users.account_id_pub` by `generate_account_identity` (v1 at signup) and `reset_identity` (+1 per rotation). Migration backfills the current key of every user that already has an `account_id_pub`.
 
-### user_groups / user_dms _(migration 000009 — directory index, #261 Phase 2)_
-Denormalized **per-user membership index**. Precursor to the per-conversation DB split (#261): the sidebar's "which groups / DMs am I in, with names + last-activity" read becomes one index query instead of a JOIN across `group_member`/`groups`/`channels` — the JOIN that becomes a cross-shard fan-out once each conversation gets its own DB.
-- `user_groups` — PK (`user_id`, `group_id`); `group_name`, `role`, `joined_at`, `last_activity_at`. Index `idx_user_groups_user_activity` on `(user_id, last_activity_at DESC)`.
-- `user_dms` — PK (`user_id`, `dm_channel_id`); `created_by`, `added_at`, `accepted_at`, `last_activity_at`. Index `idx_user_dms_user_activity`.
-- **Derived cache, not authoritative:** `group_member` / `dm_channel_member` remain the source of truth until the split's `primary` phase. The DS maintains the index as an **exact projection** — every write that changes membership, group/DM metadata, or produces a message calls a `pollis_delivery::directory::*` helper **inside the same transaction**, so the index can't drift. Projection-based upserts (`INSERT…SELECT FROM group_member/groups … ON CONFLICT DO UPDATE`) mean re-running a helper is always correct; deletes are explicit (FK cascade is off on the DS connection). Migration backfills from current membership.
-- Reads: `list_user_groups(_with_channels)` source membership+role here (group metadata + channels still joined pre-split). DM list reads still use the authoritative JOIN for now (its block-filter + `dc.created_at` need more index columns / cross-DB handling at the split). Equivalence guarded by the flows test `directory_index_matches_membership`.
+### user_groups / user_dms _(migration 000009 — created, then unused)_
+Empty, unread tables. Created by migration `000009` as the directory index for the per-conversation-DB split (#261 Phase 2). #261 was dropped (not-planned), and the maintenance + reads were reverted — but the migration is append-only history and the tables were already applied to prod/dev/test, so they remain **empty and unreferenced**. No code writes or reads them. Left in place; a future tightening migration can `DROP` them if desired.
 
 ---
 

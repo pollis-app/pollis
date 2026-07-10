@@ -13,20 +13,14 @@ pub async fn list_user_groups_with_channels(
 ) -> Result<Vec<GroupWithChannels>> {
     let conn = state.remote_db.conn().await?;
 
-    // Membership + role come from the directory index (`user_groups`, #261
-    // Phase 2) rather than a `group_member` JOIN — the DS keeps it an exact
-    // projection of membership, and post-split it answers "which groups am I in"
-    // without fanning out across per-group shards. Group metadata + channels are
-    // still joined from the shared DB pre-split. Order preserved (creation, then
-    // channel name) so the sidebar is unchanged.
     let mut rows = conn.query(
         "SELECT g.id, g.name, g.description, g.owner_id, g.created_at,
                 c.id, c.group_id, c.name, c.description, c.channel_type,
-                ug.role
-         FROM user_groups ug
-         JOIN groups g ON g.id = ug.group_id
+                gm.role
+         FROM groups g
+         JOIN group_member gm ON gm.group_id = g.id
          LEFT JOIN channels c ON c.group_id = g.id
-         WHERE ug.user_id = ?1
+         WHERE gm.user_id = ?1
          ORDER BY g.created_at, c.name",
         libsql::params![user_id],
     ).await?;
@@ -78,12 +72,11 @@ pub async fn list_user_groups(
 ) -> Result<Vec<Group>> {
     let conn = state.remote_db.conn().await?;
 
-    // Membership sourced from the directory index (`user_groups`, #261 Phase 2).
     let mut rows = conn.query(
         "SELECT g.id, g.name, g.description, g.owner_id, g.created_at
-         FROM user_groups ug
-         JOIN groups g ON g.id = ug.group_id
-         WHERE ug.user_id = ?1",
+         FROM groups g
+         JOIN group_member gm ON gm.group_id = g.id
+         WHERE gm.user_id = ?1",
         libsql::params![user_id],
     ).await?;
 

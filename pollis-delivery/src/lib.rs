@@ -27,7 +27,6 @@ pub mod cert;
 pub mod commit;
 pub mod db;
 pub mod devices;
-pub mod directory;
 pub mod email_change;
 pub mod error;
 pub mod groups;

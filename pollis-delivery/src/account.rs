@@ -660,8 +660,6 @@ pub async fn apply_reset_recover(
         libsql::params![actor.clone()],
     )
     .await?;
-    // Directory index (#261): drop the actor from every group/DM index row.
-    crate::directory::remove_user(&tx, &actor).await?;
 
     // Orphan the actor's OTHER devices; keep the current one (it re-enrolls under
     // the new identity). `None` → drop them all.
@@ -752,9 +750,6 @@ pub async fn apply_delete_account(
         libsql::params![actor.clone()],
     )
     .await?;
-    // Directory index (#261): drop the actor from every group/DM index row.
-    // Explicit (not via the user-row cascade below) so it holds with FK off.
-    crate::directory::remove_user(&tx, &actor).await?;
     // The user row last — FK ON DELETE CASCADE clears dm_channel_member,
     // group_invite, user_device, account_recovery, security_event, …
     tx.execute(
@@ -808,8 +803,6 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
                 libsql::params![gid.clone()],
             )
             .await?;
-            // Directory index (#261): the group is gone.
-            crate::directory::remove_group(conn, &gid).await?;
         } else if role == "admin" {
             let other_admins: i64 = {
                 let mut rows = conn
@@ -842,11 +835,9 @@ async fn handoff_group_ownership(conn: &Connection, actor: &str) -> anyhow::Resu
                     conn.execute(
                         "UPDATE group_member SET role = 'admin' \
                          WHERE group_id = ?1 AND user_id = ?2",
-                        libsql::params![gid.clone(), new_admin.clone()],
+                        libsql::params![gid.clone(), new_admin],
                     )
                     .await?;
-                    // Directory index (#261): re-project the promoted admin's role.
-                    crate::directory::sync_group_member(conn, &gid, &new_admin).await?;
                 }
             }
         }
