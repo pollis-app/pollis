@@ -17,8 +17,9 @@ import {
 import { useVoiceTest } from "../hooks/useVoiceTest";
 import { voiceSession } from "../voice";
 import type { AudioDevice } from "../types";
+import { observer } from "mobx-react-lite";
 import { cameraSession, LOCAL_CAMERA_PREVIEW_KEY, friendlyCameraError } from "../camera/cameraSession";
-import type { CameraSource } from "../camera/types";
+import { cameraPreviewStore } from "../camera/cameraPreviewStore";
 import { RemoteVideoTile } from "../components/Voice/RemoteVideoTile";
 import { useMediaPermissions, openPrivacySettings, type PermissionState } from "../hooks/queries/useMediaPermissions";
 
@@ -201,7 +202,7 @@ async function pushApmConfig(config: ApmConfig): Promise<void> {
   }
 }
 
-export const VoiceSettingsPage: React.FC = () => {
+export const VoiceSettingsPage: React.FC = observer(() => {
   const preferences = usePreferences();
   const test = useVoiceTest();
 
@@ -253,54 +254,59 @@ export const VoiceSettingsPage: React.FC = () => {
     }
   };
 
-  // ── Camera (issue #434) ───────────────────────────────────────────────────
-  // Live self-preview via the preview-only capture path (no call, nothing
-  // published). Frames mirror to LOCAL_CAMERA_PREVIEW_KEY; RemoteVideoTile
-  // renders + auto-mirrors them. Start on mount / device change, stop on leave.
-  const [cameras, setCameras] = useState<CameraSource[]>([]);
-  const [selectedCamera, setSelectedCameraState] = useState<string>(() => {
-    try { return localStorage.getItem(CAMERA_DEVICE_KEY) || ""; } catch { return ""; }
-  });
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  // ── Camera picker + preview (issue #434) ──────────────────────────────────
+  // All state lives in `cameraPreviewStore` — a discriminated union so invalid
+  // combos (error beside a live preview, a preview with no device, live while
+  // enumerating) are unrepresentable. Preview is OFF by default; the user opts
+  // in with the toggle (a settings page must not silently light the camera).
+  const cam = cameraPreviewStore.state;
 
   // OS camera/mic permission status (issue #434) — refetches on window focus, so
   // returning from System Settings reflects the change without a manual refresh.
   const permissions = useMediaPermissions();
 
-  const startCameraPreview = (id: string) => {
-    setCameraError(null);
-    cameraSession.startPreview(id).catch((e) => {
-      setCameraError(friendlyCameraError(String(e)));
-    });
+  // The invoke resolves once capture has started; drive the union off it — no
+  // separate "started" event needed.
+  const runPreview = (id: string) => {
+    cameraSession
+      .startPreview(id)
+      .then(() => cameraPreviewStore.wentLive())
+      .catch((e) => cameraPreviewStore.failed(friendlyCameraError(String(e))));
+  };
+
+  const togglePreview = () => {
+    if (cameraPreviewStore.isPreviewing) {
+      void cameraSession.stopPreview();
+      cameraPreviewStore.stopped();
+      return;
+    }
+    const id = cameraPreviewStore.selectedDeviceId;
+    if (!id) { return; }
+    cameraPreviewStore.startRequested();
+    runPreview(id);
   };
 
   const setCamera = (id: string) => {
-    setSelectedCameraState(id);
     try { localStorage.setItem(CAMERA_DEVICE_KEY, id); } catch { /* ignore */ }
-    startCameraPreview(id);
+    const wasPreviewing = cameraPreviewStore.isPreviewing;
+    cameraPreviewStore.select(id);
+    // `select` kept us in `starting` when previewing — actually restart capture.
+    if (wasPreviewing) { runPreview(id); }
   };
 
   useEffect(() => {
     let cancelled = false;
+    const preferred = (() => {
+      try { return localStorage.getItem(CAMERA_DEVICE_KEY); } catch { return null; }
+    })();
     cameraSession
       .listDevices()
-      .then(({ cameras }) => {
-        if (cancelled) { return; }
-        setCameras(cameras);
-        if (cameras.length === 0) { return; }
-        // Preview the saved camera if still present, else the first one.
-        const initial = cameras.some((c) => c.id === selectedCamera)
-          ? selectedCamera
-          : cameras[0].id;
-        setSelectedCameraState(initial);
-        startCameraPreview(initial);
-      })
-      .catch((e) => {
-        if (!cancelled) { setCameraError(friendlyCameraError(String(e))); }
-      });
+      .then(({ cameras }) => { if (!cancelled) { cameraPreviewStore.enumerated(cameras, preferred); } })
+      .catch(() => { if (!cancelled) { cameraPreviewStore.enumerationFailed(); } });
     return () => {
       cancelled = true;
       void cameraSession.stopPreview();
+      cameraPreviewStore.reset();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -367,19 +373,21 @@ export const VoiceSettingsPage: React.FC = () => {
           >
             Camera
           </h2>
-          {cameras.length === 0 ? (
+          {cam.kind === "loading" ? (
+            <span style={{ color: "var(--c-text-muted)" }}>Detecting cameras…</span>
+          ) : cam.kind === "empty" ? (
             <span style={{ color: "var(--c-text-muted)" }}>No camera detected.</span>
           ) : (
             <>
               <DeviceSelect
                 label="Camera"
-                devices={cameras}
-                value={selectedCamera}
+                devices={cameraPreviewStore.devices}
+                value={cam.deviceId}
                 onChange={setCamera}
                 fallbackLabel="No camera"
               />
-              {/* Live self-preview (mirrored). 16:9 letterbox; RemoteVideoTile
-                  contains within it and auto-mirrors LOCAL_CAMERA_PREVIEW_KEY. */}
+              {/* Self-preview (mirrored). Off by default — the user opts in. 16:9
+                  letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
               <div
                 data-testid="voice-camera-preview"
                 className="flex items-center justify-center overflow-hidden rounded"
@@ -391,13 +399,32 @@ export const VoiceSettingsPage: React.FC = () => {
                   border: "1px solid var(--c-border)",
                 }}
               >
-                {cameraError ? (
-                  <span className="px-3 text-center text-sm" style={{ color: "var(--c-text-muted)" }}>
-                    {cameraError}
-                  </span>
-                ) : (
+                {cam.kind === "live" ? (
                   <RemoteVideoTile trackKey={LOCAL_CAMERA_PREVIEW_KEY} />
+                ) : (
+                  <span className="px-3 text-center text-sm" style={{ color: "var(--c-text-muted)" }}>
+                    {cam.kind === "failed"
+                      ? cam.error
+                      : cam.kind === "starting"
+                        ? "Starting…"
+                        : "Preview is off — turn it on to check your camera."}
+                  </span>
                 )}
+              </div>
+              <div>
+                <Button
+                  data-testid="voice-camera-preview-toggle"
+                  variant={cam.kind === "live" ? "secondary" : "primary"}
+                  size="sm"
+                  disabled={cam.kind === "starting"}
+                  onClick={togglePreview}
+                >
+                  {cam.kind === "live"
+                    ? "Stop camera"
+                    : cam.kind === "starting"
+                      ? "Starting…"
+                      : "Test camera"}
+                </Button>
               </div>
             </>
           )}
@@ -648,4 +675,4 @@ export const VoiceSettingsPage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});
