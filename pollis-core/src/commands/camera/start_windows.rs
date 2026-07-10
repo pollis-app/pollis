@@ -725,3 +725,17 @@ fn now_us() -> i64 {
         .map(|d| d.as_micros() as i64)
         .unwrap_or(0)
 }
+
+/// Settings self-preview (issue #434). Windows *capture* is implemented above;
+/// only this preview-only path is still pending — it would open the MF reader and
+/// mirror to `LOCAL_CAMERA_PREVIEW_KEY` without publishing.
+pub async fn start_camera_preview(_state: &Arc<AppState>, _device_id: String) -> Result<()> {
+    Err(crate::error::Error::Other(anyhow::anyhow!(
+        "Windows camera preview is not implemented yet (Media Foundation TODO)"
+    )))
+}
+
+/// Idempotent no-op — no preview session exists on Windows yet.
+pub async fn stop_camera_preview(_state: &Arc<AppState>) -> Result<()> {
+    Ok(())
+}
