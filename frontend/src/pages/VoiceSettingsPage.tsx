@@ -17,12 +17,19 @@ import {
 import { useVoiceTest } from "../hooks/useVoiceTest";
 import { voiceSession } from "../voice";
 import type { AudioDevice } from "../types";
+import { observer } from "mobx-react-lite";
+import { cameraSession, LOCAL_CAMERA_PREVIEW_KEY, friendlyCameraError } from "../camera/cameraSession";
+import { cameraPreviewStore } from "../camera/cameraPreviewStore";
+import { RemoteVideoTile } from "../components/Voice/RemoteVideoTile";
+import { useMediaPermissions, openPrivacySettings, type PermissionState } from "../hooks/queries/useMediaPermissions";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
+const CAMERA_DEVICE_KEY = "pollis:camera-device";
 
 interface DeviceSelectProps {
   label: string;
-  devices: AudioDevice[];
+  // Structural `{ id, name }` so both AudioDevice and CameraSource fit.
+  devices: { id: string; name: string }[];
   value: string;
   onChange: (id: string) => void;
   fallbackLabel: string;
@@ -129,6 +136,42 @@ const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onCh
   </div>
 );
 
+const PERMISSION_LABEL: Record<PermissionState, string> = {
+  granted: "✅ Granted",
+  denied: "⛔ Denied",
+  notDetermined: "— Not requested",
+  perSession: "Managed by the system",
+  unsupported: "Unavailable",
+};
+
+/** One camera/mic permission row: status + a deep-link to System Settings.
+ *  An app can't grant/revoke its own OS grant — only the user can — so the
+ *  action is always "take me there", never an in-app toggle (issue #434). The
+ *  deep-link only exists where the OS has a per-app privacy model (macOS /
+ *  Windows); on Linux (`perSession`) there's nothing to link to. */
+const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage: () => void }> = ({
+  label,
+  state,
+  onManage,
+}) => {
+  const deepLinkable = state === "granted" || state === "denied" || state === "notDetermined";
+  return (
+    <div className="flex items-center justify-between gap-3" style={{ maxWidth: 320 }}>
+      <div className="flex flex-col">
+        <span style={{ color: "var(--c-text)" }}>{label}</span>
+        <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+          {PERMISSION_LABEL[state]}
+        </span>
+      </div>
+      {deepLinkable && (
+        <Button variant="secondary" size="sm" onClick={onManage}>
+          Manage in System Settings
+        </Button>
+      )}
+    </div>
+  );
+};
+
 const selectStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
@@ -159,7 +202,7 @@ async function pushApmConfig(config: ApmConfig): Promise<void> {
   }
 }
 
-export const VoiceSettingsPage: React.FC = () => {
+export const VoiceSettingsPage: React.FC = observer(() => {
   const preferences = usePreferences();
   const test = useVoiceTest();
 
@@ -211,6 +254,63 @@ export const VoiceSettingsPage: React.FC = () => {
     }
   };
 
+  // ── Camera picker + preview (issue #434) ──────────────────────────────────
+  // All state lives in `cameraPreviewStore` — a discriminated union so invalid
+  // combos (error beside a live preview, a preview with no device, live while
+  // enumerating) are unrepresentable. Preview is OFF by default; the user opts
+  // in with the toggle (a settings page must not silently light the camera).
+  const cam = cameraPreviewStore.state;
+
+  // OS camera/mic permission status (issue #434) — refetches on window focus, so
+  // returning from System Settings reflects the change without a manual refresh.
+  const permissions = useMediaPermissions();
+
+  // The invoke resolves once capture has started; drive the union off it — no
+  // separate "started" event needed.
+  const runPreview = (id: string) => {
+    cameraSession
+      .startPreview(id)
+      .then(() => cameraPreviewStore.wentLive())
+      .catch((e) => cameraPreviewStore.failed(friendlyCameraError(String(e))));
+  };
+
+  const togglePreview = () => {
+    if (cameraPreviewStore.isPreviewing) {
+      void cameraSession.stopPreview();
+      cameraPreviewStore.stopped();
+      return;
+    }
+    const id = cameraPreviewStore.selectedDeviceId;
+    if (!id) { return; }
+    cameraPreviewStore.startRequested();
+    runPreview(id);
+  };
+
+  const setCamera = (id: string) => {
+    try { localStorage.setItem(CAMERA_DEVICE_KEY, id); } catch { /* ignore */ }
+    const wasPreviewing = cameraPreviewStore.isPreviewing;
+    cameraPreviewStore.select(id);
+    // `select` kept us in `starting` when previewing — actually restart capture.
+    if (wasPreviewing) { runPreview(id); }
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const preferred = (() => {
+      try { return localStorage.getItem(CAMERA_DEVICE_KEY); } catch { return null; }
+    })();
+    cameraSession
+      .listDevices()
+      .then(({ cameras }) => { if (!cancelled) { cameraPreviewStore.enumerated(cameras, preferred); } })
+      .catch(() => { if (!cancelled) { cameraPreviewStore.enumerationFailed(); } });
+    return () => {
+      cancelled = true;
+      void cameraSession.stopPreview();
+      cameraPreviewStore.reset();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /**
    * Persist a partial preference change and push the resulting APM config to
    * the backend so mid-call changes take effect immediately.
@@ -239,7 +339,7 @@ export const VoiceSettingsPage: React.FC = () => {
   };
 
   return (
-    <PageShell title="Voice Settings" scrollable>
+    <PageShell title="Voice & Video" scrollable>
       <div className="flex justify-center px-6 py-8">
       <div className="flex flex-col gap-8 w-full max-w-md">
 
@@ -265,6 +365,91 @@ export const VoiceSettingsPage: React.FC = () => {
             fallbackLabel="Default speaker"
           />
         </section>
+
+        <section className="flex flex-col gap-4 mb-12" data-testid="voice-camera-section">
+          <h2
+            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+          >
+            Camera
+          </h2>
+          {cam.kind === "loading" ? (
+            <span style={{ color: "var(--c-text-muted)" }}>Detecting cameras…</span>
+          ) : cam.kind === "empty" ? (
+            <span style={{ color: "var(--c-text-muted)" }}>No camera detected.</span>
+          ) : (
+            <>
+              <DeviceSelect
+                label="Camera"
+                devices={cameraPreviewStore.devices}
+                value={cam.deviceId}
+                onChange={setCamera}
+                fallbackLabel="No camera"
+              />
+              {/* Self-preview (mirrored). Off by default — the user opts in. 16:9
+                  letterbox; RemoteVideoTile contains + auto-mirrors the key. */}
+              <div
+                data-testid="voice-camera-preview"
+                className="flex items-center justify-center overflow-hidden rounded"
+                style={{
+                  width: "100%",
+                  maxWidth: 320,
+                  aspectRatio: "16 / 9",
+                  background: "#000",
+                  border: "1px solid var(--c-border)",
+                }}
+              >
+                {cam.kind === "live" ? (
+                  <RemoteVideoTile trackKey={LOCAL_CAMERA_PREVIEW_KEY} />
+                ) : (
+                  <span className="px-3 text-center text-sm" style={{ color: "var(--c-text-muted)" }}>
+                    {cam.kind === "failed"
+                      ? cam.error
+                      : cam.kind === "starting"
+                        ? "Starting…"
+                        : "Preview is off — turn it on to check your camera."}
+                  </span>
+                )}
+              </div>
+              <div>
+                <Button
+                  data-testid="voice-camera-preview-toggle"
+                  variant={cam.kind === "live" ? "secondary" : "primary"}
+                  size="sm"
+                  disabled={cam.kind === "starting"}
+                  onClick={togglePreview}
+                >
+                  {cam.kind === "live"
+                    ? "Stop camera"
+                    : cam.kind === "starting"
+                      ? "Starting…"
+                      : "Test camera"}
+                </Button>
+              </div>
+            </>
+          )}
+        </section>
+
+        {permissions.data && (
+          <section className="flex flex-col gap-4 mb-12" data-testid="voice-permissions-section">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            >
+              Permissions
+            </h2>
+            <PermissionRow
+              label="Camera"
+              state={permissions.data.camera}
+              onManage={() => { void openPrivacySettings("camera"); }}
+            />
+            <PermissionRow
+              label="Microphone"
+              state={permissions.data.microphone}
+              onManage={() => { void openPrivacySettings("microphone"); }}
+            />
+          </section>
+        )}
 
         <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">
           <h2
@@ -490,4 +675,4 @@ export const VoiceSettingsPage: React.FC = () => {
       </div>
     </PageShell>
   );
-};
+});

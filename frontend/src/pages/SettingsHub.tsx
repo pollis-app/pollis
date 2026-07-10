@@ -35,9 +35,9 @@ export const SettingsHubPage: React.FC = observer(() => {
     },
     {
       id: "voice",
-      label: "Voice",
+      label: "Voice & Video",
       icon: <Volume2 size={14} />,
-      description: "Microphone, speaker, audio processing",
+      description: "Microphone, speaker, camera, audio processing",
       action: () => navigate({ to: "/voice-settings" }),
       testId: "menu-item-voice-settings",
     },

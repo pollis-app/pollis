@@ -118,6 +118,19 @@ class CameraSession {
     await invoke("stop_camera");
   }
 
+  /** Start a PREVIEW-ONLY capture for the settings picker (issue #434): local
+   *  self-preview under `LOCAL_CAMERA_PREVIEW_KEY` with no voice room and
+   *  nothing published. Independent of {@link start} — safe to run out of a
+   *  call, and does not disturb an in-call camera. Pair with {@link stopPreview}
+   *  when the picker closes or the device changes. */
+  async startPreview(deviceId: string): Promise<void> {
+    await invoke("start_camera_preview", { deviceId });
+  }
+
+  async stopPreview(): Promise<void> {
+    await invoke("stop_camera_preview");
+  }
+
   private handleEvent(ev: CameraEvent) {
     const store = appStore;
     switch (ev.type) {

@@ -446,7 +446,7 @@ pub async fn start_camera(state: &Arc<AppState>, device_id: String) -> Result<()
                         last_preview = Some(std::time::Instant::now());
                     }
                     push_frame(
-                        &source_for_task,
+                        Some(&source_for_task),
                         width,
                         height,
                         stride,
@@ -554,6 +554,163 @@ pub async fn stop_camera(state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }
 
+/// Start a **preview-only** capture (issue #434): drives the local self-preview
+/// with NO voice room and NO published track — for the camera picker in Voice &
+/// Video settings. Mirrors frames to the renderer under `LOCAL_CAMERA_PREVIEW_KEY`
+/// exactly like the in-call self-preview, but never touches LiveKit. Uses its own
+/// `preview_*` state slots so an in-call camera is left running undisturbed.
+pub async fn start_camera_preview(state: &Arc<AppState>, device_id: String) -> Result<()> {
+    use pollis_capture_proto::{encode_select_camera, read_msg, CameraSelection, CaptureMsg};
+    use tokio::io::AsyncWriteExt;
+
+    // Restart from a clean slate: tear down any lingering preview capture.
+    stop_camera_preview(state).await.ok();
+
+    // Reuse the parked enumeration session `list_video_devices` left, else spawn.
+    let parked = {
+        let mut cam = state.camera.lock().await;
+        cam.picker_session.take()
+    };
+    let mut session = match parked {
+        Some(s) => s,
+        None => {
+            let mut s = spawn_camera_helper(state).await?;
+            match tokio::time::timeout(HELPER_TIMEOUT, read_msg(&mut s.reader)).await {
+                Ok(Ok(Some(CaptureMsg::Cameras(_)))) => {}
+                Ok(Ok(Some(CaptureMsg::Error { message }))) => {
+                    let _ = s.child.kill().await;
+                    return Err(fail_capture(state, format!("Camera error: {message}")).await);
+                }
+                _ => {
+                    let _ = s.child.kill().await;
+                    return Err(fail_capture(
+                        state,
+                        "Camera helper did not enumerate before selection.".into(),
+                    )
+                    .await);
+                }
+            }
+            s
+        }
+    };
+
+    if let Err(e) = session
+        .writer
+        .write_all(&encode_select_camera(&CameraSelection { id: device_id.clone() }))
+        .await
+    {
+        eprintln!("[camera] preview send SelectCamera: {e}");
+        let _ = session.child.kill().await;
+        return Err(fail_capture(
+            state,
+            "Could not deliver the camera selection to the helper. Please try again.".into(),
+        )
+        .await);
+    }
+    let _ = session.writer.flush().await;
+
+    let mut reader = session.reader;
+    {
+        let mut cam = state.camera.lock().await;
+        cam.preview_helper = Some(session.child);
+        cam.preview_writer = Some(session.writer);
+    }
+
+    // Read the negotiated Format (or a leading self-describing Frame). We only
+    // need to know capture started; the preview renderer sizes from each frame's
+    // own dimensions, so we don't thread width/height further.
+    let read = tokio::time::timeout(HELPER_TIMEOUT, read_msg(&mut reader)).await;
+    match read {
+        Ok(Ok(Some(CaptureMsg::Format { .. }))) | Ok(Ok(Some(CaptureMsg::Frame { .. }))) => {}
+        Ok(Ok(Some(CaptureMsg::Error { message }))) => {
+            stop_camera_preview(state).await.ok();
+            let lower = message.to_lowercase();
+            if lower.contains("permission") || lower.contains("denied") {
+                return Err(fail_capture(
+                    state,
+                    "Camera access is blocked. Grant Camera permission in System Settings → Privacy & Security, then try again.".into(),
+                )
+                .await);
+            }
+            return Err(fail_capture(state, format!("Camera preview failed: {message}")).await);
+        }
+        _ => {
+            stop_camera_preview(state).await.ok();
+            return Err(fail_capture(
+                state,
+                "Camera preview could not start. Please try again.".into(),
+            )
+            .await);
+        }
+    }
+
+    // Reader task: mirror throttled frames to the local preview ONLY (source =
+    // None → no LiveKit publish).
+    let preview_tx = state.screenshare_frame_tx.clone();
+    let reader_task = tokio::spawn(async move {
+        let mut last_preview: Option<std::time::Instant> = None;
+        loop {
+            match read_msg(&mut reader).await {
+                Ok(Some(CaptureMsg::Frame {
+                    width,
+                    height,
+                    stride,
+                    timestamp_us,
+                    bgrx,
+                })) => {
+                    let show = last_preview
+                        .map(|t| t.elapsed() >= CAMERA_PREVIEW_MIN_INTERVAL)
+                        .unwrap_or(true);
+                    if show {
+                        last_preview = Some(std::time::Instant::now());
+                        push_frame(None, width, height, stride, timestamp_us, &bgrx, Some(&preview_tx));
+                    }
+                }
+                Ok(Some(CaptureMsg::Format { .. })) => {}
+                Ok(Some(CaptureMsg::Error { message })) => {
+                    eprintln!("[camera] preview helper error mid-stream: {message}");
+                    break;
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    eprintln!("[camera] preview reader error: {e}");
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
+    {
+        let mut cam = state.camera.lock().await;
+        cam.preview_reader_task = Some(reader_task);
+    }
+    Ok(())
+}
+
+/// Tear down the settings self-preview capture (issue #434). Safe to call when
+/// nothing is live — used both on picker close and as the pre-start teardown.
+pub async fn stop_camera_preview(state: &Arc<AppState>) -> Result<()> {
+    let helper;
+    let reader;
+    {
+        let mut cam = state.camera.lock().await;
+        helper = cam.preview_helper.take();
+        reader = cam.preview_reader_task.take();
+        // Dropping our writer half closes it so the helper sees EOF and exits.
+        cam.preview_writer = None;
+    }
+    if helper.is_none() && reader.is_none() {
+        return Ok(());
+    }
+    if let Some(t) = reader {
+        t.abort();
+    }
+    if let Some(mut h) = helper {
+        let _ = h.kill().await;
+    }
+    Ok(())
+}
+
 /// Camera-tuned `(max_framerate, max_bitrate)`. 30fps; bitrate ≈ 0.07
 /// bits/pixel/frame (720p ≈ 1.9 Mbps, 1080p ≈ 4.3 Mbps), clamped to a sane
 /// band. The encoder treats the bitrate as a ceiling, so a near-static
@@ -565,7 +722,9 @@ fn resolve_camera_encoding(width: u32, height: u32) -> (f64, u64) {
 }
 
 fn push_frame(
-    source: &NativeVideoSource,
+    // `Some` feeds the LiveKit publish source; `None` for the preview-only path
+    // (settings self-preview with no call / no publish).
+    source: Option<&NativeVideoSource>,
     width: u32,
     height: u32,
     stride: u32,
@@ -589,7 +748,9 @@ fn push_frame(
         timestamp_us,
         buffer,
     };
-    source.capture_frame(&frame);
+    if let Some(source) = source {
+        source.capture_frame(&frame);
+    }
 
     // Mirror to the renderer for the local self-preview, reusing the exact
     // I420 buffer just published — same frame wire format + WebSocket

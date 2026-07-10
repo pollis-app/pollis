@@ -46,6 +46,7 @@ fn hide_on_close(window: &tauri::Window, event: &tauri::WindowEvent) {
             tauri::async_runtime::spawn(async move {
                 let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
                 let _ = pollis_core::commands::camera::stop_camera(&state).await;
+                let _ = pollis_core::commands::camera::stop_camera_preview(&state).await;
             });
         }
         // Prevent the window from actually being destroyed.
@@ -415,6 +416,7 @@ pub fn run() {
             tray::tray_set_enabled,
             tray::tray_set_voice_state,
             commands::media_permissions::get_media_permission_status,
+            commands::media_permissions::open_privacy_settings,
             commands::media_permissions::revoke_media_permissions,
             commands::media_permissions::set_revoke_media_on_exit,
             commands::auth::initialize_identity,
@@ -560,6 +562,8 @@ commands::livekit::get_livekit_token,
             commands::camera::list_video_devices,
             commands::camera::start_camera,
             commands::camera::stop_camera,
+            commands::camera::start_camera_preview,
+            commands::camera::stop_camera_preview,
             commands::sfx::play_sfx,
             commands::sfx::start_ring,
             commands::sfx::stop_ring,
@@ -608,6 +612,7 @@ commands::livekit::get_livekit_token,
                     tauri::async_runtime::block_on(async move {
                         let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
                         let _ = pollis_core::commands::camera::stop_camera(&state).await;
+                        let _ = pollis_core::commands::camera::stop_camera_preview(&state).await;
                     });
                 }
             }
@@ -639,6 +644,7 @@ commands::livekit::get_livekit_token,
                     tauri::async_runtime::block_on(async move {
                         let _ = pollis_core::commands::screenshare::stop_screen_share(&state).await;
                         let _ = pollis_core::commands::camera::stop_camera(&state).await;
+                        let _ = pollis_core::commands::camera::stop_camera_preview(&state).await;
                         // Close the LiveKit rooms (realtime + voice) so the
                         // server evicts us immediately instead of waiting out its
                         // RTC timeout — otherwise our voice card lingers as a

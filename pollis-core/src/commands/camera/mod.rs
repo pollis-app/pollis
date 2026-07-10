@@ -76,11 +76,17 @@ mod unsupported;
 pub use state::CameraState;
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-pub use capture::{list_video_devices, start_camera, stop_camera};
+pub use capture::{
+    list_video_devices, start_camera, start_camera_preview, stop_camera, stop_camera_preview,
+};
 #[cfg(target_os = "windows")]
-pub use start_windows::{list_video_devices, start_camera, stop_camera};
+pub use start_windows::{
+    list_video_devices, start_camera, start_camera_preview, stop_camera, stop_camera_preview,
+};
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-pub use unsupported::{list_video_devices, start_camera, stop_camera};
+pub use unsupported::{
+    list_video_devices, start_camera, start_camera_preview, stop_camera, stop_camera_preview,
+};
 
 // ── Events to the frontend ────────────────────────────────────────────────
 

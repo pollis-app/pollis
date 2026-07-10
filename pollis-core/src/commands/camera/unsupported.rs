@@ -23,9 +23,19 @@ pub async fn start_camera(_state: &Arc<AppState>, _device_id: String) -> Result<
     Err(unsupported())
 }
 
+/// Settings self-preview (issue #434) — same "unsupported here" story as capture.
+pub async fn start_camera_preview(_state: &Arc<AppState>, _device_id: String) -> Result<()> {
+    Err(unsupported())
+}
+
 /// Idempotent no-op: there is never a live camera capture to tear down on
 /// an unsupported platform, and callers (e.g. leave-voice cleanup) must be
 /// able to call this unconditionally.
 pub async fn stop_camera(_state: &Arc<AppState>) -> Result<()> {
+    Ok(())
+}
+
+/// Idempotent no-op — see [`stop_camera`].
+pub async fn stop_camera_preview(_state: &Arc<AppState>) -> Result<()> {
     Ok(())
 }

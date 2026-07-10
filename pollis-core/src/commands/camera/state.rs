@@ -50,6 +50,18 @@ pub struct CameraState {
     /// fresh Arc per session so a stale stop can't fence a newer one.
     #[cfg(target_os = "windows")]
     pub windows_active: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
+
+    // ── Settings self-preview (issue #434) ──────────────────────────────────
+    // A capture that mirrors to the local preview WITHOUT a voice room or a
+    // published track — for the camera picker in Voice & Video settings.
+    // Kept in its OWN slots so it never disturbs a live in-call camera: a user
+    // can open settings mid-call and the two captures coexist.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub preview_helper: Option<tokio::process::Child>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub preview_writer: Option<tokio::net::unix::OwnedWriteHalf>,
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    pub preview_reader_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl CameraState {
@@ -70,6 +82,12 @@ impl CameraState {
             windows_thread: None,
             #[cfg(target_os = "windows")]
             windows_active: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            preview_helper: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            preview_writer: None,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            preview_reader_task: None,
         }
     }
 }

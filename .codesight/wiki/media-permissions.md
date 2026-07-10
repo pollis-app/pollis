@@ -20,7 +20,7 @@ bundle identifier). So it lives entirely in `src-tauri`, the same rationale as
 - Backend: `src-tauri/src/commands/media_permissions.rs`
 - Exit hook: `src-tauri/src/lib.rs` (`RunEvent::ExitRequested`)
 - Frontend hook: `frontend/src/hooks/queries/useMediaPermissions.ts`
-- UI: the "Media permissions" section of `frontend/src/pages/SecurityPage.tsx`
+- UI: the "Media permissions" section of `frontend/src/pages/SecurityPage.tsx` (revoke-on-exit), and a camera/mic "Permissions" section in `frontend/src/pages/VoiceSettingsPage.tsx` (status + `open_privacy_settings` deep-link, alongside the camera picker — #434)
   (reachable via Cmd+K — the Security entry's keywords include camera/microphone/
   screen/permission/revoke/privacy so a media-minded search still lands here)
 - Preference persistence: `revoke_media_on_exit` in the prefs blob
@@ -32,6 +32,7 @@ bundle identifier). So it lives entirely in `src-tauri`, the same rationale as
 | Command | Shape | Purpose |
 |---|---|---|
 | `get_media_permission_status` | `() -> MediaPermissions { camera, microphone, screen: PermissionState }` | Live status, queried at call time. The renderer refetches on window focus so it reflects changes the user makes in System Settings while Pollis runs. |
+| `open_privacy_settings` | `(kind: "camera" \| "microphone") -> ()` | Deep-links to the OS privacy pane (macOS `x-apple.systempreferences:…Privacy_Camera/Microphone`, Windows `ms-settings:privacy-webcam/microphone`; **errors on Linux** — no per-app model). "Take me there", never an in-app grant/revoke. Issue #434. |
 | `revoke_media_permissions` | `(kinds: Vec<String>) -> RevokeResult { applied, note }` | Tears down any active capture first, then revokes per platform. `applied` is true only when Pollis actually changed OS state. |
 | `set_revoke_media_on_exit` | `(enabled: bool)` | Pushes the "revoke on quit" pref into a host-side `AtomicBool` (managed `MediaPermissionsState`) so the exit hook can read it synchronously. Mirrors `tray_set_close_to_tray`. |
 

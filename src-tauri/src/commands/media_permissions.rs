@@ -132,6 +132,50 @@ pub fn get_media_permission_status() -> std::result::Result<MediaPermissions, St
     }
 }
 
+/// Deep-link to the OS privacy settings for a media `kind` ("camera" /
+/// "microphone"), issue #434. An app cannot grant or revoke its own OS privacy
+/// grant — only the user can, in System Settings — so this just takes them
+/// there (same model as Discord/Zoom). Uses the URI schemes directly rather than
+/// the shell-open bridge, whose allowlist rejects `x-apple.systempreferences:` /
+/// `ms-settings:`. Linux has no per-application camera/mic model, so there is
+/// nothing to deep-link to.
+#[tauri::command]
+pub fn open_privacy_settings(kind: String) -> std::result::Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let anchor = match kind.as_str() {
+            "camera" => "Privacy_Camera",
+            "microphone" => "Privacy_Microphone",
+            other => return Err(format!("unknown media kind: {other}")),
+        };
+        let url = format!("x-apple.systempreferences:com.apple.preference.security?{anchor}");
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let uri = match kind.as_str() {
+            "camera" => "ms-settings:privacy-webcam",
+            "microphone" => "ms-settings:privacy-microphone",
+            other => return Err(format!("unknown media kind: {other}")),
+        };
+        // `cmd /C start "" <uri>` resolves the ms-settings: URI via the shell.
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", uri])
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        let _ = kind;
+        Err("no per-application privacy settings on this platform".into())
+    }
+}
+
 /// Revoke the OS permission(s) for the given kinds ("camera"/"microphone"/
 /// "screen"). Always tears down any active capture first so we never leave a
 /// live camera/screen-share running against a permission we just cleared.
