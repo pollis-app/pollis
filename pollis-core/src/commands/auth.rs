@@ -133,11 +133,23 @@ async fn verify_otp_ds(
     email: String,
     code: String,
 ) -> Result<UserProfile> {
-    // Mint a candidate device_id to bind the session to. We don't know user_id
-    // until verify-otp returns, and the keystore device_id slot is keyed by
-    // user_id — but a brand-new signup has no slot yet, so this candidate becomes
-    // the device's stable id once persisted below.
-    let candidate_device_id = Ulid::new().to_string();
+    // The device_id the session binds to. Normally a fresh candidate (a
+    // brand-new signup has no keystore slot yet, so this becomes the device's
+    // stable id once persisted below).
+    //
+    // EXCEPTION — a returning device that is NOT yet locally enrolled: bind the
+    // session to its EXISTING stable id instead. The returning-device branch
+    // below only mints an `enrollment_session` when the session's device
+    // matches the keystore, and a fresh throwaway candidate never matches after
+    // the first login — which left a device that registered once but never
+    // finished sibling-approval enrollment UNABLE to ever restart it (the
+    // enrollment-request write is session-gated and the session was bound to
+    // the wrong device). Binding to the stable id fixes that; `register-device`
+    // is an idempotent upsert, so re-registering the existing row is safe.
+    // Already-enrolled and brand-new devices keep the fresh candidate (unchanged).
+    let candidate_device_id = stable_device_id_for_reenrollment(state, &email)
+        .await
+        .unwrap_or_else(|| Ulid::new().to_string());
 
     // 1. verify-otp: DS validates the OTP, creates/loads the account, mints a
     //    session. Unauthenticated (the OTP itself is the proof).
@@ -388,6 +400,41 @@ async fn ensure_device_id(
     };
     *state.device_id.lock().await = Some(device_id.clone());
     Ok(device_id)
+}
+
+/// For a RETURNING, not-yet-enrolled device, return its existing stable
+/// `device_id` so `verify_otp_ds` can bind the OTP session to it (rather than a
+/// throwaway candidate) — the prerequisite for minting an `enrollment_session`
+/// on a device that already registered once. Returns `None` — so the caller
+/// falls back to a fresh id — when there's no local account for this email (a
+/// brand-new device), when the device is already enrolled (preserve the current
+/// fresh-candidate path), or when no keystore device_id exists yet.
+///
+/// user_id is resolved from the LOCAL accounts index (a returning device has an
+/// entry from a prior login), so this adds no network round-trip. The
+/// enrollment check reads the keystore, not the still-locked DB, so it is valid
+/// here pre-unlock (same call site semantics as the `enrollment_required` calc).
+async fn stable_device_id_for_reenrollment(state: &Arc<AppState>, email: &str) -> Option<String> {
+    let index = crate::accounts::read_accounts_index().ok()?;
+    let user_id = index
+        .accounts
+        .iter()
+        .find(|a| a.email.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(email)))
+        .map(|a| a.user_id.clone())?;
+
+    let enrolled = crate::commands::account_identity::has_local_account_identity(state, &user_id)
+        .await
+        .unwrap_or(false);
+    if enrolled {
+        return None;
+    }
+
+    let bytes = state
+        .keystore
+        .load_for_user(DEVICE_ID_KEY, &user_id)
+        .await
+        .ok()??;
+    String::from_utf8(bytes).ok()
 }
 
 /// Send an OTP to a new email address as part of the email-change flow.

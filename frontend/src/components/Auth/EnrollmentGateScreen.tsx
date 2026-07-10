@@ -107,7 +107,11 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
       });
       startPolling(handle.request_id);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start enrollment";
+      // Tauri rejects with a serialized string, not an Error — use String(err)
+      // (matching the other panes) so the real backend reason surfaces instead
+      // of a generic message. This also lets the session-error routing in the
+      // "error" pane detect "sign in again" cases.
+      const message = err instanceof Error ? err.message : String(err) || "Failed to start enrollment";
       setState({ phase: "error", message });
     } finally {
       setIsStarting(false);
