@@ -13,6 +13,7 @@ Start here. Navigate to the article you need.
 - [Testing](./testing.md) — Integration harness for multi-client end-to-end tests
 - [Safety & Verification](./safety.md) — Signal-style safety numbers, TOFU pinning, group MITM defence (refs #277)
 - [Windows Signing](./windows-signing.md) — Azure Artifact Signing setup for Windows installer signing
+- [Windows Dev VM](./windows-vm.md) — `scripts/windows-vm.sh`: local Windows 11 ARM64 VM in Docker (colima nested virt + dockur/windows-arm) for fast Windows testing
 - [PIN Design](./pin-design.md) — Local PIN unlock: KDF/AEAD choices, blob format, lifecycle, threat model
 - [Notifications](./notifications.md) — Sound, OS notification, badge, and alert dispatcher (`notify()` + category table)
 - [Audio Processing](./audio-processing.md) — Mic-side AGC + NS + AEC pipeline (WebRTC APM), playback mixer, AEC render reference, build deps
