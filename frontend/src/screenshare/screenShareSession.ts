@@ -16,6 +16,7 @@ import { reaction } from "mobx";
 import { Channel, hasElectron, invoke } from "../bridge";
 
 import { appStore } from "../stores/appStore";
+import { voiceSession } from "../voice/VoiceSessionManager";
 import {
   clampScreenShareFps,
   getPreference,
@@ -711,8 +712,8 @@ class ScreenShareSession {
         break;
       case "remote_started":
         // One event stream, two destinations: a webcam track becomes the
-        // publisher's tile face (cameraRemotes), a screen share becomes a
-        // spotlight streamer (screenShareRemotes). Default to screen for an
+        // publisher's tile face (cameraRemotes), a screen share folds onto the
+        // publishing participant's `video` (#385). Default to screen for an
         // untagged event from an older backend.
         if (ev.source === "camera") {
           store.upsertCameraRemote(ev.identity, {
@@ -721,7 +722,7 @@ class ScreenShareSession {
             height: ev.height,
           });
         } else {
-          store.upsertScreenShareRemote(ev.identity, {
+          voiceSession.setScreenShare(ev.identity, {
             trackKey: ev.track_key,
             width: ev.width,
             height: ev.height,
@@ -731,9 +732,10 @@ class ScreenShareSession {
         break;
       case "remote_stopped":
         // The stop event carries only the track_key, not its source, so fan
-        // out to both maps — each scans its own entries and ignores a
-        // track_key it doesn't hold.
-        store.removeScreenShareRemote(ev.track_key);
+        // out to both sinks — each ignores a track_key it doesn't hold. The
+        // screenshare side clears whichever participant's `video` holds it; the
+        // pinned-viewer cleanup rides the participant change in the store mirror.
+        voiceSession.clearScreenShare(ev.track_key);
         store.removeCameraRemote(ev.track_key);
         playSfx(SFX.ping);
         break;

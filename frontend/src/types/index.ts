@@ -7,7 +7,7 @@
 //
 // This is MLS (e2e encryption) + Slack (group features)
 
-import type { ParticipantAudio } from './voice-state';
+import type { ParticipantAudio, ParticipantVideo } from './voice-state';
 
 // Shape returned by the `detect_managed_install` command. Non-null means
 // the running binary is owned by a system package manager (AUR / .deb /
@@ -183,11 +183,13 @@ export interface VoiceParticipant {
   // DU so "muted ⇒ not speaking" cannot be represented (#385). Transition it
   // only via voice/participantAudio.ts.
   audio: ParticipantAudio;
-  // #385 Phase 2: a participant's video state (screenshare + camera, tracked
-  // today in appStore.screenShareRemotes / cameraRemotes) is NOT folded into a
-  // DU here. The ticket predates #394 — screenshare and camera now COEXIST per
-  // participant, so a one-of union can't model them; folding needs a separate
-  // 2-axis (screenshare × camera) design. Deferred; audio only this pass.
+  // This participant's screenshare, folded onto the participant (#385) so a
+  // share lives on the same object as the participant that publishes it —
+  // replacing the old parallel `appStore.screenShareRemotes` map. `none` when
+  // not sharing. Camera stays on `cameraRemotes` (it coexists with screenshare,
+  // #394); this DU is the screenshare axis only. Transition it only via
+  // VoiceSessionManager's setScreenShare/clearScreenShare.
+  video: ParticipantVideo;
   isLocal: boolean;
   avatarKey?: string | null;
   // LiveKit's categorical link health for this participant. Undefined until

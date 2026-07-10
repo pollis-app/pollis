@@ -170,6 +170,7 @@ export const VoiceChannelPage: React.FC = observer(() => {
         name: p.name,
         avatarKey: p.avatar_url ?? null,
         audio: { kind: 'idle' },
+        video: { kind: 'none' },
         isLocal: false,
       }))}
       onJoin={() => voiceSession.setIntent({ channelId, groupId })}

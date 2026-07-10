@@ -3,10 +3,13 @@ import { Channel, invoke } from '../bridge';
 import { reaction } from 'mobx';
 import { appStore } from '../stores/appStore';
 import type { VoiceParticipant, VoiceConnectionQuality } from '../types';
+import type { ParticipantVideo } from '../types/voice-state';
+import { userIdFromVoiceIdentity } from './identity';
 import type { ApmConfig, PreferencesData } from '../hooks/queries/usePreferences';
 import { preferencesToApmConfig } from '../hooks/queries/usePreferences';
 import { audioLevels } from './audioLevels';
 import { audioSetMuted, audioSetSpeaking } from './participantAudio';
+import { LOCAL_PREVIEW_KEY } from '../screenshare/screenShareSession';
 
 const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
@@ -307,6 +310,60 @@ class VoiceSessionManager {
     }
   }
 
+  // ── Video (screenshare) ─────────────────────────────────────────────────
+  // A participant's screenshare lives on `participant.video` (#385), driven
+  // by the screenshare event adapters (`screenShareSession`, `livekitView`)
+  // rather than a parallel `screenShareRemotes` map. Camera is unaffected —
+  // it stays on `appStore.cameraRemotes`.
+
+  /**
+   * Attach a screenshare to the participant publishing it. Matches the
+   * publisher identity exactly, then falls back to a user-scoped match so a
+   * user-keyed event (the Electron `:view` path emits `voice-{userId}`) still
+   * lands on that user's tile. No-op if no participant matches.
+   */
+  setScreenShare(
+    identity: string,
+    info: { trackKey: string; width: number; height: number },
+  ): void {
+    const idx = this.matchParticipant(identity);
+    if (idx === -1) {
+      return;
+    }
+    const participants = this.state.participants.slice();
+    participants[idx] = {
+      ...participants[idx],
+      video: { kind: 'screenshare', ...info },
+    };
+    this.setState({ participants });
+  }
+
+  /** Clear whichever participant is publishing the given screenshare track. */
+  clearScreenShare(trackKey: string): void {
+    const idx = this.state.participants.findIndex(
+      (p) => p.video.kind === 'screenshare' && p.video.trackKey === trackKey,
+    );
+    if (idx === -1) {
+      return;
+    }
+    const participants = this.state.participants.slice();
+    participants[idx] = { ...participants[idx], video: { kind: 'none' } };
+    this.setState({ participants });
+  }
+
+  /** Locate a participant by publisher identity: exact identity first, else
+   *  the first participant with the same user id (user-scoped fallback). */
+  private matchParticipant(identity: string): number {
+    const exact = this.state.participants.findIndex((p) => p.identity === identity);
+    if (exact !== -1) {
+      return exact;
+    }
+    const userId = userIdFromVoiceIdentity(identity);
+    return this.state.participants.findIndex(
+      (p) => userIdFromVoiceIdentity(p.identity) === userId,
+    );
+  }
+
   // ── Reconciliation ────────────────────────────────────────────────────────
 
   private async reconcile(): Promise<void> {
@@ -398,6 +455,7 @@ class VoiceSessionManager {
           identity: localIdentity,
           name: displayName,
           audio: { kind: 'idle' },
+          video: { kind: 'none' },
           isLocal: true,
           avatarKey,
         },
@@ -582,6 +640,7 @@ class VoiceSessionManager {
           identity: event.identity,
           name: event.name,
           audio: event.is_muted ? { kind: 'muted' } : { kind: 'idle' },
+          video: preservedVideo(this.state.participants, event.identity),
           isLocal: event.identity === localIdentity,
           avatarKey: event.avatar_url ?? null,
         };
@@ -741,6 +800,17 @@ function persistDevicePref(kind: 'input' | 'output', deviceName: string): void {
   }
 }
 
+/** Video state to seed a (re)joined participant with: preserve an existing
+ *  active screenshare across a re-emitted seed `participant_joined` so a
+ *  mid-share roster refresh doesn't blank the tile; otherwise `none`. */
+function preservedVideo(
+  list: VoiceParticipant[],
+  identity: string,
+): ParticipantVideo {
+  const prev = list.find((p) => p.identity === identity);
+  return prev ? prev.video : { kind: 'none' };
+}
+
 function upsertParticipant(
   list: VoiceParticipant[],
   next: VoiceParticipant,
@@ -842,6 +912,21 @@ voiceSession.subscribe(() => {
   // there is nothing to mirror for those any more.
   if (store.voiceParticipants !== s.participants) {
     store.setVoiceParticipants(s.participants);
+  }
+  // Drop a pinned fullscreen view whose screenshare has ended — the track is
+  // gone from every participant's `video` (share stopped, or the publisher
+  // left), so keeping it pinned would strand a dead overlay. This is the one
+  // central place that used to live in `removeScreenShareRemote`. The local
+  // preview pin (LOCAL_PREVIEW_KEY) is driven by the local share state, not a
+  // participant, so leave it untouched.
+  const viewing = store.viewingScreenShareTrackKey;
+  if (viewing && viewing !== LOCAL_PREVIEW_KEY) {
+    const stillLive = s.participants.some(
+      (p) => p.video.kind === 'screenshare' && p.video.trackKey === viewing,
+    );
+    if (!stillLive) {
+      store.setViewingScreenShareTrackKey(null);
+    }
   }
   // Join errors mirror through the store's separate voiceError field;
   // the union's idle state doesn't carry the error itself.

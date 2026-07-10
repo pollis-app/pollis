@@ -23,7 +23,7 @@ import { ArrowLeft, Volume2, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, 
 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
-import { shareOf, cameraOf } from "../../../types/voice-state";
+import { shareOf, cameraOf, screenshareOf } from "../../../types/voice-state";
 import { isMuted } from "../../../voice/participantAudio";
 import { LOCAL_PREVIEW_KEY } from "../../../screenshare/screenShareSession";
 import { toggleScreenShare } from "../../../screenshare/screenShareActions";
@@ -70,7 +70,6 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
       voiceParticipants,
       voiceActiveSpeakerIds,
       voiceState,
-      screenShareRemotes,
       cameraRemotes,
       setViewingScreenShareTrackKey,
     } = appStore;
@@ -105,8 +104,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     // device, then whichever device is screensharing, then the first seen.
     const mergedParticipants: VoiceParticipant[] = (() => {
       const byUser = new Map<string, VoiceParticipant>();
-      const shares = (p: VoiceParticipant): boolean =>
-        !!(screenShareRemotes[p.identity] ?? screenShareRemotes[voiceUserKey(p.identity)]);
+      const shares = (p: VoiceParticipant): boolean => p.video.kind === "screenshare";
       for (const p of voiceParticipants) {
         const key = userIdFromVoiceIdentity(p.identity);
         const prev = byUser.get(key);
@@ -155,9 +153,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           cameraHeight = cameraLocalDims?.height;
         }
       } else {
-        const remote =
-          screenShareRemotes[p.identity] ??
-          screenShareRemotes[voiceUserKey(p.identity)];
+        const remote = screenshareOf(p.video);
         if (remote) {
           streamTrackKey = remote.trackKey;
           streamWidth = remote.width;

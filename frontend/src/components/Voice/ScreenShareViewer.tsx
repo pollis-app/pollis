@@ -18,7 +18,7 @@ import { shareOf } from "../../types/voice-state";
 export const ScreenShareViewer: React.FC = observer(() => {
   const {
     viewingScreenShareTrackKey,
-    screenShareRemotes,
+    voiceParticipants,
     voiceState,
     currentUser,
     setViewingScreenShareTrackKey,
@@ -33,8 +33,8 @@ export const ScreenShareViewer: React.FC = observer(() => {
     return null;
   }
   // Resolve who/what we're viewing. Local stream uses the reserved
-  // LOCAL_PREVIEW_KEY sentinel; remote streams live in the
-  // screenShareRemotes map keyed by participant identity.
+  // LOCAL_PREVIEW_KEY sentinel; remote streams live on the publishing
+  // participant's `video` (#385).
   let label: string;
   let trackKey: string;
   let width: number | undefined;
@@ -48,17 +48,18 @@ export const ScreenShareViewer: React.FC = observer(() => {
     width = screenShareLocalDimensions?.width;
     height = screenShareLocalDimensions?.height;
   } else {
-    const entry = Object.entries(screenShareRemotes).find(
-      ([, info]) => info.trackKey === viewingScreenShareTrackKey,
+    const p = voiceParticipants.find(
+      (p) =>
+        p.video.kind === "screenshare" &&
+        p.video.trackKey === viewingScreenShareTrackKey,
     );
-    if (!entry) {
+    if (!p || p.video.kind !== "screenshare") {
       return null;
     }
-    const [identity, info] = entry;
-    label = identity.replace(/^voice-/, "");
-    trackKey = info.trackKey;
-    width = info.width;
-    height = info.height;
+    label = p.identity.replace(/^voice-/, "");
+    trackKey = p.video.trackKey;
+    width = p.video.width;
+    height = p.video.height;
   }
   // Prefer the live stats dimensions/fps; fall back to the static hints.
   const liveW = stats.dimensions?.width ?? width;

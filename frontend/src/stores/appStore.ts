@@ -5,7 +5,6 @@ import type { SourceList } from '../screenshare/screenShareSession';
 import type { CameraSource } from '../camera/types';
 import { isSpeaking } from '../voice/participantAudio';
 
-type ScreenShareRemote = { trackKey: string; width: number; height: number };
 type CameraRemote = { trackKey: string; width: number; height: number };
 type EnrollmentApproval = { requestId: string; newDeviceId: string; verificationCode: string };
 type IncomingCall = { callId: string; roomName: string; callerId: string; callerUsername: string };
@@ -62,13 +61,10 @@ class AppStore implements AppState {
   // can't drift from the participant's own mute/speaking state.
   voiceParticipants: VoiceParticipant[] = [];
 
-  /** Active remote screenshares keyed by participant identity. */
-  screenShareRemotes: Record<string, ScreenShareRemote> = {};
-
-  /** Active remote webcams keyed by participant identity. Separate from
-   *  screenShareRemotes so a participant can publish both at once; the
-   *  camera renders as that participant's tile face, the screen share as a
-   *  spotlight streamer. */
+  /** Active remote webcams keyed by participant identity. A participant's
+   *  screenshare lives on `participant.video` (#385); the camera stays a
+   *  separate map because the two coexist (#394) — the camera renders as that
+   *  participant's tile face, the screen share as a spotlight streamer. */
   cameraRemotes: Record<string, CameraRemote> = {};
 
   /** Track key currently being viewed in the inline stream pane, if any. */
@@ -449,31 +445,6 @@ class AppStore implements AppState {
     return local ? isSpeaking(local.audio) : false;
   }
 
-  /** Replace the whole remote-screenshare map wholesale. Used by the LiveKit
-   *  view client's `emit()` mirror, which computes the desired set in one go. */
-  setScreenShareRemotes(remotes: Record<string, ScreenShareRemote>) {
-    this.screenShareRemotes = remotes;
-  }
-
-  upsertScreenShareRemote(identity: string, info: ScreenShareRemote) {
-    this.screenShareRemotes = { ...this.screenShareRemotes, [identity]: info };
-  }
-
-  removeScreenShareRemote(trackKey: string) {
-    const next: Record<string, ScreenShareRemote> = {};
-    let viewing = this.viewingScreenShareTrackKey;
-    for (const [id, info] of Object.entries(this.screenShareRemotes)) {
-      if (info.trackKey !== trackKey) {
-        next[id] = info;
-      }
-    }
-    if (viewing === trackKey) {
-      viewing = null;
-    }
-    this.screenShareRemotes = next;
-    this.viewingScreenShareTrackKey = viewing;
-  }
-
   setViewingScreenShareTrackKey(k: string | null) {
     this.viewingScreenShareTrackKey = k;
   }
@@ -540,7 +511,6 @@ class AppStore implements AppState {
     this.statusBarAlert = null;
     this.voiceError = null;
     this.voiceParticipants = [];
-    this.screenShareRemotes = {};
     this.cameraRemotes = {};
     this.viewingScreenShareTrackKey = null;
     this.pendingEnrollmentApproval = null;
