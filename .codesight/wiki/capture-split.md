@@ -239,7 +239,7 @@ Each capture helper takes a `--mode {screen|camera}` flag (clap). `screen`
 |----------|------------------|--------|
 | macOS | `pollis-capture-macos --mode camera` — AVFoundation `AVCaptureSession` + `AVCaptureVideoDataOutput` (32BGRA) | done |
 | Linux | `pollis-capture-linux --mode camera` — V4L2 (`v4l` crate), MJPG (zune-jpeg) or YUYV → BGRx | done |
-| Windows | not yet — `unsupported.rs` returns a clean "not yet supported" | TODO |
+| Windows | **in-process** (no helper) — Media Foundation `IMFSourceReader` with the Video Processor enabled → RGB32 (== BGRx); mirrors WGC screen capture | done |
 
 **No display-server split on Linux.** Unlike screen capture (portal vs
 xcb/SHM, routed by session type), webcam capture has *one* path: V4L2 is a
@@ -277,11 +277,15 @@ default; the driver adjusts and we publish whatever it gives. Verified at
 
 ### Parent + frontend (`camera/` modules)
 
-- **Parent**: `pollis-core/src/commands/camera/` — `capture.rs` is
-  platform-agnostic (talks only the socket protocol; `locate_capture_helper`
-  picks the per-OS helper), gated `any(macos, linux)`; other platforms get
-  `unsupported.rs`. Lifecycle: `list_video_devices` / `start_camera` /
-  `stop_camera`, events via `CameraEvent` (`local_started/stopped/error`).
+- **Parent**: `pollis-core/src/commands/camera/` — `capture.rs` is the
+  helper-socket path (talks only the socket protocol; `locate_capture_helper`
+  picks the per-OS helper), gated `any(macos, linux)`. Windows captures
+  in-process in `start_windows.rs` (Media Foundation, no helper — the same
+  divergence WGC screen capture takes); mobile/other get `unsupported.rs`.
+  All three expose the same lifecycle: `list_video_devices` / `start_camera` /
+  `stop_camera`, events via `CameraEvent` (`local_started/stopped/error`). The
+  Windows path reuses the shared `convert_to_i420` + `pack_frame_bytes` codec
+  primitives and the `LOCAL_CAMERA_PREVIEW_KEY` self-preview mirroring.
 - **Local self-preview**: the reader task mirrors each outgoing frame
   (throttled) to the renderer over the *same* frame WebSocket screen share
   uses, under `LOCAL_CAMERA_PREVIEW_KEY` (distinct from screen share's

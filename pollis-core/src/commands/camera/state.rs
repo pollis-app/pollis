@@ -36,6 +36,20 @@ pub struct CameraState {
     /// pushes them into the LiveKit source.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     pub local_reader_task: Option<tokio::task::JoinHandle<()>>,
+
+    /// Windows: the dedicated thread running the blocking Media Foundation
+    /// `IMFSourceReader::ReadSample` capture loop (no helper subprocess — MF
+    /// is clean in-process COM, mirroring WGC screen capture). `stop_camera`
+    /// flips `windows_active`; the loop observes it, tears down its own MF +
+    /// COM state, and exits. The handle is detached, not force-joined — the
+    /// fence guarantees no post-stop source access.
+    #[cfg(target_os = "windows")]
+    pub windows_thread: Option<std::thread::JoinHandle<()>>,
+    /// Windows: per-session fence, same role as the reader task on the helper
+    /// platforms. The MF loop checks it before touching the LiveKit source; a
+    /// fresh Arc per session so a stale stop can't fence a newer one.
+    #[cfg(target_os = "windows")]
+    pub windows_active: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 
 impl CameraState {
@@ -52,6 +66,10 @@ impl CameraState {
             local_writer: None,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             local_reader_task: None,
+            #[cfg(target_os = "windows")]
+            windows_thread: None,
+            #[cfg(target_os = "windows")]
+            windows_active: None,
         }
     }
 }
