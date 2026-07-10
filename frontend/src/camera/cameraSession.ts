@@ -11,9 +11,9 @@
 // one socket, one decoder, keyed by trackKey.
 //
 // Camera capture is Rust-side on every platform (macOS AVFoundation, Linux
-// V4L2, Windows Media Foundation to come), so — unlike screen share — there
-// is no Electron renderer branch: the deprecated Electron shell never grew a
-// JS camera path, and Tauri is the shipping shell.
+// V4L2, Windows Media Foundation), so — unlike screen share — there is no
+// Electron renderer branch: the deprecated Electron shell never grew a JS
+// camera path, and Tauri is the shipping shell.
 
 import { reaction } from "mobx";
 

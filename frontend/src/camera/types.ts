@@ -12,12 +12,13 @@
 //
 // Camera publishes a third video track (`TrackSource::Camera`) into the
 // active voice room alongside the mic and screen share; room-level E2EE
-// encrypts it automatically. Camera capture is macOS-only today (Linux /
-// Windows return a "not yet supported" error from the backend).
+// encrypts it automatically. Capture is live on macOS, Linux, and Windows;
+// unsupported platforms return a "not yet supported" error from the backend.
 
 /** A capturable video device. Mirrors `pollis_capture_proto::CameraSource`.
  *  `id` is an opaque, stable per-platform handle (macOS
- *  `AVCaptureDevice.uniqueID`), echoed back verbatim to `start_camera`. */
+ *  `AVCaptureDevice.uniqueID`, Linux V4L2 node path, Windows MF symbolic
+ *  link), echoed back verbatim to `start_camera`. */
 export interface CameraSource {
   id: string;
   name: string;

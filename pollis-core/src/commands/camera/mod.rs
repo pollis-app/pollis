@@ -22,10 +22,11 @@
 //! helper means such a throw kills only the helper; the parent observes
 //! the socket close and surfaces a structured error.
 //!
-//! Camera capture is macOS-only for now. Linux (V4L2 / PipeWire camera
-//! portal) and Windows (Media Foundation) land in follow-up commits; on
-//! those platforms the commands return a clean "not yet supported" error
-//! rather than spawning a helper that can't honour `--mode camera`.
+//! Capture is live on macOS (AVFoundation helper), Linux (V4L2 helper), and
+//! Windows (`start_windows.rs` — Media Foundation, in-process, no helper: the
+//! same divergence WGC screen capture takes). Mobile / other platforms fall
+//! through to `unsupported.rs`, whose commands return a clean "not yet
+//! supported" error.
 //!
 //! Remote camera frames reuse the shared remote-video path: every
 //! `RemoteTrack::Video` the voice room loop sees — screen-share or camera —
@@ -52,13 +53,13 @@ use crate::{error::Result, sink::EventSink, state::AppState};
 /// mirrored under for the sharer's own preview (mirrors screen share's
 /// `LOCAL_PREVIEW_KEY`). Kept distinct so a simultaneous screen share +
 /// webcam don't collide in the renderer's per-key frame router.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub const LOCAL_CAMERA_PREVIEW_KEY: &str = "__local_camera_preview__";
 
 /// Minimum gap between mirrored self-preview frames. The webcam publishes
 /// to peers at full rate; the local preview only needs to look live, so
 /// throttle it to spare the renderer (matches screen share's cadence).
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub(crate) const CAMERA_PREVIEW_MIN_INTERVAL: std::time::Duration =
     std::time::Duration::from_millis(100);
 
@@ -66,7 +67,7 @@ mod state;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod capture;
 // Windows captures in-process via Media Foundation (no helper subprocess) —
-// the same divergence as screen share's WGC path. SCAFFOLD: see start_windows.
+// the same divergence as screen share's WGC path. See start_windows.
 #[cfg(target_os = "windows")]
 mod start_windows;
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -111,7 +112,10 @@ pub async fn subscribe_camera_events(
 /// `LocalError { message }` so the frontend reacts even when the failure
 /// happens after `start_camera` already returned, and return a structured
 /// human-readable error. Plain user cancellation does NOT go through here.
-#[cfg_attr(not(any(target_os = "macos", target_os = "linux")), allow(dead_code))]
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "linux", target_os = "windows")),
+    allow(dead_code)
+)]
 pub(super) async fn fail_capture(state: &Arc<AppState>, human: String) -> crate::error::Error {
     eprintln!("[camera] capture failed: {human}");
     let ev = {
