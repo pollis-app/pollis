@@ -107,9 +107,7 @@ jobs:
             cp .staging/docker-compose.yml docker-compose.yml
             rm -rf .staging
 
-            # Pull pinned images + (re)create only what changed. NOT --remove-orphans:
-            # delivery/delivery-dev/watchtower are standalone (owned by #407) and
-            # must survive a LiveKit deploy.
+            # Pull pinned images + (re)create only what changed.
             docker compose -f docker-compose.yml up -d
 
             # nginx.conf may have changed without the service def changing (bind
@@ -123,7 +121,7 @@ jobs:
             docker compose ps
           REMOTE
 
-      - name: Validate — LiveKit up + delivery routing intact
+      - name: Validate — LiveKit up
         run: |
           set -euo pipefail
           # LiveKit answers GET / with "OK", but takes a couple seconds after a
@@ -132,7 +130,5 @@ jobs:
           # boot, rather than failing the deploy on a not-yet-ready upstream.
           echo "rtc.pollis.com:"
           curl -fsS --retry 10 --retry-delay 3 --retry-all-errors --retry-connrefused --max-time 20 https://rtc.pollis.com ; echo
-          # Regression check: the shared nginx still routes the delivery service
-          # after a LiveKit deploy (api.pollis.com -> delivery:8788).
-          echo "api.pollis.com/health:"
-          curl -fsS --retry 5 --retry-delay 2 --retry-all-errors --max-time 20 https://api.pollis.com/health ; echo
+          # (The Delivery Service moved to Cloudflare Containers in #515 and is no
+          # longer proxied by this nginx, so there's nothing DS-related to assert here.)
