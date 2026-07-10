@@ -497,40 +497,63 @@ pub async fn livekit_send_data(
         return Ok(resp);
     }
 
-    let (api_key, api_secret, url) = match state.broker.livekit_ready() {
-        Some(t) => t,
-        None => return Ok(not_configured("livekit")),
-    };
+    // Preserve the explicit "not configured" response for the client endpoint;
+    // the shared sender collapses a missing broker into a plain error string.
+    if state.broker.livekit_ready().is_none() {
+        return Ok(not_configured("livekit"));
+    }
+    match room_send_data(&state, &parsed.room, &parsed.payload).await {
+        Ok(()) => Ok(ok_json(serde_json::json!({ "ok": true }))),
+        Err(e) => Ok(bad_gateway(e)),
+    }
+}
 
-    let raw = serde_json::to_vec(&parsed.payload).unwrap_or_default();
+/// Fan out a JSON control payload to a LiveKit room via server-side
+/// `RoomService/SendData`. A 404 (room currently has no participants) is
+/// treated as success, matching the fire-and-forget nudge semantics.
+///
+/// Shared by the client-facing `/v1/livekit/send-data` endpoint and by
+/// **server-side emitters** — notably the enrollment-request inbox
+/// notification (`bootstrap::enrollment_request`), which the requesting device
+/// CANNOT send itself: it is pre-enrollment, so its `local_db` is closed and it
+/// has no MLS signing credential, and a client-side device-signed send-data
+/// fails with "not signed in for DS request signing". The DS holds the LiveKit
+/// admin secret, so it emits that nudge here. Returns `Err(reason)` on any
+/// failure; fire-and-forget callers log and move on.
+pub async fn room_send_data(
+    state: &AppState,
+    room: &str,
+    payload: &serde_json::Value,
+) -> Result<(), String> {
+    let (api_key, api_secret, url) = state
+        .broker
+        .livekit_ready()
+        .ok_or_else(|| "livekit not configured".to_string())?;
+
+    let raw = serde_json::to_vec(payload).unwrap_or_default();
     let data_b64 = {
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD.encode(&raw)
     };
-    let token = sign_livekit_admin_token(api_key, api_secret, &parsed.room, now_unix())?;
+    let token = sign_livekit_admin_token(api_key, api_secret, room, now_unix())
+        .map_err(|e| format!("sign admin token: {e}"))?;
     let endpoint = format!("{}/twirp/livekit.RoomService/SendData", twirp_base(url));
 
     let sent = reqwest::Client::new()
         .post(&endpoint)
         .bearer_auth(&token)
-        .json(&serde_json::json!({
-            "room": parsed.room,
-            "data": data_b64,
-            "kind": "RELIABLE",
-        }))
+        .json(&serde_json::json!({ "room": room, "data": data_b64, "kind": "RELIABLE" }))
         .send()
         .await;
 
     match sent {
-        Ok(r) if r.status().is_success() || r.status() == StatusCode::NOT_FOUND => {
-            Ok(ok_json(serde_json::json!({ "ok": true })))
-        }
+        Ok(r) if r.status().is_success() || r.status() == StatusCode::NOT_FOUND => Ok(()),
         Ok(r) => {
             let status = r.status();
             let text = r.text().await.unwrap_or_default();
-            Ok(bad_gateway(format!("SendData {status}: {text}")))
+            Err(format!("SendData {status}: {text}"))
         }
-        Err(e) => Ok(bad_gateway(format!("SendData: {e}"))),
+        Err(e) => Err(format!("SendData: {e}")),
     }
 }
 

@@ -5,14 +5,18 @@
 //! ephemeral, authenticated channel. Flow:
 //!
 //!   1. New device calls `start_device_enrollment` → generates an
-//!      ephemeral X25519 keypair and a 6-digit verification code, inserts
-//!      a `device_enrollment_request` row in Turso, publishes an
-//!      `EnrollmentRequested` event to `inbox-{user_id}` via LiveKit.
-//!      The private X25519 key stays in memory on the new device.
+//!      ephemeral X25519 keypair and a 6-digit verification code, and
+//!      writes a `device_enrollment_request` row via the session-gated DS
+//!      endpoint (the new device is pre-enrollment, so it can't device-sign).
+//!      The DS then emits the `enrollment_requested` inbox nudge SERVER-SIDE
+//!      — the new device can't, since a client-side send-data needs a signing
+//!      credential it doesn't have yet. The private X25519 key stays in
+//!      memory on the new device.
 //!
 //!   2. Any of the user's already-enrolled devices receives the inbox
-//!      event and shows an immediate-takeover approval UI that displays
-//!      the verification code.
+//!      event (or, if it was offline at request time, picks the request up
+//!      via its login-time `list_pending_enrollment_requests` poll) and shows
+//!      an immediate-takeover approval UI that displays the verification code.
 //!
 //!   3. User confirms the code matches and taps approve. The approving
 //!      device calls `approve_device_enrollment`:
@@ -250,20 +254,17 @@ pub async fn start_device_enrollment(
         .await
         .insert(request_id.clone(), private_bytes.to_vec());
 
-    // Fan out a push event to the user's inbox room. If no other device is
-    // online the poll-fallback path (`list_pending_enrollment_requests`)
-    // still works when a sibling device comes online later.
-    let payload = serde_json::json!({
-        "type": "enrollment_requested",
-        "request_id": request_id,
-        "new_device_id": device_id,
-        "verification_code": verification_code,
-    });
-    if let Err(e) =
-        crate::commands::livekit::publish_to_user_inbox(state, &user_id, payload).await
-    {
-        eprintln!("[enrollment] inbox publish failed (non-fatal): {e}");
-    }
+    // The inbox nudge to the user's already-enrolled devices is emitted
+    // SERVER-SIDE by the DS `/v1/auth/enrollment-request` handler. This device
+    // is pre-enrollment (no signing credential, local DB closed), so a
+    // client-side device-signed send-data here would ALWAYS fail with "not
+    // signed in for DS request signing" — the DS, which holds the LiveKit admin
+    // secret, sends it instead. A sibling that was offline at request time
+    // still catches it via its login-time `list_pending_enrollment_requests`
+    // poll.
+    eprintln!(
+        "[enrollment] requested enrollment for user {user_id} device {device_id} (request {request_id})"
+    );
 
     Ok(EnrollmentHandle {
         request_id,
