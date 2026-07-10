@@ -68,6 +68,22 @@ When device A commits a membership change:
    - If no local group exists → external-joins using published GroupInfo
    - If the group was evicted (user was kicked) → deletes it, then external-joins
    - Publishes updated GroupInfo after processing
+   - Reports this device's now-current applied epoch to the DS (`ds_report_commit_since` → `GET /v1/commits/:id?since=`) so the server can compute the commit-log **retention floor** (#539, below)
+
+### Commit-log retention (I4, #539)
+
+The DS (sole writer) prunes `mls_commit_log` below a **retention floor** so storage
+and a long-offline member's catch-up cost stay bounded — event-driven on
+commit-append and on a device's catch-up report, never on a timer. **Tier 1** keeps
+the floor at/below the MIN applied epoch across all CURRENT member devices (guarded
+by the SLOWEST member — zero loss; `NoLossForCurrentMember`, `specs/tla/Delivery.tla`
+Spec B), applied only once the whole roster has reported (`mls_commit_since`).
+**Tier 2** is a hard cap (`head − PRUNE_MAX_BEHIND_HEAD`) that bounds storage even
+against a never-returning device; a member pruned past its epoch hits an epoch gap
+on return (`invariants::classify` → `GapRecover`) and external-joins at head,
+forfeiting only the pruned-gap messages (accepted loss #1). `may_rejoin` (I5) still
+blocks a removed/revoked device from that rejoin. See
+[database.md](./database.md#mls_commit_since-commit-log-db-migration-000003-539).
 
 The bare `process_pending_commits_inner` / `_locked` variants are the raw commit replay used internally by the interleaved catch-up (via `process_pending_commits_inner_with_hook`). Callers that ADVANCE the epoch — the **commit-INITIATION** paths and the recovery converge alike — must NOT use the bare variant directly. The **commit-INITIATION** paths — send, edit, invite (add), remove — must NOT use the bare variant: advancing this device to head before its own op discards the ratchet keys for the current epoch (`max_past_epochs = 0`), so a current-epoch inbound message this device hasn't fetched yet would be **stranded** by its own commit (issue #440, the *committer strand*). They instead run the interleaved ingesting catch-up **before** advancing — see "Pre-op ingest-before-advance" below.
 

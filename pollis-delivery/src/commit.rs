@@ -18,6 +18,8 @@
 //!
 //! These invariants are properties of *this code*, not of DB triggers.
 
+use std::collections::HashMap;
+
 use anyhow::{anyhow, Result};
 use libsql::Connection;
 use serde::{Deserialize, Serialize};
@@ -285,6 +287,215 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
     })
 }
 
+// ─── Commit-log retention floor (I4, issue #539) ─────────────────────────────
+//
+// `mls_commit_log` is append-only and, without a floor, grows unbounded with
+// membership-churn × time per conversation. The Delivery Service (sole writer)
+// prunes commits BELOW a retention floor so storage + a long-offline member's
+// catch-up cost stay bounded, WITHOUT ever dropping a commit a current member
+// still needs. Two tiers, faithful to `specs/tla/Delivery.tla` (Spec B, I3/I4):
+//
+//   * TIER 1 (free, zero loss). The floor is kept at/below `min_since` — the
+//     MIN applied epoch across all CURRENT member DEVICES (the signal
+//     `mls_commit_since` records on each catch-up). Everyone still needs commits
+//     `>= min_since`, so nothing anyone is waiting on is deleted. This is exactly
+//     the spec's SOUND `GCBound = Min(cursor over members)` and its
+//     `NoLossForCurrentMember` invariant — the floor is guarded by the SLOWEST
+//     member, NEVER the fastest (the spec's refuted `Max` variant).
+//
+//   * TIER 2 (hard cap). `head - PRUNE_MAX_BEHIND_HEAD` bounds the log length even
+//     against a perpetually-offline device that pins `min_since` low forever. When
+//     it exceeds the Tier-1 floor the straggler is pruned past; on its return it
+//     reads an earliest-available epoch above its own, trips the client gap
+//     detector (`pollis_core::commands::mls::invariants::classify` →
+//     `GapRecover`), and external-joins at head — forfeiting only the pruned-gap
+//     messages (accepted loss #1, "messages sent before you joined the tree").
+//     `may_rejoin` (I5) still blocks a removed/revoked device from that rejoin.
+
+/// Tier-1 slack: retain this many epochs BELOW the slowest current member's
+/// applied epoch. Pure conservative buffer — a member at `min_since` needs
+/// commits from `min_since` onward, so keeping `min_since - K` never drops
+/// anything it is waiting on; the extra slack absorbs in-flight re-fetches.
+pub const PRUNE_SLACK_EPOCHS: i64 = 8;
+
+/// Tier-2 hard cap: the commit log is never retained deeper than this many
+/// epochs behind the head, EVEN IF a current member is further behind (that
+/// straggler recovers via external-join — accepted loss #1). Bounds storage +
+/// catch-up against a never-returning device.
+pub const PRUNE_MAX_BEHIND_HEAD: i64 = 512;
+
+/// The retention floor (EXCLUSIVE): the prune deletes commits with `epoch < floor`.
+///
+/// Pure so it can be unit-/property-tested in isolation (see the tests below) and
+/// audited against `specs/tla/Delivery.tla`. Inputs:
+///   * `min_since` — MIN reported applied epoch over current member devices, or
+///     `None` when no member has reported.
+///   * `all_reported` — whether EVERY current member device has a reported
+///     high-water. Tier 1 only prunes when the whole roster is accounted for; a
+///     single unreported member means `min_since` is not a safe lower bound, so
+///     Tier 1 contributes nothing (floor 0) and only Tier 2's cap applies.
+///   * `head` — the group head epoch (`MAX(epoch)+1`).
+///
+/// `floor = max(tier1, tier2)`, clamped to `>= 0`:
+///   * `tier1 = (min_since - PRUNE_SLACK_EPOCHS)` when `all_reported`, else 0.
+///   * `tier2 = head - PRUNE_MAX_BEHIND_HEAD`.
+///
+/// The ONLY way the floor exceeds `min_since` is Tier 2 binding (a member more
+/// than `PRUNE_MAX_BEHIND_HEAD` epochs behind head) — the deliberate,
+/// documented accepted-loss path. Tier 1 alone is always `<= min_since`, i.e.
+/// the spec's `NoLossForCurrentMember`.
+pub fn prune_floor(min_since: Option<i64>, all_reported: bool, head: i64) -> i64 {
+    let tier1 = match (all_reported, min_since) {
+        (true, Some(m)) => (m - PRUNE_SLACK_EPOCHS).max(0),
+        // A current member has not reported: `min_since` is not a safe lower
+        // bound over the roster, so Tier 1 must not prune. Tier 2 still applies.
+        _ => 0,
+    };
+    let tier2 = (head - PRUNE_MAX_BEHIND_HEAD).max(0);
+    tier1.max(tier2)
+}
+
+/// Record device `device_id`'s commit-catch-up high-water for a conversation.
+/// `since` is the epoch the client is caught up FROM — its current local MLS
+/// epoch — so it still needs every commit `>= since`. Monotone: the upsert keeps
+/// `MAX(existing, since)`, so a stale/reordered report can never LOWER a device's
+/// recorded epoch (which would raise the floor and prune commits it still needs).
+pub async fn record_commit_since(
+    conn: &Connection,
+    conversation_id: &str,
+    user_id: &str,
+    device_id: &str,
+    since: i64,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO mls_commit_since (conversation_id, user_id, device_id, since_epoch) \
+         VALUES (?1, ?2, ?3, ?4) \
+         ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET \
+             since_epoch = MAX(since_epoch, excluded.since_epoch), \
+             updated_at  = datetime('now')",
+        libsql::params![
+            conversation_id.to_string(),
+            user_id.to_string(),
+            device_id.to_string(),
+            since,
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
+/// The CURRENT member device ids for a conversation, read from the MAIN DB.
+/// A `conversation_id` is a group id, a DM channel id, or a channel id (mirrors
+/// [`crate::writes::is_member`]'s three membership shapes). Revoked devices are
+/// excluded — a revoked device can never rejoin (I5), so it must not pin the
+/// floor down. Cross-DB: membership lives on MAIN, the high-water on LOG, so the
+/// floor is composed in Rust across the two connections (no single SQL join).
+async fn current_member_devices(main: &Connection, conversation_id: &str) -> Result<Vec<String>> {
+    let mut rows = main
+        .query(
+            "SELECT DISTINCT ud.device_id \
+             FROM user_device ud \
+             WHERE ud.revoked_at IS NULL AND ud.user_id IN ( \
+                 SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1 \
+                 UNION \
+                 SELECT user_id FROM group_member WHERE group_id = ?1 \
+                 UNION \
+                 SELECT gm.user_id FROM channels c \
+                     JOIN group_member gm ON gm.group_id = c.group_id WHERE c.id = ?1 \
+             )",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await?;
+    let mut out = Vec::new();
+    while let Some(r) = rows.next().await? {
+        out.push(r.get::<String>(0)?);
+    }
+    Ok(out)
+}
+
+/// Every reported `(device_id -> since_epoch)` high-water for a conversation,
+/// read from the LOG DB.
+async fn recorded_since(log: &Connection, conversation_id: &str) -> Result<HashMap<String, i64>> {
+    let mut rows = log
+        .query(
+            "SELECT device_id, since_epoch FROM mls_commit_since WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await?;
+    let mut out = HashMap::new();
+    while let Some(r) = rows.next().await? {
+        out.insert(r.get::<String>(0)?, r.get::<i64>(1)?);
+    }
+    Ok(out)
+}
+
+/// Delete commits below `floor` (EXCLUSIVE) for a conversation. The single
+/// retention write, kept small + public so it can be driven with an explicit
+/// floor from tests. Never touches the UNIQUE(conversation_id, epoch) index
+/// (fork-dedup, migration 000003 main DB) — a pure row DELETE leaves the
+/// remaining epochs and their one-per-epoch guarantee intact. `floor <= 0` is a
+/// no-op (nothing to prune below epoch 0).
+pub async fn delete_commits_below(
+    conn: &Connection,
+    conversation_id: &str,
+    floor: i64,
+) -> Result<u64> {
+    if floor <= 0 {
+        return Ok(0);
+    }
+    let deleted = conn
+        .execute(
+            "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND epoch < ?2",
+            libsql::params![conversation_id.to_string(), floor],
+        )
+        .await?;
+    Ok(deleted)
+}
+
+/// Outcome of a prune pass.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PruneReport {
+    /// The computed retention floor (exclusive).
+    pub floor: i64,
+    /// Commit rows deleted this pass.
+    pub deleted: u64,
+}
+
+/// Compute the retention floor from live membership + reported high-waters and
+/// prune the commit log below it. EVENT-DRIVEN — called on commit-append
+/// (`submit`) and on a device's catch-up report (`commits` GET), never on a
+/// timer (repo rule: no periodic polling). `main` supplies membership, `log`
+/// supplies the high-waters + the commit log to prune.
+pub async fn prune_commit_log(
+    main: &Connection,
+    log: &Connection,
+    conversation_id: &str,
+) -> Result<PruneReport> {
+    let head = head_epoch(log, conversation_id).await?;
+    let members = current_member_devices(main, conversation_id).await?;
+    let recorded = recorded_since(log, conversation_id).await?;
+
+    let (min_since, all_reported) = if members.is_empty() {
+        // No current members (everyone left / the group was deleted): Tier 1 has
+        // no lower bound to protect, so only Tier 2 bounds the orphaned log.
+        (None, false)
+    } else {
+        let mut min: Option<i64> = None;
+        let mut all = true;
+        for d in &members {
+            match recorded.get(d) {
+                Some(&s) => min = Some(min.map_or(s, |m: i64| m.min(s))),
+                None => all = false,
+            }
+        }
+        (min, all)
+    };
+
+    let floor = prune_floor(min_since, all_reported, head);
+    let deleted = delete_commits_below(log, conversation_id, floor).await?;
+    Ok(PruneReport { floor, deleted })
+}
+
 // ─── Kani proof harnesses (I1 — DS head arithmetic + accept decision) ─────────
 //
 // Behind `#[cfg(kani)]` only. These prove the two pure functions above:
@@ -353,5 +564,225 @@ mod proofs {
         // Empty log drives the mutant's `u64::MAX + 1` overflow.
         let head = head_epoch_of_mutant(None);
         assert!(head == 0);
+    }
+
+    // ─── I4 — retention-floor harnesses (prune_floor) ─────────────────────────
+    //
+    // Prove the REAL `prune_floor` (no forked copy): the floor is non-negative
+    // (P1), Tier 1 never prunes past the slowest current member except when the
+    // documented Tier-2 cap binds (P2 — the code-level Spec-B
+    // `NoLossForCurrentMember`), and an unreported roster disables Tier 1
+    // entirely (P3). Pure integer arithmetic — no `Vec`/`String`, no loops — so
+    // CBMC is instantaneous. Each harness is paired with a `#[kani::should_panic]`
+    // mutant (a deliberately-broken local copy of the floor logic) that VIOLATES
+    // the property, proving the harness has teeth.
+    //
+    // BOUND NOTE: symbolic epochs sit in `0..=EPOCH_MAX`. `EPOCH_MAX` MUST exceed
+    // `PRUNE_MAX_BEHIND_HEAD` (512) so Tier 2 can actually bind above a member's
+    // epoch — otherwise P2's `floor > m` antecedent is unreachable and the proof
+    // goes vacuous. `1024` keeps the space small (CBMC reasons symbolically over
+    // pure arithmetic, so the range costs nothing) while exercising both tiers.
+    const EPOCH_MAX: i64 = 1024;
+
+    /// A symbolic `min_since`: `None`, or `Some(m)` with `0 <= m <= EPOCH_MAX`
+    /// (epochs are non-negative by construction).
+    fn symbolic_min_since() -> Option<i64> {
+        if kani::any() {
+            let m: i64 = kani::any();
+            kani::assume((0..=EPOCH_MAX).contains(&m));
+            Some(m)
+        } else {
+            None
+        }
+    }
+
+    /// P1 (floor_non_negative): `prune_floor(..) >= 0` for ALL inputs — the
+    /// `.max(0)` clamps mean a short log or an empty roster never yields a
+    /// negative floor (a negative floor would be a meaningless/underflowing
+    /// `epoch < floor` DELETE bound).
+    #[kani::proof]
+    fn i4_floor_non_negative() {
+        let min_since = symbolic_min_since();
+        let all_reported: bool = kani::any();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor(min_since, all_reported, head);
+        assert!(floor >= 0);
+    }
+
+    /// P2 (tier1_never_past_slowest = Spec-B `NoLossForCurrentMember`): with the
+    /// whole roster reported and `min_since == Some(m)`, the ONLY way the floor
+    /// can exceed `m` — the slowest current member's applied epoch — is Tier 2
+    /// binding (`head - PRUNE_MAX_BEHIND_HEAD > m`, the documented accepted-loss
+    /// path). Tier 1 alone is always `<= m`, so no commit a current member still
+    /// needs is ever pruned by Tier 1.
+    #[kani::proof]
+    fn i4_tier1_never_past_slowest() {
+        let m: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&m));
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor(Some(m), true, head);
+        if floor > m {
+            assert!(head - PRUNE_MAX_BEHIND_HEAD > m);
+        }
+    }
+
+    /// P3 (unreported_disables_tier1): when `all_reported == false`, the floor is
+    /// EXACTLY Tier 2 (`(head - PRUNE_MAX_BEHIND_HEAD).max(0)`) for ANY
+    /// `min_since` — an unreported current member can never contribute to
+    /// pruning, because `min_since` is not then a safe lower bound over the
+    /// roster.
+    #[kani::proof]
+    fn i4_unreported_disables_tier1() {
+        let min_since = symbolic_min_since();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor(min_since, false, head);
+        assert!(floor == (head - PRUNE_MAX_BEHIND_HEAD).max(0));
+    }
+
+    // ─── Mutants (teeth) ──────────────────────────────────────────────────────
+
+    /// P1 mutant: the raw Tier-2 expression with NO `.max(0)` clamp and no Tier 1
+    /// — a short log (`head < PRUNE_MAX_BEHIND_HEAD`) yields a negative floor.
+    fn prune_floor_p1_mutant(_min_since: Option<i64>, _all_reported: bool, head: i64) -> i64 {
+        // BUG: dropped the `.max(0)` floor — returns `head - 512`, negative for a
+        // short log.
+        head - PRUNE_MAX_BEHIND_HEAD
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_floor_non_negative_mutant_refuted() {
+        let min_since = symbolic_min_since();
+        let all_reported: bool = kani::any();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor_p1_mutant(min_since, all_reported, head);
+        // A short log drives the mutant negative → Kani finds the violation.
+        assert!(floor >= 0);
+    }
+
+    /// P2 mutant: `+ PRUNE_SLACK_EPOCHS` instead of `-` — retains the slack ABOVE
+    /// the slowest member, so Tier 1 alone exceeds `m` and prunes commits a
+    /// current member still needs, with Tier 2 not even binding. (This is the
+    /// spec's refuted "prune past the member" variant.)
+    fn prune_floor_p2_mutant(min_since: Option<i64>, all_reported: bool, head: i64) -> i64 {
+        let tier1 = match (all_reported, min_since) {
+            // BUG: `+ SLACK` prunes SLACK epochs PAST the slowest member.
+            (true, Some(m)) => (m + PRUNE_SLACK_EPOCHS).max(0),
+            _ => 0,
+        };
+        let tier2 = (head - PRUNE_MAX_BEHIND_HEAD).max(0);
+        tier1.max(tier2)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_tier1_never_past_slowest_mutant_refuted() {
+        let m: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&m));
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor_p2_mutant(Some(m), true, head);
+        // With a small head (Tier 2 idle) the mutant floor is `m + 8 > m`, so the
+        // Tier-2 justification is false → Kani finds the violation.
+        if floor > m {
+            assert!(head - PRUNE_MAX_BEHIND_HEAD > m);
+        }
+    }
+
+    /// P3 mutant: ignores `all_reported` — an unreported roster still lets Tier 1
+    /// prune off `min_since`, so a member we cannot bound gets pruned past.
+    fn prune_floor_p3_mutant(min_since: Option<i64>, all_reported: bool, head: i64) -> i64 {
+        // BUG: dropped the `all_reported` guard.
+        let _ = all_reported;
+        let tier1 = match min_since {
+            Some(m) => (m - PRUNE_SLACK_EPOCHS).max(0),
+            None => 0,
+        };
+        let tier2 = (head - PRUNE_MAX_BEHIND_HEAD).max(0);
+        tier1.max(tier2)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_unreported_disables_tier1_mutant_refuted() {
+        let min_since = symbolic_min_since();
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+
+        let floor = prune_floor_p3_mutant(min_since, false, head);
+        // A reported `min_since` above the Tier-2 cap makes the mutant floor
+        // exceed `(head - 512).max(0)` → Kani finds the violation.
+        assert!(floor == (head - PRUNE_MAX_BEHIND_HEAD).max(0));
+    }
+}
+
+// ─── Retention-floor unit tests (I4, issue #539) ─────────────────────────────
+#[cfg(test)]
+mod retention_tests {
+    use super::*;
+
+    /// TIER 1 (the spec's `NoLossForCurrentMember`): with the whole roster
+    /// reported and Tier 2 not binding, the floor never exceeds the slowest
+    /// member's applied epoch — so every current member keeps every commit it
+    /// still needs.
+    #[test]
+    fn tier1_floor_never_above_slowest_member() {
+        // head close to the slowest member ⇒ Tier 2 (`head - 512`) does not bind.
+        let head = 20;
+        for min_since in 0..=20i64 {
+            let floor = prune_floor(Some(min_since), true, head);
+            assert!(
+                floor <= min_since,
+                "floor {floor} must not exceed slowest member epoch {min_since}"
+            );
+            // And it is exactly the slack-buffered Tier-1 floor.
+            assert_eq!(floor, (min_since - PRUNE_SLACK_EPOCHS).max(0));
+        }
+    }
+
+    /// An unreported member (roster not fully accounted for) disables Tier 1: the
+    /// floor collapses to Tier 2 only, so a member we cannot bound is never
+    /// pruned past by Tier 1.
+    #[test]
+    fn tier1_disabled_until_whole_roster_reports() {
+        // `all_reported = false` ⇒ Tier 1 contributes nothing.
+        assert_eq!(prune_floor(Some(1_000), false, 100), 0);
+        // Even with a known min, an incomplete roster keeps Tier 1 at 0.
+        assert_eq!(prune_floor(Some(50), false, 40), 0);
+        // No member has reported at all.
+        assert_eq!(prune_floor(None, false, 40), 0);
+    }
+
+    /// TIER 2 (hard cap): a member stuck far below head is eventually pruned past
+    /// so storage stays bounded — the floor rises to `head - PRUNE_MAX_BEHIND_HEAD`
+    /// even though the straggler still "needs" those epochs (accepted loss #1).
+    #[test]
+    fn tier2_hard_cap_bounds_a_stuck_member() {
+        let stuck = 1i64; // one member pinned at epoch 1 forever
+        let head = 5_000i64; // group raced far ahead
+        let floor = prune_floor(Some(stuck), true, head);
+        assert_eq!(floor, head - PRUNE_MAX_BEHIND_HEAD);
+        assert!(
+            floor > stuck,
+            "Tier 2 must prune past the stuck member to bound storage"
+        );
+    }
+
+    /// Tier 2 clamps at 0 for a short log (no underflow), and the floor is never
+    /// negative.
+    #[test]
+    fn floor_never_negative() {
+        assert_eq!(prune_floor(None, false, 0), 0);
+        assert_eq!(prune_floor(Some(0), true, 0), 0);
+        assert_eq!(prune_floor(Some(3), true, 3), 0); // min(3)-8 → clamp 0; head 3 < cap
     }
 }

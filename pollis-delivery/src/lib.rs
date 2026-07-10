@@ -384,6 +384,20 @@ async fn submit(
     // separate log DB is configured).
     let conn = state.log_db.conn()?;
     let outcome = commit::submit_commit(&conn, &parsed).await?;
+
+    // Retention floor (#539, I4): a landed commit advanced the head, so run an
+    // EVENT-DRIVEN prune (no timer — repo rule). Best-effort: a prune failure must
+    // never fail an accepted commit. Membership is read on the MAIN DB, the log is
+    // pruned on the LOG DB.
+    if matches!(outcome, SubmitResponse::Accepted { .. }) {
+        if let Ok(main_conn) = state.db.conn() {
+            if let Err(e) = commit::prune_commit_log(&main_conn, &conn, &parsed.conversation_id).await
+            {
+                tracing::warn!(error = %e, conversation_id = %parsed.conversation_id, "commit-log prune (on submit) failed");
+            }
+        }
+    }
+
     let code = match &outcome {
         SubmitResponse::Accepted { .. } => StatusCode::OK,
         SubmitResponse::Rejected { .. } => StatusCode::CONFLICT,
@@ -395,16 +409,49 @@ async fn submit(
 struct Since {
     #[serde(default)]
     since: i64,
+    /// When both are present, `since` is recorded as this device's catch-up
+    /// high-water — the signal the retention floor is computed from (#539). The
+    /// caller reports the epoch it is catching up FROM (its current local epoch),
+    /// so it still needs every commit `>= since`.
+    #[serde(default)]
+    user_id: Option<String>,
+    #[serde(default)]
+    device_id: Option<String>,
 }
 
-/// GET /v1/commits/:conversation_id?since=N — the contiguous commit log from
-/// epoch N (default 0) to head. Reads are open (unauthenticated).
+/// GET /v1/commits/:conversation_id?since=N[&user_id=&device_id=] — the
+/// contiguous commit log from epoch N (default 0) to head. Reads are open
+/// (unauthenticated). When `user_id`+`device_id` are supplied, `since` is also
+/// recorded as that device's catch-up high-water and an EVENT-DRIVEN retention
+/// prune runs (#539, I4) — both best-effort so the read never fails on them.
 async fn commits(
     State(state): State<AppState>,
     Path(conversation_id): Path<String>,
     Query(q): Query<Since>,
 ) -> Result<impl IntoResponse, AppError> {
     let conn = state.log_db.conn()?;
+
+    // Record the reporting device's high-water, then re-compute + apply the floor.
+    // The floor is the MIN applied epoch across current members (Tier 1), so a
+    // fresh report can only RAISE the floor for a conversation whose slowest
+    // member just advanced. Best-effort: a failure here must not fail the read.
+    if let (Some(user_id), Some(device_id)) = (q.user_id.as_deref(), q.device_id.as_deref()) {
+        if !user_id.is_empty() && !device_id.is_empty() {
+            if let Err(e) =
+                commit::record_commit_since(&conn, &conversation_id, user_id, device_id, q.since)
+                    .await
+            {
+                tracing::warn!(error = %e, conversation_id = %conversation_id, "record commit-since failed");
+            } else if let Ok(main_conn) = state.db.conn() {
+                if let Err(e) =
+                    commit::prune_commit_log(&main_conn, &conn, &conversation_id).await
+                {
+                    tracing::warn!(error = %e, conversation_id = %conversation_id, "commit-log prune (on catch-up) failed");
+                }
+            }
+        }
+    }
+
     let head = commit::head_epoch(&conn, &conversation_id).await?;
     let commits = commit::fetch_commits(&conn, &conversation_id, q.since).await?;
     Ok(Json(CommitsResponse { head, commits }))

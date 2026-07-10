@@ -358,6 +358,45 @@ pub async fn ds_post_signed_or_session_ok(
     Ok(())
 }
 
+/// Report this device's applied MLS `since` epoch for a conversation to the DS
+/// commits endpoint (`GET /v1/commits/{conv}?since=&user_id=&device_id=`), the
+/// signal the server-side retention floor is the MIN of across current members
+/// (#539, I4 Tier 1). `since` is the client's current local epoch — it still
+/// needs every commit `>= since`, so a truthful report can only ever PROTECT its
+/// own history from pruning.
+///
+/// Reads are open on the DS, so this is an unauthenticated GET. Fully best-effort
+/// and EVENT-DRIVEN (fires once per catch-up, never polls): any failure — no DS
+/// URL, no device context, a network error — is swallowed, leaving the floor
+/// conservatively low (Tier 2's hard cap still bounds storage). A short timeout
+/// keeps it off the catch-up critical path.
+pub async fn ds_report_commit_since(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    since: i64,
+) {
+    let base = match state.config.pollis_delivery_url.as_deref() {
+        Some(b) => b.trim_end_matches('/').to_string(),
+        None => return,
+    };
+    let device_id = match state.device_id.lock().await.clone() {
+        Some(d) => d,
+        None => return,
+    };
+    let url = format!("{base}/v1/commits/{conversation_id}");
+    let _ = reqwest::Client::new()
+        .get(&url)
+        .query(&[
+            ("since", since.to_string()),
+            ("user_id", user_id.to_string()),
+            ("device_id", device_id),
+        ])
+        .timeout(std::time::Duration::from_secs(5))
+        .send()
+        .await;
+}
+
 /// Resolve the DS base URL or error if it isn't configured. Shared by the
 /// unauthenticated + session-bearer bootstrap clients below.
 fn delivery_base(state: &Arc<AppState>) -> Result<String> {

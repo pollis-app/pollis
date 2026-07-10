@@ -400,6 +400,7 @@ worthless, so the mutant guarantees the property has teeth. Proven functions:
 | **Own-commit resolution** — adopt IFF the log's bytes at this epoch are byte-for-byte ours (no phantom epoch/fork; never discard a landed own commit → no wedge); the #411 core | adopt/rollback decision | `mls/invariants.rs` |
 | **Revoked/removed-device gate** — the only input that admits an external-join rebuild is `(registered ∧ member)`; a revoked or removed device can never climb back (fuzzer-finding #2) | `may_rejoin` conjunction | `mls/invariants.rs` |
 | **DS head arithmetic + accept decision** — head never underflows/wraps; at any head exactly one epoch is accepted (no fork), stale/forward submits rejected (I1) | `head_epoch_of` / `accepts` | `pollis-delivery/src/commit.rs` |
+| **Retention floor** (I4) — floor is non-negative (P1); Tier 1 never prunes past the slowest current member except the documented Tier-2 cap (P2 = code-level `NoLossForCurrentMember`); an unreported roster disables Tier 1 (P3) | `prune_floor` | `pollis-delivery/src/commit.rs` |
 
 The proofs are the pure *model of record*: e.g. `accepts` is NOT wired into the
 real `submit_commit` (the race-free decision must stay inside the single
@@ -433,10 +434,11 @@ The same load-bearing pure fns the Kani harnesses prove also carry `cargo-fuzz`
 targets in the `fuzz/` crate — continuous, coverage-guided sampling that
 complements Kani's bounded exhaustive proof and makes the fns OSS-Fuzz-eligible
 (they're seedable; a seed `corpus/` ships per target). One target per fn
-(`next_watermark`, `classify`, `resolve`, `may_rejoin`), each asserting the SAME
-property its Kani harness proves (P1/P2/P3 no-skip·monotone·liveness;
-no-gap-apply; no-foreign-adopt / no-own-rollback; the recovery-gate biconditional)
-— a violation is a fuzzer crash.
+(`next_watermark`, `classify`, `resolve`, `may_rejoin`, `prune_floor`), each
+asserting the SAME property its Kani harness proves (P1/P2/P3
+no-skip·monotone·liveness; no-gap-apply; no-foreign-adopt / no-own-rollback; the
+recovery-gate biconditional; the retention floor's non-negative · no-loss ·
+unreported-disables-Tier-1) — a violation is a fuzzer crash.
 
 **Detached on purpose.** `cargo-fuzz` needs nightly, but this repo pins Rust
 1.96.0 stable for reproducible release builds, so `fuzz/` has its own
