@@ -86,11 +86,17 @@
     outline: none;
   }
 
-  /* On macOS the NSWindow contentView layer already clips to a rounded
-     rect, so an extra CSS border-radius here just creates a visible inner
-     edge. Let the OS handle it. */
+  /* The OS already rounds the window frame itself — macOS via the NSWindow
+     contentView layer, Windows 11 via DWM — so a CSS border-radius here fights
+     that OS radius. Where the CSS radius (10px) exceeds the OS one (~8px on
+     Win11) the window's own background shows through at each corner as white
+     tips. Zero it out and let the OS clip. (On Win10, which doesn't round
+     decorationless windows, this yields square corners — preferable to the
+     mismatch, and consistent with the OS's own convention.) */
   html[data-platform="macos"] body,
-  html[data-platform="macos"] #root {
+  html[data-platform="macos"] #root,
+  html[data-platform="windows"] body,
+  html[data-platform="windows"] #root {
     border-radius: 0;
   }
 }
