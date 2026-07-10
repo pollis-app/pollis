@@ -585,7 +585,7 @@ export const PreferencesPage: React.FC = observer(() => {
               </h2>
               <div className="self-start">
                 <Button variant="secondary" size="sm" onClick={() => navigate({ to: "/voice-settings" })}>
-                  Voice Settings
+                  Voice & Video
                 </Button>
               </div>
             </section>
