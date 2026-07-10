@@ -90,6 +90,26 @@ export type ParticipantAudio =
   | { kind: 'idle' }
   | { kind: 'speaking' };
 
+/** A voice participant's video state. Discriminated union so a participant's
+ *  screenshare lives as one field on the participant (#385) instead of the old
+ *  parallel `screenShareRemotes` map that keyed shares under a different scheme
+ *  than the participant list. `none` = not screensharing.
+ *
+ *  Screenshare only — camera is deliberately NOT folded in here. Screenshare and
+ *  camera coexist per participant (#394: a user can publish both at once), so a
+ *  one-of union can't carry both; the webcam track stays on its own
+ *  `cameraRemotes` axis. This DU models the screenshare axis. */
+export type ParticipantVideo =
+  | { kind: 'none' }
+  | { kind: 'screenshare'; trackKey: string; width: number; height: number };
+
+/** Narrow a `ParticipantVideo` to its active screenshare, or null. */
+export function screenshareOf(
+  v: ParticipantVideo,
+): { trackKey: string; width: number; height: number } | null {
+  return v.kind === 'screenshare' ? v : null;
+}
+
 /** Helpers — read-only narrowings that consumers reach for a lot. */
 
 export function voiceChannelId(s: VoiceState): string | null {

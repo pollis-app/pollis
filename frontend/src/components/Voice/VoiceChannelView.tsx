@@ -6,17 +6,15 @@ import type { VoiceParticipant } from "../../types";
 import { VoiceMemberTile } from "./VoiceMemberTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 import { ScreenSharePicker } from "./ScreenSharePicker";
-import { shareOf } from "../../types/voice-state";
+import { shareOf, screenshareOf } from "../../types/voice-state";
 import { isMuted } from "../../voice/participantAudio";
 import { disambiguateVoiceNames } from "../../voice/disambiguateNames";
-import { voiceUserKey } from "../../voice/identity";
 
 export const VoiceChannelView: React.FC = observer(() => {
   const {
     voiceParticipants,
     voiceActiveSpeakerIds,
     voiceState,
-    screenShareRemotes,
     setViewingScreenShareTrackKey,
   } = appStore;
   const share = shareOf(voiceState);
@@ -71,14 +69,10 @@ export const VoiceChannelView: React.FC = observer(() => {
             setViewingScreenShareTrackKey(LOCAL_PREVIEW_KEY);
             return;
           }
-          // Per-device first (voice-{userId}:{deviceId}) so each device's
-          // tile shows only its own share when the same user is in the
-          // room from multiple devices. Fall back to the user-scoped key
-          // (voice-{userId}) for cross-version compat with any client
-          // still publishing under the legacy `{userId}:view` identity.
-          const share =
-            screenShareRemotes[p.identity] ??
-            screenShareRemotes[voiceUserKey(p.identity)];
+          // The publisher's share is folded onto their participant `video`
+          // (#385) — VoiceSessionManager already resolved per-device vs
+          // user-scoped publisher identity when it landed the share here.
+          const share = screenshareOf(p.video);
           if (share) {
             setViewingScreenShareTrackKey(share.trackKey);
           }
@@ -96,9 +90,7 @@ export const VoiceChannelView: React.FC = observer(() => {
             streamWidth = shareLocalDims?.width;
             streamHeight = shareLocalDims?.height;
           } else if (!isLocal) {
-            const remote =
-              screenShareRemotes[p.identity] ??
-              screenShareRemotes[voiceUserKey(p.identity)];
+            const remote = screenshareOf(p.video);
             if (remote) {
               streamTrackKey = remote.trackKey;
               streamWidth = remote.width;

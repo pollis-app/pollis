@@ -16,9 +16,10 @@
 //     share — `getDisplayMedia` in the renderer → `publishTrack` on the
 //     same Room. The local track is exposed under the reserved
 //     `LOCAL_PREVIEW_KEY` so the existing preview tile works unchanged.
-//   - The Zustand `screenShareRemotes` map is kept in sync by translating
-//     publisher identity `{userId}:view` → `voice-{userId}`, so tiles that
-//     look up by voice identity (the existing path) keep working.
+//   - Each remote share is folded onto its publishing participant's `video`
+//     (via VoiceSessionManager) by translating publisher identity
+//     `{userId}:view` → `voice-{userId}`, so tiles read the share off the
+//     participant list they already render.
 //
 // Lifecycle reconciler mirrors `VoiceSessionManager`: declarative intent
 // (`activeVoiceChannelId` + `voicePhase === 'joined'`), reconcile loop
@@ -43,6 +44,7 @@ import { invoke } from '../bridge';
 import { hasElectron } from '../bridge/runtime';
 import { autorun } from 'mobx';
 import { appStore } from '../stores/appStore';
+import { voiceSession } from '../voice/VoiceSessionManager';
 import { LOCAL_PREVIEW_KEY } from './screenShareSession';
 
 // ── Public types ─────────────────────────────────────────────────────────────
@@ -52,7 +54,7 @@ import { LOCAL_PREVIEW_KEY } from './screenShareSession';
  * of (remote subscribed + locally published). Keys are tile identifiers:
  *   - For remote tracks: the voice identity `voice-{userId}` (derived
  *     from the publisher identity `{userId}:view`), so the keys line up
- *     with `screenShareRemotes` in the Zustand store.
+ *     with the participant identities the share is folded onto (`video`).
  *   - For the local publish: the sentinel `LOCAL_PREVIEW_KEY` so the
  *     existing in-tile preview renders unchanged.
  */
@@ -147,10 +149,14 @@ class LiveKitView {
   private deviceId: string | null = null;
 
   private tracks = new Map<string, MediaStreamTrack>();
-  /** Width × height per active remote track. Pushed into the Zustand
-   *  `screenShareRemotes` mirror so existing layout that sizes the
-   *  preview tile from initial dimensions keeps working. */
+  /** Width × height per active remote track. Folded onto the publishing
+   *  participant's `video` (#385) so layout that sizes the preview tile from
+   *  initial dimensions keeps working. */
   private trackDims = new Map<string, { width: number; height: number }>();
+  /** The remote shares (keyed by voice identity → dims) we've last pushed onto
+   *  participant `video`. Lets `emit()` diff and only touch the store for real
+   *  changes, and clear a participant's share when its track disappears. */
+  private mirroredShares = new Map<string, { width: number; height: number }>();
   private listeners = new Set<Listener>();
   /** Stable snapshot for useSyncExternalStore — only re-allocated when
    *  the underlying map actually changes. */
@@ -733,48 +739,41 @@ class LiveKitView {
    *  useSyncExternalStore sees a new reference. Cheap — the map is
    *  small (one entry per active remote share + one local).
    *
-   *  Also mirrors the remote portion into Zustand's `screenShareRemotes`
-   *  so the existing tile plumbing (`screenShareRemotes[p.identity]`)
-   *  picks up new shares without touching every reader. */
+   *  Also folds the remote shares onto their publishing participants' `video`
+   *  (#385) via `VoiceSessionManager`, so tile readers pick up new shares off
+   *  the participant list without a parallel map. */
   private emit(): void {
     this.snapshot = new Map(this.tracks);
-    // Mirror remote keys into the store. Local preview is driven by the
-    // existing `screenShareLocalActive` field — don't duplicate it here.
-    const store = appStore;
-    const desired: Record<
-      string,
-      { trackKey: string; width: number; height: number }
-    > = {};
+    // Compute the desired remote-share set (keyed by voice identity → dims).
+    // Local preview is driven by the local share state, not a participant, so
+    // it's excluded here.
+    const desired = new Map<string, { width: number; height: number }>();
     for (const [key] of this.tracks) {
       if (key === LOCAL_PREVIEW_KEY) {
         continue;
       }
-      const dims = this.trackDims.get(key) ?? { width: 0, height: 0 };
-      desired[key] = {
-        trackKey: key,
-        width: dims.width,
-        height: dims.height,
-      };
+      desired.set(key, this.trackDims.get(key) ?? { width: 0, height: 0 });
     }
-    // Replace wholesale only if it differs — avoids needless re-renders
-    // for consumers that read the map.
-    const current = store.screenShareRemotes;
-    const currentKeys = Object.keys(current);
-    const desiredKeys = Object.keys(desired);
-    let changed = currentKeys.length !== desiredKeys.length;
-    if (!changed) {
-      for (const k of desiredKeys) {
-        const a = current[k];
-        const b = desired[k];
-        if (!a || a.trackKey !== b.trackKey || a.width !== b.width || a.height !== b.height) {
-          changed = true;
-          break;
-        }
+    // Clear participants whose share vanished. The track key we stored equals
+    // the voice identity `key`, so clearScreenShare matches by it.
+    for (const key of this.mirroredShares.keys()) {
+      if (!desired.has(key)) {
+        voiceSession.clearScreenShare(key);
       }
     }
-    if (changed) {
-      store.setScreenShareRemotes(desired);
+    // Set/update the rest — only when new or the dimensions changed, so we
+    // don't churn the store (and re-render) on every unrelated emit.
+    for (const [key, dims] of desired) {
+      const prev = this.mirroredShares.get(key);
+      if (!prev || prev.width !== dims.width || prev.height !== dims.height) {
+        voiceSession.setScreenShare(key, {
+          trackKey: key,
+          width: dims.width,
+          height: dims.height,
+        });
+      }
     }
+    this.mirroredShares = desired;
     for (const listener of this.listeners) {
       try {
         listener();
