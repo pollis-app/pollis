@@ -1,0 +1,6 @@
+# cargo-fuzz build output and crash artifacts — never committed. The seed
+# `corpus/` (hand-authored) and the target sources ARE committed.
+/target
+/artifacts
+/coverage
+Cargo.lock

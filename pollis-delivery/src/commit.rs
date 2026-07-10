@@ -168,6 +168,12 @@ pub async fn fetch_commits(conn: &Connection, conversation_id: &str, since: i64)
 /// Submit a commit. Accepts iff `based_on_epoch` is the current head; otherwise
 /// rejects with the head + the missing commits. See the module docs for why
 /// this is race-free / fork-free / gap-free / append-only.
+///
+/// Abstracted by the `Submit` action in `specs/tla/CommitLog.tla` (Spec A,
+/// I1/I2): the conditional insert here is the spec's `SoundSubmit => b = Head`
+/// guard, and TLC proves that under any interleaving of racing submitters the
+/// log stays one-per-epoch / gapless / head-monotone. The teeth config
+/// (`CommitLogBroken.cfg`) drops exactly this guard and TLC forks the log.
 pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<SubmitResponse> {
     let commit = b64_decode(&body.commit)?;
 

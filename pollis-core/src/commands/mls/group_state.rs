@@ -907,7 +907,10 @@ async fn process_pending_commits_locked_impl(
     for commit in pending {
         // Gap classification (I1), proved by Kani (`invariants::classify`) never
         // to `Apply` across a gap: `Apply` iff this row's epoch is exactly
-        // `current_epoch`, else `GapRecover`.
+        // `current_epoch`, else `GapRecover`. Abstracted by the `Apply` /
+        // `ExternalJoin` actions in `specs/tla/CommitLog.tla` (Spec A): TLC
+        // checks this replay+recovery loop never adopts a foreign commit
+        // (NoForeignAdopt, I2) over the log the DS `submit_commit` maintains.
         if super::invariants::classify(current_epoch, Some(commit.epoch as u64))
             != super::invariants::ReplayStep::Apply
         {

@@ -12,6 +12,13 @@ members = [
     "verifiable-log-serve",
     "pollis-delivery",
 ]
+# Detached from this workspace on purpose: `fuzz/` is the Track-B cargo-fuzz crate
+# (#481). cargo-fuzz needs nightly, but this repo pins Rust 1.96.0 STABLE for
+# reproducible release builds, so the fuzz crate must never affect `cargo build`
+# or the pinned-stable release path. It also carries its own `[workspace]` table.
+exclude = [
+    "fuzz",
+]
 
 [workspace.package]
 version = "1.1.0"

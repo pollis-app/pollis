@@ -7,10 +7,13 @@
 > canonicalization proofs `may_rejoin` / `resolve` / `classify`
 > (`pollis-core/src/commands/mls/invariants.rs`, I5/I2/I1), each paired with a
 > `should_panic` mutant certifying teeth; and the nightly `schedule:` marathon
-> soak with one-step failing-op-sequence → regression promotion. What shipped is
-> **Kani bounded proofs on the real pure functions + refuting mutants + a
-> continuous soak** — **not** the M4/M5 TLA+ exhaustive models or the Track-B
-> `cargo-fuzz`/OSS-Fuzz targets, which **remain deferred → #481**. Governed by
+> soak with one-step failing-op-sequence → regression promotion. **M4/M5 have now
+> landed (#481):** TLA+ exhaustive models for both the delivery/retention machine
+> (Spec B, `specs/tla/Delivery.tla`, I3+I4) and the commit-log epoch machine
+> (Spec A, `specs/tla/CommitLog.tla`, I1+I2) — each sound + a refuting teeth
+> config, gated in `.github/workflows/tla.yml` — plus Track-B `cargo-fuzz` targets
+> over the pure fns in a detached `fuzz/` crate (nightly, out of band). Only
+> optional OSS-Fuzz onboarding remains open. Governed by
 > [`backend-core-invariants.md`](backend-core-invariants.md) ("invalid states are
 > unrepresentable") and composes with the verifiable-builds / transparency work
 > ([`transparency.md`](transparency.md)). Scope: the Pollis MLS control-plane and
@@ -91,10 +94,10 @@ work is.
 
 | Inv | Property | Strongest current defense | Target machine-checked defense | Gap |
 |---|---|---|---|---|
-| **I1** | commit log gapless, append-only, one-per-epoch | `UNIQUE` index + DS `submit_commit` conditional-insert (`commit.rs:137`); proptest never forks | **TLA+**: model the DS `submit_commit` as an atomic action over N clients racing at a head; model-check "no two distinct commits at one epoch ∧ no gap ∧ head monotone" exhaustively. **Kani** on `head_epoch` arithmetic + the accept/reject decision extracted as a pure fn. | Property holds *by construction in prose*; never mechanically checked. The `ON CONFLICT`+`WHERE ?2 = head` interaction is subtle enough to deserve a proof. |
-| **I2** | commits are a verifiable chain | MLS confirmation tag chains epochs (openmls); `our_commit_is_canonical` byte-compares (`reconcile.rs:35`) | Kani on the *canonicalization decision* (own-commit adoption vs rollback): given (submit outcome, stored bytes, our bytes), the adopt/rollback choice never adopts a foreign commit and never rolls back our own landed commit. | Adoption logic is scattered across `group_state.rs:403-440` + `reconcile.rs`; correctness argued in comments (#411), not proved. |
+| **I1** | commit log gapless, append-only, one-per-epoch | `UNIQUE` index + DS `submit_commit` conditional-insert (`commit.rs:137`); proptest never forks | **TLA+**: model the DS `submit_commit` as an atomic action over N clients racing at a head; model-check "no two distinct commits at one epoch ∧ no gap ∧ head monotone" exhaustively. **Kani** on `head_epoch` arithmetic + the accept/reject decision extracted as a pure fn. | ✅ **Modelled (M4 Spec A, #481).** `specs/tla/CommitLog.tla` exhaustively TLC-checks `OnePerEpoch ∧ Gapless ∧ HeadMonotone` over the `Submit` conditional-insert-at-head under N-client concurrency; teeth: `CommitLogBroken.cfg` drops the head-guard → a real `OnePerEpoch` fork counterexample. The Kani arithmetic half (`head_epoch_of`/`accepts`) already shipped in M2 (`commit.rs`). |
+| **I2** | commits are a verifiable chain | MLS confirmation tag chains epochs (openmls); `our_commit_is_canonical` byte-compares (`reconcile.rs:35`) | Kani on the *canonicalization decision* (own-commit adoption vs rollback): given (submit outcome, stored bytes, our bytes), the adopt/rollback choice never adopts a foreign commit and never rolls back our own landed commit. | ✅ **Covered from both sides (#481).** `NoForeignAdopt` is TLC-checked in TLA+ Spec A (`CommitLog.tla`, M4); the pure own-commit `resolve` decision is Kani-proved (M2) and now continuously fuzzed (Track B `fuzz/resolve`). |
 | **I3** | delivery = monotonic per-(member,device) cursor; retention ≥ slowest member (no TTL) | **Kani-proved** — `next_watermark` (`messages/watermark.rs`) called by the real ingest path (`ingest.rs:337`); plus the `envelope_cleanup_ttl_or_watermark` flow test | **Kani** on the watermark function: prove *monotonicity* (advance never regresses) and the **safety property** — the watermark never advances to/past an un-handled envelope's `sent_at` (the F3 message-loss guard). This is the single highest-ROI target. | ✅ **Proved (M1, #467/#468).** `next_watermark` extracted + wired into production; harnesses `p1_no_skip` (anti-F3), `p2_monotone`, `p3_handled_liveness`, each with a `should_panic` mutant (`p{1,2,3}_mutant_refuted`) certifying teeth. Retention floor (I4) still deferred — see that row. |
-| **I4** | commits + welcomes retained until slowest member consumed | commit-log pruning disabled; DS is sole writer, never deletes (`commit.rs:17`) | TLA+ retention model: with the cursor model, GC-below-floor is unreachable. Kani on the floor computation once it exists. | Retention floor is *deferred* (30-day envelope TTL still live per `mls-reconcile-hardening.md:141`). Model it before shipping the floor so the design is proved before the code. |
+| **I4** | commits + welcomes retained until slowest member consumed | commit-log pruning disabled; DS is sole writer, never deletes (`commit.rs:17`) | TLA+ retention model: with the cursor model, GC-below-floor is unreachable. Kani on the floor computation once it exists. | ✅ **Design modelled (M5 Spec B, #481).** `specs/tla/Delivery.tla` (+ `Delivery.cfg`) exhaustively TLC-checks `NoLossForCurrentMember` (GC never removes a message a current member-device still needs) with `DeliveryBroken.cfg` refuting it as teeth — authored **before** the floor code (#539) per the doctrine. Kani on the floor computation still pending until that code lands (30-day envelope TTL still live per `mls-reconcile-hardening.md:141`). |
 | **I5** | historical membership derivable, not guessed | DS `is_member` / client `local_user_is_member` (`group_state.rs:679`) gate recovery | Kani on the recovery-gate decision: a revoked *or* removed device can never take a recovery path that re-enters the tree (fuzzer finding #2). | Gate is fail-closed prose (`group_state.rs:679-728`); proptest samples it. Provable as a pure predicate over (registered?, member?). |
 | **I6** | one schema, one apply path | harness embeds migrations + `apply_drift_fixups` (`testing.md:87-89`) | Property test / CI assertion: test schema == prod schema (structural diff), plus `schema_migrations` contiguity check. Not really formal-methods territory — a mechanical equality check. | Divergence caught only if someone looks; make it a gate. |
 
@@ -126,8 +129,14 @@ work is.
   `schedule:` and a failing op sequence is captured as a durable CI artifact for
   one-step promotion to a deterministic regression — see §5.4.
 
-**M4/M5 (TLA+ specs, Track-B fuzz targets) remain future work**, per the
-recommended cut.
+**M4 and M5 are now landed (#481).** M5 Spec B (TLA+ Delivery / retention, I3+I4,
+`specs/tla/Delivery.tla`) was authored ahead of the #539 retention-floor code per
+the "model before you ship the floor" rule; the Track-B `cargo-fuzz` targets over
+the §4 pure fns ship in the detached `fuzz/` crate; and M4 Spec A (TLA+ CommitLog,
+I1/I2, `specs/tla/CommitLog.tla`) model-checks the `submit_commit` epoch machine
+under concurrency. Both specs (sound + teeth) run in `.github/workflows/tla.yml`;
+the fuzz smoke runs out of band on nightly. Only **optional OSS-Fuzz onboarding**
+remains.
 
 ---
 
@@ -560,8 +569,8 @@ column is only where we also want it gated on every PR.
 | **M1 — Kani watermark (I3)** | extract `next_watermark`; P1 no-skip / P2 monotone / P3 liveness; rewire flow test to the extracted fn | ~4 d | ✅ | ✅ `cargo kani` job |
 | **M2 — Kani gate + canonicalization (I5/I2/I1)** | extract `may_rejoin`, `resolve`, `classify`; prove leak-freedom + no-foreign-adopt + no-gap-apply | ~3 d | ✅ | ✅ same job |
 | **M3 — continuous soak (Track A)** | promote marathon to `schedule:`/`loop`; "persist failing op sequence as regression" helper | ~2 d | ✅ | ✅ scheduled |
-| **M4 — TLA+ epoch model (I1/I2)** | Spec A (`CommitLog`), invariants, TLC small-config, commit `.tla`+`.cfg`, cross-reference comments in `submit_commit`/`process_pending_commits` | ~1.5–2.5 wk | ✅ (JVM) | ✅ TLC small-config gate |
-| **M5 — TLA+ delivery model + fuzz targets (I3/I4 + Track B)** | Spec B (`Delivery`, retention floor — model *before* the floor code ships); `cargo-fuzz` targets over the §4 pure fns; optional OSS-Fuzz onboarding | ~1.5–2 wk | ✅ | ✅ fuzz smoke + TLC |
+| **M4 — TLA+ epoch model (I1/I2)** | ✅ **Done** (#481): `specs/tla/CommitLog.tla` + sound/teeth cfgs model-check `OnePerEpoch ∧ Gapless ∧ HeadMonotone ∧ NoForeignAdopt` over `Submit`/`Apply`/`ExternalJoin`; cross-ref comments in `submit_commit` (`commit.rs`) + the client apply/gap path (`group_state.rs`); wired into the `tla.yml` gate | ~1.5–2.5 wk | ✅ (JVM) | ✅ TLC small-config gate |
+| **M5 — TLA+ delivery model + fuzz targets (I3/I4 + Track B)** | ✅ **Spec B done** (`specs/tla/Delivery.tla` + teeth cfg, TLC gate `.github/workflows/tla.yml`, #481) — landed before the #539 floor code. ✅ **Track-B `cargo-fuzz` done**: the detached `fuzz/` crate carries a target per §4 pure fn (`next_watermark`/`classify`/`resolve`/`may_rejoin`), each asserting its Kani property with a `--cfg fuzz_mutant` teeth variant + a seed corpus (OSS-Fuzz-eligible), run via `scripts/fuzz-check.sh`. ⏳ **Remaining:** optional OSS-Fuzz onboarding | ~1.5–2 wk | ✅ | ✅ fuzz smoke + TLC |
 
 **Recommended cut if budget is tight:** M0 + M1 + M2 + M3 deliver ~80% of the
 value for ~2 weeks of work — supply-chain assurance, the three highest-consequence

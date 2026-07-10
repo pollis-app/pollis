@@ -12,7 +12,12 @@ mod read;
 mod retention;
 mod send;
 mod types;
-mod watermark;
+// `watermark` (the `next_watermark` pure fn + `EnvKind`) is `pub` — not because
+// any runtime caller needs the module path (they go through `pub use` below), but
+// so the out-of-workspace `fuzz/` crate (Track B, #481) can fuzz the SAME
+// production function Kani proves. Only `next_watermark` / `EnvKind` are `pub`
+// inside it; `is_handled` stays private, so this widens no real API surface.
+pub mod watermark;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 pub use types::{

@@ -1,0 +1,6 @@
+# TLC run output (fingerprints, state graph, error traces) — scratch, never committed
+states/
+*.st
+*.fp
+# TLC error-trace exploration specs (both *.tla and *.bin), for any spec
+*_TTrace_*

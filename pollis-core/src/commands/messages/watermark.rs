@@ -90,6 +90,11 @@ fn is_handled(kind: EnvKind, epoch: Option<u64>, max_fired_epoch: Option<u64>) -
 /// be retried). Generic over the `sent_at` key `S` so the real callers pass
 /// `&str`/`String` while the proofs pass bounded integers (Kani cannot make a
 /// `String` symbolic).
+///
+/// Abstracted by the `Advance` action / `NextWatermark` operator in the TLA+
+/// design model `specs/tla/Delivery.tla` (Spec B, I3+I4; see
+/// `docs/machine-checked-correctness-design.md` §3). Keep the "stop strictly
+/// below the first un-handled envelope" rule here in sync with that spec.
 pub fn next_watermark<S: Ord + Clone>(
     envs: &[(S, EnvKind, Option<u64>)],
     max_fired_epoch: Option<u64>,

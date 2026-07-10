@@ -1,0 +1,71 @@
+# Track-B cargo-fuzz targets over the load-bearing pure functions
+# (machine-checked-correctness §5.1 Track B / §4; #481). Each target fuzzes the
+# SAME production function its Kani harness proves and asserts the SAME property.
+#
+# DETACHED FROM THE ROOT WORKSPACE ON PURPOSE. The repo pins Rust 1.96.0 STABLE
+# via rust-toolchain.toml for reproducible/verifiable release builds; cargo-fuzz
+# needs NIGHTLY. This crate therefore carries its own `[workspace]` table (below)
+# AND is listed in the root `Cargo.toml`'s `workspace.exclude`, so a plain
+# `cargo build` / the pinned-stable release path never sees it. Fuzzing runs OUT
+# OF BAND on nightly (OSS-Fuzz style), NEVER as part of the release build.
+[package]
+name = "pollis-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+# Own workspace root — keeps this crate out of the pinned-stable workspace.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+# Depend on pollis-core with default features OFF so the fuzz crate does not drag
+# in the Tauri/native/media stack — pollis-core builds headless without them, and
+# the pure fns we fuzz have no native dependencies.
+[dependencies.pollis-core]
+path = "../pollis-core"
+default-features = false
+
+# Deliberate-mutant switch (teeth demonstration). OFF by default — the committed
+# targets call the REAL production functions. Turn it on with
+# `--cfg fuzz_mutant` (see scripts/fuzz-check.sh / the fuzz README) to make each
+# target call a locally-reimplemented BUGGY variant; the fuzzer then trips the
+# property fast, proving the harness has teeth.
+[lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = ['cfg(fuzz_mutant)'] }
+
+[profile.release]
+debug = 1
+
+[[bin]]
+name = "next_watermark"
+path = "fuzz_targets/next_watermark.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "classify"
+path = "fuzz_targets/classify.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "resolve"
+path = "fuzz_targets/resolve.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "may_rejoin"
+path = "fuzz_targets/may_rejoin.rs"
+test = false
+doc = false
+bench = false
