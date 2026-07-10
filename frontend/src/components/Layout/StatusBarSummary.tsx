@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useRouter } from "@tanstack/react-router";
 import { Hash, MessageCircle, UserPlus, Mail } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -6,6 +6,7 @@ import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
 import { useAllPendingJoinRequests, usePendingInvites } from "../../hooks/queries/useGroups";
+import { useDMRequests } from "../../hooks/queries/useBlocks";
 
 interface SummaryItemProps {
   icon: React.ReactNode;
@@ -66,6 +67,44 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
   const { data: dmConversations = [] } = useDMConversations();
   const { data: pendingJoinRequests = [] } = useAllPendingJoinRequests();
   const { data: pendingInvites = [] } = usePendingInvites();
+  const { data: dmRequests = [] } = useDMRequests();
+
+  // ── Reconcile pending DM-requests / group-invites into the status-bar alert ──
+  // The bottom-bar alert (AppShell) is otherwise purely event-driven — it's only
+  // ever set from notify.ts when a `dm_created` / `membership_changed` realtime
+  // event lands. Anything that arrived while offline, or before connect_rooms
+  // subscribed the inbox, shows up in the badges above (these queries refetch on
+  // window focus / reconnect and load at cold launch) but never lights the alert.
+  // Mirroring the query result here seeds the alert for whatever the live event
+  // stream missed, with the real inviter / requester name (issue #396).
+  //
+  // The effect re-runs whenever the pending data changes — cold launch (undefined
+  // → loaded), a focus/reconnect refetch that surfaces a new item — so no extra
+  // focus/reconnect plumbing is needed. It only seeds when no alert is already
+  // showing, so a fresher event-driven alert is never clobbered and an alert the
+  // user dismissed isn't re-raised until the next refetch brings genuinely new
+  // pending data.
+  useEffect(() => {
+    if (appStore.statusBarAlert) {
+      return;
+    }
+    const request = dmRequests[0];
+    if (request) {
+      const requester = request.members.find((m) => m.user_id === request.created_by);
+      appStore.setStatusBarAlert({
+        senderUsername: requester?.username ?? "Someone",
+        roomId: request.id,
+      });
+      return;
+    }
+    const invite = pendingInvites[0];
+    if (invite) {
+      appStore.setStatusBarAlert({
+        senderUsername: invite.inviter_username ?? invite.group_name ?? "Someone",
+        roomId: invite.group_id,
+      });
+    }
+  }, [dmRequests, pendingInvites]);
 
   const groupUnread = useMemo(() => {
     let sum = 0;

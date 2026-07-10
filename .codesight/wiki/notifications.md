@@ -102,6 +102,12 @@ if (event.kind === 'invite') {
 
 `group_invite`'s `alert` needs a `senderUsername` to fire the status-bar alert (the gate is `alert && roomId && senderUsername`). Both the invite and DM-request pings carry the counterparty's public username on the wire — see the payload note below. Before #396 the DM-request alert showed a `'New DM'` placeholder and group invites raised no status-bar alert at all.
 
+### Startup / offline reconcile (#396)
+
+`notify()` is the *only* thing that sets the status-bar alert, and it fires exclusively off a live realtime event. So a pending DM-request / group-invite that landed while the app was closed — or before `connect_rooms` subscribed the inbox room — shows up in the bottom-bar badges (`StatusBarSummary` mounts `useDMRequests` / `usePendingInvites`, both `refetchOnWindowFocus`) but never lights the alert.
+
+`StatusBarSummary` closes this gap with a small reconcile effect that mirrors "has a pending DM-request / group-invite" into `setStatusBarAlert(...)`, naming the real requester / inviter. It reuses the already-mounted, focus/reconnect-refetching queries — no extra focus/reconnect plumbing — so it re-evaluates at cold launch and whenever a refetch surfaces a new item. It only seeds when no alert is already showing, so a fresher event-driven alert is never clobbered and a dismissed alert isn't re-raised until the next refetch brings genuinely new pending data.
+
 ## Pref + permission flow
 
 `useLiveKitRealtime.ts` owns the React-side state and pushes it into `notify.ts` via `setNotifyPrefs(...)`. The effect re-runs whenever `allow_sound_effects` or `allow_desktop_notifications` changes:
