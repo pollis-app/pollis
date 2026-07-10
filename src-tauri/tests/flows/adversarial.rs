@@ -16,8 +16,8 @@
 //! leaf would fail the decrypt assertions — those are the load-bearing checks.
 
 use crate::harness::{
-    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, wipe, writable_remote, DsFault,
-    TestClient,
+    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, prune_commits_below, wipe,
+    writable_remote, DsFault, TestClient,
 };
 use serial_test::serial;
 
@@ -770,6 +770,133 @@ async fn epoch_gap_recovers_via_external_join() {
     assert!(
         contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
         "dave must decrypt post-recovery traffic — the group forked at the gap otherwise"
+    );
+
+    drop(alice);
+    drop(bob);
+    drop(carol);
+    drop(dave);
+}
+
+// ─── Scenario 2c — commit-log RETENTION prune recovers via external-join (#539) ─
+
+/// **Invariant it exercises:** the I4 retention floor (#539). The DS prunes
+/// `mls_commit_log` below a floor to bound storage; a member pruned PAST its
+/// epoch must not wedge — it drops its stale local group and external-joins onto
+/// the head, forfeiting ONLY the pruned-gap messages (accepted loss #1). A member
+/// that was REMOVED from the group must NOT climb back via that same recovery
+/// (may_rejoin / I5 holds even for a pruned gap).
+///
+/// This is the client-side complement to the DS-side floor unit tests
+/// (`pollis-delivery/tests/retention.rs`): those prove the floor is never above
+/// the slowest current member (Tier 1) + Tier 2's hard cap; this proves the
+/// CLIENT recovers when Tier 2 does prune past it, and that recovery stays gated
+/// on current membership.
+///
+/// Sequence (bob is the straggler, carol is removed, dave is continuous):
+///   commit epoch 0: bob add    (head 1)  — bob's local epoch becomes 1, offline
+///   msg  "M1"       at epoch 1  — decrypted by bob's interleave hook on return
+///   commit epoch 1: carol add  (head 2)
+///   msg  "M2"       at epoch 2  — sent while bob offline; in the PRUNED gap
+///   commit epoch 2: carol remove(head 3)
+///   commit epoch 3: dave add   (head 4)
+/// Then prune every commit below epoch 3 (Tier-2 style) → the log holds only
+/// epoch 3. bob (epoch 1) and carol (epoch 2, removed) both read epoch 3 first.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn commit_log_prune_recovers_via_external_join() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+    let mut dave = TestClient::new().await;
+
+    let _alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+    let carol_p = carol.sign_up("carol@test.local").await;
+    let dave_p = dave.sign_up("dave@test.local").await;
+
+    let group_id = alice.create_group("Prune").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    // Bob joins at commit epoch 0 (head 1); his MLS epoch is 1. He goes offline.
+    join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
+
+    // Churn while bob is offline. Carol joins at commit epoch 1 (head 2); a
+    // message is then sent at epoch 2 — this is the one that lands in bob's
+    // pruned gap. Carol is removed at commit epoch 2 (head 3), dave added at
+    // commit epoch 3 (head 4).
+    join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    alice.send_channel_message(&channel_id, "M2-in-pruned-gap").await;
+    alice.remove_member(&group_id, carol_p.id.as_str()).await;
+    alice.process_commits_for(&channel_id).await;
+    join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
+
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        4,
+        "expected head epoch 4 after bob/carol add, carol remove, dave add"
+    );
+
+    // Prune the whole prefix below epoch 3 — the retention floor advanced past
+    // both bob (epoch 1) and the removed carol (epoch 2). The log now holds only
+    // epoch 3, so a member replaying from below sees epoch 3 first.
+    let pruned = prune_commits_below(&group_id, 3).await;
+    assert_eq!(pruned, 3, "epochs 0,1,2 pruned; only epoch 3 remains");
+    assert_eq!(
+        ds_head_epoch(&group_id).await,
+        4,
+        "pruning below the head must not change MAX(epoch)+1"
+    );
+
+    // ── Bob (a CURRENT member) recovers via external-join, losing ONLY the gap ──
+    let bob_after = contents(&bob, &channel_id).await;
+    assert!(
+        bob_after.contains(&"M1-at-join-epoch".to_string()),
+        "bob keeps the message at his join epoch (decrypted before the gap), got: {bob_after:?}"
+    );
+    assert!(
+        !bob_after.contains(&"M2-in-pruned-gap".to_string()),
+        "bob must NOT recover the message sealed in the pruned gap (accepted loss #1), got: {bob_after:?}"
+    );
+
+    // Alice applies bob's recovery external-join, then sends fresh traffic.
+    alice.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "after-recovery").await;
+
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        members.contains(&bob_p.id),
+        "bob must be a current member after prune recovery, got: {members:?}"
+    );
+    assert!(
+        contents(&bob, &channel_id).await.contains(&"after-recovery".to_string()),
+        "bob must decrypt post-recovery traffic — he wedged on the pruned gap otherwise"
+    );
+
+    // Dave (continuous member) converges on the head too.
+    dave.process_commits_for(&channel_id).await;
+    assert!(
+        contents(&dave, &channel_id).await.contains(&"after-recovery".to_string()),
+        "dave must decrypt post-recovery traffic — the group forked at the prune otherwise"
+    );
+
+    // ── Carol (REMOVED) must NOT climb back via the same recovery (I5) ──
+    // Her catch-up hits the same pruned gap, but may_rejoin gates the
+    // external-join on current membership, which she lacks.
+    let _ = contents(&carol, &channel_id).await;
+    alice.process_commits_for(&channel_id).await;
+    let members = alice.group_member_ids(&group_id).await;
+    assert!(
+        !members.contains(&carol_p.id),
+        "REMOVED carol must NOT rejoin the tree via prune-gap recovery (I5), got: {members:?}"
+    );
+    alice.send_channel_message(&channel_id, "post-removal-secret").await;
+    assert!(
+        !contents(&carol, &channel_id).await.contains(&"post-removal-secret".to_string()),
+        "removed carol must not decrypt post-removal traffic after a prune-gap recovery attempt"
     );
 
     drop(alice);

@@ -431,6 +431,72 @@ async fn delivery_submit(
     }
 }
 
+/// `GET /v1/commits/:conversation_id?since=[&user_id=&device_id=]` — serve the
+/// contiguous commit log, and (when `user_id`+`device_id` are present) record the
+/// reporting device's catch-up high-water + run the event-driven retention prune
+/// (#539). Mirrors production `pollis_delivery::commits`: reads are open, the
+/// record+prune is best-effort. Membership is read on MAIN, the log on LOG.
+#[derive(serde::Deserialize)]
+struct HarnessSince {
+    #[serde(default)]
+    since: i64,
+    #[serde(default)]
+    user_id: Option<String>,
+    #[serde(default)]
+    device_id: Option<String>,
+}
+
+async fn delivery_commits_get(
+    axum::extract::State(state): axum::extract::State<DsState>,
+    axum::extract::Path(conversation_id): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<HarnessSince>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let conn = match state.log.conn().await {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("conn: {e}")),
+    };
+
+    if let (Some(user_id), Some(device_id)) = (q.user_id.as_deref(), q.device_id.as_deref()) {
+        if !user_id.is_empty() && !device_id.is_empty() {
+            if pollis_delivery::commit::record_commit_since(
+                &conn,
+                &conversation_id,
+                user_id,
+                device_id,
+                q.since,
+            )
+            .await
+            .is_ok()
+            {
+                if let Ok(main_conn) = state.main.conn().await {
+                    let _ = pollis_delivery::commit::prune_commit_log(
+                        &main_conn,
+                        &conn,
+                        &conversation_id,
+                    )
+                    .await;
+                }
+            }
+        }
+    }
+
+    let head = match pollis_delivery::commit::head_epoch(&conn, &conversation_id).await {
+        Ok(h) => h,
+        Err(e) => return ds_internal_error(format!("head_epoch: {e}")),
+    };
+    let commits = match pollis_delivery::commit::fetch_commits(&conn, &conversation_id, q.since).await
+    {
+        Ok(c) => c,
+        Err(e) => return ds_internal_error(format!("fetch_commits: {e}")),
+    };
+    (
+        axum::http::StatusCode::OK,
+        axum::Json(pollis_delivery::commit::CommitsResponse { head, commits }),
+    )
+        .into_response()
+}
+
 /// `POST /v1/group-info` (W4) — republish GroupInfo, authed user must be a
 /// current member of the conversation. Reuses the real `pollis_delivery::writes`
 /// handlers against the shared connection.
@@ -1969,6 +2035,10 @@ async fn spawn_in_process_delivery(main: Arc<RemoteDb>, log: Arc<RemoteDb>) -> S
             rt.block_on(async move {
                 let router = axum::Router::new()
                     .route("/v1/commits", axum::routing::post(delivery_submit))
+                    .route(
+                        "/v1/commits/:conversation_id",
+                        axum::routing::get(delivery_commits_get),
+                    )
                     .route("/v1/group-info", axum::routing::post(delivery_group_info))
                     .route("/v1/welcomes/ack", axum::routing::post(delivery_welcomes_ack))
                     .route(
@@ -2212,6 +2282,29 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
          {conversation_id} to delete, deleted {affected} — the gap scenario's \
          setup is wrong (no such epoch, or a duplicate row)"
     );
+}
+
+/// Prune the commit log below `floor` (EXCLUSIVE) via the REAL DS retention
+/// DELETE (`pollis_delivery::commit::delete_commits_below`) — the exact statement
+/// the event-driven prune runs (#539). Models a Tier-2 prune whose floor has
+/// advanced PAST a straggler: a member below `floor` then reads an
+/// earliest-available epoch above its own, trips the append-only gap detector in
+/// `process_pending_commits`, and recovers via external-join. Returns the number
+/// of commit rows pruned (asserted non-zero — a no-op would prove nothing).
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u64 {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for prune_commits_below");
+    let pruned = pollis_delivery::commit::delete_commits_below(&conn, conversation_id, floor)
+        .await
+        .expect("delete_commits_below");
+    assert!(
+        pruned > 0,
+        "prune_commits_below: expected to prune at least one commit below epoch \
+         {floor} for {conversation_id}, pruned 0 — the scenario's setup is wrong"
+    );
+    pruned
 }
 
 /// The Delivery Service's head epoch for a conversation — `MAX(epoch) + 1` over

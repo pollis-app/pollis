@@ -409,8 +409,10 @@ pub async fn wipe_remote(
     ];
     wipe_tables(remote, &main_tables).await?;
 
-    // LOG DB: the three MLS control-plane tables live here and ONLY here.
+    // LOG DB: the three MLS control-plane tables live here and ONLY here, plus
+    // the per-device retention high-water (`mls_commit_since`, #539).
     wipe_tables(log, &LOG_TABLES).await?;
+    wipe_tables(log, &["mls_commit_since"]).await?;
 
     Ok(())
 }

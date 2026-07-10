@@ -1205,7 +1205,46 @@ async fn process_pending_commits_locked_impl(
         }
     }
 
+    // Retention signal (#539, I4): report this device's now-current applied MLS
+    // epoch so the DS can compute the commit-log prune floor from the SLOWEST
+    // current member (Tier 1, zero loss — Spec B `NoLossForCurrentMember`).
+    // Best-effort + event-driven (fires on catch-up, never polls); a failed or
+    // skipped report only leaves the floor conservative (Tier 2's cap still bounds
+    // storage). Read the final epoch from the local group so it reflects both a
+    // normal replay and an external-join recovery above.
+    report_applied_epoch(state, mls_group_id, user_id).await;
+
     Ok(())
+}
+
+/// Read this device's current local MLS epoch for `mls_group_id` and report it to
+/// the DS as the retention high-water (`ds_client::ds_report_commit_since`). No-op
+/// when there is no local group (nothing applied to report). See #539.
+///
+/// The report is DETACHED (`tokio::spawn`): it must never hold the per-conversation
+/// MLS lock across a network round-trip, so a slow/unreachable DS can't stall
+/// catch-up. Fully best-effort — the spawned task swallows every error.
+async fn report_applied_epoch(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) {
+    let epoch = {
+        let guard = state.local_db.lock().await;
+        guard.as_ref().and_then(|db| {
+            let provider = PollisProvider::new(db.conn());
+            let group_id = GroupId::from_slice(mls_group_id.as_bytes());
+            MlsGroup::load(provider.storage(), &group_id)
+                .ok()
+                .flatten()
+                .map(|g| g.epoch().as_u64())
+        })
+    };
+    if let Some(epoch) = epoch {
+        let state = Arc::clone(state);
+        let conversation_id = mls_group_id.to_string();
+        let user_id = user_id.to_string();
+        tokio::spawn(async move {
+            super::ds_client::ds_report_commit_since(&state, &conversation_id, &user_id, epoch as i64)
+                .await;
+        });
+    }
 }
 
 /// Tauri command wrapper — resolves conversation_id to MLS group ID, then runs

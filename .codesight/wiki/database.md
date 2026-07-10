@@ -228,6 +228,41 @@ desktop-release workflow's second `db-apply` step (`MIGRATIONS_DIR=…/migration
 - `updated_at` TEXT NOT NULL DEFAULT now
 - `updated_by_device_id` TEXT NOT NULL
 
+### mls_commit_since _(commit-log-DB migration 000003, #539)_
+Per-device commit-log catch-up high-water — the signal the **retention floor** is
+computed from. On its catch-up a client reports the epoch it is caught up FROM
+(its current local MLS epoch); the DS records it and prunes `mls_commit_log` below
+the floor. Lives on the commit-log DB; the DS is the sole writer.
+- `conversation_id` TEXT NOT NULL
+- `user_id` TEXT NOT NULL _(FK users dropped — cross-DB, like the sibling log tables)_
+- `device_id` TEXT NOT NULL
+- `since_epoch` INTEGER NOT NULL _(the device's applied MLS epoch; it still needs commits `>= this`)_
+- `updated_at` TEXT NOT NULL DEFAULT now
+- PRIMARY KEY `(conversation_id, user_id, device_id)`; INDEX `idx_mls_commit_since_conv` on `(conversation_id)`
+
+**Retention floor (I4, #539).** Without pruning, `mls_commit_log` grows with
+membership-churn × time. The DS (sole writer) prunes commits below a floor,
+event-driven on commit-append (`POST /v1/commits`) and on a device's catch-up
+report (`GET /v1/commits/:id?since=&user_id=&device_id=`) — never on a timer.
+Two tiers (`pollis_delivery::commit::prune_floor`, modelled in
+`specs/tla/Delivery.tla` Spec B):
+- **Tier 1 (zero loss):** floor = MIN applied epoch across all CURRENT member
+  devices, minus a small slack. Everyone still needs commits `>= that`, so nothing
+  anyone is waiting on is deleted — the spec's `NoLossForCurrentMember` (guarded by
+  the SLOWEST member, never the fastest). Only applied when the WHOLE roster has
+  reported; an unreported/legacy member pins the floor at 0. A revoked device is
+  excluded (it can't rejoin — I5).
+- **Tier 2 (hard cap):** floor = `head − PRUNE_MAX_BEHIND_HEAD`, bounding storage +
+  catch-up even against a perpetually-offline device. A member pruned past its epoch
+  reads an earliest-available epoch above its own, trips the client gap detector
+  (`invariants::classify` → `GapRecover`), and external-joins at head — forfeiting
+  only the pruned-gap messages (accepted loss #1). `may_rejoin` (I5) still blocks a
+  removed/revoked device from that rejoin.
+
+Distinct from `conversation_watermark` (main DB), which tracks message-envelope
+FETCH progress, not applied MLS epoch — the two GC floors are computed
+independently.
+
 ### account_recovery _(migration 13)_
 - `user_id` TEXT PK FK users
 - `identity_version` INTEGER NOT NULL
