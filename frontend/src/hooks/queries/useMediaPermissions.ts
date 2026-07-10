@@ -53,6 +53,15 @@ export function useMediaPermissions() {
 }
 
 /**
+ * Deep-link to the OS privacy settings for a media kind (issue #434). An app
+ * cannot grant/revoke its own OS grant — this just takes the user there. Rejects
+ * on Linux (no per-application privacy model) and for unknown kinds.
+ */
+export async function openPrivacySettings(kind: "camera" | "microphone"): Promise<void> {
+  await invoke("open_privacy_settings", { kind });
+}
+
+/**
  * Revoke the OS permission(s) for the given kinds, then refetch the live
  * status. On macOS this clears the saved grant (macOS re-prompts next use);
  * on Linux it's a no-op success; on Windows it opens the privacy settings.

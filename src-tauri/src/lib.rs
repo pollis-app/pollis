@@ -416,6 +416,7 @@ pub fn run() {
             tray::tray_set_enabled,
             tray::tray_set_voice_state,
             commands::media_permissions::get_media_permission_status,
+            commands::media_permissions::open_privacy_settings,
             commands::media_permissions::revoke_media_permissions,
             commands::media_permissions::set_revoke_media_on_exit,
             commands::auth::initialize_identity,

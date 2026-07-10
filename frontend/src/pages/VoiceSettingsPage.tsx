@@ -20,6 +20,7 @@ import type { AudioDevice } from "../types";
 import { cameraSession, LOCAL_CAMERA_PREVIEW_KEY, friendlyCameraError } from "../camera/cameraSession";
 import type { CameraSource } from "../camera/types";
 import { RemoteVideoTile } from "../components/Voice/RemoteVideoTile";
+import { useMediaPermissions, openPrivacySettings, type PermissionState } from "../hooks/queries/useMediaPermissions";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
 const CAMERA_DEVICE_KEY = "pollis:camera-device";
@@ -134,6 +135,42 @@ const ScreenShareFpsSelect: React.FC<ScreenShareFpsSelectProps> = ({ value, onCh
   </div>
 );
 
+const PERMISSION_LABEL: Record<PermissionState, string> = {
+  granted: "✅ Granted",
+  denied: "⛔ Denied",
+  notDetermined: "— Not requested",
+  perSession: "Managed by the system",
+  unsupported: "Unavailable",
+};
+
+/** One camera/mic permission row: status + a deep-link to System Settings.
+ *  An app can't grant/revoke its own OS grant — only the user can — so the
+ *  action is always "take me there", never an in-app toggle (issue #434). The
+ *  deep-link only exists where the OS has a per-app privacy model (macOS /
+ *  Windows); on Linux (`perSession`) there's nothing to link to. */
+const PermissionRow: React.FC<{ label: string; state: PermissionState; onManage: () => void }> = ({
+  label,
+  state,
+  onManage,
+}) => {
+  const deepLinkable = state === "granted" || state === "denied" || state === "notDetermined";
+  return (
+    <div className="flex items-center justify-between gap-3" style={{ maxWidth: 320 }}>
+      <div className="flex flex-col">
+        <span style={{ color: "var(--c-text)" }}>{label}</span>
+        <span className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+          {PERMISSION_LABEL[state]}
+        </span>
+      </div>
+      {deepLinkable && (
+        <Button variant="secondary" size="sm" onClick={onManage}>
+          Manage in System Settings
+        </Button>
+      )}
+    </div>
+  );
+};
+
 const selectStyle: React.CSSProperties = {
   appearance: "none",
   WebkitAppearance: "none",
@@ -225,6 +262,10 @@ export const VoiceSettingsPage: React.FC = () => {
     try { return localStorage.getItem(CAMERA_DEVICE_KEY) || ""; } catch { return ""; }
   });
   const [cameraError, setCameraError] = useState<string | null>(null);
+
+  // OS camera/mic permission status (issue #434) — refetches on window focus, so
+  // returning from System Settings reflects the change without a manual refresh.
+  const permissions = useMediaPermissions();
 
   const startCameraPreview = (id: string) => {
     setCameraError(null);
@@ -361,6 +402,27 @@ export const VoiceSettingsPage: React.FC = () => {
             </>
           )}
         </section>
+
+        {permissions.data && (
+          <section className="flex flex-col gap-4 mb-12" data-testid="voice-permissions-section">
+            <h2
+              className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+              style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+            >
+              Permissions
+            </h2>
+            <PermissionRow
+              label="Camera"
+              state={permissions.data.camera}
+              onManage={() => { void openPrivacySettings("camera"); }}
+            />
+            <PermissionRow
+              label="Microphone"
+              state={permissions.data.microphone}
+              onManage={() => { void openPrivacySettings("microphone"); }}
+            />
+          </section>
+        )}
 
         <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">
           <h2
