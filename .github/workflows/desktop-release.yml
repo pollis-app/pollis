@@ -47,17 +47,9 @@ jobs:
 
   build-macos:
     needs: preflight
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-
-      # PR #544 ships a macOS 26 Icon Composer `.icon`, which only `actool` from
-      # Xcode 26+ can compile into Assets.car. The macos-15 image defaults to
-      # Xcode 16.4, whose actool fails ("failed to run actool") on the .icon, so
-      # select Xcode 26 explicitly. Pinned to an exact version (not "latest") to
-      # keep the macOS build recipe stable, matching the pinned rustc below.
-      - name: Select Xcode 26 (Icon Composer .icon support)
-        run: sudo xcode-select -s /Applications/Xcode_26.3.app
 
       - uses: pnpm/action-setup@v4
 

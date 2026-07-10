@@ -46,7 +46,7 @@
       "icons/icon.png",
       "icons/icon.ico",
       "icons/AppIcon.icns",
-      "icons/logo-lock-2.icon"
+      "icons/Assets.car"
     ],
     "macOS": {
       "signingIdentity": "Developer ID Application: Daniel Kral (9JF7WWYMU2)",
