@@ -17,7 +17,7 @@
     "build:tauri:windows": "sh -c 'if [ -f .env.development ]; then set -a; . ./.env.development; set +a; fi; pnpm tauri build --target x86_64-pc-windows-msvc'"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/node": "^22.10.5",
     "wrangler": "^4.76.0"
   },

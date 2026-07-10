@@ -45,7 +45,8 @@
       "icons/128x128@2x.png",
       "icons/icon.png",
       "icons/icon.ico",
-      "icons/AppIcon.icns"
+      "icons/AppIcon.icns",
+      "icons/logo-lock-2.icon"
     ],
     "macOS": {
       "signingIdentity": "Developer ID Application: Daniel Kral (9JF7WWYMU2)",
