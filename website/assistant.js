@@ -17,9 +17,26 @@
 // paraphrase can be routed to a doc-exact canned answer only above a validated high-precision cosine
 // floor. The result stays fully extractive and cited.
 
-import corpusDoc from './assistant-corpus.json' with { type: 'json' };
-import answersDoc from './assistant-answers.json' with { type: 'json' };
-import vectorsDoc from './assistant-vectors.json' with { type: 'json' };
+// Load the static data at runtime rather than via `import ... with { type: 'json' }`:
+// JSON-module import attributes only became cross-browser Baseline in mid-2025, and an
+// unsupported engine turns that import into a parse error that kills the ENTIRE module —
+// defeating the always-on lexical floor. A same-origin fetch (top-level await, Baseline
+// since 2021) loads the identical files on every browser. Resolved against import.meta.url
+// so the path is correct regardless of the page's URL; a failed fetch degrades to empty
+// data (the widget still renders and simply abstains) instead of throwing.
+const loadJSON = async (rel) => {
+  try {
+    const res = await fetch(new URL(rel, import.meta.url));
+    return res.ok ? await res.json() : {};
+  } catch {
+    return {};
+  }
+};
+const [corpusDoc, answersDoc, vectorsDoc] = await Promise.all([
+  loadJSON('./assistant-corpus.json'),
+  loadJSON('./assistant-answers.json'),
+  loadJSON('./assistant-vectors.json'),
+]);
 import { cosine, decodeI8Unit, loadExtractor, embed } from './assistant-embed.js';
 
 const CORPUS = Array.isArray(corpusDoc.chunks) ? corpusDoc.chunks : [];
