@@ -16,6 +16,7 @@ import React, { useEffect, useRef, useSyncExternalStore } from "react";
 import { hasElectron } from "../../bridge";
 import { livekitView } from "../../screenshare/livekitView";
 import { LOCAL_PREVIEW_KEY, screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
+import { LOCAL_CAMERA_PREVIEW_KEY } from "../../camera/cameraSession";
 
 interface Props {
   trackKey: string;
@@ -29,6 +30,9 @@ interface Props {
    *  rendering. Ignored under Electron (the browser already throttles
    *  hidden/offscreen video). */
   preview?: boolean;
+  /** Horizontally flip the rendered image. Used for a self-view (your own
+   *  webcam) so it reads like a mirror — never for remote participants. */
+  mirror?: boolean;
 }
 
 const PREVIEW_MIN_PAINT_INTERVAL_MS = 1000 / 15;
@@ -54,6 +58,7 @@ const RemoteVideoTileElectron: React.FC<Props> = ({
   className,
   initialWidth,
   initialHeight,
+  mirror,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -159,6 +164,7 @@ const RemoteVideoTileElectron: React.FC<Props> = ({
         height: "auto",
         background: "#000",
         objectFit: "contain",
+        transform: mirror ? "scaleX(-1)" : undefined,
       }}
     />
   );
@@ -309,6 +315,7 @@ const RemoteVideoTileTauri: React.FC<Props> = ({
   initialWidth,
   initialHeight,
   preview = false,
+  mirror,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const glRef = useRef<GLBundle | null>(null);
@@ -434,6 +441,7 @@ const RemoteVideoTileTauri: React.FC<Props> = ({
         width: "auto",
         height: "auto",
         background: "#000",
+        transform: mirror ? "scaleX(-1)" : undefined,
       }}
     />
   );
@@ -442,8 +450,13 @@ const RemoteVideoTileTauri: React.FC<Props> = ({
 // ── Dispatch ────────────────────────────────────────────────────────────────
 
 export const RemoteVideoTile: React.FC<Props> = (props) => {
+  // Auto-mirror the local camera self-view (your own webcam) so it reads like a
+  // mirror — both the in-call self-preview and the settings preview render
+  // through here under LOCAL_CAMERA_PREVIEW_KEY. Explicit `mirror` still wins.
+  const mirror = props.mirror ?? props.trackKey === LOCAL_CAMERA_PREVIEW_KEY;
+  const p = { ...props, mirror };
   if (hasElectron()) {
-    return <RemoteVideoTileElectron {...props} />;
+    return <RemoteVideoTileElectron {...p} />;
   }
-  return <RemoteVideoTileTauri {...props} />;
+  return <RemoteVideoTileTauri {...p} />;
 };

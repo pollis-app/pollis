@@ -17,12 +17,17 @@ import {
 import { useVoiceTest } from "../hooks/useVoiceTest";
 import { voiceSession } from "../voice";
 import type { AudioDevice } from "../types";
+import { cameraSession, LOCAL_CAMERA_PREVIEW_KEY, friendlyCameraError } from "../camera/cameraSession";
+import type { CameraSource } from "../camera/types";
+import { RemoteVideoTile } from "../components/Voice/RemoteVideoTile";
 
 const VOICE_DEVICES_KEY = "pollis:voice-devices";
+const CAMERA_DEVICE_KEY = "pollis:camera-device";
 
 interface DeviceSelectProps {
   label: string;
-  devices: AudioDevice[];
+  // Structural `{ id, name }` so both AudioDevice and CameraSource fit.
+  devices: { id: string; name: string }[];
   value: string;
   onChange: (id: string) => void;
   fallbackLabel: string;
@@ -211,6 +216,54 @@ export const VoiceSettingsPage: React.FC = () => {
     }
   };
 
+  // ── Camera (issue #434) ───────────────────────────────────────────────────
+  // Live self-preview via the preview-only capture path (no call, nothing
+  // published). Frames mirror to LOCAL_CAMERA_PREVIEW_KEY; RemoteVideoTile
+  // renders + auto-mirrors them. Start on mount / device change, stop on leave.
+  const [cameras, setCameras] = useState<CameraSource[]>([]);
+  const [selectedCamera, setSelectedCameraState] = useState<string>(() => {
+    try { return localStorage.getItem(CAMERA_DEVICE_KEY) || ""; } catch { return ""; }
+  });
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const startCameraPreview = (id: string) => {
+    setCameraError(null);
+    cameraSession.startPreview(id).catch((e) => {
+      setCameraError(friendlyCameraError(String(e)));
+    });
+  };
+
+  const setCamera = (id: string) => {
+    setSelectedCameraState(id);
+    try { localStorage.setItem(CAMERA_DEVICE_KEY, id); } catch { /* ignore */ }
+    startCameraPreview(id);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    cameraSession
+      .listDevices()
+      .then(({ cameras }) => {
+        if (cancelled) { return; }
+        setCameras(cameras);
+        if (cameras.length === 0) { return; }
+        // Preview the saved camera if still present, else the first one.
+        const initial = cameras.some((c) => c.id === selectedCamera)
+          ? selectedCamera
+          : cameras[0].id;
+        setSelectedCameraState(initial);
+        startCameraPreview(initial);
+      })
+      .catch((e) => {
+        if (!cancelled) { setCameraError(friendlyCameraError(String(e))); }
+      });
+    return () => {
+      cancelled = true;
+      void cameraSession.stopPreview();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /**
    * Persist a partial preference change and push the resulting APM config to
    * the backend so mid-call changes take effect immediately.
@@ -264,6 +317,49 @@ export const VoiceSettingsPage: React.FC = () => {
             onChange={setOutput}
             fallbackLabel="Default speaker"
           />
+        </section>
+
+        <section className="flex flex-col gap-4 mb-12" data-testid="voice-camera-section">
+          <h2
+            className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+            style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+          >
+            Camera
+          </h2>
+          {cameras.length === 0 ? (
+            <span style={{ color: "var(--c-text-muted)" }}>No camera detected.</span>
+          ) : (
+            <>
+              <DeviceSelect
+                label="Camera"
+                devices={cameras}
+                value={selectedCamera}
+                onChange={setCamera}
+                fallbackLabel="No camera"
+              />
+              {/* Live self-preview (mirrored). 16:9 letterbox; RemoteVideoTile
+                  contains within it and auto-mirrors LOCAL_CAMERA_PREVIEW_KEY. */}
+              <div
+                data-testid="voice-camera-preview"
+                className="flex items-center justify-center overflow-hidden rounded"
+                style={{
+                  width: "100%",
+                  maxWidth: 320,
+                  aspectRatio: "16 / 9",
+                  background: "#000",
+                  border: "1px solid var(--c-border)",
+                }}
+              >
+                {cameraError ? (
+                  <span className="px-3 text-center text-sm" style={{ color: "var(--c-text-muted)" }}>
+                    {cameraError}
+                  </span>
+                ) : (
+                  <RemoteVideoTile trackKey={LOCAL_CAMERA_PREVIEW_KEY} />
+                )}
+              </div>
+            </>
+          )}
         </section>
 
         <section className="flex flex-col gap-5 mb-12" data-testid="voice-test-section">
