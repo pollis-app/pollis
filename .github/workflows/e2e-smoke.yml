@@ -14,6 +14,9 @@ name: E2E smoke (login screen)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   smoke:
     # Same rationale as mls-tests.yml: src-tauri/build.rs compiles

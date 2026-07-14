@@ -23,6 +23,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: read
+
 jobs:
   # Resolve the version once so every build/publish job agrees. Uses the
   # dispatch input when given, else the [workspace.package] version in the

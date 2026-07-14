@@ -48,6 +48,9 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
 # Pinned so the reproduced key can never silently change under us.
 env:
   VERIFY_BASE_URL: "https://verify.pollis.com"
