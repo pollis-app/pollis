@@ -112,7 +112,7 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 | Workflow | Does |
 |---|---|
 | `attest-release.yml` | Backfills the binary-transparency attest step for an **already-published tag** — no rebuild (~2 min vs a ~40 min release). Deliberately duplicates `desktop-release.yml`'s built-in `attest-and-log` job: same `scripts/attest-binaries.sh`, the tag's commit timestamp, the published release assets. Idempotent — a tag already in the accumulator is a no-op. |
-| `rebuild-verify.yml` | The **third-party reproducer** (#484): rebuilds a released tag's Linux AppImage from public source with **no Pollis secrets** — runnable from a fork — and asserts the payload hash against the transparency log, trusting only the pinned Ed25519 log key. Always proves **log inclusion**; bit-for-bit **reproduction** additionally needs the published build recipe supplied as non-secret repo `vars` (some `option_env!` values are still secret — see `docs/reproducible-builds-residuals.md`). |
+| `rebuild-verify.yml` | The **third-party reproducer** (#484): rebuilds a released tag's Linux AppImage from public source with **no Pollis secrets** — runnable from a fork — and asserts the payload hash against the transparency log, trusting only the pinned Ed25519 log key. Log inclusion is verified in its own job (`verify-log-inclusion`), independent of the rebuild; bit-for-bit **reproduction** additionally needs the published build recipe supplied as non-secret repo `vars` (since #506 the only secret-shaped `option_env!` value left is the optional `LOG_DB_TOKEN` — see `docs/reproducible-builds-residuals.md`). |
 
 ---
 
