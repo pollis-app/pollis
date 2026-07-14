@@ -97,8 +97,14 @@ jobs:
 
             # verify one conversation's commit chain (use a conversation id, not a name)
             ./pollis-verify-<platform> group https://verify.pollis.com <CONVERSATION_ID>
+
+            # verify a user's account-key history chain (identity-key versions)
+            ./pollis-verify-<platform> account https://verify.pollis.com <USER_ID>
+
+            # verify a released version's binaries against the transparency log
+            ./pollis-verify-<platform> release https://verify.pollis.com v1.3.0
             ```
             Exit code is non-zero if any check fails. Add `--json` to
-            `group` for machine-readable output.
+            `group`, `account`, or `release` for machine-readable output.
 
             Verify the download against the matching `*.sha256` file.
