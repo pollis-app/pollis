@@ -48,8 +48,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Must match the rust-toolchain.toml pin: cargo resolves the toolchain
+      # from that file, so a floating @stable here installs the cross target
+      # (x86_64-apple-darwin) into the WRONG toolchain and the build dies with
+      # E0463 "can't find crate for `core`".
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.96.0
         with:
           targets: ${{ matrix.target }}
 
