@@ -90,6 +90,12 @@
       text-decoration-color: var(--c-accent);
     }
 
+    .kt-explainer code {
+      font-family: inherit;
+      color: var(--c-text);
+      word-break: break-all;
+    }
+
     .kt-form {
       display: flex;
       gap: 0.75rem;
@@ -291,11 +297,16 @@
 
       <div class="kt-explainer">
         This page is a <strong>live demonstration</strong>. You don't have to take our word for it —
-        you can check the same proof yourself: run our
-        <a href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve" target="_blank"
-          rel="noopener noreferrer">open-source command-line tool</a>, or query our
+        you can check the same proof yourself:
+        <a href="https://github.com/actuallydan/pollis/releases" target="_blank"
+          rel="noopener noreferrer">download the open-source <code>pollis-verify</code> tool</a>
+        (tags <code>pollis-verify-v*</code>, <a
+          href="https://github.com/actuallydan/pollis/blob/main/docs/verify-transparency-log.md"
+          target="_blank" rel="noopener noreferrer">guide here</a>), or query our
         <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
           rel="noopener noreferrer">public verification API</a> directly (rate limits apply).
+        The only thing you have to trust is the log's pinned Ed25519 public key:
+        <code>175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148</code>
       </div>
 
       <form class="kt-form" id="kt-form">
