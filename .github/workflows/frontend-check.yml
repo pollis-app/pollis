@@ -1,0 +1,44 @@
+name: Frontend check
+
+# Fast typecheck gate for the renderer (frontend/, React + TS + Vite). Until
+# now nothing gated frontend code on PRs — a tsc break could merge to main and
+# only surface at release time (documented gap in docs/deployments.md). This
+# job is deliberately minimal so it stays fast: a filtered pnpm install of the
+# frontend package only, then plain `tsc` (the tsconfig sets noEmit, so it's a
+# pure typecheck) — NO vite build, no artifacts.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      # cache: "pnpm" caches the pnpm content-addressable store keyed on
+      # pnpm-lock.yaml, so warm runs skip nearly all downloads.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+
+      # --filter ./frontend... installs only the frontend package (+ workspace
+      # deps) instead of the whole workspace — skips e2e and pollis-delivery.
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile --filter ./frontend...
+
+      # Pure typecheck: frontend/tsconfig.json has noEmit, so `tsc` emits
+      # nothing and just fails on type errors (~3s).
+      - name: Typecheck
+        run: pnpm --filter frontend exec tsc
