@@ -1,7 +1,7 @@
 name: Transparency Verifier CLI
 
-# Builds the standalone transparency-log verifier CLI (the `serve` binary's
-# `verify-remote` / `verify-group` subcommands) so security analysts can verify
+# Builds the standalone `pollis-verify` auditor CLI (`remote` / `group` /
+# `account` / `release` subcommands) so security analysts can verify
 # https://verify.pollis.com themselves, from their own machine.
 #
 # Trigger:

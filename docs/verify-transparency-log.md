@@ -42,7 +42,7 @@ cargo build -p verifiable-log --release
 The binaries land in `target/release/`:
 
 ```
-target/release/pollis-verify   # auditor CLI: remote + group
+target/release/pollis-verify   # auditor CLI: remote + group + account + release
 target/release/monitor         # offline bundle verifier
 ```
 
@@ -206,7 +206,54 @@ The Pollis app runs this same verifier internally — `self_audit_account_key`
 checks your own key, `audit_peer_account_key` checks a contact you've verified —
 so the desktop client and an independent auditor reach the identical verdict.
 
-## 5. Fully offline — `monitor verify`
+## 5. Verify a shipped release — `pollis-verify release`
+
+Pollis publishes a third tree — the **binaries directory** — with one leaf per
+shipped release artifact **layer**: `payload` is the reproducible pre-signature
+bytes, `signed` is the wrapper users actually download, and the two are bound
+by a shared `payload_sha256`. To check that a release tag's artifacts are
+provably recorded in the signed binaries tree, pass the base URL and the tag:
+
+```bash
+pollis-verify release <base-url> <tag>
+```
+
+It verifies the binaries STH signature **first** (under the binaries tree's own
+domain context), selects the tag's artifacts, checks each one's inclusion proof
+against the signed head, and asserts the tree-wide binary invariant:
+
+```
+$ pollis-verify release https://verify.pollis.com v1.3.6
+Release: v1.3.6
+Found:   yes
+STH:     tree_size 21  root e7f84a0edc5c8ccf4cec6140d474040ad83eb9e0cb8de43336eaa870c7e1a761
+Artifacts (publish order):
+  darwin   aarch64  dmg       payload  payload fa863e…f4f2  artifact fa863e…f4f2  [included ✓]
+  darwin   aarch64  dmg       signed   payload fa863e…f4f2  artifact e0f762…653f  [included ✓]
+  windows  x86_64   nsis      payload  payload dcdc72…d469  artifact dcdc72…d469  [included ✓]
+  windows  x86_64   nsis      signed   payload dcdc72…d469  artifact 9266ef…d2b7  [included ✓]
+  linux    x86_64   appimage  payload  payload dccae0…6d82  artifact dccae0…6d82  [included ✓]
+  linux    x86_64   deb       payload  payload 3273d6…5885  artifact 3273d6…5885  [included ✓]
+  linux    x86_64   rpm       payload  payload ae3d9c…ae86  artifact ae3d9c…ae86  [included ✓]
+
+PASS: release binaries tree is valid
+```
+
+A valid release exits `0`; a missing inclusion proof or a violated binary
+invariant lists the reason under `Violations:`, prints `FAIL`, and exits
+non-zero. Add `--json` for the machine-readable `ReleaseReport` — the exact
+shape the static `/verify/release/<tag>` report carries, computed by the same
+function, so the CLI and the hosted report can never disagree.
+
+To connect the log to **the file you downloaded**, hash it and compare against
+the logged `artifact_sha256` of the matching `signed` leaf (or `payload` for
+unsigned artifacts, where the two hashes are equal):
+
+```bash
+sha256sum pollis-v1.3.6-linux.AppImage
+```
+
+## 6. Fully offline — `monitor verify`
 
 If you would rather not trust the network at all during verification, download the
 signed **bundle** once and verify it with zero further network access. The bundle
@@ -244,9 +291,9 @@ As with the HTTP path, a tampered leaf, forged proof, broken consistency, bad
 signature, or equivocation makes `verify` print a `FAIL` report and **exit
 non-zero**. Same checks, same trust model — just no network.
 
-## 6. Verify the keyless build provenance yourself — cosign + SLSA (no Pollis key)
+## 7. Verify the keyless build provenance yourself — cosign + SLSA (no Pollis key)
 
-The transparency log above (steps 1–5) is anchored by **Pollis's own** Ed25519
+The transparency log above (steps 1–6) is anchored by **Pollis's own** Ed25519
 key. Released artifacts carry a **second, independent** anchor that Pollis does
 **not** control: a keyless **cosign** signature and a **SLSA build-provenance**
 attestation, both bound to Pollis's **GitHub Actions OIDC identity** via

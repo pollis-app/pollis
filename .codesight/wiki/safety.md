@@ -198,7 +198,7 @@ tree can never stand in for another:
   Actions OIDC identity, with **no Pollis key on that verification path** — and
   publishes them next to each artifact on `cdn.pollis.com` (the `.intoto.jsonl` at
   exactly the `provenance_uri` each leaf records). Verify recipe:
-  `docs/verify-transparency-log.md` §6. What is still **not** proven by the log +
+  `docs/verify-transparency-log.md` §7. What is still **not** proven by the log +
   provenance alone is bit-for-bit reproducibility of *every* platform (asserted
   for the Linux payload only): logging that a signed artifact was published — and
   confirming this build's fingerprint is in the log with a non-Pollis Rekor anchor
