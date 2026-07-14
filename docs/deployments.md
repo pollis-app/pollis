@@ -7,7 +7,7 @@ the codebase actually *ships*. Keep it updated when a build/deploy pipeline
 changes.
 
 There are **4 shipped executables/sites**, **3 running backend services**, and
-**2 managed data layers**, plus **4 CI-only gates**.
+**2 managed data layers**, plus **8 CI-only gates**.
 
 ---
 
@@ -44,7 +44,7 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 ### 2. CLI / terminal client (`pollis`)
 - **From:** `pollis-tui/` + `pollis-core/` (headless, no Tauri)
 - **Pipeline:** `.github/workflows/cli-release.yml` — `workflow_dispatch` (version input). Builds per-platform binaries (Linux glibc-dynamic, macOS aarch64, Windows), bakes prod creds via `option_env!` (read-only Turso token only).
-- **Ships to:** `cdn.pollis.com/releases/cli/<version>/…` + `cli-latest.json` + `cli-install.sh`. Install: `curl -fsSL https://cdn.pollis.com/releases/cli-install.sh | bash`.
+- **Ships to:** `cdn.pollis.com/releases/cli/<version>/…` + the `https://cdn.pollis.com/releases/cli/latest.json` manifest (which `cli-install.sh` fetches) + `cli-install.sh`. Install: `curl -fsSL https://cdn.pollis.com/releases/cli-install.sh | bash`.
 
 ### 3. Marketing website
 - **From:** `website/`
@@ -53,7 +53,7 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
-- **Pipeline:** `.github/workflows/verifier-release.yml` — builds the standalone verifier binaries + `SHA256SUMS`, with the **pinned Ed25519 public key** in the release body. Lets any analyst independently verify the transparency log.
+- **Pipeline:** `.github/workflows/verifier-release.yml` — triggered by a `pollis-verify-v*` tag push (a `workflow_dispatch` builds run artifacts only, no Release). Builds the standalone verifier binaries, each with a per-asset `.sha256` checksum file, with the **pinned Ed25519 public key** in the release body. Lets any analyst independently verify the transparency log.
 - **Ships to:** GitHub release assets. Subcommands: `remote` / `group` / `account` / `release` (verify the whole log, a conversation's commit chain, a user's key history, or a released version's binaries).
 
 ### (in development) Mobile app
@@ -82,7 +82,7 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 
 ### Transparency log — Key Transparency read API
 - **From:** `verifiable-log*` (built + signed in CI, served as **static files** — no server on the trust path)
-- **Pipeline:** `.github/workflows/transparency-publish.yml` — **daily cron** (06:47 UTC). Rebuilds the commit-log + account-key trees from the DB, signs STHs in CI, syncs to Cloudflare R2, self-audits + tripwire. (The `binaries` tenant tree, #453, is built into the crates but not yet wired into this publish job — that's #453 Phase 2.)
+- **Pipeline:** `.github/workflows/transparency-publish.yml` — **daily cron** (06:47 UTC). Rebuilds the commit-log + account-key trees from the DB and the **binaries** tenant tree (#453) from the accumulating BinaryRecord JSON on R2 that `desktop-release.yml`'s `attest-and-log` job appends to at release time; signs STHs in CI, syncs to R2, self-audits + tripwire. The binaries tree is live at `https://verify.pollis.com/v1/binaries/sth/latest.json`, with per-tag reports under `verify/release/<tag>` (verifiable via `pollis-verify release`).
 - **Runs at:** static files on Cloudflare R2 → **verify.pollis.com**.
 
 ---
@@ -102,8 +102,17 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 | `kani.yml` | Kani bounded-model-checking proofs on `pollis-core` + `pollis-delivery` pure fns (watermark no-skip, recovery gate, canonicalization, gap/head arithmetic). Path-filtered to `pollis-core/**`. |
 | `supply-chain.yml` | cargo-deny (advisories/licenses/bans/sources) + cargo-vet (dependency review provenance). Runs on every PR. |
 | `verifiable-log-tests.yml` | `cargo test` on the three `verifiable-log*` crates (transparency infra + `pollis-verify`). Pure Rust, no system deps. |
+| `tla.yml` | TLC exhaustively model-checks both TLA+ specs — Spec A CommitLog (invariants I1+I2) + Spec B Delivery (I3+I4) — plus a "teeth" check that each broken variant still produces a counterexample. JVM-only, no Rust build. Path-filtered to `specs/tla/**`. |
+| `e2e-smoke.yml` | WebDriver smoke of the **real Tauri binary**: does the app launch and show the login screen (`e2e/smoke.js`, no DS / shared-Turso dependency). `workflow_dispatch`-only — a full cargo build + virtual WebKitGTK window is too heavy for every push; run it before a release or after touching auth/bootstrap. |
+| `mobile-core-check.yml` | Cross-compiles `pollis-core` for Android + iOS (aarch64, `--no-default-features`, matching the ubrn build) so mobile `#[cfg]` gate rot becomes red CI instead of a latent defect on the next mobile build. Path-filtered to `pollis-core/**`. |
+| `frontend-check.yml` | Renderer typecheck on every PR to `main`: filtered pnpm install of `frontend/` only, then plain `tsc` (noEmit — no vite build, no artifacts). A frontend change can no longer merge without a typecheck. |
 
-> Gap (as of this writing): the **frontend** (`frontend/`) has no CI gate — no `tsc`/`vite build`/lint check. A change there can merge without a typecheck. Adding a frontend CI job would close it (the renderer builds headless: `pnpm --filter frontend build`).
+### Dispatch-only release-verification tooling (`workflow_dispatch`, take a released tag)
+
+| Workflow | Does |
+|---|---|
+| `attest-release.yml` | Backfills the binary-transparency attest step for an **already-published tag** — no rebuild (~2 min vs a ~40 min release). Deliberately duplicates `desktop-release.yml`'s built-in `attest-and-log` job: same `scripts/attest-binaries.sh`, the tag's commit timestamp, the published release assets. Idempotent — a tag already in the accumulator is a no-op. |
+| `rebuild-verify.yml` | The **third-party reproducer** (#484): rebuilds a released tag's Linux AppImage from public source with **no Pollis secrets** — runnable from a fork — and asserts the payload hash against the transparency log, trusting only the pinned Ed25519 log key. Always proves **log inclusion**; bit-for-bit **reproduction** additionally needs the published build recipe supplied as non-secret repo `vars` (some `option_env!` values are still secret — see `docs/reproducible-builds-residuals.md`). |
 
 ---
 
