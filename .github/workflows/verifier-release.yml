@@ -38,7 +38,11 @@ jobs:
           - os: macos-14
             target: aarch64-apple-darwin
             asset: pollis-verify-macos-arm64
-          - os: macos-13
+          # macos-13 (the last free x86_64 runner image) is deprecated and its
+          # pool drains for hours; cross-compile the x86_64 slice from an
+          # Apple-Silicon runner instead — the toolchain step installs the
+          # matrix target, so only the host image changes.
+          - os: macos-15
             target: x86_64-apple-darwin
             asset: pollis-verify-macos-x86_64
     steps:
