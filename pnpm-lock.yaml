@@ -39,6 +39,9 @@ importers:
       '@fontsource/dm-mono':
         specifier: ^5.2.7
         version: 5.2.7
+      '@fontsource/geist-sans':
+        specifier: ^5.2.5
+        version: 5.2.5
       '@tanstack/react-query':
         specifier: ^5.90.20
         version: 5.99.2(react@19.2.5)
@@ -683,6 +686,9 @@ packages:
 
   '@fontsource/dm-mono@5.2.7':
     resolution: {integrity: sha512-Ma1az2atTVgQWuOWwjuxx26p/6A6CU9HBNKq1CFV6YKpKhpswnf9ry9Ql4+T6bTZzkdtSfS6tjJvqZOljVzIFQ==}
+
+  '@fontsource/geist-sans@5.2.5':
+    resolution: {integrity: sha512-anllOHyJbElRs9fV15TeDRqAeb1IKm4bSknPl6ZMoyPTx1BBy7logudcUwpNjmQLkzn4Q0JGQLRCUKJYoyST6A==}
 
   '@img/colour@1.1.0':
     resolution: {integrity: sha512-Td76q7j57o/tLVdgS746cYARfSyxk8iEfRxewL9h4OMzYhbW4TAcppl0mT4eyqXddh6L/jwoM75mo7ixa/pCeQ==}
@@ -3151,6 +3157,8 @@ snapshots:
   '@fontsource/atkinson-hyperlegible-next@5.2.7': {}
 
   '@fontsource/dm-mono@5.2.7': {}
+
+  '@fontsource/geist-sans@5.2.5': {}
 
   '@img/colour@1.1.0': {}
 

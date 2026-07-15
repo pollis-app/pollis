@@ -8,6 +8,7 @@ import { MigrationBanner } from "../MigrationBanner";
 import { Sidebar } from "./Sidebar";
 import { StatusBarSummary } from "./StatusBarSummary";
 import { VoiceBar } from "../Voice/VoiceBar";
+import { useSkin } from "../../hooks/queries/usePreferences";
 import { ScreenShareViewer } from "../Voice/ScreenShareViewer";
 import { screenShareSession } from "../../screenshare/screenShareSession";
 import { cameraSession } from "../../camera/cameraSession";
@@ -111,6 +112,7 @@ export const AppShell: React.FC = observer(() => {
   }, [sidebarDefault]);
 
   const currentUser = appStore.currentUser;
+  const skin = useSkin();
 
   // Drive the looping ringtone off the incomingCall slot. Rust owns the
   // playback thread (`start_ring` / `stop_ring`) so the loop survives any
@@ -453,6 +455,17 @@ export const AppShell: React.FC = observer(() => {
     return false;
   }, [pathname]);
 
+  // Refined keeps the bottom bar quiet and neutral; terminal fills it with the
+  // accent (inverting to dark-on-accent off chat screens). `barInk` is the text
+  // color for everything sitting on the bar, derived to stay legible on `barBg`.
+  const refined = skin === "refined";
+  const barBg = refined
+    ? "var(--c-surface)"
+    : isChatScreen ? "var(--c-bg)" : "var(--c-accent)";
+  const barInk = refined
+    ? "var(--c-text-dim)"
+    : isChatScreen ? "var(--c-accent)" : "var(--c-surface)";
+
   // Find the voice channel name for the VoiceBar
   const voiceChannelName = useMemo(() => {
     if (!activeVoiceChannelId) {
@@ -550,7 +563,7 @@ export const AppShell: React.FC = observer(() => {
       {/* VoiceBar — only after the join completes, not during the
           'joining' phase. Mute/share/leave controls only make sense once
           the LiveKit room is actually connected. */}
-      {voiceState.kind === 'joined' && (
+      {voiceState.kind === 'joined' && skin === 'terminal' && (
         <VoiceBar
           channelId={voiceState.channelId}
           channelName={voiceChannelName}
@@ -584,21 +597,21 @@ export const AppShell: React.FC = observer(() => {
         style={{
           flexShrink: 0,
           borderTop: "1px solid var(--c-border)",
-          background: isChatScreen ? "var(--c-bg)" : "var(--c-accent)",
+          background: barBg,
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
           padding: "8px 10px",
         }}
       >
-        <StatusBarSummary color={isChatScreen ? "var(--c-accent)" : "black"} />
+        <StatusBarSummary color={barInk} />
         <div className="flex items-center gap-3">
         {availableUpdateVersion && (
           <button
             data-testid="status-bar-update-available"
             className="text-xs font-mono flex items-center gap-1 cursor-pointer"
             style={{
-              color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)",
+              color: barInk,
               background: "none",
               border: "none",
               padding: 0,
@@ -619,7 +632,7 @@ export const AppShell: React.FC = observer(() => {
           <div
             data-testid="status-bar-incoming-call"
             className="flex items-center gap-2"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+            style={{ color: barInk }}
           >
             <button
               data-testid="status-bar-incoming-call-accept"
@@ -681,7 +694,7 @@ export const AppShell: React.FC = observer(() => {
           <div
             data-testid="status-bar-voice-error"
             className="flex items-center gap-2"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+            style={{ color: barInk }}
           >
             <span className="text-xs font-mono flex items-center gap-1">
               <AlertTriangle className="w-4 h-4" />
@@ -701,7 +714,7 @@ export const AppShell: React.FC = observer(() => {
           <div
             data-testid="status-bar-screenshare-error"
             className="flex items-center gap-2 min-w-0 flex-1"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+            style={{ color: barInk }}
           >
             <span
               className="text-xs font-mono flex items-center gap-1 min-w-0 truncate"
@@ -723,7 +736,7 @@ export const AppShell: React.FC = observer(() => {
         ) : statusBarAlert ? (
           <button
             className="text-xs font-mono status-bar-blink flex items-center gap-1 cursor-pointer"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)", background: "none", border: "none", padding: 0 }}
+            style={{ color: barInk, background: "none", border: "none", padding: 0 }}
             onClick={() => {
               router.navigate({ to: "/dms/$conversationId", params: { conversationId: statusBarAlert.roomId } });
               setStatusBarAlert(null);
@@ -735,7 +748,7 @@ export const AppShell: React.FC = observer(() => {
           <div
             data-testid="status-bar-syncing"
             className="flex items-center gap-1.5 text-xs font-mono pointer-events-none"
-            style={{ color: isChatScreen ? "var(--c-accent)" : "var(--c-surface)" }}
+            style={{ color: barInk }}
           >
             <span>syncing…</span>
             <LoadingSpinner size="sm" />

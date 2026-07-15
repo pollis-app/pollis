@@ -23,6 +23,8 @@ import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { usePresenceStatus } from "../../stores/presenceStore";
 import { useShortcutLabel } from "../../keyboard";
+import { useSkin } from "../../hooks/queries/usePreferences";
+import { SidebarProfilePanel } from "./SidebarProfilePanel";
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
 
@@ -50,6 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   const router = useRouter();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
+  const skin = useSkin();
 
   const { data: groupsWithChannels = [] } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
@@ -151,7 +154,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   return (
     <aside
       data-testid="sidebar"
-      className="flex w-[14.667rem] shrink-0 flex-col border-r border-line bg-surface font-mono"
+      className="flex w-[var(--side-w)] shrink-0 flex-col border-r border-line bg-surface font-mono"
     >
       <div className="flex-1 overflow-y-auto overflow-x-hidden">
         <SectionHeader
@@ -292,22 +295,29 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         ))}
       </div>
 
-      <button
-        type="button"
-        data-testid="sidebar-close"
-        onClick={onToggle}
-        aria-label={`Close sidebar (${toggleSidebarLabel})`}
-        title={`Close sidebar (${toggleSidebarLabel})`}
-        className="flex shrink-0 items-center gap-2 px-2.5 min-h-bar border-t border-line text-xs text-left cursor-pointer transition-colors text-muted hover:text-fg"
-      >
-        <span className="flex-1">Close</span>
-        <kbd
-          aria-hidden="true"
-          className="font-mono bg-bg px-1.5 py-px rounded-[3px] border border-line text-2xs leading-[1.2]"
+      {/* Refined anchors the Discord-style identity + voice panel here; the
+          sidebar still collapses via the keyboard shortcut. Terminal keeps the
+          explicit Close affordance. */}
+      {skin === "refined" ? (
+        <SidebarProfilePanel />
+      ) : (
+        <button
+          type="button"
+          data-testid="sidebar-close"
+          onClick={onToggle}
+          aria-label={`Close sidebar (${toggleSidebarLabel})`}
+          title={`Close sidebar (${toggleSidebarLabel})`}
+          className="flex shrink-0 items-center gap-2 px-2.5 min-h-bar border-t border-line text-xs text-left cursor-pointer transition-colors text-muted hover:text-fg"
         >
-          {toggleSidebarLabel}
-        </kbd>
-      </button>
+          <span className="flex-1">Close</span>
+          <kbd
+            aria-hidden="true"
+            className="font-mono font-machine bg-bg px-1.5 py-px rounded-[3px] border border-line text-2xs leading-[1.2]"
+          >
+            {toggleSidebarLabel}
+          </kbd>
+        </button>
+      )}
     </aside>
   );
 });
@@ -372,7 +382,7 @@ const Row: React.FC<RowProps> = ({ indent, isActive, onClick, leading, chevron, 
   return (
     <div
       data-active={isActive ? "true" : "false"}
-      className={`flex w-full items-stretch border-l-2 transition-colors ${
+      className={`sidebar-row flex w-full items-stretch border-l-2 transition-colors ${
         isActive
           ? "bg-hover border-accent text-accent"
           : "bg-transparent border-transparent text-fg hover:bg-hover"

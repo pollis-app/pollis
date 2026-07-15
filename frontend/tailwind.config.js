@@ -36,6 +36,8 @@ export default {
         },
         // Hover overlay (accent @ low alpha) → `hover:bg-hover`.
         hover: 'var(--c-hover)',
+        // Active/selected overlay (accent-tinted) → `bg-active`.
+        active: 'var(--c-active)',
       },
       // `--bar-h` is the shared chrome-bar height (rem ⇒ font-scalable).
       // Exposed via spacing so `h-bar` / `min-h-bar` / `py-bar` all work.

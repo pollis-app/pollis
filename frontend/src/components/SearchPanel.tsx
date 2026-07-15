@@ -450,7 +450,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = observer(({ isOpen, onClo
             }}
           />
           <kbd
-            className="font-mono text-xs"
+            className="font-mono font-machine text-xs"
             style={{
               color: "var(--c-text-muted)",
               background: "var(--c-bg)",

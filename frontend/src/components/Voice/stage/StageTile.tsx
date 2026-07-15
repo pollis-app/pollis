@@ -232,8 +232,11 @@ export const StageTile: React.FC<Props> = ({
       {/* res · fps badge stays on the in-call tiles. */}
       {hasFeed && !preview && statsLabel && (
         <div className="vs-br">
+          {/* Machine-facing metric (res · fps) — stays monospace in BOTH
+              skins. Without font-machine the refined skin would swap the
+              stage's inherited font-mono to sans (index.css §refined). */}
           <span
-            className="vs-tag res"
+            className="vs-tag res font-machine"
             data-testid={`voice-tile-stream-stats-${p.identity}`}
           >
             {statsLabel}

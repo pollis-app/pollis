@@ -7,8 +7,11 @@ import {
   applyAccentColor,
   applyBackgroundColor,
   applyFontSize,
+  applySkin,
+  normalizeSkin,
   loadDeviceFontSize,
   saveDeviceFontSize,
+  type Skin,
 } from "../../utils/colorUtils";
 import {
   setShortcutOverrides,
@@ -23,6 +26,12 @@ export type NoiseSuppressionLevel = "off" | "low" | "moderate" | "high";
 export interface PreferencesData {
   accent_color?: string;
   background_color?: string;
+  /**
+   * UI skin — `terminal` (default IRC/monospace look) or `refined` (friendlier
+   * proportional-sans, Slack/Discord-shaped alternate). Synced across devices,
+   * like `accent_color`/`background_color`. Absent → terminal.
+   */
+  skin?: Skin;
   /**
    * Legacy: font size used to be synced via the remote preferences blob.
    * It is now device-local (see `loadDeviceFontSize` / `saveDeviceFontSize`
@@ -275,6 +284,7 @@ export function usePreferences() {
       return {
         accent_color: getPreference<string | undefined>(json, "accent_color", undefined),
         background_color: getPreference<string | undefined>(json, "background_color", undefined),
+        skin: normalizeSkin(getPreference<string | undefined>(json, "skin", undefined)),
         font_size: getPreference<string | undefined>(json, "font_size", undefined),
         allow_desktop_notifications: getPreference<boolean>(json, "allow_desktop_notifications", false),
         allow_sound_effects: getPreference<boolean>(json, "allow_sound_effects", true),
@@ -326,6 +336,19 @@ export function usePreferences() {
 }
 
 /**
+ * Reactive current UI skin, for components that must branch their *structure*
+ * (not just color) on the skin — e.g. the message row renders IRC-style in
+ * terminal and Slack-style in refined. Backed by the synced preferences query,
+ * so it updates the instant the toggle flips (the toggle writes the query
+ * cache). Defaults to terminal before prefs load. Pure color/spacing
+ * differences should use CSS (`:root[data-skin="refined"]`) instead of this.
+ */
+export function useSkin(): Skin {
+  const { query } = usePreferences();
+  return normalizeSkin(query.data?.skin);
+}
+
+/**
  * Apply loaded preferences (accent_color, background_color) to CSS vars.
  * Call this once after the preferences query resolves.
  *
@@ -340,6 +363,7 @@ export function applyPreferences(prefs: PreferencesData): void {
   if (prefs.background_color) {
     applyBackgroundColor(prefs.background_color);
   }
+  applySkin(normalizeSkin(prefs.skin));
   // Shortcut overrides flow through the same bindings module that
   // `useGlobalShortcut` resolves against on every keydown — no callsite
   // changes needed. An undefined map clears any previous override.
@@ -396,7 +420,7 @@ export function useApplyPreferences(): void {
       applyPreferences(data);
       applyDeviceFontSize(currentUser?.id, data);
     }
-  }, [data?.accent_color, data?.background_color, data?.font_size, overridesKey, currentUser?.id]);
+  }, [data?.accent_color, data?.background_color, data?.skin, data?.font_size, overridesKey, currentUser?.id]);
 
   // Push close-to-tray to the host so the close handler can pick
   // hide-vs-quit synchronously. macOS ignores this (close already hides via

@@ -75,4 +75,25 @@
 - **VoiceSettingsPage** — `frontend/src/pages/VoiceSettingsPage.tsx`
 
 ---
+
+## Theming & skins
+
+All colors route through `--c-*` CSS custom properties defined in `frontend/src/index.css` and surfaced as semantic Tailwind utilities (`bg-bg`, `bg-surface`, `text-fg`, `border-line`, …) in `frontend/tailwind.config.js`. The palette is derived at runtime from six "knob" vars — `--accent-h/s/l` and `--bg-h/s/l` — plus `--font-size-base` (all `rem` sizes scale off it) and `--bar-h`. `applyAccentColor` / `applyBackgroundColor` / `applyFontSize` in `frontend/src/utils/colorUtils.ts` write the knobs; `applyPreferences` (`hooks/queries/usePreferences.ts`) drives them from the synced preferences blob. Corner radii are tokenized as `--radius-chip` / `--radius-control`.
+
+### UI skins (issue #565)
+
+Two skins share the same `--c-*` token names:
+
+- **`terminal`** (default) — the IRC/monospace look; base `:root`.
+- **`refined`** — a friendlier, proportional-sans, Slack/Discord-shaped alternate for users who dislike the terminal aesthetic. A `:root[data-skin="refined"]` block **overrides** the same tokens (warm-charcoal surfaces, neutral near-white text so the amber wash lifts, neutral borders, softer radii, and `--font-sans` → Geist Sans, self-hosted via `@fontsource/geist-sans`; terminal keeps Atkinson Hyperlegible) and inverts the monospace default: `.font-mono:not(.font-machine)` renders as sans. Machine-facing text (timestamps, kbd chips, `#slug`s, code, metrics) opts back into mono with the `.font-machine` class — stays mono in **both** skins.
+
+The skin is a synced preference (`PreferencesData.skin`, rides in the opaque preferences JSON blob — no migration/Rust change), applied via `applySkin(skin)` → `document.documentElement.dataset.skin`. Toggle lives in the **Appearance** section of `PreferencesPage`. Because every surface already routes color through `--c-*`, the skin is an overlay that reskins the whole app (including legacy inline `var(--c-…)` call sites) without a parallel component tree.
+
+For surfaces whose *structure* (not just color) differs between skins, components branch on `useSkin()` (reactive, from `usePreferences.ts`) and keep the terminal render path unchanged. Refined structural forks: the message row (`MessageItem`/`MessageList` — Slack-style avatar gutter, name+timestamp header with body below, consecutive-sender grouping, centered date dividers; attachment rendering extracted to `Message/AttachmentDisplay.tsx`), the sidebar bottom (`SidebarProfilePanel` — Discord-style identity + a persistent voice strip that replaces the standalone `VoiceBar`, which AppShell renders in terminal only), the breadcrumb (`BreadcrumbNav`), the voice stage metrics, and the bottom status bar (neutral fill instead of terminal's accent fill).
+
+### Refined layout spacing
+
+The refined skin uses a roomier rhythm than terminal via CSS tokens (rem, so they track the font-size preference): `--side-w` (sidebar width, `w-[var(--side-w)]`), `--lh` (message-body line-height), and message spacing (`--msg-header-gap` before a sender group, `--msg-group-gap` between grouped messages, `--msg-row-pad-y` per row, `--msg-divider-gap` around date dividers). These are set in the `:root[data-skin="refined"]` block; terminal keeps the base `:root` values. (An earlier comfortable/compact density toggle was removed — the delta wasn't worth a user control.)
+
+---
 _Back to [index.md](./index.md)_

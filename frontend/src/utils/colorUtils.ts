@@ -56,6 +56,33 @@ export function applyFontSize(px: number): void {
   document.documentElement.style.setProperty("--font-size-base", `${px}px`);
 }
 
+/**
+ * UI skin. `terminal` is the default IRC/monospace look; `refined` is the
+ * friendlier, proportional-sans, Slack/Discord-shaped alternate. Both share
+ * the same `--c-*` token names — `refined` overrides them (and inverts the
+ * mono default) via a `:root[data-skin="refined"]` block in `index.css`.
+ * Unlike font size, the skin choice syncs across the user's devices (see
+ * `PreferencesData.skin` in `usePreferences.ts`).
+ */
+export type Skin = "terminal" | "refined";
+
+export const SKINS: readonly Skin[] = ["terminal", "refined"] as const;
+
+/** Coerce an arbitrary stored value to a valid Skin, defaulting to terminal. */
+export function normalizeSkin(v: unknown): Skin {
+  return v === "refined" ? "refined" : "terminal";
+}
+
+/** Apply the UI skin by setting the `data-skin` attribute on <html>. */
+export function applySkin(skin: Skin): void {
+  document.documentElement.dataset.skin = skin;
+}
+
+/** Read the current skin from the `data-skin` attribute (default terminal). */
+export function readSkin(): Skin {
+  return normalizeSkin(document.documentElement.dataset.skin);
+}
+
 /** Read the current accent color CSS vars as a hex string */
 export function readAccentHex(): string {
   const h = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--accent-h").trim() || "150", 10);

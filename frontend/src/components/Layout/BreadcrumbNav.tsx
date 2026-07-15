@@ -6,6 +6,7 @@ import { useShortcutLabel } from "../../keyboard";
 import { appStore } from "../../stores/appStore";
 import { useUserGroupsWithChannels } from "../../hooks/queries/useGroups";
 import { useDMConversations } from "../../hooks/queries/useMessages";
+import { useSkin } from "../../hooks/queries/usePreferences";
 
 interface Segment {
   label: string;
@@ -13,20 +14,18 @@ interface Segment {
 }
 
 /**
- * BreadcrumbNav renders below the TitleBar on authenticated pages.
- * Shows a persistent back button that navigates up one level in the
- * breadcrumb hierarchy (not browser-history back) plus the breadcrumb
- * trail itself ("Home / Direct Messages / @someone").
+ * Derives the breadcrumb trail (`Segment[]`) from the current pathname plus the
+ * loaded groups / channels / DM data. Pure pathname pattern-matching lifted out
+ * of the component body so the render stays readable. Must be called from an
+ * `observer()` component — it reads the MobX `appStore.channels` observable.
  */
-export const BreadcrumbNav: React.FC = observer(() => {
-  const router = useRouter();
+function useBreadcrumbTrail(): Segment[] {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { data: groupsWithChannels } = useUserGroupsWithChannels();
   const { data: dmConversations = [] } = useDMConversations();
   const channels = appStore.channels;
-  const searchLabel = useShortcutLabel("app.toggleSearch");
 
-  const segments = useMemo<Segment[]>(() => {
+  return useMemo<Segment[]>(() => {
     const out: Segment[] = [{ label: "Home", to: "/" }];
 
     if (pathname === "/") {
@@ -135,6 +134,20 @@ export const BreadcrumbNav: React.FC = observer(() => {
 
     return out;
   }, [pathname, groupsWithChannels, dmConversations, channels]);
+}
+
+/**
+ * BreadcrumbNav renders below the TitleBar on authenticated pages.
+ * Shows a persistent back button that navigates up one level in the
+ * breadcrumb hierarchy (not browser-history back) plus the breadcrumb
+ * trail itself ("Home / Direct Messages / @someone").
+ */
+export const BreadcrumbNav: React.FC = observer(() => {
+  const router = useRouter();
+  const skin = useSkin();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const searchLabel = useShortcutLabel("app.toggleSearch");
+  const segments = useBreadcrumbTrail();
 
   // Back = up one segment in the breadcrumb stack (not browser history)
   const parentTo = segments.length > 1 ? segments[segments.length - 2].to : null;
@@ -146,7 +159,85 @@ export const BreadcrumbNav: React.FC = observer(() => {
     router.navigate({ to: parentTo });
   };
 
+  const openSearch = () => {
+    window.dispatchEvent(new CustomEvent("pollis:open-search"));
+  };
+
   const isOnSettingsHub = pathname === "/settings";
+
+  if (skin === "refined") {
+    return (
+      <div
+        data-testid="breadcrumb-nav"
+        className="h-[2.75rem] flex-shrink-0 flex items-center gap-3 border-b border-line bg-surface px-3"
+      >
+        {parentTo ? (
+          <button
+            data-testid="breadcrumb-back-button"
+            onClick={handleBack}
+            aria-label="Back"
+            className="flex items-center justify-center text-dim transition-colors hover:text-accent"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        ) : (
+          <div className="w-[18px]" aria-hidden="true" />
+        )}
+        <nav
+          data-testid="breadcrumb-trail"
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-sm"
+        >
+          {segments.map((seg, i) => {
+            const isLast = i === segments.length - 1;
+            return (
+              <React.Fragment key={`${seg.to}-${i}`}>
+                {i > 0 && (
+                  <span className="select-none text-muted" aria-hidden="true">
+                    /
+                  </span>
+                )}
+                {isLast ? (
+                  <span className="truncate font-semibold text-accent">{seg.label}</span>
+                ) : (
+                  <button
+                    onClick={() => router.navigate({ to: seg.to })}
+                    className="truncate text-dim transition-colors hover:text-accent"
+                  >
+                    {seg.label}
+                  </button>
+                )}
+              </React.Fragment>
+            );
+          })}
+        </nav>
+        <div className="flex items-center gap-3">
+          <button
+            data-testid="breadcrumb-search-button"
+            onClick={openSearch}
+            aria-label={`Search (${searchLabel})`}
+            title={`Search (${searchLabel})`}
+            className="flex items-center gap-1.5 text-dim transition-colors hover:text-accent"
+          >
+            <SearchIcon size={16} />
+            <kbd
+              aria-hidden="true"
+              className="font-mono font-machine rounded-[var(--radius-control)] border border-line bg-bg px-1.5 py-0.5 text-xs leading-none text-muted"
+            >
+              {searchLabel}
+            </kbd>
+          </button>
+          <button
+            data-testid="breadcrumb-settings-button"
+            onClick={() => router.navigate({ to: "/settings" })}
+            aria-label="Settings"
+            className={`flex items-center justify-center rounded-[var(--radius-control)] p-1 transition-colors hover:bg-hover hover:text-accent ${isOnSettingsHub ? "text-accent" : "text-dim"}`}
+          >
+            <SettingsIcon size={18} />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -213,7 +304,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
       </span>
       <button
         data-testid="breadcrumb-search-button"
-        onClick={() => window.dispatchEvent(new CustomEvent("pollis:open-search"))}
+        onClick={openSearch}
         aria-label={`Search (${searchLabel})`}
         title={`Search (${searchLabel})`}
         className="flex items-center gap-1.5 transition-colors text-[var(--c-text)] hover:text-[var(--c-accent)]"
@@ -228,7 +319,7 @@ export const BreadcrumbNav: React.FC = observer(() => {
         <SearchIcon size={16} />
         <kbd
           aria-hidden="true"
-          className="font-mono text-xs"
+          className="font-mono font-machine text-xs"
           style={{
             color: "inherit",
             background: "var(--c-bg)",

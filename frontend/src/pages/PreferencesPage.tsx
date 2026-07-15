@@ -20,8 +20,11 @@ import {
   applyAccentColor,
   applyBackgroundColor,
   applyFontSize,
+  applySkin,
+  normalizeSkin,
   loadDeviceFontSize,
   saveDeviceFontSize,
+  type Skin,
 } from "../utils/colorUtils";
 import { RangeSlider } from "../components/ui/RangeSlider";
 import { Switch } from "../components/ui/Switch";
@@ -44,6 +47,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const currentUser = appStore.currentUser;
   const toggleSidebarLabel = useShortcutLabel("app.toggleSidebar");
+  const [skin, setSkin] = useState<Skin>("terminal");
   const [hue, setHue] = useState<number>(38);
   const [saturation, setSaturation] = useState<number>(90);
   const [bgHue, setBgHue] = useState<number>(38);
@@ -73,6 +77,7 @@ export const PreferencesPage: React.FC = observer(() => {
       applyPreferences(query.data);
       // Font size is device-local; seed once from any legacy remote value.
       applyDeviceFontSize(currentUser?.id, query.data);
+      setSkin(normalizeSkin(query.data.skin));
       if (query.data.allow_desktop_notifications !== undefined) {
         setAllowDesktopNotifications(query.data.allow_desktop_notifications);
       }
@@ -121,6 +126,7 @@ export const PreferencesPage: React.FC = observer(() => {
   const save = useCallback((opts: {
     accentH?: number; accentS?: number;
     bgH?: number; bgS?: number; bgL?: number;
+    skin?: Skin;
     notifications?: boolean; soundEffects?: boolean;
     sidebarOpenByDefault?: boolean;
     closeToTray?: boolean;
@@ -136,6 +142,7 @@ export const PreferencesPage: React.FC = observer(() => {
     const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
     const tray = opts.closeToTray ?? closeToTray;
     const menubar = opts.menubarIcon ?? menubarIcon;
+    const skinVal = opts.skin ?? skin;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
     // font_size is intentionally NOT included — it's device-local now,
@@ -148,13 +155,14 @@ export const PreferencesPage: React.FC = observer(() => {
       ...rest,
       accent_color: accentHex,
       background_color: bgHex,
+      skin: skinVal,
       allow_desktop_notifications: notif,
       allow_sound_effects: sfx,
       sidebar_open_by_default: sidebar,
       close_to_tray: tray,
       menubar_icon: menubar,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon]);
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
@@ -174,6 +182,12 @@ export const PreferencesPage: React.FC = observer(() => {
     setBgHexInput(hex);
     applyBackgroundColor(hex);
     save({ bgH: h, bgS: s, bgL: l });
+  };
+
+  const handleSkin = (val: Skin) => {
+    setSkin(val);
+    applySkin(val);
+    save({ skin: val });
   };
 
   const handleFontSize = (val: number) => {
@@ -245,6 +259,46 @@ export const PreferencesPage: React.FC = observer(() => {
         <div className="flex-1 flex justify-center overflow-auto px-6 py-8">
           <div className="w-full max-w-md flex flex-col gap-8">
 
+            {/* Appearance — UI skin (synced across devices) */}
+            <section className="flex flex-col gap-4 mb-12">
+              <h2
+                className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+                style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+              >
+                Appearance
+              </h2>
+              <div
+                role="radiogroup"
+                aria-label="UI skin"
+                className="flex gap-2 flex-wrap"
+              >
+                {([
+                  { value: "terminal", label: "Terminal" },
+                  { value: "refined", label: "Refined" },
+                ] as const).map((opt) => (
+                  <Button
+                    key={opt.value}
+                    variant={skin === opt.value ? "primary" : "secondary"}
+                    size="sm"
+                    aria-label={opt.label}
+                    data-testid={`pref-skin-${opt.value}`}
+                    onClick={() => {
+                      if (skin !== opt.value) {
+                        handleSkin(opt.value);
+                      }
+                    }}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                Terminal is the default IRC/monospace look. Refined is a
+                friendlier, proportional-sans layout for people who prefer a
+                more conventional chat app. Syncs across your devices.
+              </p>
+            </section>
+
             {/* Accent Color */}
             <section className="flex flex-col gap-4 mb-12">
               <h2
@@ -284,7 +338,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   }}
                   maxLength={7}
                   spellCheck={false}
-                  className="text-xs font-mono px-2 py-1 focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
+                  className="text-xs font-mono font-machine px-2 py-1 focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
                   style={{
                     width: 90,
                     background: "var(--c-surface)",
@@ -368,7 +422,7 @@ export const PreferencesPage: React.FC = observer(() => {
                   }}
                   maxLength={7}
                   spellCheck={false}
-                  className="text-xs font-mono px-2 py-1 focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
+                  className="text-xs font-mono font-machine px-2 py-1 focus:outline-none focus:ring-4 focus:ring-[var(--c-accent)] focus:ring-offset-2 focus:ring-offset-black"
                   style={{
                     width: 90,
                     background: "var(--c-surface)",

@@ -5,6 +5,7 @@ import { useGroupMembers } from "../../hooks/queries/useGroups";
 import { observer } from "mobx-react-lite";
 import { rosterChangeStore, type RosterBanner } from "../../stores/rosterChangeStore";
 import { formatDayDivider } from "../../utils/format";
+import { useSkin } from "../../hooks/queries/usePreferences";
 import type { Message } from "../../types";
 
 const toMs = (timestamp: number): number =>
@@ -13,21 +14,46 @@ const toMs = (timestamp: number): number =>
 const startOfLocalDay = (d: Date): number =>
   new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 
-const DayDivider: React.FC<{ label: string }> = ({ label }) => (
-  <div
-    data-testid="day-divider"
-    className="flex items-center gap-3 py-2 select-none"
-  >
-    <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
-    <span
-      className="text-xs font-mono"
-      style={{ color: "var(--c-text-muted)" }}
+// Time gap (ms) beyond which a same-author message still starts a new group.
+const GROUP_GAP_MS = 5 * 60 * 1000;
+
+const DayDivider: React.FC<{ label: string; refined: boolean }> = ({ label, refined }) => {
+  if (refined) {
+    // Centered mono label between two hairline rules, with density-driven
+    // breathing room above and below.
+    return (
+      <div
+        data-testid="day-divider"
+        className="flex items-center gap-3 px-4 select-none"
+        style={{ marginTop: "var(--msg-divider-gap)", marginBottom: "var(--msg-divider-gap)" }}
+      >
+        <div className="flex-1 border-t border-line" />
+        <span
+          className="font-machine text-2xs tabular-nums"
+          style={{ color: "var(--c-text-muted)" }}
+        >
+          {label}
+        </span>
+        <div className="flex-1 border-t border-line" />
+      </div>
+    );
+  }
+  return (
+    <div
+      data-testid="day-divider"
+      className="flex items-center gap-3 py-2 select-none"
     >
-      {label}
-    </span>
-    <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
-  </div>
-);
+      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+      <span
+        className="text-xs font-mono"
+        style={{ color: "var(--c-text-muted)" }}
+      >
+        {label}
+      </span>
+      <div className="flex-1 h-px" style={{ background: "var(--c-border)" }} />
+    </div>
+  );
+};
 
 const RosterChangeBanner: React.FC<{
   banner: RosterBanner;
@@ -106,6 +132,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
   isFetchingMore,
   onLoadMore,
 }) => {
+  const skin = useSkin();
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevLengthRef = useRef(0);
@@ -277,6 +304,18 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         const showDivider =
           item.kind === "message" && (prevDay === null || prevDay !== currentDay);
 
+        // A message starts a new sender group (refined skin) when it's the
+        // first item, when a banner or day-divider separates it from the
+        // previous item, when the previous rendered item is a different
+        // author, or when the same author's gap exceeds GROUP_GAP_MS.
+        const isGroupStart =
+          item.kind === "message" &&
+          (prev === null ||
+            prev.kind === "banner" ||
+            showDivider ||
+            prev.message.sender_id !== item.message.sender_id ||
+            item.ts - prev.ts > GROUP_GAP_MS);
+
         if (item.kind === "banner") {
           return (
             <RosterChangeBanner
@@ -321,6 +360,7 @@ export const MessageList: React.FC<MessageListProps> = observer(({
             }
             isAuthorAdmin={adminUserIds?.has(message.sender_id) ?? false}
             canModerate={viewerIsAdmin}
+            isGroupStart={isGroupStart}
             onReply={onReply}
             onEdit={onEdit}
             onDelete={onDelete}
@@ -331,7 +371,10 @@ export const MessageList: React.FC<MessageListProps> = observer(({
         return (
           <React.Fragment key={item.key}>
             {showDivider && (
-              <DayDivider label={formatDayDivider(toMs(message.created_at))} />
+              <DayDivider
+                label={formatDayDivider(toMs(message.created_at))}
+                refined={skin === "refined"}
+              />
             )}
             {rendered}
           </React.Fragment>
