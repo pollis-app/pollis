@@ -242,6 +242,10 @@ criteria = "safe-to-deploy"
 version = "5.0.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.bs58]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.bytemuck]]
 version = "1.25.0"
 criteria = "safe-to-deploy"
@@ -2247,11 +2251,11 @@ version = "0.7.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_with]]
-version = "3.18.0"
+version = "3.21.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_with_macros]]
-version = "3.18.0"
+version = "3.21.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.serial_test]]
