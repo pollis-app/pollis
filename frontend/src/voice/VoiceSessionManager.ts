@@ -846,7 +846,7 @@ export const voiceSession = new VoiceSessionManager();
 
 /**
  * Mirror the manager's state slice onto the Zustand store so existing readers
- * (`VoiceBar`, `VoiceChannelView`, `AppShell`, `useLiveKitRealtime`, etc.)
+ * (`VoiceBar`, `VoiceStage`, `AppShell`, `useLiveKitRealtime`, etc.)
  * keep working without changes. The manager is the source of truth; Zustand
  * is a write-through projection for the rendering layer.
  */

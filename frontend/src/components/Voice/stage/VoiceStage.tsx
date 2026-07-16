@@ -19,7 +19,7 @@
 
 import React, { useState } from "react";
 import { observer } from "mobx-react-lite";
-import { ArrowLeft, Volume2, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, SlidersHorizontal } from "lucide-react";
+import { ArrowLeft, Volume2, Mic, MicOff, Monitor, MonitorOff, Video, VideoOff, LogOut, Phone, PhoneOff, SlidersHorizontal } from "lucide-react";
 
 import { appStore } from "../../../stores/appStore";
 import type { VoiceParticipant } from "../../../types";
@@ -52,6 +52,13 @@ interface VoiceStageProps {
   headerActions?: React.ReactNode;
   /** When set, replaces the standard footer (e.g. the pending-delete bar). */
   footer?: React.ReactNode;
+  /** 1:1 DM call surface. A call auto-joins and rings — it has no pre-join
+   *  roster, no "Join Voice" CTA, and no group affordances. The tray's leave
+   *  action becomes a hang-up, and a hang-up stays reachable while the call is
+   *  still connecting/ringing (before the LiveKit join resolves). Everything
+   *  else — camera picker, self-preview, remote camera/screen tiles, per-user
+   *  volume, meters — is identical to a group voice channel. */
+  callMode?: boolean;
 }
 
 export const VoiceStage: React.FC<VoiceStageProps> = observer(
@@ -65,6 +72,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     observerParticipants,
     headerActions,
     footer,
+    callMode = false,
   }) => {
     const {
       voiceParticipants,
@@ -187,9 +195,23 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
     const people = mergedParticipants.map(resolve);
     const streamers = people.filter((p) => p.streamTrackKey !== undefined);
-    const spotlight = isInCall && streamers.length > 0;
+    // A call is always "in" its room (it auto-joins and rings), so it never
+    // shows the group pre-join preview and its stage goes live immediately.
+    const stageLive = isInCall || callMode;
+    const previewState = !stageLive;
+    const spotlight = stageLive && streamers.length > 0;
     const focused =
       streamers.find((p) => p.identity === focusId) ?? streamers[0] ?? null;
+
+    // Ringing/connecting caption — call-only, shown above the (self-only) grid
+    // until the counterparty joins. Replaces the group "Join Voice" preview.
+    const hasRemoteParticipant = mergedParticipants.some((p) => !p.isLocal);
+    const ringStatus =
+      callMode && !spotlight && !hasRemoteParticipant
+        ? isJoining
+          ? "Connecting…"
+          : "Ringing…"
+        : null;
 
     const previewPeople: StageParticipant[] = observerParticipants.map((p) => ({
       identity: p.identity,
@@ -201,6 +223,27 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
     }));
 
     const onView = (trackKey: string) => setViewingScreenShareTrackKey(trackKey);
+
+    // Leave affordance — a plain "Leave" in a channel, a red "Hang up" in a
+    // call. Shared between the full in-call tray and the connecting-state
+    // footer so a call can always be ended.
+    const leaveButton = (
+      <button
+        className="vs-tray-leave"
+        data-testid={callMode ? "call-hang-up" : "voice-tray-leave"}
+        title={callMode ? "Hang up" : "Leave channel"}
+        aria-label={callMode ? "Hang up" : "Leave voice channel"}
+        onClick={onLeave}
+      >
+        {callMode ? (
+          <PhoneOff size={14} />
+        ) : (
+          // Exit arrow points left (mirrored) — a "leave" gesture.
+          <LogOut size={14} style={{ transform: "scaleX(-1)" }} />
+        )}
+        {callMode ? "Hang up" : "Leave"}
+      </button>
+    );
 
     return (
       <div className="vs-stage font-mono text-xs">
@@ -217,7 +260,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
             <ArrowLeft size={12} />
           </button>
           <span style={{ flex: 1, color: "var(--c-accent)" }} className="flex items-center gap-1.5">
-            <Volume2 size={12} />
+            {callMode ? <Phone size={12} /> : <Volume2 size={12} />}
             {channelName}
           </span>
           {headerActions && <div className="flex items-center gap-2">{headerActions}</div>}
@@ -229,7 +272,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
             <ScreenSharePicker />
           ) : cameraPicking ? (
             <CameraPicker />
-          ) : !isInCall ? (
+          ) : previewState ? (
             <div className="vs-preview" data-testid="voice-channel-observers">
               {previewPeople.length === 0 ? (
                 // Empty: label + CTA centered together as one group.
@@ -280,18 +323,25 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               </div>
             </div>
           ) : (
-            <NavigableGrid<StageParticipant>
-              items={people}
-              getKey={(p) => p.identity}
-              testId="voice-channel-view"
-              emptyLabel="Connecting…"
-              autoFocus={false}
-              minCellWidth={180}
-              maxCellWidth={240}
-              renderCell={(p, { focused: f }) => (
-                <StageTile participant={p} mode="grid" focused={f} onView={onView} />
+            <>
+              {ringStatus && (
+                <div className="vs-call-status" data-testid="call-status">
+                  {ringStatus}
+                </div>
               )}
-            />
+              <NavigableGrid<StageParticipant>
+                items={people}
+                getKey={(p) => p.identity}
+                testId="voice-channel-view"
+                emptyLabel={callMode ? "Calling…" : "Connecting…"}
+                autoFocus={false}
+                minCellWidth={180}
+                maxCellWidth={240}
+                renderCell={(p, { focused: f }) => (
+                  <StageTile participant={p} mode="grid" focused={f} onView={onView} />
+                )}
+              />
+            </>
           )}
         </div>
 
@@ -307,7 +357,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         ) : voiceState.kind === "joined" ? (
           <div className="vs-foot">
             <div className="vs-foot-side">
-              {isInCall ? (
+              {isInCall || callMode ? (
                 <div className="vs-tray">
                   <button
                     className={"vs-tray-btn danger" + (micMuted ? " on" : "")}
@@ -337,16 +387,7 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                     {cameraActive ? <VideoOff size={15} /> : <Video size={15} />}
                   </button>
                   <div className="vs-tray-sep" />
-                  <button
-                    className="vs-tray-leave"
-                    data-testid="voice-tray-leave"
-                    title="Leave channel"
-                    aria-label="Leave voice channel"
-                    onClick={onLeave}
-                  >
-                    {/* Exit arrow points left (mirrored) — a "leave" gesture. */}
-                    <LogOut size={14} style={{ transform: "scaleX(-1)" }} /> Leave
-                  </button>
+                  {leaveButton}
                 </div>
               ) : (
                 <Button data-testid="voice-join-leave-button" variant="primary" size="sm" className="h-[1.75rem]" onClick={onJoin}>
@@ -362,6 +403,14 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               >
                 <SlidersHorizontal size={15} /> Voice Settings
               </button>
+            </div>
+          </div>
+        ) : callMode ? (
+          // Connecting/ringing: the mic/share/camera controls need a completed
+          // join, but a hang-up must stay reachable the whole time.
+          <div className="vs-foot">
+            <div className="vs-foot-side">
+              <div className="vs-tray">{leaveButton}</div>
             </div>
           </div>
         ) : null}

@@ -475,6 +475,17 @@
    margin: 0 2px;
 }
 
+/* ---------- call ringing/connecting caption ----------
+   Shown above the self-only grid in a 1:1 call until the peer joins. */
+.vs-call-status {
+   flex: 0 0 auto;
+   text-align: center;
+   padding: 10px 12px;
+   font-size: 12px;
+   color: var(--vs-ink-dim);
+   letter-spacing: .04em;
+}
+
 /* ---------- preview (not joined) ---------- */
 .vs-preview {
    flex: 1 1 auto;

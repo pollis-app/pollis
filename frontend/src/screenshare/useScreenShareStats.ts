@@ -12,7 +12,7 @@ const EMPTY: FrameStats = { fps: 0, dimensions: null, lastFrameBytes: 0 };
  *      RemoteVideoTile). Real-time native browser metrics.
  *    - Tauri: `screenShareSession.onStats` derived from the Rust frame
  *      channel (the legacy path).
- *  Either way the returned shape is identical so VoiceMemberTile's
+ *  Either way the returned shape is identical so StageTile's
  *  stats label keeps working unchanged. */
 export function useScreenShareStats(trackKey: string | null): FrameStats {
   const [stats, setStats] = useState<FrameStats>(EMPTY);
@@ -29,7 +29,7 @@ export function useScreenShareStats(trackKey: string | null): FrameStats {
             ? { width: s.width, height: s.height }
             : null,
           // Electron path doesn't track bytes/frame — set 0; the
-          // VoiceMemberTile statsLabel doesn't surface bytes anyway.
+          // StageTile statsLabel doesn't surface bytes anyway.
           lastFrameBytes: 0,
         });
       });

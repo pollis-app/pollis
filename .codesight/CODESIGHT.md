@@ -217,7 +217,6 @@
 - **TerminalApp** — props: onLogout, onDeleteAccount — `frontend/src/components/TerminalApp.tsx`
 - **UpdateScreen** — `frontend/src/components/UpdateScreen.tsx`
 - **VoiceBar** — props: channelId, channelName — `frontend/src/components/Voice/VoiceBar.tsx`
-- **VoiceChannelView** — `frontend/src/components/Voice/VoiceChannelView.tsx`
 - **DesktopRequiredView** — `frontend/src/features/DesktopRequiredView.tsx`
 - **AllJoinRequests** — `frontend/src/pages/AllJoinRequests.tsx`
 - **AllJoinRequestsPage** — `frontend/src/pages/AllJoinRequestsPage.tsx`

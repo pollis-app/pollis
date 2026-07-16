@@ -530,7 +530,7 @@ class ScreenShareSession {
   /** Renderer-side publish path. Captures the picked source via
    *  `getUserMedia` with `chromeMediaSourceId`, hands the track to the
    *  livekit-client view connection, and mirrors the lifecycle into the
-   *  Zustand store (so VoiceBar / VoiceMemberTile switch to the
+   *  Zustand store (so VoiceBar / StageTile switch to the
    *  streaming state) without going through the Rust event channel. */
   private async startElectron(selection: Selection | undefined, maxFramerate: number): Promise<void> {
     // The in-app picker (ScreenSharePicker.tsx) always supplies a

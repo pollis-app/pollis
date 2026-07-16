@@ -1,18 +1,21 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { PhoneOff } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import { invoke } from "../bridge";
 import { appStore } from "../stores/appStore";
-import { VoiceChannelView } from "../components/Voice/VoiceChannelView";
+import { VoiceStage } from "../components/Voice/stage/VoiceStage";
+import { userIdFromVoiceIdentity } from "../voice/identity";
 import { voiceSession } from "../voice";
 
 /**
  * 1:1 call screen. Reuses the voice stack — a call is just a private LiveKit
  * room named `call-<call_id>`. Setting `activeVoiceChannelId` to the room name
  * causes `AppShell` to mount `VoiceBar`, which is what actually invokes
- * `join_voice_channel`. This page just renders the participant view and a
- * hang-up button on top.
+ * `join_voice_channel`. This page renders the shared `VoiceStage` — the same
+ * in-call surface a group voice channel uses (camera picker, self-preview,
+ * remote camera + screen-share tiles, per-user volume, meters) — in `callMode`
+ * so the two surfaces can't drift apart. This component only owns the
+ * call-specific lifecycle (ringing timeout, bounce-back guard, cancel backstop).
  *
  * Reachable via two paths:
  * - Caller clicks the phone in a DM header → DM page invokes `start_call`,
@@ -36,11 +39,36 @@ export const CallPage: React.FC = observer(() => {
   const navigate = useNavigate();
   const { callId } = useParams({ from: "/call/$callId" });
   const roomName = `call-${callId}`;
+  const voiceState = appStore.voiceState;
   const activeVoiceChannelId =
-    appStore.voiceState.kind === 'idle' ? null : appStore.voiceState.channelId;
+    voiceState.kind === 'idle' ? null : voiceState.channelId;
   const voiceParticipants = appStore.voiceParticipants;
+  const incomingCall = appStore.incomingCall;
   const outgoingCall = appStore.outgoingCall;
   const setOutgoingCall = appStore.setOutgoingCall;
+
+  // Header title: the counterparty's display name when we can resolve it,
+  // otherwise a generic "Call". Mirrors AppShell's VoiceBar name resolution —
+  // prefer the joined peer's participant name, fall back to the incoming-call
+  // slot's caller name while the peer is still ringing.
+  const channelName = useMemo(() => {
+    const peerId =
+      voiceState.kind === "joined" || voiceState.kind === "joining"
+        ? voiceState.counterpartyUserId
+        : null;
+    if (peerId) {
+      const peer = voiceParticipants.find(
+        (p) => userIdFromVoiceIdentity(p.identity) === peerId,
+      );
+      if (peer?.name) {
+        return peer.name;
+      }
+      if (incomingCall && incomingCall.callerId === peerId) {
+        return incomingCall.callerUsername;
+      }
+    }
+    return "Call";
+  }, [voiceState, voiceParticipants, incomingCall]);
 
   // Bounce-back guard. Three cases:
   //   1. Voice is our room → stay.
@@ -126,45 +154,19 @@ export const CallPage: React.FC = observer(() => {
     };
   }, [callId]);
 
-  const hangUp = () => {
-    voiceSession.leave();
-  };
-
   return (
-    <div className="flex flex-col h-full font-mono text-xs">
-      <div
-        className="flex items-center px-4 py-2 flex-shrink-0"
-        style={{ borderBottom: "1px solid var(--c-border)", color: "var(--c-text-muted)" }}
-      >
-        <span style={{ flex: 1, color: "var(--c-accent)" }}>call</span>
-      </div>
-
-      <VoiceChannelView />
-
-      <div
-        className="px-4 py-3 flex items-center justify-end flex-shrink-0"
-        style={{ borderTop: "1px solid var(--c-border)" }}
-      >
-        <button
-          data-testid="call-hang-up"
-          onClick={hangUp}
-          className="inline-flex items-center gap-2"
-          style={{
-            background: "transparent",
-            color: "var(--c-danger)",
-            border: "2px solid var(--c-danger)",
-            padding: "6px 14px",
-            borderRadius: "0.25rem",
-            cursor: "pointer",
-            fontFamily: "inherit",
-            fontSize: "inherit",
-            fontWeight: "bold",
-            letterSpacing: "0.05em",
-          }}
-        >
-          <PhoneOff size={12} /> Hang up
-        </button>
-      </div>
-    </div>
+    <VoiceStage
+      callMode
+      channelName={channelName}
+      isInCall={activeVoiceChannelId === roomName}
+      // A call has no pre-join roster and no "Join Voice" CTA.
+      observerParticipants={[]}
+      // callMode never renders a Join affordance, so onJoin is unreachable.
+      onJoin={() => {}}
+      // Leaving a call is a hang-up.
+      onLeave={() => voiceSession.leave()}
+      onBack={() => navigate({ to: "/dms" })}
+      onOpenSettings={() => navigate({ to: "/voice-settings" })}
+    />
   );
 });

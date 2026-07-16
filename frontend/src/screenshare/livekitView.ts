@@ -332,7 +332,7 @@ class LiveKitView {
     // "Stop sharing" in the system overlay — listen for that and clean up.
     track.addEventListener('ended', () => {
       void this.unpublishScreenShare();
-      // Notify the store so VoiceMemberTile flips back to the avatar.
+      // Notify the store so StageTile flips back to the avatar.
       appStore.shareStopped();
     });
     this.tracks.set(LOCAL_PREVIEW_KEY, track);
