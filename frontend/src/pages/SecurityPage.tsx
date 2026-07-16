@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate, useRouter } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
@@ -177,7 +178,7 @@ export const SecurityPage: React.FC = observer(() => {
       .listUserDevices(currentUser.id)
       .then(setDevices)
       .catch((err) => {
-        setDevicesError(err instanceof Error ? err.message : "Failed to load devices");
+        setDevicesError(errorMessage(err, "Failed to load devices"));
         setDevices([]);
       });
   }, [currentUser?.id]);
@@ -196,7 +197,7 @@ export const SecurityPage: React.FC = observer(() => {
       })
       .catch((err) => {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load security events");
+          setError(errorMessage(err, "Failed to load security events"));
           setEvents([]);
         }
       });
@@ -222,7 +223,7 @@ export const SecurityPage: React.FC = observer(() => {
       cancelConfirm();
       loadDevices();
     } catch (err) {
-      setDevicesError(err instanceof Error ? err.message : "Failed to revoke device");
+      setDevicesError(errorMessage(err, "Failed to revoke device"));
     } finally {
       setRevoking(false);
     }
@@ -251,7 +252,7 @@ export const SecurityPage: React.FC = observer(() => {
         console.error("[SecurityPage] onDeleteAccount callback is undefined — falling back to logout only");
       }
     } catch (err) {
-      setDeleteError(err instanceof Error ? err.message : "Failed to delete account");
+      setDeleteError(errorMessage(err, "Failed to delete account"));
       setIsDeleting(false);
     }
   }, [currentUser, deleteConfirmText, onDeleteAccount]);

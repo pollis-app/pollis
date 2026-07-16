@@ -1,3 +1,5 @@
+import { errorMessage } from '../utils/errorMessage';
+import { logIgnored } from '../utils/log';
 import { Channel, invoke } from '../bridge';
 
 import { reaction } from 'mobx';
@@ -11,7 +13,7 @@ import { audioLevels } from './audioLevels';
 import { audioSetMuted, audioSetSpeaking } from './participantAudio';
 import { LOCAL_PREVIEW_KEY } from '../screenshare/screenShareSession';
 
-const VOICE_DEVICES_KEY = 'pollis:voice-devices';
+export const VOICE_DEVICES_KEY = 'pollis:voice-devices';
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -477,12 +479,12 @@ class VoiceSessionManager {
         counterpartyUserId: target.counterpartyUserId ?? null,
       });
     } catch (e) {
-      const raw = e instanceof Error ? e.message : String(e);
+      const raw = errorMessage(e);
       const msg = friendlyJoinError(raw);
       console.error('[voice] join_voice_channel failed:', raw);
       // Best-effort cleanup in case the Rust side partially set up state
       // before failing.
-      invoke('leave_voice_channel').catch(() => {});
+      invoke('leave_voice_channel').catch((e) => console.warn('leave_voice_channel failed', e));
       this.localIdentity = null;
       this.setState({
         phase: 'idle',
@@ -552,7 +554,7 @@ class VoiceSessionManager {
           console.log(formatJoinTimings(timings, intentToInvokeMs));
         }
       })
-      .catch(() => {});
+      .catch(logIgnored);
 
     return true;
   }
@@ -772,7 +774,7 @@ function sameIntent(a: VoiceIntent | null, b: VoiceIntent | null): boolean {
   return a.channelId === b.channelId && a.groupId === b.groupId;
 }
 
-function readDevicePrefs(): { input: string | null; output: string | null } {
+export function readDevicePrefs(): { input: string | null; output: string | null } {
   try {
     const prefs: Record<string, string> = JSON.parse(
       localStorage.getItem(VOICE_DEVICES_KEY) || '{}',

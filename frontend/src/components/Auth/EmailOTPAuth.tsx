@@ -1,3 +1,4 @@
+import { errorMessage } from '../../utils/errorMessage';
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import * as api from '../../services/api';
@@ -60,7 +61,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
         setStep('otp');
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Failed to send code');
+        setError(errorMessage(err, 'Failed to send code'));
       })
       .finally(() => {
         setIsLoading(false);
@@ -79,7 +80,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
       await api.requestOTP(email.trim());
       setStep('otp');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to send code');
+      setError(errorMessage(err, 'Failed to send code'));
     } finally {
       setIsLoading(false);
     }
@@ -96,7 +97,7 @@ export const EmailOTPAuth: React.FC<EmailOTPAuthProps> = ({ onSuccess, prefillEm
       const result = await api.verifyOTP(email.trim(), otp.trim());
       await onSuccess(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid code');
+      setError(errorMessage(err, 'Invalid code'));
     } finally {
       setIsLoading(false);
     }

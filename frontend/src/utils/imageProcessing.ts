@@ -131,6 +131,70 @@ export async function blurhashFromUrl(
 }
 
 /**
+ * Capture a poster frame from a video src URL by seeking to ~10% of its
+ * duration (capped at 0.5s so long videos still grab an early frame) and
+ * snapshotting the frame to a JPEG blob. Returns the poster's object URL plus
+ * the video duration in seconds (0 when the metadata reports none), or null on
+ * any failure. Shared by the composer attachment preview (ChatInput) and the
+ * rendered video attachment (AttachmentDisplay).
+ *
+ * The returned `url` is a fresh object URL the caller owns — revoke it once
+ * it's no longer needed.
+ */
+export function captureVideoPoster(
+  src: string,
+): Promise<{ url: string; duration: number } | null> {
+  return new Promise((resolve) => {
+    const vid = document.createElement('video');
+    vid.muted = true;
+    vid.playsInline = true;
+    vid.preload = 'metadata';
+
+    let settled = false;
+    const finish = (result: { url: string; duration: number } | null) => {
+      if (settled) { return; }
+      settled = true;
+      vid.src = '';
+      vid.load();
+      resolve(result);
+    };
+
+    let duration = 0;
+    vid.addEventListener('loadedmetadata', () => {
+      duration = isFinite(vid.duration) && vid.duration > 0 ? vid.duration : 0;
+      // Seek to ~10% of duration for a representative frame.
+      vid.currentTime = Math.min(0.5, duration > 0 ? duration * 0.1 : 0.5);
+    }, { once: true });
+
+    vid.addEventListener('seeked', () => {
+      const canvas = document.createElement('canvas');
+      // Cap to 1280px to stay well within WebKit/GDK's native surface limits.
+      const MAX_DIM = 1280;
+      let cw = vid.videoWidth || 320;
+      let ch = vid.videoHeight || 180;
+      if (cw > MAX_DIM) { ch = Math.round(ch * MAX_DIM / cw); cw = MAX_DIM; }
+      if (ch > MAX_DIM) { cw = Math.round(cw * MAX_DIM / ch); ch = MAX_DIM; }
+      canvas.width = cw;
+      canvas.height = ch;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) { finish(null); return; }
+      ctx.drawImage(vid, 0, 0, cw, ch);
+      canvas.toBlob((blob) => {
+        finish(blob ? { url: URL.createObjectURL(blob), duration } : null);
+      }, 'image/jpeg', 0.75);
+    }, { once: true });
+
+    vid.addEventListener('error', () => { finish(null); }, { once: true });
+
+    // Timeout guard — if nothing fires after 5s, give up.
+    setTimeout(() => { finish(null); }, 5000);
+
+    vid.src = src;
+    vid.load();
+  });
+}
+
+/**
  * Validate if a file is an image and within size limits
  *
  * @param file - File to validate

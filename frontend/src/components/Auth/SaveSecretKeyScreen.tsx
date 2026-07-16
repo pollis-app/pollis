@@ -4,6 +4,7 @@ import { DotMatrix } from "../ui/DotMatrix";
 import { Card } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { TextInput } from "../ui/TextInput";
+import { logIgnored } from "../../utils/log";
 
 interface SaveSecretKeyScreenProps {
   /// The freshly-generated Secret Key returned from `verify_otp`. Shown
@@ -251,7 +252,7 @@ export const SaveSecretKeyScreen: React.FC<SaveSecretKeyScreenProps> = ({
                         setCopied(true);
                         window.setTimeout(() => setCopied(false), 2000);
                       })
-                      .catch(() => { });
+                      .catch(logIgnored);
                   }}
                   variant="ghost"
                   className="w-fit-content mx-auto"

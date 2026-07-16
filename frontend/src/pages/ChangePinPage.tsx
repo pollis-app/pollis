@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
@@ -59,7 +60,7 @@ export const ChangePinPage: React.FC = () => {
       await api.setPin(newPin, oldPin);
       setDone(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
       resetToOld();
     } finally {
       setIsLoading(false);

@@ -12,7 +12,7 @@ import { ChatInput, type Attachment, type ChatInputHandle } from "../ui/ChatInpu
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { Button } from "../ui/Button";
 import { useMessages, useSendMessage, messageQueryKeys, useDeleteMessage, useEditMessage, useAcceptDMRequest, useBlockUser } from "../../hooks/queries";
-import { transformChannelMessage } from "../../hooks/queries/useMessages";
+import { transformChannelMessage, type RawChannelMessage } from "../../hooks/queries/useMessages";
 import { useGroupMembers, useDeleteChannel } from "../../hooks/queries/useGroups";
 import type { Message, MessageAttachment } from "../../types";
 import { blurhashFromUrl } from "../../utils/imageProcessing";
@@ -43,7 +43,7 @@ type MediaUploadResult = {
 type PageCursor = { sent_at: string; id: string };
 
 type RawMessagePage = {
-  messages: unknown[];
+  messages: RawChannelMessage[];
   next_cursor: PageCursor | null;
 };
 
@@ -166,11 +166,14 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
 
   // Initialise the cursor from the initial page load (only if no older pages
   // have been fetched yet — don't overwrite cursor mid-pagination).
+  // Include the selected channel/conversation so the cursor re-initialises on
+  // switch — keyed on nextCursor alone it could miss a re-init when the new
+  // channel's initial cursor equals the previous one.
   useEffect(() => {
     if (nextCursor && olderMessages.length === 0) {
       setPageCursor(nextCursor);
     }
-  }, [nextCursor]);
+  }, [nextCursor, selectedChannelId, selectedConversationId]);
 
   // MessageItem dispatches this when an attachment lightbox closes so focus
   // returns to the chat input — keeps the keyboard-driven flow intact.
@@ -218,8 +221,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         return;
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fetched = (page.messages as any[]).map(transformChannelMessage);
+      const fetched = page.messages.map(transformChannelMessage);
 
       setOlderMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.id));
@@ -507,7 +509,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
             }}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            onScrollToMessage={(id) => console.log("Scroll to:", id)}
+            // TODO: scroll-to-message not yet implemented; prop left unwired
             getAuthorUsername={(authorId, message) =>
               message?.sender_username || (authorId === currentUser?.id ? (currentUser?.username ?? authorId) : authorId)
             }
@@ -523,7 +525,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
           messageId={replyToMessageId}
           allMessages={allMessages}
           onDismiss={() => setReplyToMessageId(null)}
-          onScrollToMessage={(id) => console.log("Scroll to:", id)}
+          // TODO: scroll-to-message not yet implemented; prop left unwired
         />
       )}
 

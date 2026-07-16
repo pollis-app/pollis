@@ -10,7 +10,6 @@ import { useDMConversations } from "../hooks/queries/useMessages";
 import type { RouterContext } from "../types/router";
 
 export const RootPage: React.FC = observer(() => {
-  const { unreadCounts } = appStore;
   const navigate = useNavigate();
   const router = useRouter();
   const { onLogout } = router.options.context as RouterContext;
@@ -19,7 +18,7 @@ export const RootPage: React.FC = observer(() => {
   const { data: pendingInvites = [] } = usePendingInvites();
   const { data: pendingJoinRequests = [] } = useAllPendingJoinRequests();
 
-  const totalDMUnread = dmConversations.reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0);
+  const totalDMUnread = appStore.unreadFor(dmConversations);
 
   const items: TerminalMenuItem[] = [
     {

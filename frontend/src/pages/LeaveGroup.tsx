@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { appStore } from "../stores/appStore";
@@ -29,7 +30,7 @@ export const LeaveGroupPage: React.FC = observer(() => {
         </p>
         {leaveGroupMutation.isError && (
           <p className="text-xs font-mono" style={{ color: "var(--c-danger)" }}>
-            {leaveGroupMutation.error instanceof Error ? leaveGroupMutation.error.message : "Failed to leave group"}
+            {errorMessage(leaveGroupMutation.error, "Failed to leave group")}
           </p>
         )}
         <div className="flex gap-3">

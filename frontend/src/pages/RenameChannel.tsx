@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState } from "react";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -63,7 +64,7 @@ export const RenameChannel: React.FC<RenameChannelProps> = observer(({ groupId, 
       });
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to rename channel");
+      setError(errorMessage(err, "Failed to rename channel"));
     }
   };
 

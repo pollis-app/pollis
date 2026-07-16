@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { PageShell } from "../components/Layout/PageShell";
@@ -58,7 +59,7 @@ export const RequestsPage: React.FC = observer(() => {
     try {
       await blockMutation.mutateAsync(other.user_id);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       console.error("Failed to block user:", msg);
     }
   };

@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
@@ -68,7 +69,7 @@ export const PinCreateScreen: React.FC<PinCreateScreenProps> = ({
       await api.setPin(firstPin, oldPin);
       await onCreated();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorMessage(err));
       setStep("enter");
       setFirstPin("");
       setConfirmPin("");

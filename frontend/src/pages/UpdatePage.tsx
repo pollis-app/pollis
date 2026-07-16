@@ -1,3 +1,4 @@
+import { errorMessage as toErrorMessage } from "../utils/errorMessage";
 import React, { useState, useEffect, useCallback } from "react";
 import {
   getVersion,
@@ -58,7 +59,7 @@ export const UpdatePage: React.FC = observer(() => {
                 setAvailableUpdateVersion(null);
               }
             })
-            .catch(() => {});
+            .catch((e) => console.warn("checkForUpdate failed", e));
           return;
         }
 
@@ -80,7 +81,7 @@ export const UpdatePage: React.FC = observer(() => {
           return;
         }
         setStatus("error");
-        setErrorMessage(err instanceof Error ? err.message : "Failed to check for updates");
+        setErrorMessage(toErrorMessage(err, "Failed to check for updates"));
       }
     })();
     return () => {
@@ -93,7 +94,7 @@ export const UpdatePage: React.FC = observer(() => {
       return;
     }
     setIsInstalling(true);
-    await invoke("mark_update_required").catch(() => {});
+    await invoke("mark_update_required").catch((e) => console.warn("mark_update_required failed", e));
     setUpdateRequired(true);
   }, [status, setUpdateRequired]);
 

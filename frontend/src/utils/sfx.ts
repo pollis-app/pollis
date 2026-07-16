@@ -1,4 +1,5 @@
 import { invoke } from '../bridge';
+import { logIgnored } from './log';
 
 /**
  * Play a named sound effect via the Rust backend.
@@ -9,7 +10,7 @@ import { invoke } from '../bridge';
  * surface to the user.
  */
 export function playSfx(sound: string): void {
-  invoke('play_sfx', { sound }).catch(() => {});
+  invoke('play_sfx', { sound }).catch(logIgnored);
 }
 
 export const SFX = {

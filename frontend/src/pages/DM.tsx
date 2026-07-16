@@ -59,7 +59,7 @@ export const DMPage: React.FC = observer(() => {
         setOtherUserId(other?.user_id ?? null);
         setOtherAcceptedAt(other?.accepted_at ?? null);
       })
-      .catch(() => { });
+      .catch((e) => console.warn("list_dm_channels failed", e));
     return () => { cancelled = true; };
   }, [currentUser, conversationId]);
 

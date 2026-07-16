@@ -1,8 +1,10 @@
+import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { decode } from "blurhash";
 import { dialogSave, writeFile } from "../../bridge";
 import { Download, Film, Check } from "lucide-react";
 import { getFileIcon } from "../../utils/fileIcon";
+import { captureVideoPoster } from "../../utils/imageProcessing";
 import { formatFileSize, formatDuration } from "../../utils/format";
 import { downloadAndDecryptMedia, getMediaUrl } from "../../services/r2-upload";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
@@ -99,7 +101,10 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
   // Without this, setting downloadUrl (on lightbox open) re-triggers the
   // effect and creates a second GStreamer pipeline on the same blob URL,
   // which races with the lightbox video and causes intermittent failures.
-  const posterAttemptedRef = useRef(false);
+  // Tracks the specific src we last attempted a poster capture for. A boolean
+  // latch here would block a late-arriving downloadUrl from ever producing a
+  // poster; keying on the src value lets a new src re-run exactly once.
+  const posterAttemptedSrcRef = useRef<string | null>(null);
 
   // Intercept Escape in the capture phase so AppShell's navigation handler
   // doesn't also fire while the lightbox is open.
@@ -130,61 +135,32 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
   // Video: read duration + capture a poster frame via canvas.
   // Safe to seek now that gst-plugins-good is installed.
   useEffect(() => {
-    if (!isVideo || posterAttemptedRef.current) { return; }
+    if (!isVideo) { return; }
     const src = attachment.localPreviewUrl ?? downloadUrl;
-    if (!src) { return; }
-    // Mark before starting so concurrent dep changes don't trigger a second run.
-    posterAttemptedRef.current = true;
+    if (!src || posterAttemptedSrcRef.current === src) { return; }
+    // Mark this src before starting so concurrent dep changes don't trigger a
+    // second run for the same src, while a *new* src can still re-run.
+    posterAttemptedSrcRef.current = src;
     let mounted = true;
 
-    const vid = document.createElement("video");
-    vid.muted = true;
-    vid.playsInline = true;
-    vid.preload = "metadata";
+    captureVideoPoster(src).then((result) => {
+      if (!result) { return; }
+      // Component unmounted mid-capture — drop the poster and revoke its blob
+      // URL so it doesn't leak (the poster-revoke effect only tracks state).
+      if (!mounted) { URL.revokeObjectURL(result.url); return; }
+      if (result.duration > 0) { setDuration(result.duration); }
+      setPoster(result.url);
+    });
 
-    const cleanup = () => { vid.src = ""; vid.load(); };
-
-    vid.addEventListener("loadedmetadata", () => {
-      if (!mounted) { cleanup(); return; }
-      if (isFinite(vid.duration) && vid.duration > 0) {
-        setDuration(vid.duration);
-        // Seek to ~10% of duration for a representative frame.
-        vid.currentTime = Math.min(0.5, vid.duration * 0.1);
-      } else {
-        cleanup();
-      }
-    }, { once: true });
-
-    vid.addEventListener("seeked", () => {
-      if (!mounted) { cleanup(); return; }
-      const canvas = document.createElement("canvas");
-      // Cap to 1280px to stay well within WebKit/GDK's native surface limits.
-      const MAX_DIM = 1280;
-      let cw = vid.videoWidth || 320;
-      let ch = vid.videoHeight || 180;
-      if (cw > MAX_DIM) { ch = Math.round(ch * MAX_DIM / cw); cw = MAX_DIM; }
-      if (ch > MAX_DIM) { cw = Math.round(cw * MAX_DIM / ch); ch = MAX_DIM; }
-      canvas.width = cw;
-      canvas.height = ch;
-      const ctx = canvas.getContext("2d");
-      if (ctx) {
-        ctx.drawImage(vid, 0, 0);
-        canvas.toBlob((blob) => {
-          if (blob && mounted) { setPoster(URL.createObjectURL(blob)); }
-          cleanup();
-        }, "image/jpeg", 0.75);
-      } else {
-        cleanup();
-      }
-    }, { once: true });
-
-    vid.addEventListener("error", () => { cleanup(); }, { once: true });
-
-    vid.src = src;
-    vid.load();
-
-    return () => { mounted = false; cleanup(); };
+    return () => { mounted = false; };
   }, [isVideo, attachment.localPreviewUrl, downloadUrl]);
+
+  // Guard against a fetch-succeeds-but-render-fails loop: `<img onError>` nulls
+  // downloadUrl, which re-fires the auto-load effect below. A URL that fetches
+  // fine yet fails to render would otherwise loop forever (fetch→render→error→
+  // null→fetch). Cap how many render failures we retry before giving up.
+  const renderFailuresRef = useRef(0);
+  const MAX_RENDER_RETRIES = 1;
 
   // Auto-load images and audio from R2 once confirmed (object_key populated, no local URL).
   // One URL pattern across image and audio: the loopback media server
@@ -193,6 +169,12 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
   // db_key; HTTP Range works for `<audio>` / `<video>` natively.
   useEffect(() => {
     if ((!isImage && !isAudio) || isPending || downloadUrl) {
+      return;
+    }
+    // A previously fetched URL rendered and then errored past the retry cap —
+    // stop re-fetching, surface the failure instead of spinning.
+    if (renderFailuresRef.current > MAX_RENDER_RETRIES) {
+      setError("Failed to load");
       return;
     }
 
@@ -206,12 +188,15 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
     fetchUrl.then((url) => {
       if (mounted) { setDownloadUrl(url); }
     }).catch((err) => {
-      if (mounted) { setError(err instanceof Error ? err.message : "Failed to load"); }
+      if (mounted) { setError(errorMessage(err, "Failed to load")); }
     }).finally(() => {
       if (mounted) { setIsLoading(false); }
     });
     return () => { mounted = false; };
-  }, [attachment.object_key]);
+    // Key on every input the guard reads, not just object_key. Previously a
+    // confirmed attachment (isPending flips false) or a downloadUrl reset back
+    // to null (failed load) never re-fired this effect, so the media never retried.
+  }, [isImage, isAudio, isPending, downloadUrl, attachment.object_key, attachment.content_hash, attachment.content_type]);
 
   // Revoke decrypted blob URLs we created when they're replaced or on unmount.
   // Skip non-blob URLs (e.g. tauri convertFileSrc paths) and skip the
@@ -268,7 +253,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
         setTimeout(() => setDownloadStatus("idle"), 2000);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to download");
+      setError(errorMessage(err, "Failed to download"));
       setDownloadStatus("idle");
     }
   };
@@ -291,7 +276,7 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
       setDownloadUrl(url);
       setViewerOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
+      setError(errorMessage(err, "Failed to load"));
     } finally {
       setIsLoading(false);
     }
@@ -402,7 +387,10 @@ export const AttachmentDisplay: React.FC<{ attachment: MessageAttachment }> = ({
             <img
               src={downloadUrl}
               alt={attachment.filename}
-              onError={() => setDownloadUrl(null)}
+              onError={() => {
+                renderFailuresRef.current += 1;
+                setDownloadUrl(null);
+              }}
               style={{
                 width: "100%",
                 height: "100%",

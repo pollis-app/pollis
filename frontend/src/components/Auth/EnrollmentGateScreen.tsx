@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errorMessage";
 import React, { useEffect, useRef, useState } from "react";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
@@ -111,7 +112,7 @@ export const EnrollmentGateScreen: React.FC<EnrollmentGateScreenProps> = ({
       // (matching the other panes) so the real backend reason surfaces instead
       // of a generic message. This also lets the session-error routing in the
       // "error" pane detect "sign in again" cases.
-      const message = err instanceof Error ? err.message : String(err) || "Failed to start enrollment";
+      const message = errorMessage(err) || "Failed to start enrollment";
       setState({ phase: "error", message });
     } finally {
       setIsStarting(false);
@@ -397,7 +398,7 @@ const SecretKeyFallbackPane: React.FC<{
     } catch (err) {
       // Surface the real backend reason (Tauri rejects with a string, not an
       // Error) instead of a generic "Recovery failed".
-      const message = err instanceof Error ? err.message : String(err) || "Recovery failed";
+      const message = errorMessage(err) || "Recovery failed";
       setError(message);
     } finally {
       setIsLoading(false);
@@ -497,7 +498,7 @@ const ResetConfirmPane: React.FC<{
       // Tauri rejects with a serialized string, not an Error — fall back to
       // String(err) (matching PinEntryScreen) so the real backend reason
       // surfaces instead of a generic "Reset failed".
-      const message = err instanceof Error ? err.message : String(err) || "Reset failed";
+      const message = errorMessage(err) || "Reset failed";
       setError(message);
     } finally {
       setIsLoading(false);

@@ -5,6 +5,34 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+// Extension → MIME type for the file kinds Pollis previews or uploads. Single
+// source of truth for the composer (ChatInput, full map) and R2 public-file
+// downloads (image-only view below).
+export const EXT_MIME: Record<string, string> = {
+  // Images
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+  gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", avif: "image/avif",
+  // Video
+  mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+  // Audio
+  mp3: "audio/mpeg", wav: "audio/wav", ogg: "audio/ogg", m4a: "audio/mp4",
+  flac: "audio/flac", opus: "audio/opus", aac: "audio/aac",
+  // Documents / archives
+  pdf: "application/pdf", zip: "application/zip",
+};
+
+// Image-only subset of EXT_MIME. R2 public downloads (avatars, group icons)
+// only ever serve images, so the extension lookup stays narrow.
+export const IMAGE_EXT_MIME: Record<string, string> = Object.fromEntries(
+  Object.entries(EXT_MIME).filter(([, mime]) => mime.startsWith("image/")),
+);
+
+// Best-effort MIME type for a filename, falling back to a generic binary type.
+export function mimeFromName(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return EXT_MIME[ext] ?? "application/octet-stream";
+}
+
 export function getFileIcon(filename: string): LucideIcon {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   switch (ext) {

@@ -1,4 +1,4 @@
-export { voiceSession } from './VoiceSessionManager';
+export { voiceSession, VOICE_DEVICES_KEY, readDevicePrefs } from './VoiceSessionManager';
 export type {
   VoiceEvent,
   VoiceIntent,

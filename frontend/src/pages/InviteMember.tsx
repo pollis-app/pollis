@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useState } from "react";
 import { useSendGroupInvite } from "../hooks/queries";
 import { TextInput } from "../components/ui/TextInput";
@@ -72,7 +73,7 @@ export const InviteMember: React.FC<InviteMemberProps> = ({ groupId, groupName }
 
           {inviteMutation.error && (
             <p data-testid="invite-error" className="text-xs font-mono" style={{ color: 'var(--c-danger)' }}>
-              {inviteMutation.error instanceof Error ? inviteMutation.error.message : "Failed to send invite"}
+              {errorMessage(inviteMutation.error, "Failed to send invite")}
             </p>
           )}
         </form>

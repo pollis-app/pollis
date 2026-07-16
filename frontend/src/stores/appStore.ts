@@ -221,6 +221,20 @@ class AppStore implements AppState {
     };
   }
 
+  // Sum of unread counts across a collection of channels or DM conversations,
+  // each looked up by id. Replaces the duplicated
+  // `reduce((s, x) => s + (unreadCounts[x.id] ?? 0), 0)` copies at the badge
+  // call sites.
+  unreadFor(items: { id: string }[]): number {
+    return items.reduce((sum, x) => sum + (this.unreadCounts[x.id] ?? 0), 0);
+  }
+
+  // Total unread across every channel/conversation — drives the OS dock/tray
+  // badge.
+  get totalUnread(): number {
+    return Object.values(this.unreadCounts).reduce((sum, n) => sum + n, 0);
+  }
+
   // ── Voice + share transitions ──────────────────────────────────────────
   // Each transition guards on the current `voiceState.kind`. Bad
   // transitions are logged + dropped instead of mutating state — this is

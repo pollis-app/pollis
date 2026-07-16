@@ -1,5 +1,6 @@
 import { sendNotification } from '../bridge';
 import { playSfx } from './sfx';
+import { logIgnored } from './log';
 import { appStore } from '../stores/appStore';
 
 export type Category =
@@ -143,7 +144,7 @@ export function notify(category: Category, payload: NotifyPayload = {}): void {
   if (config.osNotif && prefs.allowOsNotif && prefs.osPermissionGranted && ringtoneAllowed && !cooled) {
     const title = payload.title ?? 'New message';
     const body = payload.body ?? (payload.senderUsername ? `${payload.senderUsername}: New message` : '');
-    sendNotification({ title, body }).catch(() => {});
+    sendNotification({ title, body }).catch(logIgnored);
     fired = true;
   }
 

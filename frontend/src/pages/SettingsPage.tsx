@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Upload, User } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -119,7 +120,7 @@ export const SettingsPage: React.FC = observer(() => {
       setFileInputKey((prev) => prev + 1);
       setSaveSuccess(true);
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : "Failed to upload avatar");
+      setUploadError(errorMessage(error, "Failed to upload avatar"));
     }
   }, [selectedFile, currentUser, preview, updateAvatarMutation]);
 
@@ -165,7 +166,7 @@ export const SettingsPage: React.FC = observer(() => {
       await invoke("request_email_change_otp", { userId: currentUser.id, newEmail: target });
       setEmailChangeStep("verify");
     } catch (err) {
-      setEmailChangeError(err instanceof Error ? err.message : String(err));
+      setEmailChangeError(errorMessage(err));
     } finally {
       setEmailChangePending(false);
     }
@@ -189,7 +190,7 @@ export const SettingsPage: React.FC = observer(() => {
       await queryClient.invalidateQueries({ queryKey: userQueryKeys.profile(currentUser.id) });
       cancelEmailChange();
     } catch (err) {
-      setEmailChangeError(err instanceof Error ? err.message : String(err));
+      setEmailChangeError(errorMessage(err));
     } finally {
       setEmailChangePending(false);
     }

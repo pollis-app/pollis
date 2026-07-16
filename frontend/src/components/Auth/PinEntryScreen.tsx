@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errorMessage";
 import React, { useState, useEffect, useRef } from "react";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
@@ -52,7 +53,7 @@ export const PinEntryScreen: React.FC<PinEntryScreenProps> = ({
       await api.unlockWithPin(userId, pin);
       await onUnlocked();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       setError(msg);
       setPin("");
     } finally {

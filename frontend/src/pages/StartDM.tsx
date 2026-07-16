@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useState } from "react";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -35,7 +36,7 @@ export const StartDM: React.FC<StartDMProps> = observer(({ onSuccess }) => {
       onSuccess?.(conversation.id);
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : "Failed to start conversation"
+        errorMessage(err, "Failed to start conversation")
       );
     }
   };

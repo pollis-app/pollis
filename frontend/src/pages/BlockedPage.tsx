@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React from "react";
 import { PageShell } from "../components/Layout/PageShell";
 import { useBlockedUsers, useUnblockUser } from "../hooks/queries";
@@ -13,7 +14,7 @@ export const BlockedPage: React.FC = () => {
     try {
       await unblockMutation.mutateAsync(userId);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const msg = errorMessage(err);
       console.error("Failed to unblock user:", msg);
     }
   };

@@ -4,6 +4,7 @@ import { appStore } from '../stores/appStore';
 import { useObserver } from 'mobx-react-lite';
 import { useTauriReady } from './useTauriReady';
 import { isMac, isWindows } from '../utils/platform';
+import { logIgnored } from '../utils/log';
 
 // Lazy-loaded icon images for Windows taskbar swap.
 // Cached after the first fetch so repeated badge changes don't re-fetch.
@@ -42,9 +43,7 @@ async function getWindowsNotifIcon(): Promise<PollisImage> {
  */
 export function useBadge() {
   const { isReady } = useTauriReady();
-  const unreadCounts = useObserver(() => appStore.unreadCounts);
-
-  const total = Object.values(unreadCounts).reduce((sum, n) => sum + n, 0);
+  const total = useObserver(() => appStore.totalUnread);
 
   useEffect(() => {
     if (!isReady) {
@@ -84,9 +83,9 @@ export function useBadge() {
       if (isWindows) {
         getWindowsDefaultIcon()
           .then((img) => win.setIcon(img))
-          .catch(() => {});
+          .catch(logIgnored);
       } else {
-        win.setBadgeCount(undefined).catch(() => {});
+        win.setBadgeCount(undefined).catch(logIgnored);
       }
     };
   }, [isReady]);

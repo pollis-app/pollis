@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { invoke } from "../bridge";
@@ -39,7 +40,7 @@ export const SearchGroupPage: React.FC = observer(() => {
       const group = await invoke<{ id: string; name: string; description?: string }>('search_group_by_slug', { slug: slug.trim() });
       setFoundGroup(group);
     } catch (err) {
-      setSearchError(err instanceof Error ? err.message : "Group not found");
+      setSearchError(errorMessage(err, "Group not found"));
     } finally {
       setIsSearching(false);
     }

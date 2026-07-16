@@ -93,7 +93,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
         invoke("terminal_ack", {
           terminalId: id,
           bytes: bytes.byteLength,
-        }).catch(() => {});
+        }).catch((e) => console.warn("terminal_ack failed", e));
       });
     };
 
@@ -114,7 +114,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       })
         .then((id) => {
           if (disposed) {
-            invoke("terminal_close", { terminalId: id }).catch(() => {});
+            invoke("terminal_close", { terminalId: id }).catch((e) => console.warn("terminal_close failed", e));
             return;
           }
           terminalIdRef.current = id;
@@ -141,7 +141,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       }
       invoke("terminal_write", encoder.encode(data), {
         headers: { "x-terminal-id": id },
-      }).catch(() => {});
+      }).catch((e) => console.warn("terminal_write failed", e));
     });
 
     const resizeObserver = new ResizeObserver(() => {
@@ -155,7 +155,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
           terminalId: id,
           rows: term.rows,
           cols: term.cols,
-        }).catch(() => {});
+        }).catch((e) => console.warn("terminal_resize failed", e));
       }
     });
     resizeObserver.observe(containerRef.current);
@@ -165,7 +165,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     const onBeforeUnload = () => {
       const id = terminalIdRef.current;
       if (id !== null) {
-        invoke("terminal_close", { terminalId: id }).catch(() => {});
+        invoke("terminal_close", { terminalId: id }).catch((e) => console.warn("terminal_close failed", e));
       }
     };
     window.addEventListener("beforeunload", onBeforeUnload);
@@ -178,7 +178,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
       onDataDisposable.dispose();
       const id = terminalIdRef.current;
       if (id !== null) {
-        invoke("terminal_close", { terminalId: id }).catch(() => {});
+        invoke("terminal_close", { terminalId: id }).catch((e) => console.warn("terminal_close failed", e));
       }
       term.dispose();
     };
@@ -207,7 +207,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
           terminalId: id,
           rows: term.rows,
           cols: term.cols,
-        }).catch(() => {});
+        }).catch((e) => console.warn("terminal_resize failed", e));
       }
       term.focus();
     });

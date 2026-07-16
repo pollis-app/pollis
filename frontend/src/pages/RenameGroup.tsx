@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useEffect, useState } from "react";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -60,7 +61,7 @@ export const RenameGroup: React.FC<RenameGroupProps> = observer(({ groupId, onSu
       });
       onSuccess?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to rename group");
+      setError(errorMessage(err, "Failed to rename group"));
     }
   };
 

@@ -106,23 +106,15 @@ export const StatusBarSummary: React.FC<StatusBarSummaryProps> = observer(({ col
     }
   }, [dmRequests, pendingInvites]);
 
-  const groupUnread = useMemo(() => {
-    let sum = 0;
-    for (const g of groupsWithChannels) {
-      for (const ch of g.channels) {
-        sum += unreadCounts[ch.id] ?? 0;
-      }
-    }
-    return sum;
-  }, [groupsWithChannels, unreadCounts]);
+  const groupUnread = useMemo(
+    () => groupsWithChannels.reduce((sum, g) => sum + appStore.unreadFor(g.channels), 0),
+    [groupsWithChannels, unreadCounts]
+  );
 
-  const dmUnread = useMemo(() => {
-    let sum = 0;
-    for (const c of dmConversations) {
-      sum += unreadCounts[c.id] ?? 0;
-    }
-    return sum;
-  }, [dmConversations, unreadCounts]);
+  const dmUnread = useMemo(
+    () => appStore.unreadFor(dmConversations),
+    [dmConversations, unreadCounts]
+  );
 
   const joinRequestCount = pendingJoinRequests.length;
   const inviteCount = pendingInvites.length;

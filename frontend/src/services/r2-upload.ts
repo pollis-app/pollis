@@ -1,5 +1,6 @@
 import { invoke } from '../bridge';
 import type { PresignedUploadResponse } from '../types';
+import { IMAGE_EXT_MIME } from '../utils/fileIcon';
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -38,16 +39,6 @@ export async function uploadGroupIcon(
   return { upload_url: '', object_key: result.key, public_url: result.url };
 }
 
-const EXT_MIME: Record<string, string> = {
-  gif: 'image/gif',
-  webp: 'image/webp',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  svg: 'image/svg+xml',
-  avif: 'image/avif',
-};
-
 function sniffImageMime(bytes: Uint8Array): string | null {
   if (bytes.length >= 8 &&
     bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
@@ -78,7 +69,7 @@ export async function getFileDownloadUrl(key: string): Promise<string> {
   const raw = await invoke<number[]>('download_file', { key });
   const bytes = new Uint8Array(raw);
   const ext = key.split('.').pop()?.toLowerCase() ?? '';
-  const mimeType = EXT_MIME[ext] ?? sniffImageMime(bytes) ?? 'image/png';
+  const mimeType = IMAGE_EXT_MIME[ext] ?? sniffImageMime(bytes) ?? 'image/png';
   const blob = new Blob([bytes], { type: mimeType });
   return URL.createObjectURL(blob);
 }

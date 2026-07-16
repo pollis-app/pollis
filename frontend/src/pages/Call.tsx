@@ -147,7 +147,7 @@ export const CallPage: React.FC = observer(() => {
         if (pending && pending.callId === callId) {
           const calleeId = pending.calleeId;
           appStore.setOutgoingCall(null);
-          invoke("cancel_call", { otherUserId: calleeId, callId }).catch(() => {});
+          invoke("cancel_call", { otherUserId: calleeId, callId }).catch((e) => console.warn("cancel_call failed", e));
         }
       }, DEFER_CANCEL_MS);
       pendingCancels.set(callId, timer);

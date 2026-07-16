@@ -15,7 +15,7 @@ import {
   type PreferencesData,
 } from "../hooks/queries/usePreferences";
 import { useVoiceTest } from "../hooks/useVoiceTest";
-import { voiceSession } from "../voice";
+import { voiceSession, readDevicePrefs } from "../voice";
 import type { AudioDevice } from "../types";
 import { observer } from "mobx-react-lite";
 import { cameraSession, LOCAL_CAMERA_PREVIEW_KEY, friendlyCameraError } from "../camera/cameraSession";
@@ -23,7 +23,6 @@ import { cameraPreviewStore } from "../camera/cameraPreviewStore";
 import { RemoteVideoTile } from "../components/Voice/RemoteVideoTile";
 import { useMediaPermissions, openPrivacySettings, type PermissionState } from "../hooks/queries/useMediaPermissions";
 
-const VOICE_DEVICES_KEY = "pollis:voice-devices";
 const CAMERA_DEVICE_KEY = "pollis:camera-device";
 
 interface DeviceSelectProps {
@@ -208,12 +207,12 @@ export const VoiceSettingsPage: React.FC = observer(() => {
 
   const [inputs, setInputs] = useState<AudioDevice[]>([]);
   const [outputs, setOutputs] = useState<AudioDevice[]>([]);
-  const [selectedInput, setSelectedInputState] = useState<string>(() => {
-    try { return JSON.parse(localStorage.getItem(VOICE_DEVICES_KEY) || "{}").input || "default"; } catch { return "default"; }
-  });
-  const [selectedOutput, setSelectedOutputState] = useState<string>(() => {
-    try { return JSON.parse(localStorage.getItem(VOICE_DEVICES_KEY) || "{}").output || "default"; } catch { return "default"; }
-  });
+  const [selectedInput, setSelectedInputState] = useState<string>(
+    () => readDevicePrefs().input ?? "default",
+  );
+  const [selectedOutput, setSelectedOutputState] = useState<string>(
+    () => readDevicePrefs().output ?? "default",
+  );
 
   useEffect(() => {
     invoke<AudioDevice[]>("list_audio_devices").then((devices) => {
@@ -232,7 +231,7 @@ export const VoiceSettingsPage: React.FC = observer(() => {
         setSelectedOutputState("default");
         void voiceSession.setOutputDevice("default");
       }
-    }).catch(() => { });
+    }).catch((e) => console.warn("list_audio_devices failed", e));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useMemo } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeft, Users, Plus, Search } from "lucide-react";
@@ -8,7 +9,7 @@ import { useUserGroupsWithChannels, useAllPendingJoinRequests } from "../hooks/q
 
 export const GroupsPage: React.FC = observer(() => {
   const navigate = useNavigate();
-  const { setSelectedGroupId, unreadCounts } = appStore;
+  const { setSelectedGroupId } = appStore;
 
   const { data: groupsWithChannels, isLoading: groupsLoading, error: groupsError } = useUserGroupsWithChannels();
   const { data: allJoinRequests = [] } = useAllPendingJoinRequests();
@@ -27,10 +28,10 @@ export const GroupsPage: React.FC = observer(() => {
   const groupItems: TerminalMenuItem[] = groupsLoading
     ? [{ id: "__loading__", label: "Loading…", disabled: true }]
     : groupsError
-      ? [{ id: "__error__", label: `Error: ${groupsError instanceof Error ? groupsError.message : "Failed to load"}`, disabled: true }]
+      ? [{ id: "__error__", label: `Error: ${errorMessage(groupsError, "Failed to load")}`, disabled: true }]
       : groups.map((g) => {
         const textChannels = g.channels.filter((ch) => ch.channel_type === "text");
-        const totalUnread = textChannels.reduce((sum, ch) => sum + (unreadCounts[ch.id] ?? 0), 0);
+        const totalUnread = appStore.unreadFor(textChannels);
         const pendingJoinCount = joinRequestCountByGroup[g.id] ?? 0;
 
         // Build description: prefer join request alert over static description text

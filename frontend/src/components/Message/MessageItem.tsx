@@ -9,7 +9,6 @@ import { getUsernameColor, useBackgroundIsLight } from "../../utils/usernameColo
 import { useSkin } from "../../hooks/queries/usePreferences";
 import { AttachmentDisplay } from "./AttachmentDisplay";
 import { MessageAvatar } from "./MessageAvatar";
-// import { MessageReactions } from "./MessageReactions";
 import type { Message } from "../../types";
 
 interface MessageItemProps {

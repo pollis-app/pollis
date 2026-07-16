@@ -150,7 +150,7 @@ function MainApp() {
           .isCurrentDeviceRegistered(session.user.id)
           .catch(() => true);
         if (!stillRegistered) {
-          await api.logout(false).catch(() => {});
+          await api.logout(false).catch((e) => console.warn("logout failed", e));
           appStore.logout();
           return;
         }

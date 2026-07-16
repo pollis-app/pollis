@@ -113,7 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
   };
 
   const totalDmUnread = useMemo(
-    () => dmConversations.reduce((sum, c) => sum + (unreadCounts[c.id] ?? 0), 0),
+    () => appStore.unreadFor(dmConversations),
     [dmConversations, unreadCounts]
   );
 
@@ -168,10 +168,7 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
         <ul>
           {groupsWithChannels.map((group) => {
             const isCollapsed = collapsedGroups.has(group.id);
-            const groupUnread = group.channels.reduce(
-              (sum, ch) => sum + (unreadCounts[ch.id] ?? 0),
-              0
-            );
+            const groupUnread = appStore.unreadFor(group.channels);
             const isGroupActive = activeGroupId === group.id;
             return (
               <li key={group.id}>

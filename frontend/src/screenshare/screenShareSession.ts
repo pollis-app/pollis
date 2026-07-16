@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 // Screen-share session glue. Subscribes to backend event + frame Channels
 // once per process, mirrors lifecycle into the Zustand store, and exposes a
 // pub/sub dispatcher for raw I420 frame buffers keyed by trackKey.
@@ -608,7 +609,7 @@ class ScreenShareSession {
         } as unknown as MediaTrackConstraints,
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorMessage(e);
       store.shareFailed(friendlyScreenShareError(msg));
       throw e;
     }
@@ -654,7 +655,7 @@ class ScreenShareSession {
       } catch {
         // ignore — best-effort cleanup
       }
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorMessage(e);
       store.shareFailed(friendlyScreenShareError(msg));
       throw e;
     }

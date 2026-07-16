@@ -14,6 +14,7 @@ import { RemoteVideoTile } from "./RemoteVideoTile";
 import { LOCAL_PREVIEW_KEY } from "../../screenshare/screenShareSession";
 import { useScreenShareStats } from "../../screenshare/useScreenShareStats";
 import { shareOf } from "../../types/voice-state";
+import { userIdFromVoiceIdentity } from "../../voice/identity";
 
 export const ScreenShareViewer: React.FC = observer(() => {
   const {
@@ -56,7 +57,7 @@ export const ScreenShareViewer: React.FC = observer(() => {
     if (!p || p.video.kind !== "screenshare") {
       return null;
     }
-    label = p.identity.replace(/^voice-/, "");
+    label = userIdFromVoiceIdentity(p.identity);
     trackKey = p.video.trackKey;
     width = p.video.width;
     height = p.video.height;

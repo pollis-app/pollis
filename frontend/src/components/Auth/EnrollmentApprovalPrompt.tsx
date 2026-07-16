@@ -1,3 +1,4 @@
+import { errorMessage } from "../../utils/errorMessage";
 import React, { useState } from "react";
 import { TitleBar } from "../Layout/TitleBar";
 import { DotMatrix } from "../ui/DotMatrix";
@@ -33,7 +34,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
       await api.approveDeviceEnrollment(requestId, verificationCode);
       onResolved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to approve");
+      setError(errorMessage(err, "Failed to approve"));
     } finally {
       setIsLoading(false);
     }
@@ -46,7 +47,7 @@ export const EnrollmentApprovalPrompt: React.FC<EnrollmentApprovalPromptProps> =
       await api.rejectDeviceEnrollment(requestId);
       onResolved();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to reject");
+      setError(errorMessage(err, "Failed to reject"));
     } finally {
       setIsLoading(false);
     }

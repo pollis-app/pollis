@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Channel, invoke } from "../bridge";
 
@@ -95,8 +96,8 @@ export function useVoiceTest(): UseVoiceTestResult {
     return () => {
       // Leaving the page: kill anything still running on the Rust side so
       // the mic doesn't stay hot and tones don't keep playing.
-      invoke("stop_mic_test").catch(() => {});
-      invoke("stop_test_playback").catch(() => {});
+      invoke("stop_mic_test").catch((e) => console.warn("stop_mic_test failed", e));
+      invoke("stop_test_playback").catch((e) => console.warn("stop_test_playback failed", e));
     };
   }, []);
 
@@ -113,7 +114,7 @@ export function useVoiceTest(): UseVoiceTestResult {
         });
         setPhaseBoth("mic_listening");
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
         setPhaseBoth("idle");
       }
     },
@@ -125,7 +126,7 @@ export function useVoiceTest(): UseVoiceTestResult {
     try {
       await invoke("stop_mic_test");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
     setPhaseBoth("idle");
     resetMeter();
@@ -140,7 +141,7 @@ export function useVoiceTest(): UseVoiceTestResult {
           outputDeviceId,
         });
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
       }
     },
     [],
@@ -159,7 +160,7 @@ export function useVoiceTest(): UseVoiceTestResult {
           durationMs,
         });
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
         setPhaseBoth("idle");
       }
     },
@@ -176,7 +177,7 @@ export function useVoiceTest(): UseVoiceTestResult {
           kind,
         });
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(errorMessage(e));
         setPhaseBoth("idle");
       }
     },
@@ -188,7 +189,7 @@ export function useVoiceTest(): UseVoiceTestResult {
     try {
       await invoke("stop_test_playback");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
     setPhaseBoth("idle");
   }, [setPhaseBoth]);

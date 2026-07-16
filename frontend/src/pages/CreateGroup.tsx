@@ -1,3 +1,4 @@
+import { errorMessage } from "../utils/errorMessage";
 import React, { useState } from "react";
 import { appStore } from "../stores/appStore";
 import { observer } from "mobx-react-lite";
@@ -9,6 +10,7 @@ import { TextInput } from "../components/ui/TextInput";
 import { TextArea } from "../components/ui/TextArea";
 import { Button } from "../components/ui/Button";
 import { Switch } from "../components/ui/Switch";
+import type { Group } from "../types";
 
 interface CreateGroupProps {
   onSuccess?: (groupId: string) => void;
@@ -54,7 +56,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
           createDefaultVoiceChannel: createVoiceChannel,
         },
       );
-      const groupData: any = {
+      const groupData: Group = {
         id: group.id,
         slug: finalSlug,
         name: group.name,
@@ -68,7 +70,7 @@ export const CreateGroup: React.FC<CreateGroupProps> = observer(({ onSuccess }) 
       queryClient.invalidateQueries({ queryKey: groupQueryKeys.userGroupsWithChannels(currentUser.id) });
       onSuccess?.(group.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create group");
+      setError(errorMessage(err, "Failed to create group"));
     } finally {
       setIsLoading(false);
     }

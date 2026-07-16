@@ -30,6 +30,8 @@ frontend/dist/
 frontend/.vite/
 frontend/package-lock.json
 frontend/package.json.md5
+# pnpm-only repo — a root npm lockfile is a stray artifact, never commit it
+/package-lock.json
 
 # Database
 *.db

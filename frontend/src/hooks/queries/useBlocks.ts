@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../bridge";
 import { appStore } from "../../stores/appStore";
 import { useObserver } from "mobx-react-lite";
+import { messageQueryKeys } from "./useMessages";
 import type { BlockedUser, DmChannel } from "../../types";
 
 export const blocksQueryKeys = {
@@ -46,9 +47,7 @@ export function useAcceptDMRequest() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
-      queryClient.invalidateQueries({ queryKey: ["dmConversations"] });
-      // Also invalidate the existing dm-conversations key used by useDMConversations.
-      queryClient.invalidateQueries({ queryKey: ["dm-conversations"] });
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null) });
     },
   });
 }
@@ -71,8 +70,7 @@ export function useBlockUser() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
-      queryClient.invalidateQueries({ queryKey: ["dmConversations"] });
-      queryClient.invalidateQueries({ queryKey: ["dm-conversations"] });
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null) });
       queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
     },
   });
@@ -95,8 +93,7 @@ export function useUnblockUser() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["dmRequests"] });
-      queryClient.invalidateQueries({ queryKey: ["dmConversations"] });
-      queryClient.invalidateQueries({ queryKey: ["dm-conversations"] });
+      queryClient.invalidateQueries({ queryKey: messageQueryKeys.dmConversations(currentUser?.id ?? null) });
       queryClient.invalidateQueries({ queryKey: ["blockedUsers"] });
     },
   });
