@@ -10,7 +10,8 @@
     "invalid-otp": "node ./invalid-otp.js",
     "two-client": "node ./two-client.js",
     "two-client-call": "node ./two-client-call.js",
-    "two-client-camera": "node ./two-client-camera.js"
+    "two-client-camera": "node ./two-client-camera.js",
+    "two-client-screenshare": "node ./two-client-screenshare.js"
   },
   "devDependencies": {
     "dotenv": "^16",

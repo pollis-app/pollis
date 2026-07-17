@@ -15,6 +15,7 @@ plumbing:
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 | `two-client-call.js` | two instances place + accept a real 1:1 call; each sees the other in the call | yes | yes (writable) + LiveKit + audio |
 | `two-client-camera.js` | two instances in a call; A turns its webcam on, B sees A's remote camera tile | yes | yes (writable) + LiveKit + audio + virtual camera |
+| `two-client-screenshare.js` | two instances in a call; A shares its screen (X11/Xvfb capture), B sees A's remote screenshare tile | yes | yes (writable) + LiveKit + audio |
 
 ```bash
 pnpm --filter @pollis/e2e smoke        # or: node e2e/smoke.js       (fast, no deps)
@@ -23,6 +24,7 @@ pnpm --filter @pollis/e2e invalid-otp  # or: node e2e/invalid-otp.js
 pnpm --filter @pollis/e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
 pnpm --filter @pollis/e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
 pnpm --filter @pollis/e2e two-client-camera  # or: node e2e/two-client-camera.js  (needs backend + LiveKit + audio + virtual camera up first)
+pnpm --filter @pollis/e2e two-client-screenshare  # or: node e2e/two-client-screenshare.js  (needs backend + LiveKit + audio up first)
 ```
 
 `smoke.js` is the one to reach for in CI or as a quick "did I break launch"
@@ -352,6 +354,93 @@ CI: `.github/workflows/e2e-two-client-camera.yml` — install deps → build →
 (`if: always()`). It carries a **temporary** `push:` trigger on the
 `auto/e2e-two-client-camera` branch (marked REMOVE-before-merge) so the module
 load can be validated in CI, since v4l2loopback can't run in the dev sandbox.
+
+## Two-client screenshare — X11/Xvfb capture (M3c)
+
+`two-client-screenshare.js` (issue #570, M3c) is the screenshare slice of the
+media milestone — the **last** media slice, completing the #568
+voice/video/screenshare surface. It reuses the M3a call choreography verbatim to
+get A + B into a connected call, then A shares its **screen** and B asserts A's
+**remote screenshare tile** renders.
+
+1. A + B sign up, A DMs B, B accepts, A places the call, B accepts — identical
+   to `two-client-call.js`; both converge on two participants.
+2. A clicks the screenshare toggle (`voice-bar-screenshare-button`, or the stage
+   tray's `voice-tray-screenshare`). On Linux `enumerate_screen_sources` returns
+   an **empty** list (`start_unix.rs`), so the frontend's `toggleScreenShare`
+   skips its in-app picker and calls `screenShareSession.start()` directly — the
+   capture helper spawns, probes the session, and starts streaming.
+   (The test keeps a defensive branch that selects the first display source if a
+   picker ever does appear, but on Linux/X11 it never does.)
+3. Sanity on A: A's own local self-preview tile
+   (`remote-video-tile-__local_preview__`) mounts — proof A's capture+publish
+   engaged, isolating an A-side capture failure from a B-side delivery one. This
+   is where the test **fails loudly** if the share never starts.
+4. **ASSERT on B**: poll until A's remote screenshare tile renders — a
+   `remote-video-tile-<trackKey>` element nested inside A's participant tile
+   (`voice-tile-voice-<A>`) that **also** carries a `voice-tile-stream-stats-<A>`
+   res·fps badge. That badge is present on a **screenshare** tile
+   (`StageTile.tsx`, `hasFeed && !preview`) and **absent** on a camera tile — the
+   exact mirror-inverse of the M3b camera assertion (which excludes tiles with
+   that badge), so the two stay unambiguous even now that both exist. On B a
+   remote screenshare lands as `screenshareOf(p.video)` → VoiceStage's
+   `streamTrackKey` → StageTile's `RemoteVideoTile`
+   (`remote-video-tile-<trackKey>`, a `<canvas>` on the Tauri/WebKitGTK path), so
+   the tile's presence with the badge proves A's screenshare track was published,
+   subscribed by B, and mounted. Generous eventual timeout; no fixed sleeps for
+   correctness. Then A stops the share and hangs up.
+
+**No extra fixture over M3a.** Unlike the camera slice (which needs a
+v4l2loopback `/dev/video0`), screenshare needs nothing but the Xvfb display the
+`desktop-e2e` composite action already provides:
+
+> **Linux screen capture is X11, not Wayland.** `pollis-capture-linux` has two
+> backends (`src/linux.rs` `probe_backend`): **Wayland** →
+> xdg-desktop-portal ScreenCast + PipeWire (needs a live compositor + portal
+> backend — **not feasible headless**), and **X11** → xcb + MIT-SHM `XGetImage`
+> on the **root window** (`src/x11.rs`, works under Xvfb). The probe routes on
+> **session type**: an X11 session (or, headless, `$DISPLAY` set with no
+> `$WAYLAND_DISPLAY`) selects `Backend::X11` and never touches the portal or the
+> D-Bus session bus. Under `xvfb-run` there's a real X server and no Wayland, so
+> the X11 branch is taken; the test additionally pins `XDG_SESSION_TYPE=x11` +
+> `GDK_BACKEND=x11` on each app process (`appEnvFor`) to make that explicit. The
+> app's own WebKitGTK window sits on that same Xvfb display, so the root grab is
+> non-blank — there's real content to publish. The xcb libs (`libxcb1-dev`,
+> `libxcb-shm0-dev`, `libxcb-randr0-dev`) are already in `install-system-deps.sh`
+> for exactly this capture path.
+
+Run it locally (build binaries with a **clean** env — see Prerequisites). Note a
+local X11 desktop takes the same X11 root-capture path; on a Wayland desktop the
+app would use the portal instead (a picker dialog appears), which the test's
+defensive picker branch handles:
+
+```bash
+# Bring up virtual audio, LiveKit, and the backend (no camera fixture needed):
+eval "$(e2e/scripts/start-audio.sh)"
+eval "$(e2e/scripts/start-livekit.sh)"
+eval "$(e2e/scripts/start-backend.sh)"
+
+# Drive the two clients placing a call + A sharing its screen:
+node e2e/two-client-screenshare.js
+
+# Tear it all down (idempotent — stops the DS, both containers, and PulseAudio):
+e2e/scripts/stop-backend.sh
+```
+
+Proof screenshots: `two-client-screenshare-A-ready.png`,
+`two-client-screenshare-B-ready.png`, `two-client-screenshare-A-in-call.png`,
+`two-client-screenshare-B-in-call.png`, `two-client-screenshare-A-sharing.png`,
+`two-client-screenshare-B-sees-share.png`. On failure it dumps per-client
+`A-FAIL.*` / `B-FAIL.*` (plus on-screen testids), same as the other two-client
+scripts.
+
+CI: `.github/workflows/e2e-two-client-screenshare.yml` — install deps → build →
+`start-audio.sh` → `start-livekit.sh` → `start-backend.sh` →
+`pnpm two-client-screenshare` via the `desktop-e2e` action → `stop-backend.sh`
+(`if: always()`). It carries a **temporary** `push:` trigger on the
+`auto/e2e-two-client-screenshare` branch (marked REMOVE-before-merge) so the
+headless X11 capture path can be validated in CI, since it can't run in the dev
+sandbox.
 
 ## CI history — schema bootstrap used to be manual
 
