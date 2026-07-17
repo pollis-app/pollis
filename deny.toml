@@ -60,6 +60,18 @@ ignore = [
     { id = "RUSTSEC-2026-0194", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml: all vulnerable instances are build-time (xcb/wayland-scanner codegen) or dev-only; no untrusted-XML runtime path; parents pin <0.41" },
 
+    # libcrux crypto bugs in the MLS HPKE stack. Transitive:
+    # libcrux-sha3 0.0.8 / libcrux-secrets 0.0.5 <- hpke-rs 0.6.1 <-
+    # openmls_rust_crypto 0.5.1. The fixes (libcrux-sha3 0.0.10,
+    # libcrux-secrets 0.0.6) shipped only in hpke-rs 0.7.0 (2026-07-15), which
+    # openmls_rust_crypto 0.5.1 (latest release) does not yet depend on — it
+    # pins `hpke = ^0.6.0`, so 0.0.x-incompatible bumps are unreachable in place
+    # (`cargo update --precise` rejected). Re-evaluate when openmls releases a
+    # crate moving to hpke-rs 0.7. None are reachable on our MLS path:
+    { id = "RUSTSEC-2026-0207", reason = "libcrux-sha3 portable SHAKE incremental multi-squeeze: only wrong when squeezing across multiple calls with a non-RATE-divisible length; hpke-rs squeezes full output in one call and MLS default ciphersuites key-schedule on HKDF-SHA256, not SHAKE. Fix (0.0.10) gated behind hpke-rs 0.7 / openmls bump" },
+    { id = "RUSTSEC-2026-0208", reason = "libcrux-sha3 AVX2 x4 SHAKE-256 panic: the batched avx2::x4::shake256 API is exercised by ML-KEM/ML-DSA, not by hpke-rs HPKE on our non-PQ ciphersuites; worst case is a local panic, not a compromise. Fix (0.0.10) gated behind hpke-rs 0.7 / openmls bump" },
+    { id = "RUSTSEC-2026-0212", reason = "libcrux-secrets constant-time swap/select wrong on aarch64: a correctness bug in CT primitives; an incorrect result would surface as an MLS crypto failure, not a silent key leak. Fix (0.0.6) gated behind hpke-rs 0.7 / openmls bump" },
+
     # --- Unmaintained crates (informational RUSTSEC, no vulnerability). All are
     # transitive and forced by the desktop/GUI/media stack; no maintained
     # drop-in is adopted by the parents. Compile-time or non-security surfaces.
