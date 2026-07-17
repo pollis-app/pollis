@@ -1,21 +1,12 @@
-// Remote screen-share renderer.
+// Remote screen-share / camera renderer.
 //
-// Under Electron (Chromium): the JS-side livekit-client view client
-// subscribes to remote video tracks and stashes them in `livekitView`.
-// We render via a plain `<video srcObject>` — hardware decoded by the
-// browser, 60fps, free.
-//
-// Under Tauri (WebKitGTK on Linux has no WebRTC): the Rust backend
-// decodes frames and pushes I420 planes to the renderer over IPC. A
-// WebGL shader does YUV→RGB on a `<canvas>`. The original implementation
-// — kept here because the Tauri target still ships during the dual-
-// runtime period.
+// All real-time media runs in Rust (WebKitGTK on Linux has no WebRTC): the
+// backend decodes frames and pushes I420 planes to the renderer over IPC, and
+// a WebGL shader does YUV→RGB on a `<canvas>`.
 
-import React, { useEffect, useRef, useSyncExternalStore } from "react";
+import React, { useEffect, useRef } from "react";
 
-import { hasElectron } from "../../bridge";
-import { livekitView } from "../../screenshare/livekitView";
-import { LOCAL_PREVIEW_KEY, screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
+import { screenShareSession, type DecodedFrame } from "../../screenshare/screenShareSession";
 import { LOCAL_CAMERA_PREVIEW_KEY } from "../../camera/cameraSession";
 
 interface Props {
@@ -24,11 +15,8 @@ interface Props {
   /** Hint used for canvas backing-store size before the first frame arrives. */
   initialWidth?: number;
   initialHeight?: number;
-  /** Low-cost rendering for in-grid previews: cap repaints at ~15fps and
-   *  2× downsample Y/U/V before texture upload (4× less GPU bandwidth
-   *  per frame). The fullscreen viewer omits this for source-quality
-   *  rendering. Ignored under Electron (the browser already throttles
-   *  hidden/offscreen video). */
+  /** Low-cost rendering for in-grid previews: cap repaints at ~15fps. The
+   *  fullscreen viewer omits this for source-quality rendering. */
   preview?: boolean;
   /** Horizontally flip the rendered image. Used for a self-view (your own
    *  webcam) so it reads like a mirror — never for remote participants. */
@@ -37,140 +25,7 @@ interface Props {
 
 const PREVIEW_MIN_PAINT_INTERVAL_MS = 1000 / 15;
 
-// ── Electron / WebRTC path ───────────────────────────────────────────────────
-
-/**
- * The `trackKey` plumbing was designed for the Rust path where the same
- * publisher might fan out multiple tracks (e.g. capture + preview). With
- * livekit-client we key by publisher identity. The Rust event channel
- * happens to set `trackKey = publisher_identity` when emitting
- * `remote_started`, which is the same value we store in
- * `screenShareRemotes` and pass back here as `trackKey` — so the JS
- * receiver can use it directly. The only exception is the local
- * preview key, which doesn't apply under Electron (the local capture
- * track is already in a renderer-side MediaStream we can render
- * directly — but the existing flow renders local preview through this
- * same component, so we handle that case by reading from
- * `livekitView` under the publisher identity used by the local share).
- */
-const RemoteVideoTileElectron: React.FC<Props> = ({
-  trackKey,
-  className,
-  initialWidth,
-  initialHeight,
-  mirror,
-}) => {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  const tracks = useSyncExternalStore(
-    livekitView.subscribe.bind(livekitView),
-    livekitView.getSnapshot.bind(livekitView),
-    livekitView.getSnapshot.bind(livekitView),
-  );
-
-  // LOCAL_PREVIEW_KEY works the same as any other track key here —
-  // publishScreenShare stores the local capture track under that key in
-  // livekitView.tracks. The previous explicit exclusion was a leftover
-  // from the Tauri-era flow where local preview rendered through a
-  // separate canvas pipeline; under Electron the local track is just
-  // another MediaStreamTrack and <video srcObject> handles it natively.
-  const track = tracks.get(trackKey);
-
-  useEffect(() => {
-    const el = videoRef.current;
-    if (!el) {
-      return;
-    }
-    if (!track) {
-      el.srcObject = null;
-      livekitView.clearStats(trackKey);
-      return;
-    }
-    // Wrap the bare MediaStreamTrack in a MediaStream — what <video> wants.
-    el.srcObject = new MediaStream([track]);
-    const playPromise = el.play();
-    if (playPromise && typeof playPromise.catch === "function") {
-      playPromise.catch((e) => {
-        console.warn("[RemoteVideoTile] video.play rejected:", e);
-      });
-    }
-
-    // Per-frame stats via requestVideoFrameCallback (Chromium-supported,
-    // perfect for Electron). Counts decoded frames over a sliding 1s
-    // window, reads native dimensions from the metadata each frame so
-    // the tile picks up resolution changes (e.g. window resize while
-    // sharing). Tauri's path doesn't enter this branch — its frame
-    // listener lives in screenShareSession.
-    let frames = 0;
-    let windowStart = performance.now();
-    let lastWidth = 0;
-    let lastHeight = 0;
-    let cancelled = false;
-    type RVFC = (now: number, metadata: VideoFrameCallbackMetadata) => void;
-    const supportsRvfc =
-      typeof el.requestVideoFrameCallback === "function";
-    if (supportsRvfc) {
-      const tick: RVFC = (_now, metadata) => {
-        if (cancelled) {
-          return;
-        }
-        frames += 1;
-        if (metadata.width) {
-          lastWidth = metadata.width;
-        }
-        if (metadata.height) {
-          lastHeight = metadata.height;
-        }
-        const elapsed = performance.now() - windowStart;
-        if (elapsed >= 1000) {
-          livekitView.recordStats(trackKey, {
-            fps: Math.round((frames * 1000) / elapsed),
-            width: lastWidth,
-            height: lastHeight,
-          });
-          frames = 0;
-          windowStart = performance.now();
-        }
-        el.requestVideoFrameCallback(tick);
-      };
-      el.requestVideoFrameCallback(tick);
-    }
-
-    return () => {
-      cancelled = true;
-      el.srcObject = null;
-      livekitView.clearStats(trackKey);
-    };
-  }, [track, trackKey]);
-
-  return (
-    <video
-      ref={videoRef}
-      data-testid={`remote-video-tile-${trackKey}`}
-      className={className}
-      // Muted: screenshare audio is handled by the Rust voice client. If
-      // the track ever carries audio (it won't under our current grant)
-      // we'd want it silenced anyway to avoid double-routing.
-      autoPlay
-      muted
-      playsInline
-      width={initialWidth}
-      height={initialHeight}
-      style={{
-        display: "block",
-        maxWidth: "100%",
-        maxHeight: "100%",
-        width: "auto",
-        height: "auto",
-        background: "#000",
-        objectFit: "contain",
-        transform: mirror ? "scaleX(-1)" : undefined,
-      }}
-    />
-  );
-};
-
-// ── Tauri / MJPEG fallback ───────────────────────────────────────────────────
+// ── WebGL / I420 renderer ────────────────────────────────────────────────────
 
 /// 2× nearest-neighbour downsample of a single 8-bit plane. We sample
 /// every other pixel from every other row into a tightly-packed
@@ -309,7 +164,7 @@ function uploadPlane(
   }
 }
 
-const RemoteVideoTileTauri: React.FC<Props> = ({
+const RemoteVideoTileImpl: React.FC<Props> = ({
   trackKey,
   className,
   initialWidth,
@@ -454,9 +309,5 @@ export const RemoteVideoTile: React.FC<Props> = (props) => {
   // mirror — both the in-call self-preview and the settings preview render
   // through here under LOCAL_CAMERA_PREVIEW_KEY. Explicit `mirror` still wins.
   const mirror = props.mirror ?? props.trackKey === LOCAL_CAMERA_PREVIEW_KEY;
-  const p = { ...props, mirror };
-  if (hasElectron()) {
-    return <RemoteVideoTileElectron {...p} />;
-  }
-  return <RemoteVideoTileTauri {...p} />;
+  return <RemoteVideoTileImpl {...props} mirror={mirror} />;
 };

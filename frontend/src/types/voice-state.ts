@@ -28,7 +28,7 @@ export type VoiceState =
       channelId: string;
       /** Other user_id in a 1:1 call (`call-*` room). Null for group
        *  voice channels and regular DMs. Required by the screen-share
-       *  E2EE key derivation in `livekitView.executeJoin`. */
+       *  E2EE key derivation on the Rust voice-join path. */
       counterpartyUserId: string | null;
     }
   | {

@@ -27,7 +27,6 @@
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
     "blurhash": "^2.0.5",
-    "livekit-client": "^2.19.0",
     "lucide-react": "^0.344.0",
     "mobx": "^6.16.0",
     "mobx-react-lite": "^4.1.1",

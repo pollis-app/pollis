@@ -6,7 +6,7 @@
 // Instead it's a tiny per-identity pub/sub. The participant tile's live
 // waveform subscribes and writes CSS variables straight onto its bar
 // element via a ref — so the meter animates with zero React re-renders.
-// Mirrors the `livekitView.onStats` / `useScreenShareStats` pattern.
+// Mirrors the `useScreenShareStats` per-frame-stats subscription pattern.
 
 import { userIdFromVoiceIdentity } from "./identity";
 

@@ -314,8 +314,8 @@ class VoiceSessionManager {
 
   // ── Video (screenshare) ─────────────────────────────────────────────────
   // A participant's screenshare lives on `participant.video` (#385), driven
-  // by the screenshare event adapters (`screenShareSession`, `livekitView`)
-  // rather than a parallel `screenShareRemotes` map. Camera is unaffected —
+  // by the screenshare event adapter (`screenShareSession`) rather than a
+  // parallel `screenShareRemotes` map. Camera is unaffected —
   // it stays on `appStore.cameraRemotes`.
 
   /**
@@ -715,15 +715,10 @@ class VoiceSessionManager {
         break;
       }
       case 'voice_e2ee_key_rotated': {
-        // MLS epoch advanced on the Rust side; rotate the screen-share
-        // view client's ExternalE2EEKeyProvider so its encryption stays
-        // aligned with the audio path. Lazy import so the Tauri build
-        // doesn't pull in livekit-client when it'd never use it.
-        const key = new Uint8Array(event.key);
-        const mlsGroupId = event.mls_group_id;
-        void import('../screenshare/livekitView').then(({ livekitView }) => {
-          void livekitView.rotateE2eeKey(key, mlsGroupId);
-        });
+        // MLS epoch advanced on the Rust side. All media E2EE now lives in
+        // Rust (the JS livekit-client screen-share view was removed), so the
+        // renderer has nothing to rotate — the Rust voice client already
+        // re-keyed both audio and screen-share. Nothing to do here.
         break;
       }
       case 'disconnected': {

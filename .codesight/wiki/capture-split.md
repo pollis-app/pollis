@@ -206,22 +206,16 @@ Linux helpers never send `MSG_SOURCES` and never read `MSG_SELECT`.
 The same opcodes are reserved in the proto crate so both helpers
 share one wire format definition.
 
-## Electron renderer publish path
+## Renderer publish path (removed)
 
-When `hasElectron()` is true (`frontend/src/bridge/runtime.ts`), capture
-+ encode + publish happen entirely in the renderer, bypassing the Rust
-helper pipeline above. `screenShareSession.ts` captures via
-`navigator.mediaDevices.getUserMedia` with `chromeMediaSource: "desktop"`
-and `chromeMediaSourceId` (the opaque Electron source id from
-`desktopCapturer.getSources`), then hands the `MediaStreamTrack` to
-`livekitView.publishScreenShare`. The track is published with a
-`screenShareEncoding` cap (8 Mbps, 60 fps, `degradationPreference:
-maintain-framerate`) — no per-machine codec detection; Chromium
-negotiates the best available codec with the SFU directly.
-
-Under Tauri (the shipping shell), `hasElectron()` is always false: there
-is no `window.electronAPI`, so this branch is dead. The Rust helper
-pipeline described above is the only active path.
+There was once an Electron-only path where capture + encode + publish
+happened entirely in the renderer via `getDisplayMedia` +
+`livekit-client` (`frontend/src/screenshare/livekitView.ts`), bypassing
+the Rust helper pipeline. It only ran under Chromium's WebRTC, and the
+shipping shell is Tauri (WebKitGTK has no WebRTC), so it was always dead
+code on the real build. It — along with the `livekit-client` frontend
+dependency (~490 KiB) and its E2EE worker — was **removed** (#431): the
+Rust helper pipeline described above is the only screen-share path.
 
 ## Webcam capture (`--mode camera`)
 
