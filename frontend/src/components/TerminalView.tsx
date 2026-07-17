@@ -24,7 +24,7 @@ function cssVar(name: string, fallback: string): string {
  * Rust on first mount and keeps it alive for the app's lifetime. Renders
  * with xterm.js + the WebGL addon.
  */
-export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
+const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -229,3 +229,8 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible }) => {
     />
   );
 };
+
+// Default export so AppShell can `lazy(() => import("../TerminalView"))` —
+// this keeps the ~380 KiB xterm + WebGL addon out of the initial chunk and
+// defers its parse/eval until the terminal is first opened (#431).
+export default TerminalView;

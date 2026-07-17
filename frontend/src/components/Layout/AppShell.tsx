@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, lazy, Suspense } from "react";
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
@@ -14,7 +14,10 @@ import { screenShareSession } from "../../screenshare/screenShareSession";
 import { cameraSession } from "../../camera/cameraSession";
 import { LoadingSpinner } from "../ui/LoaderSpinner";
 import { SearchPanel } from "../SearchPanel";
-import { TerminalView } from "../TerminalView";
+// Lazy so the ~380 KiB xterm.js + WebGL addon are split into their own chunk
+// and never parsed at cold launch — only when the terminal is first opened
+// (gated by `terminalActivated` below). Deferred bundle work, see #431.
+const TerminalView = lazy(() => import("../TerminalView"));
 import { observer } from "mobx-react-lite";
 import { appStore } from "../../stores/appStore";
 import { isDropTargetActive } from "../../stores/dropTargetStore";
@@ -570,7 +573,9 @@ export const AppShell: React.FC = observer(() => {
               minWidth: 0,
             }}
           >
-            <TerminalView visible={isTerminal} />
+            <Suspense fallback={null}>
+              <TerminalView visible={isTerminal} />
+            </Suspense>
           </div>
         )}
       </div>
