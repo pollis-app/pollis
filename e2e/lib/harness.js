@@ -10,6 +10,7 @@ const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const dotenv = require("dotenv");
+const { remote } = require("webdriverio");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const UI_PORT = 5173;
@@ -162,6 +163,92 @@ async function typeCode(browser, digits) {
   }
 }
 
+// ---- raw-CSS-selector variants ------------------------------------------
+// The testid helpers above cover the common case (an element whose own
+// data-testid is known). Some targets need a plain CSS selector instead:
+// a testid PREFIX match (e.g. the accept button `accept-request-<id>` whose
+// id isn't known ahead of time), or a real input that carries an `id` but no
+// testid (StartDM's visible field is `#dm-identifier`; its `dm-identifier-input`
+// testid is a hidden read-only mirror). These mirror present/waitTestId/
+// clickTestId/setTestIdValue but take any selector.
+
+async function presentSelector(browser, selector) {
+  const els = await browser.$$(selector);
+  return els.length > 0;
+}
+
+async function waitSelector(browser, selector, timeoutMs = 30000, label = selector) {
+  const end = Date.now() + timeoutMs;
+  while (Date.now() < end) {
+    if (await presentSelector(browser, selector)) {
+      return;
+    }
+    await sleep(400);
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+// Same in-page DOM click as clickTestId — WebKitWebDriver's native click
+// doesn't reliably fire React handlers here.
+async function clickSelector(browser, selector) {
+  await waitSelector(browser, selector);
+  const ok = await browser.execute((sel) => {
+    const el = document.querySelector(sel);
+    if (el) { el.click(); return true; }
+    return false;
+  }, selector);
+  if (!ok) {
+    throw new Error(`click: ${selector} vanished`);
+  }
+}
+
+async function setSelectorValue(browser, selector, value) {
+  await waitSelector(browser, selector);
+  const el = await browser.$(selector);
+  await el.setValue(value);
+}
+
+// ---- multi-client plumbing ----------------------------------------------
+// tauri-driver listens on a WebDriver port (--port) and spawns WebKitWebDriver
+// on a native port (--native-port). To run N isolated app instances against
+// ONE shared Vite dev server, each client gets a distinct (port, native-port)
+// pair. Client 0 keeps the historical 4444/4445 so the single-client scripts
+// (smoke.js / e2e.js / invalid-otp.js), which hardcode 4444, are unaffected.
+function clientPorts(index = 0) {
+  return { driverPort: 4444 + index * 2, nativePort: 4445 + index * 2 };
+}
+
+// Spawn tauri-driver + a webdriverio session for one client, all reaped by the
+// caller (returns the tauri-driver child to kill) and by harness `reap()` (which
+// pkills every tauri-driver / WebKitWebDriver / pollis regardless of port).
+// `appEnv` is the FULL env for the app process (its own POLLIS_DATA_DIR, the
+// delivery/Turso creds, and the WebKit workaround vars). `settleMs` waits out
+// the initial Vite page load before the first WebDriver command, same as the
+// single-client scripts do after remote().
+async function startClient({ index = 0, appEnv, settleMs = 6000, label = `client${index}` }) {
+  const { driverPort, nativePort } = clientPorts(index);
+  console.log(`[e2e] ${label}: tauri-driver :${driverPort} (native :${nativePort})`);
+  const tauriDriver = spawn(
+    TAURI_DRIVER,
+    ["--port", String(driverPort), "--native-port", String(nativePort)],
+    { stdio: ["ignore", "inherit", "inherit"], env: appEnv }
+  );
+  await waitPort(driverPort, "127.0.0.1", 15000);
+
+  const browser = await remote({
+    hostname: "127.0.0.1", port: driverPort, path: "/",
+    capabilities: { "tauri:options": { application: APP_BIN } },
+    logLevel: "error",
+    // Fail a wedged command in 45s instead of the default 120s.
+    connectionRetryTimeout: 45000,
+    connectionRetryCount: 1,
+  });
+
+  // Let the initial Vite page load settle before the first command.
+  await sleep(settleMs);
+  return { browser, tauriDriver, driverPort, nativePort, label };
+}
+
 function makeShot(artifactsDir) {
   // Screenshot with a hard timeout: a wedged WebKit compositor can hang the
   // screenshot endpoint indefinitely; don't let that take the whole run down.
@@ -196,5 +283,7 @@ module.exports = {
   sleep, reap, waitPort, curl, warmVite, spawnVite, waitViteReady,
   readEnvFile, tursoEnv,
   present, waitTestId, clickTestId, setTestIdValue, typeCode,
+  presentSelector, waitSelector, clickSelector, setSelectorValue,
+  clientPorts, startClient,
   makeShot, dumpFailure,
 };

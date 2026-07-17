@@ -12,11 +12,13 @@ plumbing:
 | `smoke.js` | app launches, login screen renders | no | no |
 | `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes | yes (writable) |
 | `invalid-otp.js` | a wrong OTP code is rejected with an inline error, doesn't advance | yes | yes (writable) |
+| `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 
 ```bash
 pnpm --filter @pollis/e2e smoke        # or: node e2e/smoke.js       (fast, no deps)
 pnpm --filter @pollis/e2e test         # or: node e2e/e2e.js         (full signup flow)
 pnpm --filter @pollis/e2e invalid-otp  # or: node e2e/invalid-otp.js
+pnpm --filter @pollis/e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
 ```
 
 `smoke.js` is the one to reach for in CI or as a quick "did I break launch"
@@ -149,6 +151,64 @@ node e2e/invalid-otp.js  # wrong OTP is rejected
 # Tear it all down (idempotent):
 e2e/scripts/stop-backend.sh
 ```
+
+## Two-client convergence (M2)
+
+`two-client.js` (issue #570, M2) is the first **cross-client** test: it launches
+**two** isolated real app instances against the **same** backend and proves a
+message sent by client A shows up in client B's UI — MLS delivery through the
+real renderer, not a unit test of the core.
+
+Isolation is per client: each gets its own `tauri-driver` / `WebKitWebDriver`
+port pair (A: `4444`/`4445`, B: `4446`/`4447` — `harness.clientPorts()`) and its
+own `POLLIS_DATA_DIR` (separate local SQLite + MLS state + keystore). **One**
+shared Vite dev server serves both webviews. The generalized
+`harness.startClient({ index, appEnv })` spawns a client's driver + WebDriver
+session; `harness.reap()` already pkills every `tauri-driver` / `WebKitWebDriver`
+/ `pollis` regardless of port, so both clients are cleaned up.
+
+Conversation path — **1:1 DM request → accept** (the fewest-step stable path):
+
+1. A and B each sign up through the real UI (the same steps `e2e.js` proves).
+2. A opens **New Message** and DMs B **by B's email** (`search_user_by_username`
+   matches `username OR email`, and signup sets no username) → lands on the DM
+   page, adding B to the DM's MLS group.
+3. B polls its DMs list for the incoming request (a remote metadata read, not
+   MLS-gated) and accepts it → lands on the DM page as a group member.
+4. A sends a message carrying a distinctive random token.
+5. B polls its message list until A's token text appears, re-opening the DM each
+   round to re-fire the (5s-debounced) `ingest_dm_envelopes` pull — there's no
+   LiveKit realtime hint in this fixture. Asserted; no fixed sleeps for
+   correctness.
+
+Unlike the single-client scripts, `two-client.js` **requires an external
+delivery service** (`POLLIS_DELIVERY_URL` must be set) — it never self-spawns
+one, because both clients must share exactly one backend. So bring the fixtures
+up first:
+
+```bash
+# Build both binaries with a CLEAN env (option_env! bakes compile-time values):
+env -u POLLIS_DELIVERY_URL -u TURSO_URL -u TURSO_TOKEN cargo build -p pollis -p pollis-delivery
+
+# Bring up libsql + schema + the real DS, and pull its exported env into your shell:
+eval "$(e2e/scripts/start-backend.sh)"
+
+# Drive the two clients against that shared backend:
+node e2e/two-client.js
+
+# Tear it all down (idempotent):
+e2e/scripts/stop-backend.sh
+```
+
+Proof screenshots: `two-client-A-ready.png`, `two-client-B-ready.png`,
+`two-client-A-sent.png`, `two-client-B-received.png`. On failure it dumps
+per-client `A-FAIL.png` / `A-FAIL.html` **and** `B-FAIL.png` / `B-FAIL.html`
+(plus each side's on-screen testids) so CI artifacts show both clients.
+
+CI: `.github/workflows/e2e-two-client.yml` (`workflow_dispatch`) wires it end to
+end through the same M0/M1 pieces as `e2e-full.yml` — install deps → build
+`pollis` + `pollis-delivery` → `start-backend.sh` → `pnpm two-client` via the
+`desktop-e2e` composite action → `stop-backend.sh` (`if: always()`).
 
 ## CI history — schema bootstrap used to be manual
 
