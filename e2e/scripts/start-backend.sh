@@ -102,11 +102,33 @@ fi
 # it alone). Harmless no-op on an ephemeral CI runner.
 pkill -9 -f "target/debug/pollis-delivery" >/dev/null 2>&1 || true
 
+# LiveKit token-broker secrets (issue #570, M3a). The DS's BrokerConfig reads
+# LIVEKIT_API_KEY / LIVEKIT_API_SECRET / LIVEKIT_URL and treats EMPTY as unset
+# (pollis-delivery/src/broker.rs), so forwarding them unconditionally is safe:
+# for the media E2E they're set by e2e/scripts/start-livekit.sh (run before this
+# script), and for the M1/M2 flows (no LiveKit) they default empty → the broker
+# is simply "not configured" and nothing changes.
+LIVEKIT_API_KEY="${LIVEKIT_API_KEY:-}"
+LIVEKIT_API_SECRET="${LIVEKIT_API_SECRET:-}"
+LIVEKIT_URL="${LIVEKIT_URL:-}"
+if [ -n "$LIVEKIT_URL" ]; then
+  log "LiveKit configured for the DS (url=$LIVEKIT_URL, key present)"
+else
+  log "LiveKit not configured (no LIVEKIT_URL) — DS livekit endpoints will 503"
+fi
+
 # DEV_OTP=000000 + no RESEND_API_KEY => OTP email is skipped and 000000 is the
 # only code that verifies (pollis-delivery/src/otp.rs OtpConfig::from_env).
 # LOG_DB_* unset => the MLS control-plane tables share the single libsql DB
 # (pollis-delivery/src/main.rs). PORT/TURSO_URL/TURSO_TOKEN are read by main.rs.
-log "starting pollis-delivery on 127.0.0.1:$DS_PORT (DEV_OTP=000000)"
+# POLLIS_DS_REQUIRE_AUTH=true => ENFORCE device-signature auth (the PRODUCTION
+# config; pollis-delivery/src/lib.rs default is OFF). Required for the LiveKit
+# path: `ds_livekit_token` is device-signed with NO user_id in the body and
+# relies on the DS deriving the user from the verified signature — with auth off
+# the broker's resolve_user() 400s "user_id required when auth is disabled"
+# (broker.rs), which breaks realtime presence + calls. Signup's bootstrap writes
+# are OTP-session-gated (independent of this), so enforcing here is safe.
+log "starting pollis-delivery on 127.0.0.1:$DS_PORT (DEV_OTP=000000, auth enforced)"
 # FULLY DETACH the DS so it outlives THIS step. In CI (GitHub Actions) a step's
 # child processes are reaped with the step's process group when the step's shell
 # exits, so a plain `&` DS dies before the later e2e step can reach :8788. setsid
@@ -116,6 +138,8 @@ log "starting pollis-delivery on 127.0.0.1:$DS_PORT (DEV_OTP=000000)"
 # so a possibly-imprecise $! here is only a best-effort record.
 setsid nohup env -u RESEND_API_KEY -u LOG_DB_URL -u LOG_DB_TOKEN -u LOG_DB_ADMIN_TOKEN \
   TURSO_URL="$TURSO_URL" TURSO_TOKEN="$TURSO_TOKEN" \
+  LIVEKIT_API_KEY="$LIVEKIT_API_KEY" LIVEKIT_API_SECRET="$LIVEKIT_API_SECRET" LIVEKIT_URL="$LIVEKIT_URL" \
+  POLLIS_DS_REQUIRE_AUTH="true" \
   PORT="$DS_PORT" DEV_OTP="000000" RUST_LOG="pollis_delivery=info" \
   "$DS_BIN" > "$RUN_DIR/pollis-delivery.log" 2>&1 < /dev/null &
 DS_PID=$!

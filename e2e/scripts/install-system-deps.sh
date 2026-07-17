@@ -35,6 +35,12 @@ $SUDO apt-get install -y --no-install-recommends \
   libpulse-dev \
   libpipewire-0.3-dev \
   libva-dev \
+  `# --- virtual audio (M3a): a headless PulseAudio + null-sink/virtual-source so a real ---` \
+  `# --- call's cpal mic/playback opens; libasound2-plugins gives ALSA the pulse plugin ---` \
+  `# --- so cpal (ALSA host on Linux) routes to PulseAudio. See e2e/scripts/start-audio.sh ---` \
+  pulseaudio \
+  pulseaudio-utils \
+  libasound2-plugins \
   `# --- screenshare-xcb: forward-compat for the capture path later milestones add (M1+) ---` \
   libxcb1-dev \
   libxcb-shm0-dev \

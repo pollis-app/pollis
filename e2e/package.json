@@ -8,7 +8,8 @@
     "test": "node ./e2e.js",
     "smoke": "node ./smoke.js",
     "invalid-otp": "node ./invalid-otp.js",
-    "two-client": "node ./two-client.js"
+    "two-client": "node ./two-client.js",
+    "two-client-call": "node ./two-client-call.js"
   },
   "devDependencies": {
     "dotenv": "^16",

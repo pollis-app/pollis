@@ -13,12 +13,14 @@ plumbing:
 | `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes | yes (writable) |
 | `invalid-otp.js` | a wrong OTP code is rejected with an inline error, doesn't advance | yes | yes (writable) |
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
+| `two-client-call.js` | two instances place + accept a real 1:1 call; each sees the other in the call | yes | yes (writable) + LiveKit + audio |
 
 ```bash
 pnpm --filter @pollis/e2e smoke        # or: node e2e/smoke.js       (fast, no deps)
 pnpm --filter @pollis/e2e test         # or: node e2e/e2e.js         (full signup flow)
 pnpm --filter @pollis/e2e invalid-otp  # or: node e2e/invalid-otp.js
 pnpm --filter @pollis/e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
+pnpm --filter @pollis/e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
 ```
 
 `smoke.js` is the one to reach for in CI or as a quick "did I break launch"
@@ -209,6 +211,67 @@ CI: `.github/workflows/e2e-two-client.yml` (`workflow_dispatch`) wires it end to
 end through the same M0/M1 pieces as `e2e-full.yml` — install deps → build
 `pollis` + `pollis-delivery` → `start-backend.sh` → `pnpm two-client` via the
 `desktop-e2e` composite action → `stop-backend.sh` (`if: always()`).
+
+## Two-client call — audio + LiveKit (M3a)
+
+`two-client-call.js` (issue #570, M3a) is the first **media** test: it places a
+real 1:1 **call** on top of an established DM and asserts both clients see each
+other in the call. It reuses `two-client.js`'s signup + DM-establish
+choreography verbatim, then:
+
+1. A waits until it sees B online **and** accepted — the DM-header phone button
+   (`dm-header-call`) only renders when `canCall` (1:1 && `otherAcceptedAt` &&
+   `isOtherOnline`) is true. Presence flows from the shared DM LiveKit realtime
+   room, so this doubles as proof the realtime path is up.
+2. A clicks the phone → the Call page auto-joins the `call-<id>` LiveKit room and
+   publishes the mic.
+3. B accepts the incoming-call alert in its status bar
+   (`status-bar-incoming-call-accept`, delivered over B's inbox realtime room).
+4. Each side polls until it renders a `voice-tile-voice-<id>` for the **other**
+   user (StageTile.tsx) — i.e. two distinct participants in a 1:1 call. Then A
+   hangs up (`call-hang-up`).
+
+Two extra fixtures make a real join possible headless, both idempotent and torn
+down by `stop-backend.sh`:
+
+- **`start-audio.sh`** — a headless PulseAudio daemon with a null sink (fake
+  speaker) + a virtual source (fake mic), and an `/etc/asound.conf` that points
+  ALSA's default PCM at PulseAudio so **cpal** (the Linux ALSA host) opens the
+  virtual devices. Without it `join_voice_channel` fails opening the mic. It
+  exports `PULSE_SERVER` / `PULSE_SINK` / `PULSE_SOURCE`. Needs `pulseaudio`,
+  `pulseaudio-utils`, `libasound2-plugins` (in `install-system-deps.sh`).
+- **`start-livekit.sh`** — an ephemeral `livekit/livekit-server:v1.10.0` in
+  `--dev` mode (dev key `devkey` / secret `secret`) on loopback under Docker
+  `--network host`. It exports `LIVEKIT_URL` (the app dials it —
+  `pollis-core/src/config.rs`) and `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET`
+  (the DS mints room tokens with them — `pollis-delivery/src/broker.rs`).
+  `start-backend.sh` forwards those to the `pollis-delivery` process.
+
+Run it locally (build binaries with a **clean** env — see Prerequisites):
+
+```bash
+# Bring up virtual audio, LiveKit, and the backend, pulling their env into your shell:
+eval "$(e2e/scripts/start-audio.sh)"
+eval "$(e2e/scripts/start-livekit.sh)"
+eval "$(e2e/scripts/start-backend.sh)"
+
+# Drive the two clients placing + accepting a call:
+node e2e/two-client-call.js
+
+# Tear it all down (idempotent — stops the DS, both containers, and PulseAudio):
+e2e/scripts/stop-backend.sh
+```
+
+Proof screenshots: `two-client-call-A-ready.png`, `two-client-call-B-ready.png`,
+`two-client-call-A-can-call.png`, `two-client-call-B-incoming.png`,
+`two-client-call-A-in-call.png`, `two-client-call-B-in-call.png`. On failure it
+dumps per-client `A-FAIL.*` / `B-FAIL.*` (plus on-screen testids), same as
+`two-client.js`.
+
+CI: `.github/workflows/e2e-two-client-call.yml` (`workflow_dispatch`) — install
+deps → build → `start-audio.sh` → `start-livekit.sh` → `start-backend.sh` →
+`pnpm two-client-call` via the `desktop-e2e` action → `stop-backend.sh`
+(`if: always()`).
 
 ## CI history — schema bootstrap used to be manual
 
