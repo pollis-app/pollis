@@ -12,6 +12,7 @@ plumbing:
 | `smoke.js` | app launches, login screen renders | no | no |
 | `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes | yes (writable) |
 | `invalid-otp.js` | a wrong OTP code is rejected with an inline error, doesn't advance | yes | yes (writable) |
+| `restart-persistence.js` | single client; account survives a full app restart on the same data dir (no blank re-signup) | yes | yes (writable) |
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 | `two-client-dm-reply.js` | bidirectional 1:1 DM — B replies and A sees it (reverse leg of two-client) | yes | yes (writable) |
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
@@ -24,6 +25,7 @@ plumbing:
 pnpm --filter @pollis/e2e smoke        # or: node e2e/smoke.js       (fast, no deps)
 pnpm --filter @pollis/e2e test         # or: node e2e/e2e.js         (full signup flow)
 pnpm --filter @pollis/e2e invalid-otp  # or: node e2e/invalid-otp.js
+pnpm --filter @pollis/e2e restart-persistence       # account persists across restart (needs backend)
 pnpm --filter @pollis/e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
 pnpm --filter @pollis/e2e two-client-dm-reply       # bidirectional DM (needs backend)
 pnpm --filter @pollis/e2e two-client-channel        # group text-channel convergence (needs backend)
@@ -558,3 +560,23 @@ builds `pollis` **and** `pollis-delivery`, brings the backend up with
 through the same `desktop-e2e` composite action, and tears the backend down in
 an `if: always()` step. No nightly schedule (cost); trigger it from the Actions
 tab when you want the full signup path exercised end-to-end.
+
+Every two-client / single-client script has its own `workflow_dispatch`-only
+workflow, all following one of two shapes above — backend-only (mirrors
+`e2e-two-client.yml`) or media (adds `start-audio` + `start-livekit`, mirrors
+`e2e-two-client-call.yml`):
+
+| script | workflow | extra fixtures |
+|---|---|---|
+| `restart-persistence.js` | `e2e-restart-persistence.yml` | — |
+| `two-client.js` | `e2e-two-client.yml` | — |
+| `two-client-dm-reply.js` | `e2e-two-client-dm-reply.yml` | — |
+| `two-client-channel.js` | `e2e-two-client-channel.yml` | — |
+| `two-client-voice-channel.js` | `e2e-two-client-voice-channel.yml` | LiveKit + audio |
+| `two-client-call.js` | `e2e-two-client-call.yml` | LiveKit + audio |
+| `two-client-camera.js` | `e2e-two-client-camera.yml` | LiveKit + audio + virtual camera |
+| `two-client-screenshare.js` | `e2e-two-client-screenshare.yml` | LiveKit + audio (X11 capture) |
+
+None run automatically. Wiring a cheap PR tier + a nightly full tier is the
+remaining piece of #570 M4 (deferred on cost); until then, dispatch them from
+the Actions tab after touching MLS delivery, DMs, the DS, or media.
