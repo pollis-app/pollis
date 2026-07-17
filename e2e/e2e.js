@@ -19,7 +19,6 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
-const dotenv = require("dotenv");
 const { remote } = require("webdriverio");
 const h = require("./lib/harness");
 
@@ -28,11 +27,10 @@ const shot = h.makeShot(ARTIFACTS);
 
 async function main() {
   h.reap();
-  const devEnv = dotenv.parse(fs.readFileSync(path.join(h.ROOT, ".env.development")));
-  const testEnv = dotenv.parse(fs.readFileSync(path.join(h.ROOT, ".env.test")));
-  if (!testEnv.TURSO_URL || !testEnv.TURSO_TOKEN) {
-    throw new Error(".env.test missing TURSO_URL/TOKEN (need a writable disposable DB)");
-  }
+  // .env.development is optional: present for a local run (dev R2/LiveKit creds),
+  // absent in CI where those come from the workflow env (start-backend.sh).
+  const devEnv = h.readEnvFile(".env.development");
+  const { TURSO_URL, TURSO_TOKEN } = h.tursoEnv();
 
   const children = [];
   const stop = (c) => { try { c && c.kill("SIGKILL"); } catch (_) {} };
@@ -41,20 +39,29 @@ async function main() {
   const vite = h.spawnVite(devEnv);
   children.push(vite);
 
-  // Local delivery service.
-  const dsEnv = { ...process.env, TURSO_URL: testEnv.TURSO_URL, TURSO_TOKEN: testEnv.TURSO_TOKEN,
-    PORT: String(h.DS_PORT), DEV_OTP: "000000", RUST_LOG: "pollis_delivery=info" };
-  delete dsEnv.RESEND_API_KEY; delete dsEnv.LOG_DB_URL; delete dsEnv.LOG_DB_TOKEN; delete dsEnv.LOG_DB_ADMIN_TOKEN;
-  console.log(`[e2e] starting delivery service on ${h.DS_URL} (DEV_OTP=000000)`);
-  const ds = spawn(h.DS_BIN, [], { env: dsEnv, stdio: ["ignore", "inherit", "inherit"] });
-  children.push(ds);
+  // Delivery service. When POLLIS_DELIVERY_URL is already set — CI runs the real
+  // pollis-delivery via e2e/scripts/start-backend.sh against the libsql fixture —
+  // use that external DS; otherwise spawn our own on DS_PORT so a plain
+  // `node e2e/e2e.js` stays self-contained (needs .env.test's writable Turso).
+  const deliveryUrl = process.env.POLLIS_DELIVERY_URL || h.DS_URL;
+  if (!process.env.POLLIS_DELIVERY_URL) {
+    const dsEnv = { ...process.env, TURSO_URL, TURSO_TOKEN,
+      PORT: String(h.DS_PORT), DEV_OTP: "000000", RUST_LOG: "pollis_delivery=info" };
+    delete dsEnv.RESEND_API_KEY; delete dsEnv.LOG_DB_URL; delete dsEnv.LOG_DB_TOKEN; delete dsEnv.LOG_DB_ADMIN_TOKEN;
+    console.log(`[e2e] starting delivery service on ${deliveryUrl} (DEV_OTP=000000)`);
+    const ds = spawn(h.DS_BIN, [], { env: dsEnv, stdio: ["ignore", "inherit", "inherit"] });
+    children.push(ds);
+  } else {
+    console.log(`[e2e] using external delivery service at ${deliveryUrl}`);
+  }
 
-  // App env: dev creds + writable test DB + local DS. The two WebKit vars
+  // App env: dev creds + writable test DB + the DS. The two WebKit vars
   // mirror the project's own `pnpm dev` script — WebKitGTK compositing is
   // broken on this setup and causes rendering stalls / hung screenshot
-  // commands without them.
-  const appEnv = { ...process.env, ...devEnv, TURSO_URL: testEnv.TURSO_URL, TURSO_TOKEN: testEnv.TURSO_TOKEN,
-    POLLIS_DELIVERY_URL: h.DS_URL, POLLIS_DATA_DIR: path.join(__dirname, ".tmp-data"),
+  // commands without them. R2 placeholders (present but never dialed during
+  // signup) come from process.env in CI or .env.development locally.
+  const appEnv = { ...process.env, ...devEnv, TURSO_URL, TURSO_TOKEN,
+    POLLIS_DELIVERY_URL: deliveryUrl, POLLIS_DATA_DIR: path.join(__dirname, ".tmp-data"),
     WEBKIT_DISABLE_COMPOSITING_MODE: "1", GDK_BACKEND: "x11" };
   fs.rmSync(appEnv.POLLIS_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(appEnv.POLLIS_DATA_DIR, { recursive: true });

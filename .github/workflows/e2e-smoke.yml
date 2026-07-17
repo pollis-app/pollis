@@ -43,31 +43,13 @@ jobs:
             .
             src-tauri
 
-      # Same list as mls-tests.yml (webkit/gtk for Tauri, alsa/pulse/pipewire
-      # + libva for the media stack pollis-core links even when unused, meson
-      # deps for webrtc-audio-processing-sys's vendored C++ build), plus
-      # webkit2gtk-driver (ships the WebKitWebDriver binary tauri-driver
-      # talks to) and xvfb (no real X server on the runner).
+      # Provisioned by the shared dep script (e2e/scripts/install-system-deps.sh)
+      # so the apt list lives in exactly ONE place, identical to the reusable
+      # e2e/Dockerfile image (issue #570, M0). Dep groups (webview / audio /
+      # screenshare-xcb / dbus-keystore / build-tools / display) are documented
+      # in that script.
       - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            webkit2gtk-driver \
-            xvfb \
-            libgtk-3-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libxdo-dev \
-            libssl-dev \
-            libasound2-dev \
-            libpulse-dev \
-            libpipewire-0.3-dev \
-            libva-dev \
-            libdbus-1-dev \
-            cmake \
-            clang \
-            ninja-build
+        run: bash e2e/scripts/install-system-deps.sh
 
       - name: Install meson (newer than apt)
         run: |
@@ -88,16 +70,17 @@ jobs:
       - name: Build pollis (debug)
         run: cargo build -p pollis
 
+      # Run under the shared composite action: a dbus session + xvfb, with
+      # orphan tauri-driver/WebKitWebDriver/pollis/vite reaped before and after,
+      # and FAIL.png/FAIL.html uploaded on failure. The provisioning (deps,
+      # xvfb, dbus, reaping) is now defined once and reused; this workflow only
+      # decides WHAT to run.
       - name: Run e2e smoke test
-        working-directory: e2e
-        run: xvfb-run --auto-servernum pnpm smoke
-
-      - name: Upload failure artifacts
-        if: failure()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/desktop-e2e
         with:
-          name: e2e-smoke-failure
-          path: |
+          command: pnpm smoke
+          working-directory: e2e
+          artifact-name: e2e-smoke-failure
+          artifacts-path: |
             e2e/artifacts/FAIL.png
             e2e/artifacts/FAIL.html
-          if-no-files-found: ignore

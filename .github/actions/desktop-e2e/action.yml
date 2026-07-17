@@ -1,0 +1,85 @@
+# Composite action: run a desktop-E2E command in a headless, dbus-enabled,
+# orphan-free environment (issue #570, M0).
+#
+# Encapsulates the RUN-TIME setup the native app needs regardless of where the
+# job runs — the bare ubuntu-24.04 runner (deps apt-installed via
+# e2e/scripts/install-system-deps.sh) OR the e2e/Dockerfile image (same script,
+# baked in). It does NOT install system deps or build anything; the caller does
+# that (see .github/workflows/e2e-smoke.yml) so this stays a thin, reusable
+# run wrapper that later milestones (two-client, media) can drive too.
+#
+# What it guarantees around the command:
+#   - a fresh dbus SESSION bus (dbus-run-session) — the OS keystore/secret
+#     service path the app touches needs a session bus, absent on a raw runner;
+#   - a virtual X server (xvfb-run --auto-servernum) — no real display in CI;
+#   - orphan reaping BEFORE and AFTER — a run killed mid-session leaves
+#     tauri-driver / WebKitWebDriver / pollis / pollis-delivery / vite behind,
+#     and the next run then dies with "Maximum number of active sessions" or a
+#     4445 bind error (same reap set as e2e/lib/harness.js `reap()`).
+name: Desktop E2E
+description: Run a desktop-E2E command under xvfb + a dbus session, reaping orphan processes before and after.
+
+inputs:
+  command:
+    description: Shell command to run (e.g. `pnpm smoke`). Executed inside the working-directory below.
+    required: true
+  working-directory:
+    description: Directory to run the command in.
+    required: false
+    default: e2e
+  artifacts-path:
+    description: >-
+      Path (multiline allowed) to upload as failure artifacts when the command fails.
+      Leave empty to skip artifact upload.
+    required: false
+    default: ""
+  artifact-name:
+    description: Name for the uploaded failure artifact.
+    required: false
+    default: desktop-e2e-failure
+
+runs:
+  using: composite
+  steps:
+    # Same reap set as e2e/lib/harness.js. `|| true` so a clean environment
+    # (nothing to kill) doesn't fail the step. NOTE: an EXTERNAL delivery
+    # service (POLLIS_DELIVERY_URL set by e2e/scripts/start-backend.sh) is a
+    # long-lived fixture this run depends on — do NOT reap it; only a DS a
+    # self-spawning script owns.
+    - name: Reap orphan processes (pre)
+      shell: bash
+      run: |
+        procs=(tauri-driver WebKitWebDriver bin/vite)
+        [ -z "${POLLIS_DELIVERY_URL:-}" ] && procs+=(target/debug/pollis-delivery)
+        for p in "${procs[@]}"; do pkill -9 -f "$p" || true; done
+        pkill -9 -x pollis || true
+
+    # dbus-run-session wraps the command with a private session bus; xvfb-run
+    # --auto-servernum picks a free display number. Env gotchas
+    # (WEBKIT_DISABLE_COMPOSITING_MODE / GDK_BACKEND) are set by e2e/smoke.js on
+    # the app process itself and baked into the Docker image, so they don't need
+    # re-exporting here.
+    - name: Run under xvfb + dbus session
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: dbus-run-session -- xvfb-run --auto-servernum ${{ inputs.command }}
+
+    - name: Upload failure artifacts
+      if: failure() && inputs.artifacts-path != ''
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.artifacts-path }}
+        if-no-files-found: ignore
+
+    # Always reap so a failed/killed run can't poison the next job on a reused
+    # runner. Leaves an external delivery-service fixture alone (see pre-reap) —
+    # its lifecycle is owned by e2e/scripts/{start,stop}-backend.sh.
+    - name: Reap orphan processes (post)
+      if: always()
+      shell: bash
+      run: |
+        procs=(tauri-driver WebKitWebDriver bin/vite)
+        [ -z "${POLLIS_DELIVERY_URL:-}" ] && procs+=(target/debug/pollis-delivery)
+        for p in "${procs[@]}"; do pkill -9 -f "$p" || true; done
+        pkill -9 -x pollis || true

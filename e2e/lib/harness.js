@@ -9,6 +9,7 @@ const net = require("net");
 const os = require("os");
 const path = require("path");
 const { spawn, spawnSync } = require("child_process");
+const dotenv = require("dotenv");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const UI_PORT = 5173;
@@ -20,8 +21,42 @@ const TAURI_DRIVER = path.resolve(os.homedir(), ".cargo", "bin", "tauri-driver")
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Parse a dotenv file from the repo root if it exists, else {}. In CI the app's
+// env is supplied by the workflow (e2e/scripts/start-backend.sh -> $GITHUB_ENV),
+// so .env.development / .env.test may not exist on disk — reading must not throw.
+function readEnvFile(name) {
+  try {
+    return dotenv.parse(fs.readFileSync(path.join(ROOT, name)));
+  } catch (_) {
+    return {};
+  }
+}
+
+// Turso creds for the writable test DB. Prefer the process env (CI: exported by
+// e2e/scripts/start-backend.sh, which points these at the local libsql fixture)
+// and fall back to .env.test for a local run against a hand-provisioned DB.
+function tursoEnv() {
+  const fileEnv = readEnvFile(".env.test");
+  const TURSO_URL = process.env.TURSO_URL || fileEnv.TURSO_URL;
+  const TURSO_TOKEN = process.env.TURSO_TOKEN || fileEnv.TURSO_TOKEN;
+  if (!TURSO_URL || !TURSO_TOKEN) {
+    throw new Error(
+      "need TURSO_URL/TURSO_TOKEN (process env or .env.test) — a writable disposable DB; " +
+        "run e2e/scripts/start-backend.sh or see e2e/README.md"
+    );
+  }
+  return { TURSO_URL, TURSO_TOKEN };
+}
+
 function reap() {
-  for (const p of ["tauri-driver", "WebKitWebDriver", "bin/vite", "target/debug/pollis-delivery"]) {
+  const procs = ["tauri-driver", "WebKitWebDriver", "bin/vite"];
+  // Only reap a delivery service we OWN (the self-spawn path). When
+  // POLLIS_DELIVERY_URL is set the DS is an EXTERNAL fixture managed by
+  // e2e/scripts/start-backend.sh — killing it here would break the run.
+  if (!process.env.POLLIS_DELIVERY_URL) {
+    procs.push("target/debug/pollis-delivery");
+  }
+  for (const p of procs) {
     spawnSync("pkill", ["-9", "-f", p], { stdio: "ignore" });
   }
   spawnSync("pkill", ["-9", "-x", "pollis"], { stdio: "ignore" });
@@ -159,6 +194,7 @@ async function dumpFailure(browser, artifactsDir, shot) {
 module.exports = {
   ROOT, UI_PORT, DS_PORT, DS_URL, DS_BIN, APP_BIN, TAURI_DRIVER,
   sleep, reap, waitPort, curl, warmVite, spawnVite, waitViteReady,
+  readEnvFile, tursoEnv,
   present, waitTestId, clickTestId, setTestIdValue, typeCode,
   makeShot, dumpFailure,
 };

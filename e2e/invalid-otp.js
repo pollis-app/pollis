@@ -13,7 +13,6 @@
 const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
-const dotenv = require("dotenv");
 const { remote } = require("webdriverio");
 const h = require("./lib/harness");
 
@@ -22,11 +21,10 @@ const shot = h.makeShot(ARTIFACTS);
 
 async function main() {
   h.reap();
-  const devEnv = dotenv.parse(fs.readFileSync(path.join(h.ROOT, ".env.development")));
-  const testEnv = dotenv.parse(fs.readFileSync(path.join(h.ROOT, ".env.test")));
-  if (!testEnv.TURSO_URL || !testEnv.TURSO_TOKEN) {
-    throw new Error(".env.test missing TURSO_URL/TOKEN (need a writable disposable DB)");
-  }
+  // .env.development is optional (absent in CI); Turso comes from the process env
+  // (start-backend.sh) or .env.test. See e2e.js for the full rationale.
+  const devEnv = h.readEnvFile(".env.development");
+  const { TURSO_URL, TURSO_TOKEN } = h.tursoEnv();
 
   const children = [];
   const stop = (c) => { try { c && c.kill("SIGKILL"); } catch (_) {} };
@@ -34,17 +32,23 @@ async function main() {
   const vite = h.spawnVite(devEnv);
   children.push(vite);
 
-  // Local delivery service. DEV_OTP is the code that WOULD verify — the
-  // whole point of this test is to send something else instead.
-  const dsEnv = { ...process.env, TURSO_URL: testEnv.TURSO_URL, TURSO_TOKEN: testEnv.TURSO_TOKEN,
-    PORT: String(h.DS_PORT), DEV_OTP: "000000", RUST_LOG: "pollis_delivery=info" };
-  delete dsEnv.RESEND_API_KEY; delete dsEnv.LOG_DB_URL; delete dsEnv.LOG_DB_TOKEN; delete dsEnv.LOG_DB_ADMIN_TOKEN;
-  console.log(`[invalid-otp] starting delivery service on ${h.DS_URL} (DEV_OTP=000000)`);
-  const ds = spawn(h.DS_BIN, [], { env: dsEnv, stdio: ["ignore", "inherit", "inherit"] });
-  children.push(ds);
+  // Delivery service. DEV_OTP is the code that WOULD verify — the whole point of
+  // this test is to send something else instead. Use the external DS when
+  // start-backend.sh already runs one (CI), else spawn our own on DS_PORT.
+  const deliveryUrl = process.env.POLLIS_DELIVERY_URL || h.DS_URL;
+  if (!process.env.POLLIS_DELIVERY_URL) {
+    const dsEnv = { ...process.env, TURSO_URL, TURSO_TOKEN,
+      PORT: String(h.DS_PORT), DEV_OTP: "000000", RUST_LOG: "pollis_delivery=info" };
+    delete dsEnv.RESEND_API_KEY; delete dsEnv.LOG_DB_URL; delete dsEnv.LOG_DB_TOKEN; delete dsEnv.LOG_DB_ADMIN_TOKEN;
+    console.log(`[invalid-otp] starting delivery service on ${deliveryUrl} (DEV_OTP=000000)`);
+    const ds = spawn(h.DS_BIN, [], { env: dsEnv, stdio: ["ignore", "inherit", "inherit"] });
+    children.push(ds);
+  } else {
+    console.log(`[invalid-otp] using external delivery service at ${deliveryUrl}`);
+  }
 
-  const appEnv = { ...process.env, ...devEnv, TURSO_URL: testEnv.TURSO_URL, TURSO_TOKEN: testEnv.TURSO_TOKEN,
-    POLLIS_DELIVERY_URL: h.DS_URL, POLLIS_DATA_DIR: path.join(__dirname, ".tmp-data-invalid-otp"),
+  const appEnv = { ...process.env, ...devEnv, TURSO_URL, TURSO_TOKEN,
+    POLLIS_DELIVERY_URL: deliveryUrl, POLLIS_DATA_DIR: path.join(__dirname, ".tmp-data-invalid-otp"),
     WEBKIT_DISABLE_COMPOSITING_MODE: "1", GDK_BACKEND: "x11" };
   fs.rmSync(appEnv.POLLIS_DATA_DIR, { recursive: true, force: true });
   fs.mkdirSync(appEnv.POLLIS_DATA_DIR, { recursive: true });

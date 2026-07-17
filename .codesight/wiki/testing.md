@@ -486,14 +486,17 @@ pnpm --filter @pollis/e2e test         # full signup flow
 pnpm --filter @pollis/e2e invalid-otp
 ```
 
-`smoke.js` is the CI-friendly one: the logged-out path
+`smoke.js` is the fast, backend-free one: the logged-out path
 (`checkStoredSession()` in `frontend/src/App.tsx`) resolves entirely from
 local Tauri commands, so it never calls out to the delivery service or
 Turso. `.github/workflows/e2e-smoke.yml` runs it on `workflow_dispatch`. The
-other two need a writable disposable test Turso with the schema applied
-(`scripts/db-apply.sh` against `.env.test` — see `e2e/README.md` for the
-full prerequisites and gotchas) and are for local use / not yet wired into
-CI.
+other two need a writable test Turso with the schema applied plus a running
+delivery service — all stood up automatically by
+`e2e/scripts/start-backend.sh` (a libsql server + `scripts/db-apply.sh` +
+the real `pollis-delivery` binary; issue #570, M1). `.github/workflows/e2e-full.yml`
+runs both on `workflow_dispatch` behind that script; locally,
+`eval "$(e2e/scripts/start-backend.sh)"` then run the scripts (see
+`e2e/README.md`).
 
 Full details — how the stack is stood up, `.env.test` schema bootstrap,
 `data-testid` conventions, and the WebKitWebDriver quirks (native `.click()`
