@@ -47,7 +47,7 @@ async function main() {
     console.log(`[invalid-otp] using external delivery service at ${deliveryUrl}`);
   }
 
-  const appEnv = { ...process.env, ...devEnv, TURSO_URL, TURSO_TOKEN,
+  const appEnv = { ...devEnv, ...process.env, TURSO_URL, TURSO_TOKEN,
     POLLIS_DELIVERY_URL: deliveryUrl, POLLIS_DATA_DIR: path.join(__dirname, ".tmp-data-invalid-otp"),
     WEBKIT_DISABLE_COMPOSITING_MODE: "1", GDK_BACKEND: "x11" };
   fs.rmSync(appEnv.POLLIS_DATA_DIR, { recursive: true, force: true });

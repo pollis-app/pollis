@@ -13,6 +13,9 @@ plumbing:
 | `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes | yes (writable) |
 | `invalid-otp.js` | a wrong OTP code is rejected with an inline error, doesn't advance | yes | yes (writable) |
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
+| `two-client-dm-reply.js` | bidirectional 1:1 DM — B replies and A sees it (reverse leg of two-client) | yes | yes (writable) |
+| `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
+| `two-client-voice-channel.js` | A + B join a group voice channel, both see 2 participants, A leaves, B sees the drop | yes | yes (writable) + LiveKit + audio |
 | `two-client-call.js` | two instances place + accept a real 1:1 call; each sees the other in the call | yes | yes (writable) + LiveKit + audio |
 | `two-client-camera.js` | two instances in a call; A turns its webcam on, B sees A's remote camera tile | yes | yes (writable) + LiveKit + audio + virtual camera |
 | `two-client-screenshare.js` | two instances in a call; A shares its screen (X11/Xvfb capture), B sees A's remote screenshare tile | yes | yes (writable) + LiveKit + audio |
@@ -22,6 +25,9 @@ pnpm --filter @pollis/e2e smoke        # or: node e2e/smoke.js       (fast, no d
 pnpm --filter @pollis/e2e test         # or: node e2e/e2e.js         (full signup flow)
 pnpm --filter @pollis/e2e invalid-otp  # or: node e2e/invalid-otp.js
 pnpm --filter @pollis/e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
+pnpm --filter @pollis/e2e two-client-dm-reply       # bidirectional DM (needs backend)
+pnpm --filter @pollis/e2e two-client-channel        # group text-channel convergence (needs backend)
+pnpm --filter @pollis/e2e two-client-voice-channel  # group voice join/leave (needs backend + LiveKit + audio)
 pnpm --filter @pollis/e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
 pnpm --filter @pollis/e2e two-client-camera  # or: node e2e/two-client-camera.js  (needs backend + LiveKit + audio + virtual camera up first)
 pnpm --filter @pollis/e2e two-client-screenshare  # or: node e2e/two-client-screenshare.js  (needs backend + LiveKit + audio up first)
@@ -452,6 +458,21 @@ CI via `.github/workflows/e2e-full.yml` (below). `smoke.js` remains the fast,
 backend-free launch check.
 
 ## Gotchas encoded in these scripts (learned the hard way)
+
+- **`.env.development` must not override the local fixture (local-only bug).**
+  `appEnvFor` builds the app's env as `{ ...devEnv, ...process.env, <explicit
+  overrides> }`. It **must** be that order (fixture wins) and it explicitly
+  clears `LOG_DB_*`. `.env.development` sets `LIVEKIT_URL=wss://rtc.pollis.com`
+  and a prod `LOG_DB_URL`; if those leak into the app it dials **prod** LiveKit
+  (401 → realtime dead → the membership hint that triggers the Welcome poll never
+  arrives) and reads Welcomes from the **prod** log DB (empty) — so nothing
+  converges. This never bites CI (no `.env.development` there), which is why the
+  two-client suite passed in CI but hung locally. If you add a new two-client
+  script, copy `appEnvFor` verbatim.
+- **The DS shares one libsql DB here** (`LOG_DB_*` unset → single-DB fallback),
+  so `start-backend.sh` also applies `migrations-log/` (via
+  `apply-log-migrations.py`) — without it the DS's Welcome upsert fails on a
+  missing `ON CONFLICT` target and Welcomes silently never persist.
 
 - **Clicks**: WebKitWebDriver's native `element.click()` doesn't reliably fire
   React handlers/form submits here; `clickTestId()` dispatches a DOM click via

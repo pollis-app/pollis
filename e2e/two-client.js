@@ -54,10 +54,11 @@ function appEnvFor(devEnv, turso, deliveryUrl, dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });
   fs.mkdirSync(dataDir, { recursive: true });
   return {
-    ...process.env, ...devEnv,
+    ...devEnv, ...process.env,
     TURSO_URL: turso.TURSO_URL, TURSO_TOKEN: turso.TURSO_TOKEN,
     POLLIS_DELIVERY_URL: deliveryUrl,
     POLLIS_DATA_DIR: dataDir,
+    LOG_DB_URL: "", LOG_DB_TOKEN: "", LOG_DB_ADMIN_TOKEN: "",
     WEBKIT_DISABLE_COMPOSITING_MODE: "1", GDK_BACKEND: "x11",
   };
 }

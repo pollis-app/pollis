@@ -90,6 +90,16 @@ log "libsql server up"
 log "applying migrations via scripts/db-apply.sh"
 TURSO_URL="$TURSO_URL" TURSO_TOKEN="$TURSO_TOKEN" bash "$ROOT/scripts/db-apply.sh" >&2
 
+# The DS runs in single-DB fallback here (LOG_DB_* unset below), so the MLS
+# control-plane tables share this one libsql DB — but db-apply.sh only applies
+# the main-DB `migrations/` dir. The incremental commit-log migrations
+# (`mls_welcome` UNIQUE dedupe #430, `mls_commit_since` #539) live in
+# `migrations-log/` and must ALSO land here, or the DS's idempotent Welcome
+# upsert fails on a missing ON CONFLICT target and cross-client MLS delivery
+# silently breaks. They are all `CREATE ... IF NOT EXISTS` (idempotent).
+log "applying commit-log migrations (migrations-log/) to the single DB"
+TURSO_URL="$TURSO_URL" python3 "$ROOT/e2e/scripts/apply-log-migrations.py" >&2
+
 # --- 3. real pollis-delivery binary -----------------------------------------
 DS_BIN="$ROOT/target/debug/pollis-delivery"
 if [ ! -x "$DS_BIN" ]; then
