@@ -14,6 +14,7 @@ plumbing:
 | `invalid-otp.js` | a wrong OTP code is rejected with an inline error, doesn't advance | yes | yes (writable) |
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 | `two-client-call.js` | two instances place + accept a real 1:1 call; each sees the other in the call | yes | yes (writable) + LiveKit + audio |
+| `two-client-camera.js` | two instances in a call; A turns its webcam on, B sees A's remote camera tile | yes | yes (writable) + LiveKit + audio + virtual camera |
 
 ```bash
 pnpm --filter @pollis/e2e smoke        # or: node e2e/smoke.js       (fast, no deps)
@@ -21,6 +22,7 @@ pnpm --filter @pollis/e2e test         # or: node e2e/e2e.js         (full signu
 pnpm --filter @pollis/e2e invalid-otp  # or: node e2e/invalid-otp.js
 pnpm --filter @pollis/e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
 pnpm --filter @pollis/e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
+pnpm --filter @pollis/e2e two-client-camera  # or: node e2e/two-client-camera.js  (needs backend + LiveKit + audio + virtual camera up first)
 ```
 
 `smoke.js` is the one to reach for in CI or as a quick "did I break launch"
@@ -272,6 +274,84 @@ CI: `.github/workflows/e2e-two-client-call.yml` (`workflow_dispatch`) — instal
 deps → build → `start-audio.sh` → `start-livekit.sh` → `start-backend.sh` →
 `pnpm two-client-call` via the `desktop-e2e` action → `stop-backend.sh`
 (`if: always()`).
+
+## Two-client camera — virtual webcam (M3b)
+
+`two-client-camera.js` (issue #570, M3b) is the camera slice of the media
+milestone, and directly validates the #568 camera-parity work end to end: it
+reuses the M3a call choreography verbatim to get A + B into a connected call,
+then A turns its **webcam** on and B asserts A's **remote camera tile** renders.
+
+1. A + B sign up, A DMs B, B accepts, A places the call, B accepts — identical
+   to `two-client-call.js`; both converge on two participants.
+2. A clicks the camera toggle (`voice-bar-camera-button`, or the stage tray's
+   `voice-tray-camera`). With exactly one camera on the runner (`/dev/video0` is
+   the only node), `toggleCamera()` starts it directly — no picker — capturing
+   the loopback device and publishing a `TrackSource::Camera` track into the
+   call room.
+3. Sanity on A: A's own local self-preview tile
+   (`remote-video-tile-__local_camera_preview__`) mounts — proof A's
+   capture+publish engaged, isolating an A-side capture failure from a B-side
+   delivery one.
+4. **ASSERT on B**: poll until A's remote camera tile renders — a
+   `remote-video-tile-<trackKey>` element nested inside A's participant tile
+   (`voice-tile-voice-<A>`), excluding the local-preview keys and excluding
+   screenshare feeds (a screenshare tile also carries a `voice-tile-stream-stats-`
+   badge; a camera face never does). On B a remote webcam lands in
+   `appStore.cameraRemotes[identity]` → VoiceStage's `cameraTrackKey` →
+   StageTile's `RemoteVideoTile` (`remote-video-tile-<trackKey>`, a `<canvas>` on
+   the Tauri/WebKitGTK path), so the tile's presence proves A's camera track was
+   published, subscribed by B, and mounted. Generous eventual timeout; no fixed
+   sleeps for correctness. Then A turns the camera off and hangs up.
+
+One extra fixture over M3a, idempotent and torn down by `stop-backend.sh`:
+
+- **`start-camera.sh`** — loads the `v4l2loopback` kernel module to create a
+  fixed capture node (`/dev/video0`) and feeds it a **moving** 1280x720 YUYV422
+  test pattern (`ffmpeg`'s `testsrc`) at 30fps — a real, changing signal in a
+  format the app's V4L2 path accepts directly (feeding YUYV means the loopback
+  offers only YUYV, so the app deterministically takes its YUYV branch). It
+  **verifies** `/dev/video0` exists after `modprobe` and that the capture side
+  advertises a format, and **fails loudly** with the modprobe/dmesg error
+  otherwise. Needs `v4l-utils` + `ffmpeg` (userspace) and the `v4l2loopback-dkms`
+  module + kernel headers (all in `install-system-deps.sh`; the kernel-specific
+  bits are best-effort there and retried at runtime by `start-camera.sh`).
+
+  > **Known risk — v4l2loopback on hosted runners.** Loading a kernel module
+  > (`modprobe`) requires the DKMS build to find `linux-headers-$(uname -r)` and
+  > the runner to permit module loading. A GitHub-hosted `ubuntu-24.04` runner
+  > **may not** allow this. When it can't, `start-camera.sh` fails at the
+  > `modprobe`/`/dev/video0` check with a clear message rather than hanging — a
+  > legitimate signal that this flow needs a **self-hosted runner**.
+
+Run it locally (build binaries with a **clean** env — see Prerequisites):
+
+```bash
+# Bring up the virtual camera, virtual audio, LiveKit, and the backend:
+eval "$(e2e/scripts/start-camera.sh)"
+eval "$(e2e/scripts/start-audio.sh)"
+eval "$(e2e/scripts/start-livekit.sh)"
+eval "$(e2e/scripts/start-backend.sh)"
+
+# Drive the two clients placing a call + turning the camera on:
+node e2e/two-client-camera.js
+
+# Tear it all down (idempotent — also kills the ffmpeg feeder + unloads v4l2loopback):
+e2e/scripts/stop-backend.sh
+```
+
+Proof screenshots: `two-client-camera-A-ready.png`,
+`two-client-camera-B-ready.png`, `two-client-camera-A-in-call.png`,
+`two-client-camera-B-in-call.png`, `two-client-camera-A-camera-on.png`,
+`two-client-camera-B-sees-camera.png`. On failure it dumps per-client `A-FAIL.*`
+/ `B-FAIL.*` (plus on-screen testids), same as the other two-client scripts.
+
+CI: `.github/workflows/e2e-two-client-camera.yml` — install deps → build →
+`start-camera.sh` → `start-audio.sh` → `start-livekit.sh` → `start-backend.sh` →
+`pnpm two-client-camera` via the `desktop-e2e` action → `stop-backend.sh`
+(`if: always()`). It carries a **temporary** `push:` trigger on the
+`auto/e2e-two-client-camera` branch (marked REMOVE-before-merge) so the module
+load can be validated in CI, since v4l2loopback can't run in the dev sandbox.
 
 ## CI history — schema bootstrap used to be manual
 

@@ -41,6 +41,12 @@ $SUDO apt-get install -y --no-install-recommends \
   pulseaudio \
   pulseaudio-utils \
   libasound2-plugins \
+  `# --- virtual camera (M3b): v4l-utils (v4l2-ctl) + ffmpeg feed a moving test pattern ---` \
+  `# --- into a v4l2loopback node so the app's V4L2 camera path captures a real signal. ---` \
+  `# --- The v4l2loopback KERNEL module (dkms) + its kernel headers are handled in the ---` \
+  `# --- best-effort block below, since they're kernel-version-specific. See start-camera.sh ---` \
+  v4l-utils \
+  ffmpeg \
   `# --- screenshare-xcb: forward-compat for the capture path later milestones add (M1+) ---` \
   libxcb1-dev \
   libxcb-shm0-dev \
@@ -55,3 +61,19 @@ $SUDO apt-get install -y --no-install-recommends \
   ninja-build \
   `# --- display: no real X server on the runner / in the image ---` \
   xvfb
+
+# --- v4l2loopback kernel module for the virtual camera (M3b) --------------------
+# The DKMS module is built against a SPECIFIC kernel's headers, so it's
+# kernel-version-specific and best-effort — kept OUT of the main apt-get above
+# (a failed dkms build must never fail the whole install, and it's meaningless
+# at Docker IMAGE-build time where the build host's kernel differs from the run
+# host and no module is ever loaded). On the CI runner this runs on the real
+# host, so $(uname -r) is the runner kernel and this builds the module ready for
+# start-camera.sh to `modprobe`. In the Docker build it's a harmless no-op
+# (headers for the build host's kernel aren't in the image apt sources), and
+# start-camera.sh re-attempts the exact-version headers at runtime.
+$SUDO apt-get install -y --no-install-recommends \
+  v4l2loopback-dkms \
+  v4l2loopback-utils \
+  "linux-headers-$(uname -r)" \
+  || echo "[install-system-deps] v4l2loopback-dkms/headers unavailable here (expected during the Docker image build); start-camera.sh retries at runtime on the runner kernel" >&2

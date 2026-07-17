@@ -4,3 +4,5 @@ artifacts/
 .tmp-data-invalid-otp/
 .tmp-data-call-a/
 .tmp-data-call-b/
+.tmp-data-camera-a/
+.tmp-data-camera-b/
