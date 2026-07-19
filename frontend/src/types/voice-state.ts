@@ -36,6 +36,11 @@ export type VoiceState =
       channelId: string;
       counterpartyUserId: string | null;
       micMuted: boolean;
+      /** False when this session joined *listen-only* — no working capture
+       *  device, so we're connected and receiving but not publishing audio.
+       *  The UI shows a "listening only" indicator instead of a mute toggle.
+       *  Set from the backend `mic_availability` event at join. */
+      micAvailable: boolean;
       share: ShareState;
       camera: CameraState;
     }

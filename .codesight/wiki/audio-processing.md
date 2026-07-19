@@ -46,6 +46,29 @@ the previous per-track-stream model. AEC needs *one* point at which the
 about-to-play signal is observed; otherwise the render reference is out of
 sync with what actually comes out of the speaker.
 
+## Listen-only join (no mic)
+
+The mic is **best-effort**. If `start_mic_stream` fails at join — no capture
+device, ALSA `snd_pcm_hw_params` "No such file or directory", a busy device —
+`join_voice_channel` does **not** abort. It joins *listen-only*: connected to
+the room, receiving remote audio/video, just not publishing a mic track. On
+that path the whole capture side is skipped (no `NativeAudioSource`, no
+`publish_track`, no `frame_task`, no APM, no denoiser); playback is unaffected.
+`voice.local_track` / `audio_source` / `input_stream` / `frame_task` are all
+`None`.
+
+The backend emits `VoiceEvent::MicAvailability { available: false }` once at
+join. The renderer mirrors it onto `voiceState.joined.micAvailable` and swaps
+the mute toggle for a non-interactive "listening only" indicator
+(`voice-bar-listen-only` / `voice-tray-listen-only`).
+
+Test seam: `POLLIS_DISABLE_MIC=1` forces `start_mic_stream` to fail so the
+listen-only path can be exercised without unplugging a device. Covered by
+`e2e/voice-channel-no-mic.js` (S-NOMIC). Upgrading a listen-only session to
+speaking (plug a mic in mid-call) currently requires a rejoin —
+`set_voice_input_device` only re-opens a stream when `audio_source` is already
+`Some`.
+
 ## Source files
 
 - `pollis-core/src/commands/voice_apm.rs` — `ApmStage`, `ApmConfig`, helpers (`run_capture`, `analyze_render`).

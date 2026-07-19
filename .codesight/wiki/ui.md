@@ -18,6 +18,7 @@
 - **SidebarActions** — props: isCollapsed, onCreateGroup, onSearchGroup, onHomeClick — `frontend/src/components/Layout/SidebarActions.tsx`
 - **SidebarHeader** — props: isCollapsed, onHomeClick — `frontend/src/components/Layout/SidebarHeader.tsx`
 - **TitleBar** — `frontend/src/components/Layout/TitleBar.tsx`
+- **WindowResizeEdges** — Linux-only invisible resize handles for the frameless window — `frontend/src/components/Layout/WindowResizeEdges.tsx`
 - **TreeView** — props: data, className, selectedId, onNodeClick, onNodeAction, getNodeIcon, defaultExpandedIds — `frontend/src/components/Layout/TreeView.tsx`
 - **LastMessagePreview** — props: channelId, conversationId — `frontend/src/components/Message/LastMessagePreview.tsx`
 - **MessageItem** — props: message, allMessages, authorUsername, isAuthorAdmin, onReply, onEdit, onDelete, onScrollToReply — `frontend/src/components/Message/MessageItem.tsx`
@@ -74,6 +75,22 @@
 - **VoiceSettingsPage** — `frontend/src/pages/VoiceSettingsPage.tsx`
 
 ---
+
+## Window chrome (frameless)
+
+The window ships `decorations: false` (`src-tauri/tauri.conf.json`). macOS
+re-adds `NSResizableWindowMask` and Windows uses the DWM frame (`src-tauri/src/lib.rs`),
+so both get native title-bar drag + a comfortable resize border. The custom
+**TitleBar** provides the drag region (`startDragging`) and window controls.
+
+Linux/Wayland gives an undecorated toplevel **no** server-side resize edge, so
+**WindowResizeEdges** overlays eight invisible strips (four edges + four
+corners) that call `startResizeDragging(direction)` via the window bridge —
+widening the grab area from the ~1px compositor edge to a comfortable 6px
+edge / 12px corner. Gated to Tauri + Linux (`navigator.userAgent` match);
+elsewhere the native frame already handles resize. Needs the
+`core:window:allow-start-resize-dragging` capability
+(`src-tauri/capabilities/default.json`).
 
 ## Theming & skins
 

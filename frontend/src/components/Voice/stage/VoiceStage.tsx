@@ -96,6 +96,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
     const isJoining = voiceState.kind === "joining";
     const micMuted = voiceState.kind === "joined" ? voiceState.micMuted : false;
+    // Listen-only: joined without a working capture device. The mute button
+    // becomes a non-interactive "listening only" indicator.
+    const micAvailable = voiceState.kind === "joined" ? voiceState.micAvailable : true;
 
     const [focusId, setFocusId] = useState<string | null>(null);
 
@@ -359,15 +362,27 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
             <div className="vs-foot-side">
               {isInCall || callMode ? (
                 <div className="vs-tray">
-                  <button
-                    className={"vs-tray-btn danger" + (micMuted ? " on" : "")}
-                    data-testid="voice-tray-mute"
-                    title={micMuted ? "Unmute" : "Mute"}
-                    aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
-                    onClick={() => voiceSession.toggleMute()}
-                  >
-                    {micMuted ? <MicOff size={15} /> : <Mic size={15} />}
-                  </button>
+                  {micAvailable ? (
+                    <button
+                      className={"vs-tray-btn danger" + (micMuted ? " on" : "")}
+                      data-testid="voice-tray-mute"
+                      title={micMuted ? "Unmute" : "Mute"}
+                      aria-label={micMuted ? "Unmute microphone" : "Mute microphone"}
+                      onClick={() => voiceSession.toggleMute()}
+                    >
+                      {micMuted ? <MicOff size={15} /> : <Mic size={15} />}
+                    </button>
+                  ) : (
+                    <button
+                      className="vs-tray-btn on"
+                      data-testid="voice-tray-listen-only"
+                      title="No microphone detected — listening only"
+                      aria-label="No microphone detected — listening only"
+                      disabled
+                    >
+                      <MicOff size={15} />
+                    </button>
+                  )}
                   <button
                     className={"vs-tray-btn" + (shareActive ? " on" : "")}
                     data-testid="voice-tray-screenshare"

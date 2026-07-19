@@ -41,6 +41,18 @@ export class LogicalPosition {
 type SizeArg = { width: number; height: number } | LogicalSize;
 type PositionArg = { x: number; y: number } | LogicalPosition;
 
+/** Mirrors Tauri's `ResizeDirection`. The eight window edges/corners a
+ *  frameless-window resize handle can drag. */
+export type ResizeDirection =
+  | "North"
+  | "NorthEast"
+  | "East"
+  | "SouthEast"
+  | "South"
+  | "SouthWest"
+  | "West"
+  | "NorthWest";
+
 export interface PollisImage {
   // Used by `setIcon`; under Electron we pass the raw PNG bytes to
   // windowSetBadgeIcon. Under Tauri this is the real `Image` from
@@ -74,6 +86,9 @@ export interface WindowProxy {
   // on the title bar does the work). Kept so the Tauri-era handler in
   // TitleBar.tsx survives without branching.
   startDragging: () => Promise<void>;
+  // Edge/corner resize for the frameless window. Tauri drives the native
+  // compositor resize; under Electron the OS frame handles it, so no-op.
+  startResizeDragging: (direction: ResizeDirection) => Promise<void>;
 }
 
 function electronWindow(): WindowProxy {
@@ -176,6 +191,9 @@ function electronWindow(): WindowProxy {
     startDragging: async () => {
       /* no-op: handled by CSS -webkit-app-region under Electron */
     },
+    startResizeDragging: async () => {
+      /* no-op: Electron windows keep the native OS frame, which resizes */
+    },
   };
 }
 
@@ -220,6 +238,8 @@ async function tauriWindow(): Promise<WindowProxy> {
     hide: () => real.hide(),
     show: () => real.show(),
     startDragging: () => real.startDragging(),
+    startResizeDragging: (direction) =>
+      real.startResizeDragging(direction as unknown as Parameters<typeof real.startResizeDragging>[0]),
   };
   return tauriWindowProxy;
 }
@@ -253,6 +273,7 @@ export function getCurrentWindow(): WindowProxy {
     hide: () => lazy().then((w) => w.hide()),
     show: () => lazy().then((w) => w.show()),
     startDragging: () => lazy().then((w) => w.startDragging()),
+    startResizeDragging: (direction) => lazy().then((w) => w.startResizeDragging(direction)),
   };
 }
 

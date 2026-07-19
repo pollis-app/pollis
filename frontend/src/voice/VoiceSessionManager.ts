@@ -29,6 +29,7 @@ export type VoiceEvent =
   | { type: 'participant_left'; identity: string }
   | { type: 'muted'; identity: string }
   | { type: 'unmuted'; identity: string }
+  | { type: 'mic_availability'; identity: string; available: boolean }
   | { type: 'speaking_started'; identity: string }
   | { type: 'speaking_stopped'; identity: string }
   | { type: 'audio_bands'; identity: string; bands: number[] }
@@ -81,6 +82,10 @@ export interface VoiceSessionState {
    *  a participant's audio DU — this is the local user's toggle, not a
    *  speaking-derived value. */
   isMuted: boolean;
+  /** False when the session joined listen-only (no working capture device).
+   *  Mirrored onto the store's `joined.micAvailable`; drives the "listening
+   *  only" indicator in place of the mute toggle. */
+  micAvailable: boolean;
   /** Last error from a failed join. Cleared on the next intent change. */
   error: string | null;
 }
@@ -120,6 +125,7 @@ const INITIAL_STATE: VoiceSessionState = {
   counterpartyUserId: null,
   participants: [],
   isMuted: false,
+  micAvailable: true,
   error: null,
 };
 
@@ -452,6 +458,9 @@ class VoiceSessionManager {
       groupId: target.groupId,
       counterpartyUserId: target.counterpartyUserId ?? null,
       isMuted: false,
+      // Reset any stale listen-only state from a previous session; the
+      // backend re-asserts it via `mic_availability` on this join.
+      micAvailable: true,
       participants: [
         {
           identity: localIdentity,
@@ -673,6 +682,13 @@ class VoiceSessionManager {
         this.setState(patch);
         break;
       }
+      case 'mic_availability': {
+        // Only ever carries the local identity. False = joined listen-only.
+        if (event.identity === localIdentity) {
+          this.setState({ micAvailable: event.available });
+        }
+        break;
+      }
       case 'speaking_started':
       case 'speaking_stopped': {
         const speaking = event.type === 'speaking_started';
@@ -889,10 +905,13 @@ voiceSession.subscribe(() => {
         store.voiceStartJoining(s.channelId, s.counterpartyUserId);
         store.voiceJoined();
       }
-      // Mic-mute mirror.
+      // Mic-mute + availability mirror.
       const after = appStore.voiceState;
       if (after.kind === 'joined' && after.micMuted !== s.isMuted) {
         store.voiceSetMicMuted(s.isMuted);
+      }
+      if (after.kind === 'joined' && after.micAvailable !== s.micAvailable) {
+        store.voiceSetMicAvailable(s.micAvailable);
       }
       break;
     }

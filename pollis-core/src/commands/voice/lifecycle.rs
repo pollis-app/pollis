@@ -344,6 +344,12 @@ pub async fn join_voice_channel(
     };
     let mic_fut = async {
         tokio::task::spawn_blocking(move || {
+            // Test seam: exercise the listen-only path without unplugging a
+            // physical mic. The e2e suite sets this to prove a join still
+            // succeeds when capture is unavailable.
+            if std::env::var("POLLIS_DISABLE_MIC").is_ok() {
+                return Err(anyhow::anyhow!("mic disabled via POLLIS_DISABLE_MIC").into());
+            }
             let host = cpal::default_host();
             let dev = get_device(&host, input_device_clone.as_deref(), true)?;
             eprintln!("[voice] mic device: {:?}", dev.name());
@@ -358,21 +364,53 @@ pub async fn join_voice_channel(
     let (connect_res, room_connect_ms) = connect_pair;
     let (room, mut events) =
         connect_res.map_err(|e| anyhow::anyhow!("LiveKit connect: {e}"))?;
-    let (mic_stream, mic_rate, mic_init_ms) = mic_res
-        .map_err(|e| anyhow::anyhow!("mic init panicked: {e}"))??;
-    eprintln!("[voice] connected to room {channel_id}, mic at {mic_rate} Hz");
+
+    // Mic is best-effort: a missing/failed capture device must not block the
+    // join. On failure we connect *listen-only* — in the room, receiving
+    // remote audio/video, just not publishing a mic track. A missing mic, an
+    // ALSA "No such file or directory", a busy device, or POLLIS_DISABLE_MIC
+    // all land here.
+    let mic = match mic_res {
+        Ok(Ok(v)) => Some(v),
+        Ok(Err(e)) => {
+            eprintln!("[voice] mic unavailable — joining listen-only: {e}");
+            None
+        }
+        Err(e) => {
+            eprintln!("[voice] mic init panicked — joining listen-only: {e}");
+            None
+        }
+    };
+    let has_mic = mic.is_some();
+    // Listen-only still needs a nominal rate for the playback/APM plumbing;
+    // 48 kHz is what everything downstream prefers.
+    let mic_rate = mic.as_ref().map(|(_, r, _)| *r).unwrap_or(48_000);
+    let mic_init_ms = mic.as_ref().map(|(_, _, ms)| *ms).unwrap_or(0);
+    let mic_stream = mic.map(|(s, _, _)| s);
+    if has_mic {
+        eprintln!("[voice] connected to room {channel_id}, mic at {mic_rate} Hz");
+    } else {
+        eprintln!("[voice] connected to room {channel_id}, listen-only (no mic)");
+    }
 
     let room = Arc::new(room);
 
     // ── Build APM at the mic's actual rate ────────────────────────────────
     // WebRTC supports 8/16/32/48 kHz. Anything else (e.g. legacy 44.1) means
     // we can't run APM for this session; we log and proceed without it.
-    let apm_stage = match voice_apm::ApmStage::new(mic_rate, audio_processing.clone()) {
-        Ok(stage) => Some(stage),
-        Err(e) => {
-            eprintln!("[voice] APM disabled: {e}");
-            None
+    // APM only touches the captured mic signal (and taps playback as its AEC
+    // render reference). With no mic there's nothing to process and no echo to
+    // cancel, so skip it entirely on the listen-only path.
+    let apm_stage = if has_mic {
+        match voice_apm::ApmStage::new(mic_rate, audio_processing.clone()) {
+            Ok(stage) => Some(stage),
+            Err(e) => {
+                eprintln!("[voice] APM disabled: {e}");
+                None
+            }
         }
+    } else {
+        None
     };
     let apm_handle = apm_stage.as_ref().map(|s| s.handle());
     let apm_frame_samples = voice_apm::frame_samples(mic_rate);
@@ -386,11 +424,11 @@ pub async fn join_voice_channel(
     });
     {
         let mut slot = denoiser_arc.lock().unwrap();
-        *slot = if audio_processing.click_suppression && mic_rate == voice_denoiser::REQUIRED_RATE_HZ {
+        *slot = if has_mic && audio_processing.click_suppression && mic_rate == voice_denoiser::REQUIRED_RATE_HZ {
             eprintln!("[voice/rnnoise] engaged @ {mic_rate} Hz");
             Some(voice_denoiser::DenoiserStage::new())
         } else {
-            if audio_processing.click_suppression {
+            if has_mic && audio_processing.click_suppression {
                 eprintln!(
                     "[voice/rnnoise] requested but mic rate is {mic_rate} Hz; \
                      RNNoise needs 48000 Hz — disabling for this session"
@@ -400,139 +438,153 @@ pub async fn join_voice_channel(
         };
     }
 
-    // Disable libwebrtc's internal AudioProcessingModule — APM is the only
-    // stage that touches the mic signal. Leaving libwebrtc's APM on would
-    // double-process and produce pumping/swirling artefacts.
-    let audio_source = NativeAudioSource::new(
-        AudioSourceOptions {
-            echo_cancellation: false,
-            noise_suppression: false,
-            auto_gain_control: false,
-        },
-        mic_rate,
-        1,
-        100,
-    );
+    // Publish the mic track and run the capture pipeline only when we have a
+    // working mic. On the listen-only path we skip all of it — no track, no
+    // APM capture loop — and simply consume remote media.
+    let mut audio_source_opt: Option<NativeAudioSource> = None;
+    let mut local_track_opt: Option<LocalAudioTrack> = None;
+    let mut frame_task_opt: Option<tokio::task::JoinHandle<()>> = None;
+    let mut first_publish_ms: u64 = 0;
 
-    let local_track = LocalAudioTrack::create_audio_track(
-        "microphone",
-        RtcAudioSource::Native(audio_source.clone()),
-    );
+    if has_mic {
+        // Disable libwebrtc's internal AudioProcessingModule — APM is the only
+        // stage that touches the mic signal. Leaving libwebrtc's APM on would
+        // double-process and produce pumping/swirling artefacts.
+        let audio_source = NativeAudioSource::new(
+            AudioSourceOptions {
+                echo_cancellation: false,
+                noise_suppression: false,
+                auto_gain_control: false,
+            },
+            mic_rate,
+            1,
+            100,
+        );
 
-    eprintln!("[voice] publishing track…");
-    // ── Phase: first_publish ───────────────────────────────────────────────
-    let publish_start = Instant::now();
-    room.local_participant()
-        .publish_track(
-            LocalTrack::Audio(local_track.clone()),
-            TrackPublishOptions::default(),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
-    let first_publish_ms = publish_start.elapsed().as_millis() as u64;
-    eprintln!("[voice] track published");
+        let local_track = LocalAudioTrack::create_audio_track(
+            "microphone",
+            RtcAudioSource::Native(audio_source.clone()),
+        );
 
-    // ── Mic frame task: rebuffer to exact 10ms, run APM, capture_frame ────
-    // Speaking detection runs on the post-APM peak so the indicator follows
-    // the user's effective level (after AGC + NS) rather than raw input.
-    let audio_source_task = audio_source.clone();
-    let voice_arc_frame = Arc::clone(&state.voice);
-    let local_identity_for_speaking = local_identity.clone();
-    let apm_for_capture = apm_handle.clone();
-    let denoiser_for_capture = Arc::clone(&denoiser_arc);
-    let frame_task = tokio::spawn(async move {
-        let chunk_size = (mic_rate / 100) as usize;
-        let mut buf: Vec<i16> = Vec::new();
-        let mut speak_hold: u32 = 0; // counts down after speech stops (12 × 10ms = 120ms hold)
-        let mut onset_frames: u32 = 0; // consecutive above-threshold frames; 2 required to (re)trigger
-        let mut is_speaking = false;
+        eprintln!("[voice] publishing track…");
+        // ── Phase: first_publish ───────────────────────────────────────────────
+        let publish_start = Instant::now();
+        room.local_participant()
+            .publish_track(
+                LocalTrack::Audio(local_track.clone()),
+                TrackPublishOptions::default(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("publish track: {e}"))?;
+        first_publish_ms = publish_start.elapsed().as_millis() as u64;
+        eprintln!("[voice] track published");
 
-        // Live multi-band meter for our own tile. Sink cloned once so the
-        // per-frame emit never re-locks the shared VoiceState mutex. Emit
-        // every 5 chunks (~10 ms each) ⇒ ~20 Hz.
-        let bands_sink = voice_arc_frame.lock().await.channel.clone();
-        let mut analyzer = BandAnalyzer::new(mic_rate);
-        let mut bands_ctr: u32 = 0;
+        // ── Mic frame task: rebuffer to exact 10ms, run APM, capture_frame ────
+        // Speaking detection runs on the post-APM peak so the indicator follows
+        // the user's effective level (after AGC + NS) rather than raw input.
+        let audio_source_task = audio_source.clone();
+        let voice_arc_frame = Arc::clone(&state.voice);
+        let local_identity_for_speaking = local_identity.clone();
+        let apm_for_capture = apm_handle.clone();
+        let denoiser_for_capture = Arc::clone(&denoiser_arc);
+        let frame_task = tokio::spawn(async move {
+            let chunk_size = (mic_rate / 100) as usize;
+            let mut buf: Vec<i16> = Vec::new();
+            let mut speak_hold: u32 = 0; // counts down after speech stops (12 × 10ms = 120ms hold)
+            let mut onset_frames: u32 = 0; // consecutive above-threshold frames; 2 required to (re)trigger
+            let mut is_speaking = false;
 
-        while let Some((samples, rate)) = frame_rx.recv().await {
-            buf.extend_from_slice(&samples);
-            while buf.len() >= chunk_size {
-                let mut chunk: Vec<i16> = buf.drain(..chunk_size).collect();
+            // Live multi-band meter for our own tile. Sink cloned once so the
+            // per-frame emit never re-locks the shared VoiceState mutex. Emit
+            // every 5 chunks (~10 ms each) ⇒ ~20 Hz.
+            let bands_sink = voice_arc_frame.lock().await.channel.clone();
+            let mut analyzer = BandAnalyzer::new(mic_rate);
+            let mut bands_ctr: u32 = 0;
 
-                // RNNoise (if enabled) runs first so APM gets a cleaner signal:
-                // its NS / AGC adapt to actual voice energy instead of the
-                // typing/click noise floor. Std Mutex; the lock is held for
-                // ~0.1 ms per frame (single-writer) and never crosses an await.
-                {
-                    let mut guard = denoiser_for_capture.lock().unwrap();
-                    if let Some(d) = guard.as_mut() {
-                        d.process(&mut chunk);
-                    }
-                }
+            while let Some((samples, rate)) = frame_rx.recv().await {
+                buf.extend_from_slice(&samples);
+                while buf.len() >= chunk_size {
+                    let mut chunk: Vec<i16> = buf.drain(..chunk_size).collect();
 
-                // APM mutates the chunk in place (AGC + NS + HPF + AEC capture).
-                if let Some(apm) = &apm_for_capture {
-                    if let Err(e) = voice_apm::run_capture(apm, &mut chunk, chunk_size) {
-                        eprintln!("[voice] APM capture error (frame dropped): {e}");
-                        continue;
-                    }
-                }
-
-                let peak = chunk.iter().map(|&s| s.abs()).max().unwrap_or(0);
-
-                // Speaking detection: require 2 consecutive above-threshold frames to trigger,
-                // preventing single trailing spikes from resetting the hold counter.
-                if peak > 1000 {
-                    onset_frames += 1;
-                    if onset_frames >= 2 {
-                        speak_hold = 12;
-                    }
-                } else {
-                    onset_frames = 0;
-                    if speak_hold > 0 {
-                        speak_hold -= 1;
-                    }
-                }
-                let now_speaking = speak_hold > 0;
-                if now_speaking != is_speaking {
-                    is_speaking = now_speaking;
-                    let voice = voice_arc_frame.lock().await;
-                    if let Some(ch) = &voice.channel {
-                        if is_speaking {
-                            let _ = ch.send(VoiceEvent::SpeakingStarted { identity: local_identity_for_speaking.clone() });
-                        } else {
-                            let _ = ch.send(VoiceEvent::SpeakingStopped { identity: local_identity_for_speaking.clone() });
+                    // RNNoise (if enabled) runs first so APM gets a cleaner signal:
+                    // its NS / AGC adapt to actual voice energy instead of the
+                    // typing/click noise floor. Std Mutex; the lock is held for
+                    // ~0.1 ms per frame (single-writer) and never crosses an await.
+                    {
+                        let mut guard = denoiser_for_capture.lock().unwrap();
+                        if let Some(d) = guard.as_mut() {
+                            d.process(&mut chunk);
                         }
                     }
-                }
 
-                // Live band meter on the post-APM signal (same source as
-                // the speaking indicator, so the meter matches what others
-                // hear). Decimated to ~20 Hz.
-                analyzer.process(&chunk);
-                bands_ctr += 1;
-                if bands_ctr >= 5 {
-                    bands_ctr = 0;
-                    if let Some(ch) = &bands_sink {
-                        let _ = ch.send(VoiceEvent::AudioBands {
-                            identity: local_identity_for_speaking.clone(),
-                            bands: analyzer.levels(),
-                        });
+                    // APM mutates the chunk in place (AGC + NS + HPF + AEC capture).
+                    if let Some(apm) = &apm_for_capture {
+                        if let Err(e) = voice_apm::run_capture(apm, &mut chunk, chunk_size) {
+                            eprintln!("[voice] APM capture error (frame dropped): {e}");
+                            continue;
+                        }
+                    }
+
+                    let peak = chunk.iter().map(|&s| s.abs()).max().unwrap_or(0);
+
+                    // Speaking detection: require 2 consecutive above-threshold frames to trigger,
+                    // preventing single trailing spikes from resetting the hold counter.
+                    if peak > 1000 {
+                        onset_frames += 1;
+                        if onset_frames >= 2 {
+                            speak_hold = 12;
+                        }
+                    } else {
+                        onset_frames = 0;
+                        if speak_hold > 0 {
+                            speak_hold -= 1;
+                        }
+                    }
+                    let now_speaking = speak_hold > 0;
+                    if now_speaking != is_speaking {
+                        is_speaking = now_speaking;
+                        let voice = voice_arc_frame.lock().await;
+                        if let Some(ch) = &voice.channel {
+                            if is_speaking {
+                                let _ = ch.send(VoiceEvent::SpeakingStarted { identity: local_identity_for_speaking.clone() });
+                            } else {
+                                let _ = ch.send(VoiceEvent::SpeakingStopped { identity: local_identity_for_speaking.clone() });
+                            }
+                        }
+                    }
+
+                    // Live band meter on the post-APM signal (same source as
+                    // the speaking indicator, so the meter matches what others
+                    // hear). Decimated to ~20 Hz.
+                    analyzer.process(&chunk);
+                    bands_ctr += 1;
+                    if bands_ctr >= 5 {
+                        bands_ctr = 0;
+                        if let Some(ch) = &bands_sink {
+                            let _ = ch.send(VoiceEvent::AudioBands {
+                                identity: local_identity_for_speaking.clone(),
+                                bands: analyzer.levels(),
+                            });
+                        }
+                    }
+
+                    let frame = AudioFrame {
+                        data: chunk.into(),
+                        sample_rate: rate,
+                        num_channels: 1,
+                        samples_per_channel: chunk_size as u32,
+                    };
+                    if let Err(e) = audio_source_task.capture_frame(&frame).await {
+                        eprintln!("[voice] capture_frame error: {e:?}");
                     }
                 }
-
-                let frame = AudioFrame {
-                    data: chunk.into(),
-                    sample_rate: rate,
-                    num_channels: 1,
-                    samples_per_channel: chunk_size as u32,
-                };
-                if let Err(e) = audio_source_task.capture_frame(&frame).await {
-                    eprintln!("[voice] capture_frame error: {e:?}");
-                }
             }
-        }
-    });
+        });
+
+        audio_source_opt = Some(audio_source);
+        local_track_opt = Some(local_track);
+        frame_task_opt = Some(frame_task);
+    }
 
     // ── Open the speaker pipeline: single output stream + mixer task ──────
     // Doing this BEFORE the room event loop starts means the very first
@@ -807,10 +859,11 @@ pub async fn join_voice_channel(
     if let Some(t) = voice.room_task.take() { t.abort(); }
     if let Some(t) = voice.frame_task.take() { t.abort(); }
     voice.room = Some(room);
-    voice.local_track = Some(local_track);
-    voice.audio_source = Some(audio_source);
-    voice.input_stream = Some(mic_stream);
-    voice.frame_task = Some(frame_task);
+    // All `None` on the listen-only path (no mic captured/published).
+    voice.local_track = local_track_opt;
+    voice.audio_source = audio_source_opt;
+    voice.input_stream = mic_stream;
+    voice.frame_task = frame_task_opt;
     voice.room_task = Some(room_task);
     voice.current_input_device = input_device;
     voice.apm = apm_stage;
@@ -818,6 +871,16 @@ pub async fn join_voice_channel(
     voice.e2ee_mls_group_id = Some(voice_mls_group_id);
     voice.e2ee_epoch = voice_epoch;
     *voice.last_join_timings.lock().unwrap() = Some(timings);
+
+    // Tell the renderer whether this session can transmit, so the local tile
+    // and tray show a "listening only" state instead of a live mute toggle
+    // when there's no capture device.
+    if let Some(ch) = &voice.channel {
+        let _ = ch.send(VoiceEvent::MicAvailability {
+            identity: local_identity.clone(),
+            available: has_mic,
+        });
+    }
 
     Ok(())
 }

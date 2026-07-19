@@ -88,6 +88,12 @@ pub enum VoiceEvent {
     ParticipantLeft { identity: String },
     Muted { identity: String },
     Unmuted { identity: String },
+    /// Whether the local session has a working capture device. Emitted once at
+    /// join: `available: false` means the mic failed to open (no device, ALSA
+    /// error, busy) and we joined *listen-only* — connected and receiving, but
+    /// not publishing audio. Lets the renderer swap the mute toggle for a
+    /// "listening only" indicator. Only ever carries the local identity.
+    MicAvailability { identity: String, available: bool },
     SpeakingStarted { identity: String },
     SpeakingStopped { identity: String },
     /// Per-source multi-band audio levels (one 0..1 value per band),

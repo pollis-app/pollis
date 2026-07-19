@@ -1,0 +1,83 @@
+/* Invisible frameless-window resize handles. See WindowResizeEdges.tsx.
+ * The root is click-through; only the strips themselves catch the pointer,
+ * so the app UI underneath stays fully interactive. */
+
+.wre-root {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.wre-edge {
+  position: absolute;
+  pointer-events: auto;
+  background: transparent;
+}
+
+/* Grab thickness. 6px matches the forgiving edge GTK/Windows apps expose;
+ * corners get a larger square so the diagonal cursor is easy to catch. */
+:root {
+  --wre-edge: 6px;
+  --wre-corner: 12px;
+}
+
+/* ── Edges ─────────────────────────────────────────────────────────────── */
+.wre-n {
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--wre-edge);
+  cursor: ns-resize;
+}
+.wre-s {
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--wre-edge);
+  cursor: ns-resize;
+}
+.wre-w {
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--wre-edge);
+  cursor: ew-resize;
+}
+.wre-e {
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: var(--wre-edge);
+  cursor: ew-resize;
+}
+
+/* ── Corners (above the edges so the diagonal cursor wins) ──────────────── */
+.wre-edge.wre-nw,
+.wre-edge.wre-ne,
+.wre-edge.wre-sw,
+.wre-edge.wre-se {
+  width: var(--wre-corner);
+  height: var(--wre-corner);
+  z-index: 1;
+}
+.wre-nw {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+.wre-ne {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+.wre-sw {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+.wre-se {
+  bottom: 0;
+  right: 0;
+  cursor: nwse-resize;
+}

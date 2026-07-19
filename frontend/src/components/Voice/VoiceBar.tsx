@@ -24,6 +24,9 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
     voiceActiveSpeakerIds,
   } = appStore;
   const voiceIsMuted = voiceState.kind === 'joined' ? voiceState.micMuted : false;
+  // Listen-only: joined without a working capture device. The mute toggle
+  // becomes a non-interactive "listening only" indicator.
+  const micAvailable = voiceState.kind === 'joined' ? voiceState.micAvailable : true;
   const share = shareOf(voiceState);
   const shareActive = share.kind === 'active';
   // Anything non-idle/non-picking means the button should become a "stop"
@@ -93,17 +96,29 @@ export const VoiceBar: React.FC<VoiceBarProps> = observer(({ channelId, channelN
         {channelName}
       </PillButton>
 
-      {/* Mute toggle */}
-      <PillButton
-        data-testid="voice-bar-mute-button"
-        accent={voiceIsMuted ? "var(--c-danger)" : "var(--c-accent)"}
-        onClick={toggleMute}
-        title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
-        aria-label={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
-        square
-      >
-        {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
-      </PillButton>
+      {/* Mute toggle — or, listen-only, a static "listening only" indicator */}
+      {micAvailable ? (
+        <PillButton
+          data-testid="voice-bar-mute-button"
+          accent={voiceIsMuted ? "var(--c-danger)" : "var(--c-accent)"}
+          onClick={toggleMute}
+          title={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
+          aria-label={voiceIsMuted ? "Unmute microphone" : "Mute microphone"}
+          square
+        >
+          {voiceIsMuted ? <MicOff size={12} /> : <Mic size={12} />}
+        </PillButton>
+      ) : (
+        <PillButton
+          data-testid="voice-bar-listen-only"
+          accent="var(--c-text-dim)"
+          title="No microphone detected — listening only"
+          aria-label="No microphone detected — listening only"
+          square
+        >
+          <MicOff size={12} />
+        </PillButton>
+      )}
 
       {/* Screen share toggle. On macOS we enumerate via SCShareableContent
           and route to our in-app picker — the system picker

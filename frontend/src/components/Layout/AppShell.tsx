@@ -3,6 +3,7 @@ import { Outlet, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke, getCurrentWindow, hideWindow } from "../../bridge";
 import { TitleBar } from "./TitleBar";
+import { WindowResizeEdges } from "./WindowResizeEdges";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { MigrationBanner } from "../MigrationBanner";
 import { Sidebar } from "./Sidebar";
@@ -532,6 +533,9 @@ export const AppShell: React.FC = observer(() => {
         position: "relative",
       }}
     >
+      {/* Frameless-window resize handles (Linux only — see component) */}
+      <WindowResizeEdges />
+
       {/* Cmd/Ctrl+K search panel */}
       <SearchPanel isOpen={isSearchOpen} onClose={closeSearch} />
 

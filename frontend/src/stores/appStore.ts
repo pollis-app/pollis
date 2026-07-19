@@ -259,6 +259,8 @@ class AppStore implements AppState {
       channelId,
       counterpartyUserId,
       micMuted: false,
+      // Assume a mic until the backend says otherwise via `mic_availability`.
+      micAvailable: true,
       share: { kind: 'idle' },
       camera: { kind: 'idle' },
     };
@@ -294,6 +296,13 @@ class AppStore implements AppState {
       return;
     }
     this.voiceState = { ...this.voiceState, micMuted: muted };
+  }
+
+  voiceSetMicAvailable(available: boolean) {
+    if (this.voiceState.kind !== 'joined') {
+      return;
+    }
+    this.voiceState = { ...this.voiceState, micAvailable: available };
   }
 
   shareStartPicking(sources: SourceList) {

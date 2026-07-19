@@ -43,6 +43,7 @@ makes me that the flow already works. Status: ✅ covered by an existing script,
 | S-GRP | Create a group | 3 | 3 | ⬜ | Covered as a step of M-CH. |
 | S-TXTCH | Create a text channel | 3 | 3 | ⬜ | Covered as a step of M-CH. |
 | S-VOXCH | Create a voice channel (toggle type switch) | 3 | 3 | ⬜ | Covered as a step of M-VC. |
+| S-NOMIC | Voice join with no capture device → joins listen-only (not blocked), tray shows "listening only" | 5 | 3 | ✅ | voice-channel-no-mic.js. Forces the path with POLLIS_DISABLE_MIC=1. |
 | S-RENAME | Rename a channel / group | 2 | 3 | ⬜ | |
 | S-DELCH | Delete a channel | 2 | 3 | ⬜ | |
 | S-SIGNUP | Full signup: email→OTP→secret key→PIN→app-ready | 5 | 4 | ✅ | e2e.js |
