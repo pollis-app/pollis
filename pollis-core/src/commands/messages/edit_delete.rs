@@ -10,10 +10,19 @@ use crate::state::AppState;
 /// Two paths, selected automatically by comparing `user_id` (the caller) to the
 /// stored sender of the target message:
 ///
-/// **Self-delete** (caller is the original sender): removes the envelope from
-/// Turso (preventing future delivery to anyone who hasn't fetched it yet) and
-/// removes the row from the sender's local message cache. Recipients who
-/// already received the message keep it — no retroactive broadcast.
+/// **Self-delete** (caller is the original sender) — "delete for everyone":
+/// sends an **E2EE redaction control message** (an MLS application message whose
+/// plaintext is a `0xF6` framing frame carrying the target id, indistinguishable
+/// on the wire from a short text message) so every member who already received
+/// the message soft-deletes it on their next ingest — but only after each
+/// recipient verifies the redaction's MLS-authenticated author matches the
+/// target message's author (`ingest::decrypt_and_persist_one`), so neither the
+/// server nor another member can redact a message they did not author. Also
+/// removes the original envelope + any pending edit from Turso (so a recipient
+/// who has NOT fetched yet never receives it, and the ciphertext does not linger
+/// at rest), soft-deletes the sender's own local row, and broadcasts a
+/// `deleted_message` realtime event for immediate cache invalidation. The
+/// durable path is the redaction envelope; the realtime ping is only a hint.
 ///
 /// **Admin-delete** (caller is a different user, must be a group admin in the
 /// channel's group): writes a `type='delete'` tombstone envelope to Turso so
@@ -21,7 +30,10 @@ use crate::state::AppState;
 /// removes the original message envelope and any pending edit, soft-deletes
 /// the admin's own local row, and broadcasts a `deleted_message` realtime
 /// event so currently-connected clients invalidate their cache immediately.
-/// Admin-delete is rejected for DM messages (no admin concept in 1:1 DMs).
+/// Admin-delete is server-authorized (moderation) and uses the plaintext
+/// tombstone because an admin generally cannot author an MLS message on behalf
+/// of another member. Admin-delete is rejected for DM messages (no admin
+/// concept in 1:1 DMs).
 ///
 /// Attachment cleanup: if the message had one or more attachments, each
 /// content_hash is reference-counted against the caller's other non-deleted
@@ -175,10 +187,22 @@ pub async fn delete_message(
         return Ok(());
     }
 
-    // Self-delete path (caller is the original sender). Remove the message
-    // envelope (best-effort — may already be gone) and any pending edit. DS
-    // seam: route both deletes (one transaction server-side, scoped to the
-    // authenticated sender) through the Delivery Service.
+    // Self-delete path (caller is the original sender) — "delete for everyone".
+    //
+    // Two facets, both needed:
+    //   1. Send an E2EE redaction control message so members who ALREADY fetched
+    //      the message soft-delete their local copy (verified author-side — see
+    //      `send_redaction_message`).
+    //   2. Remove the original envelope + any pending edit from Turso so a member
+    //      who has NOT fetched yet never receives it and the ciphertext does not
+    //      linger at rest.
+    // The redaction is sent FIRST so there is no window where the original is
+    // gone but no redaction is in flight for an in-progress fetch.
+    send_redaction_message(state, &conversation_id, &message_id, &user_id).await?;
+
+    // Remove the original envelope (best-effort — may already be GC'd) and any
+    // pending edit. DS seam: route both deletes (one transaction server-side,
+    // scoped to the authenticated sender) through the Delivery Service.
     let body = serde_json::json!({
         "message_id": message_id,
         "conversation_id": conversation_id,
@@ -186,11 +210,13 @@ pub async fn delete_message(
     });
     crate::commands::mls::ds_post_ok(state, "/v1/messages/delete", &body).await?;
 
-    // Read the local plaintext content before deleting so we can inspect any
-    // embedded attachment metadata. Then delete the local row and compute
-    // which attachments are no longer referenced by any of this user's other
-    // non-deleted messages. Done inside a single lock scope to avoid races
-    // with concurrent sends.
+    // Read the local plaintext content before soft-deleting so we can inspect
+    // any embedded attachment metadata. Then SOFT-delete the local row (content
+    // cleared, `deleted_at` set) — the sender sees the same `[deleted]`
+    // placeholder every recipient does, rather than the message silently
+    // vanishing only for them. Compute which attachments are no longer
+    // referenced by any of this user's other non-deleted messages. Done inside a
+    // single lock scope to avoid races with concurrent sends.
     let orphaned: Vec<AttachmentRef> = {
         let guard = state.local_db.lock().await;
         let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
@@ -203,9 +229,11 @@ pub async fn delete_message(
             )
             .optional()?;
 
+        let now = chrono::Utc::now().to_rfc3339();
         let rows_affected = db.conn().execute(
-            "DELETE FROM message WHERE id = ?1 AND sender_id = ?2",
-            rusqlite::params![message_id, user_id],
+            "UPDATE message SET content = NULL, deleted_at = ?1
+             WHERE id = ?2 AND sender_id = ?3 AND deleted_at IS NULL",
+            rusqlite::params![now, message_id, user_id],
         )?;
 
         if rows_affected == 0 {
@@ -229,6 +257,147 @@ pub async fn delete_message(
     for att in orphaned {
         cleanup_attachment(state, &att).await;
     }
+
+    // Broadcast so currently-connected members invalidate their cache and apply
+    // the redaction immediately, without waiting for a poll. Non-fatal — ingest
+    // of the redaction envelope is the durable path.
+    let (mls_group_id, is_channel) = resolve_mls_group(state, &conversation_id).await?;
+    let (channel_arg, dm_arg) = if is_channel {
+        (Some(conversation_id.as_str()), None)
+    } else {
+        (None, Some(conversation_id.as_str()))
+    };
+    if let Err(e) = crate::commands::livekit::publish_deleted_message_to_room(
+        &state.livekit,
+        &mls_group_id,
+        channel_arg,
+        dm_arg,
+        &message_id,
+    ).await {
+        eprintln!("[realtime] delete_message: publish to room {mls_group_id}: {e}");
+    }
+
+    Ok(())
+}
+
+/// Resolve the MLS group backing a conversation: a channel maps to its
+/// `group_id` (all channels in a group share one MLS group); a DM's MLS group is
+/// keyed by the conversation id itself. Returns `(mls_group_id, is_channel)`.
+async fn resolve_mls_group(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+) -> Result<(String, bool)> {
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn.query(
+        "SELECT group_id FROM channels WHERE id = ?1",
+        libsql::params![conversation_id.to_string()],
+    ).await?;
+    Ok(match rows.next().await? {
+        Some(row) => (row.get::<String>(0)?, true),
+        None => (conversation_id.to_string(), false),
+    })
+}
+
+/// Test-only: send a redaction as an ARBITRARY caller, bypassing the
+/// self-sender gate in [`delete_message`]. Lets the flows suite prove the
+/// security invariant that a recipient rejects a redaction whose
+/// MLS-authenticated author is NOT the target message's author (a member cannot
+/// redact another member's message). Not reachable in production — the real
+/// `delete_message` routes a non-author to the admin-authorized path.
+#[cfg(feature = "test-harness")]
+pub async fn send_redaction_as(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    target_message_id: &str,
+    user_id: &str,
+) -> Result<()> {
+    send_redaction_message(state, conversation_id, target_message_id, user_id).await
+}
+
+/// Send an E2EE "delete for everyone" redaction for `target_message_id`: an MLS
+/// application message whose plaintext is a `0xF6` redaction frame (see
+/// [`super::framing::pad_redaction`]). It rides the ordinary send path — a
+/// `type='message'` envelope on `/v1/messages/send` — so it inherits MLS
+/// encryption, per-conversation watermarks, envelope GC, and offline delivery
+/// with no schema, DS, or migration change. Recipients recognise the frame in
+/// [`super::ingest`] and soft-delete the target only if the redaction's
+/// MLS-authenticated author matches the target's author. It is a control
+/// message: no local `message` row is written for it on either side.
+async fn send_redaction_message(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    target_message_id: &str,
+    user_id: &str,
+) -> Result<()> {
+    let envelope_id = Ulid::new().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
+
+    // Catch up MLS before encrypting so the redaction is sealed at the current
+    // epoch (recipients at head can decrypt it) and so an un-ingested
+    // current-epoch inbound message is not stranded when this device advances
+    // (issue #440) — identical to the send/edit pre-op catch-up.
+    {
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(ref did) = device_id {
+            if let Err(e) =
+                crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
+            {
+                eprintln!("[messages] send_redaction: poll_mls_welcomes for {mls_group_id}: {e}");
+            }
+        }
+    }
+    if let Err(e) =
+        super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
+    {
+        eprintln!("[messages] send_redaction: catch_up_mls_group for {mls_group_id}: {e}");
+    }
+
+    // Encrypt the redaction frame. Repair the local group via external-join if
+    // it is missing (a wiped local DB), mirroring `edit_message`.
+    let needs_repair = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        crate::commands::mls::try_mls_encrypt(
+            db.conn(),
+            &mls_group_id,
+            &super::framing::pad_redaction(target_message_id),
+        )
+        .is_none()
+    };
+    if needs_repair {
+        crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
+    }
+
+    let ciphertext_remote = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let plaintext = super::framing::pad_redaction(target_message_id);
+        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
+                "MLS group not initialized for conversation {conversation_id}"
+            )))?;
+        format!("mls:{}", hex::encode(&mls_bytes))
+    };
+
+    // Blind the envelope sender under sealed sender exactly like a normal send
+    // (issue #331) — the true author is the MLS credential inside the ciphertext,
+    // which is what the recipient's redaction-authorization check reads.
+    let (envelope_sender_id, sealed_flag): (&str, i64) = if state.config.seal_sender {
+        (super::send::SEALED_SENDER_SENTINEL, 1)
+    } else {
+        (user_id, 0)
+    };
+
+    let body = serde_json::json!({
+        "id": envelope_id,
+        "conversation_id": conversation_id,
+        "sender_id": envelope_sender_id,
+        "sealed": sealed_flag,
+        "ciphertext": ciphertext_remote,
+        "sent_at": now,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/messages/send", &body).await?;
 
     Ok(())
 }

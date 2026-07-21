@@ -83,7 +83,7 @@ jobs:
       - name: Run two-client voice-channel e2e (two-client-voice-channel.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm two-client-voice-channel
+          command: pnpm e2e two-client-voice-channel
           working-directory: e2e
           artifact-name: e2e-two-client-voice-channel-failure
           artifacts-path: |

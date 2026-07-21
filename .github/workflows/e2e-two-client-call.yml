@@ -94,7 +94,7 @@ jobs:
       - name: Run two-client call e2e (two-client-call.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm two-client-call
+          command: pnpm e2e two-client-call
           working-directory: e2e
           artifact-name: e2e-two-client-call-failure
           artifacts-path: |

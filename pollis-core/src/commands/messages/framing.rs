@@ -42,7 +42,18 @@
 /// docs for the back-compat argument.
 const PAD_FRAMING_V1: u8 = 0xF5;
 
-/// Framing header: 1 version byte + 4-byte little-endian length prefix.
+/// First byte of the v1 **redaction control frame** ("delete for everyone").
+/// A redaction is an ordinary MLS application message whose plaintext is
+/// `[0xF6][u32 LE id-len][target message id]` zero-padded to a size bucket, so
+/// on the wire (and in a Turso breach) a redaction is indistinguishable by
+/// length from a short text message, and the server never learns which message
+/// was redacted. Drawn from the same non-UTF-8 `0xF5..=0xFF` range as
+/// [`PAD_FRAMING_V1`], so it can never collide with legacy unpadded text.
+const REDACT_FRAMING_V1: u8 = 0xF6;
+
+/// Framing header: 1 version byte + 4-byte little-endian length prefix. Shared
+/// by the padded-text ([`PAD_FRAMING_V1`]) and redaction ([`REDACT_FRAMING_V1`])
+/// frames.
 const HEADER: usize = 1 + 4;
 
 /// Smallest padded plaintext length. Every message at or below this (empty,
@@ -114,6 +125,51 @@ pub(crate) fn strip(buf: &[u8]) -> Vec<u8> {
         return buf.to_vec();
     }
     buf[HEADER..end].to_vec()
+}
+
+/// A decrypted, de-framed message payload. Ordinary text (a text message, an
+/// edit, or an attachment envelope) is [`Frame::Text`] carrying the exact
+/// plaintext; a "delete for everyone" control message is
+/// [`Frame::Redaction`] carrying the target message id.
+pub(crate) enum Frame {
+    Text(Vec<u8>),
+    Redaction(String),
+}
+
+/// Wrap `target_message_id` in the v1 redaction framing and zero-pad it to its
+/// size bucket. The returned buffer is handed to `try_mls_encrypt` exactly like
+/// a text send, so a redaction is length-indistinguishable from a short message.
+pub(crate) fn pad_redaction(target_message_id: &str) -> Vec<u8> {
+    let id = target_message_id.as_bytes();
+    let mut buf = Vec::with_capacity(HEADER + id.len());
+    buf.push(REDACT_FRAMING_V1);
+    buf.extend_from_slice(&(id.len() as u32).to_le_bytes());
+    buf.extend_from_slice(id);
+    let target = padded_len(buf.len());
+    buf.resize(target, 0u8);
+    buf
+}
+
+/// Classify a decrypted buffer. Keys on the first byte:
+///
+/// - `0xF6` ([`REDACT_FRAMING_V1`]) → [`Frame::Redaction`] with the target id.
+/// - anything else — v1 padded text (`0xF5`), legacy unpadded UTF-8, or an
+///   attachment envelope (`{`) → [`Frame::Text`] via [`strip`].
+///
+/// A malformed redaction frame (too short, bad length prefix, non-UTF-8 id)
+/// degrades to `Text` — it cannot arise from [`pad_redaction`] and exists only
+/// as belt-and-braces so a hostile buffer can never panic the ingest path.
+pub(crate) fn classify(buf: &[u8]) -> Frame {
+    if buf.first() == Some(&REDACT_FRAMING_V1) && buf.len() >= HEADER {
+        let len = u32::from_le_bytes([buf[1], buf[2], buf[3], buf[4]]) as usize;
+        let end = HEADER + len;
+        if end <= buf.len() {
+            if let Ok(id) = std::str::from_utf8(&buf[HEADER..end]) {
+                return Frame::Redaction(id.to_string());
+            }
+        }
+    }
+    Frame::Text(strip(buf))
 }
 
 #[cfg(test)]
@@ -208,5 +264,63 @@ mod tests {
         let original = vec![0u8; 300];
         let padded = pad(&original);
         assert_eq!(strip(&padded), original);
+    }
+
+    /// `pad_redaction` -> `classify` recovers the exact target id, for the ULID
+    /// shape used in production and a few edge lengths.
+    #[test]
+    fn redaction_roundtrip_recovers_target_id() {
+        for id in [
+            "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+            "",
+            "x",
+            &"9".repeat(64),
+        ] {
+            let framed = pad_redaction(id);
+            match classify(&framed) {
+                Frame::Redaction(got) => assert_eq!(got, id, "redaction id must round-trip"),
+                Frame::Text(_) => panic!("a redaction frame must classify as Redaction (id={id:?})"),
+            }
+        }
+    }
+
+    /// A redaction frame is padded to the SAME size bucket as an ordinary short
+    /// text message, so its length leaks nothing: the server cannot tell a
+    /// redaction apart from a normal message by envelope size.
+    #[test]
+    fn redaction_is_length_indistinguishable_from_text() {
+        let redaction = pad_redaction("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+        let short_text = pad(b"hey");
+        assert_eq!(redaction.len(), MIN_BUCKET);
+        assert_eq!(redaction.len(), short_text.len());
+    }
+
+    /// Text, legacy/unpadded, and attachment payloads all classify as `Text`
+    /// with their plaintext intact — only a `0xF6` lead byte means redaction.
+    #[test]
+    fn non_redaction_payloads_classify_as_text() {
+        let cases: &[&[u8]] = &[
+            b"hello world",
+            &pad(b"hello world"),
+            br#"{"_att":[{"hash":"abc","key":"k"}]}"#,
+            b"",
+        ];
+        for &buf in cases {
+            match classify(buf) {
+                Frame::Text(plaintext) => assert_eq!(plaintext, strip(buf)),
+                Frame::Redaction(_) => panic!("non-redaction payload misclassified: {buf:?}"),
+            }
+        }
+    }
+
+    /// A truncated / malformed redaction frame degrades to `Text` rather than
+    /// panicking — the ingest path must never trust attacker-controllable bytes.
+    #[test]
+    fn malformed_redaction_frame_degrades_to_text() {
+        // Lead byte says redaction but the length prefix overruns the buffer.
+        let mut bad = vec![REDACT_FRAMING_V1];
+        bad.extend_from_slice(&999u32.to_le_bytes());
+        bad.extend_from_slice(b"short");
+        assert!(matches!(classify(&bad), Frame::Text(_)));
     }
 }

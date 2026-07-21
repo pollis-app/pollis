@@ -107,7 +107,7 @@ jobs:
       - name: Run two-client camera e2e (two-client-camera.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm two-client-camera
+          command: pnpm e2e two-client-camera
           working-directory: e2e
           artifact-name: e2e-two-client-camera-failure
           artifacts-path: |

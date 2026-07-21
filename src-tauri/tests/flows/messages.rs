@@ -1431,3 +1431,172 @@ async fn dropped_bootstrap_group_info_is_healed_on_next_touch() {
 
     drop(alice);
 }
+
+/// Add `member` (already signed up, with `profile`) to `group_id`, accepting the
+/// invite and syncing every listed client's MLS state to the new epoch.
+async fn add_member_and_sync(
+    admin: &TestClient,
+    group_id: &str,
+    channel_id: &str,
+    member: &TestClient,
+    profile: &UserProfile,
+    others: &[&TestClient],
+) {
+    admin.invite(group_id, &profile.username).await;
+    let invite_id = member
+        .first_pending_invite()
+        .await
+        .expect("pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    member.accept_invite(&invite_id).await;
+    member.poll().await;
+    admin.process_commits_for(channel_id).await;
+    for c in others {
+        c.process_commits_for(channel_id).await;
+    }
+}
+
+/// "Delete for everyone": a sender deleting their OWN message must redact it on
+/// the devices of members who ALREADY received it — the whole point of the
+/// change. alice, bob, and carol are all members and all fetch alice's message;
+/// alice then deletes it, and bob + carol (who already had a local copy) must
+/// see it soft-deleted, as must alice's own view.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn self_delete_redacts_already_delivered_recipients() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Redaction").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &carol, &carol_profile, &[&bob]).await;
+
+    let msg_id = alice
+        .send_channel_message_id(&channel_id, "top secret")
+        .await;
+
+    // bob and carol both receive and decrypt the original.
+    for client in [&bob, &carol] {
+        let msgs = client.fetch_channel_messages(&channel_id).await;
+        let m = msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("recipient received the message");
+        assert_eq!(m["content"].as_str(), Some("top secret"));
+        assert!(m["deleted_at"].is_null(), "not deleted yet");
+    }
+
+    // alice deletes her own message — delete for everyone.
+    alice.delete_message(&msg_id).await;
+
+    // bob and carol, who already had it locally, now see it redacted: content
+    // cleared and a deleted_at tombstone set.
+    for (label, client) in [("bob", &bob), ("carol", &carol)] {
+        let msgs = client.fetch_channel_messages(&channel_id).await;
+        let m = msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("row is still present as a tombstone");
+        assert!(
+            m["content"].is_null(),
+            "{label}'s copy must be redacted, got content {:?}",
+            m["content"]
+        );
+        assert!(
+            m["deleted_at"].as_str().is_some(),
+            "{label}'s copy must carry a deleted_at tombstone"
+        );
+    }
+
+    // alice's own view is a tombstone too (soft-delete, not a silent vanish).
+    let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
+    let alice_m = alice_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("alice keeps a tombstone row");
+    assert!(alice_m["content"].is_null(), "alice's own copy is redacted");
+    assert!(alice_m["deleted_at"].as_str().is_some());
+
+    drop((alice, bob, carol));
+}
+
+/// Security invariant (invalid states unrepresentable): a redaction is honored
+/// ONLY when its MLS-authenticated author is the target message's author. carol
+/// — a member, but neither the author nor an admin — forges a redaction for
+/// alice's message via the test-only `send_redaction_as`. bob must STILL see
+/// alice's message: the recipient rejects the mismatched-author redaction.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn redaction_from_non_author_is_ignored() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("No Forgery").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &carol, &carol_profile, &[&bob]).await;
+
+    let msg_id = alice
+        .send_channel_message_id(&channel_id, "carol cannot delete this")
+        .await;
+
+    // bob receives the original.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        bob_msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("bob received it")["content"]
+            .as_str(),
+        Some("carol cannot delete this")
+    );
+
+    // carol forges a redaction targeting alice's message. It is a real,
+    // decryptable MLS message — but authored by carol, not alice.
+    pollis_core::commands::messages::send_redaction_as(
+        &carol.state,
+        &channel_id,
+        &msg_id,
+        carol.user_id(),
+    )
+    .await
+    .expect("forged redaction send");
+
+    // bob re-fetches: the message is UNCHANGED — the redaction was rejected
+    // because carol is not the author.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let m = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("message still present");
+    assert_eq!(
+        m["content"].as_str(),
+        Some("carol cannot delete this"),
+        "a non-author redaction must be ignored"
+    );
+    assert!(
+        m["deleted_at"].is_null(),
+        "a forged redaction must NOT mark the message deleted"
+    );
+
+    drop((alice, bob, carol));
+}

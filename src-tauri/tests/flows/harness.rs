@@ -2887,6 +2887,20 @@ impl TestClient {
         .await;
     }
 
+    /// Delete a message the caller sent — "delete for everyone". Sends the E2EE
+    /// redaction and removes the original envelope; recipients soft-delete their
+    /// local copy on next ingest.
+    pub(crate) async fn delete_message(&self, message_id: &str) {
+        self.invoke_json(
+            "delete_message",
+            json!({
+                "messageId": message_id,
+                "userId": self.user_id(),
+            }),
+        )
+        .await;
+    }
+
     /// Fetch the FULL message history for a channel, following the cursor across
     /// every page. The production read (`get_channel_messages`) is paginated
     /// (default page 50, newest-first); reading only the first page would make an

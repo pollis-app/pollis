@@ -666,7 +666,7 @@ export const MainContent: React.FC<MainContentProps> = observer(({ pendingDmRequ
         const heading = isModerating ? "remove message (admin)" : "delete message";
         const body = isModerating
           ? "This message and its attachments will be removed for everyone in the channel."
-          : "This message will be deleted from the channel. Others who already received it may still see it.";
+          : "This message will be deleted for everyone, including people who already received it.";
         return (
           <div data-testid="delete-message-bar">
             <div

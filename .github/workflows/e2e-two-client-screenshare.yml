@@ -108,7 +108,7 @@ jobs:
       - name: Run two-client screenshare e2e (two-client-screenshare.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm two-client-screenshare
+          command: pnpm e2e two-client-screenshare
           working-directory: e2e
           artifact-name: e2e-two-client-screenshare-failure
           artifacts-path: |

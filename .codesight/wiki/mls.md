@@ -285,6 +285,39 @@ Decryption is interleaved with commit replay because `max_past_epochs = 0`: a
 message must be decrypted while the local group is still AT its epoch (see
 `envelope_epoch`, which parses an envelope's epoch without touching group state).
 
+## Message deletion — "delete for everyone" (E2EE redaction)
+
+Deleting your own message is **delete for everyone**: it is redacted on the
+devices of members who *already fetched* it, not just hidden from pending
+recipients. `delete_message` (`messages/edit_delete.rs`) has two paths:
+
+- **Self-delete** (you deleting your own message) sends an **E2EE redaction
+  control message**: an ordinary `type='message'` MLS envelope whose plaintext is
+  a `0xF6` framing frame (`messages/framing.rs` `pad_redaction` / `classify`,
+  a sibling of the `0xF5` text-padding frame) carrying the target message id,
+  padded to the same size bucket so a redaction is length-indistinguishable from
+  a short message and the **server never learns which message was redacted**. It
+  rides the normal send path (`/v1/messages/send`) so it inherits MLS encryption,
+  per-conversation watermarks, envelope GC, and offline delivery — **no DS route,
+  schema, or migration change**. On ingest (`decrypt_and_persist_one`, the
+  `message` branch) a recipient honors the redaction **only if its
+  MLS-authenticated author (`cred_sender`) equals the target message's stored
+  author** — so neither the server nor another member can redact a message they
+  did not write (the invariant test is
+  `flows/messages.rs::redaction_from_non_author_is_ignored`). Self-delete also
+  removes the original envelope + any pending edit via `/v1/messages/delete` (so
+  a not-yet-fetched member never receives it and the ciphertext does not linger
+  at rest) and soft-deletes the sender's own row (`content=NULL, deleted_at`).
+
+- **Admin-delete** (a group admin removing another member's message) keeps using
+  the server-authorized plaintext `type='delete'` tombstone (`apply_delete_message`
+  writes it; ingest applies it epoch-independently) — an admin generally cannot
+  author an MLS message on another member's behalf, and moderation is legitimately
+  server-side. Rejected for DMs.
+
+The redaction is a **control message**: no visible `message` row is written for
+it on either side.
+
 ## Credential Format
 
 Each device's MLS credential is `{user_id}:{device_id}` encoded as a `BasicCredential`. Parsed by `parse_credential_user_id` and `parse_credential_device_id`.

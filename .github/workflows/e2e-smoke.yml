@@ -78,7 +78,7 @@ jobs:
       - name: Run e2e smoke test
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm smoke
+          command: pnpm e2e smoke
           working-directory: e2e
           artifact-name: e2e-smoke-failure
           artifacts-path: |

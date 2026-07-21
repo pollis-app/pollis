@@ -66,7 +66,7 @@ jobs:
       - name: Run restart-persistence e2e (restart-persistence.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm restart-persistence
+          command: pnpm e2e restart-persistence
           working-directory: e2e
           artifact-name: e2e-restart-persistence-failure
           artifacts-path: |

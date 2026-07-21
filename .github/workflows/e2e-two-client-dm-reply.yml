@@ -64,7 +64,7 @@ jobs:
       - name: Run two-client DM-reply e2e (two-client-dm-reply.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm two-client-dm-reply
+          command: pnpm e2e two-client-dm-reply
           working-directory: e2e
           artifact-name: e2e-two-client-dm-reply-failure
           artifacts-path: |

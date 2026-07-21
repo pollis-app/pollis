@@ -64,7 +64,7 @@ jobs:
       - name: Run two-client channel e2e (two-client-channel.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm two-client-channel
+          command: pnpm e2e two-client-channel
           working-directory: e2e
           artifact-name: e2e-two-client-channel-failure
           artifacts-path: |

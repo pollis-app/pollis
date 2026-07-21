@@ -87,7 +87,7 @@ jobs:
       - name: Run two-client convergence e2e (two-client.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm two-client
+          command: pnpm e2e two-client
           working-directory: e2e
           artifact-name: e2e-two-client-failure
           artifacts-path: |

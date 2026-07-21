@@ -85,7 +85,7 @@ jobs:
       - name: Run full signup e2e (e2e.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm test
+          command: pnpm e2e e2e
           working-directory: e2e
           artifact-name: e2e-full-signup-failure
           artifacts-path: |
@@ -96,7 +96,7 @@ jobs:
       - name: Run invalid-otp e2e (invalid-otp.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm invalid-otp
+          command: pnpm e2e invalid-otp
           working-directory: e2e
           artifact-name: e2e-invalid-otp-failure
           artifacts-path: |

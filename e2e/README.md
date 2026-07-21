@@ -4,8 +4,9 @@ Drives the **actual native desktop app** — the real WebKitGTK WebView inside t
 Tauri shell, talking to the real Rust core over Tauri IPC — not the browser
 build of the frontend.
 
-Three scripts, sharing `lib/harness.js` for the tauri-driver/WebKitWebDriver
-plumbing:
+Each scenario is a standalone script, sharing `lib/harness.js` for the
+tauri-driver/WebKitWebDriver plumbing and run through one `pnpm e2e <scenario>`
+entry point (see below):
 
 | script | what it proves | needs DS? | needs Turso? |
 |---|---|---|---|
@@ -15,24 +16,31 @@ plumbing:
 | `restart-persistence.js` | single client; account survives a full app restart on the same data dir (no blank re-signup) | yes | yes (writable) |
 | `two-client.js` | two isolated app instances; a message from A converges into B's UI | yes | yes (writable) |
 | `two-client-dm-reply.js` | bidirectional 1:1 DM — B replies and A sees it (reverse leg of two-client) | yes | yes (writable) |
+| `two-client-delete.js` | delete-for-everyone — after A's DM converges into B, A deletes it and B's already-delivered copy flips to `[deleted]` (E2EE redaction) | yes | yes (writable) |
 | `two-client-channel.js` | A creates a group + text channel, invites B, B accepts, A posts, B receives | yes | yes (writable) |
 | `two-client-voice-channel.js` | A + B join a group voice channel, both see 2 participants, A leaves, B sees the drop | yes | yes (writable) + LiveKit + audio |
 | `two-client-call.js` | two instances place + accept a real 1:1 call; each sees the other in the call | yes | yes (writable) + LiveKit + audio |
 | `two-client-camera.js` | two instances in a call; A turns its webcam on, B sees A's remote camera tile | yes | yes (writable) + LiveKit + audio + virtual camera |
 | `two-client-screenshare.js` | two instances in a call; A shares its screen (X11/Xvfb capture), B sees A's remote screenshare tile | yes | yes (writable) + LiveKit + audio |
 
+Every scenario runs through one entry point — `pnpm e2e <scenario>` (or `node
+e2e/<scenario>.js` directly). There is deliberately **one** package.json script,
+not one per scenario; the scenario list lives on disk (the `e2e/*.js` files).
+`pnpm e2e` with no argument prints the available scenarios.
+
 ```bash
-pnpm --filter @pollis/e2e smoke        # or: node e2e/smoke.js       (fast, no deps)
-pnpm --filter @pollis/e2e test         # or: node e2e/e2e.js         (full signup flow)
-pnpm --filter @pollis/e2e invalid-otp  # or: node e2e/invalid-otp.js
-pnpm --filter @pollis/e2e restart-persistence       # account persists across restart (needs backend)
-pnpm --filter @pollis/e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
-pnpm --filter @pollis/e2e two-client-dm-reply       # bidirectional DM (needs backend)
-pnpm --filter @pollis/e2e two-client-channel        # group text-channel convergence (needs backend)
-pnpm --filter @pollis/e2e two-client-voice-channel  # group voice join/leave (needs backend + LiveKit + audio)
-pnpm --filter @pollis/e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
-pnpm --filter @pollis/e2e two-client-camera  # or: node e2e/two-client-camera.js  (needs backend + LiveKit + audio + virtual camera up first)
-pnpm --filter @pollis/e2e two-client-screenshare  # or: node e2e/two-client-screenshare.js  (needs backend + LiveKit + audio up first)
+pnpm --filter @pollis/e2e e2e smoke        # or: node e2e/smoke.js       (fast, no deps)
+pnpm --filter @pollis/e2e e2e e2e          # or: node e2e/e2e.js         (full signup flow)
+pnpm --filter @pollis/e2e e2e invalid-otp  # or: node e2e/invalid-otp.js
+pnpm --filter @pollis/e2e e2e restart-persistence       # account persists across restart (needs backend)
+pnpm --filter @pollis/e2e e2e two-client   # or: node e2e/two-client.js  (needs backend up first)
+pnpm --filter @pollis/e2e e2e two-client-dm-reply       # bidirectional DM (needs backend)
+pnpm --filter @pollis/e2e e2e two-client-delete         # delete-for-everyone redaction (needs backend)
+pnpm --filter @pollis/e2e e2e two-client-channel        # group text-channel convergence (needs backend)
+pnpm --filter @pollis/e2e e2e two-client-voice-channel  # group voice join/leave (needs backend + LiveKit + audio)
+pnpm --filter @pollis/e2e e2e two-client-call  # or: node e2e/two-client-call.js  (needs backend + LiveKit + audio up first)
+pnpm --filter @pollis/e2e e2e two-client-camera  # or: node e2e/two-client-camera.js  (needs backend + LiveKit + audio + virtual camera up first)
+pnpm --filter @pollis/e2e e2e two-client-screenshare  # or: node e2e/two-client-screenshare.js  (needs backend + LiveKit + audio up first)
 ```
 
 `smoke.js` is the one to reach for in CI or as a quick "did I break launch"
@@ -221,7 +229,7 @@ per-client `A-FAIL.png` / `A-FAIL.html` **and** `B-FAIL.png` / `B-FAIL.html`
 
 CI: `.github/workflows/e2e-two-client.yml` (`workflow_dispatch`) wires it end to
 end through the same M0/M1 pieces as `e2e-full.yml` — install deps → build
-`pollis` + `pollis-delivery` → `start-backend.sh` → `pnpm two-client` via the
+`pollis` + `pollis-delivery` → `start-backend.sh` → `pnpm e2e two-client` via the
 `desktop-e2e` composite action → `stop-backend.sh` (`if: always()`).
 
 ## Two-client call — audio + LiveKit (M3a)
@@ -282,7 +290,7 @@ dumps per-client `A-FAIL.*` / `B-FAIL.*` (plus on-screen testids), same as
 
 CI: `.github/workflows/e2e-two-client-call.yml` (`workflow_dispatch`) — install
 deps → build → `start-audio.sh` → `start-livekit.sh` → `start-backend.sh` →
-`pnpm two-client-call` via the `desktop-e2e` action → `stop-backend.sh`
+`pnpm e2e two-client-call` via the `desktop-e2e` action → `stop-backend.sh`
 (`if: always()`).
 
 ## Two-client camera — virtual webcam (M3b)
@@ -358,7 +366,7 @@ Proof screenshots: `two-client-camera-A-ready.png`,
 
 CI: `.github/workflows/e2e-two-client-camera.yml` — install deps → build →
 `start-camera.sh` → `start-audio.sh` → `start-livekit.sh` → `start-backend.sh` →
-`pnpm two-client-camera` via the `desktop-e2e` action → `stop-backend.sh`
+`pnpm e2e two-client-camera` via the `desktop-e2e` action → `stop-backend.sh`
 (`if: always()`). It carries a **temporary** `push:` trigger on the
 `auto/e2e-two-client-camera` branch (marked REMOVE-before-merge) so the module
 load can be validated in CI, since v4l2loopback can't run in the dev sandbox.
@@ -444,7 +452,7 @@ scripts.
 
 CI: `.github/workflows/e2e-two-client-screenshare.yml` — install deps → build →
 `start-audio.sh` → `start-livekit.sh` → `start-backend.sh` →
-`pnpm two-client-screenshare` via the `desktop-e2e` action → `stop-backend.sh`
+`pnpm e2e two-client-screenshare` via the `desktop-e2e` action → `stop-backend.sh`
 (`if: always()`). It carries a **temporary** `push:` trigger on the
 `auto/e2e-two-client-screenshare` branch (marked REMOVE-before-merge) so the
 headless X11 capture path can be validated in CI, since it can't run in the dev
@@ -521,7 +529,7 @@ docker build -f e2e/Dockerfile -t pollis-e2e .
 docker run --rm -v "$PWD":/work -w /work pollis-e2e bash -lc '
   pnpm install --frozen-lockfile &&
   cargo build -p pollis &&
-  dbus-run-session -- xvfb-run --auto-servernum pnpm --filter @pollis/e2e smoke
+  dbus-run-session -- xvfb-run --auto-servernum pnpm --filter @pollis/e2e e2e smoke
 '
 ```
 
@@ -571,6 +579,7 @@ workflow, all following one of two shapes above — backend-only (mirrors
 | `restart-persistence.js` | `e2e-restart-persistence.yml` | — |
 | `two-client.js` | `e2e-two-client.yml` | — |
 | `two-client-dm-reply.js` | `e2e-two-client-dm-reply.yml` | — |
+| `two-client-delete.js` | `e2e-two-client-delete.yml` | — |
 | `two-client-channel.js` | `e2e-two-client-channel.yml` | — |
 | `two-client-voice-channel.js` | `e2e-two-client-voice-channel.yml` | LiveKit + audio |
 | `two-client-call.js` | `e2e-two-client-call.yml` | LiveKit + audio |

@@ -74,7 +74,7 @@ jobs:
       - name: Run voice-channel no-mic e2e (voice-channel-no-mic.js)
         uses: ./.github/actions/desktop-e2e
         with:
-          command: pnpm voice-channel-no-mic
+          command: pnpm e2e voice-channel-no-mic
           working-directory: e2e
           artifact-name: e2e-voice-channel-no-mic-failure
           artifacts-path: |

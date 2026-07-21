@@ -79,6 +79,16 @@ Source: `pollis-core/src/db/migrations/000000_baseline.sql` + numbered migration
 - `sent_at` TEXT NOT NULL
 - `delivered` INTEGER NOT NULL DEFAULT 0
 - `sealed` INTEGER NOT NULL DEFAULT 0 _(migration 000008; sealed sender, #331)_
+- `type` TEXT NOT NULL DEFAULT 'message' — `'message'` | `'edit'` | `'delete'`
+- `target_message_id` TEXT _(the message an `edit`/`delete` envelope acts on)_
+
+**Deletion.** A **self-delete** ("delete for everyone") does NOT use a `'delete'`
+envelope — it sends an ordinary `'message'` envelope carrying an E2EE **redaction
+control frame** (`0xF6`, see [mls.md](./mls.md#message-deletion--delete-for-everyone-e2ee-redaction)),
+so the server never learns which message was redacted, and separately removes the
+original envelope. A `type='delete'` **tombstone** (empty ciphertext,
+`target_message_id` set) is written only by **admin-delete** (server-authorized
+moderation); recipients apply it epoch-independently on ingest.
 
 **Sealed sender (#331).** Attribution is taken from the MLS credential inside the
 ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))

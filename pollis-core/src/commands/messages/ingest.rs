@@ -373,33 +373,67 @@ fn decrypt_and_persist_one(
             if exists {
                 return;
             }
-            let ct_bytes = ciphertext
+            let Some(bytes) = ciphertext
                 .strip_prefix("mls:")
-                .and_then(|h| hex::decode(h).ok());
+                .and_then(|h| hex::decode(h).ok())
+            else {
+                return;
+            };
             // Attribute from the MLS-authenticated credential inside the
             // ciphertext, NOT the server-writable `message_envelope.sender_id`
             // tuple field (which may be a blinded sentinel under sealed sender).
             // See `docs/metadata-minimization-design.md` §2.
-            let decrypted = ct_bytes
-                .as_ref()
-                .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, b))
-                .and_then(|(b, cred_sender)| {
-                    // Strip size padding (issue #331 v2, §4.1). `strip` is a
-                    // no-op for legacy unpadded sends and for attachment
-                    // envelopes, so old and new clients interoperate.
-                    let plaintext = super::framing::strip(&b);
-                    String::from_utf8(plaintext).ok().map(|text| (text, cred_sender))
-                });
-            if let (Some((text, cred_sender)), Some(bytes)) = (decrypted, ct_bytes) {
-                let _ = conn.execute(
-                    "INSERT OR IGNORE INTO message
-                     (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, sent_at],
-                );
+            let Some((plain, cred_sender)) =
+                crate::commands::mls::try_mls_decrypt(conn, mls_group_id, &bytes)
+            else {
+                // Decrypt failed — leave the envelope in message_envelope for a
+                // future retry; the watermark is computed to not skip past it.
+                return;
+            };
+            match super::framing::classify(&plain) {
+                // "Delete for everyone" (E2EE redaction). Honor it ONLY when the
+                // redaction's MLS-authenticated author (`cred_sender`) is the
+                // SAME as the target message's author (its stored `sender_id`,
+                // itself the MLS credential recorded at ingest). This makes the
+                // invariant cryptographic: neither the server nor another member
+                // can redact a message they did not author — a mismatched or
+                // unknown target is silently ignored. Admin moderation uses the
+                // separate server-issued `type='delete'` tombstone instead. The
+                // redaction is a control message and is NEVER stored as a
+                // visible `message` row.
+                super::framing::Frame::Redaction(target_message_id) => {
+                    let author: Option<String> = conn
+                        .query_row(
+                            "SELECT sender_id FROM message WHERE id = ?1",
+                            rusqlite::params![target_message_id],
+                            |row| row.get(0),
+                        )
+                        .optional()
+                        .ok()
+                        .flatten();
+                    if author.as_deref() == Some(cred_sender.as_str()) {
+                        let now = chrono::Utc::now().to_rfc3339();
+                        let _ = conn.execute(
+                            "UPDATE message SET content = NULL, deleted_at = ?1
+                             WHERE id = ?2 AND deleted_at IS NULL",
+                            rusqlite::params![now, target_message_id],
+                        );
+                    }
+                }
+                // Ordinary text / attachment message. Strip size padding (issue
+                // #331 v2, §4.1) — a no-op for legacy unpadded sends and for
+                // attachment envelopes, so old and new clients interoperate.
+                super::framing::Frame::Text(plaintext) => {
+                    if let Ok(text) = String::from_utf8(plaintext) {
+                        let _ = conn.execute(
+                            "INSERT OR IGNORE INTO message
+                             (id, conversation_id, sender_id, ciphertext, content, reply_to_id, sent_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            rusqlite::params![id, conversation_id, cred_sender, bytes, text, reply_to_id, sent_at],
+                        );
+                    }
+                }
             }
-            // Decrypt failed — leave the envelope in message_envelope for a
-            // future retry; the watermark is computed to not skip past it.
         }
         "edit" => {
             if let Some(tid) = target_id.as_ref() {

@@ -480,10 +480,14 @@ build):
 | `e2e.js` | full signup: email → OTP → secret key → PIN → app-ready | yes (writable test Turso) |
 | `invalid-otp.js` | wrong OTP code is rejected, doesn't advance past code entry | yes (writable test Turso) |
 
+Every scenario runs through one entry point — `pnpm e2e <scenario>` (one
+package.json script, not one per test; the scenario list is the `e2e/*.js`
+files on disk). `pnpm e2e` with no argument lists them.
+
 ```bash
-pnpm --filter @pollis/e2e smoke        # fast, no external deps
-pnpm --filter @pollis/e2e test         # full signup flow
-pnpm --filter @pollis/e2e invalid-otp
+pnpm --filter @pollis/e2e e2e smoke        # fast, no external deps
+pnpm --filter @pollis/e2e e2e e2e          # full signup flow
+pnpm --filter @pollis/e2e e2e invalid-otp
 ```
 
 `smoke.js` is the fast, backend-free one: the logged-out path

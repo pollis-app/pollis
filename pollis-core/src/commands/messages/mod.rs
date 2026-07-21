@@ -42,6 +42,8 @@ pub use ingest::{
 
 // ── Edit / delete ────────────────────────────────────────────────────────────
 pub use edit_delete::{delete_message, edit_message};
+#[cfg(feature = "test-harness")]
+pub use edit_delete::send_redaction_as;
 
 // ── Reactions ────────────────────────────────────────────────────────────────
 pub use reactions::{add_reaction, get_reactions, remove_reaction, Reaction};
