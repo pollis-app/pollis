@@ -61,7 +61,23 @@ const LiveWaveform: React.FC<{ identity: string }> = ({ identity }) => {
 
 export type TileMode = "grid" | "film" | "big" | "preview";
 
-export interface StageParticipant {
+/** The single media surface a tile renders. A tile shows EXACTLY one of these —
+ *  camera and screenshare are separate tiles, never crammed into one slot, so
+ *  the old "both track keys set, one silently dropped" state is unrepresentable.
+ *  A participant publishing camera + screenshare at once (#394) yields two tiles
+ *  (`{kind:'camera'}` + `{kind:'screenshare'}`); see `tilesFor` in VoiceStage. */
+export type TileMedia =
+  | { kind: "audio" }
+  | { kind: "camera"; trackKey: string; width?: number; height?: number }
+  | { kind: "screenshare"; trackKey: string; width?: number; height?: number };
+
+export interface StageTileModel {
+  /** Unique per tile: `${identity}` (audio), `${identity}:cam`, or
+   *  `${identity}:screen`. Distinct from `identity` because one participant can
+   *  own two tiles. */
+  tileKey: string;
+  /** Owning participant — drives name, mute/speaking, per-user volume. Shared by
+   *  a participant's camera and screenshare tiles. */
   identity: string;
   name: string;
   avatarKey: string | null;
@@ -69,23 +85,13 @@ export interface StageParticipant {
   isLocal: boolean;
   isSpeaking: boolean;
   connectionQuality?: VoiceConnectionQuality;
-  /** Track key + hint dimensions of this participant's active screen
-   *  share (local preview or remote). Undefined ⇒ audio-only layout. */
-  streamTrackKey?: string;
-  streamWidth?: number;
-  streamHeight?: number;
-  /** Track key + hint dimensions of this participant's active webcam (local
-   *  preview or remote). Renders as the tile's face — the avatar's slot —
-   *  when present and there's no screen share occupying the tile. */
-  cameraTrackKey?: string;
-  cameraWidth?: number;
-  cameraHeight?: number;
   /** Local user only, while the voice session is still negotiating. */
   isConnecting?: boolean;
+  media: TileMedia;
 }
 
 interface Props {
-  participant: StageParticipant;
+  participant: StageTileModel;
   mode: TileMode;
   /** Keyboard focus from the enclosing NavigableGrid — reveals the volume
    *  strip and highlights the border, mirroring mouse hover. */
@@ -118,24 +124,29 @@ export const StageTile: React.FC<Props> = ({
 }) => {
   const big = mode === "big";
   const preview = mode === "preview";
+  const media = p.media;
 
-  const hasFeed = p.streamTrackKey !== undefined;
-  // Camera shows as the tile face only when a screen share isn't already
-  // occupying it — a participant doing both surfaces the screen here and
-  // their camera follows the spotlight/screenshare; the tile face stays the
-  // screen. Camera never drives the spotlight (that's screen-share only).
-  const hasCamera = !hasFeed && p.cameraTrackKey !== undefined;
-  // A streaming tile in the filmstrip is clickable to spotlight it; the
-  // big tile is already focused, the preview state isn't a live call.
-  const focusable = hasFeed && !big && !preview;
+  // A tile carries video when its media is a camera OR a screenshare — the two
+  // are treated identically at the container level (#394): both are
+  // spotlightable, fullscreenable, and carry the LIVE + res·fps chrome. The
+  // pixels' source makes no difference to the container. An audio tile shows the
+  // avatar + meter.
+  const videoTrack =
+    media.kind === "camera" || media.kind === "screenshare"
+      ? { trackKey: media.trackKey, width: media.width, height: media.height }
+      : null;
+  const isVideo = videoTrack !== null;
+  // A video tile in the filmstrip/grid is clickable to spotlight it; the big
+  // tile is already focused, the preview state isn't a live call.
+  const focusable = isVideo && !big && !preview;
 
-  const stats = useScreenShareStats(p.streamTrackKey ?? null);
+  const stats = useScreenShareStats(videoTrack?.trackKey ?? null);
   const statsLabel = (() => {
-    if (!hasFeed) {
+    if (!videoTrack) {
       return null;
     }
-    const w = stats.dimensions?.width ?? p.streamWidth;
-    const h = stats.dimensions?.height ?? p.streamHeight;
+    const w = stats.dimensions?.width ?? videoTrack.width;
+    const h = stats.dimensions?.height ?? videoTrack.height;
     if (!w || !h) {
       return null;
     }
@@ -156,22 +167,15 @@ export const StageTile: React.FC<Props> = ({
   return (
     <div
       className={cls}
-      data-testid={`voice-tile-${p.identity}`}
-      onClick={focusable ? () => onFocus?.(p.identity) : undefined}
+      data-testid={`voice-tile-${p.tileKey}`}
+      onClick={focusable ? () => onFocus?.(p.tileKey) : undefined}
     >
       <div className="vs-tile-stage">
-        {hasFeed ? (
+        {media.kind === "screenshare" || media.kind === "camera" ? (
           <RemoteVideoTile
-            trackKey={p.streamTrackKey!}
-            initialWidth={p.streamWidth}
-            initialHeight={p.streamHeight}
-            preview={!big}
-          />
-        ) : hasCamera ? (
-          <RemoteVideoTile
-            trackKey={p.cameraTrackKey!}
-            initialWidth={p.cameraWidth}
-            initialHeight={p.cameraHeight}
+            trackKey={media.trackKey}
+            initialWidth={media.width}
+            initialHeight={media.height}
             preview={!big}
           />
         ) : (
@@ -180,7 +184,7 @@ export const StageTile: React.FC<Props> = ({
               avatarKey={p.avatarKey}
               size={big ? 92 : 60}
               alt={p.name}
-              testId={`voice-tile-avatar-${p.identity}`}
+              testId={`voice-tile-avatar-${p.tileKey}`}
             />
             {!preview && <LiveWaveform identity={p.identity} />}
           </div>
@@ -203,7 +207,7 @@ export const StageTile: React.FC<Props> = ({
       <div className="vs-tr">
         {p.isConnecting ? (
           <span
-            data-testid={`voice-tile-connecting-${p.identity}`}
+            data-testid={`voice-tile-connecting-${p.tileKey}`}
             className="flex items-center leading-none"
             title="Connecting…"
             aria-label="Connecting"
@@ -213,7 +217,7 @@ export const StageTile: React.FC<Props> = ({
         ) : (
           <span
             className="vs-tag vs-pad6"
-            data-testid={`voice-tile-quality-${p.identity}`}
+            data-testid={`voice-tile-quality-${p.tileKey}`}
             title={`Connection: ${p.connectionQuality ?? "excellent"}`}
           >
             <span className={"vs-sig " + signalClass(p.connectionQuality)}>
@@ -224,34 +228,37 @@ export const StageTile: React.FC<Props> = ({
       </div>
 
       {/* LIVE badge: only useful before you join — once you're in the
-          channel the stream itself makes it obvious who's streaming. */}
-      {hasFeed && preview && (
+          channel the video itself makes it obvious who's streaming. */}
+      {isVideo && preview && (
         <div className="vs-bl"><span className="vs-tag live">LIVE</span></div>
       )}
 
-      {/* res · fps badge stays on the in-call tiles. */}
-      {hasFeed && !preview && statsLabel && (
+      {/* res · fps badge on any in-call video tile (camera or screenshare). The
+          e2e suite tells camera from screenshare by the tile's `:cam`/`:screen`
+          key suffix, not this badge. */}
+      {isVideo && !preview && statsLabel && (
         <div className="vs-br">
           {/* Machine-facing metric (res · fps) — stays monospace in BOTH
               skins. Without font-machine the refined skin would swap the
               stage's inherited font-mono to sans (index.css §refined). */}
           <span
             className="vs-tag res font-machine"
-            data-testid={`voice-tile-stream-stats-${p.identity}`}
+            data-testid={`voice-tile-stream-stats-${p.tileKey}`}
           >
             {statsLabel}
           </span>
         </div>
       )}
 
-      {/* hover controls — streaming tiles in-call only */}
-      {hasFeed && !preview && (
+      {/* hover controls — any video tile in-call (camera or screenshare) is
+          fullscreenable and spotlightable. */}
+      {isVideo && !preview && videoTrack && (
         <div className="vs-hover">
           <button
             className="vs-hbtn"
             title="fullscreen"
             aria-label="Open fullscreen"
-            onClick={(e) => { e.stopPropagation(); onView?.(p.streamTrackKey!); }}
+            onClick={(e) => { e.stopPropagation(); onView?.(videoTrack.trackKey); }}
           >
             <Maximize size={17} />
           </button>
@@ -259,8 +266,8 @@ export const StageTile: React.FC<Props> = ({
             <button
               className="vs-hbtn"
               title="spotlight"
-              aria-label="Spotlight this stream"
-              onClick={(e) => { e.stopPropagation(); onFocus?.(p.identity); }}
+              aria-label="Spotlight this video"
+              onClick={(e) => { e.stopPropagation(); onFocus?.(p.tileKey); }}
             >
               <Pin size={17} />
             </button>
@@ -271,11 +278,12 @@ export const StageTile: React.FC<Props> = ({
       {/* volume — remote only, and in-call only. While previewing the channel
           (not joined) you're not listening to anyone, so a per-user output
           volume control is meaningless; it appears on hover/focus once you've
-          joined. */}
+          joined. Keyed by identity (per-user output gain), so a participant's
+          camera and screenshare tiles both control the same volume. */}
       {!p.isLocal && !preview && (
         <div
           className="vs-vol"
-          data-testid={`voice-tile-volume-${p.identity}`}
+          data-testid={`voice-tile-volume-${p.tileKey}`}
           onClick={(e) => e.stopPropagation()}
         >
           <RemoteUserVolumeSlider identity={p.identity} participantName={p.name} />

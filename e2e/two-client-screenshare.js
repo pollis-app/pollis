@@ -355,13 +355,14 @@ async function waitForLocalSharePreview(browser, tag, timeoutMs) {
   );
 }
 
-// Remote SCREENSHARE tiles visible on this client: a participant tile
-// (`voice-tile-voice-<id>` root, class `vs-tile`) that BOTH carries a
-// `voice-tile-stream-stats-` res·fps badge (screenshare-specific — a camera tile
-// never has it) AND contains a non-local `remote-video-tile-<trackKey>`. Returns
-// the owning tiles' identities + track keys. This is the mirror-INVERSE of the
-// M3b camera assertion (two-client-camera.js `remoteCameraTiles`, which EXCLUDES
-// tiles with that badge).
+// Remote SCREENSHARE tiles visible on this client: a participant SCREENSHARE
+// tile — a `voice-tile-voice-<id>` root (class `vs-tile`) whose key ends in
+// `:screen` (a camera tile ends `:cam`) — that contains a non-local
+// `remote-video-tile-<trackKey>`. Camera and screenshare tiles are otherwise
+// identical (both carry the res·fps badge, both spotlightable), so the
+// `:screen`/`:cam` key suffix — not the badge — distinguishes them. Returns the
+// owning tiles' identities + track keys. Mirror of the M3b camera assertion
+// (two-client-camera.js `remoteCameraTiles`, which matches `:cam`).
 async function remoteScreenshareTiles(browser) {
   return browser.execute((localKeys) => {
     const out = [];
@@ -371,9 +372,7 @@ async function remoteScreenshareTiles(browser) {
         continue;
       }
       const tileTestId = tile.getAttribute("data-testid") || "";
-      // A SCREENSHARE feed in this tile shows a res·fps badge; a camera doesn't.
-      const isScreenshare = !!tile.querySelector('[data-testid^="voice-tile-stream-stats-"]');
-      if (!isScreenshare) {
+      if (!tileTestId.endsWith(":screen")) {
         continue;
       }
       for (const v of tile.querySelectorAll('[data-testid^="remote-video-tile-"]')) {

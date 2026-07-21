@@ -288,14 +288,27 @@ default; the driver adjusts and we publish whatever it gives. Verified at
   `on_remote_video_subscribed` drain + frame WS. The voice room loop reads
   the publication's `TrackSource` and tags `ScreenShareEvent::RemoteStarted`
   with a `source` (`screen` | `camera`); the renderer routes the track_key
-  to a participant's camera tile (the tile face) vs a screenshare spotlight
-  streamer. The Tauri renderer has no JS LiveKit client, so this tag is the
-  only thing that distinguishes them.
+  to the participant's camera axis (`appStore.cameraRemotes`) vs its
+  screenshare axis (`participant.video`). The Tauri renderer has no JS LiveKit
+  client, so this tag is the only thing that distinguishes them.
+- **Two tiles, not one (#394)**: camera and screenshare are independent axes
+  that coexist, so a participant publishing both renders as **two separate
+  tiles** — a camera tile and a screenshare tile. `VoiceStage`'s `tilesFor`
+  expands each participant into up to two `StageTileModel`s
+  (`none→[audio] / camera→[camera] / screen→[screenshare] / both→[camera,
+  screenshare]`); `StageTile.media` is a `audio | camera | screenshare`
+  discriminated union so a tile carries exactly one surface (the old
+  "camera-as-tile-face, dropped when screensharing" state is unrepresentable).
+  Camera and screenshare tiles are treated identically at the container level —
+  both spotlightable, fullscreenable, and carrying the res·fps badge; the
+  container doesn't care where the pixels come from. The `:cam`/`:screen` tile
+  key suffix (not the badge) is what tells the two apart. When both a camera and
+  a screenshare are present, the screenshare takes the default spotlight.
 - **Frontend**: `camera/cameraSession.ts` (event subscription + lifecycle,
   reuses `screenShareSession`'s frame router), `camera/cameraActions.ts`
   (`toggleCamera`), `components/Voice/CameraPicker.tsx` (in-app picker, bar
-  pattern), camera toggle in `VoiceBar` + the stage tray, and camera-as-
-  tile-face in `StageTile`. MobX `CameraState` union mirrors `ShareState`.
+  pattern), camera toggle in `VoiceBar` + the stage tray, and the camera tile
+  in `StageTile`/`VoiceStage`. MobX `CameraState` union mirrors `ShareState`.
 
 ## Parent-side pipeline (unchanged, shared by all paths)
 

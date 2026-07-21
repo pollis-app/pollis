@@ -9,8 +9,8 @@
 //   - preview   (not joined): a "who's here" roster (NavigableGrid, same
 //                sizing as before) with persistent per-user volume + a
 //                solid Join Voice CTA.
-//   - spotlight (joined, someone streaming): the focused screenshare fills
-//                the body with a clickable filmstrip below.
+//   - spotlight (joined, someone sharing video): the focused video — camera or
+//                screenshare — fills the body with a clickable filmstrip below.
 //   - grid      (joined, no stream): a reflowing equal grid of tiles.
 //
 // Reads live data straight off appStore (MobX observer) rather than being a
@@ -36,7 +36,7 @@ import { Button } from "../../ui/Button";
 import { NavigableGrid } from "../../ui/NavigableGrid";
 import { ScreenSharePicker } from "../ScreenSharePicker";
 import { CameraPicker } from "../CameraPicker";
-import { StageTile, type StageParticipant } from "./StageTile";
+import { StageTile, type StageTileModel } from "./StageTile";
 import "./voice-stage.css";
 
 interface VoiceStageProps {
@@ -143,42 +143,37 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
 
     const displayNames = disambiguateVoiceNames(mergedParticipants);
 
-    // Map a live VoiceParticipant onto the tile's view model, resolving
-    // whichever screenshare track (local preview or remote) it's publishing.
-    const resolve = (p: VoiceParticipant): StageParticipant => {
-      let streamTrackKey: string | undefined;
-      let streamWidth: number | undefined;
-      let streamHeight: number | undefined;
-      let cameraTrackKey: string | undefined;
-      let cameraWidth: number | undefined;
-      let cameraHeight: number | undefined;
+    // Expand a live VoiceParticipant into its stage tiles. A participant can
+    // publish a screenshare AND a webcam at the same time (#394), so this
+    // returns UP TO TWO tiles — one per active video source — rather than one
+    // tile that has to pick a single surface. Ordering (camera first, then
+    // screenshare) keeps a person's face next to their screen in the grid.
+    //   none   → [audio]
+    //   camera → [camera]
+    //   screen → [screenshare]
+    //   both   → [camera, screenshare]
+    const tilesFor = (p: VoiceParticipant): StageTileModel[] => {
+      let screen: { trackKey: string; width?: number; height?: number } | null = null;
+      let cam: { trackKey: string; width?: number; height?: number } | null = null;
       if (p.isLocal) {
         if (shareActive) {
-          streamTrackKey = LOCAL_PREVIEW_KEY;
-          streamWidth = shareLocalDims?.width;
-          streamHeight = shareLocalDims?.height;
+          screen = { trackKey: LOCAL_PREVIEW_KEY, width: shareLocalDims?.width, height: shareLocalDims?.height };
         }
         if (cameraActive) {
-          cameraTrackKey = LOCAL_CAMERA_PREVIEW_KEY;
-          cameraWidth = cameraLocalDims?.width;
-          cameraHeight = cameraLocalDims?.height;
+          cam = { trackKey: LOCAL_CAMERA_PREVIEW_KEY, width: cameraLocalDims?.width, height: cameraLocalDims?.height };
         }
       } else {
         const remote = screenshareOf(p.video);
         if (remote) {
-          streamTrackKey = remote.trackKey;
-          streamWidth = remote.width;
-          streamHeight = remote.height;
+          screen = { trackKey: remote.trackKey, width: remote.width, height: remote.height };
         }
-        const cam =
-          cameraRemotes[p.identity] ?? cameraRemotes[voiceUserKey(p.identity)];
-        if (cam) {
-          cameraTrackKey = cam.trackKey;
-          cameraWidth = cam.width;
-          cameraHeight = cam.height;
+        const c = cameraRemotes[p.identity] ?? cameraRemotes[voiceUserKey(p.identity)];
+        if (c) {
+          cam = { trackKey: c.trackKey, width: c.width, height: c.height };
         }
       }
-      return {
+
+      const base = {
         identity: p.identity,
         name: displayNames.get(p.identity) ?? p.name,
         avatarKey: p.avatarKey ?? null,
@@ -186,25 +181,44 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
         isLocal: p.isLocal,
         isSpeaking: speakingUsers.has(userIdFromVoiceIdentity(p.identity)) && !isMuted(p.audio),
         connectionQuality: p.connectionQuality,
-        streamTrackKey,
-        streamWidth,
-        streamHeight,
-        cameraTrackKey,
-        cameraWidth,
-        cameraHeight,
         isConnecting: p.isLocal && isJoining,
       };
+
+      const tiles: StageTileModel[] = [];
+      if (cam) {
+        tiles.push({ ...base, tileKey: `${p.identity}:cam`, media: { kind: "camera", ...cam } });
+      }
+      if (screen) {
+        tiles.push({ ...base, tileKey: `${p.identity}:screen`, media: { kind: "screenshare", ...screen } });
+      }
+      // No video → a single audio/avatar tile keyed by the bare identity (so a
+      // plain voice participant's testid stays `voice-tile-<identity>`).
+      if (tiles.length === 0) {
+        tiles.push({ ...base, tileKey: p.identity, media: { kind: "audio" } });
+      }
+      return tiles;
     };
 
-    const people = mergedParticipants.map(resolve);
-    const streamers = people.filter((p) => p.streamTrackKey !== undefined);
+    const people = mergedParticipants.flatMap(tilesFor);
+    // Any video tile — camera OR screenshare — can be spotlit and shows in the
+    // spotlight/filmstrip. The two are treated identically at the stage level
+    // (#394); the container doesn't care where the pixels come from.
+    const streamers = people.filter(
+      (p) => p.media.kind === "screenshare" || p.media.kind === "camera",
+    );
     // A call is always "in" its room (it auto-joins and rings), so it never
     // shows the group pre-join preview and its stage goes live immediately.
     const stageLive = isInCall || callMode;
     const previewState = !stageLive;
     const spotlight = stageLive && streamers.length > 0;
+    // Default the big view to a screenshare when one exists (the natural focal
+    // point of "watch my screen"), otherwise the first video — but an explicit
+    // user pick (focusId) always wins.
     const focused =
-      streamers.find((p) => p.identity === focusId) ?? streamers[0] ?? null;
+      streamers.find((p) => p.tileKey === focusId) ??
+      streamers.find((p) => p.media.kind === "screenshare") ??
+      streamers[0] ??
+      null;
 
     // Ringing/connecting caption — call-only, shown above the (self-only) grid
     // until the counterparty joins. Replaces the group "Join Voice" preview.
@@ -216,13 +230,15 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
           : "Ringing…"
         : null;
 
-    const previewPeople: StageParticipant[] = observerParticipants.map((p) => ({
+    const previewPeople: StageTileModel[] = observerParticipants.map((p) => ({
+      tileKey: p.identity,
       identity: p.identity,
       name: p.name,
       avatarKey: p.avatarKey ?? null,
       isMuted: false,
       isLocal: false,
       isSpeaking: false,
+      media: { kind: "audio" },
     }));
 
     const onView = (trackKey: string) => setViewingScreenShareTrackKey(trackKey);
@@ -288,9 +304,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               ) : (
                 // Populated: roster, then the CTA pinned below the users.
                 <>
-                  <NavigableGrid<StageParticipant>
+                  <NavigableGrid<StageTileModel>
                     items={previewPeople}
-                    getKey={(p) => p.identity}
+                    getKey={(p) => p.tileKey}
                     autoFocus={false}
                     minCellWidth={180}
                     maxCellWidth={240}
@@ -317,9 +333,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
               </div>
               <div className="vs-film">
                 {people
-                  .filter((p) => !focused || p.identity !== focused.identity)
+                  .filter((p) => !focused || p.tileKey !== focused.tileKey)
                   .map((p) => (
-                    <div key={p.identity} className="vs-film-cell">
+                    <div key={p.tileKey} className="vs-film-cell">
                       <StageTile participant={p} mode="film" onFocus={setFocusId} onView={onView} />
                     </div>
                   ))}
@@ -332,9 +348,9 @@ export const VoiceStage: React.FC<VoiceStageProps> = observer(
                   {ringStatus}
                 </div>
               )}
-              <NavigableGrid<StageParticipant>
+              <NavigableGrid<StageTileModel>
                 items={people}
-                getKey={(p) => p.identity}
+                getKey={(p) => p.tileKey}
                 testId="voice-channel-view"
                 emptyLabel={callMode ? "Calling…" : "Connecting…"}
                 autoFocus={false}

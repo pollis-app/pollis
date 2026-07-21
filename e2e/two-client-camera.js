@@ -5,6 +5,12 @@
  * end: one client turns its webcam on in a live call, the OTHER client sees
  * the remote camera video tile render.
  *
+ * Then (#394) A ALSO starts a screen share, and B must see A as TWO tiles — a
+ * camera tile AND a screenshare tile — proving simultaneous camera+screen
+ * render as two tiles instead of the screenshare replacing (dropping) the
+ * camera. The Xvfb display + LiveKit this camera fixture already stands up also
+ * support X11 screenshare, so no extra fixture is needed.
+ *
  * Builds on the M3a call test (two-client-call.js): the signup + DM-establish +
  * place/accept-call choreography is reused verbatim (copied, matching how M3a
  * itself copied from two-client.js — these e2e flow helpers are duplicated per
@@ -261,10 +267,12 @@ async function waitForLocalCameraPreview(browser, tag, timeoutMs) {
 }
 
 // Remote CAMERA tiles visible on this client: `remote-video-tile-<trackKey>`
-// elements nested inside a participant tile (`voice-tile-voice-<id>` root,
-// class `vs-tile`), excluding the local-preview keys and excluding screenshare
-// feeds (a screenshare tile also carries a `voice-tile-stream-stats-` badge; a
-// camera face never does). Returns the owning tiles' identities + track keys.
+// elements nested inside a participant CAMERA tile — a `voice-tile-voice-<id>`
+// root (class `vs-tile`) whose key ends in `:cam` (a screenshare tile ends in
+// `:screen`). Camera and screenshare tiles are otherwise identical (both carry
+// the res·fps badge, both spotlightable), so the `:cam`/`:screen` suffix — not
+// the badge — is what tells them apart. Excludes the local-preview keys.
+// Returns the owning tiles' identities + track keys.
 async function remoteCameraTiles(browser) {
   return browser.execute((localKeys) => {
     const out = [];
@@ -274,9 +282,7 @@ async function remoteCameraTiles(browser) {
         continue;
       }
       const tileTestId = tile.getAttribute("data-testid") || "";
-      // A screenshare feed in this tile shows a res·fps badge; a camera doesn't.
-      const isScreenshare = !!tile.querySelector('[data-testid^="voice-tile-stream-stats-"]');
-      if (isScreenshare) {
+      if (!tileTestId.endsWith(":cam")) {
         continue;
       }
       for (const v of tile.querySelectorAll('[data-testid^="remote-video-tile-"]')) {
@@ -309,6 +315,75 @@ async function waitForRemoteCamera(browser, tag, timeoutMs) {
   throw new Error(
     `${tag}: the remote camera tile never appeared — A's camera track was not ` +
       "seen rendering on B (no non-local remote-video-tile inside a participant tile)."
+  );
+}
+
+// A: start a screen share ALONGSIDE the camera. Linux/X11 enumerates empty, so
+// the toggle starts capture directly with no picker (same as
+// two-client-screenshare.js). Bar pill first, stage tray as fallback.
+async function startScreenShare(browser, tag) {
+  if (await h.present(browser, "voice-bar-screenshare-button")) {
+    await h.clickTestId(browser, "voice-bar-screenshare-button");
+    return;
+  }
+  if (await h.present(browser, "voice-tray-screenshare")) {
+    await h.clickTestId(browser, "voice-tray-screenshare");
+    return;
+  }
+  throw new Error(`${tag}: no screenshare toggle (voice-bar-screenshare-button / voice-tray-screenshare) on screen`);
+}
+
+// Which KINDS of remote video tile this client currently renders. A remote tile
+// (`voice-tile-voice-<id>` root with a nested non-local `remote-video-tile-`) is
+// a camera when its key ends `:cam`, a screenshare when it ends `:screen`. #394:
+// a participant publishing both must show up as BOTH kinds — two distinct tiles.
+async function remoteVideoTileKinds(browser) {
+  return browser.execute((localKeys) => {
+    let camera = false;
+    let screenshare = false;
+    for (const tile of document.querySelectorAll('[data-testid^="voice-tile-voice-"]')) {
+      if (!tile.classList.contains("vs-tile")) {
+        continue;
+      }
+      const tileTestId = tile.getAttribute("data-testid") || "";
+      let hasRemoteVideo = false;
+      for (const v of tile.querySelectorAll('[data-testid^="remote-video-tile-"]')) {
+        const key = (v.getAttribute("data-testid") || "").slice("remote-video-tile-".length);
+        if (!localKeys.includes(key)) {
+          hasRemoteVideo = true;
+        }
+      }
+      if (!hasRemoteVideo) {
+        continue;
+      }
+      if (tileTestId.endsWith(":screen")) {
+        screenshare = true;
+      } else if (tileTestId.endsWith(":cam")) {
+        camera = true;
+      }
+    }
+    return { camera, screenshare };
+  }, [LOCAL_CAMERA_PREVIEW_KEY, LOCAL_PREVIEW_KEY]);
+}
+
+// B: poll until it renders BOTH a remote camera tile AND a remote screenshare
+// tile — i.e. A's simultaneous camera+screen surfaces as two tiles (#394). This
+// is the regression guard for the old bug where a screenshare REPLACED the
+// camera tile and the camera was silently dropped.
+async function waitForBothRemoteVideo(browser, tag, timeoutMs) {
+  const end = Date.now() + timeoutMs;
+  let last = { camera: false, screenshare: false };
+  while (Date.now() < end) {
+    last = await remoteVideoTileKinds(browser).catch(() => ({ camera: false, screenshare: false }));
+    if (last.camera && last.screenshare) {
+      return;
+    }
+    await h.sleep(2000);
+  }
+  throw new Error(
+    `${tag}: expected BOTH a remote camera tile and a screenshare tile for the ` +
+      `participant sharing both (got camera=${last.camera}, screenshare=${last.screenshare}). ` +
+      "A participant publishing camera + screen must render two tiles (#394)."
   );
 }
 
@@ -411,6 +486,16 @@ async function main() {
     await waitForRemoteCamera(B.browser, "B", REMOTE_CAMERA_TIMEOUT_MS);
     await shot(B.browser, "two-client-camera-B-sees-camera.png");
     console.log("[two-client-camera] SUCCESS: B sees A's remote camera tile");
+
+    // ── #394: A ALSO shares its screen — camera + screenshare must render as
+    // TWO tiles for A on B. Before the fix, the screenshare took over A's tile
+    // and the camera was dropped; now each source gets its own tile. ──
+    console.log("[two-client-camera] A: starting a screen share alongside the camera");
+    await startScreenShare(A.browser, "A");
+    console.log("[two-client-camera] B: waiting for BOTH A's camera tile AND screenshare tile…");
+    await waitForBothRemoteVideo(B.browser, "B", REMOTE_CAMERA_TIMEOUT_MS);
+    await shot(B.browser, "two-client-camera-B-sees-both.png");
+    console.log("[two-client-camera] SUCCESS: B sees A's camera AND screenshare as two tiles");
 
     // Turn the camera off + hang up (best-effort — the run already succeeded).
     await clickCameraToggle(A.browser, "A").catch(() => {});
