@@ -40,6 +40,7 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 - **From:** `src-tauri/` + `frontend/` + `pollis-core/` + `pollis-capture-*`
 - **Pipeline:** `.github/workflows/desktop-release.yml` — triggered by a `git tag v*` push (the whole ceremony: version stamp, signed macOS DMG/ZIP, Windows via Azure Trusted Signing, Linux .deb/.rpm/.AppImage + AUR, R2 upload, GitHub release, `latest.json` + Tauri updater manifests, and `apply-migrations` to prod Turso).
 - **Ships to:** `cdn.pollis.com/releases/<version>/…` + auto-update manifests. Install: the download cards / `curl … cdn.pollis.com/releases/install.sh | bash` on the site.
+- **R2 retention:** the release job keeps only the **latest 3** `releases/v*/` version directories on R2, pruning older ones **at release time** (count-based, not an R2 lifecycle/age rule — an age rule would delete the *current* release if releases went quiet). It never prunes the version it just published, the top-level `install.sh`/`latest.json`/`update-*.json`, the `releases/latest/` alias, or `cli/`. **GitHub Releases remain the permanent archive** of every version's installers, and the transparency log retains every binary hash — so R2 only needs a small rolling window (the updater/install.sh/AUR/website reference only the latest, plus a couple for rollback headroom). The no-JS website download links point at the stable `releases/latest/pollis-latest-*` alias (overwritten each release, never pruned).
 
 ### 2. CLI / terminal client (`pollis`)
 - **From:** `pollis-tui/` + `pollis-core/` (headless, no Tauri)

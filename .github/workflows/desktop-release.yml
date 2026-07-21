@@ -575,12 +575,25 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          # Use the actual artifact paths with wildcards
-          aws s3 cp $(find artifacts/pollis-macos -name "*.dmg" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg" --endpoint-url "${ENDPOINT}"
-          aws s3 cp $(find artifacts/pollis-windows -name "*.exe" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe" --endpoint-url "${ENDPOINT}"
-          aws s3 cp $(find artifacts/pollis-linux -name "*.AppImage" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
-          aws s3 cp $(find artifacts/pollis-linux -name "*.deb" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.deb" --endpoint-url "${ENDPOINT}"
-          aws s3 cp $(find artifacts/pollis-linux -name "*.rpm" | head -1) "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.rpm" --endpoint-url "${ENDPOINT}"
+          DMG=$(find artifacts/pollis-macos -name "*.dmg" | head -1)
+          EXE=$(find artifacts/pollis-windows -name "*.exe" | head -1)
+          APPIMAGE=$(find artifacts/pollis-linux -name "*.AppImage" | head -1)
+          DEB=$(find artifacts/pollis-linux -name "*.deb" | head -1)
+          RPM=$(find artifacts/pollis-linux -name "*.rpm" | head -1)
+          # Version-pinned, immutable copies — the canonical per-release artifacts.
+          aws s3 cp "$DMG"      "s3://pollis/releases/${VERSION}/pollis-${VERSION}-macos.dmg"      --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$EXE"      "s3://pollis/releases/${VERSION}/pollis-${VERSION}-windows.exe"    --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$APPIMAGE" "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.AppImage" --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$DEB"      "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.deb"       --endpoint-url "${ENDPOINT}"
+          aws s3 cp "$RPM"      "s3://pollis/releases/${VERSION}/pollis-${VERSION}-linux.rpm"       --endpoint-url "${ENDPOINT}"
+          # Stable "latest" aliases (overwritten every release, NEVER pruned) so the
+          # website's no-JS download links resolve to the current release forever,
+          # instead of a hard-coded version that the retention prune below would 404.
+          aws s3 cp "$DMG"      "s3://pollis/releases/latest/pollis-latest-macos.dmg"      --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
+          aws s3 cp "$EXE"      "s3://pollis/releases/latest/pollis-latest-windows.exe"    --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
+          aws s3 cp "$APPIMAGE" "s3://pollis/releases/latest/pollis-latest-linux.AppImage" --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
+          aws s3 cp "$DEB"      "s3://pollis/releases/latest/pollis-latest-linux.deb"       --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
+          aws s3 cp "$RPM"      "s3://pollis/releases/latest/pollis-latest-linux.rpm"       --endpoint-url "${ENDPOINT}" --cache-control "no-cache"
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
@@ -687,6 +700,62 @@ jobs:
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           echo "{\"version\":\"${VERSION}\",\"macos\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-macos.dmg\",\"windows\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-windows.exe\",\"linux\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.AppImage\",\"linux_deb\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.deb\",\"linux_rpm\":\"https://cdn.pollis.com/releases/${VERSION}/pollis-${VERSION}-linux.rpm\"}" > latest.json
           aws s3 cp latest.json "s3://pollis/releases/latest.json" --endpoint-url "${ENDPOINT}" --content-type "application/json" --cache-control "no-cache"
+        env:
+          AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
+          AWS_DEFAULT_REGION: auto
+
+      # Retention: keep only the newest KEEP version directories under
+      # `releases/`. This is COUNT-based and runs only when a release ships — a
+      # deliberate choice over an R2 lifecycle (age) rule, which would delete the
+      # CURRENT release if the project went a while between releases. GitHub
+      # Releases remain the permanent archive of every version's installers; R2
+      # keeps a small rolling window because the auto-updater / install.sh / AUR /
+      # website only ever reference the latest (plus a couple for rollback
+      # headroom). Best-effort: a prune failure must never fail an otherwise-good
+      # release, so errors are warnings, not fatal. Only `releases/v<semver>/`
+      # prefixes are candidates — top-level files (install.sh, latest.json,
+      # update-*.json), the `latest/` alias, and `cli/` never match.
+      - name: Prune old release versions from R2 (keep latest 3)
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          KEEP=3
+          CURRENT="${GITHUB_REF_NAME}"
+
+          # Version "directories" directly under releases/. `aws s3 ls` prints
+          # `  PRE v1.5.1/` for each common prefix; keep only version-tag-shaped
+          # ones (v + digit) so nothing else is ever a deletion candidate.
+          VERSIONS=()
+          while IFS= read -r v; do
+            [ -n "$v" ] && VERSIONS+=("$v")
+          done < <(
+            aws s3 ls "s3://pollis/releases/" --endpoint-url "${ENDPOINT}" \
+              | awk '/ PRE v[0-9]/ { print $2 }' \
+              | sed 's#/$##' \
+              | sort -Vr
+          )
+
+          echo "Found ${#VERSIONS[@]} version prefix(es): ${VERSIONS[*]:-<none>}"
+          if [ "${#VERSIONS[@]}" -le "$KEEP" ]; then
+            echo "At or below keep threshold ($KEEP) — nothing to prune."
+            exit 0
+          fi
+
+          # Keep the newest $KEEP, and ALWAYS keep the version we just published
+          # (latest.json / update-*.json point at it; also guards any version-sort
+          # edge case around prerelease tags).
+          KEEP_SET=$(printf '%s\n' "${VERSIONS[@]:0:$KEEP}" "$CURRENT" | sort -u)
+          echo "Keeping:"; echo "$KEEP_SET" | sed 's/^/  /'
+
+          for v in "${VERSIONS[@]}"; do
+            if ! grep -qxF "$v" <<< "$KEEP_SET"; then
+              echo "Pruning s3://pollis/releases/$v/"
+              aws s3 rm "s3://pollis/releases/$v/" --recursive --endpoint-url "${ENDPOINT}" \
+                || echo "::warning::failed to prune $v — leaving it in place"
+            fi
+          done
         env:
           AWS_ACCESS_KEY_ID: ${{ env.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ env.R2_SECRET_KEY }}
