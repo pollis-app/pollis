@@ -128,3 +128,56 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 | a DB migration in `pollis-core/src/db/migrations/` | applied by whichever runs first: a DS deploy (`delivery-deploy-{dev,prod}.yml`) or `desktop-release.yml` (`apply-migrations`) — both migrate-then-ship, idempotent; dev also auto-applies on merge via `db-migrate-dev.yml` |
 | `verifiable-log*` (published-tree behavior) | `transparency-publish.yml` (also runs daily) |
 | `verifiable-log-serve` (`pollis-verify` CLI) | `verifier-release.yml` |
+
+---
+
+## Post-merge release checklist — did anything downstream go stale?
+
+**Run this after every merge that lands a real feature or fix — not just the ones
+you plan to deploy.** The failure mode this prevents: you fix something in a
+shared crate, ship *one* consumer (say the desktop app), and leave the DS, the
+CLI, the verifier, or the transparency log running the old code for days without
+noticing (this is literally what happened in #515 — the DS silently ran stale for
+11 days). You do **not** rebuild everything on every merge. You **do** consciously
+walk the outputs, decide deploy-or-not for each, and — for the ones you deploy —
+**confirm the new build is actually live**, not merely that a workflow was fired.
+
+### Step 1 — map the change to its blast radius
+
+Most merges touch a **shared crate**, and the fan-out is wider than the directory
+you edited. Use this, not intuition:
+
+| You touched… | Consumers that can now be stale |
+|---|---|
+| `pollis-core/` | **Desktop** (`src-tauri`+`frontend`), **CLI** (`pollis-tui`), **Mobile** (uniffi). If you changed a **wire contract** — canonical signing, `livekit_jwt`, `r2` presign, DS request/response shapes, MLS envelope encoding — **also the DS**: `pollis-delivery` re-implements that scheme **by hand** and does *not* compile against `pollis-core`, so the compiler will **not** catch drift. Mirror the change into `pollis-delivery` and redeploy it. |
+| `verifiable-log*` | `pollis-core` depends on `verifiable-log-serve`, so the change ripples into **every client** (desktop/CLI/mobile) **and** the **`pollis-verify` CLI** (`verifier-release.yml`) **and** the published **transparency tree** (`transparency-publish.yml`). |
+| `pollis-delivery/` | **DS** only (dev → verify → prod). |
+| `frontend/` / `src-tauri/` | **Desktop** only. |
+| `pollis-tui/` | **CLI** only. |
+| a DB migration in `pollis-core/src/db/migrations/` | Applied by whichever prod deploy runs first (a DS deploy **or** `desktop-release.yml`) — migrate-then-ship, idempotent. If the merge ships **neither** a client release nor a DS deploy, prod has **not** run the migration yet; note it as pending. Dev auto-applies via `db-migrate-dev.yml`. |
+| `website/` / `livekit/` | **Website** / **LiveKit stack** only. |
+
+### Step 2 — for each output in the blast radius, decide and record
+
+For every affected output below, pick one: **`— redeploy` / `— defer (reason)` / `— N/A`**. Deferring is fine; *silently forgetting* is the bug. Record the decision in the PR description or merge comment so the next person can see nothing was dropped.
+
+- [ ] **Desktop app** — user-visible change? tag a new `v*` → `desktop-release.yml` (also applies pending migrations).
+- [ ] **CLI (`pollis`)** — behavior a terminal user sees? `cli-release.yml` (`workflow_dispatch`). Easy to forget after a `pollis-core` change.
+- [ ] **DS** — DS code *or* a mirrored wire-contract change? `delivery-deploy-dev.yml` → verify → `delivery-deploy-prod.yml`.
+- [ ] **Mobile** — in development; not a released output yet, but note if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up (`mobile-core-check.yml` gates gate-rot).
+- [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? `verifier-release.yml` (`pollis-verify-v*` tag).
+- [ ] **Transparency log** — tree/STH behavior changed? it rebuilds daily, but force `transparency-publish.yml` if correctness depends on it now.
+- [ ] **DB migration** — pending on prod until a client release or DS deploy runs? Note it, or trigger one.
+- [ ] **Website / LiveKit** — only if you touched `website/` / `livekit/`.
+
+### Step 3 — verify the deploy actually landed (don't trust "workflow started")
+
+A green workflow is **not** proof the new bits are serving traffic. For anything you did deploy:
+
+- **DS** — poll `/version` for the merged git SHA (the #509 tripwire the deploy already does; check it). `/health` alone is not enough.
+- **Desktop / CLI** — the new version appears under `cdn.pollis.com/releases/<version>/…` and in the `latest.json` / `cli/latest.json` manifest.
+- **Website** — the change is live on **pollis.com** (Cloudflare Pages deploy is a manual button; `main` being green ≠ deployed).
+- **Transparency log** — `verify.pollis.com` STH advanced; `pollis-verify` still passes.
+- **Migration** — confirm it's recorded in prod `schema_migrations` after the deploy that was supposed to apply it.
+
+If a target is deferred, it is now **known-stale** — say so, and make sure the eventual deploy that ships it is on someone's radar.

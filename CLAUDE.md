@@ -44,6 +44,7 @@ Secrets: Doppler → GH Actions; locally `.env.development` (scripts source it a
 - New static pages register in three places: `frontend/src/router.tsx`, `PAGE_RESULTS` in `SearchPanel.tsx`, and the Sidebar nav. (Parameterized routes are exempt.)
 - No neon/glow effects — solid borders and backgrounds only. No periodic polling (`setInterval` keepalives) — event-driven or `with_retry`.
 - For design decisions, reference how Slack/Discord/Linear solve the same problem — don't reinvent solved problems.
+- **After any merge that lands a real feature or fix, run the post-merge release checklist** (`docs/deployments.md` → "Post-merge release checklist"): walk the change's blast radius (shared crates like `pollis-core`/`verifiable-log*` fan out to desktop, CLI, DS, verifier, transparency log), decide redeploy/defer/N-A for each downstream output, and for anything deployed **confirm the new build is live** (e.g. DS `/version` SHA), not merely that a workflow fired. Don't rebuild everything every time — but never leave a downstream target silently stale.
 
 ## Style
 
