@@ -209,6 +209,11 @@ enum ExternalJoinResult {
     /// Another member already committed at the target epoch; our freshly
     /// built local branch is doomed and must be discarded before retrying.
     LostRace,
+    /// A Welcome for this device became available for this conversation — the
+    /// canonical join path. We stood down without building/submitting anything so
+    /// we don't race our own inbound Welcome (both do "delete stale group →
+    /// rejoin"). See the DM-accept convergence note in [`external_join_attempt`].
+    DeferredToWelcome,
 }
 
 /// Body of [`external_join_group`]. Assumes the caller already holds the
@@ -228,6 +233,10 @@ pub(crate) async fn external_join_group_inner(
     for attempt in 0..MAX_JOIN_ATTEMPTS {
         match external_join_attempt(state, conversation_id, user_id).await? {
             ExternalJoinResult::Joined => return Ok(()),
+            // A Welcome became available mid-recovery — defer to it (the join will
+            // happen via `apply_welcome`). Success, not an error: the group WILL be
+            // joined, just via the canonical Welcome path.
+            ExternalJoinResult::DeferredToWelcome => return Ok(()),
             ExternalJoinResult::LostRace => {
                 eprintln!(
                     "[mls] external_join_group: lost epoch race for {conversation_id} \
@@ -285,6 +294,29 @@ async fn external_join_attempt(
             }
         }
     };
+
+    // GroupInfo is present — so, because the DS writes the commit, its GroupInfo,
+    // AND the add's Welcomes in ONE transaction (`pollis_delivery::commit::
+    // submit_commit`, an IMMEDIATE tx), any Welcome reconcile produced for THIS
+    // device is durably present too. Prefer that Welcome and stand down: external-
+    // joining now would race our own inbound Welcome — both do "delete stale local
+    // group → (re)join" — and can clobber the freshly-joined group, stranding us
+    // (`no GroupInfo stored — cannot external-join`, the DM-accept convergence race).
+    //
+    // This is the load-bearing close of that race. The `create_dm` sequence makes a
+    // recipient's membership row (and thus this recovery path) visible BEFORE
+    // reconcile produces the Welcome+GroupInfo, so the caller's pre-check can run
+    // in that gap and miss the Welcome; but external-join can only ever SUCCEED
+    // once GroupInfo exists, and by the atomic write that is exactly when the
+    // Welcome exists — so re-checking HERE catches it deterministically. A genuine
+    // Secret-Key recovery / dropped-Welcome case has no such row and proceeds.
+    if has_pending_welcome(state, conversation_id, user_id).await {
+        eprintln!(
+            "[mls] external_join: a Welcome for {conversation_id} is available — deferring to it \
+             instead of external-joining (avoids racing our own Welcome)"
+        );
+        return Ok(ExternalJoinResult::DeferredToWelcome);
+    }
 
     // 2. Run the external commit inside the local_db sync scope. Capture both
     //    the commit and its resulting-epoch GroupInfo so they land atomically
@@ -714,6 +746,50 @@ async fn local_user_is_member(state: &Arc<AppState>, mls_group_id: &str, user_id
     }
 }
 
+/// Whether an undelivered MLS `Welcome` for THIS device targets `mls_group_id`.
+///
+/// When true, the Welcome is the canonical join path and the external-join
+/// *recovery* must stand down: firing external-join in parallel makes this device
+/// race its own inbound Welcome — both do "delete stale local group → (re)join" —
+/// which can clobber the freshly-joined group and strand the member
+/// (`no GroupInfo stored — cannot external-join`, the DM-accept convergence race).
+///
+/// Self-healing: `apply_welcome` (via `poll_mls_welcomes_inner`) marks the row
+/// `delivered = 1` even when apply FAILS, so this gate lifts on a later pass once
+/// the Welcome is genuinely consumed — a truly orphaned Welcome then hands off to
+/// external-join rather than deadlocking recovery forever.
+///
+/// Reads the log DB (where `mls_welcome` lives post-#420), mirroring
+/// `poll_mls_welcomes_inner`'s selection exactly (recipient + this device, or a
+/// legacy device-agnostic row). Fails OPEN (returns `false` ⇒ "no Welcome, don't
+/// suppress") on a missing device context or any read error: a transient inability
+/// to see the Welcome must never permanently block recovery — external-join, which
+/// reads the same log DB for GroupInfo, is the pre-existing fallback and simply
+/// no-ops itself if the GroupInfo isn't visible either.
+async fn has_pending_welcome(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) -> bool {
+    let device_id = match state.device_id.lock().await.clone() {
+        Some(d) => d,
+        None => return false,
+    };
+    let conn = match state.log_db.conn().await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    match conn
+        .query(
+            "SELECT 1 FROM mls_welcome \
+             WHERE conversation_id = ?1 AND recipient_id = ?2 AND delivered = 0 \
+             AND (recipient_device_id = ?3 OR recipient_device_id IS NULL) \
+             LIMIT 1",
+            libsql::params![mls_group_id, user_id, device_id],
+        )
+        .await
+    {
+        Ok(mut rows) => matches!(rows.next().await, Ok(Some(_))),
+        Err(_) => false,
+    }
+}
+
 /// Both cooperative gates on the external-join *recovery* paths: this device is
 /// still registered (not revoked) AND its user is still a current member of the
 /// group. A `false` from either means "do not rebuild/rejoin". Logs the specific
@@ -810,18 +886,43 @@ async fn process_pending_commits_locked_impl(
     let initial_epoch = match has_group {
         Some(epoch) => epoch,
         None => {
-            // No local group — external-join to create one, UNLESS this device
-            // has been revoked (its `user_device` row is gone) OR its user is no
-            // longer a group member (removed from `group_member`). Either must
-            // not climb back in: a revoked/removed member's external-join squats
-            // an epoch and, under the UNIQUE(conversation_id, epoch) constraint,
-            // would wedge the group — and, absent a DS membership gate on
-            // `/v1/commits`, a removed member would otherwise rejoin the tree and
-            // decrypt post-removal traffic (membership leak, fuzzer finding #2).
-            // Lock already held by the wrapper, so call the unlocked inner variant.
-            if may_rejoin_via_external_join(state, mls_group_id, user_id).await {
-                if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
-                    eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
+            // No local group. Two ways in — the inbound Welcome (apply_welcome)
+            // and external-join *recovery* — and they must not both run: both do
+            // "delete stale local group → (re)join", so in parallel the device
+            // races its own Welcome and can clobber the freshly-joined group,
+            // stranding it (`no GroupInfo stored — cannot external-join`, the
+            // DM-accept convergence race). Arbitrate through the pure I6 gate
+            // (`invariants::join_recovery`, Kani-proved to admit ExternalJoin ONLY
+            // when no Welcome is pending):
+            //   * a queued Welcome wins — defer to it (it self-heals into
+            //     external-join on a later pass if it never applies);
+            //   * otherwise external-join, UNLESS this device was revoked (its
+            //     `user_device` row is gone) OR its user was removed from the group
+            //     — either must not climb back in (a revoked/removed member's
+            //     external-join squats an epoch and, under
+            //     UNIQUE(conversation_id, epoch), wedges the group; absent a DS
+            //     membership gate on `/v1/commits` a removed member would also
+            //     rejoin the tree and decrypt post-removal traffic — membership
+            //     leak, fuzzer finding #2).
+            let welcome_pending = has_pending_welcome(state, mls_group_id, user_id).await;
+            let may_rejoin = may_rejoin_via_external_join(state, mls_group_id, user_id).await;
+            match super::invariants::join_recovery(welcome_pending, may_rejoin) {
+                super::invariants::JoinRecovery::AwaitWelcome => {
+                    eprintln!(
+                        "[mls] process_pending_commits: no local group for {mls_group_id} but an \
+                         undelivered Welcome targets this device — deferring to the Welcome path \
+                         (not external-joining) to avoid racing our own Welcome"
+                    );
+                }
+                super::invariants::JoinRecovery::ExternalJoin => {
+                    // Lock already held by the wrapper, so call the unlocked inner variant.
+                    if let Err(e) = external_join_group_inner(state, mls_group_id, user_id).await {
+                        eprintln!("[mls] process_pending_commits: no local group for {mls_group_id}, external-join failed: {e}");
+                    }
+                }
+                super::invariants::JoinRecovery::StayOut => {
+                    // `may_rejoin_via_external_join` already logged the specific
+                    // revoked/removed reason.
                 }
             }
             return Ok(());

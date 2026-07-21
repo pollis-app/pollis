@@ -8,7 +8,7 @@
 //! what a status poll means, list-selection movement — live here so they are
 //! unit-tested in isolation and the screens stay correct-by-construction.
 
-use pollis_tui::enroll::{EnrollmentStatus, PendingEnrollmentRequest};
+use crate::enroll::{EnrollmentStatus, PendingEnrollmentRequest};
 
 /// Which onboarding flow the shared [`crate::app::Screen::SetPin`] screen finishes
 /// into. First-device signup and a second device diverge only in the SetPin tail

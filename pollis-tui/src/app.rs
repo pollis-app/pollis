@@ -11,9 +11,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pollis_core::commands::auth::UserProfile;
 use pollis_core::state::AppState;
 
-use pollis_tui::auth::{self, Boot};
-use pollis_tui::enroll::{self, EnrollmentHandle};
-use pollis_tui::{data, send, sync};
+use crate::auth::{self, Boot};
+use crate::enroll::{self, EnrollmentHandle};
+use crate::{data, send, sync};
 
 use crate::enroll_flow::{poll_outcome, ApprovalState, EnrollChoice, PinFlow, PollOutcome};
 use crate::home::{
@@ -156,10 +156,23 @@ pub struct App {
     /// Last-rendered height (in rows) of the message pane, so the key handler can
     /// scroll by whole pages. Updated by the renderer via [`Self::set_msg_height`].
     msg_height: usize,
+    /// Cadence the background sync loop is spawned at on [`Action::EnterHome`].
+    /// Defaults to [`SYNC_CADENCE`] (the 4s production value); the e2e driver
+    /// overrides it via [`Self::with_sync_cadence`] so a headless test doesn't
+    /// wait seconds per round while still exercising the real spawn_loop →
+    /// SyncSnapshot → [`Action::Refresh`] path.
+    sync_cadence: Duration,
 }
 
 impl App {
+    /// Production constructor: the background sync loop runs at [`SYNC_CADENCE`].
     pub fn new(state: Arc<AppState>) -> Self {
+        Self::with_sync_cadence(state, SYNC_CADENCE)
+    }
+
+    /// Like [`Self::new`] but with an injectable background-sync cadence. Used
+    /// only by the e2e driver — the binary always uses [`Self::new`] (4s).
+    pub fn with_sync_cadence(state: Arc<AppState>, sync_cadence: Duration) -> Self {
         Self {
             state,
             screen: Screen::Booting,
@@ -178,12 +191,21 @@ impl App {
             sync_loop: None,
             last_sync_round: 0,
             msg_height: 0,
+            sync_cadence,
         }
     }
 
     /// The signed-in user's display name, if any (used by the header bar).
     pub fn identity(&self) -> Option<&str> {
         self.profile.as_ref().map(|p| p.username.as_str())
+    }
+
+    /// The signed-in user's id, once a profile has been established (after
+    /// verify-otp). Read-only accessor exposed for the e2e driver, which needs
+    /// it to establish DM membership through the core command layer before
+    /// exercising send/receive through the real UI.
+    pub fn signed_in_user_id(&self) -> Option<&str> {
+        self.profile.as_ref().map(|p| p.id.as_str())
     }
 
     /// Record the message pane's rendered height so page-scroll keys know how far
@@ -776,7 +798,7 @@ impl App {
                 if self.sync_loop.is_none() {
                     let user_id = self.user_id();
                     self.sync_loop =
-                        Some(sync::spawn_loop(self.state.clone(), user_id, SYNC_CADENCE));
+                        Some(sync::spawn_loop(self.state.clone(), user_id, self.sync_cadence));
                 }
                 // Load the tree once immediately (user-initiated, so a visible
                 // "working…" is fine) so the sidebar isn't empty while the first

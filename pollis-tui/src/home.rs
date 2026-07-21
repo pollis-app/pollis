@@ -13,7 +13,7 @@ use std::collections::HashSet;
 
 use pollis_core::commands::messages::{ChannelMessage, MessageCursor};
 
-use pollis_tui::data::ConversationTree;
+use crate::data::ConversationTree;
 
 /// How close to the top of the loaded buffer the user must scroll before we
 /// prefetch the next older page — keeps history loading a beat ahead of the eye.

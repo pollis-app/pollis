@@ -25,6 +25,13 @@
 
 #![allow(dead_code)]
 
+mod driver;
+// Each `*_smoke.rs` binary includes this `common` module but only `ui_e2e` uses
+// the driver, so the re-export is dead in the others — allow it (mirrors the
+// module-wide `dead_code` allowance for the same reason).
+#[allow(unused_imports)]
+pub use driver::Driver;
+
 use std::sync::Arc;
 
 use axum::extract::State;

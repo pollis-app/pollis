@@ -41,6 +41,55 @@ pub fn may_rejoin(registered: bool, is_member: bool) -> bool {
     registered && is_member
 }
 
+// ─── I6: Welcome-vs-external-join recovery arbitration ────────────────────────
+
+/// What a device with NO local MLS group does when it finds pending commits for a
+/// conversation it cannot yet open.
+///
+/// The recipient of a freshly-created DM has TWO ways into the group: the inbound
+/// Welcome (`apply_welcome`) and, once the creator publishes GroupInfo, the
+/// external-join *recovery* path. Both do "delete stale local group → (re)join",
+/// so running them concurrently makes the device race its own Welcome and can
+/// clobber the freshly-joined group — stranding the member with
+/// `no GroupInfo stored — cannot external-join`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum JoinRecovery {
+    /// An undelivered Welcome for this device targets this conversation — defer to
+    /// the Welcome path; do NOT external-join (that would race our own Welcome).
+    AwaitWelcome,
+    /// No Welcome available and the device is a current, registered member —
+    /// external-join is the genuine recovery (Secret-Key recovery / dropped Welcome).
+    ExternalJoin,
+    /// No Welcome and the device may not rejoin (revoked or removed) — stay out.
+    StayOut,
+}
+
+/// Decide the no-local-group recovery action from the two guards the runtime
+/// evaluates: `welcome_pending` (an undelivered Welcome targets this device for
+/// this conversation) and `may_rejoin` (the I5 gate: registered ∧ member).
+///
+/// **Welcome-first.** Whenever a Welcome is pending we defer to it, REGARDLESS of
+/// the rejoin gate — the Welcome is the canonical, cheaper join, and
+/// `apply_welcome` marks the row delivered even on failure, so a stuck Welcome
+/// self-heals into the external-join path on a later pass (once `welcome_pending`
+/// is false). Only when no Welcome is available does the I5 gate decide
+/// external-join vs stay-out.
+///
+/// The Kani harness proves the load-bearing property: **`ExternalJoin` ⟹
+/// `!welcome_pending`** — a device with a pending Welcome NEVER external-joins, so
+/// the two concurrent join mechanisms can never both run for one fresh membership
+/// (the DM-accept convergence race). This is the pure core of the gate in
+/// `group_state::process_pending_commits_locked_impl`.
+pub fn join_recovery(welcome_pending: bool, may_rejoin: bool) -> JoinRecovery {
+    if welcome_pending {
+        JoinRecovery::AwaitWelcome
+    } else if may_rejoin {
+        JoinRecovery::ExternalJoin
+    } else {
+        JoinRecovery::StayOut
+    }
+}
+
 // ─── I2: own-commit canonicalization (#411) ──────────────────────────────────
 
 /// The outcome of submitting a commit through the delivery seam, as the pure
@@ -223,6 +272,61 @@ mod proofs {
         }
     }
 
+    // ── I6: Welcome-vs-external-join recovery arbitration ─────────────────────
+
+    /// I6: a device with a pending Welcome NEVER external-joins — the exhaustive
+    /// 2-bit truth table. This is what makes the DM-accept dual-path race
+    /// unrepresentable: `ExternalJoin` is admitted ONLY when no Welcome is
+    /// pending, so the Welcome-apply and external-join recovery can never both
+    /// fire for one fresh membership.
+    #[kani::proof]
+    fn i6_welcome_first_never_double_joins() {
+        let welcome_pending: bool = kani::any();
+        let may_rejoin: bool = kani::any();
+
+        match join_recovery(welcome_pending, may_rejoin) {
+            // The headline: never external-join while a Welcome is queued.
+            JoinRecovery::ExternalJoin => {
+                assert!(!welcome_pending);
+                assert!(may_rejoin);
+            }
+            // Deferring to the Welcome happens exactly when one is pending.
+            JoinRecovery::AwaitWelcome => assert!(welcome_pending),
+            // Stay-out is exactly "no Welcome and not allowed to rejoin".
+            JoinRecovery::StayOut => {
+                assert!(!welcome_pending);
+                assert!(!may_rejoin);
+            }
+        }
+    }
+
+    /// Negative harness: a broken arbiter that external-joins whenever the rejoin
+    /// gate passes, IGNORING a pending Welcome — the exact dual-path that strands
+    /// a DM recipient. `should_panic`: Kani must find the double-join the real
+    /// Welcome-first guard prevents.
+    fn join_recovery_mutant(welcome_pending: bool, may_rejoin: bool) -> JoinRecovery {
+        // BUG: checks the rejoin gate BEFORE the Welcome, so a device with a
+        // pending Welcome still external-joins and races its own Welcome.
+        if may_rejoin {
+            JoinRecovery::ExternalJoin
+        } else if welcome_pending {
+            JoinRecovery::AwaitWelcome
+        } else {
+            JoinRecovery::StayOut
+        }
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i6_mutant_refuted() {
+        let welcome_pending: bool = kani::any();
+        let may_rejoin: bool = kani::any();
+
+        if let JoinRecovery::ExternalJoin = join_recovery_mutant(welcome_pending, may_rejoin) {
+            assert!(!welcome_pending);
+        }
+    }
+
     // ── I2: own-commit canonicalization (#411) ───────────────────────────────
     //
     // Small fixed-size byte arrays (N = 3, bytes 0..=1) + a symbolic Some/None
@@ -360,6 +464,50 @@ mod proofs {
 
         if let ReplayStep::Apply = classify_mutant(current, next) {
             assert!(next == Some(current));
+        }
+    }
+}
+
+// ─── cargo-test unit coverage ─────────────────────────────────────────────────
+//
+// The Kani harnesses above prove these predicates exhaustively, but Kani is not
+// run by `cargo test`. These plain tests pin the load-bearing decisions under the
+// normal test suite too, so a regression is caught even without a Kani pass.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// I6, the DM-accept convergence invariant: a device with a pending Welcome
+    /// ALWAYS defers to it and NEVER external-joins, regardless of the rejoin
+    /// gate. This is the chokepoint that stops the recipient of a fresh DM from
+    /// racing its own inbound Welcome against external-join recovery (the two
+    /// concurrent "delete stale group → rejoin" paths that stranded the accept).
+    #[test]
+    fn join_recovery_welcome_first_never_double_joins() {
+        // A pending Welcome always wins — even when the device is a full member
+        // that COULD external-join. This is the exact state a fresh DM recipient
+        // is in, and the one that used to strand it.
+        assert_eq!(join_recovery(true, true), JoinRecovery::AwaitWelcome);
+        assert_eq!(join_recovery(true, false), JoinRecovery::AwaitWelcome);
+
+        // No Welcome available: the I5 gate decides. A current member recovers via
+        // external-join (Secret-Key recovery / genuinely dropped Welcome)...
+        assert_eq!(join_recovery(false, true), JoinRecovery::ExternalJoin);
+        // ...and a revoked/removed device stays out (never climbs back in).
+        assert_eq!(join_recovery(false, false), JoinRecovery::StayOut);
+
+        // The headline property over the whole 2-bit space: ExternalJoin ⟹ no
+        // Welcome pending. If this ever holds with a Welcome pending, the dual-path
+        // race is back.
+        for welcome_pending in [false, true] {
+            for may_rejoin in [false, true] {
+                if join_recovery(welcome_pending, may_rejoin) == JoinRecovery::ExternalJoin {
+                    assert!(
+                        !welcome_pending,
+                        "external-join must never run while a Welcome is pending"
+                    );
+                }
+            }
         }
     }
 }

@@ -2,13 +2,11 @@
 //! `pollis-core` with no Tauri, no IPC and no WebView. See
 //! `docs/pollis-tui-spec.md` and `.codesight/wiki/pollis-tui.md`.
 
-// `auth`, `data` and `sync` live in the library crate (`pollis_tui`) so the
-// in-box smoke tests can link them; the binary reaches `auth` through the lib.
-mod app;
-mod enroll_flow;
-mod home;
+// The UI state machine (`app`/`ui`/`home`/`enroll_flow`) and the data/sync/auth
+// core all live in the library crate (`pollis_tui`) so the in-box smoke + e2e
+// tests can link them; the binary reaches them through the lib. Only `terminal`
+// (the real crossterm raw-mode / alt-screen guard) stays binary-only here.
 mod terminal;
-mod ui;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,8 +17,9 @@ use pollis_core::config::Config;
 use pollis_core::state::AppState;
 use tokio::sync::mpsc;
 
-use crate::app::{App, Action, Screen};
 use crate::terminal::TerminalGuard;
+use pollis_tui::app::{Action, App, Screen};
+use pollis_tui::ui;
 
 /// How often the UI re-reads local state to surface what the background sync
 /// loop wrote. Deliberately shorter than the sync cadence so a synced message
