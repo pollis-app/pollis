@@ -1,4 +1,4 @@
-//! The shared relay wire protocol + the device-signature handshake.
+//! The shared relay wire protocol + the device-certificate handshake.
 //!
 //! # Framing
 //!
@@ -13,9 +13,14 @@
 //! │ u8   msg_type           (== MSG_HANDSHAKE)                 │
 //! │ u16  user_id_len | user_id bytes            (UTF-8)        │
 //! │ u16  device_id_len | device_id bytes        (UTF-8)       │
+//! │ [32] device_signing_pub (Ed25519, PRESENTED not resolved) │
+//! │ [32] account_id_pub     (Ed25519 account identity key)    │
+//! │ u32  identity_version   (big-endian)                      │
+//! │ u64  issued_at          (big-endian, unix seconds)        │
+//! │ [64] device_cert        (account key's sig over the chain)│
 //! │ i64  timestamp          (unix seconds, big-endian)        │
 //! │ u8   nonce_len (== 32) | nonce bytes                      │
-//! │ [64] signature          (Ed25519, over the canonical msg) │
+//! │ [64] signature          (device key, over the canonical)  │
 //! └────────────────────────────────────────────────────────────┘
 //! ┌──────────────── Connect (client → relay) ──────────────────┐
 //! │ u8   version            (== PROTOCOL_VERSION)              │
@@ -37,33 +42,45 @@
 //! rejection the relay closes the stream. After an `Ok`, the stream becomes the
 //! raw byte pipe to the target.
 //!
-//! # Handshake auth
+//! # Handshake auth — OFFLINE device-certificate chain (design §9.4, §11.1)
 //!
-//! Mirrors `pollis-delivery/src/auth.rs`: the client signs with its Ed25519
-//! device private key and the relay verifies against the registered public key.
-//! The canonical signed message (UTF-8, `\n` = 0x0A, no trailing newline) is the
-//! METHOD-less relay variant:
+//! Unlike Slice 1 (which resolved the device key from an in-memory table), the
+//! client now **presents its full identity chain** and the relay verifies it with
+//! **zero I/O** — no Turso query, no network call per connection. That is the
+//! mechanism that keeps the relay tier out of the metadata plane (§11.1). Two
+//! independent checks, both must pass:
 //!
-//! ```text
-//! pollis-relay-v1\n{user_id}\n{device_id}\n{timestamp}\n{sha256_hex(nonce)}
-//! ```
+//! 1. **Possession.** The handshake `signature` verifies, under the presented
+//!    `device_signing_pub`, over the canonical message (skew-bounded, nonce'd):
+//!    ```text
+//!    pollis-relay-v2\n{user_id}\n{device_id}\n{timestamp}\n{sha256_hex(nonce)}
+//!    ```
+//!    ⇒ the connecting party holds that device signing private key.
+//! 2. **Membership.** [`pollis_device_cert::verify_device_cert`] confirms
+//!    `device_cert` is the account key `account_id_pub`'s signature binding
+//!    `device_signing_pub` to this `device_id` at `identity_version` / `issued_at`
+//!    ⇒ that device key was certified by the account.
 //!
-//! For this slice the relay accepts any well-formed device signature whose
-//! self-consistency verifies against the public key supplied by a [`KeyResolver`]
-//! (an in-memory resolver backs the tests; a Turso-backed one is a later slice).
+//! Together: "a cryptographically self-consistent Pollis device." v0 does NOT
+//! anchor `account_id_pub` to the account-key transparency log (that needs a
+//! fetch, which would re-introduce network coupling) — see `docs/relay-operations.md`.
+//! Because destinations are allowlisted to first-party hosts only (§1.2), "a
+//! well-formed device, rate-limited" is sufficient anti-abuse for v0.
 
 use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-/// Wire protocol version. Bumped only on an incompatible framing change.
-pub const PROTOCOL_VERSION: u8 = 1;
+/// Wire protocol version. Bumped from 1 → 2 for the cert-chain handshake (Slice
+/// 2a): the frame now carries the presented device key + the account cert chain.
+pub const PROTOCOL_VERSION: u8 = 2;
 
-/// ALPN for the outer relay-hop QUIC transport.
-pub const ALPN: &[u8] = b"pollis-relay/1";
+/// ALPN for the outer relay-hop QUIC transport. Bumped alongside
+/// [`PROTOCOL_VERSION`] so a v1 client cannot silently half-speak to a v2 relay.
+pub const ALPN: &[u8] = b"pollis-relay/2";
 
 /// Domain-separation prefix for the handshake canonical message.
-pub const HANDSHAKE_DOMAIN: &str = "pollis-relay-v1";
+pub const HANDSHAKE_DOMAIN: &str = "pollis-relay-v2";
 
 /// Accepted clock skew, in seconds, on either side of the relay clock. Matches
 /// the DS replay window (`pollis-delivery` `REPLAY_WINDOW_SECS`).
@@ -99,12 +116,16 @@ pub enum ProtoError {
 pub enum RejectReason {
     /// Target host is not in the relay's static allowlist (design §1.2).
     NotAllowed,
-    /// Missing / forged / expired device signature.
+    /// Missing / forged / expired device signature, or a cert chain that does
+    /// not bind the presented device key to the claimed account.
     Unauthorized,
     /// Allowed and authorized, but the relay could not reach the target.
     DialFailed,
     /// Frame was structurally invalid.
     BadRequest,
+    /// The client tripped a per-account or per-source-IP rate/concurrency limit
+    /// (design §11.5). Returned cleanly rather than dropping the stream.
+    RateLimited,
     /// Relay-side failure.
     Internal,
 }
@@ -116,6 +137,7 @@ impl RejectReason {
             RejectReason::Unauthorized => 2,
             RejectReason::DialFailed => 3,
             RejectReason::BadRequest => 4,
+            RejectReason::RateLimited => 6,
             RejectReason::Internal => 5,
         }
     }
@@ -126,16 +148,70 @@ impl RejectReason {
             2 => RejectReason::Unauthorized,
             3 => RejectReason::DialFailed,
             4 => RejectReason::BadRequest,
+            6 => RejectReason::RateLimited,
             _ => RejectReason::Internal,
         }
     }
 }
 
-/// The device-signature handshake frame.
+/// The device-certificate material a client presents alongside the handshake
+/// signature — the offline chain the relay verifies (§9.4). Mirrors the columns
+/// a device stores after `ensure_device_cert` (see
+/// `pollis-core/src/commands/mls/device.rs`).
+#[derive(Debug, Clone)]
+pub struct DeviceCertMaterial {
+    /// The user's Ed25519 account identity public key (32 bytes).
+    pub account_id_pub: [u8; 32],
+    /// The 64-byte cert: the account key's signature binding this device's
+    /// signing key to `account_id_pub`.
+    pub device_cert: [u8; 64],
+    /// Account-key version the cert was minted under.
+    pub identity_version: u32,
+    /// Unix seconds the cert was issued.
+    pub issued_at: u64,
+}
+
+impl DeviceCertMaterial {
+    /// Mint a cert chain by signing the canonical payload with a known account
+    /// key. This is the "minimal seam" (task §2) that lets a holder of the
+    /// account signing key — chiefly tests injecting a known account identity —
+    /// produce a chain the relay will accept. Production certs are minted by
+    /// `pollis-core::commands::account_identity::sign_device_cert`, which signs
+    /// the SAME shared payload.
+    pub fn mint(
+        account: &SigningKey,
+        device_id: &str,
+        device_signing_pub: &[u8; 32],
+        identity_version: u32,
+        issued_at: u64,
+    ) -> DeviceCertMaterial {
+        let payload = pollis_device_cert::device_cert_signed_payload(
+            device_id,
+            device_signing_pub,
+            identity_version,
+            issued_at,
+        )
+        .expect("device_id / signing pub within cert length bounds");
+        let sig: Signature = account.sign(&payload);
+        DeviceCertMaterial {
+            account_id_pub: account.verifying_key().to_bytes(),
+            device_cert: sig.to_bytes(),
+            identity_version,
+            issued_at,
+        }
+    }
+}
+
+/// The device-certificate handshake frame.
 #[derive(Debug, Clone)]
 pub struct Handshake {
     pub user_id: String,
     pub device_id: String,
+    /// The device's Ed25519 signing public key, PRESENTED in-band. The handshake
+    /// `signature` is verified against it; the `device_cert` chains it to the
+    /// account. (In Pollis this is `user_device.mls_signature_pub`.)
+    pub device_signing_pub: [u8; 32],
+    pub cert: DeviceCertMaterial,
     pub timestamp: i64,
     pub nonce: [u8; NONCE_LEN],
     pub signature: [u8; 64],
@@ -149,32 +225,12 @@ pub struct Connect {
     pub port: u16,
 }
 
-/// Look up the registered Ed25519 public key for a device. A Turso-backed
-/// resolver is a later slice; [`InMemoryKeyResolver`] backs the tests.
-pub trait KeyResolver: Send + Sync {
-    fn resolve(&self, user_id: &str, device_id: &str) -> Option<VerifyingKey>;
-}
-
-/// In-memory `(user_id, device_id) → VerifyingKey` map.
-#[derive(Debug, Default, Clone)]
-pub struct InMemoryKeyResolver {
-    keys: std::collections::HashMap<(String, String), VerifyingKey>,
-}
-
-impl InMemoryKeyResolver {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn insert(&mut self, user_id: impl Into<String>, device_id: impl Into<String>, key: VerifyingKey) {
-        self.keys.insert((user_id.into(), device_id.into()), key);
-    }
-}
-
-impl KeyResolver for InMemoryKeyResolver {
-    fn resolve(&self, user_id: &str, device_id: &str) -> Option<VerifyingKey> {
-        self.keys.get(&(user_id.to_string(), device_id.to_string())).copied()
-    }
+/// What a verified handshake yields the relay: the authenticated `user_id` plus
+/// the `account_id_pub` the rate limiter keys per-account limits on.
+#[derive(Debug, Clone)]
+pub struct VerifiedClient {
+    pub user_id: String,
+    pub account_id_pub: [u8; 32],
 }
 
 /// Lowercase hex, no separators (avoids a `hex` dependency for one digest).
@@ -198,11 +254,13 @@ pub fn handshake_canonical_bytes(user_id: &str, device_id: &str, timestamp: i64,
 }
 
 /// Produce a signed handshake for `(user_id, device_id)` at `timestamp` with a
-/// fresh `nonce`, signed by the device's Ed25519 private key.
+/// fresh `nonce`, signed by the device's Ed25519 private key, carrying the
+/// device's account cert chain.
 pub fn sign_handshake(
     signing_key: &SigningKey,
     user_id: &str,
     device_id: &str,
+    cert: DeviceCertMaterial,
     timestamp: i64,
     nonce: [u8; NONCE_LEN],
 ) -> Handshake {
@@ -211,35 +269,51 @@ pub fn sign_handshake(
     Handshake {
         user_id: user_id.to_string(),
         device_id: device_id.to_string(),
+        device_signing_pub: signing_key.verifying_key().to_bytes(),
+        cert,
         timestamp,
         nonce,
         signature: signature.to_bytes(),
     }
 }
 
-/// Verify a handshake: bounded timestamp skew, resolvable device key, and a
-/// signature that checks out over the canonical message. On success returns the
-/// authenticated `user_id`. Never fails open — any failure is a [`RejectReason`].
-pub fn verify_handshake(
-    resolver: &dyn KeyResolver,
-    hs: &Handshake,
-    now: i64,
-) -> Result<String, RejectReason> {
+/// Verify a handshake with the OFFLINE cert chain (design §9.4, §11.1): bounded
+/// timestamp skew, a signature that checks out under the PRESENTED device key,
+/// and a device cert that binds that key to the claimed `account_id_pub`. No
+/// resolver, no I/O. On success returns the authenticated [`VerifiedClient`].
+/// Never fails open — any failure is a [`RejectReason`].
+pub fn verify_handshake(hs: &Handshake, now: i64) -> Result<VerifiedClient, RejectReason> {
     if hs.user_id.is_empty() || hs.device_id.is_empty() {
         return Err(RejectReason::Unauthorized);
     }
     if (now - hs.timestamp).abs() > MAX_SKEW_SECS {
         return Err(RejectReason::Unauthorized);
     }
-    let verifying_key = resolver
-        .resolve(&hs.user_id, &hs.device_id)
-        .ok_or(RejectReason::Unauthorized)?;
+
+    // (a) Possession: the handshake signature is valid under the presented key.
+    let device_key =
+        VerifyingKey::from_bytes(&hs.device_signing_pub).map_err(|_| RejectReason::Unauthorized)?;
     let msg = handshake_canonical_bytes(&hs.user_id, &hs.device_id, hs.timestamp, &hs.nonce);
     let signature = Signature::from_bytes(&hs.signature);
-    verifying_key
+    device_key
         .verify(&msg, &signature)
         .map_err(|_| RejectReason::Unauthorized)?;
-    Ok(hs.user_id.clone())
+
+    // (b) Membership: the account key certified this device key (offline chain).
+    pollis_device_cert::verify_device_cert(
+        &hs.cert.account_id_pub,
+        &hs.device_id,
+        &hs.device_signing_pub,
+        hs.cert.identity_version,
+        hs.cert.issued_at,
+        &hs.cert.device_cert,
+    )
+    .map_err(|_| RejectReason::Unauthorized)?;
+
+    Ok(VerifiedClient {
+        user_id: hs.user_id.clone(),
+        account_id_pub: hs.cert.account_id_pub,
+    })
 }
 
 /// Current unix time in seconds.
@@ -278,6 +352,11 @@ pub async fn write_handshake<W: AsyncWrite + Unpin>(w: &mut W, hs: &Handshake) -
     w.write_u8(MSG_HANDSHAKE).await?;
     write_string(w, &hs.user_id).await?;
     write_string(w, &hs.device_id).await?;
+    w.write_all(&hs.device_signing_pub).await?;
+    w.write_all(&hs.cert.account_id_pub).await?;
+    w.write_u32(hs.cert.identity_version).await?;
+    w.write_u64(hs.cert.issued_at).await?;
+    w.write_all(&hs.cert.device_cert).await?;
     w.write_i64(hs.timestamp).await?;
     w.write_u8(NONCE_LEN as u8).await?;
     w.write_all(&hs.nonce).await?;
@@ -298,6 +377,14 @@ pub async fn read_handshake<R: AsyncRead + Unpin>(r: &mut R) -> Result<Handshake
     }
     let user_id = read_string(r).await?;
     let device_id = read_string(r).await?;
+    let mut device_signing_pub = [0u8; 32];
+    r.read_exact(&mut device_signing_pub).await?;
+    let mut account_id_pub = [0u8; 32];
+    r.read_exact(&mut account_id_pub).await?;
+    let identity_version = r.read_u32().await?;
+    let issued_at = r.read_u64().await?;
+    let mut device_cert = [0u8; 64];
+    r.read_exact(&mut device_cert).await?;
     let timestamp = r.read_i64().await?;
     let nonce_len = r.read_u8().await? as usize;
     if nonce_len != NONCE_LEN {
@@ -307,7 +394,20 @@ pub async fn read_handshake<R: AsyncRead + Unpin>(r: &mut R) -> Result<Handshake
     r.read_exact(&mut nonce).await?;
     let mut signature = [0u8; 64];
     r.read_exact(&mut signature).await?;
-    Ok(Handshake { user_id, device_id, timestamp, nonce, signature })
+    Ok(Handshake {
+        user_id,
+        device_id,
+        device_signing_pub,
+        cert: DeviceCertMaterial {
+            account_id_pub,
+            device_cert,
+            identity_version,
+            issued_at,
+        },
+        timestamp,
+        nonce,
+        signature,
+    })
 }
 
 /// Write a connect frame.
@@ -370,5 +470,70 @@ pub async fn read_response<R: AsyncRead + Unpin>(r: &mut R) -> Result<(), ProtoE
             Err(ProtoError::Rejected(RejectReason::from_code(code)))
         }
         _ => Err(ProtoError::Malformed("bad status")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_chain_accepts() {
+        let account = SigningKey::from_bytes(&[5u8; 32]);
+        let device = SigningKey::from_bytes(&[6u8; 32]);
+        let cert = DeviceCertMaterial::mint(&account, "d1", &device.verifying_key().to_bytes(), 1, 1_700_000_000);
+        let now = now_unix();
+        let hs = sign_handshake(&device, "u1", "d1", cert, now, [1u8; 32]);
+        let v = verify_handshake(&hs, now).expect("valid chain");
+        assert_eq!(v.user_id, "u1");
+        assert_eq!(v.account_id_pub, account.verifying_key().to_bytes());
+    }
+
+    #[test]
+    fn forged_cert_rejected() {
+        // Device key NOT certified by the presented account: the attacker signs a
+        // cert with the WRONG (their own) account key but claims the victim's
+        // account_id_pub.
+        let victim_account = SigningKey::from_bytes(&[5u8; 32]);
+        let attacker_account = SigningKey::from_bytes(&[9u8; 32]);
+        let device = SigningKey::from_bytes(&[6u8; 32]);
+        let mut cert =
+            DeviceCertMaterial::mint(&attacker_account, "d1", &device.verifying_key().to_bytes(), 1, 1);
+        // Claim the victim's account id, but the signature is the attacker's.
+        cert.account_id_pub = victim_account.verifying_key().to_bytes();
+        let now = now_unix();
+        let hs = sign_handshake(&device, "u1", "d1", cert, now, [1u8; 32]);
+        assert_eq!(verify_handshake(&hs, now).unwrap_err(), RejectReason::Unauthorized);
+    }
+
+    #[test]
+    fn cert_for_other_device_key_rejected() {
+        // A valid cert, but the handshake is signed by a DIFFERENT device key than
+        // the cert binds — possession and membership refer to different keys.
+        let account = SigningKey::from_bytes(&[5u8; 32]);
+        let real_device = SigningKey::from_bytes(&[6u8; 32]);
+        let other_device = SigningKey::from_bytes(&[7u8; 32]);
+        let cert = DeviceCertMaterial::mint(&account, "d1", &real_device.verifying_key().to_bytes(), 1, 1);
+        let now = now_unix();
+        // Sign with other_device; its pub is presented, but the cert binds real_device.
+        let hs = sign_handshake(&other_device, "u1", "d1", cert, now, [1u8; 32]);
+        assert_eq!(verify_handshake(&hs, now).unwrap_err(), RejectReason::Unauthorized);
+    }
+
+    #[test]
+    fn expired_and_forged_signature_rejected() {
+        let account = SigningKey::from_bytes(&[5u8; 32]);
+        let device = SigningKey::from_bytes(&[6u8; 32]);
+        let cert = DeviceCertMaterial::mint(&account, "d1", &device.verifying_key().to_bytes(), 1, 1);
+        let now = now_unix();
+
+        // Expired.
+        let expired = sign_handshake(&device, "u1", "d1", cert.clone(), now - 10_000, [1u8; 32]);
+        assert_eq!(verify_handshake(&expired, now).unwrap_err(), RejectReason::Unauthorized);
+
+        // Forged signature byte.
+        let mut forged = sign_handshake(&device, "u1", "d1", cert, now, [1u8; 32]);
+        forged.signature[0] ^= 0xFF;
+        assert_eq!(verify_handshake(&forged, now).unwrap_err(), RejectReason::Unauthorized);
     }
 }

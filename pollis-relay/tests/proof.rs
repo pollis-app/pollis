@@ -19,12 +19,14 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use ed25519_dalek::SigningKey;
 use pollis_relay::client::{ClientIdentity, RelayClient};
 use pollis_relay::circuit::{CircuitFactory, Hop, SingleHopFactory};
 use pollis_relay::policy::{FinalAction, OverlayMode, PlannedRoute, RoutingPolicy};
-use pollis_relay::proto::{self, Handshake, InMemoryKeyResolver, RejectReason};
+use pollis_relay::proto::{self, DeviceCertMaterial, Handshake, RejectReason};
+use pollis_relay::ratelimit::RateLimitConfig;
 use pollis_relay::server::{Allowlist, RelayConfig, RelayServer, RelayStats};
 use pollis_relay::shim::OverlayShim;
 use pollis_relay::stream::BoxedStream;
@@ -35,20 +37,31 @@ use tokio::net::TcpListener;
 const USER: &str = "u_test";
 const DEVICE: &str = "d_test";
 const ORIGIN_NAME: &str = "origin.test";
+const ISSUED_AT: u64 = 1_700_000_000;
 
+/// The device's Ed25519 signing key (what signs the handshake).
 fn client_signing_key() -> SigningKey {
     SigningKey::from_bytes(&[7u8; 32])
 }
 
-/// A resolver that knows the one authorized test device.
-fn authorized_resolver() -> Arc<InMemoryKeyResolver> {
-    let mut resolver = InMemoryKeyResolver::new();
-    resolver.insert(USER, DEVICE, client_signing_key().verifying_key());
-    Arc::new(resolver)
+/// The user's account identity key — the test's "injected known account
+/// identity" (task §2). It certifies the device key into a cert chain.
+fn account_key() -> SigningKey {
+    SigningKey::from_bytes(&[3u8; 32])
 }
 
+/// A full client identity: device signing key + a valid cert chain minted by the
+/// account key. The relay verifies this OFFLINE — no resolver.
 fn client_identity() -> Arc<ClientIdentity> {
-    Arc::new(ClientIdentity::new(USER, DEVICE, client_signing_key()))
+    let device = client_signing_key();
+    let cert = DeviceCertMaterial::mint(
+        &account_key(),
+        DEVICE,
+        &device.verifying_key().to_bytes(),
+        1,
+        ISSUED_AT,
+    );
+    Arc::new(ClientIdentity::new(USER, DEVICE, device, cert))
 }
 
 // ---- test infrastructure ---------------------------------------------------
@@ -67,7 +80,6 @@ fn spawn_relay(allow: &[&str], overrides: &[(&str, IpAddr)]) -> TestRelay {
     let mut config = RelayConfig::new(
         "127.0.0.1:0".parse().unwrap(),
         Allowlist::from_patterns(allow.iter().copied()),
-        authorized_resolver(),
     )
     .unwrap();
     for (host, ip) in overrides {
@@ -293,42 +305,36 @@ async fn t3_allowlist_rejects_unlisted_host() {
 
 #[test]
 fn t4_handshake_verification_unit() {
-    let resolver = authorized_resolver();
-    let key = client_signing_key();
+    let account = account_key();
+    let device = client_signing_key();
+    let cert = DeviceCertMaterial::mint(&account, DEVICE, &device.verifying_key().to_bytes(), 1, ISSUED_AT);
     let now = proto::now_unix();
 
-    // Valid.
-    let good = proto::sign_handshake(&key, USER, DEVICE, now, [1u8; 32]);
-    assert_eq!(proto::verify_handshake(resolver.as_ref(), &good, now).unwrap(), USER);
+    // Valid: signature under the presented device key + a cert chaining it to the
+    // account. Verified OFFLINE — no resolver.
+    let good = proto::sign_handshake(&device, USER, DEVICE, cert.clone(), now, [1u8; 32]);
+    let v = proto::verify_handshake(&good, now).unwrap();
+    assert_eq!(v.user_id, USER);
+    assert_eq!(v.account_id_pub, account.verifying_key().to_bytes());
 
     // Expired (outside the skew window).
-    let expired = proto::sign_handshake(&key, USER, DEVICE, now - 10_000, [1u8; 32]);
-    assert_eq!(
-        proto::verify_handshake(resolver.as_ref(), &expired, now).unwrap_err(),
-        RejectReason::Unauthorized
-    );
+    let expired = proto::sign_handshake(&device, USER, DEVICE, cert.clone(), now - 10_000, [1u8; 32]);
+    assert_eq!(proto::verify_handshake(&expired, now).unwrap_err(), RejectReason::Unauthorized);
 
     // Forged: flip a signature byte.
     let mut forged = good.clone();
     forged.signature[0] ^= 0xFF;
-    assert_eq!(
-        proto::verify_handshake(resolver.as_ref(), &forged, now).unwrap_err(),
-        RejectReason::Unauthorized
-    );
+    assert_eq!(proto::verify_handshake(&forged, now).unwrap_err(), RejectReason::Unauthorized);
 
-    // Unknown device: empty resolver.
-    let empty = InMemoryKeyResolver::new();
-    assert_eq!(
-        proto::verify_handshake(&empty, &good, now).unwrap_err(),
-        RejectReason::Unauthorized
-    );
+    // Forged cert: a device key NOT certified by the presented account_id_pub —
+    // sign a cert with a wrong account key but claim the real account id.
+    let mut mismatched = good.clone();
+    mismatched.cert.device_cert[0] ^= 0xFF;
+    assert_eq!(proto::verify_handshake(&mismatched, now).unwrap_err(), RejectReason::Unauthorized);
 
     // Missing identity fields.
     let blank = Handshake { user_id: String::new(), ..good.clone() };
-    assert_eq!(
-        proto::verify_handshake(resolver.as_ref(), &blank, now).unwrap_err(),
-        RejectReason::Unauthorized
-    );
+    assert_eq!(proto::verify_handshake(&blank, now).unwrap_err(), RejectReason::Unauthorized);
 }
 
 #[tokio::test]
@@ -353,8 +359,18 @@ async fn t4_relay_accepts_valid_rejects_forged() {
     assert_eq!(&buf, b"ping");
     assert_eq!(relay.stats.dials(), 1);
 
-    // Wrong key (not in the resolver) → rejected, no dial.
-    let bad_identity = Arc::new(ClientIdentity::new(USER, DEVICE, SigningKey::from_bytes(&[9u8; 32])));
+    // Forged: the presented device key is NOT the one the cert binds (the cert
+    // was minted for a different signing key), so the offline chain fails →
+    // rejected, no dial.
+    let bad_device = SigningKey::from_bytes(&[9u8; 32]);
+    let wrong_cert = DeviceCertMaterial::mint(
+        &account_key(),
+        DEVICE,
+        &SigningKey::from_bytes(&[8u8; 32]).verifying_key().to_bytes(),
+        1,
+        ISSUED_AT,
+    );
+    let bad_identity = Arc::new(ClientIdentity::new(USER, DEVICE, bad_device, wrong_cert));
     let err = RelayClient::connect(
         relay.addr,
         &relay.cert,
@@ -486,4 +502,134 @@ async fn t6_off_mode_client_is_direct() {
         .expect("direct request with the overlay off");
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "direct-and-inert");
+}
+
+// ---- T7: rate limiting (Slice 2a) ------------------------------------------
+
+/// A second concurrent circuit from the same account, over a per-account cap of
+/// 1, is refused cleanly as `Rejected(RateLimited)` — not dropped.
+#[tokio::test]
+async fn t7_rate_limit_trips_to_rejected() {
+    let (echo_addr, _c) = spawn_echo().await;
+    let allow = [echo_addr.ip().to_string()];
+    let mut config = RelayConfig::new(
+        "127.0.0.1:0".parse().unwrap(),
+        Allowlist::from_patterns(allow.iter().map(|s| s.as_str())),
+    )
+    .unwrap();
+    config.rate_limits = RateLimitConfig {
+        max_concurrent_per_account: 1,
+        ..Default::default()
+    };
+    let cert = config.server_cert();
+    let stats = config.stats.clone();
+    let (_task, addr) = RelayServer::spawn(config).unwrap();
+
+    // First circuit: admitted and live.
+    let mut s1 = RelayClient::connect(
+        addr,
+        &cert,
+        &client_identity(),
+        &echo_addr.ip().to_string(),
+        echo_addr.port(),
+    )
+    .await
+    .expect("first circuit admitted");
+    s1.write_all(b"one!").await.unwrap();
+    let mut buf = [0u8; 4];
+    s1.read_exact(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"one!");
+
+    // Second concurrent circuit for the same account trips the cap.
+    let err = RelayClient::connect(
+        addr,
+        &cert,
+        &client_identity(),
+        &echo_addr.ip().to_string(),
+        echo_addr.port(),
+    )
+    .await;
+    assert!(err.is_err(), "second concurrent circuit must be rate-limited");
+    assert!(stats.rate_limited() >= 1, "relay must record the rate-limit rejection");
+
+    // Freeing the first circuit lets a fresh one through again.
+    drop(s1);
+    // Give the server a moment to drop the guard as the stream tears down.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let mut s3 = RelayClient::connect(
+        addr,
+        &cert,
+        &client_identity(),
+        &echo_addr.ip().to_string(),
+        echo_addr.port(),
+    )
+    .await
+    .expect("slot freed → admitted again");
+    s3.write_all(b"two!").await.unwrap();
+    s3.read_exact(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"two!");
+}
+
+// ---- T8: graceful shutdown drains in-flight pipes (Slice 2a) ---------------
+
+#[tokio::test]
+async fn t8_graceful_shutdown_drains() {
+    use tokio::sync::oneshot;
+
+    let (echo_addr, _c) = spawn_echo().await;
+    let allow = [echo_addr.ip().to_string()];
+    let config = RelayConfig::new(
+        "127.0.0.1:0".parse().unwrap(),
+        Allowlist::from_patterns(allow.iter().map(|s| s.as_str())),
+    )
+    .unwrap();
+    let cert = config.server_cert();
+    let (tx, rx) = oneshot::channel::<()>();
+    let (handle, addr) = RelayServer::spawn_with_shutdown(
+        config,
+        async move {
+            let _ = rx.await;
+        },
+        Duration::from_secs(5),
+    )
+    .unwrap();
+
+    // Open a circuit and prove it works before shutdown.
+    let mut s = RelayClient::connect(
+        addr,
+        &cert,
+        &client_identity(),
+        &echo_addr.ip().to_string(),
+        echo_addr.port(),
+    )
+    .await
+    .expect("circuit opens");
+    s.write_all(b"pre!").await.unwrap();
+    let mut buf = [0u8; 4];
+    s.read_exact(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"pre!");
+
+    // Signal shutdown. The in-flight pipe must keep working (drain), not be cut.
+    tx.send(()).unwrap();
+    s.write_all(b"post").await.unwrap();
+    s.read_exact(&mut buf).await.unwrap();
+    assert_eq!(&buf, b"post", "in-flight circuit must drain, not be severed");
+
+    // A NEW connection after shutdown must not be served.
+    let after = RelayClient::connect(
+        addr,
+        &cert,
+        &client_identity(),
+        &echo_addr.ip().to_string(),
+        echo_addr.port(),
+    )
+    .await;
+    assert!(after.is_err(), "no new circuits accepted after shutdown");
+
+    // Closing the client lets the server drain and the task exit within deadline.
+    drop(s);
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("relay task drained and exited")
+        .unwrap();
 }

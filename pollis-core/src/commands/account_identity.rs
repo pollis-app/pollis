@@ -21,7 +21,7 @@ use std::sync::Arc;
 use aes_gcm::aead::generic_array::GenericArray;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit};
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
+use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use hkdf::Hkdf;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -633,59 +633,15 @@ fn signing_key_from_bytes(bytes: &[u8]) -> Result<SigningKey> {
 
 // ── Device certificate ───────────────────────────────────────────────────────
 
-/// Domain separator baked into every device cert signature. Bump the suffix
-/// if the signed payload format ever changes so old signatures cannot be
-/// reinterpreted under a new schema.
-const DEVICE_CERT_DOMAIN: &[u8] = b"pollis-device-cert-v1\x00";
-
-/// Build the canonical byte string that a device cert signs over.
-///
-/// Layout:
-///   domain_separator (22 bytes, trailing NUL included)
-///   u8  device_id_len     ||  device_id bytes
-///   u8  mls_sig_pub_len   ||  mls_sig_pub bytes
-///   u32 identity_version  (big-endian)
-///   u64 issued_at         (big-endian, unix seconds)
-///
-/// All length prefixes are u8 because device_ids are ULIDs (26 bytes) and
-/// Ed25519 public keys are 32 bytes — both fit comfortably.
-fn device_cert_signed_payload(
-    device_id: &str,
-    mls_signature_pub: &[u8],
-    identity_version: u32,
-    issued_at: u64,
-) -> Result<Vec<u8>> {
-    if device_id.len() > u8::MAX as usize {
-        return Err(Error::Crypto(format!(
-            "device_id too long for cert payload ({} > 255)",
-            device_id.len()
-        )));
-    }
-    if mls_signature_pub.len() > u8::MAX as usize {
-        return Err(Error::Crypto(format!(
-            "mls_signature_pub too long for cert payload ({} > 255)",
-            mls_signature_pub.len()
-        )));
-    }
-
-    let mut out = Vec::with_capacity(
-        DEVICE_CERT_DOMAIN.len()
-            + 1
-            + device_id.len()
-            + 1
-            + mls_signature_pub.len()
-            + 4
-            + 8,
-    );
-    out.extend_from_slice(DEVICE_CERT_DOMAIN);
-    out.push(device_id.len() as u8);
-    out.extend_from_slice(device_id.as_bytes());
-    out.push(mls_signature_pub.len() as u8);
-    out.extend_from_slice(mls_signature_pub);
-    out.extend_from_slice(&identity_version.to_be_bytes());
-    out.extend_from_slice(&issued_at.to_be_bytes());
-    Ok(out)
-}
+// The device-cert PAYLOAD FORMAT and its VERIFICATION live in the standalone
+// `pollis-device-cert` crate (deps: ed25519-dalek + std only) so `pollis-relay`
+// can verify certs at its handshake without depending on `pollis-core` (which
+// would be a cycle — pollis-core already depends on pollis-relay). Re-exported
+// here so every existing caller — `device.rs`, `key_packages.rs`, the MLS accept
+// path, and the tests below — is unchanged. `sign_device_cert` stays here: it
+// needs `AppState`/keystore to load the account key, but it signs over the SAME
+// shared payload, so signer and verifier can never drift. See §11.1.
+pub use pollis_device_cert::{device_cert_signed_payload, verify_device_cert, DEVICE_CERT_DOMAIN};
 
 /// Sign a device cert for this device using the loaded account identity
 /// key. The caller is responsible for persisting the returned signature,
@@ -708,52 +664,6 @@ pub async fn sign_device_cert(
     )?;
     let signature: Signature = signing_key.sign(&payload);
     Ok(signature.to_bytes().to_vec())
-}
-
-/// Verify a device cert against a user's published `account_id_pub`.
-///
-/// Returns `Ok(())` if the cert is valid, `Err(Error::Crypto)` otherwise.
-/// Used by every client before accepting a new device into an MLS group.
-pub fn verify_device_cert(
-    account_id_pub: &[u8],
-    device_id: &str,
-    mls_signature_pub: &[u8],
-    identity_version: u32,
-    issued_at: u64,
-    cert_bytes: &[u8],
-) -> Result<()> {
-    if account_id_pub.len() != 32 {
-        return Err(Error::Crypto(format!(
-            "account_id_pub has wrong length: {} (expected 32)",
-            account_id_pub.len()
-        )));
-    }
-    if cert_bytes.len() != 64 {
-        return Err(Error::Crypto(format!(
-            "device_cert has wrong length: {} (expected 64)",
-            cert_bytes.len()
-        )));
-    }
-
-    let mut pk_arr = [0u8; 32];
-    pk_arr.copy_from_slice(account_id_pub);
-    let verifying_key = VerifyingKey::from_bytes(&pk_arr)
-        .map_err(|e| Error::Crypto(format!("bad account_id_pub: {e}")))?;
-
-    let mut sig_arr = [0u8; 64];
-    sig_arr.copy_from_slice(cert_bytes);
-    let signature = Signature::from_bytes(&sig_arr);
-
-    let payload = device_cert_signed_payload(
-        device_id,
-        mls_signature_pub,
-        identity_version,
-        issued_at,
-    )?;
-
-    verifying_key
-        .verify(&payload, &signature)
-        .map_err(|e| Error::Crypto(format!("device cert signature invalid: {e}")))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -819,6 +729,32 @@ mod tests {
         let ct = aes_gcm_encrypt(&wrap_key, &nonce, plaintext).unwrap();
         let pt = aes_gcm_decrypt(&wrap_key, &nonce, &ct).unwrap();
         assert_eq!(pt, plaintext);
+    }
+
+    /// Cross-crate consistency: the byte format `sign_device_cert` mints in
+    /// (account key signs `device_cert_signed_payload`) is IDENTICAL to the
+    /// golden vector `pollis-device-cert` freezes and `pollis-relay` verifies at
+    /// its handshake. Same fixed inputs ⇒ same 64-byte cert. If this and
+    /// `pollis_device_cert`'s `golden_vector_is_frozen` ever disagree, the mint
+    /// and verify halves have drifted.
+    #[test]
+    fn sign_device_cert_matches_shared_golden_vector() {
+        let account = SigningKey::from_bytes(&[42u8; 32]);
+        let device_id = "01HXGOLDENVECTORDEVICE0001";
+        let device_pub = SigningKey::from_bytes(&[7u8; 32]).verifying_key().to_bytes();
+
+        // This is exactly what `sign_device_cert` does after loading the account
+        // key: sign the shared payload.
+        let payload = device_cert_signed_payload(device_id, &device_pub, 3, 1_800_000_000).unwrap();
+        let cert: Signature = account.sign(&payload);
+
+        let expected = "af1b7e28940c1bdc67201d9d91bd9263c02f456929a7bc2f6ce35a7398d725616842eed1734cd16a41836edc45b7a722c670b018f0786a573ec42bdf0cd4cd03";
+        let got: String = cert.to_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(got, expected, "pollis-core mint format drifted from the shared golden vector");
+
+        // And it verifies through the shared (re-exported) verifier.
+        verify_device_cert(&account.verifying_key().to_bytes(), device_id, &device_pub, 3, 1_800_000_000, &cert.to_bytes())
+            .expect("golden cert must verify under the shared verifier");
     }
 
     #[test]
