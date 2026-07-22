@@ -38,9 +38,20 @@ A notarized macOS `.dmg` embeds an Apple timestamp + CMS signature; an
 Authenticode `.exe` embeds a mandatory RFC-3161 timestamp from
 `timestamp.acs.microsoft.com`; the Tauri updater `.sig` is a minisign signature
 over the artifact. **None can be reproduced** without Pollis's private keys, and
-the timestamps differ on every run by design. Resolution: we reproduce and log
-the **pre-signature payload** and log the signed wrapper as a separate derived
-hash bound to that payload. Install-time integrity of the signed wrapper still
+the timestamps differ on every run by design.
+
+**What we log today (corrected):** on Linux the `payload` leaf genuinely is the
+pre-signature reproducible unit. On **macOS and Windows it is not** — the attest
+job extracts the `.app` out of the already-signed, notarized `.dmg` (and the file
+tree out of the signed NSIS installer) and hashes that, so those `payload` leaves
+contain Apple's CMS signature, the stapled notarization ticket, and Authenticode
+data. **They therefore cannot be reproduced by anyone, including us on a matching
+runner** — not "hard", impossible. Capturing a genuine pre-signature payload on
+those platforms is tracked in #603. This paragraph previously claimed the
+pre-signature behaviour as already implemented; it was describing the intent, not
+the pipeline.
+
+The signed wrapper is logged as a separate derived hash bound to the payload. Install-time integrity of the signed wrapper still
 rests on platform code-signing (Gatekeeper / Authenticode), exactly as before —
 transparency is *added to*, not a *replacement for*, signing.
 
@@ -53,8 +64,18 @@ the correct two-leaf `payload`/`signed` structure, and reproduction is
 **best-effort on a matching runner** — not asserted by `rebuild-verify.yml`,
 which reproduces the Linux payload only. Native codegen on these platforms
 (MSVC/clang, resource compilers) can embed host paths and vary across patch
-versions; treat macOS/Windows payload reproduction as unverified until a matching
-platform reproducer exists.
+versions; treat macOS/Windows payload reproduction as **impossible with the
+current leaf definition** (see §1) rather than merely unverified. Two things must
+land before it becomes a question of determinism at all: a pre-signature payload
+hash (#603) and a matching-platform reproducer.
+
+An empirical note for whoever picks up #603: `codesign --remove-signature` is
+**deterministic** — stripping the shipped v1.5.3 `Contents/MacOS/pollis` twice
+yields the identical digest (`acd70269be7b…`). That makes normalization viable as
+a cross-check between two observers of the same signed artifact. It does **not**
+establish that stripped bytes equal a freshly built *unsigned* binary, and that
+equality — untested — is the load-bearing assumption for any reproducibility
+claim built on stripping rather than on capturing the payload before signing.
 
 ### 3. Apple notarization staple — non-reproducible, post-build mutation
 Apple's notary service staples a ticket **after** the build, changing the shipped

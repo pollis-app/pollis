@@ -1,0 +1,66 @@
+name: Scripts check
+
+# Gate for the release-attestation shell layer (`scripts/attest-binaries.sh` and
+# the helpers it sources). This layer had NO test coverage of any kind, and its
+# only exercise was a real release — which is how three consecutive releases
+# (#588, #602, #604) were broken by it: a guessed package member path, missing
+# tooling in a duplicated workflow, and an opaque two-process pipeline. Each cost
+# a release cycle to find, and every one is the sort of thing a five-second test
+# catches.
+#
+# Deliberately minimal and fast: no toolchain, no build, no network. Runs on
+# ubuntu so GNU tar and sha256sum are present and the payload-hash contract
+# (which the independent rebuilder recomputes) is actually asserted rather than
+# skipped the way it is on a developer's macOS machine.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - ".github/workflows/scripts-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scripts-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Named distinctly: a job called `test` here collides with another
+  # workflow's check of the same name in the PR checks list, making it
+  # impossible to tell at a glance whether this gate actually ran.
+  shell-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Attest helper + payload-hash tests
+        run: ./scripts/test-attest-helpers.sh
+
+      # Syntax-check every shell script in scripts/, so a typo in a release-path
+      # script is caught on the PR rather than mid-release.
+      - name: Shell syntax check
+        run: |
+          set -euo pipefail
+          rc=0
+          while IFS= read -r f; do
+            bash -n "$f" || { echo "::error::bash -n failed: $f"; rc=1; }
+          done < <(find scripts -type f -name '*.sh')
+          exit $rc
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      # Advisory for now: the existing scripts predate this gate and carry
+      # warnings that are not worth churning in the same PR that adds the gate.
+      # Errors fail; style/info do not.
+      - name: shellcheck (errors only)
+        run: |
+          set -euo pipefail
+          shellcheck --severity=error $(find scripts -type f -name '*.sh')

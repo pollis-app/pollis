@@ -89,30 +89,17 @@ emit() {
   echo "attest: ${1}/${3} ${5} payload=${6:0:12}… artifact=${7:0:12}…"
 }
 
-# Fail with a clear message when a tool this script shells out to is absent.
-# Missing tooling otherwise surfaces as an opaque non-zero exit (a subshell
-# pipeline under `set -o pipefail` can swallow the diagnostic entirely), which is
-# exactly what made the first v1.5.3 attest failure undiagnosable from its log.
-need() {
-  command -v "$1" >/dev/null 2>&1 || {
-    echo "::error::attest: required tool '${1}' is not installed — needed to ${2}."
-    echo "::error::  Install it in the workflow calling this script. NOTE: both"
-    echo "::error::  desktop-release.yml (attest-and-log) and attest-release.yml"
-    echo "::error::  run this script and each installs its own tooling."
-    exit 1
-  }
-}
+# Shared, unit-tested helpers (`need`, `find_installed_bin`, MAIN_BIN). Kept in
+# their own file so scripts/test-attest-helpers.sh can exercise them without a
+# real release — every attest failure so far lived in this layer.
+# shellcheck source=scripts/lib/attest-helpers.sh
+. "$(dirname "$0")/lib/attest-helpers.sh"
 
 need jq "build the BinaryRecord leaves"
 need tar "hash directory-tree payloads"
 need sha256sum "hash payloads and artifacts"
 
 find_one() { find "$ARTIFACTS_DIR" -type f -name "$1" 2>/dev/null | head -1; }
-
-# The main executable's own name inside every bundle shape — Tauri names it from
-# the cargo bin (`pollis`), NOT from productName ("Pollis"): the installed app is
-# `Pollis.app/Contents/MacOS/pollis`, `pollis.exe`, `usr/bin/pollis`.
-MAIN_BIN="pollis"
 
 # emit_exe <platform> <arch> <bundle> <artifact_name> <payload_sha> <runner_image> <path-to-exe>
 #
@@ -138,13 +125,6 @@ emit_exe() {
   emit "$platform" "$arch" "$bundle" "$name" exe "$pay_sha" "$(sha_file "$exe")" "$runner"
 }
 
-# Locate the installed main executable inside an extracted Linux package tree.
-# Search rather than name the member path: the packagers disagree on the prefix
-# (`dpkg-deb --fsys-tarfile` emits `usr/bin/pollis`, rpm's cpio emits
-# `./usr/bin/pollis`), and hardcoding one of them failed the v1.5.3 release.
-find_installed_bin() {
-  find "$1" -type f -path "*/usr/bin/${MAIN_BIN}" 2>/dev/null | head -1
-}
 
 # ── macOS: .dmg wraps a reproducible .app payload (payload + signed) ──
 dmg="$(find_one '*.dmg' || true)"
