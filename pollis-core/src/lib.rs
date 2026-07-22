@@ -10,6 +10,7 @@ pub mod db;
 pub mod error;
 pub mod keystore;
 pub mod media_server;
+pub mod net;
 pub mod realtime;
 pub mod signal;
 pub mod sink;

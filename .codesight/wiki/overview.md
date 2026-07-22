@@ -89,6 +89,17 @@ website/             # Static marketing site (Cloudflare Pages, not part of the 
 **Trusted:** User's device, local database, the signed Tauri application binary (Tauri host + WebView renderer + `pollis-core`) at the installed version, OS keystore.
 **Untrusted:** Network, Turso, server operators.
 
+## Network egress & the closed-overlay relay
+
+Every outbound connection goes to a fixed, small set of first-party hosts: Turso (libSQL/Hrana), the Delivery Service, Cloudflare R2, and LiveKit. The optional **closed-overlay relay** (`pollis-relay` crate; design `docs/relay-overlay-design.md` §14) can route the metadata-sensitive **control plane** through a first-party relay so the services see a relay's IP instead of the user's. It is **off by default** and inert unless `POLLIS_OVERLAY` selects a non-off mode at runtime.
+
+- **Config** (`config.rs`): `POLLIS_OVERLAY` = `off` (default) | `prefer` | `strict`; `POLLIS_OVERLAY_RELAY` = the relay endpoint. Unknown/empty → `off`.
+- **Wiring** (`pollis-core/src/net/overlay.rs`): when a non-off mode is set, `AppState::new` starts a loopback SOCKS5 shim (`pollis_relay::OverlayShim`) once and stores the `OverlayHandle` on `AppState.overlay`. The routing policy sends Turso/DS/R2 through the overlay and keeps **LiveKit direct** (the media plane, §6.4).
+- **Seams:** control-plane HTTP goes through `net::overlay::http_client(state.overlay.as_ref())` (a `socks5h://` reqwest client) instead of `reqwest::Client::new()`; the libsql Turso connection uses `RemoteDb::connect_with_overlay`, which attaches `overlay_connector` (a SOCKS-dialing `hyper-rustls` connector) — the inner TLS still terminates at the real service, so the relay only forwards opaque bytes.
+- **Off = unchanged:** with `POLLIS_OVERLAY` unset, `overlay` is `None`, `http_client(None)` is a plain client, and `RemoteDb` takes libsql's unchanged `.build()` path — byte-for-byte the pre-overlay behavior.
+- **Left direct:** Expo push (`push.rs`, non-first-party host) and the `ureq` transparency verifier (no proxy seam) stay direct — documented residual leaks (§14.4).
+- **Modes:** `prefer` falls back to a direct dial if the overlay is unreachable; `strict` surfaces a degraded error rather than silently going direct (messages-must-work).
+
 ## Realtime
 
 LiveKit rooms carry realtime events (new_message, membership_changed, voice_joined, etc.). The Rust event loop in `livekit.rs` receives data events and pushes them through the `EventSink` trait; `src-tauri/src/sink.rs`'s `ChannelSink` wraps a `tauri::ipc::Channel<E>` so the event rides Tauri's IPC channel to the renderer, which subscribes through the bridge's `channelOn(id, handler)`. MLS operations (process commits, poll welcomes) fire as needed.

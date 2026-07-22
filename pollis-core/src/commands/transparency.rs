@@ -174,7 +174,7 @@ pub async fn self_audit_account_key(
     let my_pub_hex = hex::encode(&my_pub);
 
     let base = transparency_base_url();
-    match fetch_and_verify(&base, &my_user_id).await {
+    match fetch_and_verify(state.overlay.as_ref(), &base, &my_user_id).await {
         Ok((report, served_key)) => {
             Ok(derive_self_audit(&report, &served_key, &my_pub_hex, my_version))
         }
@@ -201,7 +201,7 @@ pub async fn audit_peer_account_key(
     let pinned_version = pinned.as_ref().map(|(_, v)| *v);
 
     let base = transparency_base_url();
-    match fetch_and_verify(&base, &peer_user_id).await {
+    match fetch_and_verify(state.overlay.as_ref(), &base, &peer_user_id).await {
         Ok((report, served_key)) => {
             let pin = match (&pinned_hex, pinned_version) {
                 (Some(h), Some(v)) => Some((h.as_str(), v)),
@@ -229,7 +229,7 @@ pub async fn audit_peer_account_key(
 /// `pollis-verify release` CLI runs — no verifier is reimplemented — run on the
 /// blocking pool like [`self_audit_account_key`]. Advisory only: it never gates
 /// launch or update, matching the account-key self-audit policy.
-pub async fn verify_own_build() -> Result<BuildVerifyReport> {
+pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport> {
     let version = env!("CARGO_PKG_VERSION").to_string();
     // Baked by `build.rs`; `None` when this build had no git checkout.
     let commit = option_env!("POLLIS_GIT_COMMIT").map(str::to_string);
@@ -265,7 +265,7 @@ pub async fn verify_own_build() -> Result<BuildVerifyReport> {
     // the host serves into its verdict, so an unpinned key could sign a
     // self-consistent forged tree that "verifies" — the same trap the account
     // self-audit guards against. A served key ≠ the pin is the loud case.
-    match fetch_served_binaries_public_key(&base).await {
+    match fetch_served_binaries_public_key(state.overlay.as_ref(), &base).await {
         Ok(served) if !served_key_matches_pin(&served) => {
             return Ok(BuildVerifyReport {
                 status: BuildVerifyStatus::Mismatch,
@@ -308,6 +308,7 @@ pub async fn verify_own_build() -> Result<BuildVerifyReport> {
 /// `user_id`. Returns `Err(detail)` on any transport/parse failure of the
 /// prerequisites — the caller maps that to [`AuditStatus::Unavailable`].
 async fn fetch_and_verify(
+    overlay: Option<&pollis_relay::OverlayHandle>,
     base: &str,
     user_id: &str,
 ) -> std::result::Result<(AccountReport, String), String> {
@@ -315,7 +316,7 @@ async fn fetch_and_verify(
     // separately because the shared verifier folds the key into its verdict but
     // does not surface it; a served key that differs from the pin is caught in
     // `derive_*` regardless of how the (forged) tree verifies under it.
-    let served_key = fetch_served_public_key(base)
+    let served_key = fetch_served_public_key(overlay, base)
         .await
         .map_err(|e| format!("could not fetch the log's public key: {e}"))?;
 
@@ -335,7 +336,13 @@ async fn fetch_and_verify(
 }
 
 /// Fetch `/v1/account-keys/public_key.json` and return its key (lowercase hex).
-async fn fetch_served_public_key(base: &str) -> Result<String> {
+/// Routes through the overlay when on — this is the async reqwest fetch path
+/// (§14.2); the `ureq` verifier below has no proxy seam and stays a documented
+/// residual (§14.4).
+async fn fetch_served_public_key(
+    overlay: Option<&pollis_relay::OverlayHandle>,
+    base: &str,
+) -> Result<String> {
     #[derive(serde::Deserialize)]
     struct PublicKeyDoc {
         public_key: String,
@@ -344,7 +351,7 @@ async fn fetch_served_public_key(base: &str) -> Result<String> {
         "{}/v1/account-keys/public_key.json",
         base.trim_end_matches('/')
     );
-    let client = reqwest::Client::new();
+    let client = crate::net::overlay::http_client(overlay);
     let doc: PublicKeyDoc = client
         .get(&url)
         .send()
@@ -360,6 +367,7 @@ async fn fetch_served_public_key(base: &str) -> Result<String> {
 /// served under the binaries subtree; the caller pin-checks it before trusting
 /// any release verdict. Returns `Err(detail)` on transport/parse failure.
 async fn fetch_served_binaries_public_key(
+    overlay: Option<&pollis_relay::OverlayHandle>,
     base: &str,
 ) -> std::result::Result<String, String> {
     #[derive(serde::Deserialize)]
@@ -367,7 +375,7 @@ async fn fetch_served_binaries_public_key(
         public_key: String,
     }
     let url = format!("{}/v1/binaries/public_key.json", base.trim_end_matches('/'));
-    let client = reqwest::Client::new();
+    let client = crate::net::overlay::http_client(overlay);
     let doc: PublicKeyDoc = client
         .get(&url)
         .send()

@@ -1,5 +1,6 @@
 use libsql::{Builder, Database, Connection};
 use tokio::sync::RwLock;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use crate::error::Result;
@@ -34,15 +35,55 @@ pub struct RemoteDb {
     /// [`set_remote_token`](RemoteDb::set_remote_token); read on every
     /// [`reconnect`](RemoteDb::reconnect).
     token_override: Arc<RwLock<Option<String>>>,
+    /// Loopback address of the overlay SOCKS5 shim to route this DB's Hrana/TLS
+    /// through (design §14.1). `None` → today's unchanged libsql `.build()` path
+    /// (overlay off, or a local backend). `Some` → build with
+    /// `.connector(overlay_connector(shim))`, so the TCP lands on the shim while
+    /// the client TLS still terminates at the real Turso host. Carried on the
+    /// struct so [`reconnect`](RemoteDb::reconnect) rebuilds through the overlay
+    /// too. The shim's own policy decides overlay-vs-direct per host.
+    overlay_shim: Option<SocketAddr>,
+}
+
+/// Build a remote libsql `Database`, optionally routing through the overlay shim.
+/// This is the single seam where the overlay connector is (or is not) attached —
+/// `overlay_shim: None` is byte-for-byte today's `.build()` path.
+async fn build_remote_database(
+    url: &str,
+    token: &str,
+    overlay_shim: Option<SocketAddr>,
+) -> Result<Database> {
+    let builder = Builder::new_remote(url.to_string(), token.to_string());
+    let db = match overlay_shim {
+        Some(shim) => {
+            builder
+                .connector(crate::net::overlay::overlay_connector(shim)?)
+                .build()
+                .await?
+        }
+        None => builder.build().await?,
+    };
+    Ok(db)
 }
 
 impl RemoteDb {
     /// Connect to the remote database. The schema must already be up to date —
     /// run `pnpm db:apply <env>` before shipping a new schema version.
+    ///
+    /// Direct (no overlay) — equivalent to `connect_with_overlay(url, token, None)`.
     pub async fn connect(url: &str, token: &str) -> Result<Self> {
-        let db = Builder::new_remote(url.to_string(), token.to_string())
-            .build()
-            .await?;
+        Self::connect_with_overlay(url, token, None).await
+    }
+
+    /// Connect to the remote database, optionally routing through the overlay
+    /// SOCKS5 shim (design §14.1). `overlay_shim: None` is the unchanged direct
+    /// `.build()` path; `Some(addr)` attaches the libsql overlay connector.
+    pub async fn connect_with_overlay(
+        url: &str,
+        token: &str,
+        overlay_shim: Option<SocketAddr>,
+    ) -> Result<Self> {
+        let db = build_remote_database(url, token, overlay_shim).await?;
         Ok(Self {
             db: Arc::new(RwLock::new(db)),
             backend: Backend::Remote {
@@ -51,6 +92,7 @@ impl RemoteDb {
             },
             query_only: false,
             token_override: Arc::new(RwLock::new(None)),
+            overlay_shim,
         })
     }
 
@@ -76,6 +118,8 @@ impl RemoteDb {
             backend: Backend::Local { path },
             query_only: false,
             token_override: Arc::new(RwLock::new(None)),
+            // Local test backend never dials the network — no overlay.
+            overlay_shim: None,
         })
     }
 
@@ -102,6 +146,7 @@ impl RemoteDb {
             backend: self.backend.clone(),
             query_only: true,
             token_override: Arc::clone(&self.token_override),
+            overlay_shim: self.overlay_shim,
         }
     }
 
@@ -141,7 +186,9 @@ impl RemoteDb {
                     .await
                     .clone()
                     .unwrap_or_else(|| token.clone());
-                Builder::new_remote(url.clone(), effective).build().await?
+                // Rebuild through the overlay too, so a reconnect after a dropped
+                // Hrana stream keeps the same routing as the initial connect.
+                build_remote_database(url, &effective, self.overlay_shim).await?
             }
             Backend::Local { path } => Builder::new_local(path).build().await?,
         };
