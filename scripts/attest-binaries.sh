@@ -82,7 +82,30 @@ emit() {
                  source_date_epoch:$source_date_epoch},
       provenance_uri:$provenance_uri}')"
   records="$(jq -c ". + [${rec}]" <<<"$records")"
+  # One line per leaf. This script runs under `set -e` in a release-critical job,
+  # so an unexpected non-zero exit anywhere kills it; without a progress trail the
+  # only evidence is "exit code 1" with no indication of which bundle was being
+  # processed. Cheap breadcrumbs beat re-running with `bash -x`.
+  echo "attest: ${1}/${3} ${5} payload=${6:0:12}… artifact=${7:0:12}…"
 }
+
+# Fail with a clear message when a tool this script shells out to is absent.
+# Missing tooling otherwise surfaces as an opaque non-zero exit (a subshell
+# pipeline under `set -o pipefail` can swallow the diagnostic entirely), which is
+# exactly what made the first v1.5.3 attest failure undiagnosable from its log.
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "::error::attest: required tool '${1}' is not installed — needed to ${2}."
+    echo "::error::  Install it in the workflow calling this script. NOTE: both"
+    echo "::error::  desktop-release.yml (attest-and-log) and attest-release.yml"
+    echo "::error::  run this script and each installs its own tooling."
+    exit 1
+  }
+}
+
+need jq "build the BinaryRecord leaves"
+need tar "hash directory-tree payloads"
+need sha256sum "hash payloads and artifacts"
 
 find_one() { find "$ARTIFACTS_DIR" -type f -name "$1" 2>/dev/null | head -1; }
 
@@ -128,6 +151,7 @@ dmg="$(find_one '*.dmg' || true)"
 if [ -n "${dmg:-}" ]; then
   name="pollis-${RELEASE_TAG}-macos.dmg"
   art_sha="$(sha_file "$dmg")"
+  need 7z "extract the .app payload from the .dmg"
   ex="$work/dmg"; mkdir -p "$ex"
   # 7z reads the HFS filesystem inside the .dmg on Linux; extract the .app.
   # The .dmg carries the standard "drag to /Applications" symlink, on which
@@ -150,6 +174,7 @@ exe="$(find_one '*.exe' || true)"
 if [ -n "${exe:-}" ]; then
   name="pollis-${RELEASE_TAG}-windows.exe"
   art_sha="$(sha_file "$exe")"
+  need 7z "extract the file tree from the NSIS installer"
   ex="$work/nsis"; mkdir -p "$ex"
   # 7z unpacks the NSIS installer's embedded file tree.
   7z x -y -o"$ex" "$exe" >/dev/null
@@ -177,6 +202,7 @@ if [ -n "${deb:-}" ]; then
   # Unpack the package filesystem to reach the installed executable — a running
   # deb install's `current_exe()` IS `/usr/bin/pollis`, so that file's hash is
   # what the app will present.
+  need dpkg-deb "unpack the .deb to reach its installed executable"
   ex="$work/deb"; mkdir -p "$ex"
   dpkg-deb --fsys-tarfile "$deb" | tar -xf - -C "$ex"
   emit_exe linux x86_64 deb "$name" "$sha" "ubuntu-22.04" "$(find_installed_bin "$ex")"
@@ -189,6 +215,8 @@ if [ -n "${rpm:-}" ]; then
   # Same for rpm; rpm2cpio + cpio are installed by the attest job. cpio only
   # unpacks into the cwd, so resolve the package to an absolute path before the
   # subshell cd (ARTIFACTS_DIR — and therefore `find_one` — is relative).
+  need rpm2cpio "unpack the .rpm to reach its installed executable"
+  need cpio "unpack the .rpm to reach its installed executable"
   ex="$work/rpm"; mkdir -p "$ex"
   rpm_abs="$(cd "$(dirname "$rpm")" && pwd)/$(basename "$rpm")"
   (cd "$ex" && rpm2cpio "$rpm_abs" | cpio -idm --quiet)

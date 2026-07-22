@@ -34,7 +34,12 @@ jobs:
           set -euo pipefail
           git fetch --depth 1 origin tag "${{ inputs.tag }}"
           echo "epoch=$(git log -1 --format=%ct "${{ inputs.tag }}")" >> "$GITHUB_OUTPUT"
-          echo "sha=$(git rev-parse "${{ inputs.tag }}")" >> "$GITHUB_OUTPUT"
+          # `^{commit}` is load-bearing: release tags are ANNOTATED, and a bare
+          # `git rev-parse v1.5.3` resolves to the tag OBJECT's sha, not the
+          # commit's. That sha was being stamped into every backfilled leaf's
+          # `commit` field, which is documented as the exact source revision —
+          # so backfilled leaves pointed at an object that is not a commit.
+          echo "sha=$(git rev-parse "${{ inputs.tag }}^{commit}")" >> "$GITHUB_OUTPUT"
 
       # The shipped installers, pulled from the GitHub release for the tag (same
       # bytes published to cdn.pollis.com). attest-binaries.sh finds each by glob.
@@ -49,10 +54,15 @@ jobs:
             --pattern '*.deb' --pattern '*.rpm'
           ls -la artifacts
 
+      # Must match desktop-release.yml's attest-and-log tooling: this workflow
+      # deliberately duplicates that job, so a tool added there must be added
+      # here too or the backfill path breaks while the release path works.
+      # 7z reads the dmg/NSIS payloads; rpm/cpio unpack the .rpm to reach
+      # `usr/bin/pollis` for its `exe` leaf (the .deb uses dpkg-deb, preinstalled).
       - name: Install extraction tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y p7zip-full jq
+          sudo apt-get install -y p7zip-full jq rpm cpio
 
       - name: Compute BinaryRecord leaves for this tag
         env:
