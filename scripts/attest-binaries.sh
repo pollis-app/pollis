@@ -105,13 +105,22 @@ MAIN_BIN="pollis"
 # Better to break the release job loudly than to publish an unverifiable build.
 emit_exe() {
   local platform="$1" arch="$2" bundle="$3" name="$4" pay_sha="$5" runner="$6" exe="$7"
-  if [ ! -f "$exe" ]; then
-    echo "::error::attest: main executable not found for ${bundle} at ${exe} — the in-app"
-    echo "::error::  build check cannot work for this platform without it. If the bundle"
-    echo "::error::  layout changed, update MAIN_BIN / the extraction below in this script."
+  if [ -z "${exe:-}" ] || [ ! -f "$exe" ]; then
+    echo "::error::attest: main executable not found for ${bundle} (looked for ${MAIN_BIN}" \
+         "at '${exe:-<no match>}') — the in-app build check cannot work for this platform"
+    echo "::error::  without it. If the bundle layout changed, update MAIN_BIN or the"
+    echo "::error::  extraction for this bundle in scripts/attest-binaries.sh."
     exit 1
   fi
   emit "$platform" "$arch" "$bundle" "$name" exe "$pay_sha" "$(sha_file "$exe")" "$runner"
+}
+
+# Locate the installed main executable inside an extracted Linux package tree.
+# Search rather than name the member path: the packagers disagree on the prefix
+# (`dpkg-deb --fsys-tarfile` emits `usr/bin/pollis`, rpm's cpio emits
+# `./usr/bin/pollis`), and hardcoding one of them failed the v1.5.3 release.
+find_installed_bin() {
+  find "$1" -type f -path "*/usr/bin/${MAIN_BIN}" 2>/dev/null | head -1
 }
 
 # ── macOS: .dmg wraps a reproducible .app payload (payload + signed) ──
@@ -169,8 +178,8 @@ if [ -n "${deb:-}" ]; then
   # deb install's `current_exe()` IS `/usr/bin/pollis`, so that file's hash is
   # what the app will present.
   ex="$work/deb"; mkdir -p "$ex"
-  dpkg-deb --fsys-tarfile "$deb" | tar -xf - -C "$ex" "./usr/bin/${MAIN_BIN}"
-  emit_exe linux x86_64 deb "$name" "$sha" "ubuntu-22.04" "$ex/usr/bin/${MAIN_BIN}"
+  dpkg-deb --fsys-tarfile "$deb" | tar -xf - -C "$ex"
+  emit_exe linux x86_64 deb "$name" "$sha" "ubuntu-22.04" "$(find_installed_bin "$ex")"
 fi
 rpm="$(find_one '*.rpm' || true)"
 if [ -n "${rpm:-}" ]; then
@@ -182,8 +191,8 @@ if [ -n "${rpm:-}" ]; then
   # subshell cd (ARTIFACTS_DIR — and therefore `find_one` — is relative).
   ex="$work/rpm"; mkdir -p "$ex"
   rpm_abs="$(cd "$(dirname "$rpm")" && pwd)/$(basename "$rpm")"
-  (cd "$ex" && rpm2cpio "$rpm_abs" | cpio -idm --quiet "./usr/bin/${MAIN_BIN}")
-  emit_exe linux x86_64 rpm "$name" "$sha" "ubuntu-22.04" "$ex/usr/bin/${MAIN_BIN}"
+  (cd "$ex" && rpm2cpio "$rpm_abs" | cpio -idm --quiet)
+  emit_exe linux x86_64 rpm "$name" "$sha" "ubuntu-22.04" "$(find_installed_bin "$ex")"
 fi
 
 count="$(jq 'length' <<<"$records")"
