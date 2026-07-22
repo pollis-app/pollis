@@ -212,14 +212,14 @@ if [ -n "${rpm:-}" ]; then
   name="pollis-${RELEASE_TAG}-linux.rpm"
   sha="$(sha_file "$rpm")"
   emit linux x86_64 rpm "$name" payload "$sha" "$sha" "ubuntu-22.04"
-  # Same for rpm; rpm2cpio + cpio are installed by the attest job. cpio only
-  # unpacks into the cwd, so resolve the package to an absolute path before the
-  # subshell cd (ARTIFACTS_DIR — and therefore `find_one` — is relative).
-  need rpm2cpio "unpack the .rpm to reach its installed executable"
-  need cpio "unpack the .rpm to reach its installed executable"
+  # bsdtar (libarchive) reads the .rpm directly. The obvious `rpm2cpio | cpio`
+  # was tried first and failed in CI with a bare exit 1 and no diagnostic: cpio
+  # was run `--quiet`, and the two-process pipeline under `set -o pipefail` gives
+  # no indication of which half died or why. One tool, no pipeline, no cwd
+  # juggling, and it handles whatever payload compression the rpm uses.
+  need bsdtar "unpack the .rpm to reach its installed executable"
   ex="$work/rpm"; mkdir -p "$ex"
-  rpm_abs="$(cd "$(dirname "$rpm")" && pwd)/$(basename "$rpm")"
-  (cd "$ex" && rpm2cpio "$rpm_abs" | cpio -idm --quiet)
+  bsdtar -xf "$rpm" -C "$ex"
   emit_exe linux x86_64 rpm "$name" "$sha" "ubuntu-22.04" "$(find_installed_bin "$ex")"
 fi
 

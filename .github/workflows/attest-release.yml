@@ -57,12 +57,12 @@ jobs:
       # Must match desktop-release.yml's attest-and-log tooling: this workflow
       # deliberately duplicates that job, so a tool added there must be added
       # here too or the backfill path breaks while the release path works.
-      # 7z reads the dmg/NSIS payloads; rpm/cpio unpack the .rpm to reach
-      # `usr/bin/pollis` for its `exe` leaf (the .deb uses dpkg-deb, preinstalled).
+      # 7z reads the dmg/NSIS payloads; bsdtar (libarchive-tools) unpacks the .rpm to
+      # reach `usr/bin/pollis` for its `exe` leaf (the .deb uses dpkg-deb, preinstalled).
       - name: Install extraction tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y p7zip-full jq rpm cpio
+          sudo apt-get install -y p7zip-full jq libarchive-tools
 
       - name: Compute BinaryRecord leaves for this tag
         env:
