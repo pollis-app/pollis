@@ -263,6 +263,9 @@ pub async fn spawn_world() -> World {
         // Sealed Sender off: the smoke rig exercises sync/enroll flows, not
         // envelope blinding (mirrors the flows harness default).
         seal_sender: false,
+        // Overlay off: the smoke rig talks to the in-process DS directly.
+        overlay_mode: pollis_core::config::OverlayMode::Off,
+        overlay_relay_url: None,
     };
 
     World {

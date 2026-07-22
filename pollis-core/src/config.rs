@@ -1,5 +1,9 @@
 use crate::error::{Error, Result};
 
+// Re-exported so Config consumers can name the overlay mode without taking a
+// direct dependency on `pollis-relay` (the field type below lives there).
+pub use pollis_relay::OverlayMode;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub turso_url: String,
