@@ -403,3 +403,121 @@ Safeguards so the incentive never distorts safety: a relay **cannot** gain any r
 > - Being a relay is a **separate, explicit consent**, defaulted to Wi-Fi + power-connected (§10.2, §11.6); relaying grants no read access of any kind (§8, §10.3).
 > - The **operational separation** of the relay tier from the Turso metadata plane is decided and documented before v0 ships — or v0 is honestly scoped as breach/subpoena defense, not malicious-operator defense (§11.1).
 > - **Non-negotiable framing guardrails** (§3, §12): the relay is marketed as *"hides your IP from our servers"* — never as *"anonymous"* or *"untraceable"*, and **never as part of or proof of the E2EE guarantee** (that proof is verifiable builds + the transparency log); copy violating this is rejected in review. Shipping the relay must not imply the application-layer social graph (sealed sender) is solved (§2.2).
+
+---
+
+## 14. v0 Execution Plan — de-risk results, generic-CONNECT decision, surface, slices
+
+*Added 2026-07-22 after the §12 de-risk spike. This section supersedes §9's "candidate"
+hedging where it conflicts: the load-bearing seams are now **confirmed against the pinned crate
+versions**, and the north-star direction is set (see below). §1–§13 remain the rationale; this is
+the build contract.*
+
+### 14.0 Direction: north star B + a browser/VPN stretch door (do not spec now, do not preclude)
+
+The roadmap owner set the north star to **Option B (multi-hop onion, §6.2) as the real goal**, with
+v0 (§6.1 single-hop first-party) as a **waypoint, not the destination** — because "trust us, we
+operationally separate the relay tier from the metadata plane" (§11.1) is *unverifiable* and
+contrary to Pollis's verify-don't-trust ethos. v1 removes that trust assumption; v0 ships the
+plumbing and the honest breach/subpoena win in the meantime.
+
+Additionally a **stretch goal** is declared **out of scope to spec today but must not be
+architecturally precluded**: a future in-app browser ("extranet") or full-VPN mode where
+medium-term *no client→Pollis-service traffic* is reliably associable and long-term *traffic to any
+destination* is unassociable.
+
+**The single binding rule this imposes on v0** (and the whole point of getting it right now, when
+it is free): **the transport primitive is a generic anonymized stream — `CONNECT(host, port)` inside
+the circuit. The first-party destination allowlist is enforced as relay-side *policy* (signed
+config, checked at the last hop), never as *protocol structure*.** The client shim speaks a generic
+CONNECT interface from day one; it does not know or care that today only the four first-party hosts
+will be accepted. Consequences:
+- A future webview/VPN consumer points at the *same* local shim and gets a stream — zero change to
+  circuit crypto, framing, or the shim.
+- "Extranet"/VPN later = widen the relay's signed egress policy (curated destinations), or bridge
+  the last hop into **Tor** for arbitrary destinations. Running our *own* open exits reintroduces
+  Tor's exit-node liability (§1.2) and yields only a weak Pollis-sized anonymity set — so the
+  Tor-bridge is the documented candidate for "any destination", **not** a committed own-exit fleet.
+- This costs v0 nothing: generic framing instead of a hardcoded 4-host proxy is the *same amount of
+  code*, just factored as policy-over-primitive.
+
+### 14.1 De-risk results (§12 item 1–2) — the load-bearing plumbing is GREEN
+
+The §12 worry was "does libSQL's Hrana/TLS session survive being tunneled to the real host?"
+**Retired by construction against the pinned deps:**
+
+- **libsql 0.9.30** exposes `Builder::new_remote(url, token).connector(C)`
+  (`database/builder.rs:770`). `C` becomes a `ConnectorService = Service<http::Uri, Box<dyn
+  Socket>>` (`util/http.rs`). We supply `hyper_rustls::HttpsConnector<ProxyConnector>`: **rustls
+  uses the request URI's host for SNI + certificate verification, so TLS still terminates at the
+  real Turso** — the inner `ProxyConnector` only changes *where the TCP lands* (it dials the local
+  shim / issues CONNECT). **No libsql fork.** The `libsql` version must stay pinned; a bump that
+  drops `.connector()` is a breaking change to guard in CI.
+- **reqwest 0.12.28** has native `Proxy` support incl. `socks5h://` (proxy-side DNS) behind the
+  `socks` feature (currently OFF — one-line enable in `pollis-core/Cargo.toml`), plus built-in
+  HTTP-CONNECT. Point every client at `socks5h://127.0.0.1:<shim-port>`.
+
+**Chosen shim shape: a local SOCKS5 server on `127.0.0.1:<auto-port>`** (loopback, ephemeral port —
+same blessed pattern as `media_server.rs`). SOCKS5 is the generic-CONNECT primitive §14.0 requires
+and is natively consumable by reqwest *and* a future webview; the libsql connector speaks SOCKS5 to
+the same port. Upstream of the shim (shim→relay) is our own framed protocol over QUIC (`quinn`) with
+device-signature auth (§9.4); v0 circuit length = 1 hop, but the circuit abstraction takes `n` hops
+so v1 is a policy/param change, not a rewrite.
+
+### 14.2 Full client egress surface + v0 per-host routing
+
+Every outbound path in `pollis-core` (+ shells), from the surface audit:
+
+| Egress | Crate / site | Proxy seam | v0 routing |
+|---|---|---|---|
+| Turso reads (libSQL/Hrana) | `libsql` — `db/remote.rs:43` | `.connector()` ✅ | **overlay** |
+| DS writes/reads | `reqwest` — `mls/ds_client.rs:135,388,421,444` | `.proxy()` ✅ | **overlay** |
+| R2 presigned PUT/GET/DELETE | `reqwest` — `r2.rs:761,777,788` | `.proxy()` ✅ | **overlay** (R2 host allowlisted) |
+| Transparency fetch (async) | `reqwest` — `transparency.rs:347,370` | `.proxy()` ✅ | overlay |
+| Transparency **verify** | `ureq` (sync, in `verifiable-log-serve`) | ❌ none | **residual leak (§14.4)** |
+| Push register (Expo) | `reqwest` — `push.rs:139` | `.proxy()` ✅ | see §14.4 (non-first-party host) |
+| LiveKit signaling (WS) + media (RTP) | `livekit` crate | ❌ none | **direct** — plane split (§6.4) |
+
+The 10 bare `reqwest::Client::new()` sites confirm there is **no shared HTTP client builder** today.
+v0's first refactor is a `state`-aware `http_client()` helper that all sites call; it applies the
+proxy when the overlay is on and is a no-op passthrough when off. This both wires the overlay and
+removes the per-call-`Client::new()` anti-pattern (connection-pool win for free).
+
+### 14.3 v0 slices (each independently reviewable + headless-gated)
+
+- **Slice 1 — the shim + plumbing + a loopback test relay (the de-risk made real).**
+  `pollis-core/src/net/overlay/`: (a) SOCKS5 loopback shim; (b) `Circuit` abstraction (n-hop,
+  n=1); (c) the QUIC relay-client with device-sig auth; (d) routing policy `off | prefer | strict`
+  + per-host plane table (§6.4); (e) the libsql `ProxyConnector` + the shared `http_client()`
+  reqwest helper; (f) endpoint re-resolution wiring at `db/remote.rs` + the reqwest sites, gated by
+  a new `Config` field (`POLLIS_OVERLAY`, default **off** → today's path byte-for-byte unchanged).
+  A minimal `pollis-relay/` **lib+bin** (quinn, allowlist, device-sig, CONNECT framing, pipe) so
+  tests spin it in-process. **Gate:** headless `-p pollis --no-default-features` build clean +
+  tests: reqwest GET and a libsql-shaped TLS connection both tunnel through the shim→relay to a
+  local test **TLS** server with the cert verified for the *real* name (proves end-to-end TLS
+  survives); allowlist-rejection test; strict-mode surfaces degraded state (never silent-drops,
+  messages-must-work); off-mode is byte-identical to direct.
+- **Slice 2 — deploy shape of the first-party relay pool + `off→prefer→strict` UI + consent.**
+  The `pollis-relay` binary as a deployable (see §7); the settings surface (§10.1) and the
+  be-a-relay consent (§10.2) are UI and can follow once the transport is proven.
+- **Slice 3 — one-hop latency measurement** against the §6.4 budget (de-risk item 3), on the real
+  control plane, before any "ship v0" call.
+
+v1 (multi-hop, peer relays, NAT traversal via the shipped WebRTC/ICE stack, guard/path selection,
+first-party last hop) builds on Slice 1's `n`-hop `Circuit` — no re-plumb.
+
+### 14.4 Residual leaks to state honestly in v0 (do not paper over)
+
+1. **`ureq` transparency-verify path can't proxy** (`verifiable-log-serve`, sync). The account-key /
+   build-verify *fetch* has an async reqwest path we proxy; the *verifier* uses ureq and will leak
+   the client IP to `verify.pollis.com`. Options: route verify through the shim via ureq's
+   (limited) proxy env, port the verifier fetch to reqwest, or accept + document. v0 **documents**
+   it; it is public-key fetching, not account-keyed activity, so it is the lowest-value leak.
+2. **Push register (Expo `exp.host`) is not a first-party host.** It is outside the closed
+   allowlist by definition, so it **cannot** go through the overlay (a relay would refuse it, per
+   §1.2). v0 keeps it direct and notes it; longer term the DS should proxy push registration
+   server-side (same shape as the #393 secrets-broker consolidation, §11.9) so the client stops
+   talking to Expo directly at all.
+3. **LiveKit signaling stays direct in v0** (no proxy seam in the `livekit` crate; media is direct
+   by plane-split anyway). Routing LiveKit's WebSocket is a v1+ item requiring either an upstream
+   connector seam or a wrapping shim.

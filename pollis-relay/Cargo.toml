@@ -1,0 +1,47 @@
+[package]
+name = "pollis-relay"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Pollis closed-overlay relay (v0): a generic anonymized-stream transport. The client shim speaks SOCKS5 CONNECT(host,port) on loopback; the relay authenticates the device (Ed25519, DS scheme), enforces a static first-party destination allowlist as policy, and pipes opaque bytes to the pinned host. Forwards sealed TLS/QUIC bytes only — never terminates the inner TLS, never sees plaintext or keys."
+
+[lib]
+name = "pollis_relay"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pollis-relay"
+path = "src/bin/pollis-relay.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "time", "sync", "signal"] }
+# Outer relay-hop transport. QUIC + rustls (ring provider, matching the rest of
+# the tree — aws-lc-rs is absent from the lockfile). The INNER payload is the
+# client's own TLS to the real service, which the relay never terminates.
+quinn = { version = "0.11", default-features = false, features = ["ring", "runtime-tokio", "rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging"] }
+rustls-pki-types = "1"
+# Self-signed relay QUIC identity (v0). Test certs are also generated in-test.
+# ring backend to avoid dragging in aws-lc-rs' C toolchain requirement.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"] }
+# Device-signature handshake, mirroring pollis-delivery/src/auth.rs: raw 32-byte
+# Ed25519 pubkey, 64-byte PureEdDSA signature over a canonical message.
+ed25519-dalek = "2"
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+# Shared HTTP client helper: socks5h:// (proxy-side DNS) points every caller at
+# the loopback shim; rustls-tls so the inner TLS terminates at the real host.
+reqwest = { version = "0.12", default-features = false, features = ["socks", "rustls-tls"] }
+async-trait = "0.1"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+
+[dev-dependencies]
+# T2 de-risks the libsql `.connector()` shape: a SOCKS-dialing connector under
+# rustls reaches the real host with SNI/cert intact. tokio-socks dials the shim;
+# tokio-rustls runs the client TLS over it (design §14.1 explicitly allows
+# "rustls-over-the-shim" as an alternative to hyper-rustls).
+tokio-socks = "0.5"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }

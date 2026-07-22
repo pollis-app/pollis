@@ -318,6 +318,10 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.chacha20]]
+version = "0.10.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.chacha20poly1305]]
 version = "0.10.1"
 criteria = "safe-to-deploy"
@@ -424,6 +428,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.cpufeatures]]
 version = "0.2.17"
+criteria = "safe-to-deploy"
+
+[[exemptions.cpufeatures]]
+version = "0.3.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.crc32fast]]
@@ -1930,6 +1938,10 @@ criteria = "safe-to-deploy"
 version = "0.11.14"
 criteria = "safe-to-deploy"
 
+[[exemptions.quinn-proto]]
+version = "0.11.16"
+criteria = "safe-to-deploy"
+
 [[exemptions.quinn-udp]]
 version = "0.5.14"
 criteria = "safe-to-deploy"
@@ -1970,12 +1982,20 @@ criteria = "safe-to-deploy"
 version = "0.2.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.rand_pcg]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.ratatui]]
 version = "0.28.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.rayon]]
 version = "1.12.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.rcgen]]
+version = "0.13.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.realfft]]
@@ -2569,6 +2589,10 @@ criteria = "safe-to-deploy"
 [[exemptions.tokio-rustls]]
 version = "0.26.4"
 criteria = "safe-to-deploy"
+
+[[exemptions.tokio-socks]]
+version = "0.5.3"
+criteria = "safe-to-run"
 
 [[exemptions.tokio-stream]]
 version = "0.1.18"
@@ -3196,6 +3220,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.xdg-home]]
 version = "1.3.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.yasna]]
+version = "0.5.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.yoke]]
