@@ -25,6 +25,6 @@ pub async fn audit_peer_account_key(
 }
 
 #[tauri::command]
-pub async fn verify_own_build() -> Result<BuildVerifyReport> {
-    pollis_core::commands::transparency::verify_own_build().await
+pub async fn verify_own_build(state: State<'_, Arc<AppState>>) -> Result<BuildVerifyReport> {
+    pollis_core::commands::transparency::verify_own_build(&state).await
 }

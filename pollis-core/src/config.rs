@@ -33,6 +33,20 @@ pub struct Config {
     /// sealing off); flipping `POLLIS_SEAL_SENDER` on later == release N+1. This
     /// is the additive two-release dance CLAUDE.md prescribes.
     pub seal_sender: bool,
+    /// Closed-overlay relay mode (design `docs/relay-overlay-design.md` §10.1,
+    /// §14). Parsed from `POLLIS_OVERLAY` (`off` | `prefer` | `strict`, default
+    /// **off**; unknown/empty → off). When `Off` the overlay is inert and every
+    /// network path is byte-for-byte identical to a build without it. `Prefer`
+    /// routes the control plane through the overlay with direct fallback; `Strict`
+    /// requires it and surfaces a degraded error rather than silently going direct
+    /// (messages-must-work). Media (LiveKit) stays direct in every mode (§6.4).
+    pub overlay_mode: pollis_relay::OverlayMode,
+    /// The v0 first-party relay endpoint (`POLLIS_OVERLAY_RELAY`, e.g.
+    /// `relay.pollis.com:443`). Absent → the overlay cannot build a circuit: in
+    /// `Prefer` that means direct fallback, in `Strict` a surfaced degraded error
+    /// — never a silent drop. The shim still starts whenever the mode is non-off
+    /// so `Strict` degrades instead of silently going direct.
+    pub overlay_relay_url: Option<String>,
 }
 
 impl Config {
@@ -68,7 +82,29 @@ impl Config {
                 .or_else(|| std::env::var("POLLIS_SEAL_SENDER").ok())
                 .map(|s| parse_env_bool(&s))
                 .unwrap_or(false),
+            // Optional overlay mode, default OFF (§14: overlay inert unless a
+            // non-off mode is selected at runtime).
+            overlay_mode: option_env!("POLLIS_OVERLAY")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("POLLIS_OVERLAY").ok())
+                .map(|s| parse_overlay_mode(&s))
+                .unwrap_or(pollis_relay::OverlayMode::Off),
+            overlay_relay_url: option_env!("POLLIS_OVERLAY_RELAY")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("POLLIS_OVERLAY_RELAY").ok())
+                .filter(|s| !s.is_empty()),
         })
+    }
+}
+
+/// Parse `POLLIS_OVERLAY`: `prefer` / `strict` (case-insensitive) select those
+/// modes; everything else — including `off`, unknown values, and empty — is
+/// `Off`, so a misconfigured value fails safe to today's direct path.
+pub(crate) fn parse_overlay_mode(s: &str) -> pollis_relay::OverlayMode {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "prefer" => pollis_relay::OverlayMode::Prefer,
+        "strict" => pollis_relay::OverlayMode::Strict,
+        _ => pollis_relay::OverlayMode::Off,
     }
 }
 
@@ -122,6 +158,11 @@ impl Config {
             // Default OFF; the sealed-sender flows test flips this per-client to
             // exercise the release-N+1 sealing path (see `TestClient::new_sealed`).
             seal_sender: false,
+            // Overlay off in the integration harness — it exercises the direct
+            // control-plane path. Overlay wiring has its own unit tests
+            // (`net::overlay`) that spin an in-process relay.
+            overlay_mode: pollis_relay::OverlayMode::Off,
+            overlay_relay_url: None,
         })
     }
 }

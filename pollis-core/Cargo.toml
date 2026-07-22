@@ -83,8 +83,24 @@ base64 = "0.22"
 hex = "0.4"
 ulid = "1"
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+# `socks` enables `Proxy::all("socks5h://…")` so `pollis_relay::http::http_client`
+# can point control-plane HTTP at the loopback overlay shim (proxy-side DNS). OFF
+# by default at runtime — an unset `POLLIS_OVERLAY` builds a proxy-less client, so
+# enabling the feature changes nothing until the overlay is turned on.
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "socks"], default-features = false }
 anyhow = "1"
+# Closed-overlay relay transport (design `docs/relay-overlay-design.md` §14).
+# Depended on UNCONDITIONALLY — the overlay is compiled into every consumer but
+# stays INERT unless `POLLIS_OVERLAY` selects a non-off mode at runtime (§14.0).
+pollis-relay = { path = "../pollis-relay" }
+# The libsql connector that routes Turso's Hrana/TLS through the overlay shim.
+# hyper 0.14 + hyper-rustls 0.25 are ALREADY in this crate's graph via libsql's
+# default (tls) features; naming them directly lets `net::overlay::overlay_connector`
+# mirror libsql's own default TLS connector (`with_native_roots().enable_http1()`)
+# but wrap a SOCKS-dialing inner connector. No new lockfile crates.
+hyper = { version = "0.14", features = ["client"] }
+hyper-rustls = "0.25"
+tower-service = "0.3"
 dotenvy = "0.15"
 thiserror = "1"
 zeroize = { version = "1", features = ["derive"] }
@@ -238,3 +254,11 @@ path = "../pollis-capture-proto"
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 required-features = ["cli"]
+
+# Overlay-wiring tests spin an in-process pollis-relay + shim and run TLS over the
+# libsql-shaped SOCKS connector, verifying the cert for the REAL origin name — the
+# same proof shape as `pollis-relay/tests/proof.rs` T2. rustls 0.23 / tokio-rustls
+# 0.26 are already in the lockfile (reqwest + quinn); no new supply-chain crates.
+[dev-dependencies]
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }

@@ -141,23 +141,43 @@ pub struct AppState {
     /// own receiver. Capacity is small and lagged receivers drop old frames —
     /// latest-frame-wins, never back-pressure the decoder.
     pub screenshare_frame_tx: tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>,
+    /// The running closed-overlay relay shim (design §14), or `None` when the
+    /// overlay is off (`POLLIS_OVERLAY` unset/`off`). `Some` owns the loopback
+    /// SOCKS5 shim task for the app's lifetime; dropping it (process exit) aborts
+    /// the accept loop. Control-plane HTTP + the libsql connector consult
+    /// `overlay.as_ref()` to route through the shim; when `None` every path is
+    /// byte-for-byte the pre-overlay direct behavior. Started in [`AppState::new`].
+    pub overlay: Option<pollis_relay::OverlayHandle>,
 }
 
 impl AppState {
     pub async fn new(config: Config) -> crate::error::Result<Self> {
-        let remote_db = Arc::new(RemoteDb::connect(&config.turso_url, &config.turso_token).await?);
+        // Start the overlay shim FIRST (or `None` when off), so both remote DBs
+        // can be built through it. Off-by-default: `None` ⇒ every connection below
+        // is the unchanged direct path.
+        let overlay = crate::net::overlay::start_overlay(&config).await;
+        let overlay_shim = overlay.as_ref().map(|h| h.socks_addr());
+
+        let remote_db = Arc::new(
+            RemoteDb::connect_with_overlay(&config.turso_url, &config.turso_token, overlay_shim)
+                .await?,
+        );
         // Read-only commit-log DB when configured; otherwise reuse remote_db so
-        // behavior is unchanged pre-cutover.
+        // behavior is unchanged pre-cutover. Same operator (Turso) ⇒ same overlay.
         let log_db = match (&config.log_db_url, &config.log_db_token) {
-            (Some(url), Some(token)) => Arc::new(RemoteDb::connect(url, token).await?),
+            (Some(url), Some(token)) => {
+                Arc::new(RemoteDb::connect_with_overlay(url, token, overlay_shim).await?)
+            }
             _ => Arc::clone(&remote_db),
         };
-        Ok(Self::new_with_parts(
+        let mut state = Self::new_with_parts(
             config,
             remote_db,
             log_db,
             keystore::default_os_keystore(),
-        ))
+        );
+        state.overlay = overlay;
+        Ok(state)
     }
 
     /// Build AppState from pre-constructed parts. Production should use
@@ -200,6 +220,9 @@ impl AppState {
             // Receiver dropped immediately; subscribers are created per
             // WebSocket connection via `screenshare_frame_tx.subscribe()`.
             screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,
+            // Overlay off unless `AppState::new` starts it (test harness /
+            // `new_with_parts` callers stay direct).
+            overlay: None,
         }
     }
 

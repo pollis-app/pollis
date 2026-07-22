@@ -135,6 +135,10 @@ pub async fn notify_new_message(
         return Ok(());
     }
 
+    // Direct, NOT through the overlay: Expo (`exp.host`) is a non-first-party host
+    // outside the closed allowlist, so a relay would refuse to forward it (§1.2,
+    // §14.4). Longer term the DS should proxy push registration server-side so the
+    // client stops talking to Expo directly at all.
     // Expo accepts up to 100 messages per request; chunk to stay under it.
     let client = reqwest::Client::new();
     for chunk in messages.chunks(100) {

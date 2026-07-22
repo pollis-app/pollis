@@ -154,6 +154,11 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 livekit_url: parsed.livekit_url,
                 pollis_delivery_url: parsed.pollis_delivery_url.filter(|s| !s.is_empty()),
                 seal_sender: parsed.seal_sender,
+                // Overlay is off on the mobile bridge path in Slice 1b: the shim
+                // + connector wiring ships desktop-first (config-from-env).
+                // Mobile opt-in follows once the relay pool is deployed (Slice 2).
+                overlay_mode: pollis_relay::OverlayMode::Off,
+                overlay_relay_url: None,
             };
             let state = AppState::new(config).await?;
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))

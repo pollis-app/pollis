@@ -275,7 +275,7 @@ pub async fn upload_file(
     state: &Arc<AppState>,
 ) -> Result<UploadResult> {
     let put_url = presign_r2(state, "put", &key).await?;
-    r2_put_url(&put_url, data, &content_type).await?;
+    r2_put_url(state.overlay.as_ref(), &put_url, data, &content_type).await?;
     let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
     Ok(UploadResult { key, url })
 }
@@ -285,7 +285,7 @@ pub async fn download_file(
     state: &Arc<AppState>,
 ) -> Result<Vec<u8>> {
     let get_url = presign_r2(state, "get", &key).await?;
-    r2_get_url(&get_url).await
+    r2_get_url(state.overlay.as_ref(), &get_url).await
 }
 
 // ── Media upload (convergent encryption + cross-user dedup) ───────────────
@@ -369,7 +369,7 @@ pub async fn upload_media(
         let ciphertext = encrypt_chunked(&data, &enc_key, &enc_nonce);
 
         let put_url = presign_r2(state, "put", &r2_key).await?;
-        r2_put_url(&put_url, ciphertext, "application/octet-stream").await?;
+        r2_put_url(state.overlay.as_ref(), &put_url, ciphertext, "application/octet-stream").await?;
 
         // Register in Turso so future uploads of the same file skip R2 — route the
         // dedup-row write through the Delivery Service.
@@ -415,7 +415,7 @@ pub async fn download_media(
     // ever exposes convergently-encrypted ciphertext; confidentiality comes from
     // MLS key distribution, not the R2 ACL (see broker.rs).
     let get_url = presign_r2(state, "get", &r2_key).await?;
-    let ciphertext = r2_get_url(&get_url).await?;
+    let ciphertext = r2_get_url(state.overlay.as_ref(), &get_url).await?;
     decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)
 }
 
@@ -621,7 +621,7 @@ pub(crate) async fn delete_r2_object(
     r2_key: &str,
 ) -> Result<()> {
     let delete_url = presign_r2(state, "delete", r2_key).await?;
-    r2_delete_url(&delete_url).await
+    r2_delete_url(state.overlay.as_ref(), &delete_url).await
 }
 
 // ── Crypto helpers ────────────────────────────────────────────────────────
@@ -756,9 +756,15 @@ async fn presign_r2(state: &Arc<AppState>, operation: &str, key: &str) -> Result
 }
 
 /// PUT `data` to a presigned URL. Content-Type is set at request time (the broker
-/// signs only `host`, so it is deliberately left unsigned).
-async fn r2_put_url(url: &str, data: Vec<u8>, content_type: &str) -> Result<()> {
-    let resp = reqwest::Client::new()
+/// signs only `host`, so it is deliberately left unsigned). Routes through the
+/// overlay when on — R2 is a first-party, allowlisted host (§14.2).
+async fn r2_put_url(
+    overlay: Option<&pollis_relay::OverlayHandle>,
+    url: &str,
+    data: Vec<u8>,
+    content_type: &str,
+) -> Result<()> {
+    let resp = crate::net::overlay::http_client(overlay)
         .put(url)
         .header("Content-Type", content_type)
         .body(data)
@@ -772,9 +778,9 @@ async fn r2_put_url(url: &str, data: Vec<u8>, content_type: &str) -> Result<()> 
     Ok(())
 }
 
-/// GET the bytes at a presigned URL.
-async fn r2_get_url(url: &str) -> Result<Vec<u8>> {
-    let resp = reqwest::Client::new().get(url).send().await?;
+/// GET the bytes at a presigned URL. Routes through the overlay when on.
+async fn r2_get_url(overlay: Option<&pollis_relay::OverlayHandle>, url: &str) -> Result<Vec<u8>> {
+    let resp = crate::net::overlay::http_client(overlay).get(url).send().await?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
@@ -784,8 +790,9 @@ async fn r2_get_url(url: &str) -> Result<Vec<u8>> {
 }
 
 /// DELETE the object at a presigned URL. A 404 counts as success (already gone).
-async fn r2_delete_url(url: &str) -> Result<()> {
-    let resp = reqwest::Client::new().delete(url).send().await?;
+/// Routes through the overlay when on.
+async fn r2_delete_url(overlay: Option<&pollis_relay::OverlayHandle>, url: &str) -> Result<()> {
+    let resp = crate::net::overlay::http_client(overlay).delete(url).send().await?;
     let status = resp.status();
     if status.is_success() || status.as_u16() == 404 {
         return Ok(());
