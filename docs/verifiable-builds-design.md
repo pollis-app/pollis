@@ -276,7 +276,7 @@ deterministic):
   "arch": "aarch64",                 // aarch64 | x86_64
   "bundle": "dmg",                   // dmg | app | nsis | appimage | deb | rpm
   "artifact_name": "pollis-v1.3.0-macos.dmg",
-  "layer": "signed",                 // "payload" (reproducible) | "signed" (wrapped)
+  "layer": "signed",                 // "payload" (reproducible) | "signed" (wrapped) | "exe" (main binary as installed)
   "payload_sha256": "<hex>",         // hash of the reproducible pre-signature payload
   "artifact_sha256": "<hex>",        // hash of the *shipped* artifact (== payload_sha256 for layer=payload)
   "toolchain": {                      // the reproducibility recipe, pinned
@@ -296,6 +296,16 @@ Design notes:
   `commit`/`release_tag`, joined by `payload_sha256`. This is what lets the
   verifier prove "the honest reproducible payload `P` is inside the signed thing
   I downloaded" while keeping `P` independently reproducible.
+- **Plus an `exe` leaf** on every bundle except the AppImage, holding the sha256
+  of the main executable *as installed* (`Contents/MacOS/pollis`, `pollis.exe`,
+  `usr/bin/pollis`) in `artifact_sha256`, joined to its payload leaf by the same
+  `payload_sha256`. Rationale in §4.2: `payload` leaves hash an extracted
+  directory tree or the installer file, so a *running* app has no preimage for
+  them and the in-app check could never match on macOS/Windows/deb/rpm. The
+  AppImage needs no `exe` leaf — its shipped bytes ARE the payload and the app
+  hashes them directly via `$APPIMAGE`, a strictly stronger check. Adding a
+  `Layer` variant is backward-compatible: existing leaves' canonical bytes, and
+  therefore every published inclusion proof, are untouched.
 - The leaf commits to a **content hash + full recipe**, never to binary bytes —
   same privacy/space property as the commit-log builder (hash, drop the blob).
 - `provenance_uri` links each leaf to its SLSA/in-toto attestation (§3), so the
@@ -313,8 +323,10 @@ layer)` it enforces:
 - **Monotonic releases:** `release_tag` is append-only in publish order; a leaf
   cannot reference a commit that isn't an ancestor of a previously-logged tag on
   the release branch (a weak, cheap supply-chain sanity rule).
-- **Payload/signed pairing:** every `layer:"signed"` leaf must have a matching
-  `layer:"payload"` leaf with equal `payload_sha256` earlier in the tree.
+- **Derived-layer pairing:** every non-`payload` leaf (`signed`, `exe`) must have
+  a matching `layer:"payload"` leaf with equal `payload_sha256` earlier in the
+  tree. Stated over "not payload" rather than per-variant, so a future layer
+  inherits the rule instead of silently escaping it.
 
 Because these run inside `verifiable-log`'s replay, `pollis-verify` re-checks them
 independently — the app and CLI can never disagree, same guarantee the existing
@@ -521,9 +533,30 @@ advisory-line pattern already used by `AccountKeyAuditLine` +
 The running app knows its **own** binary. A new `pollis-core` command,
 `verify_own_build`, does:
 
-1. Compute the running binary's payload hash. The app can hash its own on-disk
-   artifact / `.app` bundle payload (the reproducible unit), the same computation
-   the release job logged.
+1. Compute the running binary's hash **and the leaf layer it is comparable
+   against.** An early assumption here ("the app can just hash its own `.app`
+   bundle payload, the same computation the release job logged") turned out to be
+   false in practice, and shipped a false alarm.
+   `scripts/attest-binaries.sh` logs, per shape: `sha_file` of the
+   `.AppImage`/`.deb`/`.rpm`, but `sha_tree` — a `SOURCE_DATE_EPOCH`-pinned `tar`
+   of an *extracted directory* — for the macOS `.app` (7z-extracted from the
+   signed `.dmg` on a Linux runner) and the Windows NSIS tree. An installed
+   process has neither the original installer nor that tar preimage, so no hash
+   it can take will ever equal those leaves: the comparison missed 100% of the
+   time everywhere except the AppImage, rendering the danger-styled "Build not in
+   public log" on genuine, signed, notarized releases.
+
+   The resolution is **§2.2's `exe` layer** — a third leaf per bundle holding the
+   sha256 of the main executable as installed, which is both what a running
+   process can hash and the precise claim this affordance makes ("these running
+   bytes are bytes Pollis published"). It is bound to its `payload` leaf by the
+   shared `payload_sha256`, so it can never float free of a published,
+   reproducible unit. `compute_my_payload` returns a `MyPayload` enum pairing the
+   hash with its target layer — `Payload(hash)` for the AppImage (whose shipped
+   bytes ARE the payload, a strictly stronger whole-payload check), `Exe(hash)`
+   everywhere else — so a cross-layer comparison is unrepresentable rather than
+   merely discouraged. Releases predating the `exe` layer (≤ v1.5.2) carry no
+   comparable leaf and report **Unavailable**, never Mismatch.
 2. Fetch `/v1/binaries/entries.json` + the STH + the inclusion proof for this
    version's `payload` leaf from `verify.pollis.com`, and verify — **reusing the
    exact `verifiable-log` verification functions** already compiled into
@@ -538,7 +571,14 @@ The running app knows its **own** binary. A new `pollis-core` command,
      loud case: it means the running binary is not one Pollis publicly attested,
      which is exactly the targeted-backdoor signal. Surface prominently but
      without a modal (repo rule: no modals) — an inline danger-styled line + a
-     link to `docs/verify-transparency-log.md`.
+     link to `docs/verify-transparency-log.md`. Only reachable when the tag
+     actually published a leaf of this install's layer (step 1) — plus the two
+     platform-independent alarms, a tree that fails verification and a served key
+     that isn't the pin.
+   - **Unavailable** — "couldn't check". The host being unreachable, the local
+     hash failing, *or* a tag with no leaf of the comparable layer (releases
+     before `exe` shipped). Quiet, not alarming, and its copy points at the
+     independent-verification guide.
 
 > **Honesty caveat (must be in the UI copy, not buried):** the in-app check
 > proves *inclusion in the log* and *hash match to the logged payload*. It does

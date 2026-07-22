@@ -39,9 +39,14 @@ pub const STH_CONTEXT: &[u8] = b"pollis-verifiable-log:sth:v1:binaries";
 /// non-reproducible (embedded notarization / Authenticode / minisign
 /// signatures), so it is logged as a *derived* [`Self::Signed`] leaf bound to a
 /// reproducible [`Self::Payload`] leaf via `payload_sha256`. Modelling this as a
-/// two-value enum (rather than a free string) makes an invalid `layer` an
+/// closed enum (rather than a free string) makes an invalid `layer` an
 /// unrepresentable state: decoding a leaf with any other value is a parse error,
 /// which the invariant treats as a violation.
+///
+/// Adding a variant is backward-compatible in both directions that matter: old
+/// leaves carry `payload`/`signed` and still decode, and their canonical bytes
+/// (and therefore every published inclusion proof) are untouched, because the
+/// variant list is not part of any leaf's encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Layer {
@@ -51,6 +56,19 @@ pub enum Layer {
     /// The shipped, signed/notarized bytes — a derived wrapper around a
     /// `Payload` leaf sharing the same `payload_sha256`.
     Signed,
+    /// The **main executable as installed**, hashed on its own:
+    /// `Contents/MacOS/pollis` inside the `.app`, `pollis.exe` inside the NSIS
+    /// tree, `usr/bin/pollis` inside the AppImage/deb/rpm. `artifact_sha256` is
+    /// that file's sha256; `payload_sha256` binds it to the enclosing
+    /// [`Self::Payload`] leaf.
+    ///
+    /// This layer exists so a *running* app can verify itself. The `payload`
+    /// leaf is the rebuilder's unit — a `sha_tree` of an extracted directory or
+    /// the installer file — and an installed process has neither preimage, so
+    /// it can never match one. It CAN hash the one file it is executing, which
+    /// is also the precise claim the in-app check makes: that these running
+    /// bytes are bytes Pollis published.
+    Exe,
 }
 
 /// The reproducibility recipe pinned into each leaf. A rebuilder installs these
@@ -152,10 +170,12 @@ impl BinaryRecord {
 ///   leaf cannot reference a tag out of publish order). The git-ancestry half of
 ///   the design rule is intentionally omitted here — a pure, offline verifier
 ///   has no git graph — leaving the cheap, self-contained tag-order check.
-/// * **Payload/signed pairing** — every `layer:"signed"` leaf must have a
-///   matching `layer:"payload"` leaf with equal `payload_sha256` earlier in the
-///   tree, so the reproducible unit inside a signed artifact is always itself
-///   published and independently reproducible.
+/// * **Derived-layer pairing** — every non-`payload` leaf (`signed`, `exe`) must
+///   have a matching `layer:"payload"` leaf with equal `payload_sha256` earlier
+///   in the tree, so the reproducible unit a derived leaf describes is always
+///   itself published and independently reproducible. Stated over "not payload"
+///   rather than per-variant so a future layer inherits the rule instead of
+///   silently escaping it.
 ///
 /// Because this runs inside `verifiable_log`'s replay, `pollis-verify` re-checks
 /// it independently — the app and CLI can never disagree, the same guarantee the
@@ -228,14 +248,14 @@ impl TenantInvariant for BinaryInvariant {
             ));
         }
 
-        // (c) Payload/signed pairing: a signed leaf must wrap an already-logged
-        //     reproducible payload with the same payload_sha256.
-        if cand.layer == Layer::Signed && !payload_seen {
+        // (c) Derived-layer pairing: a signed/exe leaf must be bound to an
+        //     already-logged reproducible payload with the same payload_sha256.
+        if cand.layer != Layer::Payload && !payload_seen {
             return Err(InvariantViolation::new(
                 TENANT,
                 format!(
-                    "signed artifact `{}` ({}) has no matching payload leaf with payload_sha256 {}",
-                    cand.artifact_name, cand.release_tag, cand.payload_sha256,
+                    "{:?} artifact `{}` ({}) has no matching payload leaf with payload_sha256 {}",
+                    cand.layer, cand.artifact_name, cand.release_tag, cand.payload_sha256,
                 ),
             ));
         }
@@ -330,6 +350,49 @@ mod tests {
         let signed = record("v1.0.0", "windows", "nsis", Layer::Signed, 0x44, 0x55).to_entry().unwrap();
         let err = inv.check(&[], &signed).unwrap_err();
         assert!(err.message.contains("no matching payload"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn rejects_exe_without_payload() {
+        let inv = BinaryInvariant;
+        // The pairing rule is stated over "not payload", so `exe` inherits it:
+        // an exe leaf must be bound to a published reproducible payload.
+        let exe = record("v1.0.0", "darwin", "dmg", Layer::Exe, 0x44, 0x55).to_entry().unwrap();
+        let err = inv.check(&[], &exe).unwrap_err();
+        assert!(err.message.contains("no matching payload"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn accepts_exe_leaf_bound_to_its_payload() {
+        let inv = BinaryInvariant;
+        let payload = record("v1.0.0", "darwin", "dmg", Layer::Payload, 0x11, 0x11).to_entry().unwrap();
+        let signed = record("v1.0.0", "darwin", "dmg", Layer::Signed, 0x11, 0x22).to_entry().unwrap();
+        // Same payload_sha256 binds it to the .app payload; artifact_sha256 is
+        // the main executable's own hash — what a running app can recompute.
+        let exe = record("v1.0.0", "darwin", "dmg", Layer::Exe, 0x11, 0x33).to_entry().unwrap();
+        assert!(inv.check(&[&payload, &signed], &exe).is_ok());
+        // `exe` is its own fork_key slot, so it doesn't collide with `signed`
+        // despite sharing (tag, platform, arch, bundle) and differing in hash.
+        assert!(inv.check(&[&payload, &exe], &signed).is_ok());
+    }
+
+    #[test]
+    fn exe_layer_serialises_as_exe_and_roundtrips() {
+        let r = record("v1.0.0", "windows", "nsis", Layer::Exe, 0x11, 0x33);
+        let bytes = r.encode().unwrap();
+        let s = String::from_utf8(bytes.clone()).unwrap();
+        assert!(s.contains("\"layer\":\"exe\""), "got: {s}");
+        assert_eq!(BinaryRecord::decode(&bytes).unwrap(), r);
+    }
+
+    #[test]
+    fn pre_exe_leaf_bytes_still_decode_unchanged() {
+        // Adding the variant must not disturb leaves already in the published
+        // tree — their bytes (and every inclusion proof over them) are fixed.
+        let r = record("v1.0.0", "darwin", "dmg", Layer::Payload, 0x11, 0x11);
+        let bytes = r.encode().unwrap();
+        assert_eq!(BinaryRecord::decode(&bytes).unwrap(), r);
+        assert_eq!(BinaryRecord::decode(&bytes).unwrap().encode().unwrap(), bytes);
     }
 
     #[test]

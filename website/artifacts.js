@@ -32,6 +32,16 @@ function esc(s) {
     .replace(/"/g, "&quot;");
 }
 
+// Normalise a release version to exactly one leading "v". The two feeds
+// disagree: releases/latest.json publishes "v1.5.2" while releases/cli/latest.json
+// publishes "1.1.4", so prefixing blindly rendered "vv1.5.2" — and, worse, asked
+// the binaries log for a tag `vv1.5.2`, which can never exist, so Release proofs
+// always reported the newest desktop release as missing from the log.
+function vTag(version) {
+  const v = String(version || "").replace(/^v+/, "");
+  return v ? "v" + v : "";
+}
+
 function shortHash(s) {
   if (!s || s.length <= 14) {
     return s || "";
@@ -125,7 +135,7 @@ function renderDesktop(data) {
     '<div class="art-card-head">' +
     '<span class="art-card-name">Pollis desktop app</span>' +
     '<span class="art-card-ver">' +
-    (version ? "v" + esc(version) : "version unknown") +
+    (vTag(version) ? esc(vTag(version)) : "version unknown") +
     "</span>" +
     "</div>" +
     '<p class="art-card-desc">The full Tauri desktop client. Signed installer per platform.</p>' +
@@ -261,7 +271,7 @@ function renderReleaseProofsUnavailable(tag) {
 }
 
 function loadReleaseProofs(version) {
-  const tag = "v" + version;
+  const tag = vTag(version);
   fetchJSON(BACKEND_BASE + "/verify/release/" + encodeURIComponent(tag))
     .then(function (report) {
       renderReleaseProofs(report, tag);
@@ -298,7 +308,7 @@ function renderCLI(data) {
     '<div class="art-card-head">' +
     '<span class="art-card-name">Pollis CLI (terminal client)</span>' +
     '<span class="art-card-ver">' +
-    (version ? "v" + esc(version) : "version unknown") +
+    (vTag(version) ? esc(vTag(version)) : "version unknown") +
     "</span>" +
     "</div>" +
     '<p class="art-card-desc">The self-contained <code>pollis</code> terminal client — same MLS ' +

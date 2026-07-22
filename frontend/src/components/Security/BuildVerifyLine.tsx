@@ -6,7 +6,8 @@ import type { BuildVerifyStatus } from "../../types";
 interface BuildVerifyLineProps {
   status: BuildVerifyStatus;
   // One-line, human-readable explanation from the report. Surfaced as the reason
-  // on `mismatch`; ignored for the other (self-explanatory) statuses.
+  // on `mismatch` and `unavailable`; ignored for the other (self-explanatory)
+  // statuses.
   detail: string;
   testId?: string;
 }
@@ -49,14 +50,18 @@ const statusConfig: Record<
 
 // A small, advisory status line surfacing the result of an in-app "verify this
 // build" check (issue #484). Same deliberately-quiet pattern as
-// AccountKeyAuditLine. On `mismatch` it renders the report's reason and a link
-// out to the third-party verification guide.
+// AccountKeyAuditLine. On `mismatch` and `unavailable` it renders the report's
+// reason and a link out to the third-party verification guide — for the install
+// shapes that can't reproduce their own payload hash in-app (macOS .app,
+// Windows NSIS, deb/rpm) that guide IS the verification path, so it has to be
+// reachable from the quiet status too, not just the alarm.
 export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
   status,
   detail,
   testId = "build-verify",
 }) => {
   const { icon, label, color } = statusConfig[status];
+  const showReason = status === "mismatch" || status === "unavailable";
 
   return (
     <div
@@ -71,9 +76,9 @@ export const BuildVerifyLine: React.FC<BuildVerifyLineProps> = ({
         {icon}
         {label}
       </span>
-      {/* On mismatch, append the report's reason and the verify-guide link so
-          the user can act on it. */}
-      {status === "mismatch" && (
+      {/* Append the report's reason and the verify-guide link so the user can
+          act on it. */}
+      {showReason && (
         <>
           {detail && (
             <span

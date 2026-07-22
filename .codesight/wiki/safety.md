@@ -222,17 +222,44 @@ makes every user's full history auditable by anyone.
   rotation); pinned key absent from a verifying history → `alarm` (the server
   showed a key it never published).
 - `verify_own_build` (#484, binaries tenant) — the in-app "Verify this build"
-  check. Computes the running binary's payload hash best-effort per-platform
-  (exact for the Linux AppImage via `$APPIMAGE`; deferred for `.app`/NSIS/deb/rpm
-  until reproducibility lands), pins the served binaries key, then runs the SAME
-  `verifiable_log_serve::release::verify_release` the `pollis-verify release` CLI
-  runs. The pure `derive_build_verify` maps the report to `verified` (our hash is
-  a published payload leaf for `v{version}`) / `pending` (tag not yet republished)
-  / `mismatch` (tag present but our hash absent, or the tree/served key failed the
-  trust check — the targeted-backdoor signal) / `unavailable` (couldn't check).
-  The version/commit are baked in (`pollis-core/build.rs`, commit omitted if
-  absent). On-demand only (a mutation, never auto-run) and advisory — it never
-  gates launch or update.
+  check. Computes the running binary's payload hash, pins the served binaries
+  key, then runs the SAME `verifiable_log_serve::release::verify_release` the
+  `pollis-verify release` CLI runs. The pure `derive_build_verify` maps the
+  report to `verified` (our hash is a published payload leaf for `v{version}`) /
+  `pending` (tag not yet republished) / `mismatch` (tag present but our hash
+  absent, or the tree/served key failed the trust check — the targeted-backdoor
+  signal) / `unavailable` (couldn't check). The version/commit are baked in
+  (`pollis-core/build.rs`, commit omitted if absent). On-demand only (a mutation,
+  never auto-run) and advisory — it never gates launch or update.
+
+  **The `exe` layer is what makes this work off Linux.** Originally the app
+  compared `sha256(current_exe())` against `payload` leaves — but
+  `scripts/attest-binaries.sh` logs `payload` as a `sha_tree` of an *extracted
+  directory* (a `SOURCE_DATE_EPOCH`-pinned tar) or a `sha_file` of the
+  *installer*, and an installed process has neither preimage. The comparison
+  therefore missed 100% of the time on macOS `.app`, Windows NSIS and deb/rpm,
+  rendering the danger-styled "Build not in public log" on every genuine signed
+  release. Only the AppImage (whose shipped bytes ARE the payload, reachable via
+  `$APPIMAGE`) ever matched.
+
+  The fix is a third `Layer::Exe` leaf per bundle, carrying the sha256 of the
+  main executable as installed (`Contents/MacOS/pollis`, `pollis.exe`,
+  `usr/bin/pollis`) in `artifact_sha256`, bound to its `payload` leaf through the
+  shared `payload_sha256` (the invariant's derived-layer pairing rule, now stated
+  over "not payload" so future layers inherit it). Adding an enum variant leaves
+  every published leaf's canonical bytes — and every inclusion proof — untouched.
+  Client-side, `compute_my_payload` returns a `MyPayload` enum pairing the hash
+  with the layer it is meaningful against (`Payload` for AppImage, `Exe`
+  everywhere else) so a cross-layer comparison is unrepresentable, and
+  `derive_build_verify` filters the tag's artifacts to that layer. A tag carrying
+  no leaf of the needed layer — every release ≤ v1.5.2 — is `unavailable`
+  ("couldn't check"), never `mismatch`. Tree-invalid and tag-not-found stay loud
+  on all platforms; the gate is scoped to the hash comparison alone.
+
+  The `exe` leaf attests the running binary, which is exactly the claim the UI
+  makes. It is not a substitute for the `payload` leaf: that remains the
+  rebuilders' reproducibility unit, and full payload reproduction off Linux is
+  still Phase 5.
 
 Statuses are `ok` / `pending` / `alarm` / `unavailable`. The log's public key is
 pinned in the client; a served key ≠ the pin is a hard `alarm` (any key can sign

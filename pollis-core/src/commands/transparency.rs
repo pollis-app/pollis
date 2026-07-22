@@ -30,7 +30,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use verifiable_log_serve::release::{verify_release, ReleaseReport};
+use verifiable_log_serve::release::{verify_release, Layer, ReleaseReport};
 use verifiable_log_serve::{AccountKeyVersion, AccountReport};
 
 use crate::error::{Error, Result};
@@ -247,8 +247,8 @@ pub async fn verify_own_build() -> Result<BuildVerifyReport> {
     };
 
     // Hash our own binary (blocking file IO) on the blocking pool.
-    let my_hash = match tokio::task::spawn_blocking(compute_my_payload_sha256).await {
-        Ok(Ok(hash)) => hash,
+    let my_payload = match tokio::task::spawn_blocking(compute_my_payload).await {
+        Ok(Ok(payload)) => payload,
         Ok(Err(detail)) => return Ok(mk_unavailable(detail, String::new())),
         Err(e) => {
             return Ok(mk_unavailable(
@@ -257,6 +257,7 @@ pub async fn verify_own_build() -> Result<BuildVerifyReport> {
             ))
         }
     };
+    let my_hash = my_payload.sha256().to_string();
 
     let base = transparency_base_url();
 
@@ -286,7 +287,7 @@ pub async fn verify_own_build() -> Result<BuildVerifyReport> {
     match tokio::task::spawn_blocking(move || verify_release(&base_owned, &tag_owned)).await {
         Ok(Ok(report)) => Ok(derive_build_verify(
             &report,
-            &my_hash,
+            &my_payload,
             &version,
             commit.as_deref(),
         )),
@@ -379,31 +380,68 @@ async fn fetch_served_binaries_public_key(
     Ok(doc.public_key.to_lowercase())
 }
 
-/// Compute this build's reproducible payload hash, best-effort per-platform, with
-/// the SAME method `scripts/attest-binaries.sh` logs — so a genuine build's hash
-/// matches its published `payload` leaf.
+/// This build's own hash, paired with the leaf layer it is comparable against.
+///
+/// A hash means nothing without knowing which published leaf it should equal,
+/// and the two shapes are NOT interchangeable: the `payload` leaf is a
+/// `sha_tree` of an extracted directory (or the installer file), which an
+/// installed process has no preimage for, while the `exe` leaf is the main
+/// executable's own sha256, which is exactly what a running process can take.
+/// Pairing hash with target layer in one type is what stops the wrong
+/// comparison — which misses every time, and renders as "this binary is not one
+/// Pollis publicly attested" on a perfectly genuine build.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MyPayload {
+    /// Compare against `payload` leaves: the shipped bytes ARE the logged
+    /// payload (Linux AppImage — `$APPIMAGE` is the very file that was hashed).
+    /// The stronger check of the two: it covers the whole payload, not just the
+    /// main binary.
+    Payload(String),
+    /// Compare against `exe` leaves: the sha256 of the executable this process
+    /// is running, which `scripts/attest-binaries.sh` logs per bundle.
+    Exe(String),
+}
+
+impl MyPayload {
+    /// The hex digest, for display in the report either way.
+    fn sha256(&self) -> &str {
+        match self {
+            MyPayload::Payload(h) | MyPayload::Exe(h) => h,
+        }
+    }
+
+    /// The leaf layer this hash is meaningful against.
+    fn layer(&self) -> Layer {
+        match self {
+            MyPayload::Payload(_) => Layer::Payload,
+            MyPayload::Exe(_) => Layer::Exe,
+        }
+    }
+}
+
+/// Compute this build's hash with the SAME method `scripts/attest-binaries.sh`
+/// logs, and say which layer it is to be compared against.
 ///
 /// - **Linux AppImage:** the shipped bytes ARE the reproducible payload (the
 ///   script's `sha_file` of the `.AppImage`). The AppImage runtime exports
-///   `APPIMAGE` pointing at the mounted `.AppImage`, so we hash exactly what was
-///   logged — an exact match.
-/// - **Other shapes** (Linux deb/rpm, macOS `.app`, Windows NSIS): the logged
-///   payload is a directory tree or installer the already-installed process
-///   can't reconstruct byte-for-byte without the original installer and the
-///   build's `SOURCE_DATE_EPOCH` (design §4.2 calls this out as best-effort).
-///   We hash the running executable so the check still runs and returns an
-///   honest verdict; an exact match for those platforms lands with the
-///   reproducible-build work (Phase 5).
-fn compute_my_payload_sha256() -> std::result::Result<String, String> {
+///   `APPIMAGE` pointing at the file it mounted, so we hash exactly what was
+///   logged and compare against the `payload` leaf.
+/// - **Everything else** (macOS `.app` in a `.dmg`, Windows NSIS, Linux
+///   deb/rpm): the `payload` leaf is unreachable from inside an install, so the
+///   script also logs an `exe` leaf — the sha256 of `Contents/MacOS/pollis`,
+///   `pollis.exe`, `usr/bin/pollis` as installed. `current_exe()` is that file.
+fn compute_my_payload() -> std::result::Result<MyPayload, String> {
     #[cfg(target_os = "linux")]
     {
         if let Some(appimage) = std::env::var_os("APPIMAGE") {
-            return sha256_file(std::path::Path::new(&appimage));
+            return Ok(MyPayload::Payload(sha256_file(std::path::Path::new(
+                &appimage,
+            ))?));
         }
     }
     let exe = std::env::current_exe()
         .map_err(|e| format!("could not locate the running executable: {e}"))?;
-    sha256_file(&exe)
+    Ok(MyPayload::Exe(sha256_file(&exe)?))
 }
 
 /// Stream a file through SHA-256, returning the lowercase-hex digest.
@@ -616,12 +654,16 @@ pub fn derive_peer_audit(
 ///   verification under the trusted key — loud, like the self-audit alarm).
 /// - tag not found (no artifacts for this release) → **Pending** (the tree
 ///   republishes after each release; a fresh build is invisible until then).
-/// - our payload hash present among the tag's leaves → **Verified**.
-/// - tag present but our hash absent → **Mismatch** (the targeted-backdoor
-///   signal: the running binary is not one Pollis publicly attested).
+/// - tag present but carrying no leaf of the layer this install can compare
+///   against → **Unavailable** ("couldn't check"). Comparing across layers would
+///   miss every time and libel a genuine release; [`MyPayload`] makes choosing
+///   the wrong layer unrepresentable, and this guard covers pre-`exe` tags.
+/// - our hash present among the tag's comparable leaves → **Verified**.
+/// - tag present, comparable leaves exist, ours absent → **Mismatch** (the
+///   targeted-backdoor signal: the running binary is not one Pollis attested).
 pub fn derive_build_verify(
     report: &ReleaseReport,
-    my_payload_sha256: &str,
+    my_payload: &MyPayload,
     version: &str,
     commit: Option<&str>,
 ) -> BuildVerifyReport {
@@ -630,7 +672,7 @@ pub fn derive_build_verify(
         detail,
         version: version.to_string(),
         commit: commit.map(str::to_string),
-        my_payload_sha256: my_payload_sha256.to_string(),
+        my_payload_sha256: my_payload.sha256().to_string(),
         report: Some(report.clone()),
     };
 
@@ -654,13 +696,50 @@ pub fn derive_build_verify(
         );
     }
 
-    // Payload and signed leaves share `payload_sha256`, and the invariant forces
-    // every signed leaf to pair with a payload leaf, so a match on any of the
-    // tag's artifacts confirms our payload is the published, reproducible one.
-    let published = report
+    // Compare only against leaves of the layer our hash actually means something
+    // against (see `MyPayload`). `exe` leaves carry the executable's hash in
+    // `artifact_sha256`; `payload` leaves carry the payload hash in
+    // `payload_sha256` — and every signed leaf repeats its payload's
+    // `payload_sha256`, so matching on that field keeps the AppImage behaviour
+    // unchanged.
+    //
+    // Deliberately NOT filtered by platform/arch: a sha256 collision across
+    // platforms is not a threat we need to model, whereas the leaves' `arch`
+    // label is only as good as the attest script's (today it stamps `aarch64`
+    // for a `universal-apple-darwin` build). Filtering on a label that can be
+    // wrong would turn a cosmetic metadata bug into a false tamper alarm.
+    let want = my_payload.layer();
+    let comparable: Vec<&str> = report
         .artifacts
         .iter()
-        .any(|a| a.payload_sha256.eq_ignore_ascii_case(my_payload_sha256));
+        .filter(|a| a.layer == want)
+        .map(|a| match want {
+            Layer::Exe => a.artifact_sha256.as_str(),
+            _ => a.payload_sha256.as_str(),
+        })
+        .collect();
+
+    // A tag published before this platform's comparable layer existed has
+    // nothing we can check against. That is "couldn't check", NOT "your binary
+    // is unattested" — releases up to v1.5.2 carry no `exe` leaves at all, and
+    // every macOS/Windows install would otherwise read as a tamper alarm.
+    if comparable.is_empty() {
+        return mk(
+            BuildVerifyStatus::Unavailable,
+            format!(
+                "{} is published and its tree verifies, but it carries no fingerprint this \
+                 install can compare itself against (releases before in-app verification \
+                 shipped logged only the installer payload, which an installed app has no \
+                 preimage for). Verify this build independently instead.",
+                report.release_tag
+            ),
+        );
+    }
+
+    let my_payload_sha256 = my_payload.sha256();
+    let published = comparable
+        .iter()
+        .any(|h| h.eq_ignore_ascii_case(my_payload_sha256));
     if published {
         mk(
             BuildVerifyStatus::Verified,
@@ -887,11 +966,11 @@ mod tests {
 
     const HASH_MINE: &str = "1111111111111111111111111111111111111111111111111111111111111111";
     const HASH_OTHER: &str = "2222222222222222222222222222222222222222222222222222222222222222";
+    const HASH_SIGNED: &str = "3333333333333333333333333333333333333333333333333333333333333333";
 
-    // Build a fixture ReleaseReport by deserializing JSON, so the test never
-    // needs to name `Layer` (owned by verifiable-log-builder, not a pollis-core
-    // dep). `payloads` become one `payload` leaf each; the whole tree's
-    // validity and whether the tag is found are set explicitly.
+    // Build a fixture ReleaseReport by deserializing JSON. `payloads` become one
+    // `payload` leaf each; the whole tree's validity and whether the tag is
+    // found are set explicitly. Mirrors a pre-`exe` release (≤ v1.5.2).
     fn release_report(
         tag: &str,
         found: bool,
@@ -930,10 +1009,65 @@ mod tests {
         serde_json::from_value(value).expect("fixture ReleaseReport deserializes")
     }
 
+    // A modern macOS-shaped release: the `.app` payload leaf, its `signed` dmg
+    // leaf repeating that payload hash, and the `exe` leaf whose
+    // `artifact_sha256` is the Mach-O a running app hashes.
+    fn release_report_with_exe(
+        tag: &str,
+        chain_valid: bool,
+        payload: &str,
+        exes: &[&str],
+    ) -> ReleaseReport {
+        let mut artifacts = vec![
+            serde_json::json!({
+                "platform": "darwin", "arch": "aarch64", "bundle": "dmg",
+                "layer": "payload", "artifact_name": "pollis-macos.dmg",
+                "payload_sha256": payload, "artifact_sha256": payload,
+                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl", "included": true,
+            }),
+            serde_json::json!({
+                "platform": "darwin", "arch": "aarch64", "bundle": "dmg",
+                "layer": "signed", "artifact_name": "pollis-macos.dmg",
+                "payload_sha256": payload, "artifact_sha256": HASH_SIGNED,
+                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl", "included": true,
+            }),
+        ];
+        for e in exes {
+            artifacts.push(serde_json::json!({
+                "platform": "darwin", "arch": "aarch64", "bundle": "dmg",
+                "layer": "exe", "artifact_name": "pollis-macos.dmg",
+                "payload_sha256": payload, "artifact_sha256": e,
+                "provenance_uri": "cdn.pollis.com/x.intoto.jsonl", "included": true,
+            }));
+        }
+        let value = serde_json::json!({
+            "release_tag": tag,
+            "found": true,
+            "sth_tree_size": 10,
+            "root_hex": "deadbeef",
+            "artifacts": artifacts,
+            "chain_valid": chain_valid,
+            "violations": if chain_valid {
+                Vec::<String>::new()
+            } else {
+                vec!["binaries STH signature is invalid".to_string()]
+            },
+        });
+        serde_json::from_value(value).expect("fixture ReleaseReport deserializes")
+    }
+
+    fn mine() -> MyPayload {
+        MyPayload::Payload(HASH_MINE.to_string())
+    }
+
+    fn my_exe() -> MyPayload {
+        MyPayload::Exe(HASH_MINE.to_string())
+    }
+
     #[test]
     fn build_verified_when_my_hash_is_published() {
         let r = release_report("v1.1.0", true, true, &[HASH_OTHER, HASH_MINE]);
-        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", Some("abc1234"));
+        let out = derive_build_verify(&r, &mine(), "1.1.0", Some("abc1234"));
         assert_eq!(out.status, BuildVerifyStatus::Verified);
         assert_eq!(out.commit.as_deref(), Some("abc1234"));
     }
@@ -941,7 +1075,12 @@ mod tests {
     #[test]
     fn build_verified_is_case_insensitive_on_hash() {
         let r = release_report("v1.1.0", true, true, &[HASH_MINE]);
-        let out = derive_build_verify(&r, &HASH_MINE.to_uppercase(), "1.1.0", None);
+        let out = derive_build_verify(
+            &r,
+            &MyPayload::Payload(HASH_MINE.to_uppercase()),
+            "1.1.0",
+            None,
+        );
         assert_eq!(out.status, BuildVerifyStatus::Verified);
         assert_eq!(out.commit, None);
     }
@@ -951,14 +1090,14 @@ mod tests {
         // The deliberately-wrong-local-hash case (design §6 Phase 4 acceptance):
         // the tag is in the log, but our payload hash is not among its leaves.
         let r = release_report("v1.1.0", true, true, &[HASH_OTHER]);
-        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", Some("abc1234"));
+        let out = derive_build_verify(&r, &mine(), "1.1.0", Some("abc1234"));
         assert_eq!(out.status, BuildVerifyStatus::Mismatch);
     }
 
     #[test]
     fn build_pending_when_tag_not_in_log_yet() {
         let r = release_report("v1.1.0", false, true, &[]);
-        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", None);
+        let out = derive_build_verify(&r, &mine(), "1.1.0", None);
         assert_eq!(out.status, BuildVerifyStatus::Pending);
     }
 
@@ -967,7 +1106,89 @@ mod tests {
         // A tampered/forked tree (chain_valid == false) is loud, not pending —
         // even if our hash happens to appear among the untrusted leaves.
         let r = release_report("v1.1.0", true, false, &[HASH_MINE]);
-        let out = derive_build_verify(&r, HASH_MINE, "1.1.0", None);
+        let out = derive_build_verify(&r, &mine(), "1.1.0", None);
         assert_eq!(out.status, BuildVerifyStatus::Mismatch);
+    }
+
+    #[test]
+    fn exe_build_verified_against_exe_leaf() {
+        // The macOS/Windows path: the running executable's hash matches the
+        // tag's `exe` leaf. This is the case that was impossible before the
+        // layer existed — every genuine build read as "not publicly attested".
+        let r = release_report_with_exe("v1.1.0", true, HASH_OTHER, &[HASH_MINE]);
+        let out = derive_build_verify(&r, &my_exe(), "1.1.0", Some("abc1234"));
+        assert_eq!(out.status, BuildVerifyStatus::Verified);
+        assert_eq!(out.my_payload_sha256, HASH_MINE);
+    }
+
+    #[test]
+    fn exe_build_mismatch_when_exe_leaf_present_but_ours_absent() {
+        // With a comparable leaf published, a miss IS the real signal again.
+        let r = release_report_with_exe("v1.1.0", true, HASH_OTHER, &[HASH_SIGNED]);
+        let out = derive_build_verify(&r, &my_exe(), "1.1.0", None);
+        assert_eq!(out.status, BuildVerifyStatus::Mismatch);
+    }
+
+    #[test]
+    fn layers_are_never_compared_across() {
+        // THE invariant. Our exe hash equals the tag's *payload* leaf here — a
+        // coincidence that says nothing, since the two hash different objects.
+        // It must not read as Verified.
+        let r = release_report_with_exe("v1.1.0", true, HASH_MINE, &[HASH_OTHER]);
+        assert_eq!(
+            derive_build_verify(&r, &my_exe(), "1.1.0", None).status,
+            BuildVerifyStatus::Mismatch
+        );
+
+        // And symmetrically: an AppImage's payload hash must not be satisfied
+        // by an `exe` leaf that happens to carry the same digest.
+        let r = release_report_with_exe("v1.1.0", true, HASH_OTHER, &[HASH_MINE]);
+        assert_eq!(
+            derive_build_verify(&r, &mine(), "1.1.0", None).status,
+            BuildVerifyStatus::Mismatch
+        );
+    }
+
+    #[test]
+    fn pre_exe_release_is_unavailable_not_mismatch() {
+        // Releases up to v1.5.2 logged no `exe` leaves. A macOS install checking
+        // itself against one has nothing comparable — "couldn't check", never
+        // "your binary is unattested". This is the exact false alarm that
+        // shipped: a genuine, signed, notarized v1.5.2 accused of being a
+        // binary Pollis never published.
+        let old = release_report("v1.5.2", true, true, &[HASH_OTHER]);
+        let out = derive_build_verify(&old, &my_exe(), "1.5.2", Some("c3f8cf5"));
+        assert_eq!(out.status, BuildVerifyStatus::Unavailable);
+        assert_eq!(out.my_payload_sha256, HASH_MINE);
+
+        // Not even if the exe hash coincidentally equals the payload leaf.
+        let old = release_report("v1.5.2", true, true, &[HASH_MINE]);
+        let out = derive_build_verify(&old, &my_exe(), "1.5.2", None);
+        assert_eq!(out.status, BuildVerifyStatus::Unavailable);
+    }
+
+    #[test]
+    fn missing_comparable_layer_still_reports_real_alarms() {
+        // The Unavailable gate is scoped to the leaf comparison: a tree that
+        // fails verification stays loud, and an unpublished tag stays pending,
+        // on every platform and every release vintage.
+        let broken = release_report("v1.5.2", true, false, &[HASH_MINE]);
+        let out = derive_build_verify(&broken, &my_exe(), "1.5.2", None);
+        assert_eq!(out.status, BuildVerifyStatus::Mismatch);
+
+        let unpublished = release_report("v1.5.2", false, true, &[]);
+        let out = derive_build_verify(&unpublished, &my_exe(), "1.5.2", None);
+        assert_eq!(out.status, BuildVerifyStatus::Pending);
+    }
+
+    #[test]
+    fn appimage_payload_path_is_unchanged_by_the_exe_layer() {
+        // The AppImage keeps its stronger whole-payload match, and a tag that
+        // also carries exe leaves does not disturb it.
+        let r = release_report_with_exe("v1.1.0", true, HASH_MINE, &[HASH_OTHER]);
+        assert_eq!(
+            derive_build_verify(&r, &mine(), "1.1.0", None).status,
+            BuildVerifyStatus::Verified
+        );
     }
 }

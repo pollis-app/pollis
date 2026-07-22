@@ -79,9 +79,13 @@
       color: var(--c-text);
     }
 
+    /* `a.art-inline` is deliberately NOT scoped to a container — it was
+       `.art-card a.art-inline`, so the same class rendered amber inside a card
+       and default browser blue in a section lede. The class names the style, so
+       it should carry it wherever it is used. */
     .art-explainer a,
     .art-note a,
-    .art-card a.art-inline,
+    a.art-inline,
     .art-key-block a {
       color: var(--c-accent);
       text-decoration: underline;
@@ -91,7 +95,7 @@
 
     .art-explainer a:hover,
     .art-note a:hover,
-    .art-card a.art-inline:hover,
+    a.art-inline:hover,
     .art-key-block a:hover {
       text-decoration-color: var(--c-accent);
     }

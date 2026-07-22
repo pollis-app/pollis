@@ -24,6 +24,7 @@ import { appStore } from "../../stores/appStore";
 import { usePresenceStatus } from "../../stores/presenceStore";
 import { useShortcutLabel } from "../../keyboard";
 import { useSkin } from "../../hooks/queries/usePreferences";
+import { PresenceAvatar } from "../ui/PresenceAvatar";
 import { SidebarProfilePanel } from "./SidebarProfilePanel";
 
 const COLLAPSED_GROUPS_KEY = "pollis.sidebar.collapsedGroups";
@@ -264,7 +265,22 @@ export const Sidebar: React.FC<SidebarProps> = observer(({ isOpen, onToggle }) =
                 indent={1}
                 isActive={activeDmId === c.id}
                 onClick={() => router.navigate({ to: "/dms/$conversationId", params: { conversationId: c.id } })}
-                leading={<PresenceDot userId={c.user2_id ?? null} />}
+                leading={
+                  // Refined shows the peer's avatar (with the presence dot
+                  // anchored to it); terminal keeps the bare dot so rows stay
+                  // one text-line tall.
+                  skin === "refined" ? (
+                    <PresenceAvatar
+                      userId={c.user2_id ?? null}
+                      avatarKey={c.user2_avatar_url}
+                      size={20}
+                      alt={`${c.user2_identifier} avatar`}
+                      testId={`sidebar-dm-avatar-${c.id}`}
+                    />
+                  ) : (
+                    <PresenceDot userId={c.user2_id ?? null} />
+                  )
+                }
                 label={c.user2_identifier}
                 badge={unread > 0 ? unread : null}
                 trailing={trailing}

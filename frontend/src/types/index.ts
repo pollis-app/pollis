@@ -273,7 +273,9 @@ export interface PeerAuditReport {
 //   pending  — the release tag isn't in the published tree yet (advisory)
 //   mismatch — tag present but our hash absent, or the tree/served key failed the
 //              trust check; the loud, targeted-backdoor signal
-//   unavailable — the log host was unreachable / the local hash couldn't be taken
+//   unavailable — the log host was unreachable, the local hash couldn't be taken,
+//              or the tag carries no leaf of the layer this install can compare
+//              against (releases before the `exe` layer shipped)
 export type BuildVerifyStatus =
   | "verified"
   | "pending"
@@ -285,7 +287,11 @@ export interface ReleaseArtifact {
   platform: string; // darwin | windows | linux
   arch: string; // aarch64 | x86_64
   bundle: string; // dmg | app | nsis | appimage | deb | rpm
-  layer: "payload" | "signed";
+  // payload — the reproducible pre-signature unit (rebuilders' target)
+  // signed  — the shipped, signed/notarized wrapper
+  // exe     — the main executable as installed; the only layer a running app
+  //           can hash itself against
+  layer: "payload" | "signed" | "exe";
   artifact_name: string;
   payload_sha256: string; // lowercase hex
   artifact_sha256: string; // lowercase hex

@@ -32,7 +32,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use verifiable_log::{proof, verifying_key_from_hex, Entry, InclusionProof, Sth, VerifiableLog};
-use verifiable_log_builder::binaries::{self, BinaryInvariant, BinaryRecord, Layer};
+use verifiable_log_builder::binaries::{self, BinaryInvariant, BinaryRecord};
 
 use crate::bundle::{Bundle, InclusionCheck, PublicKeyDoc};
 use crate::error::Result;
@@ -41,6 +41,11 @@ use crate::remote::{build_agent, fetch_json};
 /// Tenant id the binary entries carry in the shared log. Re-exported from the
 /// builder so layout/remote can filter on it without reaching across crates.
 pub const BINARIES_TENANT: &str = binaries::TENANT;
+
+/// Re-exported because it is part of [`ReleaseArtifact`]'s public shape — a
+/// consumer (e.g. the app's in-app build check, which selects leaves by layer)
+/// must be able to name it without depending on the builder crate.
+pub use binaries::Layer;
 
 /// One released artifact in a tag's set, as reported to a caller. Mirrors the
 /// key structural fields of a [`BinaryRecord`] plus whether its inclusion proof
@@ -311,6 +316,7 @@ fn layer_str(layer: Layer) -> &'static str {
     match layer {
         Layer::Payload => "payload",
         Layer::Signed => "signed",
+        Layer::Exe => "exe",
     }
 }
 

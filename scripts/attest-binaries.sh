@@ -17,6 +17,14 @@
 #   * platforms whose shipped bytes ARE the reproducible payload (Linux
 #     AppImage/deb/rpm — Tauri's minisign signature is detached, and deb/rpm are
 #     not signed here) get ONE `payload` leaf with artifact_sha256 == payload_sha256.
+#   * every bundle EXCEPT the AppImage additionally gets an `exe` leaf holding the
+#     sha256 of the main executable as installed. That leaf is what makes the
+#     in-app "Verify this build" check work: a running app can hash the file it
+#     is executing, but it can reproduce neither a sha_tree of an extracted
+#     directory nor the installer file, so `payload` leaves are unmatchable from
+#     inside an install. The AppImage needs no `exe` leaf — its shipped bytes ARE
+#     the payload and the running app hashes them directly via $APPIMAGE, which
+#     is a strictly stronger check (whole payload, not just the main binary).
 #
 # Output: a JSON array of BinaryRecords (this tag only) at $OUT, in publish
 # order. The caller (desktop-release.yml) merges it into the accumulating
@@ -78,6 +86,34 @@ emit() {
 
 find_one() { find "$ARTIFACTS_DIR" -type f -name "$1" 2>/dev/null | head -1; }
 
+# The main executable's own name inside every bundle shape — Tauri names it from
+# the cargo bin (`pollis`), NOT from productName ("Pollis"): the installed app is
+# `Pollis.app/Contents/MacOS/pollis`, `pollis.exe`, `usr/bin/pollis`.
+MAIN_BIN="pollis"
+
+# emit_exe <platform> <arch> <bundle> <artifact_name> <payload_sha> <runner_image> <path-to-exe>
+#
+# The `exe` leaf: the main executable as installed, hashed alone. This is the
+# ONLY leaf a *running* app can reproduce — `payload` leaves are a sha_tree of an
+# extracted directory or the installer file, and an installed process has neither
+# preimage. Bound to the enclosing payload leaf via the shared payload_sha256
+# (the invariant's derived-layer pairing rule), so an exe leaf can never float
+# free of a published, reproducible payload.
+#
+# Hard failure, never a skip: a release whose exe leaf is missing ships an app
+# that cannot verify itself, which is precisely the bug this layer exists to fix.
+# Better to break the release job loudly than to publish an unverifiable build.
+emit_exe() {
+  local platform="$1" arch="$2" bundle="$3" name="$4" pay_sha="$5" runner="$6" exe="$7"
+  if [ ! -f "$exe" ]; then
+    echo "::error::attest: main executable not found for ${bundle} at ${exe} — the in-app"
+    echo "::error::  build check cannot work for this platform without it. If the bundle"
+    echo "::error::  layout changed, update MAIN_BIN / the extraction below in this script."
+    exit 1
+  fi
+  emit "$platform" "$arch" "$bundle" "$name" exe "$pay_sha" "$(sha_file "$exe")" "$runner"
+}
+
 # ── macOS: .dmg wraps a reproducible .app payload (payload + signed) ──
 dmg="$(find_one '*.dmg' || true)"
 if [ -n "${dmg:-}" ]; then
@@ -96,6 +132,8 @@ if [ -n "${dmg:-}" ]; then
   pay_sha="$(sha_tree "$app")"
   emit darwin aarch64 dmg "$name" payload "$pay_sha" "$pay_sha" "macos-latest"
   emit darwin aarch64 dmg "$name" signed  "$pay_sha" "$art_sha" "macos-latest"
+  # The Mach-O the user actually runs, inside the bundle we just hashed.
+  emit_exe darwin aarch64 dmg "$name" "$pay_sha" "macos-latest" "$app/Contents/MacOS/$MAIN_BIN"
 fi
 
 # ── Windows: NSIS .exe wraps unsigned exe+resources (payload + signed) ──
@@ -111,6 +149,8 @@ if [ -n "${exe:-}" ]; then
   pay_sha="$(sha_tree "$ex")"
   emit windows x86_64 nsis "$name" payload "$pay_sha" "$pay_sha" "windows-latest"
   emit windows x86_64 nsis "$name" signed  "$pay_sha" "$art_sha" "windows-latest"
+  # NSIS lays the install tree out flat, so the exe sits at the extraction root.
+  emit_exe windows x86_64 nsis "$name" "$pay_sha" "windows-latest" "$ex/${MAIN_BIN}.exe"
 fi
 
 # ── Linux: the shipped bytes ARE the reproducible payload (payload-only) ──
@@ -125,12 +165,25 @@ if [ -n "${deb:-}" ]; then
   name="pollis-${RELEASE_TAG}-linux.deb"
   sha="$(sha_file "$deb")"
   emit linux x86_64 deb "$name" payload "$sha" "$sha" "ubuntu-22.04"
+  # Unpack the package filesystem to reach the installed executable — a running
+  # deb install's `current_exe()` IS `/usr/bin/pollis`, so that file's hash is
+  # what the app will present.
+  ex="$work/deb"; mkdir -p "$ex"
+  dpkg-deb --fsys-tarfile "$deb" | tar -xf - -C "$ex" "./usr/bin/${MAIN_BIN}"
+  emit_exe linux x86_64 deb "$name" "$sha" "ubuntu-22.04" "$ex/usr/bin/${MAIN_BIN}"
 fi
 rpm="$(find_one '*.rpm' || true)"
 if [ -n "${rpm:-}" ]; then
   name="pollis-${RELEASE_TAG}-linux.rpm"
   sha="$(sha_file "$rpm")"
   emit linux x86_64 rpm "$name" payload "$sha" "$sha" "ubuntu-22.04"
+  # Same for rpm; rpm2cpio + cpio are installed by the attest job. cpio only
+  # unpacks into the cwd, so resolve the package to an absolute path before the
+  # subshell cd (ARTIFACTS_DIR — and therefore `find_one` — is relative).
+  ex="$work/rpm"; mkdir -p "$ex"
+  rpm_abs="$(cd "$(dirname "$rpm")" && pwd)/$(basename "$rpm")"
+  (cd "$ex" && rpm2cpio "$rpm_abs" | cpio -idm --quiet "./usr/bin/${MAIN_BIN}")
+  emit_exe linux x86_64 rpm "$name" "$sha" "ubuntu-22.04" "$ex/usr/bin/${MAIN_BIN}"
 fi
 
 count="$(jq 'length' <<<"$records")"

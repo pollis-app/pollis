@@ -91,6 +91,10 @@ function shortId(id: string): string {
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
 }
 
+// How many security events to render before "Show older events". The backend
+// caps the fetch at 100 newest-first, so this is a display slice, not a query.
+const SECURITY_EVENTS_PAGE_SIZE = 20;
+
 const sectionHeaderClass =
   "text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b";
 const sectionHeaderStyle: React.CSSProperties = {
@@ -108,6 +112,7 @@ export const SecurityPage: React.FC = observer(() => {
   const buildVerify = useVerifyOwnBuild();
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [events, setEvents] = useState<api.SecurityEvent[] | null>(null);
+  const [visibleEvents, setVisibleEvents] = useState(SECURITY_EVENTS_PAGE_SIZE);
   const [error, setError] = useState<string | null>(null);
 
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
@@ -430,6 +435,10 @@ export const SecurityPage: React.FC = observer(() => {
             ) : (
               <NavigableList<api.DeviceInfo>
                 testId="devices-list"
+                // Keeps its keyboard navigation (rows have Revoke buttons), but
+                // must not claim focus on mount or on any re-render — same
+                // scroll-jump the events list had, just further up the page.
+                autoFocus={false}
                 items={devices ?? []}
                 isLoading={devices === null}
                 loadingLabel="Loading devices…"
@@ -490,29 +499,56 @@ export const SecurityPage: React.FC = observer(() => {
               </p>
             )}
 
-            <NavigableList<api.SecurityEvent>
-              testId="security-events-list"
-              items={events ?? []}
-              isLoading={events === null}
-              loadingLabel="Loading…"
-              emptyLabel="No security events recorded yet."
-              getKey={(e) => e.id}
-              rowTestId={(e) => `security-event-${e.id}`}
-              renderRow={(event) => {
-                const { heading, detail } = describe(event);
-                return (
-                  <div className="min-w-0 flex flex-col">
-                    <span style={{ color: "var(--c-text)" }}>{heading}</span>
-                    {detail && (
-                      <span style={{ color: "var(--c-text-muted)" }}>{detail}</span>
-                    )}
-                    <span style={{ color: "var(--c-text-dim)" }}>
-                      {formatDateTime(event.created_at)}
-                    </span>
+            {/* Deliberately NOT a NavigableList. This is a read-only audit
+                trail with nothing to select, and that component's container is
+                `tabIndex={0}` + calls `.focus()` from an effect keyed on
+                `items`/`getKey` — both fresh identities on every render — so any
+                unrelated re-render of this page (a media-permissions refetch on
+                window focus, a keystroke in the revoke-confirm field) yanked
+                focus here and scrolled the user down to it. A plain list has no
+                focus to steal. */}
+            {events === null ? (
+              <p className="text-xs font-mono text-muted">Loading…</p>
+            ) : events.length === 0 ? (
+              <p className="text-xs font-mono text-dim">
+                No security events recorded yet.
+              </p>
+            ) : (
+              <div data-testid="security-events-list" className="flex flex-col">
+                {events.slice(0, visibleEvents).map((event) => {
+                  const { heading, detail } = describe(event);
+                  return (
+                    <div
+                      key={event.id}
+                      data-testid={`security-event-${event.id}`}
+                      className="flex min-w-0 flex-col px-4 py-2 text-xs font-mono"
+                    >
+                      <span className="text-fg">{heading}</span>
+                      {detail && <span className="text-muted">{detail}</span>}
+                      <span className="text-dim">
+                        {formatDateTime(event.created_at)}
+                      </span>
+                    </div>
+                  );
+                })}
+                {/* The backend already returns newest-first, capped at 100, so
+                    paging is a pure slice — no refetch, no cursor. */}
+                {events.length > visibleEvents && (
+                  <div className="px-4 pt-2">
+                    <Button
+                      data-testid="security-events-show-more"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setVisibleEvents((n) => n + SECURITY_EVENTS_PAGE_SIZE)
+                      }
+                    >
+                      Show older events ({events.length - visibleEvents} more)
+                    </Button>
                   </div>
-                );
-              }}
-            />
+                )}
+              </div>
+            )}
           </section>
 
           {/* Media permissions — OS camera/mic/screen access: live status,

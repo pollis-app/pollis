@@ -1037,10 +1037,12 @@ jobs:
 
       # 7z reads the HFS payload inside the .dmg and the NSIS installer's file
       # tree on this Linux runner; jq builds and merges the records JSON.
+      # rpm/cpio unpack the .rpm to reach `usr/bin/pollis` for its `exe` leaf
+      # (the .deb uses dpkg-deb, already present on the runner).
       - name: Install extraction tooling
         run: |
           sudo apt-get update
-          sudo apt-get install -y p7zip-full jq
+          sudo apt-get install -y p7zip-full jq rpm cpio
 
       - name: Compute BinaryRecord leaves for this tag
         env:

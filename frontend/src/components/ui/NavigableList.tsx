@@ -94,10 +94,15 @@ export function NavigableList<T>({
       return;
     }
     if (nav.colIndex === 0) {
-      // Only grab the container's focus on the row itself if either
-      // the dedicated initial autofocus is enabled, or the user has
-      // already started navigating with arrow keys.
-      if (autoFocus || hasNavigatedRef.current) {
+      // Only follow the cursor once the user has actually navigated. The
+      // initial autofocus is the dedicated effect below, and it must NOT be
+      // repeated from here: this effect's deps include `items` and `getKey`,
+      // which consumers almost always pass as fresh literals/arrows, so it
+      // re-runs on EVERY parent render. Focusing a tabIndex={0} container
+      // scrolls it into view, so with `autoFocus` in this condition any
+      // unrelated re-render of the host page yanked the viewport back to the
+      // list (SecurityPage was the visible case, but all nine consumers had it).
+      if (hasNavigatedRef.current) {
         containerRef.current?.focus();
       }
       return;
@@ -118,7 +123,7 @@ export function NavigableList<T>({
       'button, [role="switch"], input, [tabindex]:not([tabindex="-1"])',
     );
     focusable?.focus();
-  }, [nav, items, getKey, autoFocus]);
+  }, [nav, items, getKey]);
 
   // Take initial focus when there's something to navigate.
   useEffect(() => {
