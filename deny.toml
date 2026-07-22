@@ -165,6 +165,11 @@ expression = "LicenseRef-proprietary"
 license-files = []
 
 [[licenses.clarify]]
+name = "pollis-relay"
+expression = "LicenseRef-proprietary"
+license-files = []
+
+[[licenses.clarify]]
 name = "pollis-tui"
 expression = "LicenseRef-proprietary"
 license-files = []
