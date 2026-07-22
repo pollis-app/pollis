@@ -58,6 +58,54 @@ pub fn generate_self_signed(name: &str) -> anyhow::Result<SelfSignedIdentity> {
     })
 }
 
+/// Load the relay's persisted QUIC identity from `key_path` (+ its cert at
+/// `<key_path>.crt`), generating and persisting a fresh one if either file is
+/// absent. Both are raw DER. This makes a relay node's identity **stable across
+/// restarts** (so pinned clients keep trusting it) yet **disposable/rotatable**
+/// (delete the files to mint a new identity) — the deploy shape §7 / the ops doc
+/// call for.
+pub fn load_or_generate_identity(key_path: &str) -> anyhow::Result<SelfSignedIdentity> {
+    let cert_path = format!("{key_path}.crt");
+    if std::path::Path::new(key_path).exists() && std::path::Path::new(&cert_path).exists() {
+        let key_bytes = std::fs::read(key_path)?;
+        let cert_bytes = std::fs::read(&cert_path)?;
+        let key_der = PrivateKeyDer::try_from(key_bytes)
+            .map_err(|e| anyhow::anyhow!("load relay key {key_path}: {e}"))?;
+        return Ok(SelfSignedIdentity {
+            cert_der: CertificateDer::from(cert_bytes),
+            key_der,
+        });
+    }
+
+    let identity = generate_self_signed(RELAY_SERVER_NAME)?;
+    if let Some(parent) = std::path::Path::new(key_path).parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(&cert_path, identity.cert_der.as_ref())?;
+    std::fs::write(key_path, identity.key_der.secret_der())?;
+    restrict_key_perms(key_path);
+    Ok(identity)
+}
+
+/// Best-effort `0600` on the persisted private key (Unix). A no-op elsewhere.
+fn restrict_key_perms(path: &str) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(path, perms);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+}
+
 /// A CA cert plus a leaf cert issued by it for a given DNS name. Used only by
 /// tests to stand up a TLS "origin" server whose cert the client verifies for
 /// the *real* name, proving the inner TLS survives tunneling.

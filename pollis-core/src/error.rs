@@ -39,6 +39,16 @@ pub enum Error {
     Other(#[from] anyhow::Error),
 }
 
+// A failed device-cert build/verify is a crypto error in pollis-core's taxonomy.
+// This `From` is what lets `sign_device_cert` keep calling the shared
+// `device_cert_signed_payload` with a bare `?` after the primitive moved to the
+// `pollis-device-cert` crate.
+impl From<pollis_device_cert::DeviceCertError> for Error {
+    fn from(e: pollis_device_cert::DeviceCertError) -> Self {
+        Error::Crypto(e.to_string())
+    }
+}
+
 // Tauri requires commands return serializable errors
 impl Serialize for Error {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>

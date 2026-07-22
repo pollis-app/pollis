@@ -1,23 +1,31 @@
 //! The minimal relay server: QUIC in, allowlisted TCP dial out, bytes piped.
 //!
-//! Per accepted bi-stream the relay runs the device-signature handshake, reads
-//! the `Connect` frame, checks the host against the **static allowlist** (policy,
-//! not protocol — design §14.0), TCP-dials the target, and pipes bytes until
-//! either side closes. It never terminates the inner TLS — it forwards opaque
-//! bytes only (design §8).
+//! Per accepted bi-stream the relay runs the OFFLINE device-cert handshake
+//! (design §9.4 — no Turso query, no network call: the client presents its cert
+//! chain and the relay verifies it locally, which is what keeps the relay tier
+//! out of the metadata plane, §11.1), applies per-account / per-IP rate limits
+//! (§11.5), reads the `Connect` frame, checks the host against the **static
+//! allowlist** (policy, not protocol — design §14.0), TCP-dials the target, and
+//! pipes bytes until either side closes. It never terminates the inner TLS — it
+//! forwards opaque bytes only (design §8).
+//!
+//! Deployability (Slice 2a): a global concurrent-connection cap, in-memory rate
+//! limiting, and **graceful shutdown** (stop accepting, drain in-flight pipes to
+//! a bounded deadline, exit) via [`RelayServer::spawn_with_shutdown`].
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use quinn::crypto::rustls::QuicServerConfig;
 use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
 
-use crate::proto::{
-    self, Connect, Handshake, KeyResolver, RejectReason,
-};
+use crate::proto::{self, Connect, Handshake, RejectReason};
+use crate::ratelimit::{RateLimitConfig, RateLimiter};
 use crate::stream::RelayStream;
 use crate::tls::{self, SelfSignedIdentity};
 
@@ -86,8 +94,10 @@ impl Allowlist {
 pub struct RelayStats {
     /// Streams whose handshake verified.
     pub authorized: AtomicU64,
-    /// Streams rejected before a dial (auth or allowlist).
+    /// Streams rejected before a dial (auth, allowlist, or rate limit).
     pub rejected: AtomicU64,
+    /// Streams rejected specifically for tripping a rate/concurrency limit.
+    pub rate_limited: AtomicU64,
     /// Targets the relay actually TCP-dialed — proof a hop was traversed.
     pub dials: AtomicU64,
 }
@@ -98,6 +108,9 @@ impl RelayStats {
     }
     pub fn rejected(&self) -> u64 {
         self.rejected.load(Ordering::Relaxed)
+    }
+    pub fn rate_limited(&self) -> u64 {
+        self.rate_limited.load(Ordering::Relaxed)
     }
     pub fn dials(&self) -> u64 {
         self.dials.load(Ordering::Relaxed)
@@ -110,30 +123,40 @@ pub struct RelayConfig {
     pub bind: SocketAddr,
     /// Static destination allowlist (design §1.2).
     pub allowlist: Allowlist,
-    /// Device-key lookup for the handshake.
-    pub key_resolver: Arc<dyn KeyResolver>,
     /// The relay's own QUIC identity (self-signed). Callers keep the cert to pin
     /// it client-side.
     pub identity: SelfSignedIdentity,
     /// Host → IP overrides applied before dialing. Lets tests point a real DNS
     /// name (e.g. `origin.test`) at a loopback listener; also a pinning hook.
     pub resolve_overrides: HashMap<String, IpAddr>,
+    /// In-memory abuse control (design §11.5).
+    pub rate_limits: RateLimitConfig,
+    /// Global cap on simultaneously-open QUIC connections.
+    pub max_concurrent_connections: u32,
     /// Shared counters.
     pub stats: Arc<RelayStats>,
 }
 
 impl RelayConfig {
-    /// Build a config, auto-generating a fresh self-signed QUIC identity.
-    pub fn new(bind: SocketAddr, allowlist: Allowlist, key_resolver: Arc<dyn KeyResolver>) -> anyhow::Result<Self> {
+    /// Build a config, auto-generating a fresh self-signed QUIC identity. For a
+    /// deployable node use [`tls::load_or_generate_identity`] +
+    /// [`RelayConfig::with_identity`] so the identity is stable across restarts.
+    pub fn new(bind: SocketAddr, allowlist: Allowlist) -> anyhow::Result<Self> {
         let identity = tls::generate_self_signed(tls::RELAY_SERVER_NAME)?;
-        Ok(RelayConfig {
+        Ok(Self::with_identity(bind, allowlist, identity))
+    }
+
+    /// Build a config around a caller-supplied (e.g. persisted) QUIC identity.
+    pub fn with_identity(bind: SocketAddr, allowlist: Allowlist, identity: SelfSignedIdentity) -> Self {
+        RelayConfig {
             bind,
             allowlist,
-            key_resolver,
             identity,
             resolve_overrides: HashMap::new(),
+            rate_limits: RateLimitConfig::default(),
+            max_concurrent_connections: crate::config::DEFAULT_MAX_CONCURRENT_CONNECTIONS,
             stats: Arc::new(RelayStats::default()),
-        })
+        }
     }
 
     /// The DER cert a client must pin to connect to this relay.
@@ -145,8 +168,8 @@ impl RelayConfig {
 /// Fields the per-stream handler needs, shared behind an `Arc`.
 struct RelayInner {
     allowlist: Allowlist,
-    key_resolver: Arc<dyn KeyResolver>,
     resolve_overrides: HashMap<String, IpAddr>,
+    rate_limiter: Arc<RateLimiter>,
     stats: Arc<RelayStats>,
 }
 
@@ -155,9 +178,25 @@ pub struct RelayServer;
 
 impl RelayServer {
     /// Spawn a relay on `config.bind`, returning the accept task and the actual
-    /// bound address (useful when binding to port 0). Dropping the returned
-    /// `JoinHandle` does not stop it; abort it to shut down.
+    /// bound address (useful when binding to port 0). The task runs until the
+    /// `JoinHandle` is aborted. For clean shutdown use
+    /// [`RelayServer::spawn_with_shutdown`].
     pub fn spawn(config: RelayConfig) -> anyhow::Result<(JoinHandle<()>, SocketAddr)> {
+        Self::spawn_with_shutdown(config, std::future::pending::<()>(), Duration::from_secs(0))
+    }
+
+    /// Spawn a relay that shuts down gracefully when `shutdown` resolves: it stops
+    /// accepting new connections, lets in-flight pipes drain for up to
+    /// `drain_timeout`, then closes the endpoint and the task returns (exit 0 in
+    /// the binary). The returned `JoinHandle` completes once draining is done.
+    pub fn spawn_with_shutdown<F>(
+        config: RelayConfig,
+        shutdown: F,
+        drain_timeout: Duration,
+    ) -> anyhow::Result<(JoinHandle<()>, SocketAddr)>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         tls::ensure_crypto_provider();
 
         let mut server_crypto = rustls::ServerConfig::builder()
@@ -173,21 +212,50 @@ impl RelayServer {
 
         let inner = Arc::new(RelayInner {
             allowlist: config.allowlist,
-            key_resolver: config.key_resolver,
             resolve_overrides: config.resolve_overrides,
+            rate_limiter: RateLimiter::new(config.rate_limits),
             stats: config.stats,
         });
+        let max_conns = config.max_concurrent_connections.max(1) as u64;
+        let live_conns = Arc::new(AtomicU64::new(0));
 
         let handle = tokio::spawn(async move {
-            while let Some(incoming) = endpoint.accept().await {
-                let inner = inner.clone();
-                tokio::spawn(async move {
-                    match incoming.await {
-                        Ok(connection) => handle_connection(connection, inner).await,
-                        Err(e) => tracing::debug!("relay: connection setup failed: {e}"),
+            tokio::pin!(shutdown);
+            loop {
+                tokio::select! {
+                    biased;
+                    _ = &mut shutdown => {
+                        break;
                     }
-                });
+                    incoming = endpoint.accept() => {
+                        let Some(incoming) = incoming else {
+                            break;
+                        };
+                        // Global concurrent-connection cap: shed load cleanly.
+                        if live_conns.load(Ordering::Relaxed) >= max_conns {
+                            incoming.refuse();
+                            continue;
+                        }
+                        live_conns.fetch_add(1, Ordering::Relaxed);
+                        let inner = inner.clone();
+                        let live = live_conns.clone();
+                        tokio::spawn(async move {
+                            match incoming.await {
+                                Ok(connection) => handle_connection(connection, inner).await,
+                                Err(e) => tracing::debug!("relay: connection setup failed: {e}"),
+                            }
+                            live.fetch_sub(1, Ordering::Relaxed);
+                        });
+                    }
+                }
             }
+
+            // Graceful shutdown: we've left the accept loop, so no new connection
+            // is served (quinn drops un-accepted incoming). Drain the in-flight
+            // ones to the deadline — `wait_idle` returns once all connections have
+            // closed — then close the endpoint.
+            let _ = tokio::time::timeout(drain_timeout, endpoint.wait_idle()).await;
+            endpoint.close(0u32.into(), b"relay shutting down");
         });
 
         Ok((handle, local_addr))
@@ -195,11 +263,12 @@ impl RelayServer {
 }
 
 async fn handle_connection(connection: quinn::Connection, inner: Arc<RelayInner>) {
+    let peer_ip = connection.remote_address().ip();
     // Each target gets its own bi-stream; serve them until the peer goes away.
     while let Ok((send, recv)) = connection.accept_bi().await {
         let inner = inner.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_stream(send, recv, inner).await {
+            if let Err(e) = handle_stream(send, recv, inner, peer_ip).await {
                 tracing::debug!("relay: stream ended: {e}");
             }
         });
@@ -210,6 +279,7 @@ async fn handle_stream(
     mut send: quinn::SendStream,
     mut recv: quinn::RecvStream,
     inner: Arc<RelayInner>,
+    peer_ip: IpAddr,
 ) -> anyhow::Result<()> {
     // 1. Handshake — reject on any auth failure, never fail open.
     let handshake: Handshake = match proto::read_handshake(&mut recv).await {
@@ -220,14 +290,30 @@ async fn handle_stream(
             return Ok(());
         }
     };
-    if let Err(reason) = proto::verify_handshake(inner.key_resolver.as_ref(), &handshake, proto::now_unix()) {
-        inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
-        let _ = proto::write_response(&mut send, Err(reason)).await;
-        return Ok(());
-    }
+    let verified = match proto::verify_handshake(&handshake, proto::now_unix()) {
+        Ok(v) => v,
+        Err(reason) => {
+            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+            let _ = proto::write_response(&mut send, Err(reason)).await;
+            return Ok(());
+        }
+    };
     inner.stats.authorized.fetch_add(1, Ordering::Relaxed);
 
-    // 2. Connect frame.
+    // 2. Rate / concurrency limits, keyed on BOTH the source IP and the
+    //    authenticated account (§11.5). The guard frees the concurrency slots
+    //    when this stream ends.
+    let _circuit_guard = match inner.rate_limiter.admit(peer_ip, verified.account_id_pub) {
+        Some(g) => g,
+        None => {
+            inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
+            inner.stats.rate_limited.fetch_add(1, Ordering::Relaxed);
+            let _ = proto::write_response(&mut send, Err(RejectReason::RateLimited)).await;
+            return Ok(());
+        }
+    };
+
+    // 3. Connect frame.
     let connect: Connect = match proto::read_connect(&mut recv).await {
         Ok(c) => c,
         Err(_) => {
@@ -236,14 +322,14 @@ async fn handle_stream(
         }
     };
 
-    // 3. Allowlist — the closed-overlay guarantee (design §1.2).
+    // 4. Allowlist — the closed-overlay guarantee (design §1.2).
     if !inner.allowlist.permits(&connect.host) {
         inner.stats.rejected.fetch_add(1, Ordering::Relaxed);
         let _ = proto::write_response(&mut send, Err(RejectReason::NotAllowed)).await;
         return Ok(());
     }
 
-    // 4. Dial the target (applying any host→IP override).
+    // 5. Dial the target (applying any host→IP override).
     let tcp = match dial_target(&connect, &inner.resolve_overrides).await {
         Ok(s) => s,
         Err(e) => {
@@ -254,7 +340,7 @@ async fn handle_stream(
     };
     inner.stats.dials.fetch_add(1, Ordering::Relaxed);
 
-    // 5. Tell the client the pipe is live, then splice bytes both ways. The
+    // 6. Tell the client the pipe is live, then splice bytes both ways. The
     //    QUIC connection stays alive in the accept loop, so the stream doesn't
     //    need to own it here.
     proto::write_response(&mut send, Ok(())).await?;

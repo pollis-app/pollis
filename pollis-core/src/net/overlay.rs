@@ -96,14 +96,24 @@ pub(crate) fn overlay_policy(config: &Config) -> RoutingPolicy {
 
 /// A circuit factory that never yields a circuit.
 ///
-/// Slice 1b wires the transport, but a real single-hop circuit needs the
-/// deployed relay's pinned cert AND the logged-in device's Ed25519 key — neither
-/// exists at `AppState::new` time (no user is logged in; no relay is deployed).
-/// Until that provisioning lands (Slice 2), the factory fails fast, so `Prefer`
-/// falls back to a direct dial and `Strict` surfaces a degraded error — never a
-/// silent direct send (messages-must-work, §7/§10.1). The shim itself still runs
-/// whenever the mode is non-off, which is exactly what makes `Strict` degrade
-/// instead of silently going direct.
+/// The client-side auth material a circuit needs is now fully specified: a
+/// [`pollis_relay::ClientIdentity`] carries the device signing key PLUS the
+/// offline cert chain (`account_id_pub` + `device_cert` + `identity_version` +
+/// `issued_at`) the relay verifies (§9.4). In production that chain is read from
+/// the device's stored cert material (OS keystore + the `user_device` row
+/// `ensure_device_cert` writes). A device with NO cert yet — pre-enrollment / OTP
+/// bootstrap — cannot build a `ClientIdentity`, so its circuit build fails and
+/// traffic stays DIRECT (documented in `docs/relay-operations.md`; mirrors the
+/// DS's session-vs-device auth split).
+///
+/// What is still deferred is the RUNTIME provisioning that turns that into a live
+/// factory: the deployed relay's pinned cert and per-`AppState` access to the
+/// logged-in device's keys — neither exists at `AppState::new` time (no user is
+/// logged in; no relay endpoint is provisioned). Until that lands, the factory
+/// fails fast, so `Prefer` falls back to a direct dial and `Strict` surfaces a
+/// degraded error — never a silent direct send (messages-must-work, §7/§10.1).
+/// The shim itself still runs whenever the mode is non-off, which is exactly what
+/// makes `Strict` degrade instead of silently going direct.
 struct PendingRelayFactory;
 
 #[async_trait::async_trait]
@@ -323,7 +333,7 @@ mod tests {
     use ed25519_dalek::SigningKey;
     use pollis_relay::circuit::{Hop, SingleHopFactory};
     use pollis_relay::client::ClientIdentity;
-    use pollis_relay::proto::InMemoryKeyResolver;
+    use pollis_relay::proto::DeviceCertMaterial;
     use pollis_relay::server::{Allowlist as RelayAllowlist, RelayConfig, RelayServer, RelayStats};
     use rustls::pki_types::{CertificateDer, ServerName};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -332,19 +342,31 @@ mod tests {
     const USER: &str = "u_overlay_test";
     const DEVICE: &str = "d_overlay_test";
     const ORIGIN_NAME: &str = "origin.test";
+    const ISSUED_AT: u64 = 1_700_000_000;
 
+    /// The device signing key (signs the relay handshake).
     fn signing_key() -> SigningKey {
         SigningKey::from_bytes(&[11u8; 32])
     }
 
-    fn identity() -> Arc<ClientIdentity> {
-        Arc::new(ClientIdentity::new(USER, DEVICE, signing_key()))
+    /// The account identity key that certifies the device into a cert chain.
+    fn account_key() -> SigningKey {
+        SigningKey::from_bytes(&[12u8; 32])
     }
 
-    fn resolver() -> Arc<InMemoryKeyResolver> {
-        let mut r = InMemoryKeyResolver::new();
-        r.insert(USER, DEVICE, signing_key().verifying_key());
-        Arc::new(r)
+    /// A client identity carrying the device key + a valid offline cert chain —
+    /// exactly what the client-side presents in production (built from the
+    /// device's stored cert material).
+    fn identity() -> Arc<ClientIdentity> {
+        let device = signing_key();
+        let cert = DeviceCertMaterial::mint(
+            &account_key(),
+            DEVICE,
+            &device.verifying_key().to_bytes(),
+            1,
+            ISSUED_AT,
+        );
+        Arc::new(ClientIdentity::new(USER, DEVICE, device, cert))
     }
 
     fn cfg(mode: OverlayMode, relay: Option<&str>) -> Config {
@@ -374,7 +396,6 @@ mod tests {
         let mut config = RelayConfig::new(
             "127.0.0.1:0".parse().unwrap(),
             RelayAllowlist::from_patterns(allow.iter().copied()),
-            resolver(),
         )
         .unwrap();
         for (host, ip) in overrides {

@@ -338,7 +338,7 @@ Safeguards so the incentive never distorts safety: a relay **cannot** gain any r
 
 ## 11. Open Questions and Risks
 
-1. **Does single-hop actually help against the real adversary?** v0's value hinges on the first-party relay tier being *operationally separated* from the Turso metadata plane (so no single system joins IP↔account). If Pollis runs both and can trivially join their logs, v0 buys little against a *malicious* operator (it still helps vs. breach, subpoena-to-Turso-only, and honest-but-curious). **Decide and document** the operational-separation commitment before shipping v0, or be honest that v0 is "breach/subpoena defense," not "malicious-operator defense."
+1. **Does single-hop actually help against the real adversary?** v0's value hinges on the first-party relay tier being *operationally separated* from the Turso metadata plane (so no single system joins IP↔account). If Pollis runs both and can trivially join their logs, v0 buys little against a *malicious* operator (it still helps vs. breach, subpoena-to-Turso-only, and honest-but-curious). **Decide and document** the operational-separation commitment before shipping v0, or be honest that v0 is "breach/subpoena defense," not "malicious-operator defense." **→ Decided & documented in `docs/relay-operations.md`:** v0 is honestly scoped as breach/subpoena + IP-unlinking defense (the B-direction choice), and the concrete separation mechanism is **offline device-cert auth** — the relay verifies a connecting device's cert chain locally (`pollis-device-cert`, zero I/O), so a relay node holds no Turso/DS credentials and makes no metadata-plane query. Log-anchoring the account id and live revocation are stated v1 items.
 2. **Traffic fingerprinting.** Even IP-hidden, Pollis's characteristic request cadence (poll intervals, commit sizes) may fingerprint the app/user to an on-path observer. Padding/cover traffic is a v2 lever; note the residual risk now.
 3. **Anonymity-set size.** IP unlinkability is only as strong as the crowd you blend into. A small relay pool with few users offers weak anonymity (few candidates behind a relay's IP). Real value needs adoption; measure pool size and set expectations.
 4. **Sybil economics** (§4.4). The "require first-party last hop" mitigation is strong but re-centralizes trust in the last hop — acceptable (it's a relay, not the service, §5.2) but worth stating.
@@ -500,6 +500,16 @@ removes the per-call-`Client::new()` anti-pattern (connection-pool win for free)
 - **Slice 2 — deploy shape of the first-party relay pool + `off→prefer→strict` UI + consent.**
   The `pollis-relay` binary as a deployable (see §7); the settings surface (§10.1) and the
   be-a-relay consent (§10.2) are UI and can follow once the transport is proven.
+  - **Slice 2a (landed).** Hardened `pollis-relay` into a deployable first-party node:
+    **production auth = the OFFLINE device-certificate chain** (the mechanism that keeps the relay
+    tier out of the metadata plane, §11.1) — extracted into the shared `pollis-device-cert` crate so
+    `pollis-core` (mints) and `pollis-relay` (verifies) share one frozen format with no crate cycle;
+    the handshake now carries `account_id_pub` + `device_cert` + `identity_version` + `issued_at`
+    (protocol v2), replacing the Slice-1 in-memory key resolver. Plus: TOML config file, generated /
+    persisted QUIC identity, graceful shutdown (drain on SIGTERM/SIGINT), and per-account / per-IP
+    rate + concurrency limits (`Rejected(RateLimited)`). Operational-separation commitment written up
+    in **`docs/relay-operations.md`**. Bootstrap/OTP traffic (a device with no cert yet) cannot
+    cert-authenticate and stays DIRECT — documented, mirrors the DS session-vs-device split.
 - **Slice 3 — one-hop latency measurement** against the §6.4 budget (de-risk item 3), on the real
   control plane, before any "ship v0" call.
 

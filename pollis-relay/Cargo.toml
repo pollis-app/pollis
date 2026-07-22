@@ -27,9 +27,16 @@ rcgen = { version = "0.13", default-features = false, features = ["ring", "pem"]
 # Device-signature handshake, mirroring pollis-delivery/src/auth.rs: raw 32-byte
 # Ed25519 pubkey, 64-byte PureEdDSA signature over a canonical message.
 ed25519-dalek = "2"
+# The OFFLINE device-cert primitive, shared verbatim with pollis-core so the
+# handshake verifies the exact chain pollis-core mints — no drift, no cycle.
+pollis-device-cert = { path = "../pollis-device-cert" }
 sha2 = "0.10"
 base64 = "0.22"
 getrandom = "0.2"
+# Deployable-bin config: a TOML file for bind/allowlist/identity/rate-limits.
+# Both already in the workspace lockfile — no new supply-chain surface.
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
 # Shared HTTP client helper: socks5h:// (proxy-side DNS) points every caller at
 # the loopback shim; rustls-tls so the inner TLS terminates at the real host.
 reqwest = { version = "0.12", default-features = false, features = ["socks", "rustls-tls"] }

@@ -1,0 +1,17 @@
+[package]
+name = "pollis-device-cert"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Pollis offline device-certificate primitive: the domain-separated, length-prefixed payload a device cert signs over, plus its Ed25519 verification. Zero I/O, deps = ed25519-dalek + std only, so both pollis-core (which mints certs) and pollis-relay (which verifies them at the handshake) share ONE source of truth for the wire format — no drift, no crate cycle."
+
+[lib]
+name = "pollis_device_cert"
+path = "src/lib.rs"
+
+[dependencies]
+# The ONLY dependency by design: the cert is an Ed25519 signature over a
+# hand-rolled, length-prefixed payload. Nothing else is needed, and adding
+# anything would widen the trust surface of a primitive that both the metadata
+# plane (pollis-core) and the relay tier (pollis-relay) depend on.
+ed25519-dalek = "2"

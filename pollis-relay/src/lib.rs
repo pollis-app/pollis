@@ -10,25 +10,30 @@
 //! (§14.0).
 //!
 //! Layout:
-//! - [`proto`] — the wire protocol + the Ed25519 device-signature handshake.
-//! - [`server`] — the QUIC relay: handshake → allowlist → dial → pipe.
+//! - [`proto`] — the wire protocol + the offline device-CERTIFICATE handshake.
+//! - [`server`] — the QUIC relay: handshake → rate limit → allowlist → dial → pipe.
 //! - [`client`] — the QUIC relay client.
 //! - [`circuit`] — an n-hop `Circuit` (v0: n = 1) + a [`circuit::CircuitFactory`].
 //! - [`shim`] — the local SOCKS5 CONNECT server on loopback.
 //! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4).
+//! - [`ratelimit`] — in-memory per-account / per-IP abuse control (§11.5).
+//! - [`config`] — the deployable bin's TOML config.
 //! - [`http`] — the shared reqwest client helper.
-//! - [`tls`] — cert generation + the pinned-cert QUIC verifier.
+//! - [`tls`] — cert generation/persistence + the pinned-cert QUIC verifier.
 //! - [`stream`] — the byte-pipe stream types.
 //!
 //! The relay only ever forwards opaque bytes inside the client's own TLS to a
 //! first-party host; it never terminates that TLS and never sees plaintext or
-//! keys (§8).
+//! keys (§8). Auth is the OFFLINE device-cert chain (`pollis-device-cert`), so
+//! the relay makes no metadata-plane query per connection (§11.1).
 
 pub mod circuit;
 pub mod client;
+pub mod config;
 pub mod http;
 pub mod policy;
 pub mod proto;
+pub mod ratelimit;
 pub mod server;
 pub mod shim;
 pub mod stream;
@@ -37,9 +42,11 @@ pub mod tls;
 // Re-export the load-bearing types at the crate root for ergonomic consumers.
 pub use circuit::{Circuit, CircuitFactory, Hop, SingleHopFactory};
 pub use client::{ClientIdentity, RelayClient};
+pub use config::{RateLimitFileConfig, RelayFileConfig};
 pub use http::{http_client, http_client_builder};
 pub use policy::{FinalAction, OverlayMode, PlannedRoute, RoutingPolicy};
-pub use proto::{InMemoryKeyResolver, KeyResolver, RejectReason};
+pub use proto::{DeviceCertMaterial, RejectReason, VerifiedClient};
+pub use ratelimit::{RateLimitConfig, RateLimiter};
 pub use server::{Allowlist, HostPattern, RelayConfig, RelayServer, RelayStats};
 pub use shim::{OverlayHandle, OverlayShim};
 pub use stream::{BoxedStream, RelayStream};
