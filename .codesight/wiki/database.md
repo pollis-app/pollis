@@ -97,9 +97,8 @@ decrypts and reads the credential's `{user_id}:{device_id}`, so a server-written
 additionally marks an envelope whose `sender_id` column is a non-identifying
 sentinel (the string `"sealed"`) rather than the real sender — envelope-sender
 *blinding*, so a Turso breach/subpoena of the stored table reveals nothing about
-who sent which message. Blinding is gated behind `POLLIS_SEAL_SENDER` (default
-**OFF**, dormant); the column and both code paths ship now so flipping it on later
-is a config change, not a migration. `sender_id` stays `NOT NULL` and the sentinel
+who sent which message. Blinding is **unconditional** — every send and
+redaction writes the sentinel; there is no flag and no opt-out. `sender_id` stays `NOT NULL` and the sentinel
 is a valid value, so the previously-shipped app keeps working (see migration
 000008's backward-compat note; version 000007 is deliberately skipped).
 

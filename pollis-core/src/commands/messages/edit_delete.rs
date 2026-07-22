@@ -383,11 +383,8 @@ async fn send_redaction_message(
     // Blind the envelope sender under sealed sender exactly like a normal send
     // (issue #331) — the true author is the MLS credential inside the ciphertext,
     // which is what the recipient's redaction-authorization check reads.
-    let (envelope_sender_id, sealed_flag): (&str, i64) = if state.config.seal_sender {
-        (super::send::SEALED_SENDER_SENTINEL, 1)
-    } else {
-        (user_id, 0)
-    };
+    let (envelope_sender_id, sealed_flag): (&str, i64) =
+        (super::send::SEALED_SENDER_SENTINEL, 1);
 
     let body = serde_json::json!({
         "id": envelope_id,

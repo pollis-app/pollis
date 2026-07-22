@@ -28,7 +28,7 @@ name: Rebuild & Verify (independent reproducer)
 # recipe via `option_env!` at compile time (pollis-core/src/config.rs). Since
 # the #506 secrets-broker cutover that recipe is: TURSO_URL, the READ-ONLY
 # TURSO_TOKEN, LOG_DB_URL, LOG_DB_TOKEN, R2_S3_ENDPOINT, R2_PUBLIC_URL,
-# LIVEKIT_URL, POLLIS_DELIVERY_URL, POLLIS_SEAL_SENDER — no R2 or LiveKit
+# LIVEKIT_URL, POLLIS_DELIVERY_URL — no R2 or LiveKit
 # credentials are read by the client at all anymore. Every entry is publishable
 # except the one remaining secret-shaped residual: the OPTIONAL observability
 # LOG_DB_TOKEN (see the residuals doc, item 4). Until that token is scoped out
@@ -268,8 +268,8 @@ jobs:
       # passed). Exported via $GITHUB_ENV behind an is-set guard because an
       # unset var must stay truly UNSET: a plain `env:` mapping of an undefined
       # var exports an EMPTY string, which option_env! bakes as Some("") —
-      # different bytes from a release that left the var unset (None), e.g.
-      # POLLIS_SEAL_SENDER today. Tags older than v1.3.5 predate both the
+      # different bytes from a release that left the var unset (None), e.g. the
+      # optional LOG_DB_TOKEN today. Tags older than v1.3.5 predate both the
       # determinism flags (#504) and the #506 recipe and are not
       # bit-reproducible here regardless — for those, only log inclusion
       # applies.
@@ -283,12 +283,11 @@ jobs:
           R2_PUBLIC_URL: ${{ vars.R2_PUBLIC_URL }}
           LIVEKIT_URL: ${{ vars.LIVEKIT_URL }}
           POLLIS_DELIVERY_URL: ${{ vars.POLLIS_DELIVERY_URL }}
-          POLLIS_SEAL_SENDER: ${{ vars.POLLIS_SEAL_SENDER }}
         run: |
           set -euo pipefail
           for key in TURSO_URL TURSO_TOKEN LOG_DB_URL LOG_DB_TOKEN \
                      R2_S3_ENDPOINT R2_PUBLIC_URL LIVEKIT_URL \
-                     POLLIS_DELIVERY_URL POLLIS_SEAL_SENDER; do
+                     POLLIS_DELIVERY_URL; do
             if [ -n "${!key}" ]; then
               echo "${key}=${!key}" >> "$GITHUB_ENV"
             fi

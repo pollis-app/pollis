@@ -332,22 +332,31 @@ deliberately *not* read for attribution. This is **always on**: because the
 sender is authenticated by MLS, a server that rewrites `sender_id` can neither
 forge authorship nor learn it from that column.
 
-On top of that, **envelope-sender blinding** can make the stored `sender_id`
-non-identifying. When `state.config.seal_sender` is set (env `POLLIS_SEAL_SENDER`,
-default **OFF**), `send_message` posts `sealed = 1` and a fixed sentinel
-(`SEALED_SENDER_SENTINEL = "sealed"`) as the envelope's `sender_id` instead of the
-real user id, so a Turso breach/subpoena of `message_envelope` reveals nothing
-about who sent which message. The local `message` row keeps the real `sender_id`
-(it's the author's own copy on a trusted device; the send path writes
-self-attribution directly rather than re-deriving from the credential). The DS
-relaxes its "send-as-yourself" equality check for sealed sends but keeps the
-membership authz unchanged — it still verifies the *authenticated* writer is a
-member (`apply_send_message` in `pollis-delivery/src/messages.rs`).
+On top of that, **envelope-sender blinding is unconditional**. `send_message`
+(and the redaction path in `edit_delete.rs`) always posts `sealed = 1` with a
+fixed sentinel (`SEALED_SENDER_SENTINEL = "sealed"`) as the envelope's
+`sender_id`, so a Turso breach or subpoena of `message_envelope` reveals nothing
+about who sent which message. There is **no flag** — `POLLIS_SEAL_SENDER` and
+`Config::seal_sender` were removed once the reader half had shipped, because a
+build-time toggle would make the envelope's privacy depend on a value the user
+can neither see nor verify. `src-tauri/tests/flows/sealed_sender.rs` carries an
+invariant test (`sealing_has_no_opt_out_for_an_ordinary_client`) that fails if an
+escape hatch is reintroduced.
 
-**Honest scope (§2.1).** This is an **at-rest** defense. The DS authenticates
-every write with an `X-Pollis-User` header and gates on membership, so a *live* DS
-operator still sees the sender in real time. Closing that axis is v1.5
-anonymous-membership (not shipped — tracked in #489). See
+The local `message` row keeps the real `sender_id` (it's the author's own copy on
+a trusted device; the send path writes self-attribution directly rather than
+re-deriving from the credential). The DS relaxes its "send-as-yourself" equality
+check for sealed sends but keeps the membership authz unchanged — it still
+verifies the *authenticated* writer is a member (`apply_send_message` in
+`pollis-delivery/src/messages.rs`), and it still accepts `sealed = 0` from
+pre-cutover clients.
+
+**Scope.** Blinding covers the **stored envelope** — the artifact a breach or
+subpoena yields. It does not cover the live request path: the DS authenticates
+every write with an `X-Pollis-User` header and gates on membership, so a DS
+operator observing traffic in real time still sees who is sending. Removing that
+requires authorizing membership without identifying the member — anonymous
+membership credentials, tracked in #489. See
 `docs/metadata-minimization-design.md` §2.
 
 ## Metadata-minimized signalling (#331 v2)

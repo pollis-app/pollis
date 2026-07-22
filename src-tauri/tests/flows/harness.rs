@@ -2443,19 +2443,8 @@ impl TestClient {
         Self::new_with_config(world().await.config.clone()).await
     }
 
-    /// Build a fresh client whose Config has sealed sender enabled
-    /// (`POLLIS_SEAL_SENDER=1`, issue #331). Used by the sealed-sender flows
-    /// test to drive the release-N+1 sending path per-client while every other
-    /// client in the process stays on the default (sealing off). Does NOT sign
-    /// in — call [`sign_up`] after construction.
-    pub(crate) async fn new_sealed() -> Self {
-        let mut config = world().await.config.clone();
-        config.seal_sender = true;
-        Self::new_with_config(config).await
-    }
 
-    /// Shared constructor: build a client backed by an explicit Config (so a
-    /// test can flip per-client flags like `seal_sender`).
+    /// Shared constructor: build a client backed by an explicit Config.
     async fn new_with_config(config: Config) -> Self {
         let w = world().await;
         let keystore: Arc<dyn Keystore> = Arc::new(InMemoryKeystore::new());

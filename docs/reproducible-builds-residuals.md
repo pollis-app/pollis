@@ -65,7 +65,8 @@ non-reproducible signed-wrapper layer.
 The client bakes build-configuration values into the binary at compile time via
 `option_env!` (`pollis-core/src/config.rs`): `TURSO_URL`, the **read-only**
 `TURSO_TOKEN`, `LOG_DB_URL`, `LOG_DB_TOKEN`, `R2_S3_ENDPOINT`, `R2_PUBLIC_URL`,
-`LIVEKIT_URL`, `POLLIS_DELIVERY_URL`, and `POLLIS_SEAL_SENDER`. These bytes are
+`LIVEKIT_URL`, and `POLLIS_DELIVERY_URL`. (`POLLIS_SEAL_SENDER` was removed when
+sealed sending became unconditional — one fewer recipe input to reproduce.) These bytes are
 part of the reproducible payload, so a reproducer must bake the **identical**
 values or its hash legitimately diverges.
 

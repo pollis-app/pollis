@@ -178,11 +178,13 @@ pub async fn send_message(
     // apply. Sealing it would mislabel the author's own message, since the send
     // path writes attribution directly rather than re-deriving it from the
     // credential the way the ingest reader does.
-    let (envelope_sender_id, sealed_flag): (&str, i64) = if state.config.seal_sender {
-        (SEALED_SENDER_SENTINEL, 1)
-    } else {
-        (sender_id.as_str(), 0)
-    };
+    // Sealing is unconditional (#331). The reader half — attribution from the
+    // MLS credential inside the ciphertext, never from this column — shipped a
+    // release earlier, which is what the additive two-release dance required;
+    // this is that second release. There is deliberately no opt-out: a runtime
+    // flag would mean the envelope's privacy depended on a build-time value the
+    // user cannot see or verify.
+    let (envelope_sender_id, sealed_flag): (&str, i64) = (SEALED_SENDER_SENTINEL, 1);
 
     // Post to Turso for offline delivery. DS seam: route the envelope write
     // through the Delivery Service (the write API).

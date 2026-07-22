@@ -3,17 +3,19 @@
 //! The reader half — attributing every message from the MLS credential inside
 //! the ciphertext rather than the server-writable `message_envelope.sender_id`
 //! column — shipped as release N and is exercised by the whole existing flows
-//! suite. These tests cover the SENDING half (release N+1, gated behind
-//! `POLLIS_SEAL_SENDER`, default off):
+//! suite. These tests cover the SENDING half, which is now **unconditional** —
+//! `POLLIS_SEAL_SENDER` is gone, and there is no code path that writes a real
+//! `sender_id` into `message_envelope`:
 //!
-//!   - **sealed positive** — with sealing on, the stored envelope is blinded
-//!     (`sealed = 1`, sentinel `sender_id`) yet the recipient still attributes
-//!     the message to the real sender via the credential.
+//!   - **sealed positive** — the stored envelope is blinded (`sealed = 1`,
+//!     sentinel `sender_id`) yet the recipient still attributes the message to
+//!     the real sender via the credential.
 //!   - **non-member rejected** — a sealed send from a non-member is still
 //!     refused by the DS membership gate (sealing relaxes the
 //!     `sender_id == auth-user` binding, NOT the membership authz).
-//!   - **regression** — with the flag off (default), everything behaves exactly
-//!     as before (real `sender_id`, `sealed = 0`, attribution correct).
+//!   - **no opt-out** — an ordinary client, constructed the ordinary way, seals.
+//!     This is the invariant test: it fails if anyone reintroduces a way to send
+//!     an envelope that names its author.
 
 use std::sync::Arc;
 
@@ -66,7 +68,7 @@ async fn two_member_channel(sender: &TestClient, receiver: &TestClient, receiver
 /// HEADLINE PROOF: sealing on blinds the server-stored sender while attribution
 /// still works.
 ///
-/// Alice sends with `POLLIS_SEAL_SENDER` enabled. The stored `message_envelope`
+/// Alice sends an ordinary message. The stored `message_envelope`
 /// row carries `sealed = 1` and the sentinel `sender_id` (`"sealed"`), NOT
 /// Alice's real id — so a Turso breach reveals nothing about who sent it. Yet
 /// Bob ingests the message and attributes it to Alice's REAL id, because the
@@ -78,7 +80,7 @@ async fn sealed_send_blinds_server_but_recipient_attributes_correctly() {
     wipe().await;
 
     // Alice's client has sealing ON; Bob's is a default (sealing off) client.
-    let mut alice = TestClient::new_sealed().await;
+    let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
 
     let alice_profile = alice.sign_up("alice@test.local").await;
@@ -134,9 +136,9 @@ async fn sealed_send_blinds_server_but_recipient_attributes_correctly() {
 async fn sealed_send_from_non_member_is_rejected() {
     wipe().await;
 
-    let mut alice = TestClient::new_sealed().await;
+    let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
-    let mut mallory = TestClient::new_sealed().await;
+    let mut mallory = TestClient::new().await;
 
     let _alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
@@ -185,13 +187,15 @@ async fn sealed_send_from_non_member_is_rejected() {
     drop(mallory);
 }
 
-/// REGRESSION: with the flag off (the default `TestClient::new`), a send behaves
-/// exactly as before sealed sending existed — the envelope stores the real
-/// `sender_id` and `sealed = 0`, and the recipient attributes correctly. This is
-/// what makes landing the sending half == release N (reader on, sealing off).
+/// INVARIANT: sealing has no opt-out. A client built the ordinary way — no
+/// special constructor, no flag — must still blind the envelope. Before #331's
+/// second release this same construction produced a real `sender_id`, so this
+/// test is what catches a reintroduced escape hatch (a config field, an env
+/// var, a conditional) that would silently restore per-message sender exposure
+/// at rest.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn unsealed_send_stores_real_sender_and_attributes_correctly() {
+async fn sealing_has_no_opt_out_for_an_ordinary_client() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -204,16 +208,16 @@ async fn unsealed_send_stores_real_sender_and_attributes_correctly() {
 
     let msg_id = alice.send_channel_message_id(&channel_id, "plain hello").await;
 
-    // Unsealed: the stored envelope carries alice's real id and sealed = 0.
+    // The at-rest view must never name the author.
     let remote = writable_remote().await;
     let (sealed, envelope_sender) = envelope_sealed_and_sender(&remote, &msg_id).await;
-    assert_eq!(sealed, 0, "unsealed send must store sealed = 0");
-    assert_eq!(
+    assert_eq!(sealed, 1, "an ordinary client's send must be sealed");
+    assert_ne!(
         envelope_sender, alice_profile.id,
-        "unsealed send must store alice's real sender_id"
+        "the stored envelope must not carry alice's real sender_id"
     );
 
-    // Attribution still correct (from the credential, same as always).
+    // Attribution is unaffected — it comes from the MLS credential.
     let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
     let bob_msg = bob_msgs
         .iter()
@@ -223,7 +227,7 @@ async fn unsealed_send_stores_real_sender_and_attributes_correctly() {
     assert_eq!(
         bob_msg["sender_id"].as_str(),
         Some(alice_profile.id.as_str()),
-        "bob must attribute the unsealed message to alice's real id"
+        "bob must still attribute the message to alice via the credential"
     );
 
     drop(alice);
