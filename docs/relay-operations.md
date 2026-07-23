@@ -136,6 +136,39 @@ plane.
   relays are a v1 feature. Relaying grants no read access of any kind: a relay
   only ever forwards sealed TLS bytes to a pinned first-party host (design §8).
 
+### Relay pool & failover (client-side)
+
+The client can be pointed at **multiple first-party relay endpoints**
+(`POLLIS_OVERLAY_RELAY` is a comma-separated list, e.g.
+`relay1.pollis.com:443,relay2.pollis.com:443`). This is what makes
+"messages must work" real when the overlay is on: a single dead relay never
+wedges delivery. The pool is entirely single-hop — it decides *which* first-party
+relay to dial, not *how many hops* (multi-hop/onion is v1). One shared pinned cert
+(`POLLIS_OVERLAY_RELAY_CERT`) covers every endpoint in v0 (all first-party, same
+identity).
+
+`RealRelayFactory` (`pollis-core/src/net/overlay.rs`) implements it:
+
+- **Failover.** Each `connect` tries the endpoints in health order and returns
+  the FIRST success. Every attempt is `resolve addr → build_single_hop → connect`;
+  on failure the endpoint is marked dead and the next candidate is tried. Only
+  when **every** candidate fails does `connect` error — so `prefer` still falls
+  back to direct and `strict` still degrades (surfaced), but only after the whole
+  pool is exhausted, never on one dead relay.
+- **Mark-dead-on-failure + cooldown (no background poll).** Health is tracked
+  inline: a failed dial marks that endpoint dead for a cooldown (30s), a success
+  clears it. There is deliberately **no health-poll loop** (repo rule: no periodic
+  keepalives) — recovery is lazy, matching `RemoteDb::with_retry`: the cooldown
+  expires and the next connect that reaches the endpoint retries it.
+- **Fail-open.** Healthy endpoints are tried first, but if **all** are marked dead
+  they are still tried — a transient outage that marked the whole pool dead must
+  never make it permanently unusable.
+- **Load spread.** A rotating start index deals connects across healthy endpoints
+  rather than always hammering endpoint 0.
+- **Bounded dial.** Each dial has an upper timeout (8s) so an *unreachable* relay
+  (packets dropped, no ICMP) fails over fast instead of hanging on the QUIC
+  handshake timeout.
+
 ## 5. Residual leaks stated honestly (design §14.4)
 
 v0 does not paper over what still leaks: the `ureq` transparency-**verify** path

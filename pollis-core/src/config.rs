@@ -46,10 +46,11 @@ pub struct Config {
     /// (messages-must-work). Media (LiveKit) stays direct in every mode (§6.4).
     pub overlay_mode: pollis_relay::OverlayMode,
     /// The v0 first-party relay endpoint(s) (`POLLIS_OVERLAY_RELAY`, e.g.
-    /// `relay.pollis.com:443`). Comma-separated for a future pool — v0 dials the
-    /// first (see [`overlay_relay_endpoints`](Config::overlay_relay_endpoints));
-    /// the pool+failover slice extends this. Absent → the overlay cannot build a
-    /// circuit: in `Prefer` that means direct fallback, in `Strict` a surfaced
+    /// `relay.pollis.com:443`). Comma-separated for a POOL: `RealRelayFactory`
+    /// tries them in health order and fails over to the first success (see
+    /// [`overlay_relay_endpoints`](Config::overlay_relay_endpoints)). Absent → the
+    /// overlay cannot build a circuit: in `Prefer` that means direct fallback,
+    /// in `Strict` a surfaced
     /// degraded error — never a silent drop. The shim still starts whenever the
     /// mode is non-off so `Strict` degrades instead of silently going direct.
     pub overlay_relay_url: Option<String>,
@@ -64,8 +65,9 @@ pub struct Config {
 }
 
 impl Config {
-    /// The configured relay endpoints, in order. v0 dials the first; the
-    /// pool+failover slice will try the rest. Empty when unconfigured.
+    /// The configured relay endpoints, in order. `RealRelayFactory` treats them
+    /// as a pool — tries them in health order and fails over to the first
+    /// success. Empty when unconfigured.
     pub fn overlay_relay_endpoints(&self) -> Vec<String> {
         self.overlay_relay_url
             .as_deref()

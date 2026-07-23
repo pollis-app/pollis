@@ -15,8 +15,10 @@
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::{Arc, Weak};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use hyper::client::connect::{Connected, Connection};
 use hyper::Uri;
@@ -113,6 +115,22 @@ pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolic
 /// not the version.
 const OVERLAY_CERT_IDENTITY_VERSION: u32 = 1;
 
+/// How long a relay endpoint stays marked dead after a failed dial before it is
+/// eligible again. Mark-dead-on-failure + cooldown is the *event-driven*
+/// alternative to a background health-poll loop (CLAUDE.md forbids periodic
+/// keepalives): a dead relay is simply skipped until this window elapses, then
+/// retried on the next connect that reaches it. Mirrors `RemoteDb::with_retry`'s
+/// reconnect-on-demand posture — recover lazily, never poll.
+const RELAY_DEAD_COOLDOWN: Duration = Duration::from_secs(30);
+
+/// Upper bound on a single endpoint's dial (QUIC handshake + CONNECT). Without
+/// it, a relay that is *unreachable* (packets dropped, no ICMP) stalls on the
+/// QUIC handshake timeout — which would defeat the pool's purpose: a dead relay
+/// must fail over FAST, not hang delivery. On timeout the endpoint is treated as
+/// failed (marked dead) and the next candidate is tried. Generous enough for a
+/// real first-party relay handshake over the internet.
+const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(8);
+
 /// A resolved relay endpoint: the `host:port` to dial and the pinned QUIC leaf
 /// the client verifies it against (the relay's identity *is* its cert, §7).
 #[derive(Clone)]
@@ -146,15 +164,118 @@ struct RelayEndpoint {
 /// **Caching.** The built identity is cached (`identity`), but re-derived if the
 /// cache is empty, so a device re-enroll is tolerated: `set_overlay_mode` rebuilds
 /// the factory on the next apply, and each fresh factory reloads.
+///
+/// **Pool + failover (design §14.1, the "messages must work" slice).** The
+/// factory holds a POOL of first-party relays and, per `connect`, tries them in
+/// health order, returning the FIRST success; only when EVERY candidate fails
+/// does it error — so `Prefer` still falls back to direct and `Strict` still
+/// degrades, but only once the whole pool is exhausted, never on one dead relay.
+/// Health is tracked inline (`health[i]` = `Some(dead_until)` while endpoint `i`
+/// is in its cooldown after a failed dial, `None` when healthy): a failed dial
+/// marks the endpoint dead for [`RELAY_DEAD_COOLDOWN`], a success clears it. There
+/// is **no background poll** — recovery is lazy (the cooldown expires and the next
+/// connect retries it), matching `RemoteDb::with_retry`. Selection is *fail-open*:
+/// healthy endpoints are tried first, but if all are marked dead they are still
+/// tried (a transient outage that marked the whole pool dead must never wedge it
+/// permanently). A rotating start index (`next_start`) spreads load across healthy
+/// endpoints instead of always hammering endpoint 0.
 struct RealRelayFactory {
     /// Weak so the factory (owned by the shim task, owned by `AppState.overlay`)
     /// does not form a reference cycle back into `AppState`.
     state: Weak<AppState>,
     endpoints: Vec<RelayEndpoint>,
     identity: AsyncMutex<Option<Arc<ClientIdentity>>>,
+    /// Per-endpoint health, indexed parallel to `endpoints`: `Some(dead_until)`
+    /// while in cooldown after a failed dial, `None` when healthy. A plain
+    /// `std::sync::Mutex` (never held across an await) — the guard is dropped
+    /// before any I/O.
+    health: Mutex<Vec<Option<Instant>>>,
+    /// Rotating start offset for load spread: each `connect` bumps this so the
+    /// pool doesn't always begin at endpoint 0.
+    next_start: AtomicUsize,
+    /// How long a failed endpoint stays dead. `RELAY_DEAD_COOLDOWN` in production;
+    /// tests inject a short value to exercise recovery.
+    cooldown: Duration,
+    /// Upper bound on a single dial. `RELAY_DIAL_TIMEOUT` in production; tests
+    /// inject a short value so an unreachable endpoint fails over fast.
+    dial_timeout: Duration,
 }
 
 impl RealRelayFactory {
+    /// Build a factory over `endpoints`, all initially healthy.
+    fn new(
+        state: Weak<AppState>,
+        endpoints: Vec<RelayEndpoint>,
+        cooldown: Duration,
+        dial_timeout: Duration,
+    ) -> Self {
+        let n = endpoints.len();
+        RealRelayFactory {
+            state,
+            endpoints,
+            identity: AsyncMutex::new(None),
+            health: Mutex::new(vec![None; n]),
+            next_start: AtomicUsize::new(0),
+            cooldown,
+            dial_timeout,
+        }
+    }
+
+    /// The order to try endpoints in for the next dial: healthy endpoints first
+    /// (rotated by `next_start` so load spreads), then any still in cooldown
+    /// (fail-open — always tried, so a fully-dead pool is never permanently
+    /// wedged). Returns endpoint indices. The health lock is taken and dropped
+    /// here; no I/O happens under it.
+    fn candidate_order(&self) -> Vec<usize> {
+        let n = self.endpoints.len();
+        let start = self.next_start.fetch_add(1, Ordering::Relaxed) % n;
+        let now = Instant::now();
+        let health = self.health.lock().unwrap();
+        let mut healthy = Vec::with_capacity(n);
+        let mut dead = Vec::new();
+        for i in 0..n {
+            let idx = (start + i) % n;
+            let in_cooldown = health[idx].is_some_and(|until| until > now);
+            if in_cooldown {
+                dead.push(idx);
+            } else {
+                healthy.push(idx);
+            }
+        }
+        healthy.extend(dead);
+        healthy
+    }
+
+    /// Mark endpoint `idx` dead until `now + cooldown` (failed dial).
+    fn mark_dead(&self, idx: usize) {
+        let until = Instant::now() + self.cooldown;
+        self.health.lock().unwrap()[idx] = Some(until);
+    }
+
+    /// Clear endpoint `idx`'s dead mark (successful dial).
+    fn mark_healthy(&self, idx: usize) {
+        self.health.lock().unwrap()[idx] = None;
+    }
+
+    /// Dial a single endpoint: resolve → single-hop circuit → connect to the
+    /// target. Kept single-hop (v0 is n=1 first-party); the pool decides *which*
+    /// relay, not *how many hops*.
+    async fn dial_endpoint(
+        &self,
+        endpoint: &RelayEndpoint,
+        identity: &Arc<ClientIdentity>,
+        host: &str,
+        port: u16,
+    ) -> anyhow::Result<BoxedStream> {
+        let addr = tokio::net::lookup_host(&endpoint.addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("overlay: resolve relay {}: {e}", endpoint.addr))?
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("overlay: relay {} did not resolve", endpoint.addr))?;
+        let circuit = Circuit::build_single_hop(Hop::new(addr, endpoint.cert.clone()), identity.clone());
+        circuit.connect(host, port).await
+    }
+
     /// Load (or reuse the cached) device `ClientIdentity`. Errors — fail-closed —
     /// when the device isn't in a state to authenticate to a relay (no user, no
     /// local DB, locked/absent account key).
@@ -178,23 +299,41 @@ impl RealRelayFactory {
 #[async_trait::async_trait]
 impl CircuitFactory for RealRelayFactory {
     async fn connect(&self, host: &str, port: u16) -> anyhow::Result<BoxedStream> {
-        // v0: dial the first configured endpoint. The pool+failover slice extends
-        // this to try the rest; here we just error on failure so Prefer falls
-        // back to direct and Strict degrades.
-        let endpoint = self
-            .endpoints
-            .first()
-            .ok_or_else(|| anyhow::anyhow!("overlay: no relay endpoint / pinned cert configured"))?;
+        // Fail-closed when nothing is configured (no endpoint / no pinned cert):
+        // `Prefer` then dials direct and `Strict` degrades, same as today.
+        if self.endpoints.is_empty() {
+            anyhow::bail!("overlay: no relay endpoint / pinned cert configured");
+        }
         let identity = self.identity().await?;
 
-        let addr = tokio::net::lookup_host(&endpoint.addr)
-            .await
-            .map_err(|e| anyhow::anyhow!("overlay: resolve relay {}: {e}", endpoint.addr))?
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("overlay: relay {} did not resolve", endpoint.addr))?;
-
-        let circuit = Circuit::build_single_hop(Hop::new(addr, endpoint.cert.clone()), identity);
-        circuit.connect(host, port).await
+        // Try the pool in health order and return the FIRST success. Only when
+        // EVERY candidate fails do we error — so a single dead relay never wedges
+        // delivery, but an all-down pool still surfaces (Prefer→direct,
+        // Strict→degrade). Each failed dial marks that endpoint dead; each success
+        // clears it.
+        let mut last_err = None;
+        for idx in self.candidate_order() {
+            let dial = self.dial_endpoint(&self.endpoints[idx], &identity, host, port);
+            let outcome = match tokio::time::timeout(self.dial_timeout, dial).await {
+                Ok(res) => res,
+                Err(_) => Err(anyhow::anyhow!(
+                    "overlay: relay {} dial timed out",
+                    self.endpoints[idx].addr
+                )),
+            };
+            match outcome {
+                Ok(stream) => {
+                    self.mark_healthy(idx);
+                    return Ok(stream);
+                }
+                Err(e) => {
+                    self.mark_dead(idx);
+                    last_err = Some(e);
+                }
+            }
+        }
+        Err(last_err
+            .unwrap_or_else(|| anyhow::anyhow!("overlay: relay pool exhausted with no endpoints")))
     }
 }
 
@@ -321,11 +460,12 @@ pub(crate) async fn start_overlay_shim(
 ) -> Result<OverlayHandle> {
     let policy = overlay_policy(&state.config, mode);
     let endpoints = load_relay_endpoints(&state.config);
-    let factory: Arc<dyn CircuitFactory> = Arc::new(RealRelayFactory {
-        state: Arc::downgrade(state),
+    let factory: Arc<dyn CircuitFactory> = Arc::new(RealRelayFactory::new(
+        Arc::downgrade(state),
         endpoints,
-        identity: AsyncMutex::new(None),
-    });
+        RELAY_DEAD_COOLDOWN,
+        RELAY_DIAL_TIMEOUT,
+    ));
     let handle = OverlayShim::start(policy, factory)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("overlay shim start: {e}")))?;
@@ -1098,5 +1238,199 @@ mod tests {
             Service::call(&mut connector, uri).await.is_ok(),
             "Prefer + relay down must fall back to a direct dial"
         );
+    }
+
+    // ── (e) POOL + health + failover (design §14.1, "messages must work") ───────
+
+    const LOCALHOST: IpAddr = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+    /// A relay that resolves `origin.test` to loopback and allows it as a target
+    /// — an in-process pool member the client can dial an origin through.
+    fn spawn_pool_relay() -> TestRelay {
+        spawn_relay(&[ORIGIN_NAME], &[(ORIGIN_NAME, LOCALHOST)])
+    }
+
+    /// A `RealRelayFactory` over `endpoints`, drawing its device identity from a
+    /// provisioned `AppState` (kept alive by the caller via the returned `Arc`).
+    fn pool_factory(
+        state: &Arc<AppState>,
+        endpoints: Vec<RelayEndpoint>,
+        cooldown: Duration,
+    ) -> RealRelayFactory {
+        // Short dial timeout so an unreachable endpoint fails over fast in tests.
+        RealRelayFactory::new(
+            Arc::downgrade(state),
+            endpoints,
+            cooldown,
+            Duration::from_secs(2),
+        )
+    }
+
+    fn endpoint(addr: String, cert: CertificateDer<'static>) -> RelayEndpoint {
+        RelayEndpoint { addr, cert }
+    }
+
+    /// FAILOVER: [relayA(unreachable), relayB(up)] → a control-plane dial still
+    /// succeeds THROUGH relayB, relayA is tried first and marked unhealthy.
+    #[tokio::test]
+    async fn pool_fails_over_to_healthy_relay() {
+        let origin = spawn_plain_http("failover-target").await;
+        let relay_b = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        // relayA is an unreachable address at index 0 (tried first on the first
+        // connect: start offset is 0); relayB is the live pool member at index 1.
+        let endpoints = vec![
+            endpoint("127.0.0.1:1".into(), relay_b.cert.clone()),
+            endpoint(relay_b.addr.to_string(), relay_b.cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+
+        let stream = factory.connect(ORIGIN_NAME, origin.port()).await;
+        assert!(stream.is_ok(), "pool must fail over to the healthy relay B");
+        assert_eq!(relay_b.stats.dials(), 1, "relay B dialed the origin");
+
+        let health = factory.health.lock().unwrap();
+        assert!(health[0].is_some(), "relay A must be marked unhealthy after its failed dial");
+        assert!(health[1].is_none(), "relay B stays healthy after a successful dial");
+    }
+
+    /// ALL-DOWN → policy holds: every endpoint fails → `connect` errors (so Prefer
+    /// falls back to direct / Strict degrades), and every endpoint is marked dead.
+    #[tokio::test]
+    async fn pool_all_down_errors_so_policy_applies() {
+        let cert = pollis_relay::tls::generate_self_signed("pollis-relay")
+            .unwrap()
+            .cert_der;
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+        let endpoints = vec![
+            endpoint("127.0.0.1:1".into(), cert.clone()),
+            endpoint("127.0.0.1:2".into(), cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+
+        assert!(
+            factory.connect(ORIGIN_NAME, 443).await.is_err(),
+            "an all-down pool must error so Prefer→direct / Strict→degrade applies"
+        );
+        let health = factory.health.lock().unwrap();
+        assert!(
+            health.iter().all(|h| h.is_some()),
+            "every endpoint marked dead after all fail"
+        );
+    }
+
+    /// ALL-DOWN, applied LIVE via a comma-separated multi-endpoint config: Prefer
+    /// still falls back to a direct dial (the whole pool → policy path).
+    #[tokio::test]
+    async fn pool_multi_endpoint_prefer_falls_back_direct_live() {
+        let plain = spawn_plain_http("pool-prefer-fallback").await;
+        let host = plain.ip().to_string();
+        let cert = pollis_relay::tls::generate_self_signed("pollis-relay")
+            .unwrap()
+            .cert_der;
+        // Two dead relays, comma-separated — parsed into a two-member pool.
+        let mut config = cfg(OverlayMode::Off, Some("127.0.0.1:1,127.0.0.1:2"));
+        config.turso_url = format!("libsql://{host}");
+        config.overlay_relay_cert = Some(cert_b64(&cert));
+        let state = provisioned_state(config).await;
+
+        crate::commands::overlay::apply_overlay_mode(&state, OverlayMode::Prefer)
+            .await
+            .unwrap();
+        let handle = state.overlay_handle().unwrap();
+
+        let mut connector = SocksConnector::new(handle.socks_addr());
+        let uri: Uri = format!("http://{host}:{}", plain.port()).parse().unwrap();
+        assert!(
+            Service::call(&mut connector, uri).await.is_ok(),
+            "Prefer + whole pool down must still fall back to a direct dial"
+        );
+    }
+
+    /// HEALTH/COOLDOWN: an endpoint in its cooldown window is skipped (the healthy
+    /// one is preferred); after the cooldown expires it is retried.
+    #[tokio::test]
+    async fn pool_skips_dead_endpoint_during_cooldown_then_retries() {
+        let origin = spawn_plain_http("cooldown-target").await;
+        let relay0 = spawn_pool_relay();
+        let relay1 = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let cooldown = Duration::from_millis(150);
+        let endpoints = vec![
+            endpoint(relay0.addr.to_string(), relay0.cert.clone()),
+            endpoint(relay1.addr.to_string(), relay1.cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, cooldown);
+
+        // Both relays are UP, but pin endpoint 0 as dead within its cooldown.
+        factory.health.lock().unwrap()[0] = Some(Instant::now() + cooldown);
+
+        // The dead endpoint is skipped — endpoint 1 serves the connect.
+        factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        assert_eq!(relay0.stats.dials(), 0, "dead endpoint 0 skipped while in cooldown");
+        assert_eq!(relay1.stats.dials(), 1, "healthy endpoint 1 served the connect");
+
+        // After the cooldown expires, endpoint 0 is eligible again; over a few
+        // rotating connects it is retried and dials.
+        tokio::time::sleep(cooldown + Duration::from_millis(50)).await;
+        for _ in 0..4 {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        assert!(
+            relay0.stats.dials() >= 1,
+            "endpoint 0 is retried once its cooldown has expired"
+        );
+    }
+
+    /// FAIL-OPEN: if ALL endpoints are marked dead, they are still TRIED — a
+    /// transient outage that marked the whole pool dead must never wedge it.
+    #[tokio::test]
+    async fn pool_tries_all_dead_endpoints_fail_open() {
+        let origin = spawn_plain_http("fail-open-target").await;
+        let relay = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints = vec![endpoint(relay.addr.to_string(), relay.cert.clone())];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+
+        // Mark the only endpoint dead for the full cooldown; fail-open must still
+        // try it rather than refuse to dial.
+        factory.health.lock().unwrap()[0] = Some(Instant::now() + Duration::from_secs(30));
+
+        factory
+            .connect(ORIGIN_NAME, origin.port())
+            .await
+            .expect("fail-open: a fully-dead pool is still tried");
+        assert_eq!(relay.stats.dials(), 1, "the dead endpoint was tried anyway");
+        // A successful dial clears its dead mark.
+        assert!(factory.health.lock().unwrap()[0].is_none());
+    }
+
+    /// LOAD SPREAD: with two healthy relays, repeated connects do not all land on
+    /// endpoint 0 — the rotating start index deals them out deterministically.
+    #[tokio::test]
+    async fn pool_spreads_load_across_healthy_relays() {
+        let origin = spawn_plain_http("spread-target").await;
+        let relay0 = spawn_pool_relay();
+        let relay1 = spawn_pool_relay();
+        let state = provisioned_state(cfg(OverlayMode::Prefer, None)).await;
+
+        let endpoints = vec![
+            endpoint(relay0.addr.to_string(), relay0.cert.clone()),
+            endpoint(relay1.addr.to_string(), relay1.cert.clone()),
+        ];
+        let factory = pool_factory(&state, endpoints, Duration::from_secs(30));
+
+        const N: u64 = 6;
+        for _ in 0..N {
+            factory.connect(ORIGIN_NAME, origin.port()).await.unwrap();
+        }
+        // Rotation alternates the first-tried (and, both being up, dialed)
+        // endpoint, so each takes exactly half — deterministic, never flaky.
+        assert_eq!(relay0.stats.dials(), N / 2, "endpoint 0 took its share");
+        assert_eq!(relay1.stats.dials(), N / 2, "endpoint 1 took its share");
+        assert_eq!(relay0.stats.dials() + relay1.stats.dials(), N);
     }
 }
