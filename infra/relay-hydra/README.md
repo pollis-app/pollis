@@ -32,11 +32,29 @@ health/failover. Each relay is just a node with a public UDP port.
 1. **AWS auth.** `aws login` (interactive), then `aws sts get-caller-identity` must
    succeed. The account needs VPC/EC2/ASG/IAM/SSM/S3/CloudFront/Lambda/EventBridge/
    Budgets/CloudWatch.
+
+   > **Terraform can't see an `aws login` session.** That flow stores short-lived
+   > creds under `~/.aws/login/`, which the AWS CLI resolves but the Go SDK the AWS
+   > provider uses does not — `terraform plan` fails with "No valid credential
+   > sources found". Export them into the environment first, in the same shell:
+   >
+   > ```bash
+   > eval "$(aws configure export-credentials --format env)"
+   > ```
+   >
+   > These expire (check `AWS_CREDENTIAL_EXPIRATION`, typically a few hours). Re-run
+   > `aws login` + the `eval` when they do. Don't start a long apply — the CloudFront
+   > distribution alone takes several minutes — with only minutes left on the clock.
 2. **The relay image is published and pullable by the nodes.** Run
    `.github/workflows/relay-image.yml` (needs org `packages: write`) and make
    `ghcr.io/actuallydan/pollis-relay` **public** (or add a pull secret to the
    user-data). This is a prerequisite, not part of the Terraform.
 3. **Terraform ≥ 1.6** and Node ≥ 20 (for the scripts/test).
+
+   > **State is local and gitignored** (`terraform.tfstate` next to this README).
+   > Losing it orphans every resource below — they keep billing and nothing manages
+   > them. Run applies from a durable checkout, not a temp dir, and back the file up
+   > (or move to an S3 backend) before the pool grows.
 4. **Allowlist hostnames** — the defaults in `variables.tf` were pulled from
    `.env.production`; re-verify against the current file before apply.
 
