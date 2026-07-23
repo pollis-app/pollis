@@ -81,15 +81,24 @@ async fn ds_rejects_unsigned_or_invalid_writes() {
 
 /// Domain-A (#419) server-side AUTHORIZATION: a *validly signed* message write
 /// must still be refused when the signer lacks permission. Authentication proves
-/// who they are; authorization is what they lack. This is the security core of
-/// the slice — the membership / sender checks live on the DS, so a client cannot
-/// write into a conversation it doesn't belong to, nor edit a message it didn't
-/// send, even with a perfectly good device signature.
+/// who they are; authorization is what they lack. The DS's remaining domain-A
+/// gate is MEMBERSHIP — a client cannot write into a conversation it doesn't
+/// belong to, even with a perfect device signature.
 ///
-/// Two refusals, both at 403 (not 401 — the requests are correctly signed):
+/// Authorship is NOT a DS gate anymore (Solution A, #607): under unconditional
+/// sealed sender the stored `sender_id` is a blinded sentinel, so the DS cannot
+/// prove who authored a message and deliberately does not try. A member-but-
+/// non-author edit is therefore ACCEPTED by the DS (200) and rejected instead on
+/// the recipient's ingest, where the edit's MLS-authenticated author must equal
+/// the target's author (proven by `messages::sealed_non_author_edit_is_ignored`).
+///
+/// Refusals here (403, not 401 — the requests are correctly signed):
 ///   1. a NON-member signs a `messages/send` into someone else's channel;
-///   2. a member-but-NON-sender signs a `messages/edit` of another user's
-///      message.
+///   2. a NON-member signs a `messages/edit` — the membership gate still applies
+///      to edits;
+/// plus the post-#607 acceptance:
+///   3. a member-but-non-author edit is accepted by the DS (200), authorship
+///      being enforced client-side.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn ds_rejects_domain_a_writes_lacking_authorization() {
@@ -145,9 +154,29 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
         "a validly-signed send from a non-member must be FORBIDDEN, got {code}"
     );
 
-    // (2) Member-but-non-sender edit → 403. Bob is a current member, so he
-    //     passes the membership gate, but the target message's sender is alice,
-    //     so the sender-only edit check refuses him.
+    // (2) NON-member edit → 403. Mallory is not a member of `channel_id`, so the
+    //     membership gate refuses her edit — the DS still gates edits on
+    //     membership (Solution A only dropped the AUTHOR check, #607).
+    let nonmember_edit_body = serde_json::to_vec(&json!({
+        "envelope_id": "01TESTNONMEMBEREDITXXXXXXX",
+        "conversation_id": channel_id,
+        "target_message_id": msg_id,
+        "sender_id": mallory.user_id(),
+        "ciphertext": "mls:00",
+        "sent_at": "2026-01-01T00:00:00+00:00",
+    }))
+    .expect("serialize non-member edit body");
+    let code = signed_post_status(&mallory, "/v1/messages/edit", &nonmember_edit_body).await;
+    assert_eq!(
+        code, 403,
+        "a validly-signed edit from a NON-member must be FORBIDDEN, got {code}"
+    );
+
+    // (3) Member-but-non-author edit → 200 (Solution A, #607). Bob is a member,
+    //     so he passes the membership gate; the DS no longer checks authorship
+    //     (the sealed sender_id can't prove it), so it ACCEPTS the envelope. The
+    //     forged edit is rejected instead on ingest by every recipient — see
+    //     `messages::sealed_non_author_edit_is_ignored`.
     let edit_body = serde_json::to_vec(&json!({
         "envelope_id": "01TESTBOGUSEDITENVXXXXXXXX",
         "conversation_id": channel_id,
@@ -159,8 +188,9 @@ async fn ds_rejects_domain_a_writes_lacking_authorization() {
     .expect("serialize edit body");
     let code = signed_post_status(&bob, "/v1/messages/edit", &edit_body).await;
     assert_eq!(
-        code, 403,
-        "a validly-signed edit of someone else's message must be FORBIDDEN, got {code}"
+        code, 200,
+        "post-#607 the DS accepts a member's edit regardless of authorship \
+         (enforced client-side on ingest), got {code}"
     );
 
     drop(alice);
