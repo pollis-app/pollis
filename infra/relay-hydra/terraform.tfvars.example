@@ -1,0 +1,21 @@
+# Copy to terraform.tfvars and adjust. All values have sensible defaults in
+# variables.tf; this file only shows the ones you're most likely to touch.
+
+# Desired-state SEED (the reconciler owns runtime scaling after apply — edit the
+# SSM desired-state param to scale; see README). 3 nodes ≈ the $20/mo budget.
+region_node_counts = { "us-west-2" = 3 }
+
+# Minimum always-on (on-demand) nodes. Spot can never drop the pool below this.
+node_floor = 2
+node_max   = 3
+
+# Stable client-facing directory URL host. Requires a DNS CNAME + ACM validation
+# (see README). Set to "" to use the raw *.cloudfront.net domain.
+directory_domain = "relays.pollis.com"
+
+# Verify against the CURRENT .env.production before apply (schemes/paths stripped).
+relay_allowlist = "prod-actuallydan.aws-us-east-1.turso.io,api.pollis.com,4bd9ab176c5febd5e7ac1b64b23dede5.r2.cloudflarestorage.com,cdn.pollis.com,rtc.pollis.com"
+
+# $20/mo hard cap alert. Add emails to get notified.
+monthly_budget_usd  = 20
+budget_alert_emails = []

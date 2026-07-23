@@ -171,6 +171,12 @@ identity).
 
 ## 5. Turnkey deploy runbook
 
+The steps below are the **manual VPS/host** roll. For a **hands-off AWS pool** that
+provisions the nodes, hosts a signed relay directory, and self-heals/scales with no
+human in the loop, use **the hydra** (`infra/relay-hydra/`, #616) instead — it wraps
+the same image + config in Terraform + a reconciler Lambda. The manual steps here
+remain the reference for the config shape and the per-node contract.
+
 Everything below is turnkey from this repo **except provisioning the hosts and
 DNS** — spinning up the VMs and pointing names at them is the operator's ops (the
 one thing the codebase can't do for you). The relay deploys on the **VPS/host

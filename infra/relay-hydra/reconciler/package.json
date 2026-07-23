@@ -1,0 +1,8 @@
+{
+  "name": "pollis-relay-hydra-reconciler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Relay-pool reconciler Lambda for the Pollis closed-overlay relay (issue #616). No third-party deps: AWS SDK v3 and node:crypto are provided by the Lambda Node 20 runtime.",
+  "main": "index.mjs"
+}
