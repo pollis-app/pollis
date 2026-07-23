@@ -24,6 +24,12 @@
   <link rel="stylesheet" href="styles.css" />
 
   <style>
+    /* Verdict colours — same green/red the animations use. */
+    :root {
+      --ln-ok: #7bd88f;
+      --ln-bad: #f1707b;
+    }
+
     .ln-main {
       width: 100%;
       max-width: 820px;
@@ -327,6 +333,157 @@
       color: var(--c-accent);
     }
 
+    /* ── Proof mode (Topic 8): path, siblings, everything else greyed ─── */
+    .ln-node--dim {
+      opacity: 0.3;
+    }
+
+    .ln-node--path {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+    }
+
+    .ln-node--sib {
+      border-color: var(--c-text);
+      color: var(--c-text);
+    }
+
+    .ln-proof-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      margin-top: 1.25rem;
+    }
+
+    .ln-proof-label {
+      font-size: 0.8rem;
+      color: var(--c-text-muted);
+    }
+
+    .ln-proof-select,
+    .ln-proof-btn {
+      font-family: inherit;
+      font-size: 0.78rem;
+      padding: 0.4rem 0.7rem;
+      border: 1px solid var(--c-border);
+      border-radius: 5px;
+      background: var(--c-bg);
+      color: var(--c-text);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .ln-proof-select {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+    }
+
+    .ln-proof-btn {
+      border-color: var(--c-accent);
+      color: var(--c-accent);
+      font-weight: 700;
+    }
+
+    .ln-proof-btn:hover {
+      background: var(--c-accent);
+      color: var(--c-bg);
+    }
+
+    .ln-proof-btn--ghost {
+      border-color: var(--c-border);
+      color: var(--c-text-muted);
+      font-weight: 400;
+    }
+
+    .ln-proof-btn--ghost:hover {
+      background: var(--c-bg);
+      border-color: var(--c-text-muted);
+      color: var(--c-text);
+    }
+
+    .ln-proof-steps {
+      display: grid;
+      gap: 0.4rem;
+      margin-top: 1rem;
+    }
+
+    .ln-proof-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+    }
+
+    .ln-proof-row--start {
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid var(--c-border);
+    }
+
+    .ln-proof-step {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.15rem;
+      height: 1.15rem;
+      border: 1px solid var(--c-border);
+      border-radius: 4px;
+      font-size: 0.68rem;
+      color: var(--c-text-muted);
+    }
+
+    .ln-proof-lab {
+      font-size: 0.75rem;
+      color: var(--c-text-muted);
+    }
+
+    .ln-proof-hex {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.75rem;
+      color: var(--c-accent);
+    }
+
+    .ln-proof-sib {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.72rem;
+      width: 10rem;
+      padding: 0.2rem 0.4rem;
+      border: 1px solid var(--c-border);
+      border-radius: 5px;
+      background: var(--c-bg);
+      color: var(--c-text);
+      transition: border-color 0.15s, color 0.15s;
+    }
+
+    .ln-proof-sib:focus {
+      outline: none;
+      border-color: var(--c-accent);
+    }
+
+    .ln-proof-sib--tampered {
+      border-color: var(--ln-bad);
+      color: var(--ln-bad);
+    }
+
+    .ln-proof-verdict {
+      font-size: 0.82rem;
+      line-height: 1.6;
+      margin-top: 1rem;
+      color: var(--c-text-muted);
+    }
+
+    .ln-proof-verdict b {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-weight: 400;
+    }
+
+    .ln-proof-verdict--ok {
+      color: var(--ln-ok);
+    }
+
+    .ln-proof-verdict--bad {
+      color: var(--ln-bad);
+    }
+
     .ln-leaf-row {
       display: grid;
       grid-template-columns: repeat(8, 1fr);
@@ -429,8 +586,8 @@
       <ul class="ln-toc">
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
             append-only logs</a></li>
-        <li><span class="ln-track">SOON</span><span class="ln-soon">Signed tree heads, inclusion
-            &amp; consistency proofs</span></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
+            heads, proofs &amp; equivocation</a></li>
         <li><span class="ln-track">SOON</span><span class="ln-soon">Pollis's three logs — and what
             each one prevents</span></li>
       </ul>
@@ -565,6 +722,194 @@
             href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/merkle.rs"
             target="_blank" rel="noopener noreferrer">verifiable-log/src/merkle.rs</a>. See the
           live roots on the <a href="artifacts.html">artifacts page</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Topic 8 — STHs, proofs, equivocation (#597) ═══════════════════ -->
+      <section class="ln-section" id="proofs-and-equivocation">
+        <div class="ln-eyebrow">Track D · Transparency · Topic 8</div>
+        <h2>Signed tree heads, proofs, and equivocation</h2>
+
+        <div class="ln-prose">
+          <p>
+            You have a root: 64 characters fingerprinting an entire list. Two questions follow.
+          </p>
+          <p>
+            <strong>"Is my entry actually in there?"</strong> — the inclusion proof. You could
+            download every entry and rebuild the tree, but you don't need to. You only need the
+            hashes of the <em>siblings</em> along the path from your entry up to the root. Hash your
+            entry, combine it with the sibling you were given, hash that, combine with the next
+            sibling, and keep climbing. If you arrive at the published root, your entry is in the
+            tree. If you arrive at anything else, it isn't.
+          </p>
+          <p>
+            For a list of a thousand entries, that's about ten hashes. For a million, about twenty.
+            <strong>The proof grows like the logarithm of the list</strong> — double the entries,
+            add one step. That's why this scales to logs that never stop growing.
+          </p>
+          <p>
+            <strong>"Is this the same list as before, only longer?"</strong> — the consistency
+            proof. This is the one that enforces "append-only". You saw a root last week; there's a
+            new root today. A consistency proof is a small set of hashes demonstrating that the old
+            tree is contained inside the new one — everything you saw before is still there,
+            unchanged, and the difference is purely additions.
+          </p>
+          <p>
+            If we had edited an old entry, or removed one, <strong>no such proof could exist.</strong>
+            We couldn't fake it any more than we could fake a matching root. So "append-only" stops
+            being a policy we promise and becomes a property you verify.
+          </p>
+          <p>
+            <strong>So who says which root is the real one?</strong> We sign it. Periodically we
+            publish a <strong>signed tree head</strong> — the root, the number of entries, a
+            timestamp, and a signature over all of it. The signature is made with one specific
+            Ed25519 key, and Pollis apps and the <code>pollis-verify</code> tool have that key's
+            public half <strong>hard-coded</strong>:
+          </p>
+          <code class="ln-root">pinned key: 175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148</code>
+          <p>
+            That pinning matters more than it looks. If the key were simply fetched from our server,
+            a malicious server could serve its own key alongside a self-consistent fake tree, and
+            everything would "verify" beautifully. Because the key is compiled into the client, a
+            substituted key is detected immediately — in our own code that's a hard alarm, never a
+            warning.
+          </p>
+          <p>
+            <strong>And now the attack this is all really about: equivocation.</strong> A log that
+            only ever grows, with signed heads and proofs, still leaves one move: show
+            <em>different people different logs</em>. A clean, append-only, perfectly-signed log for
+            auditors — and a second one, with an extra key in it, served only to you. Each is
+            internally consistent. Each verifies. They just aren't the same log.
+          </p>
+          <p>
+            The defence isn't cryptographic — it's social, and it's the reason "publish it" beats
+            "promise it". Any two parties who compare the heads they were served will disagree, and
+            since each head is <em>signed by us</em>, the pair is undeniable, permanent proof of
+            misbehaviour. Nobody has to trust anybody; they just have to compare. Two heads claiming
+            the same entry count with different roots is precisely what our own tooling flags as
+            equivocation, and our publishing job keeps an across-run tripwire looking for exactly
+            that.
+          </p>
+          <p>
+            So the chain is: a root fingerprints the list → an inclusion proof puts your entry in it
+            → a consistency proof stops us rewriting it → a signature under a pinned key says it's
+            ours → and comparison between observers stops us keeping two sets of books.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            None of this makes equivocation <strong>impossible</strong> — it makes it
+            <strong>undeniable once someone compares.</strong> If literally nobody ever checks the
+            head they were served against anyone else's, two sets of books can sit side by side
+            forever. The cryptography guarantees that comparison would settle it instantly; it can't
+            guarantee that the comparison happens. Today the routine comparison is our own
+            publishing job re-auditing what's actually being served plus a tripwire that fails loudly
+            if a head at a given size ever changes — and anyone running <code>pollis-verify</code>.
+            More independent observers is strictly better, and that's a limitation we'd rather state
+            than paper over.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/proofs-and-equivocation.jpg"
+            aria-describedby="proofs-transcript-body">
+            <source src="learn/media/proofs-and-equivocation.webm" type="video/webm" />
+            <source src="learn/media/proofs-and-equivocation.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/proofs-and-equivocation.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            Climbing an audit path, watching a forged entry miss the root, a cheat that can't produce
+            a consistency proof, and the two-sets-of-books attack that comparison defeats.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="proofs-transcript-body">
+            <p>You've got a root — sixty-four characters standing in for an entire list. Two
+              questions. First: is <em>my</em> entry actually in there?</p>
+            <p>You don't need the whole list. You need the siblings along the path from your entry
+              to the top. Hash yours. Combine with this sibling. Hash. Combine with the next.
+              Climb.</p>
+            <p>If you land on the published root, your entry is in the tree. If you land anywhere
+              else, it isn't. A million entries needs about twenty hashes. Double the list, add one
+              step. That's why this works for logs that grow forever.</p>
+            <p>Second question: is this the same list as last week, with things only added? Here's
+              last week's tree, and here's today's. A consistency proof shows the old one sitting
+              inside the new one — untouched — with the new entries added on the end.</p>
+            <p>Now watch us try to cheat. We edit an old entry. The old tree no longer fits inside
+              the new one. No proof exists. We can't manufacture one. So "append-only" isn't a
+              promise. It's something you check.</p>
+            <p>But who says which root is real? We sign it — the root, the count, the time, all
+              sealed together. That's a signed tree head.</p>
+            <p>And the key we sign with is baked into the app and the verifier. Not downloaded. That
+              matters. If it were fetched, a dishonest server could hand you its own key with a
+              perfect fake log attached, and everything would verify. Because it's built in, we can
+              try — and get caught instantly.</p>
+            <p>Which leaves one last move. And this is the one worth understanding. We could keep
+              two sets of books. A clean log for the auditors. And a second one, just for you, with
+              one extra key in it. Both append-only. Both signed. Both verify perfectly. Neither of
+              you can tell alone.</p>
+            <p>So compare. Two signed heads, side by side. They disagree — and both carry our
+              signature. There's no explanation for that. It's permanent, public proof we
+              cheated.</p>
+            <p>That's the whole reason this is published rather than promised. Not because comparing
+              is cryptographically clever, but because it makes lying to two people at once
+              impossible to survive.</p>
+            <p>Root. Inclusion. Consistency. Signature. Comparison. Each one closes a door.</p>
+          </div>
+        </details>
+
+        <!-- Same widget component as Topic 7, in proof mode — see learn.js -->
+        <div class="ln-widget" id="proof-widget" data-merkle-widget data-proof hidden>
+          <div class="ln-widget-head">
+            <strong>Prove an entry.</strong> Pick one, and you'll be handed only the sibling hashes
+            on its path. Climb one step at a time and check where you land — then tamper with any
+            sibling you were given and watch the proof stop working.
+          </div>
+          <div class="ln-widget-canvas" data-canvas>
+            <svg class="ln-widget-svg" data-edges aria-hidden="true"></svg>
+          </div>
+          <div class="ln-leaf-row" data-leaves></div>
+          <div class="ln-widget-root" data-root></div>
+
+          <div class="ln-proof-controls">
+            <label class="ln-proof-label" for="proof-pick">Prove entry</label>
+            <select class="ln-proof-select" id="proof-pick" data-proof-pick></select>
+            <button type="button" class="ln-proof-btn" data-proof-run>Prove this entry</button>
+            <button type="button" class="ln-proof-btn ln-proof-btn--ghost" data-proof-reset>
+              Reset
+            </button>
+          </div>
+          <div class="ln-proof-steps" data-proof-steps></div>
+          <p class="ln-proof-verdict" data-proof-verdict aria-live="polite"></p>
+
+          <p class="ln-widget-note">
+            The sibling fields are editable on purpose — that's the forgery attempt. Everything is
+            real SHA-256 computed in your browser with <code>crypto.subtle</code>; nothing leaves
+            your device.
+          </p>
+        </div>
+
+        <p class="ln-deeper">
+          The rigorous version: <a
+            href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/proof.rs"
+            target="_blank" rel="noopener noreferrer">verifiable-log/src/proof.rs</a> for both proof
+          checks, <a href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/sth.rs"
+            target="_blank" rel="noopener noreferrer">sth.rs</a> for signed heads and the
+          equivocation test, and <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            target="_blank" rel="noopener noreferrer">docs/transparency.md</a> → "Trust model". The
+          live signed head is on the <a href="artifacts.html">artifacts page</a>.
         </p>
       </section>
 

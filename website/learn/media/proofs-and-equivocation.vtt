@@ -1,0 +1,44 @@
+WEBVTT
+
+NOTE Captions for "Signed tree heads, proofs, and equivocation" (Topic 8). No
+NOTE audio track yet by decision; these captions carry the narration. Source of
+NOTE truth: learn/manim/scripts/proofs-and-equivocation.md
+
+00:00.000 --> 00:14.000
+You've got a root — sixty-four characters standing in for an entire list. Two questions follow. First: is my entry actually in there?
+
+00:14.000 --> 00:32.000
+You don't need the whole list. You need the siblings along the path from your entry up to the top. Hash yours. Combine it with this sibling. Hash. Combine with the next one. Climb.
+
+00:32.000 --> 00:44.000
+If you land on the published root, your entry is in the tree. If you land anywhere else, it isn't. Here's a forged entry doing exactly that — a different root.
+
+00:44.000 --> 00:52.000
+A million entries needs about twenty hashes. Double the list, add one step. That's why this works for logs that grow forever.
+
+00:52.000 --> 01:10.000
+Second question: is this the same list as last week, with things only added? A consistency proof shows the old tree sitting inside the new one — untouched — with the new entries added on the end.
+
+01:10.000 --> 01:26.000
+Now watch us try to cheat. We edit an old entry. The old tree no longer fits inside the new one. No proof exists. We can't manufacture one.
+
+01:26.000 --> 01:35.000
+So "append-only" isn't a promise. It's something you check.
+
+01:35.000 --> 01:50.000
+But who says which root is real? We sign it — the root, the count, the time, all sealed together. That's a signed tree head.
+
+01:50.000 --> 02:05.000
+And the key we sign with is baked into the app and the verifier. Not downloaded. If it were fetched, a dishonest server could hand you its own key with a perfect fake log attached, and everything would verify.
+
+02:05.000 --> 02:25.000
+Which leaves one last move — the one worth understanding. We could keep two sets of books. A clean log for the auditors. And a second one, just for you, with one extra key in it.
+
+02:25.000 --> 02:42.000
+Both append-only. Both signed. Both verify perfectly. Neither of you can tell alone.
+
+02:42.000 --> 02:57.000
+So compare. Two signed heads, side by side. They disagree — and both carry our signature. There's no explanation for that. It's permanent, public proof we cheated.
+
+02:57.000 --> 03:05.000
+Root. Inclusion. Consistency. Signature. Comparison. Each one closes a door.

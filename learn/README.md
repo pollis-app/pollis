@@ -71,7 +71,10 @@ works with zero extra infra.
   if the log is re-seeded.
 - Widgets are vanilla JS + SVG + `crypto.subtle`, no dependencies, ship `hidden`
   and are revealed by `learn.js` only when they can actually run (progressive
-  enhancement — the prose + video teach without them).
+  enhancement — the prose + video teach without them). One component is mounted
+  per `[data-merkle-widget]` element, so topics share it rather than forking it:
+  Topic 7 mounts it plain, Topic 8 adds `data-proof` for the inclusion-proof walk
+  (pick an entry, get only its sibling hashes, climb, tamper, watch it fail).
 - Every section states its mechanism's **honest limit** in the `.ln-limit`
   callout. Non-negotiable (epic "honesty constraint").
 - Every claim traces to a repo anchor, listed at the top of the scene file and in
