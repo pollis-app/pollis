@@ -141,7 +141,7 @@ function AuthPIN() {
     unlockMutation.isPending;
 
   return (
-    <Screen>
+    <Screen testID="screen-auth-pin">
       <Crumb
         segs={[
           { label: "AUTH" },
@@ -234,6 +234,9 @@ function AuthPIN() {
               on the keypad with no path back to sign-in. */}
           <Pressable
             onPress={() => router.replace("/(auth)/email")}
+            testID="btn-pin-signout"
+            accessibilityRole="button"
+            accessibilityLabel="Sign in again"
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -271,6 +274,13 @@ function AuthPIN() {
           <Pressable
             key={i}
             disabled={k === ""}
+            testID={
+              k === "" ? undefined : k === "bk" ? "btn-pin-back" : `btn-pin-${k}`
+            }
+            accessibilityRole={k === "" ? undefined : "button"}
+            accessibilityLabel={
+              k === "" ? undefined : k === "bk" ? "Delete" : k
+            }
             onPress={() => (k === "bk" ? setPin(pin.slice(0, -1)) : push(k))}
             // Subtle press feedback: the key briefly fills with the soft amber
             // tier so a tap is acknowledged without anything flashy.

@@ -50,13 +50,15 @@ function NewGroup() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-group-new">
       <Crumb segs={[{ label: "GROUPS" }, { label: "New", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 16 }}>
           <View style={{ gap: 8 }}>
             <Text style={ty.label}>GROUP NAME</Text>
             <Field
+              testID="input-group-name"
+              accessibilityLabel="Group name"
               amber
               value={name}
               onChangeText={setName}
@@ -67,6 +69,8 @@ function NewGroup() {
           <View style={{ gap: 8 }}>
             <Text style={ty.label}>DESCRIPTION (OPTIONAL)</Text>
             <Field
+              testID="input-group-description"
+              accessibilityLabel="Group description"
               value={description}
               onChangeText={setDescription}
               placeholder="What's this group for?"

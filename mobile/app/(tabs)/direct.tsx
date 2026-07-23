@@ -29,7 +29,7 @@ function Direct() {
   const setSelectedConversationId = appStore.setSelectedConversationId;
 
   return (
-    <Screen>
+    <Screen testID="screen-direct">
       <Crumb segs={[{ label: "DIRECT", leaf: true }]} end={String(dms.length)} />
       <Body>
         {requests.length > 0 ? (
@@ -40,6 +40,7 @@ function Direct() {
               return (
                 <ListRow
                   key={d.id}
+                  testID={`row-request-${d.id}`}
                   minHeight={64}
                   glyph={<Avatar label={handle.slice(0, 2)} />}
                   name={
@@ -56,6 +57,8 @@ function Direct() {
                   sub="wants to message you"
                   end={
                     <Chip
+                      testID={`btn-accept-request-${d.id}`}
+                      accessibilityLabel="Accept request"
                       variant="on"
                       onPress={() => acceptRequest.mutate(d.id)}
                     >
@@ -112,6 +115,7 @@ function Direct() {
           return (
             <ListRow
               key={d.id}
+              testID={`row-dm-${d.id}`}
               minHeight={64}
               onPress={() => {
                 setSelectedConversationId(d.id);
@@ -138,6 +142,7 @@ function Direct() {
       </Body>
       <BottomAction>
         <Button
+          testID="btn-new-dm"
           full
           icon={<Icon.plus color={semantic.ink} />}
           onPress={() => router.push("/dm/new")}

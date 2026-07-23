@@ -61,7 +61,7 @@ export default function Search() {
     totalResults === 0;
 
   return (
-    <Screen>
+    <Screen testID="screen-search">
       <Crumb
         segs={[{ label: "SEARCH", leaf: true }]}
         end={trimmed.length >= 2 ? `${totalResults} RESULTS` : "TYPE…"}
@@ -101,6 +101,7 @@ export default function Search() {
             {filtered.groups.map((g) => (
               <ListRow
                 key={g.id}
+                testID={`row-group-${g.id}`}
                 minHeight={46}
                 glyph={<Icon.diamond size={14} color={semantic.mute} />}
                 name={g.name}
@@ -122,6 +123,7 @@ export default function Search() {
             {filtered.channels.map((c) => (
               <ListRow
                 key={c.id}
+                testID={`row-channel-${c.id}`}
                 minHeight={48}
                 glyph={<Icon.hash color={semantic.mute} />}
                 name={c.name}
@@ -141,6 +143,7 @@ export default function Search() {
           <View>
             <SectionTitle>DIRECT</SectionTitle>
             <ListRow
+              testID={`row-user-${user.data.id}`}
               minHeight={48}
               glyph={
                 <Avatar
@@ -166,6 +169,7 @@ export default function Search() {
             {messages.data!.map((m) => (
               <ListRow
                 key={m.message_id}
+                testID={`row-message-${m.message_id}`}
                 minHeight={58}
                 glyph={<Avatar label={m.sender_id.slice(0, 2)} size="sm" />}
                 name={m.sender_id}
@@ -202,6 +206,8 @@ export default function Search() {
         }}
       >
         <Field
+          testID="input-search"
+          accessibilityLabel="Search"
           amber
           value={q}
           onChangeText={setQ}

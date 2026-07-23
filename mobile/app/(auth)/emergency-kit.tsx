@@ -43,7 +43,7 @@ function EmergencyKit() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-auth-emergency-kit">
       <Crumb
         segs={[{ label: "AUTH" }, { label: "Emergency kit", leaf: true }]}
       />
@@ -105,6 +105,10 @@ function EmergencyKit() {
 
           <Pressable
             onPress={() => setAcknowledged((v) => !v)}
+            testID="toggle-recovery-ack"
+            accessibilityRole="checkbox"
+            accessibilityLabel="I've saved my recovery key"
+            accessibilityState={{ checked: acknowledged }}
             style={{
               flexDirection: "row",
               alignItems: "center",
@@ -141,6 +145,7 @@ function EmergencyKit() {
       </Body>
       <BottomAction>
         <Button
+          testID="btn-continue"
           full
           variant="primary"
           onPress={onContinue}

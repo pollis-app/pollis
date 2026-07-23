@@ -24,7 +24,7 @@ export default function AuthEmail() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-auth-email">
       <Crumb segs={[{ label: "AUTH" }, { label: "Identify", leaf: true }]} />
       <View
         style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 24 }}
@@ -45,6 +45,8 @@ export default function AuthEmail() {
         <View style={{ gap: 8 }}>
           <Text style={ty.label}>EMAIL</Text>
           <Field
+            testID="input-email"
+            accessibilityLabel="Email"
             amber
             value={email}
             onChangeText={setEmail}
@@ -67,6 +69,8 @@ export default function AuthEmail() {
       </View>
       <BottomAction>
         <Button
+          testID="btn-submit-email"
+          accessibilityLabel="Continue"
           variant="primary"
           full
           onPress={onSubmit}

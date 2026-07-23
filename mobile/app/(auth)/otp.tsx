@@ -37,7 +37,7 @@ export default function AuthOTP() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-auth-otp">
       <Crumb
         segs={[{ label: "AUTH" }, { label: "Verify email", leaf: true }]}
       />
@@ -114,6 +114,8 @@ export default function AuthOTP() {
         </Pressable>
         <TextInput
           ref={input}
+          testID="input-otp"
+          accessibilityLabel="One-time code"
           value={code}
           onChangeText={(v) => setCode(v.replace(/[^0-9]/g, "").slice(0, 6))}
           keyboardType="number-pad"
@@ -159,6 +161,8 @@ export default function AuthOTP() {
 
       <BottomAction>
         <Button
+          testID="btn-submit-otp"
+          accessibilityLabel="Verify"
           variant="primary"
           full
           onPress={onSubmit}

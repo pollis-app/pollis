@@ -77,6 +77,7 @@ function Msg({
   edited,
   onPressAvatar,
   onLongPress,
+  testID,
 }: {
   av: string;
   amber?: boolean;
@@ -87,11 +88,14 @@ function Msg({
   edited?: boolean;
   onPressAvatar?: () => void;
   onLongPress?: () => void;
+  testID?: string;
 }) {
   return (
     <Pressable
       onLongPress={onLongPress}
       delayLongPress={350}
+      testID={testID}
+      accessibilityLabel={text ? `${name}: ${text}` : name}
       style={{
         flexDirection: "row",
         gap: 12,
@@ -265,7 +269,7 @@ function TextChat() {
     (kind === "dm" ? "Direct message" : "Channel");
 
   return (
-    <Screen>
+    <Screen testID="screen-chat">
       <Crumb segs={[{ label: ctxLabel, leaf: true }]} />
       <ScrollView
         ref={scrollRef}
@@ -320,6 +324,7 @@ function TextChat() {
               return (
                 <Msg
                   key={m.id}
+                  testID={`row-message-${m.id}`}
                   av={name.slice(0, 2)}
                   amber={mine}
                   name={name}
@@ -389,8 +394,14 @@ function TextChat() {
         }
         actions={
           <>
-            <CtxAct icon={<Icon.people color={semantic.ink2} />} />
             <CtxAct
+              testID="btn-members"
+              accessibilityLabel="Members"
+              icon={<Icon.people color={semantic.ink2} />}
+            />
+            <CtxAct
+              testID="btn-chat-menu"
+              accessibilityLabel="Conversation menu"
               icon={<Icon.kebab color={semantic.ink2} />}
               onPress={() => {
                 if (!conversationId) {
@@ -425,6 +436,9 @@ function TextChat() {
               setEditTarget(null);
               setEditDraft("");
             }}
+            testID="btn-edit-cancel"
+            accessibilityRole="button"
+            accessibilityLabel="Cancel edit"
             style={{
               width: 38,
               height: 38,
@@ -438,6 +452,8 @@ function TextChat() {
             <Icon.exit color={semantic.ink} />
           </Pressable>
           <TextInput
+            testID="input-edit-composer"
+            accessibilityLabel="Edit message"
             value={editDraft}
             onChangeText={setEditDraft}
             autoFocus
@@ -489,6 +505,9 @@ function TextChat() {
               );
             }}
             disabled={!editDraft.trim() || editMessage.isPending}
+            testID="btn-edit-save"
+            accessibilityRole="button"
+            accessibilityLabel="Save edit"
             style={{
               width: 38,
               height: 38,
@@ -516,6 +535,9 @@ function TextChat() {
           }}
         >
           <Pressable
+            testID="btn-attach"
+            accessibilityRole="button"
+            accessibilityLabel="Add attachment"
             style={{
               width: 38,
               height: 38,
@@ -529,6 +551,8 @@ function TextChat() {
             <Icon.plus color={semantic.ink} />
           </Pressable>
           <TextInput
+            testID="input-composer"
+            accessibilityLabel="Message"
             value={draft}
             onChangeText={setDraft}
             placeholder="Type a message…"
@@ -552,6 +576,9 @@ function TextChat() {
           <Pressable
             onPress={onSend}
             disabled={!draft.trim() || sendMessage.isPending}
+            testID="btn-send"
+            accessibilityRole="button"
+            accessibilityLabel="Send"
             style={{
               width: 38,
               height: 38,
@@ -600,9 +627,12 @@ function TextChat() {
                 paddingVertical: 6,
               }}
             >
-              {QUICK_EMOJI.map((emoji) => (
+              {QUICK_EMOJI.map((emoji, ei) => (
                 <Pressable
                   key={emoji}
+                  testID={`btn-react-${ei}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`React ${emoji}`}
                   onPress={() => {
                     if (!actionTarget) {
                       return;
@@ -637,6 +667,9 @@ function TextChat() {
                     setEditDraft(actionTarget.content);
                     setActionTarget(null);
                   }}
+                  testID="btn-edit"
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit message"
                   style={{
                     paddingVertical: 14,
                     paddingHorizontal: 12,
@@ -667,6 +700,9 @@ function TextChat() {
                     deleteMessage.mutate(actionTarget.id);
                     setActionTarget(null);
                   }}
+                  testID="btn-delete"
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete message"
                   style={{
                     paddingVertical: 14,
                     paddingHorizontal: 12,
@@ -694,6 +730,9 @@ function TextChat() {
 
             <Pressable
               onPress={() => setActionTarget(null)}
+              testID="btn-action-cancel"
+              accessibilityRole="button"
+              accessibilityLabel="Cancel"
               style={{
                 paddingVertical: 14,
                 alignItems: "center",
