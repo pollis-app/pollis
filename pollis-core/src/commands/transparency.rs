@@ -30,7 +30,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use verifiable_log_serve::release::{verify_release, Layer, ReleaseReport};
+use verifiable_log_serve::release::{verify_release_via, Layer, ReleaseReport};
 use verifiable_log_serve::{AccountKeyVersion, AccountReport};
 
 use crate::error::{Error, Result};
@@ -284,10 +284,19 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
     }
 
     // The shared verifier — the SAME function `pollis-verify release` runs. Its
-    // HTTP is blocking (ureq), so it runs on the blocking pool.
+    // HTTP is blocking (ureq), so it runs on the blocking pool. Same overlay seam
+    // as the account path: compute the SOCKS5 proxy before spawning so the
+    // blocking `ureq` fetches route through the shim (overlay on) or dial direct
+    // (overlay off — byte-for-byte unchanged); a proxied connect failure surfaces
+    // as `Unavailable`, never a silent direct leak.
+    let proxy = overlay_proxy(overlay.as_deref());
     let base_owned = base.clone();
     let tag_owned = release_tag.clone();
-    match tokio::task::spawn_blocking(move || verify_release(&base_owned, &tag_owned)).await {
+    match tokio::task::spawn_blocking(move || {
+        verify_release_via(&base_owned, &tag_owned, proxy.as_deref())
+    })
+    .await
+    {
         Ok(Ok(report)) => Ok(derive_build_verify(
             &report,
             &my_payload,
@@ -306,6 +315,25 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
 }
 
 // ── Network (the only IO; everything below derive_* is pure) ──────────────────
+
+/// The SOCKS5 proxy URL for the blocking `ureq` transparency verifier, or `None`
+/// when the overlay is off.
+///
+/// The transparency host (`verify.pollis.com`) is a FIRST-PARTY control-plane
+/// host — inside the "hide the client IP from Pollis's servers" guarantee — so it
+/// is routed whenever the overlay is running; the media/direct plane split (which
+/// keeps LiveKit direct) does not apply to it. Off ⇒ `None` ⇒ a direct fetch,
+/// byte-for-byte the pre-overlay behaviour.
+///
+/// The scheme is `socks5://`, not `socks5h://`: `ureq`'s SOCKS5 does not
+/// recognize the `socks5h` token, but for a HOSTNAME target it already sends
+/// `ATYP=DOMAIN` (the domain, not a pre-resolved IP) to the proxy — i.e. it
+/// resolves proxy-side, exactly what `socks5h` denotes and exactly what the shim
+/// needs to allowlist + resolve the real hostname at the relay. `verify.pollis.com`
+/// is a hostname, so no local DNS lookup happens and no IP leaks.
+fn overlay_proxy(overlay: Option<&pollis_relay::OverlayHandle>) -> Option<String> {
+    overlay.map(|h| format!("socks5://{}", h.socks_addr()))
+}
 
 /// Fetch the served public key and run the shared account verifier for
 /// `user_id`. Returns `Err(detail)` on any transport/parse failure of the
@@ -326,10 +354,25 @@ async fn fetch_and_verify(
     // The shared verifier — the SAME function `pollis-verify account` runs. Its
     // HTTP is blocking (ureq), so it runs on the blocking pool, matching how the
     // rest of pollis-core offloads blocking work (`spawn_blocking`).
+    //
+    // Overlay seam: compute the SOCKS5 proxy BEFORE spawning (the handle isn't
+    // `Send` across the closure boundary as a borrow), then pass it into the
+    // blocking `ureq` path so it hides the client IP from the first-party
+    // transparency host — the same guarantee the async reqwest fetch above
+    // already gets. Overlay off ⇒ `None` ⇒ a direct fetch, byte-for-byte
+    // unchanged. If the overlay is on but the proxied verify can't connect, the
+    // `Err` below maps to `AuditStatus::Unavailable` ("couldn't check") — advisory
+    // and non-blocking, and crucially it does NOT silently fall back to a direct
+    // fetch, so the IP the overlay hides is never leaked.
+    let proxy = overlay_proxy(overlay);
     let base_owned = base.to_string();
     let user_owned = user_id.to_string();
     let report = tokio::task::spawn_blocking(move || {
-        verifiable_log_serve::account::verify_account(&base_owned, &user_owned)
+        verifiable_log_serve::account::verify_account_via(
+            &base_owned,
+            &user_owned,
+            proxy.as_deref(),
+        )
     })
     .await
     .map_err(|e| format!("account verifier task failed: {e}"))?
@@ -340,8 +383,10 @@ async fn fetch_and_verify(
 
 /// Fetch `/v1/account-keys/public_key.json` and return its key (lowercase hex).
 /// Routes through the overlay when on — this is the async reqwest fetch path
-/// (§14.2); the `ureq` verifier below has no proxy seam and stays a documented
-/// residual (§14.4).
+/// (§14.2). The blocking `ureq` verifier below now routes through the overlay
+/// too (via [`overlay_proxy`] + the `verify_*_via` entry points), so the whole
+/// transparency-verify path is proxied when the overlay is on — the §14.4
+/// residual is closed.
 async fn fetch_served_public_key(
     overlay: Option<&pollis_relay::OverlayHandle>,
     base: &str,

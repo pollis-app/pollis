@@ -82,7 +82,7 @@ impl Report {
 /// artifact yields `Ok(Report { ok: false, .. })` rather than an error.
 pub fn verify_remote(base_url: &str) -> Result<Report> {
     let base = base_url.trim_end_matches('/');
-    let agent = build_agent();
+    let agent = build_agent(None)?;
 
     let mut report = Report::new();
 
@@ -630,12 +630,25 @@ fn verify_binaries_tree(agent: &ureq::Agent, base: &str, report: &mut Report) {
     }
 }
 
-/// A blocking HTTP agent with a sane timeout, shared by every fetch path. The
-/// serve layer only ever talks to a loopback static host, so no TLS is needed.
-pub(crate) fn build_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
+/// A blocking HTTP agent with a sane timeout, shared by every fetch path.
+///
+/// `proxy` is the overlay seam: when `Some(url)` (e.g.
+/// `socks5h://127.0.0.1:9050`) every fetch is dialed through that SOCKS5 proxy,
+/// so an app running with the closed overlay on hides its real IP from the
+/// first-party transparency host (design `docs/relay-overlay-design.md` §14.4);
+/// when `None` the agent is byte-for-byte the pre-overlay one (a direct fetch to
+/// the loopback/static host, no proxy). A malformed proxy URL is surfaced as an
+/// `Err` — never silently downgraded to a direct fetch, which would leak the IP
+/// the overlay is meant to hide.
+pub(crate) fn build_agent(proxy: Option<&str>) -> Result<ureq::Agent> {
+    let mut builder =
+        ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(30));
+    if let Some(url) = proxy {
+        let proxy = ureq::Proxy::new(url)
+            .map_err(|e| ServeError::Http(format!("invalid overlay proxy {url}: {e}")))?;
+        builder = builder.proxy(proxy);
+    }
+    Ok(builder.build())
 }
 
 /// Blocking GET + JSON parse. A non-2xx status, transport error, or malformed
@@ -670,5 +683,164 @@ pub(crate) fn fetch_json_opt<T: serde::de::DeserializeOwned>(
         }
         Err(ureq::Error::Status(404, _)) => Ok(None),
         Err(e) => Err(ServeError::Http(format!("GET {url}: {e}"))),
+    }
+}
+
+// ── Overlay proxy plumbing ────────────────────────────────────────────────────
+//
+// The load-bearing proof for the transparency VERIFY overlay slice (design
+// `docs/relay-overlay-design.md` §14.4): `build_agent(Some("socks5://<shim>"))`
+// makes the blocking `ureq` fetch traverse the relay (the relay observes the
+// dial), while `build_agent(None)` dials the origin directly. An in-process
+// relay + SOCKS5 shim + a fake loopback HTTP origin is a full end-to-end check
+// of the seam pollis-core wires the closed overlay into — no live network, all
+// generated in-test. Mirrors the pattern in `pollis-core/src/net/overlay.rs`.
+#[cfg(test)]
+mod overlay_proxy_tests {
+    use super::*;
+
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use ed25519_dalek::SigningKey;
+    use pollis_relay::circuit::{Hop, SingleHopFactory};
+    use pollis_relay::client::ClientIdentity;
+    use pollis_relay::proto::DeviceCertMaterial;
+    use pollis_relay::server::{RelayConfig, RelayServer, RelayStats};
+    use pollis_relay::{Allowlist, CircuitFactory, OverlayMode, OverlayShim, RoutingPolicy};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    const ORIGIN_NAME: &str = "origin.test";
+
+    /// A client identity carrying a device key + a valid offline cert chain —
+    /// exactly what a real client presents to the relay.
+    fn identity() -> Arc<ClientIdentity> {
+        let device = SigningKey::from_bytes(&[11u8; 32]);
+        let account = SigningKey::from_bytes(&[12u8; 32]);
+        let cert = DeviceCertMaterial::mint(
+            &account,
+            "d_verify_test",
+            &device.verifying_key().to_bytes(),
+            1,
+            1_700_000_000,
+        );
+        Arc::new(ClientIdentity::new("u_verify_test", "d_verify_test", device, cert))
+    }
+
+    /// Spawn an in-process relay that allows `ORIGIN_NAME` and resolves it to
+    /// loopback, returning its dial-through factory + the shared stats.
+    fn spawn_relay() -> (Arc<dyn CircuitFactory>, Arc<RelayStats>) {
+        let mut config = RelayConfig::new(
+            "127.0.0.1:0".parse().unwrap(),
+            Allowlist::from_patterns([ORIGIN_NAME]),
+        )
+        .unwrap();
+        config
+            .resolve_overrides
+            .insert(ORIGIN_NAME.to_string(), IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let cert = config.server_cert();
+        let stats = config.stats.clone();
+        let (_task, addr) = RelayServer::spawn(config).unwrap();
+        // Leak the accept task: it lives for the whole (short) test process.
+        std::mem::forget(_task);
+        let factory: Arc<dyn CircuitFactory> =
+            Arc::new(SingleHopFactory::new(Hop::new(addr, cert), identity()));
+        (factory, stats)
+    }
+
+    /// A loopback plain-HTTP origin that answers every request with `body` and
+    /// counts accepted connections.
+    async fn spawn_plain_http(body: &'static str) -> (SocketAddr, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let count = Arc::new(AtomicUsize::new(0));
+        let c = count.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                c.fetch_add(1, Ordering::Relaxed);
+                let body = body.to_string();
+                tokio::spawn(async move {
+                    // Drain the request head, then reply.
+                    let mut byte = [0u8; 1];
+                    let mut buf = Vec::new();
+                    while let Ok(n) = sock.read(&mut byte).await {
+                        if n == 0 {
+                            break;
+                        }
+                        buf.push(byte[0]);
+                        if buf.ends_with(b"\r\n\r\n") {
+                            break;
+                        }
+                    }
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                        body.len(),
+                        body
+                    );
+                    let _ = sock.write_all(resp.as_bytes()).await;
+                });
+            }
+        });
+        (addr, count)
+    }
+
+    /// A malformed proxy URL surfaces as an error — never a silent direct fetch,
+    /// which would leak the IP the overlay is meant to hide.
+    #[test]
+    fn build_agent_rejects_malformed_proxy() {
+        // An unsupported proxy scheme is rejected outright.
+        assert!(build_agent(Some("socks6://127.0.0.1:9")).is_err());
+        // A valid SOCKS5 proxy URL builds.
+        assert!(build_agent(Some("socks5://127.0.0.1:9050")).is_ok());
+        // The `None` (overlay-off) path is always fine.
+        assert!(build_agent(None).is_ok());
+    }
+
+    /// `build_agent(Some(shim))` routes the blocking fetch THROUGH the relay
+    /// (the relay records the dial); `build_agent(None)` dials the origin
+    /// directly (the relay sees no dial).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn build_agent_proxy_traverses_relay_none_goes_direct() {
+        let (origin_addr, origin_conns) = spawn_plain_http(r#"{"ok":true}"#).await;
+        let (factory, stats) = spawn_relay();
+        let policy = RoutingPolicy::new(
+            OverlayMode::Strict,
+            Allowlist::from_patterns([ORIGIN_NAME]),
+            Allowlist::default(),
+        );
+        let shim = OverlayShim::start(policy, factory).await.unwrap();
+        let proxy = format!("socks5://{}", shim.socks_addr());
+
+        // Proxied: fetch the real name through the shim → relay → origin. `ureq`
+        // is blocking, so run it off the runtime.
+        let origin_port = origin_addr.port();
+        let proxy_c = proxy.clone();
+        let via_overlay: serde_json::Value = tokio::task::spawn_blocking(move || {
+            let agent = build_agent(Some(&proxy_c)).expect("agent with valid proxy");
+            fetch_json(&agent, &format!("http://{ORIGIN_NAME}:{origin_port}/x.json"))
+        })
+        .await
+        .unwrap()
+        .expect("proxied fetch reaches the origin through the relay");
+        assert_eq!(via_overlay["ok"], serde_json::json!(true));
+        assert_eq!(stats.dials(), 1, "the relay must have dialed the origin");
+        assert_eq!(origin_conns.load(Ordering::Relaxed), 1);
+
+        // Direct: `None` dials the origin's loopback address itself; the relay
+        // sees no further dial.
+        let direct: serde_json::Value = tokio::task::spawn_blocking(move || {
+            let agent = build_agent(None).expect("proxy-less agent");
+            fetch_json(&agent, &format!("http://127.0.0.1:{origin_port}/x.json"))
+        })
+        .await
+        .unwrap()
+        .expect("direct fetch reaches the origin");
+        assert_eq!(direct["ok"], serde_json::json!(true));
+        assert_eq!(stats.dials(), 1, "the direct fetch must NOT traverse the relay");
+        assert_eq!(origin_conns.load(Ordering::Relaxed), 2);
+
+        drop(shim);
     }
 }

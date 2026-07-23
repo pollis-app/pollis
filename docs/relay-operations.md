@@ -171,8 +171,10 @@ identity).
 
 ## 5. Residual leaks stated honestly (design §14.4)
 
-v0 does not paper over what still leaks: the `ureq` transparency-**verify** path
-can't proxy (public-key fetching, not account-keyed activity); Expo push
-registration is a non-first-party host and stays direct; LiveKit signaling stays
-direct by the plane split. See design §14.4 for the full list and the planned
-dispositions.
+v0 does not paper over what still leaks. The `ureq` transparency-**verify** path
+is **no longer** on that list: it now routes through the shim when the overlay is
+on (`build_agent` takes an optional SOCKS5 proxy; `pollis-core` passes
+`socks5://<shim>` to the `verify_*_via` entry points — `verify.pollis.com` is a
+first-party host), so it is closed. What remains: Expo push registration is a
+non-first-party host and stays direct; LiveKit signaling stays direct by the
+plane split. See design §14.4 for the full list and the planned dispositions.

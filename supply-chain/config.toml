@@ -2350,6 +2350,10 @@ criteria = "safe-to-deploy"
 version = "0.6.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.socks]]
+version = "0.3.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.softbuffer]]
 version = "0.4.8"
 criteria = "safe-to-deploy"

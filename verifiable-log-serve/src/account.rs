@@ -96,8 +96,23 @@ pub struct AccountReport {
 /// Returns `Err` only for transport/parse failures of the prerequisites; any
 /// *verification* failure is folded into the report as `chain_valid = false`.
 pub fn verify_account(base_url: &str, user_id: &str) -> Result<AccountReport> {
+    verify_account_via(base_url, user_id, None)
+}
+
+/// [`verify_account`] with an optional SOCKS5 `proxy` (e.g.
+/// `socks5h://127.0.0.1:9050`) for every fetch. When the closed overlay is on,
+/// pollis-core passes the loopback shim here so the blocking `ureq` verify path
+/// routes through the relay and does not leak the client's IP to the first-party
+/// transparency host (design §14.4). `None` is exactly [`verify_account`] — a
+/// direct fetch, byte-for-byte the pre-overlay behaviour. A malformed proxy URL
+/// is returned as `Err`, never silently downgraded to a direct fetch.
+pub fn verify_account_via(
+    base_url: &str,
+    user_id: &str,
+    proxy: Option<&str>,
+) -> Result<AccountReport> {
     let base = base_url.trim_end_matches('/');
-    let agent = build_agent();
+    let agent = build_agent(proxy)?;
 
     // Prerequisites, all under the account-keys subtree.
     let pk_doc: PublicKeyDoc =
