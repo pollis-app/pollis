@@ -1,15 +1,10 @@
-// Starter hook to seed the mobile data-fetching pattern. Mirrors the
-// shape of `frontend/src/hooks/queries/useUserProfile.ts` so that:
-//   - Future hooks copy this layout (query key fn, queryFn that calls
-//     `invoke()`, store-derived enable flag, staleTime in ms).
-//   - When `pollis-native` exposes a real `invoke()` dispatcher, this
-//     hook starts returning real data without any call-site change.
-//
-// Until the bridge is wired (see lib/native/bridge.ts), this hook will
-// throw "[pollis-native] invoke('get_user_profile') is not implemented"
-// — by design, so the lack of a backend is loud rather than silent.
-// Register a mock with `registerMockCommand("get_user_profile", …)` in
-// dev to unblock UI work.
+// Reference hook for the mobile data-fetching pattern. Mirrors the shape
+// of `frontend/src/hooks/queries/useUserProfile.ts` so future hooks copy
+// this layout (query key fn, queryFn that calls `invoke()`, store-derived
+// enable flag, staleTime in ms). `get_user_profile` is wired through the
+// `pollis-core` bridge, so this returns real data once
+// `initializeNativeBridge()` has run; register a mock with
+// `registerMockCommand("get_user_profile", …)` to drive it in dev.
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "../../lib/native";

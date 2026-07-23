@@ -8,9 +8,8 @@
 // (encrypted) message and decrypt it locally.
 //
 // Everything degrades gracefully: denied permission, a missing EAS
-// projectId, or the (not-yet-implemented) `register_push_token` bridge
-// command all resolve without throwing, leaving the app working exactly as
-// it does today.
+// projectId, or a failed `register_push_token` call all resolve without
+// throwing, leaving the app working exactly as it does today.
 
 import { Platform, Linking } from "react-native";
 import * as Notifications from "expo-notifications";
@@ -63,8 +62,8 @@ const registeredFor = new Set<string>();
  * it back on is a Settings trip — see `openNotificationSettings`).
  *
  * Returns the Expo push token, or null if not granted / already handled / no
- * EAS projectId / the (not-yet-implemented) `register_push_token` command is
- * absent. Best-effort throughout: never throws, never blocks the UI.
+ * EAS projectId / the `register_push_token` call fails. Best-effort
+ * throughout: never throws, never blocks the UI.
  */
 export async function ensurePushRegistration(
   userId: string,
@@ -107,7 +106,8 @@ export async function ensurePushRegistration(
     return null;
   }
 
-  // Best-effort backend registration — command not implemented yet.
+  // Best-effort backend registration. On failure we fall back to the
+  // focus/realtime ingest path, so a transient error here is non-fatal.
   try {
     await invoke("register_push_token", {
       userId,
@@ -115,7 +115,7 @@ export async function ensurePushRegistration(
       platform: Platform.OS,
     });
   } catch {
-    // No-op — falls back to focus/realtime ingest until the command lands.
+    // No-op — falls back to focus/realtime ingest.
   }
 
   registeredFor.add(userId);

@@ -337,6 +337,13 @@ async fn invoke_inner(cmd: String, args_json: String) -> Result<String, BridgeEr
             auth::revoke_device(&state()?, user_id, device_id).await?;
             ok(())
         }
+        // Authoritative, spoof-resistant check of whether THIS device is still
+        // registered for the user. Mobile calls it from the inbox realtime
+        // handler on a `device_revoked` nudge before deciding to self-sign-out.
+        "is_current_device_registered" => {
+            let user_id: String = arg(&args, "userId")?;
+            ok(auth::is_current_device_registered(&state()?, user_id).await?)
+        }
 
         // ----- pin -----
         "set_pin" => {

@@ -58,6 +58,11 @@ export type RealtimeEvent =
       left_user_ids: string[];
       devices_added: [string, string][];
       devices_removed: [string, string][];
+    }
+  | {
+      type: "device_revoked";
+      device_id: string;
+      user_id: string;
     };
 
 // The set of `type` discriminants this client understands. An event whose
@@ -71,6 +76,7 @@ const KNOWN_TYPES = new Set<RealtimeEvent["type"]>([
   "all_mention",
   "member_role_changed",
   "roster_changed",
+  "device_revoked",
 ]);
 
 /**
