@@ -169,7 +169,125 @@ identity).
   (packets dropped, no ICMP) fails over fast instead of hanging on the QUIC
   handshake timeout.
 
-## 5. Residual leaks stated honestly (design §14.4)
+## 5. Turnkey deploy runbook
+
+Everything below is turnkey from this repo **except provisioning the hosts and
+DNS** — spinning up the VMs and pointing names at them is the operator's ops (the
+one thing the codebase can't do for you). The relay deploys on the **VPS/host
+model** (a public UDP/QUIC port, like LiveKit — **not** a Cloudflare Worker,
+because the overlay hop is QUIC). The image is built + published by
+`.github/workflows/relay-image.yml` to `ghcr.io/actuallydan/pollis-relay`; there
+is **no auto-deploy**, so the roll is manual per the steps here.
+
+Reaffirming the **§11.1 posture** the whole tier rests on: v0 is
+**breach/subpoena defense + IP-unlinking** from the metadata plane. A relay node
+holds **no Turso URL/token and no DS credentials** — it authenticates devices with
+the offline device-cert chain and makes zero metadata-plane queries. Keep it that
+way: never hand a relay node a Turso secret.
+
+### Step 1 — mint the pinned relay QUIC identity (once)
+
+The relay's identity **is** its self-signed QUIC leaf cert; clients pin that exact
+cert rather than trusting a CA. Generate it once and reuse it across the whole
+pool (v0: all endpoints are first-party and share one pinned identity):
+
+```bash
+# First start writes identity.key + identity.key.crt (raw DER) if absent.
+pollis-relay --identity /var/lib/pollis-relay/identity.key --bind 0.0.0.0:9444 --allow example.invalid
+# Grab the DER cert the clients must pin (base64 for baking into the client build):
+base64 -w0 /var/lib/pollis-relay/identity.key.crt   # → POLLIS_OVERLAY_RELAY_CERT
+```
+
+- **How the pinned cert reaches the client:** it is baked into the client build as
+  `POLLIS_OVERLAY_RELAY_CERT` (base64 of the DER, or a filesystem path) — Step 3.
+  There is no cert-fetch on the trust path: the client trusts exactly the bytes
+  compiled in, so a swapped relay cert can't be silently accepted.
+- **Sharing vs per-node:** minting **one** identity and copying `identity.key` +
+  `identity.key.crt` to every node is the v0 default (one `POLLIS_OVERLAY_RELAY_CERT`
+  covers the pool). Alternatively mint one per node and bake a cert **list** — but
+  v0's client pins a single shared cert, so share one identity. Rotate by deleting
+  both files (a fresh identity is minted on next start) and re-baking the client.
+
+### Step 2 — run N nodes across ≥2 unrelated providers
+
+Provision (operator ops) ≥2 hosts on **unrelated** providers/networks (so one
+provider's outage or subpoena doesn't take the whole pool). On each, run the
+published image with a config file:
+
+```toml
+# /etc/pollis-relay/relay.toml
+bind = "0.0.0.0:9444"
+# The FOUR first-party destinations, resolved from THIS deployment's real
+# hostnames (prod shown; a dev pool uses api-dev.pollis.com etc.):
+#   Turso (metadata reads), the DS (writes), R2 (media/CDN), LiveKit (media SFU).
+allowlist = [
+  "*.turso.io",
+  "api.pollis.com",
+  "cdn.pollis.com",
+  "livekit.pollis.com",
+]
+identity_path = "/var/lib/pollis-relay/identity.key"
+health_bind = "0.0.0.0:9445"
+
+[rate_limit]
+new_circuits_per_min_per_ip = 600
+new_circuits_per_min_per_account = 600
+max_concurrent_per_ip = 256
+max_concurrent_per_account = 128
+```
+
+```bash
+docker run -d --name pollis-relay \
+  -p 9444:9444/udp -p 9445:9445 \
+  -v pollis-relay-data:/var/lib/pollis-relay \
+  -v /etc/pollis-relay:/etc/pollis-relay:ro \
+  -e POLLIS_RELAY_CONFIG=/etc/pollis-relay/relay.toml \
+  ghcr.io/actuallydan/pollis-relay:latest
+```
+
+Open the host firewall for **`9444/udp`** (the QUIC relay) and the **health TCP
+port** (`9445`, scoped to your orchestrator/LB rather than the public internet if
+you can). Mount the identity volume so a restart keeps the same pinned cert.
+
+### Step 3 — point clients at the pool
+
+Bake the pool into the client build (the same `option_env!` mechanism as every
+other first-party endpoint; a runtime env var of the same name overrides for local
+testing):
+
+- `POLLIS_OVERLAY_RELAY` = the **comma-separated** endpoint list, e.g.
+  `relay1.pollis.com:9444,relay2.pollis.com:9444`.
+- `POLLIS_OVERLAY_RELAY_CERT` = the pinned cert from Step 1 (base64 of the DER, or
+  a path to the DER file).
+
+The client (`RealRelayFactory`, `pollis-core/src/net/overlay.rs`) treats the list
+as a **pool** (design §4 above): it dials endpoints in health order and takes the
+first success; a failed dial marks that endpoint dead for a 30 s cooldown and the
+next candidate is tried; only when **every** endpoint fails does a connect error
+(so `prefer` still falls back to direct, `strict` still degrades — but never on a
+single dead relay). A rotating start index spreads load; each dial is bounded (8 s)
+so an unreachable node fails over fast. One shared `POLLIS_OVERLAY_RELAY_CERT`
+pins every endpoint (all first-party, same identity).
+
+### Step 4 — verify
+
+- **Image is live:** `curl http://<host>:9445/version` → the SHA `relay-image.yml`
+  built (mirrors the DS `/version` tripwire — don't trust "container started",
+  confirm the running build). `curl http://<host>:9445/health` → `ok`.
+- **Traffic actually routes:** a client with the overlay in **Prefer** mode (and a
+  reachable pool) sends its control-plane traffic (Turso reads, DS writes) through
+  a relay — the node's logs show authorized handshakes + dials to the allowlisted
+  hosts, and the client's source IP no longer appears at Turso/DS.
+
+### The ops boundary, stated plainly
+
+**Turnkey here:** the image, the health/version probe, the CI build+publish, the
+config shape, and every step above. **Operator ops (not automatable from this
+repo):** provisioning the VMs, opening the firewall, and the DNS records that make
+`relay1.pollis.com` etc. resolve. Once a host + name exist, the roll is `docker
+run` + a client rebuild with the two env vars.
+
+## 6. Residual leaks stated honestly (design §14.4)
 
 v0 does not paper over what still leaks. The `ureq` transparency-**verify** path
 is **no longer** on that list: it now routes through the shim when the overlay is

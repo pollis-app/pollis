@@ -6,7 +6,7 @@ deploys it, and where it runs. New here? Start with this file to understand what
 the codebase actually *ships*. Keep it updated when a build/deploy pipeline
 changes.
 
-There are **4 shipped executables/sites**, **3 running backend services**, and
+There are **4 shipped executables/sites**, **4 running backend services**, and
 **2 managed data layers**, plus **8 CI-only gates**.
 
 ---
@@ -20,6 +20,7 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 | `pollis-core/` | Reusable Rust core (auth, MLS, groups/channels/DMs, messages, DB, media) — no shell dependency | **Desktop app, CLI, Mobile** (shared) |
 | `pollis-tui/` | Headless terminal client (`pollis` binary, ratatui) on `pollis-core` — no Tauri | **CLI** |
 | `pollis-delivery/` | The Delivery Service (DS): axum server, sole writer to Turso, MLS commit serialization | **DS** (backend service) |
+| `pollis-relay/` | Closed-overlay relay: QUIC-in / allowlisted TCP-dial-out byte pipe, offline device-cert auth, no Turso creds (`pollis-relay` binary) | **Relay pool** (backend service) |
 | `pollis-capture-{linux,macos,proto}/` | Screen-capture helpers for the desktop media pipeline | **Desktop app** (media stack) |
 | `mobile/` | React Native / Expo app, consumes `pollis-core` via uniffi bindings | **Mobile app** (in development — epics #342/#339) |
 | `verifiable-log/` | Core Merkle tree / STH / inclusion-proof crate | **Transparency log** + **pollis-verify** |
@@ -81,6 +82,14 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 - **Pipeline:** `.github/workflows/livekit-deploy.yml` — `workflow_dispatch` (env choice prod/dev). SSH + compose on the VPS.
 - **Runs at:** VPS. Frames are E2EE (the SFU forwards ciphertext).
 
+### Relay pool — closed-overlay first-party relay nodes
+- **From:** `pollis-relay/` (the `pollis-relay` binary; shares the offline device-cert primitive `pollis-device-cert`)
+- **Runs on:** **hosts with a public UDP port** — the **VPS/host model, like LiveKit, NOT Cloudflare Workers**: the overlay hop is QUIC (UDP), which a Worker/Container front-door can't terminate, and the relay terminates its *own* outer QUIC (a pinned self-signed identity) directly. Stateless and disposable — a node holds only its own QUIC identity keypair (persisted so restarts keep the same pinned cert; delete to rotate). **No Turso URL/token, no DS creds** — auth is the offline device-cert chain, so the relay is genuinely outside the metadata plane (design §11.1).
+- **Image:** `.github/workflows/relay-image.yml` — **`workflow_dispatch`** (optional `ref`; also builds on PRs touching `pollis-relay/**` as a gate). Job 1 runs `cargo test -p pollis-relay -p pollis-device-cert`; Job 2 builds `pollis-relay/Dockerfile` (repo-root context, `GIT_SHA` baked) and publishes to **GHCR** `ghcr.io/actuallydan/pollis-relay`. GHCR (not CF Containers, where the DS moved in #515) is deliberate: the relay is the VPS/host model, so a plain pullable image is the right shape. **Build+publish only — NO auto-deploy** (there is no relay host infra yet; provisioning hosts + DNS is operator ops).
+  - **Required GHCR config:** the workflow pushes with the built-in `GITHUB_TOKEN` + `packages: write`. If the org restricts package writes, an admin must allow this repo's token to publish (Org → Packages), else Job 2's push fails while the tests/build still pass.
+- **Runs at:** operator-provisioned hosts (≥2 unrelated providers for the pool). Health/version: `GET /health` / `GET /version` on the configured `health_bind` TCP port; the QUIC relay listens on `bind` (`0.0.0.0:9444/udp` default). Full turnkey runbook: `docs/relay-operations.md`.
+- **Role:** the first-party fallback relay pool (design §7) that makes "messages must work" real with zero volunteer peers; hides the client source IP from Turso/DS/R2 (breach/subpoena defense, §11.1). Never part of the E2EE proof; only ever forwards sealed TLS bytes to a pinned first-party host.
+
 ### Transparency log — Key Transparency read API
 - **From:** `verifiable-log*` (built + signed in CI, served as **static files** — no server on the trust path)
 - **Pipeline:** `.github/workflows/transparency-publish.yml` — **daily cron** (06:47 UTC). Rebuilds the commit-log + account-key trees from the DB and the **binaries** tenant tree (#453) from the accumulating BinaryRecord JSON on R2 that `desktop-release.yml`'s `attest-and-log` job appends to at release time; signs STHs in CI, syncs to R2, self-audits + tripwire. The binaries tree is live at `https://verify.pollis.com/v1/binaries/sth/latest.json`, with per-tag reports under `verify/release/<tag>` (verifiable via `pollis-verify release`).
@@ -123,6 +132,7 @@ There are **4 shipped executables/sites**, **3 running backend services**, and
 |---|---|
 | `website/` | `website-deploy.yml` |
 | `pollis-delivery/` (or `pollis-core` DS paths) | `delivery-deploy-dev.yml` → verify → `delivery-deploy-prod.yml` |
+| `pollis-relay/` (or `pollis-device-cert`) | `relay-image.yml` (build + publish the GHCR image); then an operator rolls the pool nodes per `docs/relay-operations.md` — no auto-deploy |
 | `livekit/` config | `livekit-deploy.yml` |
 | `pollis-core` / `src-tauri` / `frontend` (desktop-facing, user-visible) | tag a new `v*` → `desktop-release.yml` (also releases the DB migrations) |
 | `pollis-tui` / `pollis-core` (CLI-facing) | `cli-release.yml` |
@@ -153,6 +163,7 @@ you edited. Use this, not intuition:
 | `pollis-core/` | **Desktop** (`src-tauri`+`frontend`), **CLI** (`pollis-tui`), **Mobile** (uniffi). If you changed a **wire contract** — canonical signing, `livekit_jwt`, `r2` presign, DS request/response shapes, MLS envelope encoding — **also the DS**: `pollis-delivery` re-implements that scheme **by hand** and does *not* compile against `pollis-core`, so the compiler will **not** catch drift. Mirror the change into `pollis-delivery` and redeploy it. |
 | `verifiable-log*` | `pollis-core` depends on `verifiable-log-serve`, so the change ripples into **every client** (desktop/CLI/mobile) **and** the **`pollis-verify` CLI** (`verifier-release.yml`) **and** the published **transparency tree** (`transparency-publish.yml`). |
 | `pollis-delivery/` | **DS** only (dev → verify → prod). |
+| `pollis-relay/` / `pollis-device-cert/` | **Relay pool** only — rebuild the GHCR image (`relay-image.yml`), then roll the pool nodes. `pollis-device-cert` is shared with `pollis-core` (it mints the certs the relay verifies), so a change there also fans out to every **client** — keep the mint/verify halves in lockstep (golden vector). |
 | `frontend/` / `src-tauri/` | **Desktop** only. |
 | `pollis-tui/` | **CLI** only. |
 | a DB migration in `pollis-core/src/db/migrations/` | Applied by whichever prod deploy runs first (a DS deploy **or** `desktop-release.yml`) — migrate-then-ship, idempotent. If the merge ships **neither** a client release nor a DS deploy, prod has **not** run the migration yet; note it as pending. Dev auto-applies via `db-migrate-dev.yml`. |
@@ -165,6 +176,7 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
 - [ ] **Desktop app** — user-visible change? tag a new `v*` → `desktop-release.yml` (also applies pending migrations).
 - [ ] **CLI (`pollis`)** — behavior a terminal user sees? `cli-release.yml` (`workflow_dispatch`). Easy to forget after a `pollis-core` change.
 - [ ] **DS** — DS code *or* a mirrored wire-contract change? `delivery-deploy-dev.yml` → verify → `delivery-deploy-prod.yml`.
+- [ ] **Relay pool** — `pollis-relay` / `pollis-device-cert` change? rebuild the GHCR image (`relay-image.yml`) and roll the pool nodes (`docs/relay-operations.md`); verify each `GET /version` reports the new SHA. No auto-deploy exists, so this is always a manual roll.
 - [ ] **Mobile** — in development; not a released output yet, but note if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up (`mobile-core-check.yml` gates gate-rot).
 - [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? `verifier-release.yml` (`pollis-verify-v*` tag).
 - [ ] **Transparency log** — tree/STH behavior changed? it rebuilds daily, but force `transparency-publish.yml` if correctness depends on it now.

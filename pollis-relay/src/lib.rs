@@ -18,6 +18,7 @@
 //! - [`policy`] — pure `off | prefer | strict` routing + the plane split (§6.4).
 //! - [`ratelimit`] — in-memory per-account / per-IP abuse control (§11.5).
 //! - [`config`] — the deployable bin's TOML config.
+//! - [`health`] — the opt-in HTTP/1.1 health/version probe endpoint.
 //! - [`http`] — the shared reqwest client helper.
 //! - [`tls`] — cert generation/persistence + the pinned-cert QUIC verifier.
 //! - [`stream`] — the byte-pipe stream types.
@@ -30,6 +31,7 @@
 pub mod circuit;
 pub mod client;
 pub mod config;
+pub mod health;
 pub mod http;
 pub mod policy;
 pub mod proto;

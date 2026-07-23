@@ -1,0 +1,126 @@
+name: Relay image
+
+# Build + test pollis-relay and publish its container image to GHCR (design §7
+# first-party pool node). MANUAL ONLY (workflow_dispatch) with an optional `ref`
+# input — the relay deploys on the VPS/host model (a public UDP/QUIC port), NOT
+# Cloudflare Workers, so this workflow only BUILDS + PUBLISHES the image; there is
+# no relay host infra yet, so it wires NO auto-deploy. An operator pulls the
+# published image onto a provisioned host per docs/relay-operations.md.
+#
+# Even though the DS moved OFF GHCR to Cloudflare Containers (#515), the relay uses
+# GHCR: it is the VPS/host model (like LiveKit), so a plain pullable image is the
+# right shape. Job 2 gates on Job 1 (green tests) before publishing.
+#
+# GHCR PUBLISH PERMISSION: publishing to ghcr.io/actuallydan/pollis-relay needs
+# `packages: write` (granted below via GITHUB_TOKEN). If the org restricts GHCR,
+# an admin must allow the repo's GITHUB_TOKEN to write packages (Org → Packages →
+# enable, or grant this repo access) — the workflow is otherwise correct; see
+# docs/deployments.md (Relay pool).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to build (branch, tag, or SHA)
+        required: false
+        default: main
+      publish:
+        description: Publish the image to GHCR (uncheck to build-only, e.g. a dry run)
+        type: boolean
+        required: false
+        default: true
+  pull_request:
+    paths:
+      - 'pollis-relay/**'
+      - 'pollis-device-cert/**'
+      - '.github/workflows/relay-image.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'pollis-relay/**'
+      - 'pollis-device-cert/**'
+      - '.github/workflows/relay-image.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/actuallydan/pollis-relay
+
+jobs:
+  # Gate the image on green tests: the relay itself + the shared offline device-cert
+  # primitive it verifies handshakes against (a drift there would break auth).
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ${{ inputs.ref || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: cargo test (pollis-relay + pollis-device-cert)
+        run: cargo test -p pollis-relay -p pollis-device-cert
+
+  # Build the container image and (on dispatch/push, not PRs) publish to GHCR.
+  image:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required to push the image to GHCR with the built-in GITHUB_TOKEN.
+      packages: write
+    steps:
+      - name: Checkout ${{ inputs.ref || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Resolve build SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Publish only on a manual dispatch (publish=true) or a push to main — never
+      # on a PR from a fork (no GHCR write, and untrusted). PRs build-only to prove
+      # the Dockerfile still assembles.
+      - name: Decide publish
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" != "true" ]; then
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log in to GHCR
+        if: steps.mode.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Build from the REPO ROOT so the whole cargo workspace resolves; bake the
+      # git SHA so /version reports the running build (the DS #509 tripwire shape).
+      - name: Build + push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: pollis-relay/Dockerfile
+          push: ${{ steps.mode.outputs.push == 'true' }}
+          build-args: |
+            GIT_SHA=${{ steps.sha.outputs.sha }}
+          tags: |
+            ${{ env.IMAGE }}:${{ steps.sha.outputs.sha }}
+            ${{ env.IMAGE }}:latest
