@@ -42,7 +42,15 @@ pub struct RemoteDb {
     /// the client TLS still terminates at the real Turso host. Carried on the
     /// struct so [`reconnect`](RemoteDb::reconnect) rebuilds through the overlay
     /// too. The shim's own policy decides overlay-vs-direct per host.
-    overlay_shim: Option<SocketAddr>,
+    ///
+    /// Interior-mutable so the overlay can be turned on/off **at runtime**
+    /// ([`set_overlay_shim`](RemoteDb::set_overlay_shim)) without swapping the
+    /// `Arc<RemoteDb>` every reader holds: flipping the mode rebuilds the inner
+    /// libsql `Database` through (or without) the connector while every
+    /// `state.remote_db` handle stays valid. `std::sync::Mutex` — the critical
+    /// section is a pointer read with no `.await` held, and `query_only_view`
+    /// (sync) needs to snapshot it.
+    overlay_shim: std::sync::Mutex<Option<SocketAddr>>,
 }
 
 /// Build a remote libsql `Database`, optionally routing through the overlay shim.
@@ -92,7 +100,7 @@ impl RemoteDb {
             },
             query_only: false,
             token_override: Arc::new(RwLock::new(None)),
-            overlay_shim,
+            overlay_shim: std::sync::Mutex::new(overlay_shim),
         })
     }
 
@@ -119,7 +127,7 @@ impl RemoteDb {
             query_only: false,
             token_override: Arc::new(RwLock::new(None)),
             // Local test backend never dials the network — no overlay.
-            overlay_shim: None,
+            overlay_shim: std::sync::Mutex::new(None),
         })
     }
 
@@ -146,7 +154,9 @@ impl RemoteDb {
             backend: self.backend.clone(),
             query_only: true,
             token_override: Arc::clone(&self.token_override),
-            overlay_shim: self.overlay_shim,
+            // Snapshot the current overlay target (the view is a read-only
+            // sibling; it never mutates or reconnects independently).
+            overlay_shim: std::sync::Mutex::new(*self.overlay_shim.lock().unwrap()),
         }
     }
 
@@ -187,14 +197,46 @@ impl RemoteDb {
                     .clone()
                     .unwrap_or_else(|| token.clone());
                 // Rebuild through the overlay too, so a reconnect after a dropped
-                // Hrana stream keeps the same routing as the initial connect.
-                build_remote_database(url, &effective, self.overlay_shim).await?
+                // Hrana stream keeps the same routing as the initial connect (or
+                // the routing most recently set via `set_overlay_shim`).
+                let shim = *self.overlay_shim.lock().unwrap();
+                build_remote_database(url, &effective, shim).await?
             }
             Backend::Local { path } => Builder::new_local(path).build().await?,
         };
         let mut db = self.db.write().await;
         *db = new_db;
         Ok(())
+    }
+
+    /// Point this DB's connections at the overlay shim (`Some`) or back to a
+    /// direct dial (`None`), rebuilding the inner libsql `Database` in place so
+    /// every `Arc<RemoteDb>` reader picks up the new routing without being
+    /// swapped. This is the libsql half of runtime overlay apply (design §14):
+    /// `set_overlay_mode` calls it on both `remote_db` and `log_db` when the mode
+    /// crosses the off/non-off boundary, so Turso's Hrana/TLS starts (or stops)
+    /// landing on the loopback shim. No-op — and Ok — for the local test backend
+    /// (which never dials the network) and when the target is unchanged.
+    pub async fn set_overlay_shim(&self, shim: Option<SocketAddr>) -> Result<()> {
+        if matches!(self.backend, Backend::Local { .. }) {
+            return Ok(());
+        }
+        {
+            let mut cur = self.overlay_shim.lock().unwrap();
+            if *cur == shim {
+                return Ok(());
+            }
+            *cur = shim;
+        }
+        // Rebuild the handle so the connector (or its absence) takes effect now.
+        self.reconnect().await
+    }
+
+    /// The overlay shim this DB currently routes through, if any. Test-only:
+    /// lets the overlay-apply tests assert the DB was (re)pointed live.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub fn overlay_shim(&self) -> Option<SocketAddr> {
+        *self.overlay_shim.lock().unwrap()
     }
 
     /// Swap in a DS-minted short-TTL read-only token (#393) and rebuild the

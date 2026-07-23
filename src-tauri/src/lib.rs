@@ -365,6 +365,17 @@ pub fn run() {
                 let state = AppState::new(config).await.map_err(|e| e.to_string())?;
                 let state = Arc::new(state);
 
+                // Honor POLLIS_OVERLAY at boot through the runtime apply path
+                // (design §14: construct DBs direct, then apply the mode). A
+                // failure here must not block startup — it leaves the overlay off
+                // (direct), the safe default.
+                let boot_mode = state.config.overlay_mode;
+                if let Err(e) =
+                    pollis_core::commands::overlay::apply_overlay_mode(&state, boot_mode).await
+                {
+                    eprintln!("[overlay] boot apply ({boot_mode:?}) failed, staying direct: {e}");
+                }
+
                 // Loopback HTTP server for cached media. The webview
                 // embeds `http://127.0.0.1:<port>/<token>/<hash>` URLs
                 // for every `<img>/<audio>/<video>` element. Spawned
@@ -452,6 +463,8 @@ pub fn run() {
             commands::transparency::self_audit_account_key,
             commands::transparency::audit_peer_account_key,
             commands::transparency::verify_own_build,
+            commands::overlay::get_overlay_mode,
+            commands::overlay::set_overlay_mode,
             commands::user::get_user_profile,
             commands::user::update_user_profile,
             commands::user::search_user_by_username,

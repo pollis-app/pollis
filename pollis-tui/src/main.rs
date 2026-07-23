@@ -43,6 +43,13 @@ async fn main() -> Result<()> {
             .context("connecting AppState (Turso + keystore)")?,
     );
 
+    // Honor POLLIS_OVERLAY at boot via the runtime apply path (construct DBs
+    // direct, then apply the mode). Non-fatal: on failure stay direct.
+    let boot_mode = state.config.overlay_mode;
+    if let Err(e) = pollis_core::commands::overlay::apply_overlay_mode(&state, boot_mode).await {
+        eprintln!("[overlay] boot apply ({boot_mode:?}) failed, staying direct: {e}");
+    }
+
     // pollis-core logs with bare `eprintln!` (fine under the desktop shell,
     // where stderr is a dev terminal). Here stderr IS the UI's terminal — any
     // write scrolls the screen under ratatui and corrupts the layout — so

@@ -143,40 +143,42 @@ pub struct AppState {
     pub screenshare_frame_tx: tokio::sync::broadcast::Sender<std::sync::Arc<Vec<u8>>>,
     /// The running closed-overlay relay shim (design §14), or `None` when the
     /// overlay is off (`POLLIS_OVERLAY` unset/`off`). `Some` owns the loopback
-    /// SOCKS5 shim task for the app's lifetime; dropping it (process exit) aborts
-    /// the accept loop. Control-plane HTTP + the libsql connector consult
-    /// `overlay.as_ref()` to route through the shim; when `None` every path is
-    /// byte-for-byte the pre-overlay direct behavior. Started in [`AppState::new`].
-    pub overlay: Option<pollis_relay::OverlayHandle>,
+    /// SOCKS5 shim task; dropping it (process exit, or a runtime switch to Off)
+    /// aborts the accept loop. Control-plane HTTP + the libsql connector consult
+    /// [`overlay_handle`](AppState::overlay_handle) to route through the shim;
+    /// when `None` every path is byte-for-byte the pre-overlay direct behavior.
+    ///
+    /// Interior-mutable (and `Arc`-wrapped inside) so the overlay can be started,
+    /// stopped, and replaced **at runtime** — `commands::overlay::set_overlay_mode`
+    /// swaps this handle live. A `std::sync::Mutex` (not tokio) so the hot-path
+    /// read is a cheap uncontended lock + `Arc` clone with no `.await` held;
+    /// swaps happen only on a mode change. Off-by-default: `None` at boot until
+    /// `apply_overlay_mode` starts a shim for a non-off `POLLIS_OVERLAY`.
+    pub overlay: std::sync::Mutex<Option<Arc<pollis_relay::OverlayHandle>>>,
 }
 
 impl AppState {
     pub async fn new(config: Config) -> crate::error::Result<Self> {
-        // Start the overlay shim FIRST (or `None` when off), so both remote DBs
-        // can be built through it. Off-by-default: `None` ⇒ every connection below
-        // is the unchanged direct path.
-        let overlay = crate::net::overlay::start_overlay(&config).await;
-        let overlay_shim = overlay.as_ref().map(|h| h.socks_addr());
-
-        let remote_db = Arc::new(
-            RemoteDb::connect_with_overlay(&config.turso_url, &config.turso_token, overlay_shim)
-                .await?,
-        );
+        // Build both remote DBs on the DIRECT path. The overlay is applied AFTER
+        // the state is wrapped in an `Arc` — the shell calls
+        // `commands::overlay::apply_overlay_mode(&state, config.overlay_mode)` at
+        // boot to honor `POLLIS_OVERLAY` through the SAME runtime code path a
+        // settings toggle uses (design §14: boot = construct DBs direct, then
+        // apply the mode). Off-by-default: with the overlay off this is
+        // byte-for-byte the pre-overlay direct path and no shim is ever started.
+        let remote_db = Arc::new(RemoteDb::connect(&config.turso_url, &config.turso_token).await?);
         // Read-only commit-log DB when configured; otherwise reuse remote_db so
-        // behavior is unchanged pre-cutover. Same operator (Turso) ⇒ same overlay.
+        // behavior is unchanged pre-cutover.
         let log_db = match (&config.log_db_url, &config.log_db_token) {
-            (Some(url), Some(token)) => {
-                Arc::new(RemoteDb::connect_with_overlay(url, token, overlay_shim).await?)
-            }
+            (Some(url), Some(token)) => Arc::new(RemoteDb::connect(url, token).await?),
             _ => Arc::clone(&remote_db),
         };
-        let mut state = Self::new_with_parts(
+        let state = Self::new_with_parts(
             config,
             remote_db,
             log_db,
             keystore::default_os_keystore(),
         );
-        state.overlay = overlay;
         Ok(state)
     }
 
@@ -220,10 +222,19 @@ impl AppState {
             // Receiver dropped immediately; subscribers are created per
             // WebSocket connection via `screenshare_frame_tx.subscribe()`.
             screenshare_frame_tx: tokio::sync::broadcast::channel(8).0,
-            // Overlay off unless `AppState::new` starts it (test harness /
-            // `new_with_parts` callers stay direct).
-            overlay: None,
+            // Overlay off until `apply_overlay_mode` starts a shim (boot honoring
+            // `POLLIS_OVERLAY`, or a runtime `set_overlay_mode`). Test harness /
+            // `new_with_parts` callers stay direct unless a test applies a mode.
+            overlay: std::sync::Mutex::new(None),
         }
+    }
+
+    /// The overlay shim handle currently in force, or `None` when the overlay is
+    /// off. Cheap hot-path read: an uncontended lock plus an `Arc` clone (no
+    /// `.await` held). Every control-plane HTTP caller and the libsql connector
+    /// go through this so a runtime `set_overlay_mode` is picked up immediately.
+    pub fn overlay_handle(&self) -> Option<Arc<pollis_relay::OverlayHandle>> {
+        self.overlay.lock().unwrap().clone()
     }
 
     /// Acquire the per-conversation MLS lock. The returned guard must be held

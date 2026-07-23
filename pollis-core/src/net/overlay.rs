@@ -1,33 +1,41 @@
 //! Closed-overlay relay wiring for `pollis-core` (design
 //! `docs/relay-overlay-design.md` §14). This is the CONSUMER side of the
 //! `pollis-relay` transport crate: it derives the routing policy from `Config`,
-//! starts the loopback SOCKS5 shim, hands out the shared reqwest client, and
-//! builds the libsql SOCKS connector.
+//! builds the real circuit factory + starts the loopback SOCKS5 shim
+//! ([`start_overlay_shim`]), hands out the shared reqwest client, and builds the
+//! libsql SOCKS connector. The runtime on/off/switch engine that DRIVES this lives
+//! in [`crate::commands::overlay`] (`set_overlay_mode` / `apply_overlay_mode`).
 //!
 //! **Off-by-default is sacred.** With `POLLIS_OVERLAY` unset (`OverlayMode::Off`)
-//! [`start_overlay`] returns `None`, `AppState.overlay` stays `None`, and every
-//! network path is byte-for-byte identical to a build without the overlay:
-//! [`http_client`] returns a proxy-less `reqwest::Client`, and `RemoteDb::connect`
-//! takes libsql's unchanged `.build()` path (no `.connector()`).
+//! no shim is ever started, `AppState.overlay` stays `None`, and every network
+//! path is byte-for-byte identical to a build without the overlay: [`http_client`]
+//! returns a proxy-less `reqwest::Client`, and `RemoteDb::connect` takes libsql's
+//! unchanged `.build()` path (no `.connector()`).
 
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 
 use hyper::client::connect::{Connected, Connection};
 use hyper::Uri;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
+use tokio::sync::Mutex as AsyncMutex;
 use tower_service::Service;
 
-use pollis_relay::circuit::CircuitFactory;
+use pollis_relay::circuit::{Circuit, CircuitFactory, Hop};
+use pollis_relay::client::ClientIdentity;
+use pollis_relay::proto::DeviceCertMaterial;
 use pollis_relay::stream::BoxedStream;
-use pollis_relay::{Allowlist, OverlayHandle, OverlayMode, OverlayShim, RoutingPolicy};
+use pollis_relay::{
+    Allowlist, CertificateDer, OverlayHandle, OverlayMode, OverlayShim, RoutingPolicy,
+};
 
 use crate::config::Config;
 use crate::error::{Error, Result};
+use crate::state::AppState;
 
 // ── The shared reqwest seam (design §14.2) ─────────────────────────────────
 
@@ -61,11 +69,13 @@ fn host_of(url: &str) -> Option<String> {
     }
 }
 
-/// Build the per-host routing policy from `Config`: the first-party control
-/// plane (Turso + optional commit-log DB, the DS, R2) routes through the overlay;
-/// LiveKit stays DIRECT in every mode (the media plane, §6.4). Any host not on
-/// either list is dialed direct (e.g. non-first-party Expo push, §14.4).
-pub(crate) fn overlay_policy(config: &Config) -> RoutingPolicy {
+/// Build the per-host routing policy from `Config` for a given runtime `mode`:
+/// the first-party control plane (Turso + optional commit-log DB, the DS, R2)
+/// routes through the overlay; LiveKit stays DIRECT in every mode (the media
+/// plane, §6.4). Any host not on either list is dialed direct (e.g. non-first-
+/// party Expo push, §14.4). The mode is passed explicitly (not read from
+/// `config.overlay_mode`) because it is now a RUNTIME value the shim can flip.
+pub(crate) fn overlay_policy(config: &Config, mode: OverlayMode) -> RoutingPolicy {
     let mut overlay_hosts: Vec<String> = Vec::new();
     let control_urls = [
         Some(config.turso_url.as_str()),
@@ -86,78 +96,249 @@ pub(crate) fn overlay_policy(config: &Config) -> RoutingPolicy {
     let direct_hosts: Vec<String> = host_of(&config.livekit_url).into_iter().collect();
 
     RoutingPolicy::new(
-        config.overlay_mode,
+        mode,
         Allowlist::from_patterns(overlay_hosts),
         Allowlist::from_patterns(direct_hosts),
     )
 }
 
-// ── Shim startup (design §9.2, §14.1) ──────────────────────────────────────
+// ── The real circuit factory (design §9.2, §9.4, §14.1) ────────────────────
 
-/// A circuit factory that never yields a circuit.
-///
-/// The client-side auth material a circuit needs is now fully specified: a
-/// [`pollis_relay::ClientIdentity`] carries the device signing key PLUS the
-/// offline cert chain (`account_id_pub` + `device_cert` + `identity_version` +
-/// `issued_at`) the relay verifies (§9.4). In production that chain is read from
-/// the device's stored cert material (OS keystore + the `user_device` row
-/// `ensure_device_cert` writes). A device with NO cert yet — pre-enrollment / OTP
-/// bootstrap — cannot build a `ClientIdentity`, so its circuit build fails and
-/// traffic stays DIRECT (documented in `docs/relay-operations.md`; mirrors the
-/// DS's session-vs-device auth split).
-///
-/// What is still deferred is the RUNTIME provisioning that turns that into a live
-/// factory: the deployed relay's pinned cert and per-`AppState` access to the
-/// logged-in device's keys — neither exists at `AppState::new` time (no user is
-/// logged in; no relay endpoint is provisioned). Until that lands, the factory
-/// fails fast, so `Prefer` falls back to a direct dial and `Strict` surfaces a
-/// degraded error — never a silent direct send (messages-must-work, §7/§10.1).
-/// The shim itself still runs whenever the mode is non-off, which is exactly what
-/// makes `Strict` degrade instead of silently going direct.
-struct PendingRelayFactory;
+/// The `identity_version` stamped into the relay handshake cert this client
+/// mints locally (see [`RealRelayFactory`]). The relay verifies a device cert for
+/// **self-consistency only** — that the presented account key signed *this*
+/// device key at *this* `(version, issued_at)` — and never cross-checks the value
+/// against `users.identity_version`. So a fixed version is sufficient and correct
+/// for the handshake; the rate limiter keys on `account_id_pub` (the real one),
+/// not the version.
+const OVERLAY_CERT_IDENTITY_VERSION: u32 = 1;
 
-#[async_trait::async_trait]
-impl CircuitFactory for PendingRelayFactory {
-    async fn connect(&self, _host: &str, _port: u16) -> anyhow::Result<BoxedStream> {
-        anyhow::bail!(
-            "overlay circuit unavailable: relay cert + device-identity provisioning \
-             lands in a later slice"
-        )
+/// A resolved relay endpoint: the `host:port` to dial and the pinned QUIC leaf
+/// the client verifies it against (the relay's identity *is* its cert, §7).
+#[derive(Clone)]
+struct RelayEndpoint {
+    /// As configured; resolved to a `SocketAddr` per dial (v0 relays are a small
+    /// known set, so a fresh lookup per circuit is fine).
+    addr: String,
+    cert: CertificateDer<'static>,
+}
+
+/// The production [`CircuitFactory`]: on each `connect`, present the logged-in
+/// device's [`ClientIdentity`] and dial the configured relay, returning the
+/// resulting byte pipe (over which the caller runs its own TLS to the real host).
+///
+/// **Identity (design §9.4).** The `ClientIdentity` carries the device Ed25519
+/// signing key — the SAME key `ds_client` signs DS writes with and that
+/// `user_device.mls_signature_pub` records — plus the offline cert chain
+/// (`account_id_pub` + `device_cert` + `version`/`issued_at`) the relay verifies
+/// with zero I/O. Both halves are loaded from LOCAL state: the device signing key
+/// from the open local DB (openmls storage), and the cert is minted on the spot
+/// from the locally-held account identity key (`load_account_id_key`). Minting
+/// locally — rather than reading the published `user_device.device_cert` through
+/// `remote_db` — is deliberate: once the mode is applied, `remote_db` itself
+/// routes through THIS shim, so reading the cert from it to *build* a circuit
+/// would recurse into the very circuit being built. The minted cert is
+/// cryptographically identical in what the relay checks (the current account key
+/// certifying the real device key), and a device with NO account key yet
+/// (pre-enrollment / locked / no user) simply can't mint one → `connect` errors →
+/// `Prefer` falls back to direct and `Strict` degrades, never a silent send.
+///
+/// **Caching.** The built identity is cached (`identity`), but re-derived if the
+/// cache is empty, so a device re-enroll is tolerated: `set_overlay_mode` rebuilds
+/// the factory on the next apply, and each fresh factory reloads.
+struct RealRelayFactory {
+    /// Weak so the factory (owned by the shim task, owned by `AppState.overlay`)
+    /// does not form a reference cycle back into `AppState`.
+    state: Weak<AppState>,
+    endpoints: Vec<RelayEndpoint>,
+    identity: AsyncMutex<Option<Arc<ClientIdentity>>>,
+}
+
+impl RealRelayFactory {
+    /// Load (or reuse the cached) device `ClientIdentity`. Errors — fail-closed —
+    /// when the device isn't in a state to authenticate to a relay (no user, no
+    /// local DB, locked/absent account key).
+    async fn identity(&self) -> anyhow::Result<Arc<ClientIdentity>> {
+        {
+            let cached = self.identity.lock().await;
+            if let Some(id) = cached.as_ref() {
+                return Ok(id.clone());
+            }
+        }
+        let state = self
+            .state
+            .upgrade()
+            .ok_or_else(|| anyhow::anyhow!("overlay: app state gone"))?;
+        let id = Arc::new(build_client_identity(&state).await?);
+        *self.identity.lock().await = Some(id.clone());
+        Ok(id)
     }
 }
 
-/// Start the overlay shim for this app, or `None` when the overlay is off.
-///
-/// - `OverlayMode::Off` → `None`: the shim never binds and the app is byte-for-byte
-///   identical to a build without the overlay.
-/// - `Prefer` / `Strict` → start the loopback SOCKS5 shim once and return its
-///   handle. The handle owns the shim task, so it lives for the app's lifetime and
-///   is aborted cleanly on drop (`AppState.overlay`).
-pub(crate) async fn start_overlay(config: &Config) -> Option<OverlayHandle> {
-    if config.overlay_mode == OverlayMode::Off {
+#[async_trait::async_trait]
+impl CircuitFactory for RealRelayFactory {
+    async fn connect(&self, host: &str, port: u16) -> anyhow::Result<BoxedStream> {
+        // v0: dial the first configured endpoint. The pool+failover slice extends
+        // this to try the rest; here we just error on failure so Prefer falls
+        // back to direct and Strict degrades.
+        let endpoint = self
+            .endpoints
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("overlay: no relay endpoint / pinned cert configured"))?;
+        let identity = self.identity().await?;
+
+        let addr = tokio::net::lookup_host(&endpoint.addr)
+            .await
+            .map_err(|e| anyhow::anyhow!("overlay: resolve relay {}: {e}", endpoint.addr))?
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("overlay: relay {} did not resolve", endpoint.addr))?;
+
+        let circuit = Circuit::build_single_hop(Hop::new(addr, endpoint.cert.clone()), identity);
+        circuit.connect(host, port).await
+    }
+}
+
+/// Build the logged-in device's relay [`ClientIdentity`] from local state.
+/// See [`RealRelayFactory`] for why the cert is minted locally.
+async fn build_client_identity(state: &Arc<AppState>) -> anyhow::Result<ClientIdentity> {
+    let user_id = overlay_signing_user(state).await?;
+
+    let device_id = state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("overlay: device_id not set (not logged in)"))?;
+
+    // Account identity key (local): absent/locked ⇒ fail-closed (pre-enrollment).
+    let account_key = crate::commands::account_identity::load_account_id_key(state, &user_id)
+        .await
+        .map_err(|e| anyhow::anyhow!("overlay: account identity unavailable ({e})"))?;
+    let account_id_pub = account_key.verifying_key().to_bytes();
+
+    // Device signing key (local DB / openmls storage) — the key the cert chain
+    // certifies and `ds_client` signs with. Scoped so the !Send provider drops
+    // before any await.
+    let (device_signing, device_pub) = {
+        let guard = state.local_db.lock().await;
+        let db = guard
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("overlay: not signed in (local DB closed)"))?;
+        let provider = crate::commands::mls::PollisProvider::new(db.conn());
+        crate::commands::mls::load_device_signing_key(&provider, &user_id, &device_id)
+            .map_err(|e| anyhow::anyhow!("overlay: device signing key unavailable ({e})"))?
+    };
+    let device_pub: [u8; 32] = device_pub
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("overlay: device signing pub is not 32 bytes"))?;
+
+    let issued_at = now_unix_secs();
+    let cert = DeviceCertMaterial::mint(
+        &account_key,
+        &device_id,
+        &device_pub,
+        OVERLAY_CERT_IDENTITY_VERSION,
+        issued_at,
+    );
+    debug_assert_eq!(cert.account_id_pub, account_id_pub);
+
+    Ok(ClientIdentity::new(user_id, device_id, device_signing, cert))
+}
+
+/// The user this device signs as, mirroring `ds_client::current_user_id`: prefer
+/// the unlocked session, fall back to the accounts index before unlock.
+async fn overlay_signing_user(state: &Arc<AppState>) -> anyhow::Result<String> {
+    if let Some(u) = state.unlock.lock().await.as_ref() {
+        if !u.user_id.is_empty() {
+            return Ok(u.user_id.clone());
+        }
+    }
+    let index = crate::accounts::read_accounts_index()
+        .map_err(|e| anyhow::anyhow!("overlay: read accounts index: {e}"))?;
+    index
+        .last_active_user
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("overlay: no active user to sign relay handshake"))
+}
+
+fn now_unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Load the configured relay endpoint(s) + the pinned QUIC leaf. Empty when the
+/// endpoint or the pinned cert is absent/unreadable — the fail-closed state:
+/// `RealRelayFactory::connect` then errors, so `Prefer` dials direct and `Strict`
+/// degrades. A cert that can't be loaded is treated the same as none (never dial
+/// an unverified relay).
+fn load_relay_endpoints(config: &Config) -> Vec<RelayEndpoint> {
+    let addrs = config.overlay_relay_endpoints();
+    if addrs.is_empty() {
+        return Vec::new();
+    }
+    let cert = match config.overlay_relay_cert.as_deref().and_then(load_pinned_cert) {
+        Some(c) => c,
+        None => {
+            eprintln!("[overlay] relay endpoint set but no valid pinned cert — staying fail-closed");
+            return Vec::new();
+        }
+    };
+    addrs
+        .into_iter()
+        .map(|addr| RelayEndpoint { addr, cert: cert.clone() })
+        .collect()
+}
+
+/// Resolve `POLLIS_OVERLAY_RELAY_CERT`: a filesystem path to a DER cert, else the
+/// base64 (STANDARD) of the DER bytes.
+fn load_pinned_cert(s: &str) -> Option<CertificateDer<'static>> {
+    let s = s.trim();
+    if s.is_empty() {
         return None;
     }
-
-    let policy = overlay_policy(config);
-    let factory: Arc<dyn CircuitFactory> = Arc::new(PendingRelayFactory);
-    match OverlayShim::start(policy, factory).await {
-        Ok(handle) => {
-            let relay = config
-                .overlay_relay_url
-                .as_deref()
-                .unwrap_or("<none configured>");
-            eprintln!(
-                "[overlay] shim on {} (mode={:?}, relay={relay})",
-                handle.socks_addr(),
-                config.overlay_mode
-            );
-            Some(handle)
-        }
-        Err(e) => {
-            eprintln!("[overlay] failed to start shim: {e}");
-            None
-        }
+    if std::path::Path::new(s).is_file() {
+        return std::fs::read(s).ok().map(CertificateDer::from);
     }
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(s)
+        .ok()
+        .map(CertificateDer::from)
+}
+
+/// Start the overlay shim for `state` under `mode` (must be non-off). Builds the
+/// routing policy + the real circuit factory and binds the loopback SOCKS5 shim.
+/// The returned handle owns the shim task (aborted on drop) and lets the caller
+/// flip Prefer↔Strict live. The factory loads the device identity lazily, so this
+/// succeeds even before login — the shim runs (so `Strict` degrades) while
+/// circuits fail-closed until a signing device is available.
+pub(crate) async fn start_overlay_shim(
+    state: &Arc<AppState>,
+    mode: OverlayMode,
+) -> Result<OverlayHandle> {
+    let policy = overlay_policy(&state.config, mode);
+    let endpoints = load_relay_endpoints(&state.config);
+    let factory: Arc<dyn CircuitFactory> = Arc::new(RealRelayFactory {
+        state: Arc::downgrade(state),
+        endpoints,
+        identity: AsyncMutex::new(None),
+    });
+    let handle = OverlayShim::start(policy, factory)
+        .await
+        .map_err(|e| Error::Other(anyhow::anyhow!("overlay shim start: {e}")))?;
+    let relay = state
+        .config
+        .overlay_relay_url
+        .as_deref()
+        .unwrap_or("<none configured>");
+    eprintln!(
+        "[overlay] shim on {} (mode={mode:?}, relay={relay})",
+        handle.socks_addr()
+    );
+    Ok(handle)
 }
 
 // ── The libsql SOCKS connector (design §14.1) ──────────────────────────────
@@ -338,6 +519,10 @@ mod tests {
     use rustls::pki_types::{CertificateDer, ServerName};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+    use zeroize::Zeroizing;
+
+    use crate::commands::pin::UnlockState;
+    use crate::db::remote::RemoteDb;
 
     const USER: &str = "u_overlay_test";
     const DEVICE: &str = "d_overlay_test";
@@ -382,6 +567,25 @@ mod tests {
             seal_sender: false,
             overlay_mode: mode,
             overlay_relay_url: relay.map(|s| s.to_string()),
+            overlay_relay_cert: None,
+        }
+    }
+
+    /// A base64 (STANDARD) DER encoding of a relay's pinned cert, for
+    /// `POLLIS_OVERLAY_RELAY_CERT`.
+    fn cert_b64(cert: &CertificateDer<'static>) -> String {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD.encode(cert.as_ref())
+    }
+
+    /// A never-connecting factory: the fail-closed shape the shim sees when a
+    /// device can't authenticate to a relay (no identity) or none is configured.
+    struct FailingFactory;
+
+    #[async_trait::async_trait]
+    impl CircuitFactory for FailingFactory {
+        async fn connect(&self, _host: &str, _port: u16) -> anyhow::Result<BoxedStream> {
+            anyhow::bail!("overlay circuit unavailable (test fail-closed factory)")
         }
     }
 
@@ -520,7 +724,7 @@ mod tests {
 
     #[test]
     fn policy_routes_control_plane_and_leaves_media_direct() {
-        let policy = overlay_policy(&cfg(OverlayMode::Prefer, None));
+        let policy = overlay_policy(&cfg(OverlayMode::Prefer, None), OverlayMode::Prefer);
         use pollis_relay::PlannedRoute;
         // Control-plane hosts route overlay (with direct fallback in Prefer).
         assert_eq!(
@@ -543,9 +747,15 @@ mod tests {
 
     // ── (b) overlay-off ⇒ inert ────────────────────────────────────────────
 
-    #[tokio::test]
-    async fn off_mode_starts_no_shim() {
-        assert!(start_overlay(&cfg(OverlayMode::Off, None)).await.is_none());
+    /// `Off` derives a policy that routes every host — control-plane included —
+    /// direct, so no shim is ever consulted. (The apply state machine never even
+    /// starts a shim for `Off`; that is covered in `commands::overlay` tests.)
+    #[test]
+    fn off_mode_policy_is_all_direct() {
+        use pollis_relay::PlannedRoute;
+        let policy = overlay_policy(&cfg(OverlayMode::Off, None), OverlayMode::Off);
+        assert_eq!(policy.plan("turso.example.com"), PlannedRoute::Direct);
+        assert_eq!(policy.plan("api.example.com"), PlannedRoute::Direct);
     }
 
     #[tokio::test]
@@ -574,7 +784,7 @@ mod tests {
             Allowlist::from_patterns([host.as_str()]),
             Allowlist::default(),
         );
-        let shim = OverlayShim::start(policy, Arc::new(PendingRelayFactory))
+        let shim = OverlayShim::start(policy, Arc::new(FailingFactory))
             .await
             .unwrap();
 
@@ -675,27 +885,218 @@ mod tests {
         drop(shim);
     }
 
-    /// Strict + non-off mode with no relay must surface a degraded error rather
-    /// than silently dialing direct (messages-must-work). The shim runs (so the
-    /// mode is honored) but every control-plane CONNECT fails.
+    /// Strict + non-off mode with no usable circuit must surface a degraded error
+    /// rather than silently dialing direct (messages-must-work). The shim runs
+    /// (so the mode is honored) but every control-plane CONNECT fails.
     #[tokio::test]
     async fn strict_without_relay_degrades_not_silent_direct() {
         let addr = spawn_plain_http("must-not-be-reached").await;
         let host = addr.ip().to_string();
-        let shim = start_overlay(&{
-            let mut c = cfg(OverlayMode::Strict, None);
-            // Route the echo host as control-plane so Strict applies.
-            c.turso_url = format!("libsql://{host}");
-            c
-        })
-        .await
-        .expect("Strict starts the shim even with no relay configured");
+        // Route the echo host as control-plane so Strict applies, with a
+        // fail-closed factory standing in for "no relay reachable".
+        let policy = RoutingPolicy::new(
+            OverlayMode::Strict,
+            Allowlist::from_patterns([host.as_str()]),
+            Allowlist::default(),
+        );
+        let shim = OverlayShim::start(policy, Arc::new(FailingFactory))
+            .await
+            .expect("Strict starts the shim even with no relay reachable");
 
-        let connector = SocksConnector::new(shim.socks_addr());
+        let mut connector = SocksConnector::new(shim.socks_addr());
         let uri: Uri = format!("https://{host}:{}", addr.port()).parse().unwrap();
-        let mut connector = connector;
         let result = Service::call(&mut connector, uri).await;
         assert!(result.is_err(), "Strict + no relay must degrade, never silent-direct");
         drop(shim);
+    }
+
+    // ── (d) LIVE application: set_overlay_mode actually routes traffic ──────────
+
+    /// Build an `AppState` with device cert material provisioned (unlocked
+    /// session + account identity key + open local DB + device id), so the
+    /// `RealRelayFactory` can load a `ClientIdentity` and authenticate to a relay.
+    /// `remote_db` is a (lazy) remote handle so `set_overlay_shim` exercises the
+    /// real rebuild path; it is never queried here.
+    async fn provisioned_state(config: Config) -> Arc<AppState> {
+        let remote = Arc::new(RemoteDb::connect(&config.turso_url, "tok").await.unwrap());
+        let keystore: Arc<dyn crate::keystore::Keystore> =
+            Arc::new(crate::keystore::InMemoryKeystore::new());
+        // log_db == remote_db (unconfigured commit-log DB), like production.
+        let state = Arc::new(AppState::new_with_parts(
+            config,
+            Arc::clone(&remote),
+            remote,
+            keystore,
+        ));
+        *state.unlock.lock().await = Some(UnlockState {
+            user_id: USER.to_string(),
+            db_key: Zeroizing::new(vec![7u8; 32]),
+            account_id_key: Zeroizing::new(account_key().to_bytes().to_vec()),
+        });
+        *state.device_id.lock().await = Some(DEVICE.to_string());
+        *state.local_db.lock().await = Some(crate::db::local::LocalDb::open_in_memory().unwrap());
+        state
+    }
+
+    /// Drive the exact libsql-shaped `SocksConnector` through `shim` to the TLS
+    /// origin and verify the inner TLS terminates at the REAL name `origin.test`.
+    async fn tls_probe_through_shim(shim: SocketAddr, port: u16, ca: &CertificateDer<'static>) {
+        let mut connector = SocksConnector::new(shim);
+        let uri: Uri = format!("https://{ORIGIN_NAME}:{port}").parse().unwrap();
+        let stream = Service::call(&mut connector, uri)
+            .await
+            .expect("SOCKS connect through shim");
+
+        let mut roots = rustls::RootCertStore::empty();
+        roots.add(ca.clone()).unwrap();
+        let mut client_cfg = rustls::ClientConfig::builder()
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+        client_cfg.alpn_protocols = vec![b"http/1.1".to_vec()];
+        let tls_connector = tokio_rustls::TlsConnector::from(Arc::new(client_cfg));
+        let server_name = ServerName::try_from(ORIGIN_NAME).unwrap();
+        let mut tls = tls_connector
+            .connect(server_name, stream)
+            .await
+            .expect("inner TLS verified for origin.test through the shim");
+        tls.write_all(b"GET / HTTP/1.1\r\nHost: origin.test\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut resp = Vec::new();
+        tls.read_to_end(&mut resp).await.unwrap();
+        assert!(
+            String::from_utf8_lossy(&resp).starts_with("HTTP/1.1 200 OK"),
+            "libsql-shaped probe did not reach origin through the relay"
+        );
+    }
+
+    /// THE live-application proof: flipping `set_overlay_mode` genuinely routes a
+    /// reqwest control-plane call AND a libsql-shaped connection through an
+    /// in-process relay (cert verified for the real name), Prefer↔Strict flips the
+    /// live policy with no shim restart / DB reconnect, and Off restores the
+    /// byte-for-byte direct path (relay sees no further dials).
+    #[tokio::test]
+    async fn set_overlay_mode_routes_live_through_relay() {
+        let (origin_addr, ca, origin_conns) = spawn_tls_origin("live-apply").await;
+        let relay = spawn_relay(&[ORIGIN_NAME], &[(ORIGIN_NAME, IpAddr::V4(Ipv4Addr::LOCALHOST))]);
+
+        let mut config = cfg(OverlayMode::Off, Some(&relay.addr.to_string()));
+        // origin.test is the control-plane (Turso) host, so it routes overlay.
+        config.turso_url = format!("libsql://{ORIGIN_NAME}");
+        config.overlay_relay_cert = Some(cert_b64(&relay.cert));
+        let state = provisioned_state(config).await;
+
+        use crate::commands::overlay::{apply_overlay_mode, get_overlay_mode};
+
+        // Off → Prefer: shim up, both remote DBs repointed through it.
+        apply_overlay_mode(&state, OverlayMode::Prefer).await.unwrap();
+        assert_eq!(get_overlay_mode(&state).await.unwrap(), "prefer");
+        let handle = state.overlay_handle().expect("shim running after Prefer");
+        assert_eq!(handle.mode(), OverlayMode::Prefer);
+        let shim_addr = handle.socks_addr();
+        assert_eq!(
+            state.remote_db.overlay_shim(),
+            Some(shim_addr),
+            "remote_db must be routed through the shim after Prefer"
+        );
+
+        // (1) A reqwest control-plane call routes THROUGH THE RELAY.
+        let client = pollis_relay::http::http_client_builder(Some(handle.as_ref()))
+            .add_root_certificate(reqwest::Certificate::from_der(&ca).unwrap())
+            .build()
+            .unwrap();
+        let url = format!("https://{ORIGIN_NAME}:{}/", origin_addr.port());
+        let resp = client.get(&url).send().await.expect("reqwest routes through relay");
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.text().await.unwrap(), "live-apply");
+        assert_eq!(relay.stats.dials(), 1, "relay must have dialed the origin (reqwest)");
+
+        // (2) A libsql-shaped connection routes through the relay too, cert
+        //     verified for the REAL name origin.test.
+        tls_probe_through_shim(shim_addr, origin_addr.port(), &ca).await;
+        assert_eq!(relay.stats.dials(), 2, "relay must have dialed the origin (libsql shape)");
+        assert!(origin_conns.load(Ordering::Relaxed) >= 2);
+
+        // Prefer → Strict: live policy flip — SAME shim, no DB reconnect.
+        apply_overlay_mode(&state, OverlayMode::Strict).await.unwrap();
+        assert_eq!(get_overlay_mode(&state).await.unwrap(), "strict");
+        let handle2 = state.overlay_handle().expect("shim still running after Strict");
+        assert_eq!(handle2.mode(), OverlayMode::Strict);
+        assert_eq!(handle2.socks_addr(), shim_addr, "Prefer↔Strict must not restart the shim");
+        assert_eq!(
+            state.remote_db.overlay_shim(),
+            Some(shim_addr),
+            "Prefer↔Strict must not reconnect the DBs"
+        );
+
+        // Strict → Off: shim dropped, DBs back to direct, relay sees no new dials.
+        apply_overlay_mode(&state, OverlayMode::Off).await.unwrap();
+        assert_eq!(get_overlay_mode(&state).await.unwrap(), "off");
+        assert!(state.overlay_handle().is_none(), "shim must stop after Off");
+        assert_eq!(state.remote_db.overlay_shim(), None, "remote_db must be direct after Off");
+
+        // A direct call now bypasses the relay entirely.
+        let plain = spawn_plain_http("direct-after-off").await;
+        let direct = http_client(None)
+            .get(format!("http://{plain}/"))
+            .send()
+            .await
+            .expect("direct request after Off");
+        assert_eq!(direct.status(), 200);
+        assert_eq!(relay.stats.dials(), 2, "Off routes direct — relay sees no new dials");
+    }
+
+    /// Strict with the relay DOWN, applied LIVE, must surface a degraded error —
+    /// never a silent direct send.
+    #[tokio::test]
+    async fn set_overlay_strict_relay_down_degrades_live() {
+        // A pinned cert we can load, but an endpoint that points nowhere.
+        let cert = pollis_relay::tls::generate_self_signed("pollis-relay")
+            .unwrap()
+            .cert_der;
+        let mut config = cfg(OverlayMode::Off, Some("127.0.0.1:1"));
+        config.turso_url = format!("libsql://{ORIGIN_NAME}");
+        config.overlay_relay_cert = Some(cert_b64(&cert));
+        let state = provisioned_state(config).await;
+
+        crate::commands::overlay::apply_overlay_mode(&state, OverlayMode::Strict)
+            .await
+            .unwrap();
+        let handle = state.overlay_handle().unwrap();
+
+        let mut connector = SocksConnector::new(handle.socks_addr());
+        let uri: Uri = format!("https://{ORIGIN_NAME}:443").parse().unwrap();
+        assert!(
+            Service::call(&mut connector, uri).await.is_err(),
+            "Strict + relay down must degrade, never silent-direct"
+        );
+    }
+
+    /// Prefer with the relay DOWN, applied LIVE, falls back to a direct dial of
+    /// the (directly reachable) control-plane host.
+    #[tokio::test]
+    async fn set_overlay_prefer_relay_down_falls_back_direct_live() {
+        let plain = spawn_plain_http("prefer-fallback").await;
+        let host = plain.ip().to_string();
+        let cert = pollis_relay::tls::generate_self_signed("pollis-relay")
+            .unwrap()
+            .cert_der;
+        let mut config = cfg(OverlayMode::Off, Some("127.0.0.1:1"));
+        // Control-plane host = the directly-connectable plain origin.
+        config.turso_url = format!("libsql://{host}");
+        config.overlay_relay_cert = Some(cert_b64(&cert));
+        let state = provisioned_state(config).await;
+
+        crate::commands::overlay::apply_overlay_mode(&state, OverlayMode::Prefer)
+            .await
+            .unwrap();
+        let handle = state.overlay_handle().unwrap();
+
+        let mut connector = SocksConnector::new(handle.socks_addr());
+        let uri: Uri = format!("http://{host}:{}", plain.port()).parse().unwrap();
+        assert!(
+            Service::call(&mut connector, uri).await.is_ok(),
+            "Prefer + relay down must fall back to a direct dial"
+        );
     }
 }

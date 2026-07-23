@@ -266,6 +266,7 @@ pub async fn spawn_world() -> World {
         // Overlay off: the smoke rig talks to the in-process DS directly.
         overlay_mode: pollis_core::config::OverlayMode::Off,
         overlay_relay_url: None,
+        overlay_relay_cert: None,
     };
 
     World {

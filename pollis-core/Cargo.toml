@@ -140,7 +140,13 @@ bytes = "1"
 openmls = "0.8"
 openmls_traits = "0.5"
 openmls_rust_crypto = "0.5"
-openmls_basic_credential = "0.5"
+# `test-utils` exposes `SignatureKeyPair::private()` — the ONLY accessor for the
+# raw device signing seed. The overlay relay handshake (`net::overlay`) must sign
+# with the SAME Ed25519 device key the cert chain certifies, so it needs the seed
+# to build an `ed25519_dalek::SigningKey`. The feature adds a getter only — no
+# extra crates, no behavioral change (openmls_basic_credential's `test-utils` =
+# [] gates just `fn private`).
+openmls_basic_credential = { version = "0.5", features = ["test-utils"] }
 gethostname = "1.1.0"
 # Account-key transparency: reuse the SAME shared URL-based verifier the
 # `pollis-verify` auditor CLI runs (account::verify_account), so the client's

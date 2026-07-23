@@ -13,6 +13,7 @@ pub mod install_kind;
 pub mod media_permissions;
 pub mod messages;
 pub mod mls;
+pub mod overlay;
 pub mod pin;
 pub mod r2;
 pub mod safety;

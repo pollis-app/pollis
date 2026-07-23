@@ -46,6 +46,9 @@ pub use config::{RateLimitFileConfig, RelayFileConfig};
 pub use http::{http_client, http_client_builder};
 pub use policy::{FinalAction, OverlayMode, PlannedRoute, RoutingPolicy};
 pub use proto::{DeviceCertMaterial, RejectReason, VerifiedClient};
+// Re-exported so consumers (pollis-core's `net::overlay`) can name the pinned
+// relay leaf type without taking a direct `rustls`/`rustls-pki-types` dependency.
+pub use rustls::pki_types::CertificateDer;
 pub use ratelimit::{RateLimitConfig, RateLimiter};
 pub use server::{Allowlist, HostPattern, RelayConfig, RelayServer, RelayStats};
 pub use shim::{OverlayHandle, OverlayShim};

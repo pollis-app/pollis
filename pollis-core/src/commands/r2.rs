@@ -275,7 +275,8 @@ pub async fn upload_file(
     state: &Arc<AppState>,
 ) -> Result<UploadResult> {
     let put_url = presign_r2(state, "put", &key).await?;
-    r2_put_url(state.overlay.as_ref(), &put_url, data, &content_type).await?;
+    let overlay = state.overlay_handle();
+    r2_put_url(overlay.as_deref(), &put_url, data, &content_type).await?;
     let url = format!("{}/{}", state.config.r2_endpoint.trim_end_matches('/'), key);
     Ok(UploadResult { key, url })
 }
@@ -285,7 +286,8 @@ pub async fn download_file(
     state: &Arc<AppState>,
 ) -> Result<Vec<u8>> {
     let get_url = presign_r2(state, "get", &key).await?;
-    r2_get_url(state.overlay.as_ref(), &get_url).await
+    let overlay = state.overlay_handle();
+    r2_get_url(overlay.as_deref(), &get_url).await
 }
 
 // ── Media upload (convergent encryption + cross-user dedup) ───────────────
@@ -369,7 +371,8 @@ pub async fn upload_media(
         let ciphertext = encrypt_chunked(&data, &enc_key, &enc_nonce);
 
         let put_url = presign_r2(state, "put", &r2_key).await?;
-        r2_put_url(state.overlay.as_ref(), &put_url, ciphertext, "application/octet-stream").await?;
+        let overlay = state.overlay_handle();
+        r2_put_url(overlay.as_deref(), &put_url, ciphertext, "application/octet-stream").await?;
 
         // Register in Turso so future uploads of the same file skip R2 — route the
         // dedup-row write through the Delivery Service.
@@ -415,7 +418,8 @@ pub async fn download_media(
     // ever exposes convergently-encrypted ciphertext; confidentiality comes from
     // MLS key distribution, not the R2 ACL (see broker.rs).
     let get_url = presign_r2(state, "get", &r2_key).await?;
-    let ciphertext = r2_get_url(state.overlay.as_ref(), &get_url).await?;
+    let overlay = state.overlay_handle();
+    let ciphertext = r2_get_url(overlay.as_deref(), &get_url).await?;
     decrypt_chunked(&ciphertext, &enc_key, &enc_nonce)
 }
 
@@ -621,7 +625,8 @@ pub(crate) async fn delete_r2_object(
     r2_key: &str,
 ) -> Result<()> {
     let delete_url = presign_r2(state, "delete", r2_key).await?;
-    r2_delete_url(state.overlay.as_ref(), &delete_url).await
+    let overlay = state.overlay_handle();
+    r2_delete_url(overlay.as_deref(), &delete_url).await
 }
 
 // ── Crypto helpers ────────────────────────────────────────────────────────

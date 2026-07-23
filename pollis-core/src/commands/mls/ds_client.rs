@@ -133,7 +133,8 @@ pub async fn ds_post(
 
     let url = format!("{}{}", base.trim_end_matches('/'), path);
     // First-party DS write — route through the overlay when it is on (§14.2).
-    let resp = crate::net::overlay::http_client(state.overlay.as_ref())
+    let overlay = state.overlay_handle();
+    let resp = crate::net::overlay::http_client(overlay.as_deref())
         .post(&url)
         .header("X-Pollis-User", &user_id)
         .header("X-Pollis-Device", &device_id)
@@ -386,7 +387,8 @@ pub async fn ds_report_commit_since(
         None => return,
     };
     let url = format!("{base}/v1/commits/{conversation_id}");
-    let _ = crate::net::overlay::http_client(state.overlay.as_ref())
+    let overlay = state.overlay_handle();
+    let _ = crate::net::overlay::http_client(overlay.as_deref())
         .get(&url)
         .query(&[
             ("since", since.to_string()),
@@ -419,7 +421,8 @@ pub async fn ds_post_plain(
     body: &serde_json::Value,
 ) -> Result<reqwest::Response> {
     let url = format!("{}{}", delivery_base(state)?, path);
-    crate::net::overlay::http_client(state.overlay.as_ref())
+    let overlay = state.overlay_handle();
+    crate::net::overlay::http_client(overlay.as_deref())
         .post(&url)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .json(body)
@@ -442,7 +445,8 @@ pub async fn ds_post_session(
     let url = format!("{}{}", delivery_base(state)?, path);
     let body_bytes = serde_json::to_vec(body)
         .map_err(|e| Error::Other(anyhow::anyhow!("ds_post_session serialize: {e}")))?;
-    crate::net::overlay::http_client(state.overlay.as_ref())
+    let overlay = state.overlay_handle();
+    crate::net::overlay::http_client(overlay.as_deref())
         .post(&url)
         .header("X-Pollis-Session", session_token)
         .header(reqwest::header::CONTENT_TYPE, "application/json")
