@@ -39,7 +39,7 @@ export default function InviteToGroup() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-group-invite">
       <Crumb
         segs={[
           { label: "GROUPS" },
@@ -54,6 +54,8 @@ export default function InviteToGroup() {
             amber
             value={identifier}
             onChangeText={setIdentifier}
+            testID="input-user-search"
+            accessibilityLabel="Username or email"
             icon={<Icon.at color={semantic.mute} />}
           />
           <Text
@@ -98,6 +100,7 @@ export default function InviteToGroup() {
       <BottomAction>
         <Button
           full
+          testID="btn-send-invite"
           variant="primary"
           onPress={onSend}
           disabled={!identifier.trim() || sendInvite.isPending}
@@ -105,7 +108,12 @@ export default function InviteToGroup() {
         >
           {sendInvite.isPending ? "SENDING…" : "SEND INVITE"}
         </Button>
-        <Button variant="subtle" full onPress={() => router.back()}>
+        <Button
+          variant="subtle"
+          full
+          testID="btn-cancel"
+          onPress={() => router.back()}
+        >
           Cancel
         </Button>
       </BottomAction>

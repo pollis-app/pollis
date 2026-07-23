@@ -40,7 +40,7 @@ export default function NewDM() {
     !search.isLoading && !search.isError && query.trim().length >= 2 && !found;
 
   return (
-    <Screen>
+    <Screen testID="screen-dm-new">
       <Crumb
         segs={[{ label: "DIRECT" }, { label: "New", leaf: true }]}
       />
@@ -51,6 +51,8 @@ export default function NewDM() {
             amber
             value={query}
             onChangeText={setQuery}
+            testID="input-user-search"
+            accessibilityLabel="Username or email"
             icon={<Icon.search color={semantic.mute} />}
           />
           <Text
@@ -107,6 +109,8 @@ export default function NewDM() {
           ) : null}
           {found ? (
             <ListRow
+              testID={`row-user-${found.id}`}
+              accessibilityLabel={`Start DM with @${found.username}`}
               minHeight={64}
               glyph={
                 <Avatar

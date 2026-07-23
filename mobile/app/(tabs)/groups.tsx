@@ -33,7 +33,7 @@ function Groups() {
   const totalChannels = groups.reduce((acc, g) => acc + g.channels.length, 0);
 
   return (
-    <Screen>
+    <Screen testID="screen-groups">
       <Crumb segs={[{ label: "GROUPS", leaf: true }]} end={String(totalChannels)} />
       <Body>
         {invites.length > 0 ? (
@@ -42,17 +42,22 @@ function Groups() {
             {invites.map((inv) => (
               <ListRow
                 key={inv.id}
+                testID={`row-invite-${inv.id}`}
                 glyph={<Icon.inbox color={semantic.accent} />}
                 name={inv.group_name}
                 sub={`from @${inv.inviter_username ?? "someone"}`}
                 end={
                   <View style={{ flexDirection: "row", gap: 6 }}>
                     <Chip
+                      testID={`btn-decline-invite-${inv.id}`}
+                      accessibilityLabel="Decline invite"
                       onPress={() => declineInvite.mutate(inv.id)}
                     >
                       Decline
                     </Chip>
                     <Chip
+                      testID={`btn-accept-invite-${inv.id}`}
+                      accessibilityLabel="Accept invite"
                       variant="on"
                       onPress={() => acceptInvite.mutate(inv.id)}
                     >
@@ -124,6 +129,7 @@ function Groups() {
             {g.channels.map((c) => (
               <ListRow
                 key={c.id}
+                testID={`row-channel-${c.id}`}
                 glyph={<Icon.hash color={semantic.mute} />}
                 name={c.name}
                 sub={c.description ?? undefined}
@@ -142,6 +148,7 @@ function Groups() {
       </Body>
       <BottomAction>
         <Button
+          testID="btn-create-group"
           full
           icon={<Icon.plus color={semantic.ink} />}
           onPress={() => router.push("/group/new")}
@@ -149,6 +156,7 @@ function Groups() {
           New Group
         </Button>
         <Button
+          testID="btn-join-group"
           variant="subtle"
           full
           icon={<Icon.search color={semantic.ink} />}

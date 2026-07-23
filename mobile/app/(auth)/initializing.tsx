@@ -102,7 +102,7 @@ function Initializing() {
   ];
 
   return (
-    <Screen>
+    <Screen testID="screen-auth-initializing">
       <Corner pos="tl" />
       <Corner pos="tr" />
       <Corner pos="bl" />
@@ -251,7 +251,12 @@ function Initializing() {
         }}
       >
         <Text style={ty.label}>v3.1.2 · NODE 0x4A2C</Text>
-        <Pressable onPress={() => router.replace("/(tabs)/groups")}>
+        <Pressable
+          onPress={() => router.replace("/(tabs)/groups")}
+          testID="btn-continue"
+          accessibilityRole="button"
+          accessibilityLabel="Skip"
+        >
           <Text style={[ty.label, { color: semantic.accent }]}>SKIP →</Text>
         </Pressable>
       </View>

@@ -36,12 +36,21 @@ export function Txt({
 }
 
 /* ── Screen ───────────────────────────────────────────────────────── */
-export function Screen({ children }: { children: React.ReactNode }) {
+export function Screen({
+  children,
+  testID,
+}: {
+  children: React.ReactNode;
+  // Each route sets `screen-<route>` here so e2e flows have one stable root
+  // anchor per screen. Inert in production.
+  testID?: string;
+}) {
   // Subscribe to the accent so the whole subtree re-renders (and the token
   // getters resolve to the new color) when it changes.
   useTheme();
   return (
     <SafeAreaView
+      testID={testID}
       style={{ flex: 1, backgroundColor: palette.bg }}
       edges={["top", "bottom"]}
     >
@@ -76,12 +85,17 @@ export function Diamond({
 export function Crumb({
   segs,
   end,
+  testID,
 }: {
   segs: { label: string; leaf?: boolean }[];
   end?: string;
+  // Optional passive anchor; some routes prefer `screen-*` on <Screen>, but
+  // the crumb is a convenient stable header target too.
+  testID?: string;
 }) {
   return (
     <View
+      testID={testID}
       style={{
         flexDirection: "row",
         alignItems: "center",
@@ -148,11 +162,17 @@ export function Chip({
   variant = "default",
   onPress,
   style,
+  testID,
+  accessibilityLabel,
 }: {
   children: React.ReactNode;
   variant?: "default" | "on" | "solid" | "subtle";
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
+  // Set when the chip is an interactive affordance (accept/decline/toggle),
+  // e.g. `chip-accent-mint`. Harmless when the chip is purely decorative.
+  testID?: string;
+  accessibilityLabel?: string;
 }) {
   const border =
     variant === "on"
@@ -177,6 +197,11 @@ export function Chip({
   return (
     <Pressable
       onPress={onPress}
+      testID={testID}
+      accessibilityLabel={
+        accessibilityLabel ??
+        (typeof children === "string" ? children : undefined)
+      }
       style={[
         {
           flexDirection: "row",
@@ -220,6 +245,8 @@ export function Button({
   iconRight,
   disabled,
   align = "center",
+  testID,
+  accessibilityLabel,
 }: {
   children: string;
   variant?: "default" | "primary" | "subtle" | "danger";
@@ -229,6 +256,10 @@ export function Button({
   iconRight?: React.ReactNode;
   disabled?: boolean;
   align?: "center" | "left";
+  // `btn-<name>` for e2e flows; accessibilityLabel defaults to the button's
+  // text label when not given explicitly.
+  testID?: string;
+  accessibilityLabel?: string;
 }) {
   const primary = variant === "primary";
   const danger = variant === "danger";
@@ -237,6 +268,10 @@ export function Button({
     <Pressable
       onPress={disabled ? undefined : onPress}
       disabled={disabled}
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? children}
+      accessibilityState={{ disabled: !!disabled }}
       style={{
         opacity: disabled ? 0.45 : 1,
         flexDirection: "row",
@@ -337,6 +372,8 @@ export function ListRow({
   minHeight = 56,
   onPress,
   nameStyle,
+  testID,
+  accessibilityLabel,
 }: {
   glyph?: React.ReactNode;
   name: React.ReactNode;
@@ -346,10 +383,17 @@ export function ListRow({
   minHeight?: number;
   onPress?: () => void;
   nameStyle?: StyleProp<TextStyle>;
+  // `row-<kind>-<id>` for list rows so flows can target a specific record.
+  testID?: string;
+  accessibilityLabel?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      testID={testID}
+      accessibilityLabel={
+        accessibilityLabel ?? (typeof name === "string" ? name : undefined)
+      }
       style={{
         flexDirection: "row",
         alignItems: "center",
@@ -446,6 +490,8 @@ export function Field({
   editable = true,
   secureTextEntry,
   keyboardType,
+  testID,
+  accessibilityLabel,
 }: {
   value?: string;
   onChangeText?: (v: string) => void;
@@ -456,6 +502,10 @@ export function Field({
   editable?: boolean;
   secureTextEntry?: boolean;
   keyboardType?: "default" | "email-address" | "number-pad";
+  // `input-<name>` on the underlying TextInput; accessibilityLabel comes from
+  // the caller's field label (Field renders no label of its own).
+  testID?: string;
+  accessibilityLabel?: string;
 }) {
   return (
     <View
@@ -473,6 +523,8 @@ export function Field({
     >
       {icon}
       <TextInput
+        testID={testID}
+        accessibilityLabel={accessibilityLabel}
         value={value}
         onChangeText={onChangeText}
         placeholder={placeholder}
@@ -498,13 +550,22 @@ export function Field({
 export function Toggle({
   on,
   onPress,
+  testID,
+  accessibilityLabel,
 }: {
   on?: boolean;
   onPress?: () => void;
+  // `toggle-<name>`; exposes switch semantics so e2e + a11y read the state.
+  testID?: string;
+  accessibilityLabel?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      testID={testID}
+      accessibilityRole="switch"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ checked: !!on }}
       style={{
         width: 36,
         height: 20,
@@ -578,14 +639,19 @@ export function Ctx({
   cr,
   name,
   actions,
+  testID,
 }: {
   cr?: string;
   name: React.ReactNode;
   actions?: React.ReactNode;
+  // Optional anchor on the context strip container. The back Pressable always
+  // carries `btn-back` for navigation flows.
+  testID?: string;
 }) {
   const router = useRouter();
   return (
     <View
+      testID={testID}
       style={{
         flexDirection: "row",
         alignItems: "center",
@@ -600,6 +666,9 @@ export function Ctx({
     >
       <Pressable
         onPress={() => router.back()}
+        testID="btn-back"
+        accessibilityRole="button"
+        accessibilityLabel="Back"
         style={{
           width: 38,
           height: 38,
@@ -653,13 +722,21 @@ export function Ctx({
 export function CtxAct({
   icon,
   onPress,
+  testID,
+  accessibilityLabel,
 }: {
   icon: React.ReactNode;
   onPress?: () => void;
+  // `btn-<name>` — bottom command actions are load-bearing in flows.
+  testID?: string;
+  accessibilityLabel?: string;
 }) {
   return (
     <Pressable
       onPress={onPress}
+      testID={testID}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
       style={{
         width: 38,
         height: 38,

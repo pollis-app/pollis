@@ -91,7 +91,14 @@ function NotificationsSetting() {
       nameStyle={{ fontSize: 14, fontFamily: ty.body.fontFamily }}
       sub={sub}
       onPress={onPress}
-      end={<Toggle on={granted} onPress={onPress} />}
+      end={
+        <Toggle
+          on={granted}
+          onPress={onPress}
+          testID="toggle-notifications"
+          accessibilityLabel="Notifications"
+        />
+      }
     />
   );
 }
@@ -115,7 +122,7 @@ export default function Preferences() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-self-preferences">
       <Crumb segs={[{ label: "SELF" }, { label: "Preferences", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12 }}>
@@ -126,6 +133,8 @@ export default function Preferences() {
               return (
                 <Pressable
                   key={s.n}
+                  testID={`chip-accent-${s.n.toLowerCase()}`}
+                  accessibilityLabel={`Accent ${s.n}`}
                   onPress={() => setAccent(s.c)}
                   style={{
                     width: "31.5%",
@@ -176,6 +185,7 @@ export default function Preferences() {
             {THEMES.map((opt) => (
               <Chip
                 key={opt}
+                testID={`chip-theme-${opt.toLowerCase()}`}
                 variant={theme === opt ? "on" : "default"}
                 onPress={() => update({ mobile_theme: opt })}
               >
@@ -191,6 +201,7 @@ export default function Preferences() {
             {DENSITIES.map((opt) => (
               <Chip
                 key={opt}
+                testID={`chip-density-${opt.toLowerCase()}`}
                 variant={density === opt ? "on" : "default"}
                 onPress={() => update({ mobile_density: opt })}
               >
@@ -211,6 +222,8 @@ export default function Preferences() {
               <Toggle
                 on={isBehaviorOn(b.key, b.defaultOn)}
                 onPress={() => toggleBehavior(b.key, b.defaultOn)}
+                testID={`toggle-${b.key.replace(/_/g, "-")}`}
+                accessibilityLabel={b.n}
               />
             }
           />

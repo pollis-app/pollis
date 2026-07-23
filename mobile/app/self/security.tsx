@@ -76,7 +76,7 @@ export default function Security() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-self-security">
       <Crumb segs={[{ label: "SELF" }, { label: "Security", leaf: true }]} />
       <Body>
         {pendingEnrollments.length > 0 ? (
@@ -124,12 +124,16 @@ export default function Security() {
                 </Text>
                 <View style={{ flexDirection: "row", gap: 8, paddingTop: 6 }}>
                   <Chip
+                    testID={`btn-reject-${req.request_id}`}
+                    accessibilityLabel="Reject enrollment"
                     onPress={() => rejectEnrollment.mutate(req.request_id)}
                   >
                     Reject
                   </Chip>
                   <Chip
                     variant="on"
+                    testID={`btn-approve-${req.request_id}`}
+                    accessibilityLabel="Approve enrollment"
                     onPress={() =>
                       approveEnrollment.mutate({
                         requestId: req.request_id,
@@ -195,6 +199,7 @@ export default function Security() {
           return (
             <ListRow
               key={d.device_id}
+              testID={`row-device-${d.device_id}`}
               minHeight={54}
               glyph={<Icon.device color={semantic.mute} />}
               name={`${name}${d.is_current ? " · this device" : ""}`}
@@ -206,6 +211,8 @@ export default function Security() {
                 ) : (
                   <Chip
                     variant={armed ? "on" : "default"}
+                    testID={`btn-revoke-device-${d.device_id}`}
+                    accessibilityLabel="Revoke device"
                     onPress={() => onRevoke(d.device_id)}
                   >
                     {revoke.isPending && armed
@@ -235,6 +242,7 @@ export default function Security() {
 
         <SectionTitle>SAFETY</SectionTitle>
         <ListRow
+          testID="row-blocked-users"
           minHeight={48}
           glyph={<Icon.exit color={semantic.mute} />}
           name="Blocked users"
@@ -262,6 +270,7 @@ export default function Security() {
         <View style={{ paddingHorizontal: 18, paddingTop: 18 }}>
           <Button
             full
+            testID="btn-sign-out"
             variant="danger"
             icon={<Icon.exit color={semantic.danger} />}
             onPress={onSignOut}

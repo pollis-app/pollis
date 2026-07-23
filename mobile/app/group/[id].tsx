@@ -58,7 +58,7 @@ function GroupDetail() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-group">
       <Crumb
         segs={[{ label: "GROUPS" }, { label: groupName, leaf: true }]}
         end={`${members.length || 0} MEMBERS`}
@@ -118,6 +118,7 @@ function GroupDetail() {
         {channels.map((c) => (
           <ListRow
             key={c.id}
+            testID={`row-channel-${c.id}`}
             minHeight={54}
             glyph={<Icon.hash color={semantic.mute} />}
             name={c.name}
@@ -135,6 +136,7 @@ function GroupDetail() {
 
         <SectionTitle>ADMIN</SectionTitle>
         <ListRow
+          testID="row-group-members"
           minHeight={48}
           glyph={<Icon.people color={semantic.mute} />}
           name="Members"
@@ -150,6 +152,7 @@ function GroupDetail() {
           end={<Icon.fwd color={semantic.mute} />}
         />
         <ListRow
+          testID="row-group-invite"
           minHeight={48}
           glyph={<Icon.at color={semantic.mute} />}
           name="Invite a member"
@@ -164,6 +167,7 @@ function GroupDetail() {
           end={<Icon.fwd color={semantic.mute} />}
         />
         <ListRow
+          testID="row-group-settings"
           minHeight={48}
           glyph={<Icon.gear color={semantic.mute} />}
           name="Settings"
@@ -180,6 +184,7 @@ function GroupDetail() {
         />
         {joinRequests.length > 0 ? (
           <ListRow
+            testID="row-group-requests"
             minHeight={48}
             glyph={<Icon.inbox color={semantic.mute} />}
             name="Join requests"
@@ -198,6 +203,7 @@ function GroupDetail() {
 
         <SectionTitle>DANGER</SectionTitle>
         <ListRow
+          testID="btn-leave-group"
           minHeight={48}
           glyph={<Icon.exit color={semantic.danger} />}
           name={leaveGroup.isPending ? "Leaving…" : "Leave group"}
@@ -226,7 +232,13 @@ function GroupDetail() {
       <Ctx
         cr="GROUPS"
         name={groupName}
-        actions={<CtxAct icon={<Icon.kebab color={semantic.ink2} />} />}
+        actions={
+          <CtxAct
+            testID="btn-group-menu"
+            accessibilityLabel="Group menu"
+            icon={<Icon.kebab color={semantic.ink2} />}
+          />
+        }
       />
     </Screen>
   );

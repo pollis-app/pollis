@@ -77,7 +77,7 @@ export default function Enrollment() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-auth-enrollment">
       <Crumb segs={[{ label: "AUTH" }, { label: "Pair device", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>
@@ -108,6 +108,7 @@ export default function Enrollment() {
           {mode === "chooser" ? (
             <View style={{ gap: 10, paddingTop: 6 }}>
               <Button
+                testID="btn-enroll-approve-device"
                 full
                 align="left"
                 variant="primary"
@@ -118,6 +119,7 @@ export default function Enrollment() {
                 {start.isPending ? "STARTING…" : "APPROVE FROM ANOTHER DEVICE"}
               </Button>
               <Button
+                testID="btn-enroll-recovery"
                 full
                 align="left"
                 onPress={() => setMode("recovery")}
@@ -171,6 +173,8 @@ export default function Enrollment() {
             <View style={{ gap: 10, paddingTop: 6 }}>
               <Text style={ty.label}>RECOVERY KEY</Text>
               <Field
+                testID="input-recovery-key"
+                accessibilityLabel="Recovery key"
                 amber
                 value={secretKey}
                 onChangeText={setSecretKey}
@@ -195,6 +199,7 @@ export default function Enrollment() {
       {mode === "recovery" ? (
         <BottomAction>
           <Button
+            testID="btn-submit-recovery"
             full
             variant="primary"
             onPress={onRecover}
@@ -203,13 +208,19 @@ export default function Enrollment() {
           >
             {recover.isPending ? "RECOVERING…" : "RECOVER"}
           </Button>
-          <Button variant="subtle" full onPress={() => setMode("chooser")}>
+          <Button
+            testID="btn-enroll-back"
+            variant="subtle"
+            full
+            onPress={() => setMode("chooser")}
+          >
             Back
           </Button>
         </BottomAction>
       ) : mode === "polling" ? (
         <BottomAction>
           <Button
+            testID="btn-enroll-cancel"
             variant="subtle"
             full
             onPress={() => {

@@ -38,23 +38,26 @@ function Self() {
       n: "Preferences",
       s: "Theme, density, behavior",
       to: "/self/preferences" as const,
+      t: "row-self-preferences",
     },
     {
       g: <Icon.user color={semantic.accent} />,
       n: "User settings",
       s: "Display name, handle, email",
       to: "/self/user-settings" as const,
+      t: "row-self-user-settings",
     },
     {
       g: <Icon.shield color={semantic.accent} />,
       n: "Security",
       s: "Keys, devices, sign out",
       to: "/self/security" as const,
+      t: "row-self-security",
     },
   ];
 
   return (
-    <Screen>
+    <Screen testID="screen-self">
       <Crumb segs={[{ label: "SELF", leaf: true }]} end="ONLINE" />
       <Body>
         <View
@@ -117,6 +120,7 @@ function Self() {
               }}
             >
               <ListRow
+                testID={c.t}
                 minHeight={64}
                 glyph={c.g}
                 name={c.n}
@@ -130,6 +134,7 @@ function Self() {
 
         <View style={{ paddingHorizontal: 18, paddingTop: 10 }}>
           <Button
+            testID="btn-sign-out"
             full
             variant="danger"
             icon={<Icon.exit color={semantic.danger} />}

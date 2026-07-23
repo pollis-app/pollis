@@ -56,7 +56,7 @@ function UserSettings() {
   const avatarLabel = (handle || currentUser?.username || "us").slice(0, 2);
 
   return (
-    <Screen>
+    <Screen testID="screen-self-user-settings">
       <Crumb
         segs={[{ label: "SELF" }, { label: "User settings", leaf: true }]}
       />
@@ -99,13 +99,20 @@ function UserSettings() {
         <SectionTitle>IDENTITY</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
           <Text style={ty.label}>DISPLAY NAME</Text>
-          <Field value={displayName} onChangeText={setDisplayName} />
+          <Field
+            value={displayName}
+            onChangeText={setDisplayName}
+            testID="input-display-name"
+            accessibilityLabel="Display name"
+          />
         </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
           <Text style={ty.label}>HANDLE</Text>
           <Field
             value={handle}
             onChangeText={setHandle}
+            testID="input-handle"
+            accessibilityLabel="Handle"
             icon={
               <Text
                 style={{
@@ -132,11 +139,14 @@ function UserSettings() {
           <Field
             value={profile?.email ?? currentUser?.email ?? ""}
             editable={false}
+            testID="input-email"
+            accessibilityLabel="Email"
             icon={<Icon.mail color={semantic.mute} />}
           />
           <Button
             variant="subtle"
             full
+            testID="btn-change-email"
             onPress={() => router.push("/self/change-email")}
             icon={<Icon.edit color={semantic.ink} />}
           >
@@ -175,6 +185,7 @@ function UserSettings() {
       <BottomAction>
         <Button
           full
+          testID="btn-save"
           variant="primary"
           onPress={onSave}
           disabled={!dirty || !handle.trim() || updateProfile.isPending}
@@ -182,7 +193,12 @@ function UserSettings() {
         >
           {updateProfile.isPending ? "SAVING…" : "SAVE CHANGES"}
         </Button>
-        <Button variant="subtle" full onPress={() => router.back()}>
+        <Button
+          variant="subtle"
+          full
+          testID="btn-cancel"
+          onPress={() => router.back()}
+        >
           Cancel
         </Button>
       </BottomAction>

@@ -32,7 +32,7 @@ export default function Discover() {
   const status = myRequest.data?.status;
 
   return (
-    <Screen>
+    <Screen testID="screen-group-discover">
       <Crumb segs={[{ label: "GROUPS" }, { label: "Discover", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 8 }}>
@@ -42,6 +42,8 @@ export default function Discover() {
             value={slug}
             onChangeText={setSlug}
             placeholder="#general-room"
+            testID="input-group-search"
+            accessibilityLabel="Group slug"
             icon={<Icon.diamond size={14} color={semantic.mute} />}
           />
           <Text
@@ -121,6 +123,7 @@ export default function Discover() {
                 ) : (
                   <Button
                     full
+                    testID="btn-request-access"
                     variant="primary"
                     onPress={onRequest}
                     disabled={requestAccess.isPending}
@@ -138,6 +141,7 @@ export default function Discover() {
       <BottomAction>
         <Button
           full
+          testID="btn-back"
           variant="subtle"
           onPress={() => router.back()}
           icon={<Icon.back color={semantic.ink} />}

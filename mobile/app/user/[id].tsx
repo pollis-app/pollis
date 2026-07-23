@@ -108,7 +108,7 @@ function UserProfile() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-user">
       <Crumb segs={[{ label: "USER" }, { label: display, leaf: true }]} />
       <Body>
         <View
@@ -201,6 +201,7 @@ function UserProfile() {
                 >
                   <Text
                     selectable
+                    testID="text-safety-number"
                     style={{
                       fontFamily: fonts.mono400,
                       fontSize: 13,
@@ -219,7 +220,7 @@ function UserProfile() {
                       marginTop: 12,
                     }}
                   >
-                    <Pressable onPress={onToggleVerified}>
+                    <Pressable onPress={onToggleVerified} testID="btn-verify">
                       <Chip
                         variant={
                           safety.data.verification === "verified" ? "on" : "default"
@@ -267,6 +268,7 @@ function UserProfile() {
             <View style={{ paddingHorizontal: 18 }}>
               <Button
                 full
+                testID={isBlocked ? "btn-unblock" : "btn-block"}
                 variant={isBlocked ? "default" : "danger"}
                 icon={
                   <Icon.exit
@@ -291,6 +293,7 @@ function UserProfile() {
         <BottomAction>
           <Button
             full
+            testID="btn-message"
             variant="primary"
             onPress={onMessage}
             disabled={createDM.isPending}

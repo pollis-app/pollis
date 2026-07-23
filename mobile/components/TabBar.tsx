@@ -44,6 +44,10 @@ export function TabBar({ state, navigation }: any) {
           <Pressable
             key={tab.name}
             onPress={() => navigation.navigate(tab.name)}
+            testID={`tab-${tab.name}`}
+            accessibilityRole="tab"
+            accessibilityLabel={tab.label}
+            accessibilityState={{ selected: focused }}
             style={{
               flex: 1,
               alignItems: "center",
