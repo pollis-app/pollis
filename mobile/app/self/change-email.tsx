@@ -78,7 +78,7 @@ function ChangeEmail() {
   const error = requestOtp.error ?? verify.error;
 
   return (
-    <Screen>
+    <Screen testID="screen-self-change-email">
       <Crumb
         segs={[
           { label: "SELF" },
@@ -109,6 +109,8 @@ function ChangeEmail() {
                 amber
                 value={newEmail}
                 onChangeText={setNewEmail}
+                testID="input-email"
+                accessibilityLabel="New email"
                 icon={<Icon.mail color={semantic.mute} />}
                 keyboardType="email-address"
               />
@@ -122,6 +124,8 @@ function ChangeEmail() {
                 onChangeText={(v) =>
                   setCode(v.replace(/[^0-9]/g, "").slice(0, 6))
                 }
+                testID="input-otp"
+                accessibilityLabel="Verification code"
                 keyboardType="number-pad"
                 icon={<Icon.key color={semantic.mute} />}
               />
@@ -145,6 +149,7 @@ function ChangeEmail() {
       <BottomAction>
         <Button
           full
+          testID={stage === "enter-email" ? "btn-request-otp" : "btn-submit"}
           variant="primary"
           onPress={onSubmit}
           disabled={
@@ -165,6 +170,7 @@ function ChangeEmail() {
           <Button
             variant="subtle"
             full
+            testID="btn-use-different-email"
             onPress={() => {
               setCode("");
               setStage("enter-email");

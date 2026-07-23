@@ -72,7 +72,7 @@ function DMInfo() {
   const members = channel.data?.members ?? [];
 
   return (
-    <Screen>
+    <Screen testID="screen-dm-info">
       <Crumb segs={[{ label: "DIRECT" }, { label: "Info", leaf: true }]} />
       <Body>
         <SectionTitle>PARTICIPANTS</SectionTitle>
@@ -95,6 +95,7 @@ function DMInfo() {
           return (
             <ListRow
               key={m.user_id}
+              testID={`row-member-${m.user_id}`}
               minHeight={54}
               glyph={<Avatar label={handle.slice(0, 2)} />}
               name={`@${handle}${isMe ? " · you" : ""}`}
@@ -117,6 +118,7 @@ function DMInfo() {
         <View style={{ paddingHorizontal: 18 }}>
           <Button
             full
+            testID="btn-leave"
             variant="danger"
             icon={<Icon.exit color={semantic.danger} />}
             onPress={onLeave}
@@ -146,6 +148,7 @@ function DMInfo() {
       <BottomAction>
         <Button
           full
+          testID="btn-back-to-conversation"
           variant="subtle"
           onPress={() => router.back()}
           icon={<Icon.back color={semantic.ink} />}

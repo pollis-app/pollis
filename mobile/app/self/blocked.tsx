@@ -17,7 +17,7 @@ export default function Blocked() {
   const unblock = useUnblockUser();
 
   return (
-    <Screen>
+    <Screen testID="screen-self-blocked">
       <Crumb
         segs={[{ label: "SELF" }, { label: "Blocked", leaf: true }]}
         end={String(blocked.length)}
@@ -55,13 +55,18 @@ export default function Blocked() {
           return (
             <ListRow
               key={b.blocked_id}
+              testID={`row-blocked-${b.blocked_id}`}
               minHeight={54}
               glyph={<Avatar label={handle.slice(0, 2)} />}
               name={`@${handle}`}
               nameStyle={{ fontSize: 14 }}
               sub={`blocked ${new Date(b.created_at).toLocaleDateString()}`}
               end={
-                <Chip onPress={() => unblock.mutate(b.blocked_id)}>
+                <Chip
+                  testID={`btn-unblock-${b.blocked_id}`}
+                  accessibilityLabel="Unblock"
+                  onPress={() => unblock.mutate(b.blocked_id)}
+                >
                   {unblock.isPending ? "…" : "Unblock"}
                 </Chip>
               }

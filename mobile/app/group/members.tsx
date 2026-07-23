@@ -60,7 +60,7 @@ function Members() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-group-members">
       <Crumb
         segs={[
           { label: "GROUPS" },
@@ -92,6 +92,7 @@ function Members() {
           return (
             <ListRow
               key={m.user_id}
+              testID={`row-member-${m.user_id}`}
               minHeight={54}
               glyph={
                 <Avatar label={(m.username || m.user_id).slice(0, 2)} />
@@ -129,12 +130,16 @@ function Members() {
                   <View style={{ flexDirection: "row", gap: 6 }}>
                     <Chip
                       variant={isAdmin ? "on" : "default"}
+                      testID={`btn-toggle-role-${m.user_id}`}
+                      accessibilityLabel={isAdmin ? "Remove admin" : "Make admin"}
                       onPress={() => onToggleRole(m.user_id, m.role)}
                     >
                       {setRole.isPending ? "…" : isAdmin ? "Admin" : "Make admin"}
                     </Chip>
                     <Chip
                       variant={armed ? "on" : "default"}
+                      testID={`btn-remove-member-${m.user_id}`}
+                      accessibilityLabel="Remove member"
                       onPress={() => onRemove(m.user_id)}
                     >
                       {removeMember.isPending && armed

@@ -96,7 +96,7 @@ function GroupSettings() {
   };
 
   return (
-    <Screen>
+    <Screen testID="screen-group-settings">
       <Crumb
         segs={[
           { label: "GROUPS" },
@@ -122,7 +122,13 @@ function GroupSettings() {
         <SectionTitle>IDENTITY</SectionTitle>
         <View style={{ paddingHorizontal: 18, paddingTop: 6, gap: 6 }}>
           <Text style={ty.label}>NAME</Text>
-          <Field value={name} onChangeText={setName} editable={iAmAdmin} />
+          <Field
+            value={name}
+            onChangeText={setName}
+            editable={iAmAdmin}
+            testID="input-group-name"
+            accessibilityLabel="Group name"
+          />
         </View>
         <View style={{ paddingHorizontal: 18, paddingTop: 14, gap: 6 }}>
           <Text style={ty.label}>DESCRIPTION</Text>
@@ -130,6 +136,8 @@ function GroupSettings() {
             value={description}
             onChangeText={setDescription}
             editable={iAmAdmin}
+            testID="input-group-description"
+            accessibilityLabel="Group description"
           />
         </View>
 
@@ -139,6 +147,7 @@ function GroupSettings() {
           return (
             <ListRow
               key={c.id}
+              testID={`row-channel-${c.id}`}
               minHeight={48}
               glyph={<Icon.hash color={semantic.mute} />}
               name={c.name}
@@ -148,6 +157,8 @@ function GroupSettings() {
                 iAmAdmin && channels.length > 1 ? (
                   <Chip
                     variant={armed ? "on" : "default"}
+                    testID={`btn-delete-channel-${c.id}`}
+                    accessibilityLabel="Delete channel"
                     onPress={() => onDeleteChannel(c.id)}
                   >
                     {deleteChannel.isPending && armed
@@ -181,6 +192,7 @@ function GroupSettings() {
             <View style={{ paddingHorizontal: 18 }}>
               <Button
                 full
+                testID="btn-delete-group"
                 variant="danger"
                 icon={<Icon.exit color={semantic.danger} />}
                 onPress={onDeleteGroup}
@@ -228,6 +240,7 @@ function GroupSettings() {
         <BottomAction>
           <Button
             full
+            testID="btn-save"
             variant="primary"
             onPress={onSave}
             disabled={!dirty || !name.trim() || updateGroup.isPending}

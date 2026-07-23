@@ -28,7 +28,7 @@ export default function JoinRequests() {
   const reject = useRejectJoinRequest(id);
 
   return (
-    <Screen>
+    <Screen testID="screen-group-requests">
       <Crumb
         segs={[
           { label: "GROUPS" },
@@ -70,6 +70,7 @@ export default function JoinRequests() {
           return (
             <ListRow
               key={r.id}
+              testID={`row-request-${r.id}`}
               minHeight={54}
               glyph={<Avatar label={handle.slice(0, 2)} />}
               name={`@${handle}`}
@@ -77,8 +78,19 @@ export default function JoinRequests() {
               sub={`requested ${new Date(r.created_at).toLocaleDateString()}`}
               end={
                 <View style={{ flexDirection: "row", gap: 6 }}>
-                  <Chip onPress={() => reject.mutate(r.id)}>Decline</Chip>
-                  <Chip variant="on" onPress={() => approve.mutate(r.id)}>
+                  <Chip
+                    testID={`btn-reject-${r.id}`}
+                    accessibilityLabel="Decline request"
+                    onPress={() => reject.mutate(r.id)}
+                  >
+                    Decline
+                  </Chip>
+                  <Chip
+                    variant="on"
+                    testID={`btn-approve-${r.id}`}
+                    accessibilityLabel="Approve request"
+                    onPress={() => approve.mutate(r.id)}
+                  >
                     {approve.isPending ? "…" : "Approve"}
                   </Chip>
                 </View>
