@@ -123,9 +123,6 @@ struct InitConfig {
     /// Optional Delivery Service base URL. Absent → direct Turso writes.
     #[serde(default)]
     pollis_delivery_url: Option<String>,
-    /// Sealed sender (issue #331). Absent/false → real sender_id, sealed=0.
-    #[serde(default)]
-    seal_sender: bool,
 }
 
 /// Initialize the process-global `AppState`. Safe to call multiple times —
@@ -153,7 +150,6 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 r2_public_url: parsed.r2_public_url,
                 livekit_url: parsed.livekit_url,
                 pollis_delivery_url: parsed.pollis_delivery_url.filter(|s| !s.is_empty()),
-                seal_sender: parsed.seal_sender,
                 // Overlay is off on the mobile bridge path in Slice 1b: the shim
                 // + connector wiring ships desktop-first (config-from-env).
                 // Mobile opt-in follows once the relay pool is deployed (Slice 2).

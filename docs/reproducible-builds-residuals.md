@@ -86,11 +86,12 @@ non-reproducible signed-wrapper layer.
 The client bakes build-configuration values into the binary at compile time via
 `option_env!` (`pollis-core/src/config.rs`): `TURSO_URL`, the **read-only**
 `TURSO_TOKEN`, `LOG_DB_URL`, `LOG_DB_TOKEN`, `R2_S3_ENDPOINT`, `R2_PUBLIC_URL`,
-`LIVEKIT_URL`, `POLLIS_DELIVERY_URL`, and `POLLIS_SEAL_SENDER`. These bytes are
-part of the reproducible payload, so a reproducer must bake the **identical**
-values or its hash legitimately diverges.
+`LIVEKIT_URL`, and `POLLIS_DELIVERY_URL`. (`POLLIS_SEAL_SENDER` is gone as of
+#607 — sealed sender is unconditional, so there is no longer a flag to bake.)
+These bytes are part of the reproducible payload, so a reproducer must bake the
+**identical** values or its hash legitimately diverges.
 
-- Most are **non-secret by design** (public URLs, a boolean flag, the RO token)
+- Most are **non-secret by design** (public URLs, the RO token)
   and can be published as a build recipe; `rebuild-verify.yml` reads them from
   non-secret repository/environment `vars`.
 - **As of #506 (secrets-broker cutover, finishing #393) the client bakes no R2 or

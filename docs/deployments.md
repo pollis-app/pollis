@@ -176,6 +176,17 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
 - [ ] **Desktop app** — user-visible change? tag a new `v*` → `desktop-release.yml` (also applies pending migrations).
 - [ ] **CLI (`pollis`)** — behavior a terminal user sees? `cli-release.yml` (`workflow_dispatch`). Easy to forget after a `pollis-core` change.
 - [ ] **DS** — DS code *or* a mirrored wire-contract change? `delivery-deploy-dev.yml` → verify → `delivery-deploy-prod.yml`.
+  - **Ordering (sealed sender / client-side edit-delete authz, #607):** the DS
+    authz change (drop the edit/delete author checks; keep membership + admin
+    gates) **must be live in prod BEFORE any client that seals** ships. A sealing
+    client posts `sealed = 1` with the sentinel `sender_id`; an old DS still
+    running the author-equality check compares the sentinel to the real editor and
+    **403s every edit and self-delete**. The order is manageable because DS deploys
+    are `workflow_dispatch` while client sealing rides a desktop release — but it is
+    **not automatic**: deploy the DS, confirm `/version` shows the merged SHA, and
+    only then cut the client release. There is **no data migration** for this
+    cutover — sealing was never previously on, so there are no unsealed rows to
+    convert; new sends simply start sealing.
 - [ ] **Relay pool** — `pollis-relay` / `pollis-device-cert` change? rebuild the GHCR image (`relay-image.yml`) and roll the pool nodes (`docs/relay-operations.md`); verify each `GET /version` reports the new SHA. No auto-deploy exists, so this is always a manual roll.
 - [ ] **Mobile** — in development; not a released output yet, but note if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up (`mobile-core-check.yml` gates gate-rot).
 - [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? `verifier-release.yml` (`pollis-verify-v*` tag).

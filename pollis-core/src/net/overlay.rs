@@ -704,7 +704,6 @@ mod tests {
             r2_public_url: "https://cdn.example.com".into(),
             livekit_url: "wss://livekit.example.com".into(),
             pollis_delivery_url: Some("https://api.example.com".into()),
-            seal_sender: false,
             overlay_mode: mode,
             overlay_relay_url: relay.map(|s| s.to_string()),
             overlay_relay_cert: None,

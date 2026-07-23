@@ -437,17 +437,35 @@ fn decrypt_and_persist_one(
         }
         "edit" => {
             if let Some(tid) = target_id.as_ref() {
-                // Edits update content only (no sender change); the credential
-                // sender from the decrypt is unused here.
-                let plaintext = ciphertext
+                // Honor the edit ONLY when its MLS-authenticated author
+                // (`cred_sender`) equals the target message's stored author. This
+                // MIRRORS the Redaction branch and is the client-side enforcement
+                // that REPLACES the DS author check dropped under Solution A
+                // (#607): the DS now accepts an edit envelope from any member, so
+                // authorship is proven here, cryptographically — neither the
+                // server nor another member can edit a message they did not write.
+                // A mismatched or unknown-target edit is silently dropped.
+                let Some((plain, cred_sender)) = ciphertext
                     .strip_prefix("mls:")
                     .and_then(|h| hex::decode(h).ok())
                     .and_then(|b| crate::commands::mls::try_mls_decrypt(conn, mls_group_id, &b))
-                    // Strip size padding (§4.1); no-op for legacy/unpadded edits.
-                    .and_then(|(b, _cred_sender)| {
-                        String::from_utf8(super::framing::strip(&b)).ok()
-                    });
-                if let Some(text) = plaintext {
+                else {
+                    return;
+                };
+                let author: Option<String> = conn
+                    .query_row(
+                        "SELECT sender_id FROM message WHERE id = ?1",
+                        rusqlite::params![tid],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .ok()
+                    .flatten();
+                if author.as_deref() != Some(cred_sender.as_str()) {
+                    return;
+                }
+                // Strip size padding (§4.1); no-op for legacy/unpadded edits.
+                if let Ok(text) = String::from_utf8(super::framing::strip(&plain)) {
                     let now = chrono::Utc::now().to_rfc3339();
                     let _ = conn.execute(
                         "UPDATE message SET content = ?1, edited_at = ?2

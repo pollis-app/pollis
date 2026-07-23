@@ -1,19 +1,24 @@
-//! Sealed sender v1 (issue #331, `docs/metadata-minimization-design.md` §2).
+//! Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2) —
+//! now UNCONDITIONAL (#607).
 //!
 //! The reader half — attributing every message from the MLS credential inside
 //! the ciphertext rather than the server-writable `message_envelope.sender_id`
-//! column — shipped as release N and is exercised by the whole existing flows
-//! suite. These tests cover the SENDING half (release N+1, gated behind
-//! `POLLIS_SEAL_SENDER`, default off):
+//! column — shipped earlier and is exercised by the whole existing flows suite.
+//! The SENDING half (envelope-sender blinding) is no longer behind a flag: every
+//! outbound `message`/redaction envelope is written `sealed = 1` with the
+//! sentinel `sender_id`. Making it unconditional is what lets edit/delete
+//! authorization move fully client-side (Solution A) — the DS can no longer see
+//! who authored a message, so it stops trying to enforce authorship.
 //!
-//!   - **sealed positive** — with sealing on, the stored envelope is blinded
-//!     (`sealed = 1`, sentinel `sender_id`) yet the recipient still attributes
-//!     the message to the real sender via the credential.
+//!   - **sealed positive** — the stored envelope is blinded (`sealed = 1`,
+//!     sentinel `sender_id`) yet the recipient still attributes the message to
+//!     the real sender via the credential.
 //!   - **non-member rejected** — a sealed send from a non-member is still
 //!     refused by the DS membership gate (sealing relaxes the
 //!     `sender_id == auth-user` binding, NOT the membership authz).
-//!   - **regression** — with the flag off (default), everything behaves exactly
-//!     as before (real `sender_id`, `sealed = 0`, attribution correct).
+//!   - **no opt-out invariant** — there is NO way to emit an unsealed envelope:
+//!     every posted `type='message'` envelope (ordinary sends AND redactions)
+//!     carries `sealed = 1` and the sentinel, never a real id.
 
 use std::sync::Arc;
 
@@ -63,22 +68,21 @@ async fn two_member_channel(sender: &TestClient, receiver: &TestClient, receiver
     (group_id, channel_id)
 }
 
-/// HEADLINE PROOF: sealing on blinds the server-stored sender while attribution
+/// HEADLINE PROOF: sealing blinds the server-stored sender while attribution
 /// still works.
 ///
-/// Alice sends with `POLLIS_SEAL_SENDER` enabled. The stored `message_envelope`
-/// row carries `sealed = 1` and the sentinel `sender_id` (`"sealed"`), NOT
-/// Alice's real id — so a Turso breach reveals nothing about who sent it. Yet
-/// Bob ingests the message and attributes it to Alice's REAL id, because the
-/// reader takes the sender from the MLS credential inside the ciphertext, not
-/// the (now-blinded) envelope column.
+/// The stored `message_envelope` row carries `sealed = 1` and the sentinel
+/// `sender_id` (`"sealed"`), NOT Alice's real id — so a Turso breach reveals
+/// nothing about who sent it. Yet Bob ingests the message and attributes it to
+/// Alice's REAL id, because the reader takes the sender from the MLS credential
+/// inside the ciphertext, not the (now-blinded) envelope column.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn sealed_send_blinds_server_but_recipient_attributes_correctly() {
     wipe().await;
 
-    // Alice's client has sealing ON; Bob's is a default (sealing off) client.
-    let mut alice = TestClient::new_sealed().await;
+    // Sealing is unconditional — both clients seal every send.
+    let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
 
     let alice_profile = alice.sign_up("alice@test.local").await;
@@ -134,9 +138,9 @@ async fn sealed_send_blinds_server_but_recipient_attributes_correctly() {
 async fn sealed_send_from_non_member_is_rejected() {
     wipe().await;
 
-    let mut alice = TestClient::new_sealed().await;
+    let mut alice = TestClient::new().await;
     let mut bob = TestClient::new().await;
-    let mut mallory = TestClient::new_sealed().await;
+    let mut mallory = TestClient::new().await;
 
     let _alice_profile = alice.sign_up("alice@test.local").await;
     let bob_profile = bob.sign_up("bob@test.local").await;
@@ -185,13 +189,19 @@ async fn sealed_send_from_non_member_is_rejected() {
     drop(mallory);
 }
 
-/// REGRESSION: with the flag off (the default `TestClient::new`), a send behaves
-/// exactly as before sealed sending existed — the envelope stores the real
-/// `sender_id` and `sealed = 0`, and the recipient attributes correctly. This is
-/// what makes landing the sending half == release N (reader on, sealing off).
+/// NO-OPT-OUT INVARIANT (#606/#607): there is NO way to emit an UNSEALED
+/// envelope. Sealing is unconditional, so every posted `type='message'` envelope
+/// — ordinary sends AND self-delete redactions (which ride the same send path) —
+/// must carry `sealed = 1` and the sentinel `sender_id`, never a real id. This is
+/// the property edit/delete client-side authz (Solution A) leans on: the DS can
+/// never learn who authored a message from the stored envelope.
+///
+/// The check is over the WHOLE `message_envelope` table's `type='message'` rows,
+/// so it catches any code path that might slip an unsealed row through — not just
+/// the one message we can name by id.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
-async fn unsealed_send_stores_real_sender_and_attributes_correctly() {
+async fn no_unsealed_envelope_can_be_sent() {
     wipe().await;
 
     let mut alice = TestClient::new().await;
@@ -202,28 +212,46 @@ async fn unsealed_send_stores_real_sender_and_attributes_correctly() {
 
     let (_group_id, channel_id) = two_member_channel(&alice, &bob, &bob_profile.username).await;
 
-    let msg_id = alice.send_channel_message_id(&channel_id, "plain hello").await;
+    // An ordinary send…
+    let keep_id = alice.send_channel_message_id(&channel_id, "kept message").await;
+    // …and a message alice then self-deletes, which posts a REDACTION envelope
+    // (also a `type='message'` row) on the same sealed send path.
+    let doomed_id = alice.send_channel_message_id(&channel_id, "doomed message").await;
+    alice.delete_message(&doomed_id).await;
 
-    // Unsealed: the stored envelope carries alice's real id and sealed = 0.
+    // The kept message's envelope is blinded.
     let remote = writable_remote().await;
-    let (sealed, envelope_sender) = envelope_sealed_and_sender(&remote, &msg_id).await;
-    assert_eq!(sealed, 0, "unsealed send must store sealed = 0");
-    assert_eq!(
+    let (sealed, envelope_sender) = envelope_sealed_and_sender(&remote, &keep_id).await;
+    assert_eq!(sealed, 1, "every send must store sealed = 1");
+    assert_eq!(envelope_sender, "sealed", "every send must store the sentinel");
+    assert_ne!(
         envelope_sender, alice_profile.id,
-        "unsealed send must store alice's real sender_id"
+        "the server-stored sender must never be a real id"
     );
 
-    // Attribution still correct (from the credential, same as always).
-    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
-    let bob_msg = bob_msgs
-        .iter()
-        .find(|m| m["id"] == msg_id)
-        .expect("bob should ingest the message");
-    assert_eq!(bob_msg["content"].as_str(), Some("plain hello"));
+    // WHOLE-TABLE invariant: NO `type='message'` envelope is unsealed or carries
+    // a non-sentinel sender. This is the load-bearing "no opt-out" assertion —
+    // if any path (send or redaction) emitted an unsealed row, this trips.
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM message_envelope \
+             WHERE type = 'message' AND (sealed <> 1 OR sender_id <> 'sealed')",
+            libsql::params![],
+        )
+        .await
+        .expect("count query");
+    let bad: i64 = rows
+        .next()
+        .await
+        .expect("row")
+        .expect("some row")
+        .get(0)
+        .expect("count");
     assert_eq!(
-        bob_msg["sender_id"].as_str(),
-        Some(alice_profile.id.as_str()),
-        "bob must attribute the unsealed message to alice's real id"
+        bad, 0,
+        "every posted message/redaction envelope must be sealed=1 with the \
+         sentinel sender_id — found {bad} unsealed/real-sender rows"
     );
 
     drop(alice);
