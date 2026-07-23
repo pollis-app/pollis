@@ -10,6 +10,7 @@
 //! Only SOCKS5 CONNECT with no authentication is supported (loopback side only).
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,7 +18,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::task::JoinHandle;
 
 use crate::circuit::CircuitFactory;
-use crate::policy::{FinalAction, PlannedRoute, RoutingPolicy};
+use crate::policy::{FinalAction, OverlayMode, PlannedRoute, RoutingPolicy};
 use crate::stream::BoxedStream;
 
 const SOCKS5_VERSION: u8 = 0x05;
@@ -37,6 +38,10 @@ const REP_CMD_NOT_SUPPORTED: u8 = 0x07;
 pub struct OverlayHandle {
     socks_addr: SocketAddr,
     task: JoinHandle<()>,
+    /// Shared with the shim's live [`RoutingPolicy`]: flipping this switches
+    /// Prefer↔Strict for every in-flight and future SOCKS request without
+    /// restarting the shim (design §14 apply slice).
+    mode: Arc<AtomicU8>,
 }
 
 impl OverlayHandle {
@@ -44,6 +49,17 @@ impl OverlayHandle {
     /// (`socks5h://…`) at.
     pub fn socks_addr(&self) -> SocketAddr {
         self.socks_addr
+    }
+
+    /// The mode the shim is currently routing under.
+    pub fn mode(&self) -> OverlayMode {
+        OverlayMode::from_u8(self.mode.load(Ordering::Relaxed))
+    }
+
+    /// Flip the live routing mode (Prefer↔Strict). No shim restart, no DB
+    /// reconnect: the shim's routing policy reads this on the next request.
+    pub fn set_mode(&self, mode: OverlayMode) {
+        self.mode.store(mode.as_u8(), Ordering::Relaxed);
     }
 }
 
@@ -65,6 +81,9 @@ impl OverlayShim {
         let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
         let socks_addr = listener.local_addr()?;
 
+        // Capture the shared mode cell BEFORE the policy is moved into the shim,
+        // so the returned handle can flip Prefer↔Strict live.
+        let mode = policy.mode_atomic();
         let policy = Arc::new(policy);
         let task = tokio::spawn(async move {
             loop {
@@ -86,7 +105,7 @@ impl OverlayShim {
             }
         });
 
-        Ok(OverlayHandle { socks_addr, task })
+        Ok(OverlayHandle { socks_addr, task, mode })
     }
 }
 

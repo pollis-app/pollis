@@ -115,6 +115,8 @@ pub fn build_client_app(state: Arc<AppState>) -> Result<(App<MockRuntime>, Webvi
             crate::commands::mls::poll_mls_welcomes,
             crate::commands::mls::process_pending_commits,
             crate::commands::mls::catch_up_all_mls_groups,
+            crate::commands::overlay::get_overlay_mode,
+            crate::commands::overlay::set_overlay_mode,
         ])
         .manage(state)
         .build(mock_context(noop_assets()))

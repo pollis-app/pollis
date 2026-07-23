@@ -159,6 +159,7 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 // Mobile opt-in follows once the relay pool is deployed (Slice 2).
                 overlay_mode: pollis_relay::OverlayMode::Off,
                 overlay_relay_url: None,
+                overlay_relay_cert: None,
             };
             let state = AppState::new(config).await?;
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))

@@ -97,6 +97,33 @@ pub fn load_or_create_device_signer(
     Ok((sig_keys, pub_bytes))
 }
 
+/// Load this device's stable MLS signing key as an `ed25519_dalek::SigningKey`.
+///
+/// This is the SAME key `ds_client` signs DS requests with and the SAME key the
+/// device cert certifies (`user_device.mls_signature_pub`). The closed-overlay
+/// relay handshake (`net::overlay`) presents a `pollis_relay::ClientIdentity`
+/// built from it, so the handshake signature verifies under the key the offline
+/// cert chain binds to the account. Requires the local DB to be open.
+///
+/// The Pollis MLS ciphersuite is `MLS_128_..._Ed25519`, so the openmls
+/// `SignatureKeyPair`'s private half is exactly the 32-byte Ed25519 seed —
+/// `SignatureKeyPair::private()` (the `test-utils` accessor) returns it verbatim.
+/// Returns `(signing_key, pub_bytes)`; `pub_bytes` is the certified
+/// `mls_signature_pub`.
+pub fn load_device_signing_key(
+    provider: &PollisProvider<'_>,
+    user_id: &str,
+    device_id: &str,
+) -> crate::error::Result<(ed25519_dalek::SigningKey, Vec<u8>)> {
+    let (kp, pub_bytes) = load_or_create_device_signer(provider, user_id, device_id)?;
+    let seed: [u8; 32] = kp.private().try_into().map_err(|_| {
+        crate::error::Error::Other(anyhow::anyhow!(
+            "device signing key is not a 32-byte Ed25519 seed"
+        ))
+    })?;
+    Ok((ed25519_dalek::SigningKey::from_bytes(&seed), pub_bytes))
+}
+
 // ── Device cross-signing ─────────────────────────────────────────────────────
 
 /// Ensure this device has a stable MLS signing keypair AND a `device_cert`

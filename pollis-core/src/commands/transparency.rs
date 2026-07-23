@@ -174,7 +174,8 @@ pub async fn self_audit_account_key(
     let my_pub_hex = hex::encode(&my_pub);
 
     let base = transparency_base_url();
-    match fetch_and_verify(state.overlay.as_ref(), &base, &my_user_id).await {
+    let overlay = state.overlay_handle();
+    match fetch_and_verify(overlay.as_deref(), &base, &my_user_id).await {
         Ok((report, served_key)) => {
             Ok(derive_self_audit(&report, &served_key, &my_pub_hex, my_version))
         }
@@ -201,7 +202,8 @@ pub async fn audit_peer_account_key(
     let pinned_version = pinned.as_ref().map(|(_, v)| *v);
 
     let base = transparency_base_url();
-    match fetch_and_verify(state.overlay.as_ref(), &base, &peer_user_id).await {
+    let overlay = state.overlay_handle();
+    match fetch_and_verify(overlay.as_deref(), &base, &peer_user_id).await {
         Ok((report, served_key)) => {
             let pin = match (&pinned_hex, pinned_version) {
                 (Some(h), Some(v)) => Some((h.as_str(), v)),
@@ -265,7 +267,8 @@ pub async fn verify_own_build(state: &Arc<AppState>) -> Result<BuildVerifyReport
     // the host serves into its verdict, so an unpinned key could sign a
     // self-consistent forged tree that "verifies" — the same trap the account
     // self-audit guards against. A served key ≠ the pin is the loud case.
-    match fetch_served_binaries_public_key(state.overlay.as_ref(), &base).await {
+    let overlay = state.overlay_handle();
+    match fetch_served_binaries_public_key(overlay.as_deref(), &base).await {
         Ok(served) if !served_key_matches_pin(&served) => {
             return Ok(BuildVerifyReport {
                 status: BuildVerifyStatus::Mismatch,

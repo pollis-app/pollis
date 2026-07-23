@@ -45,12 +45,38 @@ pub struct Config {
     /// requires it and surfaces a degraded error rather than silently going direct
     /// (messages-must-work). Media (LiveKit) stays direct in every mode (§6.4).
     pub overlay_mode: pollis_relay::OverlayMode,
-    /// The v0 first-party relay endpoint (`POLLIS_OVERLAY_RELAY`, e.g.
-    /// `relay.pollis.com:443`). Absent → the overlay cannot build a circuit: in
-    /// `Prefer` that means direct fallback, in `Strict` a surfaced degraded error
-    /// — never a silent drop. The shim still starts whenever the mode is non-off
-    /// so `Strict` degrades instead of silently going direct.
+    /// The v0 first-party relay endpoint(s) (`POLLIS_OVERLAY_RELAY`, e.g.
+    /// `relay.pollis.com:443`). Comma-separated for a future pool — v0 dials the
+    /// first (see [`overlay_relay_endpoints`](Config::overlay_relay_endpoints));
+    /// the pool+failover slice extends this. Absent → the overlay cannot build a
+    /// circuit: in `Prefer` that means direct fallback, in `Strict` a surfaced
+    /// degraded error — never a silent drop. The shim still starts whenever the
+    /// mode is non-off so `Strict` degrades instead of silently going direct.
     pub overlay_relay_url: Option<String>,
+    /// The pinned QUIC server identity of the relay (`POLLIS_OVERLAY_RELAY_CERT`):
+    /// a filesystem path to a DER cert, or the base64 (STANDARD) of the DER bytes.
+    /// The client pins this exact leaf (the relay's identity *is* its cert, see
+    /// `pollis_relay::tls::PinnedServerCertVerifier`) so it verifies which relay
+    /// it dials. Absent → no circuit can be built (fail-closed, same as an absent
+    /// endpoint). Kept separate from the endpoint so a future pool can pin one
+    /// cert while listing several addresses.
+    pub overlay_relay_cert: Option<String>,
+}
+
+impl Config {
+    /// The configured relay endpoints, in order. v0 dials the first; the
+    /// pool+failover slice will try the rest. Empty when unconfigured.
+    pub fn overlay_relay_endpoints(&self) -> Vec<String> {
+        self.overlay_relay_url
+            .as_deref()
+            .map(|s| {
+                s.split(',')
+                    .map(|e| e.trim().to_string())
+                    .filter(|e| !e.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 impl Config {
@@ -96,6 +122,10 @@ impl Config {
             overlay_relay_url: option_env!("POLLIS_OVERLAY_RELAY")
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("POLLIS_OVERLAY_RELAY").ok())
+                .filter(|s| !s.is_empty()),
+            overlay_relay_cert: option_env!("POLLIS_OVERLAY_RELAY_CERT")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("POLLIS_OVERLAY_RELAY_CERT").ok())
                 .filter(|s| !s.is_empty()),
         })
     }
@@ -167,6 +197,7 @@ impl Config {
             // (`net::overlay`) that spin an in-process relay.
             overlay_mode: pollis_relay::OverlayMode::Off,
             overlay_relay_url: None,
+            overlay_relay_cert: None,
         })
     }
 }

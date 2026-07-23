@@ -26,6 +26,10 @@ pub mod livekit;
 // and unit-tests on every target.
 pub mod livekit_signalling;
 pub mod mls;
+// Runtime application of the closed-overlay relay mode (design §14): the engine
+// behind get/set_overlay_mode that live-routes control-plane traffic through the
+// relay. Off-by-default; always compiled (pure Rust + pollis-relay).
+pub mod overlay;
 // Push-notification backend (#344): token registration + the content-free
 // send_message fanout. Pure libsql + reqwest, so it compiles on every target.
 pub mod push;
