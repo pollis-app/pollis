@@ -1,0 +1,38 @@
+WEBVTT
+
+NOTE Captions for "Pollis's three logs, and what each one prevents" (Topic 9).
+NOTE No audio track yet by decision; these captions carry the narration. Source
+NOTE of truth: learn/manim/scripts/three-logs.md
+
+00:00.000 --> 00:20.000
+Three logs. One signing key. One address: verify dot pollis dot com. Each one closes a different attack.
+
+00:20.000 --> 00:40.000
+The first holds every identity key we've ever published. To hand you the wrong key, we'd have to write the fake key here — permanently, in public, where the real owner's own app is looking.
+
+00:40.000 --> 01:00.000
+And the rule on this log is that versions only move forward. We can't slip an old key back in, or renumber history.
+
+01:00.000 --> 01:15.000
+The second holds every commit in every conversation. Groups move forward in epochs, and everyone has to apply them in the same order.
+
+01:15.000 --> 01:32.000
+So watch what a dishonest server would try: two different commits, both claiming to be epoch eight. The group splits — half in one reality, half in another.
+
+01:32.000 --> 01:45.000
+The log's rule makes that impossible. One epoch, one commit. And look at what's stored — it's sealed. The log publishes the order of a conversation, never a word of its content.
+
+01:45.000 --> 02:10.000
+The third holds the fingerprint of every app we've released. Build a special version for one person and that fingerprint is either in this public log, where anyone can see it, or missing from it, where that person's own app notices. There's no third option.
+
+02:10.000 --> 02:25.000
+Why three logs instead of one? Because a signed head for one must never work as a head for another.
+
+02:25.000 --> 02:40.000
+Take a valid head from the commit log and try to pass it off as one for the binaries log. It doesn't fit. Each tree signs under its own context, so the signature says which tree it belongs to.
+
+02:40.000 --> 02:52.000
+And the limits, plainly. These don't make us honest — they make lying undeniable rather than impossible. They also say nothing about bugs. A log proves what we published, not that it's correct.
+
+02:52.000 --> 03:00.000
+One practical note. The logs rebuild once a day, so something published an hour ago may genuinely not be in there yet. That's why your app says "pending" instead of raising an alarm.
