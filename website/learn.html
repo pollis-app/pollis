@@ -588,8 +588,8 @@
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
             heads, proofs &amp; equivocation</a></li>
-        <li><span class="ln-track">SOON</span><span class="ln-soon">Pollis's three logs — and what
-            each one prevents</span></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#three-logs">Pollis's three logs — and
+            what each one prevents</a></li>
       </ul>
 
       <!-- ═══ Topic 7 — Merkle trees (M0 pilot, #596) ═══════════════════════ -->
@@ -910,6 +910,140 @@
             href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a> → "Trust model". The
           live signed head is on the <a href="artifacts.html">artifacts page</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Topic 9 — the three logs (#598) ═══════════════════════════════ -->
+      <section class="ln-section" id="three-logs">
+        <div class="ln-eyebrow">Track D · Transparency · Topic 9</div>
+        <h2>Pollis's three logs — and what each one prevents</h2>
+
+        <div class="ln-prose">
+          <p>
+            Three separate append-only logs, one signing key, one static site at
+            <code>verify.pollis.com</code>. Each is worth describing by the attack it closes rather
+            than by what's in it.
+          </p>
+          <p>
+            <strong>Log 1 — account keys. Stops: us handing you the wrong person's key.</strong>
+            Every identity key Pollis publishes for an account goes in here, in order, with a
+            version number. To substitute a key, we'd have to publish it — permanently, in public,
+            where the real owner's own device is checking. The rule this log enforces is that
+            versions only ever move forward: we can't insert an older key retroactively or renumber
+            history.
+          </p>
+          <p>
+            <strong>Log 2 — the MLS commit log. Stops: us quietly rewriting a group's
+            history.</strong> A group advances through epochs, and every member must apply the same
+            commits in the same order — exactly the sort of thing a malicious server could tamper
+            with by reordering, dropping, or forking it. So every commit is logged, and the rule is
+            that a conversation is a straight line: <strong>each epoch appears once</strong>, and two
+            different commits can never claim the same epoch. A fork is rejected at write time.
+          </p>
+          <p>
+            Note what this log holds: <em>sealed</em> commits. Publishing them exposes the shape of a
+            conversation, never its content — the server never had the keys, and neither does anyone
+            reading the log.
+          </p>
+          <p>
+            <strong>Log 3 — binaries. Stops: us shipping you a custom backdoored app.</strong> Every
+            released installer's hashes go here. Its rule is no silent re-issue: the same release tag
+            and platform can't come to mean different bytes later. If we ever built a special version
+            for one person, its fingerprint is either in a public log everyone can read — or
+            conspicuously missing from it. Both are detectable.
+          </p>
+          <p>
+            <strong>Why three logs and not one big one.</strong> Because a signed head for one tree
+            must never be usable as a head for another. If all three shared a signature format, an
+            attacker holding a valid head for the commit log could try to present it as a head for
+            the binaries log. So each tree signs under its own <strong>domain-separated
+            context</strong> — the signature commits to <em>which tree</em> it belongs to:
+          </p>
+          <code class="ln-root">pollis-verifiable-log:sth:v1&nbsp;&nbsp;·&nbsp;&nbsp;…:sth:v1:account-keys&nbsp;&nbsp;·&nbsp;&nbsp;…:sth:v1:binaries</code>
+          <p>
+            A head from one tree fails verification against another, structurally. Different
+            questions, different logs, non-interchangeable proofs. They share one signing key and one
+            static site, which keeps the thing you have to trust down to a single pinned key.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            None of these logs makes us honest. A dishonest entry can be written to any of them; what
+            changes is that it becomes permanent, public, and comparable across every observer —
+            <strong>undeniable rather than impossible</strong>. They also do nothing about bugs: a log
+            proves what we published, not that what we published is correct. And there's an
+            operational limit worth stating plainly — the logs are rebuilt and republished on a
+            <strong>daily</strong> schedule, so a brand-new release or a just-published key can be
+            genuinely absent for a while. "Not in the log <em>yet</em>" and "not in the log" are
+            different statements, and the app deliberately shows the first as
+            <strong>pending</strong> rather than an alarm.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/three-logs.jpg" aria-describedby="three-logs-transcript-body">
+            <source src="learn/media/three-logs.webm" type="video/webm" />
+            <source src="learn/media/three-logs.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/three-logs.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            Each log introduced by the attack it closes, a fork getting slammed shut, and a signed
+            head that physically won't fit another tree's slot.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="three-logs-transcript-body">
+            <p>Three logs. One signing key. One address: verify dot pollis dot com.</p>
+            <p>The first holds every identity key we've ever published. Remember the attack where we
+              hand you the wrong key? To do that, we'd have to write the fake key <em>here</em> —
+              permanently, in public, where the real owner's own app is looking. And the rule on this
+              log is that versions only move forward. We can't slip an old key back in, or renumber
+              history.</p>
+            <p>The second holds every commit in every conversation. Groups move forward in epochs,
+              and everyone has to apply them in the same order. So watch what a dishonest server
+              would try: two different commits, both claiming to be epoch eight. The group splits —
+              half in one reality, half in another.</p>
+            <p>The log's rule makes that impossible. One epoch, one commit. The fork is rejected, and
+              the attempt is on the record. And look closely at what's actually stored — it's sealed.
+              The log publishes the <em>order</em> of a conversation. Never a word of its content. We
+              never had the keys either.</p>
+            <p>The third holds the fingerprint of every app we've ever released. If we ever built a
+              special version for one person, that fingerprint is either in this public log — where
+              anyone can see it — or missing from it, where that person's own app notices. There's no
+              third option.</p>
+            <p>Why three logs instead of one? Because a signed head for one must never work as a head
+              for another. Take a valid head from the commit log, and try to pass it off as one for
+              the binaries log. It doesn't fit. Each tree signs under its own context, so the
+              signature says which tree it belongs to.</p>
+            <p>And the limits, plainly. These don't make us honest. We could write something
+              dishonest to any of them. What changes is that it's permanent, public, and identical
+              for everyone who looks — undeniable, not impossible. They also say nothing about bugs.
+              A log proves what we published. It doesn't prove it's correct.</p>
+            <p>One practical note. The logs rebuild once a day. So a brand-new release, or a key
+              published an hour ago, may genuinely not be in there yet. That's why your app says
+              "pending" instead of raising an alarm. Not in the log <em>yet</em> is a different thing
+              from not in the log.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            target="_blank" rel="noopener noreferrer">docs/transparency.md</a> → "Three
+          domain-separated trees" and "The commit-log invariant", plus the per-tree contexts in <a
+            href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-builder/src"
+            target="_blank" rel="noopener noreferrer">verifiable-log-builder/src</a>.
         </p>
       </section>
 
