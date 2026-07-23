@@ -90,8 +90,23 @@ pub struct GroupReport {
 /// is folded into the returned report as `chain_valid = false` with a
 /// `violations` entry; it never panics and never returns `Err` for those.
 pub fn verify_group(base_url: &str, conversation_id: &str) -> Result<GroupReport> {
+    verify_group_via(base_url, conversation_id, None)
+}
+
+/// [`verify_group`] with an optional SOCKS5 `proxy` (e.g.
+/// `socks5h://127.0.0.1:9050`) for every fetch. When the closed overlay is on,
+/// pollis-core passes the loopback shim here so the blocking `ureq` verify path
+/// routes through the relay and does not leak the client's IP to the first-party
+/// transparency host (design §14.4). `None` is exactly [`verify_group`] — a
+/// direct fetch, byte-for-byte the pre-overlay behaviour. A malformed proxy URL
+/// is returned as `Err`, never silently downgraded to a direct fetch.
+pub fn verify_group_via(
+    base_url: &str,
+    conversation_id: &str,
+    proxy: Option<&str>,
+) -> Result<GroupReport> {
     let base = base_url.trim_end_matches('/');
-    let agent = build_agent();
+    let agent = build_agent(proxy)?;
 
     // Prerequisites: the published key, the latest signed head, and the full
     // ordered entry list. Without these there is nothing to verify.

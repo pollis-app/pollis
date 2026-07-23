@@ -474,7 +474,7 @@ Every outbound path in `pollis-core` (+ shells), from the surface audit:
 | DS writes/reads | `reqwest` — `mls/ds_client.rs:135,388,421,444` | `.proxy()` ✅ | **overlay** |
 | R2 presigned PUT/GET/DELETE | `reqwest` — `r2.rs:761,777,788` | `.proxy()` ✅ | **overlay** (R2 host allowlisted) |
 | Transparency fetch (async) | `reqwest` — `transparency.rs:347,370` | `.proxy()` ✅ | overlay |
-| Transparency **verify** | `ureq` (sync, in `verifiable-log-serve`) | ❌ none | **residual leak (§14.4)** |
+| Transparency **verify** | `ureq` (sync, in `verifiable-log-serve`) | `.proxy()` via `*_via` ✅ | **overlay** (closed §14.4) |
 | Push register (Expo) | `reqwest` — `push.rs:139` | `.proxy()` ✅ | see §14.4 (non-first-party host) |
 | LiveKit signaling (WS) + media (RTP) | `livekit` crate | ❌ none | **direct** — plane split (§6.4) |
 
@@ -518,11 +518,19 @@ first-party last hop) builds on Slice 1's `n`-hop `Circuit` — no re-plumb.
 
 ### 14.4 Residual leaks to state honestly in v0 (do not paper over)
 
-1. **`ureq` transparency-verify path can't proxy** (`verifiable-log-serve`, sync). The account-key /
-   build-verify *fetch* has an async reqwest path we proxy; the *verifier* uses ureq and will leak
-   the client IP to `verify.pollis.com`. Options: route verify through the shim via ureq's
-   (limited) proxy env, port the verifier fetch to reqwest, or accept + document. v0 **documents**
-   it; it is public-key fetching, not account-keyed activity, so it is the lowest-value leak.
+1. **`ureq` transparency-verify path — CLOSED when the overlay is on.** ~~Can't proxy.~~ The blocking
+   `ureq` verifier in `verifiable-log-serve` now takes an optional SOCKS5 proxy: `build_agent` gained a
+   `proxy: Option<&str>` arg (ureq `socks-proxy` feature), and the three public verifiers grew sibling
+   `verify_account_via` / `verify_release_via` / `verify_group_via` entry points that thread it through
+   (the no-`_via` forms delegate with `None`, so CLI/server/tests are unchanged). `pollis-core`'s
+   `transparency.rs` computes `socks5://<shim>` from `state.overlay_handle()` before each `spawn_blocking`
+   and passes it in, so the account-key self/peer audit and the build-verify fetch route through the relay
+   whenever the overlay is on — `verify.pollis.com` is a first-party control-plane host, routed like the
+   other control-plane egress. (`socks5://` not `socks5h://`: ureq doesn't recognize the `socks5h` token,
+   but for a hostname target it already sends `ATYP=DOMAIN` — proxy-side DNS — which is what `socks5h`
+   denotes and what the shim needs.) A malformed proxy URL is a hard error, never a silent direct fetch;
+   an overlay-on connect failure surfaces as `Unavailable` (advisory), never a silent direct leak. Overlay
+   **off** is byte-for-byte the pre-overlay direct fetch. No residual leak remains on this path.
 2. **Push register (Expo `exp.host`) is not a first-party host.** It is outside the closed
    allowlist by definition, so it **cannot** go through the overlay (a relay would refuse it, per
    §1.2). v0 keeps it direct and notes it; longer term the DS should proxy push registration
