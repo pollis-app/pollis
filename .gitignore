@@ -11,6 +11,7 @@ pollis
 !verifiable-log/src/bin/
 !verifiable-log-builder/src/bin/
 !verifiable-log-serve/src/bin/
+!pollis-relay/src/bin/
 
 # Test binary
 *.test

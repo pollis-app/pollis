@@ -25,6 +25,10 @@
 //! # Global cap on simultaneously-open QUIC connections. Default 4096.
 //! max_concurrent_connections = 4096
 //!
+//! # Opt-in HTTP/1.1 health/version endpoint (TCP). Orchestrators/load-balancers
+//! # probe this (the relay itself is QUIC/UDP-only). Omitted ⇒ NOT started.
+//! health_bind = "0.0.0.0:9445"
+//!
 //! [rate_limit]
 //! new_circuits_per_min_per_ip = 600
 //! new_circuits_per_min_per_account = 600
@@ -50,6 +54,8 @@ pub struct RelayFileConfig {
     pub allowlist: Option<Vec<String>>,
     pub identity_path: Option<String>,
     pub max_concurrent_connections: Option<u32>,
+    /// TCP bind for the opt-in HTTP health/version endpoint. `None` ⇒ not started.
+    pub health_bind: Option<String>,
     pub rate_limit: Option<RateLimitFileConfig>,
 }
 
@@ -106,6 +112,7 @@ mod tests {
             allowlist = ["turso.io", "*.pollis.com"]
             identity_path = "/tmp/id.key"
             max_concurrent_connections = 100
+            health_bind = "0.0.0.0:9445"
 
             [rate_limit]
             new_circuits_per_min_per_ip = 10
@@ -119,6 +126,7 @@ mod tests {
         );
         assert_eq!(cfg.identity_path.as_deref(), Some("/tmp/id.key"));
         assert_eq!(cfg.max_concurrent_connections, Some(100));
+        assert_eq!(cfg.health_bind.as_deref(), Some("0.0.0.0:9445"));
 
         // Filled fields override; omitted ones fall to the default.
         let rl = cfg.rate_limits();
