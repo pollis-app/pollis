@@ -1,0 +1,11 @@
+# Python venv for the Manim render toolchain — recreate with:
+#   uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python manim
+.venv/
+
+# Manim's per-render scratch tree (partial movies, caches). The SHIPPING artifacts
+# are written to website/learn/media/ by render.sh — those ARE committed.
+media/
+
+# Python bytecode
+__pycache__/
+*.pyc

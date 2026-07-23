@@ -1,0 +1,31 @@
+#!/bin/bash
+# Pollis relay node bootstrap (Amazon Linux 2023, arm64). Stateless: fetches the
+# shared pool QUIC identity from SSM and runs the published relay image. Holds no
+# Turso/DS credentials — the relay authenticates devices offline (see
+# docs/relay-operations.md §2). Idempotent enough for a fresh boot.
+set -euxo pipefail
+
+dnf install -y docker
+systemctl enable --now docker
+
+install -d -m 0700 /var/lib/pollis-relay
+
+# The pool QUIC identity (key + leaf cert) lives in SSM SecureStrings as base64.
+# The client pins this cert; every node in the pool shares it (v0.5). The AWS CLI
+# ships in the AL2023 base image; the instance role grants read on just these two.
+aws ssm get-parameter --region ${region} --name "${identity_key_param}" --with-decryption \
+  --query Parameter.Value --output text | base64 -d > /var/lib/pollis-relay/identity.key
+aws ssm get-parameter --region ${region} --name "${identity_cert_param}" --with-decryption \
+  --query Parameter.Value --output text | base64 -d > /var/lib/pollis-relay/identity.key.crt
+chmod 0600 /var/lib/pollis-relay/identity.key /var/lib/pollis-relay/identity.key.crt
+
+# --network host so the QUIC UDP port and the health TCP port bind directly to
+# the node's public interface. --restart=always survives dockerd/instance reboots;
+# the ASG replaces the whole node if it dies.
+docker run -d --name pollis-relay --restart=always --network host \
+  -v /var/lib/pollis-relay:/var/lib/pollis-relay \
+  -e POLLIS_RELAY_BIND=0.0.0.0:${relay_port} \
+  -e POLLIS_RELAY_HEALTH_BIND=0.0.0.0:${health_port} \
+  -e POLLIS_RELAY_ALLOWLIST='${relay_allowlist}' \
+  -e POLLIS_RELAY_IDENTITY=/var/lib/pollis-relay/identity.key \
+  ${relay_image}
