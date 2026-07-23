@@ -8,7 +8,13 @@ import {
   setTrayEnabled,
 } from "../bridge";
 import { PageShell } from "../components/Layout/PageShell";
-import { usePreferences, applyPreferences, applyDeviceFontSize } from "../hooks/queries/usePreferences";
+import {
+  usePreferences,
+  applyPreferences,
+  applyDeviceFontSize,
+  normalizeOverlayMode,
+  type OverlayMode,
+} from "../hooks/queries/usePreferences";
 import {
   useMessageRetention,
   useSetMessageRetention,
@@ -60,6 +66,10 @@ export const PreferencesPage: React.FC = observer(() => {
   const [sidebarOpenByDefault, setSidebarOpenByDefault] = useState<boolean>(true);
   const [closeToTray, setCloseToTray] = useState<boolean>(true);
   const [menubarIcon, setMenubarIcon] = useState<boolean>(false);
+  const [overlayMode, setOverlayMode] = useState<OverlayMode>("off");
+  // Inline status line under the relay control: an apply error (e.g. Strict
+  // with no relay reachable) surfaces here rather than throwing.
+  const [overlayStatus, setOverlayStatus] = useState<string | null>(null);
   const [accentHexInput, setAccentHexInput] = useState<string>(() => hslToHex(38, 90, 62));
   const [bgHexInput, setBgHexInput] = useState<string>(() => hslToHex(38, 20, 4));
 
@@ -93,6 +103,7 @@ export const PreferencesPage: React.FC = observer(() => {
       if (query.data.menubar_icon !== undefined) {
         setMenubarIcon(query.data.menubar_icon);
       }
+      setOverlayMode(normalizeOverlayMode(query.data.overlay_mode));
     }
   }, [query.data, currentUser?.id]);
 
@@ -131,6 +142,7 @@ export const PreferencesPage: React.FC = observer(() => {
     sidebarOpenByDefault?: boolean;
     closeToTray?: boolean;
     menubarIcon?: boolean;
+    overlayMode?: OverlayMode;
   }) => {
     const ah = opts.accentH ?? hue;
     const as_ = opts.accentS ?? saturation;
@@ -142,6 +154,7 @@ export const PreferencesPage: React.FC = observer(() => {
     const sidebar = opts.sidebarOpenByDefault ?? sidebarOpenByDefault;
     const tray = opts.closeToTray ?? closeToTray;
     const menubar = opts.menubarIcon ?? menubarIcon;
+    const overlay = opts.overlayMode ?? overlayMode;
     const skinVal = opts.skin ?? skin;
     const accentHex = hslToHex(ah, as_, 62);
     const bgHex = hslToHex(bh, bs, bl);
@@ -161,8 +174,76 @@ export const PreferencesPage: React.FC = observer(() => {
       sidebar_open_by_default: sidebar,
       close_to_tray: tray,
       menubar_icon: menubar,
+      overlay_mode: overlay,
     });
-  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon]);
+  }, [savePrefs, query.data, hue, saturation, bgHue, bgSaturation, bgLightness, skin, allowDesktopNotifications, allowSoundEffects, sidebarOpenByDefault, closeToTray, menubarIcon, overlayMode]);
+
+  // Drive the merged overlay engine (`set_overlay_mode`) to `val`, live. Never
+  // throws: a rejected apply (e.g. Strict with no relay reachable — the engine
+  // rolls back rather than silently going direct) is surfaced inline and the
+  // control snaps to whatever mode actually took effect (`get_overlay_mode`).
+  // `persist` writes the result through the synced preferences blob; the
+  // apply-on-load path passes false so it never re-saves.
+  const applyOverlayMode = useCallback(async (val: OverlayMode, persist: boolean) => {
+    try {
+      await invoke("set_overlay_mode", { mode: val });
+      setOverlayStatus(null);
+      if (persist) {
+        save({ overlayMode: val });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      let actual: OverlayMode = val;
+      try {
+        actual = normalizeOverlayMode(await invoke<string>("get_overlay_mode"));
+      } catch {
+        // `get_overlay_mode` itself failed — keep the best guess (`val`) and
+        // still surface the original apply error below.
+      }
+      setOverlayMode(actual);
+      setOverlayStatus(msg);
+      if (persist) {
+        save({ overlayMode: actual });
+      }
+    }
+  }, [save]);
+
+  // Apply the saved relay preference after login/restart so the synced choice
+  // takes effect. Guarded: only invoke when the desired mode differs from the
+  // currently-running one, so a redundant re-apply never reconnects the DBs.
+  useEffect(() => {
+    const desired = query.data?.overlay_mode;
+    if (desired === undefined) {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const current = normalizeOverlayMode(await invoke<string>("get_overlay_mode"));
+        if (cancelled || current === desired) {
+          return;
+        }
+      } catch {
+        // Couldn't read the live mode — fall through and apply anyway;
+        // `set_overlay_mode` is itself idempotent.
+      }
+      if (!cancelled) {
+        await applyOverlayMode(desired, false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [query.data?.overlay_mode, applyOverlayMode]);
+
+  const handleOverlayMode = (val: OverlayMode) => {
+    if (val === overlayMode) {
+      return;
+    }
+    setOverlayMode(val);
+    setOverlayStatus(null);
+    void applyOverlayMode(val, true);
+  };
 
   const handleAccentColor = (hex: string) => {
     const [h, s] = hexToHsl(hex);
@@ -627,6 +708,65 @@ export const PreferencesPage: React.FC = observer(() => {
                 not affect your other devices or the people you're talking to, and
                 you'll still receive new messages normally.
               </p>
+            </section>
+
+            {/* Network privacy — relay overlay (#455). Synced across devices and
+                applied live via set_overlay_mode. */}
+            <section className="flex flex-col gap-4 mb-12">
+              <h2
+                className="text-xs font-mono font-medium uppercase tracking-widest pb-1 border-b"
+                style={{ color: "var(--c-text)", borderColor: "var(--c-border)" }}
+              >
+                Network privacy (relay)
+              </h2>
+              <div
+                role="radiogroup"
+                aria-label="Network privacy relay mode"
+                className="flex gap-2 flex-wrap"
+              >
+                {([
+                  { value: "off", label: "Off" },
+                  { value: "prefer", label: "Prefer" },
+                  { value: "strict", label: "Strict" },
+                ] as const).map((opt) => (
+                  <Button
+                    key={opt.value}
+                    variant={overlayMode === opt.value ? "primary" : "secondary"}
+                    size="sm"
+                    aria-label={opt.label}
+                    data-testid={`pref-overlay-mode-${opt.value}`}
+                    onClick={() => handleOverlayMode(opt.value)}
+                  >
+                    {opt.label}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                Routes Pollis's own traffic (messages, sync) through a relay so our
+                servers see the relay's address, not yours. Calls connect directly.
+                This hides your IP from Pollis — it is not anonymity, and does not
+                change end-to-end encryption.
+              </p>
+              <ul className="flex flex-col gap-1 text-xs font-mono" style={{ color: "var(--c-text-muted)" }}>
+                <li>
+                  <span style={{ color: "var(--c-text-dim)" }}>Off</span> — Direct connection (default, fastest).
+                </li>
+                <li>
+                  <span style={{ color: "var(--c-text-dim)" }}>Prefer</span> — Use the relay when available; fall back to a direct connection if it isn't.
+                </li>
+                <li>
+                  <span style={{ color: "var(--c-text-dim)" }}>Strict</span> — Only connect through the relay. If no relay is reachable, sending is paused rather than revealing your IP.
+                </li>
+              </ul>
+              {overlayStatus !== null && (
+                <p
+                  data-testid="pref-overlay-status"
+                  className="text-xs font-mono"
+                  style={{ color: "var(--c-danger)" }}
+                >
+                  Couldn't apply relay mode: {overlayStatus} — currently {overlayMode}.
+                </p>
+              )}
             </section>
 
             {/* Voice */}

@@ -23,6 +23,20 @@ import {
  */
 export type NoiseSuppressionLevel = "off" | "low" | "moderate" | "high";
 
+/**
+ * Network-privacy relay overlay mode. Mirrors the Rust `pollis_relay::OverlayMode`
+ * that `get_overlay_mode` / `set_overlay_mode` (see `commands/overlay.rs`) parse
+ * and apply. `off` is the default direct path; `prefer` routes through the relay
+ * when one is reachable and falls back to direct; `strict` routes only through the
+ * relay and pauses sending rather than revealing the client IP when none is up.
+ */
+export type OverlayMode = "off" | "prefer" | "strict";
+
+/** Coerce an arbitrary string to a known `OverlayMode`; unknown/absent → `off`. */
+export function normalizeOverlayMode(v: string | undefined | null): OverlayMode {
+  return v === "prefer" || v === "strict" ? v : "off";
+}
+
 export interface PreferencesData {
   accent_color?: string;
   background_color?: string;
@@ -99,6 +113,13 @@ export interface PreferencesData {
    * `defaultCombo` in `keyboard/commands.ts`.
    */
   shortcut_overrides?: { [commandId: string]: string };
+  /**
+   * Network-privacy relay overlay mode (#455). Persisted through the synced
+   * preferences blob like every other field so the choice survives restart and
+   * syncs across devices; applied live via `set_overlay_mode` on change and on
+   * load. Absent → `off` (the direct path). See `OverlayMode`.
+   */
+  overlay_mode?: OverlayMode;
 }
 
 // Voice-identity parsing (`userIdFromVoiceIdentity`) lives in
@@ -315,6 +336,9 @@ export function usePreferences() {
           json,
           "shortcut_overrides",
           undefined,
+        ),
+        overlay_mode: normalizeOverlayMode(
+          getPreference<string | undefined>(json, "overlay_mode", undefined),
         ),
       };
     },
