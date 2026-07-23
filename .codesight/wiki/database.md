@@ -90,18 +90,26 @@ original envelope. A `type='delete'` **tombstone** (empty ciphertext,
 `target_message_id` set) is written only by **admin-delete** (server-authorized
 moderation); recipients apply it epoch-independently on ingest.
 
-**Sealed sender (#331).** Attribution is taken from the MLS credential inside the
-ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))
+**Sealed sender (#331, #607).** Attribution is taken from the MLS credential inside
+the ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))
 decrypts and reads the credential's `{user_id}:{device_id}`, so a server-written
-`sender_id` cannot forge or reveal authorship. This is **always on**. `sealed = 1`
-additionally marks an envelope whose `sender_id` column is a non-identifying
-sentinel (the string `"sealed"`) rather than the real sender — envelope-sender
-*blinding*, so a Turso breach/subpoena of the stored table reveals nothing about
-who sent which message. Blinding is gated behind `POLLIS_SEAL_SENDER` (default
-**OFF**, dormant); the column and both code paths ship now so flipping it on later
-is a config change, not a migration. `sender_id` stays `NOT NULL` and the sentinel
-is a valid value, so the previously-shipped app keeps working (see migration
-000008's backward-compat note; version 000007 is deliberately skipped).
+`sender_id` cannot forge or reveal authorship. Envelope-sender *blinding* is now
+**unconditional** (#607): every `type='message'`/redaction envelope is written
+`sealed = 1` with a non-identifying sentinel `sender_id` (the string `"sealed"`)
+rather than the real sender, so a Turso breach/subpoena of the stored table reveals
+nothing about who sent which message. There is no `POLLIS_SEAL_SENDER` flag and no
+way to emit an unsealed envelope (invariant test in `flows/sealed_sender.rs`).
+Because the stored `sender_id` no longer identifies the author, edit/delete
+authorization moved fully **client-side / cryptographic** (Solution A) — the DS
+membership-gates edit/self-delete and admin-gates admin-delete, and authorship is
+enforced on ingest by matching the MLS credential to the target's author, NOT by a
+server policy on this column. `sender_id` stays `NOT NULL` and the sentinel is a
+valid value, so the previously-shipped app keeps working (see migration 000008's
+backward-compat note; version 000007 is deliberately skipped). **No data
+migration** was needed for the cutover — sealing was never previously on, so there
+are no pre-existing unsealed rows to convert; new sends simply start sealing. Edit
+envelopes (`type='edit'`) keep the real `sender_id` so the DS can membership-gate
+on the authenticated editor.
 
 Honest scope: this is an **at-rest** defense only. The DS still authenticates
 every write with an `X-Pollis-User` header and gates on membership, so a *live* DS

@@ -332,17 +332,35 @@ deliberately *not* read for attribution. This is **always on**: because the
 sender is authenticated by MLS, a server that rewrites `sender_id` can neither
 forge authorship nor learn it from that column.
 
-On top of that, **envelope-sender blinding** can make the stored `sender_id`
-non-identifying. When `state.config.seal_sender` is set (env `POLLIS_SEAL_SENDER`,
-default **OFF**), `send_message` posts `sealed = 1` and a fixed sentinel
+On top of that, **envelope-sender blinding** makes the stored `sender_id`
+non-identifying. This is **UNCONDITIONAL** (#607) — there is no flag: every
+outbound `message`/redaction envelope is posted `sealed = 1` with a fixed sentinel
 (`SEALED_SENDER_SENTINEL = "sealed"`) as the envelope's `sender_id` instead of the
 real user id, so a Turso breach/subpoena of `message_envelope` reveals nothing
-about who sent which message. The local `message` row keeps the real `sender_id`
-(it's the author's own copy on a trusted device; the send path writes
-self-attribution directly rather than re-deriving from the credential). The DS
-relaxes its "send-as-yourself" equality check for sealed sends but keeps the
-membership authz unchanged — it still verifies the *authenticated* writer is a
-member (`apply_send_message` in `pollis-delivery/src/messages.rs`).
+about who sent which message. There is no way to emit an unsealed envelope (the
+no-opt-out invariant test in `flows/sealed_sender.rs`). The local `message` row
+keeps the real `sender_id` (it's the author's own copy on a trusted device; the
+send path writes self-attribution directly rather than re-deriving from the
+credential). The DS drops the "send-as-yourself" equality check for these sends
+but keeps the membership authz unchanged — it still verifies the *authenticated*
+writer is a member (`apply_send_message` in `pollis-delivery/src/messages.rs`).
+Edit envelopes (`type='edit'`) are the one exception: they keep the real
+`sender_id` so the DS can membership-gate on the authenticated editor.
+
+**Edit/delete authorization is now client-side (Solution A, #607).** Because the
+stored `sender_id` is always the sentinel, the DS can no longer prove who authored
+a message, so it stopped trying: `apply_edit_message` and the self-delete branch of
+`apply_delete_message` gate on **membership only**; admin-delete still gates on the
+re-derived **admin role**. Authorship is enforced **cryptographically on ingest**
+instead — an edit or redaction is applied only when its MLS-authenticated author
+(the credential inside the ciphertext) equals the target message's author
+(`decrypt_and_persist_one` in `messages/ingest.rs`; invariant tests
+`sealed_non_author_edit_is_ignored` / `redaction_from_non_author_is_ignored`). The
+one accepted trade: a non-author member can remove a *not-yet-fetched* envelope
+from Turso (an availability cost), but cannot forge a *delete appearance* on any
+member who already holds the message — that still requires a valid redaction or an
+admin tombstone. **Deploy ordering:** the DS must ship this authz change BEFORE any
+sealing client, or edits/deletes 403 in prod (see `docs/deployments.md`).
 
 **Honest scope (§2.1).** This is an **at-rest** defense. The DS authenticates
 every write with an `X-Pollis-User` header and gates on membership, so a *live* DS

@@ -260,9 +260,6 @@ pub async fn spawn_world() -> World {
         r2_public_url: String::new(),
         livekit_url: String::new(),
         pollis_delivery_url: Some(delivery_url),
-        // Sealed Sender off: the smoke rig exercises sync/enroll flows, not
-        // envelope blinding (mirrors the flows harness default).
-        seal_sender: false,
         // Overlay off: the smoke rig talks to the in-process DS directly.
         overlay_mode: pollis_core::config::OverlayMode::Off,
         overlay_relay_url: None,

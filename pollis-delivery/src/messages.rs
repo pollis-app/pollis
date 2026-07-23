@@ -32,9 +32,14 @@
 //! `gate` proves *which user* signed the request; each `apply_*` then proves the
 //! user is *allowed* to make that specific write:
 //!   - send / edit / delete: the user is a current member of the conversation
-//!     (reusing [`crate::writes::is_member`]); edit/delete of a specific message
-//!     additionally requires the user be the message's sender, or — for an
-//!     admin-delete — a group admin of the channel's owning group.
+//!     (reusing [`crate::writes::is_member`]). Authorship is NOT checked here
+//!     (Solution A, #607): under unconditional sealed sender the stored
+//!     `sender_id` is a blinded sentinel, so the DS cannot prove who authored a
+//!     message. Edit/self-delete are membership-gated only; the author check that
+//!     used to live here is enforced CLIENT-side on ingest (the edit/redaction's
+//!     MLS-authenticated credential must equal the target's author). Admin-delete
+//!     still additionally requires the user be a group admin of the channel's
+//!     owning group (a permission check, not an author check).
 //!   - reactions: the user is a member, and may only write/remove their OWN
 //!     reaction (`user_id` is bound to the authenticated user).
 //!   - watermark: the row is per `(conversation, user, device)`; the user may
@@ -114,28 +119,6 @@ DELETE FROM message_envelope
    )";
 
 // ── Shared authz helpers ─────────────────────────────────────────────────────
-
-/// Resolve the acting user for a domain-A write.
-///
-///   - auth ON (`authed = Some`) → the authenticated user. A body-supplied actor
-///     (if any) must equal it, else the request is forging another identity
-///     (`Forbidden`).
-///   - auth OFF (`authed = None`) → the body's actor (the no-auth path has no
-///     signed identity). Missing/empty → `Forbidden` (no actor at all).
-/// The original sender of a `type='message'` envelope, if it's still present
-/// (it may have aged out via watermark/TTL GC).
-async fn original_sender(conn: &Connection, message_id: &str) -> anyhow::Result<Option<String>> {
-    let mut rows = conn
-        .query(
-            "SELECT sender_id FROM message_envelope WHERE id = ?1 AND type = 'message'",
-            libsql::params![message_id.to_string()],
-        )
-        .await?;
-    Ok(match rows.next().await? {
-        Some(row) => Some(row.get::<String>(0)?),
-        None => None,
-    })
-}
 
 /// The conversation a message belongs to, resolved from any envelope carrying
 /// its id (used to membership-gate reactions, which only know `message_id`).
@@ -348,8 +331,17 @@ pub async fn edit_message(
 }
 
 /// Replace the single pending edit envelope (DELETE prior + INSERT new) in one
-/// transaction. Authz: the editor is a member AND — when the original message
-/// envelope is still present — its sender (edits are sender-only).
+/// transaction. Authz: the editor is a current member of the conversation.
+///
+/// Authorship is NOT checked here (Solution A, #607): under unconditional sealed
+/// sender the stored `sender_id` is always a blinded sentinel, so the DS cannot
+/// verify the editor authored the target — and it deliberately does not try. The
+/// edit's content only ever lands on a recipient whose ingest
+/// (`pollis_core::commands::messages::ingest`) confirms the edit's
+/// MLS-authenticated author (the credential inside the ciphertext) equals the
+/// target message's author; a non-author's edit envelope is accepted for storage
+/// here but dropped, cryptographically, on ingest. The DS's job is reduced to the
+/// membership gate: only a member may write an edit envelope to the conversation.
 pub async fn apply_edit_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -359,15 +351,8 @@ pub async fn apply_edit_message(
         Ok(s) => s,
         Err(o) => return Ok(o),
     };
-    if authed.is_some() {
-        if !is_member(conn, &body.conversation_id, &sender).await? {
-            return Ok(WriteOutcome::Forbidden);
-        }
-        if let Some(orig) = original_sender(conn, &body.target_message_id).await? {
-            if orig != sender {
-                return Ok(WriteOutcome::Forbidden);
-            }
-        }
+    if authed.is_some() && !is_member(conn, &body.conversation_id, &sender).await? {
+        return Ok(WriteOutcome::Forbidden);
     }
     let tx = conn.transaction().await?;
     tx.execute(
@@ -400,10 +385,12 @@ pub async fn apply_edit_message(
 pub struct DeleteMessageBody {
     pub message_id: String,
     pub conversation_id: String,
-    /// The original sender the client resolved (from the remote envelope or its
-    /// local cache). Only consulted to pick self-vs-admin WHEN the envelope has
-    /// already aged out; never trusted for the admin authz decision (the server
-    /// re-derives the role independently).
+    /// The original author the client resolved (from its local cache). Selects
+    /// the self-vs-admin branch (Solution A, #607): the DS can no longer re-derive
+    /// authorship from the sealed envelope, so it trusts this hint for BRANCHING
+    /// only. It is never trusted for a permission grant — the admin branch
+    /// re-derives the admin role independently, and the self branch grants nothing
+    /// beyond envelope removal that membership doesn't already permit.
     #[serde(default)]
     pub msg_sender_id: Option<String>,
     /// No-auth fallback for the acting user.
@@ -430,12 +417,24 @@ pub async fn delete_message(
     outcome_response(apply_delete_message(&conn, authed.as_deref(), &parsed).await?)
 }
 
-/// Delete a message. Self-delete (actor is the sender) removes the envelope +
-/// any pending edit. Admin-delete (actor is a group admin of the channel) also
-/// writes a `type='delete'` tombstone so every member soft-deletes on next
-/// ingest. The self-path SQL is scoped `sender_id = :actor` and the admin path
-/// is gated on a re-derived admin role, so trusting the client's branch hint is
-/// safe — a wrong hint deletes nothing or is refused.
+/// Delete a message. Two branches, chosen by the client's `msg_sender_id` hint
+/// (Solution A, #607): under unconditional sealed sender the stored `sender_id`
+/// is always a blinded sentinel, so the DS can no longer derive who authored the
+/// message — it trusts the client to say whether this is a self-delete.
+///
+/// **Self-branch** (`msg_sender_id == actor`): gated on **membership** only.
+/// Removes the original envelope (unscoped — a sealed row has no matchable
+/// sender) and any pending edit; writes **no** tombstone. A non-author member can
+/// thus remove a not-yet-fetched envelope (an accepted availability trade, #607),
+/// but cannot forge a *delete appearance*: making other members drop an
+/// already-fetched copy requires either a valid E2EE redaction (honored on ingest
+/// only when its MLS-authenticated author matches the target's author) or an
+/// admin tombstone (below) — neither of which a non-author can produce.
+///
+/// **Admin-branch** (`msg_sender_id != actor`): the actor must be a group admin
+/// of the channel (a re-derived permission check, not an author check). Removes
+/// the envelope + pending edit and writes a `type='delete'` tombstone so every
+/// member soft-deletes on next ingest. Server-authorized moderation.
 pub async fn apply_delete_message(
     conn: &Connection,
     authed: Option<&str>,
@@ -446,18 +445,22 @@ pub async fn apply_delete_message(
         Err(o) => return Ok(o),
     };
 
-    // Prefer the authoritative remote envelope; fall back to the client's hint
-    // only when it's been GC'd.
-    let effective_sender = original_sender(conn, &body.message_id)
-        .await?
-        .or_else(|| body.msg_sender_id.clone());
-    let is_self_delete = effective_sender.as_deref() == Some(actor.as_str());
+    // Branch selection comes from the client's hint — the DS cannot re-derive
+    // authorship from the (sealed) envelope. Self-branch when the hint names the
+    // actor as the author; admin-branch otherwise.
+    let is_self_delete = body.msg_sender_id.as_deref() == Some(actor.as_str());
 
     if is_self_delete {
+        // Self-branch authz is membership: any member may remove an envelope
+        // they claim to have authored (authorship itself is enforced
+        // client-side on ingest, never here). Skipped on the no-auth path.
+        if authed.is_some() && !is_member(conn, &body.conversation_id, &actor).await? {
+            return Ok(WriteOutcome::Forbidden);
+        }
         let tx = conn.transaction().await?;
         tx.execute(
-            "DELETE FROM message_envelope WHERE id = ?1 AND sender_id = ?2",
-            libsql::params![body.message_id.clone(), actor.clone()],
+            "DELETE FROM message_envelope WHERE id = ?1",
+            libsql::params![body.message_id.clone()],
         )
         .await?;
         tx.execute(

@@ -8,7 +8,9 @@ use crate::state::AppState;
 /// Delete a message.
 ///
 /// Two paths, selected automatically by comparing `user_id` (the caller) to the
-/// stored sender of the target message:
+/// target message's author as recorded in the LOCAL `message` row (the
+/// credential-authenticated sender). The remote envelope's `sender_id` is now the
+/// sealed sentinel (#607) and is never consulted for authorship:
 ///
 /// **Self-delete** (caller is the original sender) — "delete for everyone":
 /// sends an **E2EE redaction control message** (an MLS application message whose
@@ -48,29 +50,40 @@ pub async fn delete_message(
 ) -> Result<()> {
     let conn = state.remote_db.conn().await?;
 
-    // Resolve the message's original sender + conversation. Prefer the remote
-    // envelope (authoritative across devices) but fall back to the local row
-    // if Turso has already cleaned up the envelope by watermark/TTL.
-    let (msg_sender_id, conversation_id): (String, String) = {
-        let mut rows = conn.query(
-            "SELECT sender_id, conversation_id FROM message_envelope
-             WHERE id = ?1 AND type = 'message'",
-            libsql::params![message_id.clone()],
-        ).await?;
-        if let Some(row) = rows.next().await? {
-            (row.get::<String>(0)?, row.get::<String>(1)?)
-        } else {
-            let guard = state.local_db.lock().await;
-            let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
-            let local: Option<(String, String)> = db.conn()
-                .query_row(
-                    "SELECT sender_id, conversation_id FROM message WHERE id = ?1",
-                    rusqlite::params![message_id],
-                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
-                )
-                .optional()?;
-            match local {
-                Some(t) => t,
+    // Resolve the message's AUTHOR + conversation. Authorship MUST come from the
+    // LOCAL `message` row — its `sender_id` is the credential-authenticated author
+    // (written from the MLS credential at ingest, or self-attributed at send).
+    // The remote `message_envelope.sender_id` is now ALWAYS the sealed sentinel
+    // (#607), so it can no longer reveal who authored the message; it serves only
+    // as a fallback for the conversation_id when this device holds no local copy
+    // (an admin deleting a message they never fetched). Deriving self-vs-admin
+    // from the sealed envelope would misroute EVERY self-delete to the admin path.
+    let local_row: Option<(String, String)> = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        db.conn()
+            .query_row(
+                "SELECT sender_id, conversation_id FROM message WHERE id = ?1",
+                rusqlite::params![message_id],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+    };
+
+    let (msg_sender_id, conversation_id): (String, String) = match local_row {
+        Some(t) => t,
+        None => {
+            // No local copy: this can only be an admin-delete (a self-delete
+            // requires you authored — and therefore hold — the message). Take the
+            // conversation from the remote envelope and leave the author unknown
+            // (empty), which forces the admin branch below.
+            let mut rows = conn.query(
+                "SELECT conversation_id FROM message_envelope
+                 WHERE id = ?1 AND type = 'message'",
+                libsql::params![message_id.clone()],
+            ).await?;
+            match rows.next().await? {
+                Some(row) => (String::new(), row.get::<String>(0)?),
                 None => {
                     return Err(crate::error::Error::Other(anyhow::anyhow!(
                         "Message not found"
@@ -314,6 +327,86 @@ pub async fn send_redaction_as(
     send_redaction_message(state, conversation_id, target_message_id, user_id).await
 }
 
+/// Test-only: publish an edit envelope for `target_message_id` as an ARBITRARY
+/// caller, bypassing the author self-gate in [`edit_message`] (which only edits a
+/// message the caller sent and has locally). Lets the flows suite prove the
+/// client-side edit-author enforcement (#607): a recipient must REJECT an edit
+/// whose MLS-authenticated author is NOT the target message's author. Not
+/// reachable in production — the real `edit_message` edits only the caller's own
+/// message, and the DS now membership-gates (no longer author-gates) the write,
+/// so this models a member forging an edit for someone else's message.
+#[cfg(feature = "test-harness")]
+pub async fn edit_message_as(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    target_message_id: &str,
+    user_id: &str,
+    new_content: &str,
+) -> Result<()> {
+    let envelope_id = Ulid::new().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let (mls_group_id, _is_channel) = resolve_mls_group(state, conversation_id).await?;
+
+    // Catch up (welcomes + interleaved) so the edit is sealed at the current
+    // epoch — identical pre-op catch-up to `edit_message` / `send_redaction_message`.
+    {
+        let device_id = state.device_id.lock().await.clone();
+        if let Some(ref did) = device_id {
+            if let Err(e) =
+                crate::commands::mls::poll_mls_welcomes_inner(state, user_id, did).await
+            {
+                eprintln!("[messages] edit_message_as: poll_mls_welcomes for {mls_group_id}: {e}");
+            }
+        }
+    }
+    if let Err(e) =
+        super::catch_up_mls_group_interleaved(state, &mls_group_id, user_id).await
+    {
+        eprintln!("[messages] edit_message_as: catch_up_mls_group for {mls_group_id}: {e}");
+    }
+
+    // Encrypt the padded new content, repairing the local group if it is missing.
+    let needs_repair = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        crate::commands::mls::try_mls_encrypt(
+            db.conn(),
+            &mls_group_id,
+            &super::framing::pad(new_content.as_bytes()),
+        )
+        .is_none()
+    };
+    if needs_repair {
+        crate::commands::mls::external_join_group(state, &mls_group_id, user_id).await?;
+    }
+
+    let ciphertext_remote = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("Not signed in")))?;
+        let plaintext = super::framing::pad(new_content.as_bytes());
+        let mls_bytes = crate::commands::mls::try_mls_encrypt(db.conn(), &mls_group_id, &plaintext)
+            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!(
+                "MLS group not initialized for conversation {conversation_id}"
+            )))?;
+        format!("mls:{}", hex::encode(&mls_bytes))
+    };
+
+    // Edit envelopes are NOT sealed (the DS membership-gates the write on the
+    // authenticated writer, so `sender_id` binds to the caller); the recipient's
+    // author check reads the MLS credential, not this column.
+    let body = serde_json::json!({
+        "envelope_id": envelope_id,
+        "conversation_id": conversation_id,
+        "target_message_id": target_message_id,
+        "sender_id": user_id,
+        "ciphertext": ciphertext_remote,
+        "sent_at": now,
+    });
+    crate::commands::mls::ds_post_ok(state, "/v1/messages/edit", &body).await?;
+
+    Ok(())
+}
+
 /// Send an E2EE "delete for everyone" redaction for `target_message_id`: an MLS
 /// application message whose plaintext is a `0xF6` redaction frame (see
 /// [`super::framing::pad_redaction`]). It rides the ordinary send path — a
@@ -380,20 +473,15 @@ async fn send_redaction_message(
         format!("mls:{}", hex::encode(&mls_bytes))
     };
 
-    // Blind the envelope sender under sealed sender exactly like a normal send
-    // (issue #331) — the true author is the MLS credential inside the ciphertext,
-    // which is what the recipient's redaction-authorization check reads.
-    let (envelope_sender_id, sealed_flag): (&str, i64) = if state.config.seal_sender {
-        (super::send::SEALED_SENDER_SENTINEL, 1)
-    } else {
-        (user_id, 0)
-    };
-
+    // Blind the envelope sender exactly like a normal send — sealing is
+    // UNCONDITIONAL (#607). The true author is the MLS credential inside the
+    // ciphertext, which is what the recipient's redaction-authorization check
+    // reads; the stored `sender_id` is always the non-identifying sentinel.
     let body = serde_json::json!({
         "id": envelope_id,
         "conversation_id": conversation_id,
-        "sender_id": envelope_sender_id,
-        "sealed": sealed_flag,
+        "sender_id": super::send::SEALED_SENDER_SENTINEL,
+        "sealed": 1,
         "ciphertext": ciphertext_remote,
         "sent_at": now,
     });

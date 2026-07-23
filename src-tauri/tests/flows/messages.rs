@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::harness::{wipe, TestClient};
+use crate::harness::{wipe, writable_remote, TestClient};
 use pollis_lib::commands::auth::UserProfile;
 use serial_test::serial;
 
@@ -1597,6 +1597,299 @@ async fn redaction_from_non_author_is_ignored() {
         m["deleted_at"].is_null(),
         "a forged redaction must NOT mark the message deleted"
     );
+
+    drop((alice, bob, carol));
+}
+
+// ─── Solution A (#607): client-side edit/delete authz under unconditional
+// sealed sender ──────────────────────────────────────────────────────────────
+//
+// The DS no longer checks authorship on edit/delete (the stored sender_id is
+// always the sealed sentinel). Authorship is enforced CLIENT-side on ingest.
+// These four prove both halves: the legitimate cases still work now that the DS
+// stopped blocking them, and the forged cases are rejected by the client.
+
+/// Sealed EDIT, self: an author edits their OWN message and a recipient ingests
+/// the new content. This is the case that 403'd before Solution A — with sealing
+/// on, the DS's old author-equality check (`original_sender == sender`) compared
+/// the sentinel to the real editor and refused the edit. The DS now
+/// membership-gates only, and ingest applies the edit because the credential
+/// author matches the target's author.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn sealed_self_edit_is_visible_to_recipient() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Self Edit").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
+
+    let msg_id = alice
+        .send_channel_message_id(&channel_id, "original")
+        .await;
+
+    // Bob receives the original.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        bob_msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("bob received it")["content"]
+            .as_str(),
+        Some("original")
+    );
+
+    // Alice edits her own message — no DS rejection under Solution A.
+    alice.edit_message(&channel_id, &msg_id, "edited by author").await;
+
+    // Bob re-fetches and sees the edited content.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let m = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("message still present");
+    assert_eq!(
+        m["content"].as_str(),
+        Some("edited by author"),
+        "recipient must apply the author's sealed edit"
+    );
+    assert!(
+        m["edited_at"].as_str().is_some(),
+        "the edited row must carry an edited_at timestamp"
+    );
+
+    drop((alice, bob));
+}
+
+/// Sealed EDIT, non-author rejected: carol (a member, but NOT the author) forges
+/// an edit envelope for alice's message via the test-only `edit_message_as`
+/// (bypassing the client-send self-gate). The DS accepts the envelope for storage
+/// (membership only), but bob's ingest DROPS it because the edit's
+/// MLS-authenticated author (carol) does not match the target's author (alice).
+/// This is the load-bearing new client-side check that replaces the dropped DS
+/// author gate.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn sealed_non_author_edit_is_ignored() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("No Edit Forgery").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &carol, &carol_profile, &[&bob]).await;
+
+    let msg_id = alice
+        .send_channel_message_id(&channel_id, "carol cannot edit this")
+        .await;
+
+    // bob receives the original.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        bob_msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("bob received it")["content"]
+            .as_str(),
+        Some("carol cannot edit this")
+    );
+
+    // carol forges an edit targeting alice's message: a real, decryptable MLS
+    // edit envelope — but authored by carol, not alice.
+    pollis_core::commands::messages::edit_message_as(
+        &carol.state,
+        &channel_id,
+        &msg_id,
+        carol.user_id(),
+        "hacked by carol",
+    )
+    .await
+    .expect("forged edit send");
+
+    // bob re-fetches: the message is UNCHANGED — the edit was rejected because
+    // carol is not the author.
+    let bob_msgs = bob.fetch_channel_messages(&channel_id).await;
+    let m = bob_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("message still present");
+    assert_eq!(
+        m["content"].as_str(),
+        Some("carol cannot edit this"),
+        "a non-author edit must be ignored on ingest"
+    );
+    assert!(
+        m["edited_at"].is_null(),
+        "a forged edit must NOT mark the message edited"
+    );
+
+    drop((alice, bob, carol));
+}
+
+/// Sealed DELETE, self (NON-admin author): bob — a plain member, not a group
+/// admin — self-deletes his OWN message. Before Solution A this was broken under
+/// sealing: the client resolved the author from the sealed envelope (sentinel),
+/// misrouted the delete to the admin path, and bob (no admin role) was refused.
+/// Now the client resolves authorship from its local row, takes the self path
+/// (membership-gated), the redaction applies for synced members, and the DS
+/// removes the envelope.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn sealed_non_admin_self_delete_works() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("Self Delete").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    // bob is a plain member (never promoted to admin).
+    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
+
+    // bob sends; alice fetches so she holds a local copy to be redacted.
+    let msg_id = bob
+        .send_channel_message_id(&channel_id, "bob's message")
+        .await;
+    let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
+    assert_eq!(
+        alice_msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("alice received it")["content"]
+            .as_str(),
+        Some("bob's message")
+    );
+
+    // bob self-deletes his own message — the non-admin self path.
+    bob.delete_message(&msg_id).await;
+
+    // alice (already had it) now sees it redacted: content cleared + tombstone.
+    let alice_msgs = alice.fetch_channel_messages(&channel_id).await;
+    let m = alice_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("row present as a tombstone");
+    assert!(
+        m["content"].is_null(),
+        "alice's copy must be redacted, got {:?}",
+        m["content"]
+    );
+    assert!(
+        m["deleted_at"].as_str().is_some(),
+        "alice's copy must carry a deleted_at tombstone"
+    );
+
+    // The original envelope was removed from the server.
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM message_envelope WHERE id = ?1 AND type = 'message'",
+            libsql::params![msg_id.clone()],
+        )
+        .await
+        .expect("count query");
+    let count: i64 = rows
+        .next()
+        .await
+        .expect("row")
+        .expect("some row")
+        .get(0)
+        .expect("count");
+    assert_eq!(count, 0, "the self-deleted envelope must be removed from Turso");
+
+    drop((alice, bob));
+}
+
+/// Sealed DELETE, admin: an admin (alice, the group creator) deletes ANOTHER
+/// member's (bob's) message via the tombstone path. The DS re-derives alice's
+/// admin role (a permission check, not an author check), removes the envelope,
+/// and writes a `type='delete'` tombstone that every member applies on ingest.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn sealed_admin_delete_of_other_member_works() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let mut carol = TestClient::new().await;
+
+    let _alice_profile = alice.sign_up("alice@test.local").await;
+    let bob_profile = bob.sign_up("bob@test.local").await;
+    let carol_profile = carol.sign_up("carol@test.local").await;
+
+    let group_id = alice.create_group("Admin Delete").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &bob, &bob_profile, &[]).await;
+    add_member_and_sync(&alice, &group_id, &channel_id, &carol, &carol_profile, &[&bob]).await;
+
+    // bob sends; alice + carol fetch so they hold local copies.
+    let msg_id = bob
+        .send_channel_message_id(&channel_id, "bob's post")
+        .await;
+    for c in [&alice, &carol] {
+        let msgs = c.fetch_channel_messages(&channel_id).await;
+        assert_eq!(
+            msgs.iter()
+                .find(|m| m["id"] == msg_id)
+                .expect("received it")["content"]
+                .as_str(),
+            Some("bob's post")
+        );
+    }
+
+    // alice (admin) deletes bob's message — the tombstone path.
+    alice.delete_message(&msg_id).await;
+
+    // carol applies the tombstone on next ingest: content cleared + tombstone.
+    let carol_msgs = carol.fetch_channel_messages(&channel_id).await;
+    let m = carol_msgs
+        .iter()
+        .find(|m| m["id"] == msg_id)
+        .expect("row present as a tombstone");
+    assert!(
+        m["content"].is_null(),
+        "carol's copy must be redacted by the admin tombstone, got {:?}",
+        m["content"]
+    );
+    assert!(
+        m["deleted_at"].as_str().is_some(),
+        "carol's copy must carry a deleted_at tombstone"
+    );
+
+    // A `type='delete'` tombstone was written and the original envelope removed.
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn");
+    let mut rows = conn
+        .query(
+            "SELECT \
+               (SELECT COUNT(*) FROM message_envelope WHERE id = ?1 AND type = 'message'), \
+               (SELECT COUNT(*) FROM message_envelope WHERE target_message_id = ?1 AND type = 'delete')",
+            libsql::params![msg_id.clone()],
+        )
+        .await
+        .expect("count query");
+    let row = rows.next().await.expect("row").expect("some row");
+    let orig: i64 = row.get(0).expect("orig count");
+    let tombstones: i64 = row.get(1).expect("tombstone count");
+    assert_eq!(orig, 0, "the admin-deleted original envelope must be removed");
+    assert_eq!(tombstones, 1, "an admin delete must write exactly one tombstone");
 
     drop((alice, bob, carol));
 }

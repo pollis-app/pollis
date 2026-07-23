@@ -27,16 +27,6 @@ pub struct Config {
     /// commit submission routes through the DS (serialized, race/gap-free);
     /// when `None`, commits write direct to Turso. See `commands::mls::delivery`.
     pub pollis_delivery_url: Option<String>,
-    /// Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2).
-    /// When true, outbound `message_envelope` rows are written with `sealed = 1`
-    /// and a non-identifying sentinel `sender_id` instead of the real sender — so
-    /// the stored envelope no longer reveals sender-per-message (at-rest / breach
-    /// / subpoena defense). Attribution is unaffected: recipients always take the
-    /// sender from the MLS credential inside the ciphertext (release N, already
-    /// shipped). Defaults OFF: landing the sending half == release N (reader on,
-    /// sealing off); flipping `POLLIS_SEAL_SENDER` on later == release N+1. This
-    /// is the additive two-release dance CLAUDE.md prescribes.
-    pub seal_sender: bool,
     /// Closed-overlay relay mode (design `docs/relay-overlay-design.md` §10.1,
     /// §14). Parsed from `POLLIS_OVERLAY` (`off` | `prefer` | `strict`, default
     /// **off**; unknown/empty → off). When `Off` the overlay is inert and every
@@ -108,12 +98,6 @@ impl Config {
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("POLLIS_DELIVERY_URL").ok())
                 .filter(|s| !s.is_empty()),
-            // Optional boolean, default OFF (release N: reader on, sealing off).
-            seal_sender: option_env!("POLLIS_SEAL_SENDER")
-                .map(|s| s.to_string())
-                .or_else(|| std::env::var("POLLIS_SEAL_SENDER").ok())
-                .map(|s| parse_env_bool(&s))
-                .unwrap_or(false),
             // Optional overlay mode, default OFF (§14: overlay inert unless a
             // non-off mode is selected at runtime).
             overlay_mode: option_env!("POLLIS_OVERLAY")
@@ -142,15 +126,6 @@ pub(crate) fn parse_overlay_mode(s: &str) -> pollis_relay::OverlayMode {
         "strict" => pollis_relay::OverlayMode::Strict,
         _ => pollis_relay::OverlayMode::Off,
     }
-}
-
-/// Parse a boolean-ish env var: `1` / `true` / `yes` / `on` (case-insensitive)
-/// are true; everything else (including unset, handled by the caller) is false.
-fn parse_env_bool(s: &str) -> bool {
-    matches!(
-        s.trim().to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
 }
 
 fn require_env(key: &str, compiled: Option<&'static str>) -> Result<String> {
@@ -191,9 +166,6 @@ impl Config {
             // DS URL, so integration tests exercise the real (signed) DS write
             // path. There is no remaining direct-write path to exercise.
             pollis_delivery_url: None,
-            // Default OFF; the sealed-sender flows test flips this per-client to
-            // exercise the release-N+1 sealing path (see `TestClient::new_sealed`).
-            seal_sender: false,
             // Overlay off in the integration harness — it exercises the direct
             // control-plane path. Overlay wiring has its own unit tests
             // (`net::overlay`) that spin an in-process relay.

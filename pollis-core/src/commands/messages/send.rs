@@ -159,13 +159,17 @@ pub async fn send_message(
         mls_ct_str
     };
 
-    // Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2).
-    // When sealing is enabled we blind the server-visible `message_envelope`:
+    // Sealed sender (issue #331, `docs/metadata-minimization-design.md` §2) —
+    // UNCONDITIONAL (#607). We always blind the server-visible `message_envelope`:
     // `sealed = 1` and a fixed, non-identifying sentinel in the still-NOT-NULL
     // `sender_id` column, so a Turso breach / subpoena of the stored table no
     // longer reveals sender-per-message. Attribution is unaffected — recipients
     // take the true sender from the MLS credential inside the ciphertext (the
-    // release-N reader, already shipped), so the sentinel never has to decode.
+    // reader, already shipped), so the sentinel never has to decode. There is no
+    // opt-out: no config flag can emit an UNSEALED envelope (invariant test in
+    // `flows/sealed_sender.rs`), which is what lets edit/delete authorization move
+    // fully client-side (Solution A) — the DS can no longer see who authored a
+    // message, so it stops trying to enforce authorship.
     //
     // Scope (be honest, §2.1): this defends the AT-REST envelope only. The DS
     // still authenticates every write with an `X-Pollis-User` header and gates on
@@ -178,19 +182,14 @@ pub async fn send_message(
     // apply. Sealing it would mislabel the author's own message, since the send
     // path writes attribution directly rather than re-deriving it from the
     // credential the way the ingest reader does.
-    let (envelope_sender_id, sealed_flag): (&str, i64) = if state.config.seal_sender {
-        (SEALED_SENDER_SENTINEL, 1)
-    } else {
-        (sender_id.as_str(), 0)
-    };
 
     // Post to Turso for offline delivery. DS seam: route the envelope write
     // through the Delivery Service (the write API).
     let body = serde_json::json!({
         "id": id,
         "conversation_id": conversation_id,
-        "sender_id": envelope_sender_id,
-        "sealed": sealed_flag,
+        "sender_id": SEALED_SENDER_SENTINEL,
+        "sealed": 1,
         "ciphertext": ciphertext_remote,
         "reply_to_id": reply_to_id,
         "sent_at": now,
