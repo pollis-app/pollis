@@ -52,6 +52,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 - **From:** `website/`
 - **Pipeline:** `.github/workflows/website-deploy.yml` — `workflow_dispatch` (deploy-button pattern; `main` stays always-deployable).
 - **Ships to:** Cloudflare Pages → **pollis.com** / **www.pollis.com**.
+- **`/learn` section (Epic #589):** `website/learn.html` + `website/learn.js`, media under `website/learn/media/*` (mp4/webm/poster/vtt). The video artifacts are **committed to git** and served straight from the Pages build (no build step). Animation sources + narration scripts live in `learn/manim/`; regenerate with `learn/manim/render.sh <Scene> <slug>` (see `learn/README.md`). Long-term, rendered media may move to R2 (one-line base-URL swap) to cap clone size.
 
 ### 4. pollis-verify (auditor CLI)
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
