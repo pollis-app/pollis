@@ -13,7 +13,7 @@ import * as api from "../services/api";
 import { AccountKeyAuditLine } from "../components/Security/AccountKeyAuditLine";
 import { BuildVerifyLine } from "../components/Security/BuildVerifyLine";
 import { useSelfAuditAccountKey, useVerifyOwnBuild } from "../hooks/queries";
-import { getVersion } from "../bridge";
+import { getVersion, shellOpen } from "../bridge";
 import { usePreferences } from "../hooks/queries/usePreferences";
 import {
   useMediaPermissions,
@@ -23,6 +23,11 @@ import {
 import { invoke } from "../bridge";
 import { isMac, isLinux, isWindows } from "../utils/platform";
 import { formatDateTime } from "../utils/format";
+
+// The plain-language explainer for everything on this page — what a root is,
+// what an inclusion tick means, and the difference between "couldn't check" and
+// "not in the log" (epic #589, topic 12).
+const LEARN_DASHBOARDS_URL = "https://pollis.com/learn#reading-the-dashboards";
 
 // Map a PermissionState onto a human label + solid token color for the status
 // pill. No neon/glow — solid text colors only.
@@ -303,6 +308,22 @@ export const SecurityPage: React.FC = observer(() => {
               rebuilders — it does not by itself prove the build matches the
               source, since a tampered app could lie about its own fingerprint.
             </p>
+
+            {/* Reciprocal link into the /learn explainer that decodes this page
+                (epic #589, topic 12). The four verdicts below are easy to
+                misread — "unavailable" is not an accusation — so the legend has
+                to be reachable from the surface itself. */}
+            <button
+              type="button"
+              data-testid="build-verify-learn-link"
+              className="text-2xs font-mono underline self-start"
+              style={{ color: "var(--c-text-muted)" }}
+              onClick={() => {
+                void shellOpen(LEARN_DASHBOARDS_URL);
+              }}
+            >
+              What these verdicts mean &rarr;
+            </button>
 
             {/* Version + commit of the running build. Commit is only shown once
                 the check has run (it's baked into the report), and only if this
