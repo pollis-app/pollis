@@ -1,3 +1,15 @@
+# ── Naming (env-namespaced) ─────────────────────────────────────────────────
+# env="prod" reproduces the ORIGINAL names byte-for-byte (so a prod re-apply is a
+# no-op); any other env prefixes every named resource so a second isolated pool
+# can coexist in the same account+region. Threaded into every module + ssm.tf.
+locals {
+  is_prod          = var.env == "prod"
+  name_prefix      = local.is_prod ? "pollis-relay-hydra" : "pollis-relay-hydra-${var.env}"
+  node_name_prefix = local.is_prod ? "pollis-relay" : "pollis-relay-${var.env}"
+  # CloudWatch metric namespace: PascalCase, per-env so alarms never cross wires.
+  metric_namespace = local.is_prod ? "PollisRelayHydra" : "PollisRelayHydra${title(var.env)}"
+}
+
 # ── Relay nodes: one module instance per allowed region ─────────────────────
 #
 # for_each over the jurisdiction-filtered region set. All allowed regions must
@@ -10,6 +22,7 @@ module "relay_region" {
   source   = "./modules/relay-region"
   for_each = toset(local.allowed_regions)
 
+  name_prefix     = local.node_name_prefix
   region          = each.value
   node_floor      = var.node_floor
   node_max        = var.node_max
@@ -35,7 +48,7 @@ module "directory" {
     aws.us_east_1 = aws.us_east_1
   }
 
-  name_prefix          = "pollis-relay-hydra"
+  name_prefix          = local.name_prefix
   directory_domain     = var.directory_domain
   directory_object_key = var.directory_object_key
 }
@@ -64,12 +77,15 @@ module "reconciler" {
   node_floor  = var.node_floor
   node_max    = var.node_max
 
+  name_prefix      = local.name_prefix
+  metric_namespace = local.metric_namespace
+
   alarm_email_addresses = var.alarm_email_addresses
 }
 
 # ── Guardrail: AWS Budgets alert at the §0 hard cap ─────────────────────────
 resource "aws_budgets_budget" "monthly_cap" {
-  name         = "pollis-relay-hydra"
+  name         = local.name_prefix
   budget_type  = "COST"
   limit_amount = tostring(var.monthly_budget_usd)
   limit_unit   = "USD"

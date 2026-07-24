@@ -1,3 +1,8 @@
+variable "name_prefix" {
+  description = "Env-namespaced prefix for this shard's resource names (VPC/SG/IAM/ASG/launch-template), e.g. pollis-relay or pollis-relay-test. Region is appended."
+  type        = string
+}
+
 variable "region" {
   description = "AWS region this pool shard runs in (must already be jurisdiction-approved by the root)."
   type        = string

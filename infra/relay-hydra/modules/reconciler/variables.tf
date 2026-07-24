@@ -1,3 +1,13 @@
+variable "name_prefix" {
+  description = "Env-namespaced resource-name prefix (e.g. pollis-relay-hydra or pollis-relay-hydra-test). Names the Lambda, IAM role, SNS topic, event rule, and alarms."
+  type        = string
+}
+
+variable "metric_namespace" {
+  description = "CloudWatch metric namespace the reconciler emits into and the alarms read from. Per-env so two pools never cross wires."
+  type        = string
+}
+
 variable "primary_region" {
   type = string
 }

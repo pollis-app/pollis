@@ -160,11 +160,53 @@ scripts/mint-relay-identity.sh us-west-2   # overwrites the SSM identity key + c
 #   in the next directory automatically.
 ```
 
+### Stand up a throwaway TEST env (`env=test`)
+
+Exercise the REAL infra end to end — a dev-enrolled client through real AWS
+Graviton relays to your dev services — without touching prod and without a prod
+login. `env` namespaces every named resource (S3 bucket, SSM params, Lambda, ASG,
+IAM roles, SG, alarms, budget), so a second isolated pool coexists in the SAME
+account+region. `env=prod` (the default) reproduces the original names exactly, so
+prod is never affected. Cost is a few cents for a short session (see Cost below).
+
+```bash
+# From a SEPARATE working dir so the test state never touches prod state.
+cd infra/relay-hydra          # (a fresh checkout / worktree — its own terraform.tfstate)
+
+# Mint TEST signing key + identity into the test SSM prefix (note the param names):
+scripts/mint-signing-key.sh   us-west-2 /pollis/relay-hydra-test/signing-key
+scripts/mint-relay-identity.sh us-west-2   # writes /pollis/relay-hydra-test/* if you pass the test names
+
+# Point the pool at your DEV hosts and keep it to one node.
+cat > test.tfvars <<'EOF'
+env                   = "test"
+directory_domain      = ""          # raw *.cloudfront.net — skips ACM/DNS/CAA
+relay_allowlist       = "*.turso.io,*.pollis.com,*.cloudflarestorage.com"
+region_node_counts    = { "us-west-2" = 1 }
+node_floor            = 1
+node_max              = 1
+alarm_email_addresses = []
+EOF
+terraform init
+terraform apply -var-file=test.tfvars
+
+# Hand the two outputs to a DEV client build (raw CloudFront URL, no DNS):
+terraform output -raw POLLIS_OVERLAY_DIRECTORY_URL   # https://<id>.cloudfront.net/directory.json
+# POLLIS_OVERLAY_DIRECTORY_KEY = the public key printed by mint-signing-key.sh above
+
+# ...run the client (DEV_EMAIL auto-login) in Strict mode against those, then:
+terraform destroy -var-file=test.tfvars
+aws ssm delete-parameters --region us-west-2 --names \
+  /pollis/relay-hydra-test/signing-key /pollis/relay-hydra-test/identity-key \
+  /pollis/relay-hydra-test/identity-cert /pollis/relay-hydra-test/desired-state
+```
+
 ### Tear it all down
 ```bash
-terraform destroy
+terraform destroy                 # add -var-file=test.tfvars for a test env
 # The signing/identity SSM SecureStrings are NOT Terraform-managed (their plaintext
-# must never touch TF state) — delete them explicitly:
+# must never touch TF state) — delete them explicitly (swap the -test prefix for a
+# test env):
 aws ssm delete-parameters --region us-west-2 --names \
   /pollis/relay-hydra/signing-key /pollis/relay-hydra/identity-key \
   /pollis/relay-hydra/identity-cert /pollis/relay-hydra/desired-state

@@ -12,7 +12,10 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  param_prefix = "/pollis/relay-hydra"
+  # env-namespaced (see the `name_prefix`/`is_prod` locals in main.tf): prod keeps
+  # "/pollis/relay-hydra", a test env gets "/pollis/relay-hydra-test", so the mint
+  # scripts + Terraform for the two envs never share secrets.
+  param_prefix = local.is_prod ? "/pollis/relay-hydra" : "/pollis/relay-hydra-${var.env}"
 
   signing_key_param   = "${local.param_prefix}/signing-key"   # SecureString: Ed25519 private PKCS8 PEM
   identity_key_param  = "${local.param_prefix}/identity-key"  # SecureString: base64(raw) QUIC identity key
