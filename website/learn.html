@@ -700,6 +700,8 @@
             signatures &amp; hashes — the vocabulary</a></li>
         <li><span class="ln-track">MLS</span><a href="#mls-groups">MLS groups — the ratchet tree,
             epochs &amp; commits</a></li>
+        <li><span class="ln-track">MLS</span><a href="#joining-leaving">Joining, leaving,
+            multi-device &amp; the honest history boundary</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
@@ -1108,6 +1110,143 @@
             target="_blank" rel="noopener noreferrer">mls.rs</a>, and the ordering invariant in <a
             href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Topic 4 — joining, leaving, multi-device (#593) ══════════════ -->
+      <section class="ln-section" id="joining-leaving">
+        <div class="ln-eyebrow">Track B · MLS · Topic 4</div>
+        <h2>Joining, leaving, multi-device — and the honest history boundary</h2>
+
+        <div class="ln-prose">
+          <p>
+            <strong>Joining a group.</strong> To add you to a group, someone has to encrypt the
+            group's current keys to you — which means they need a public key of yours, available
+            before you're online. So every Pollis device publishes a small bundle in advance: a
+            <strong>key package</strong>. Think of it as a self-addressed lockbox left at the front
+            desk. When someone adds you, they use your key package to seal up the group's state and
+            send you a <strong>Welcome</strong> message. You open it with your private key, and
+            you're in — holding the current epoch's keys.
+          </p>
+          <p>
+            <strong>Here's the part that surprises people.</strong> That Welcome gives you the keys
+            as they exist <em>now</em>. It does not give you the keys from before you joined — and it
+            can't, because MLS is specifically designed so that old keys can't be derived from new
+            ones. That property is the whole point: it's what makes removing someone actually work.
+          </p>
+          <p>
+            So <strong>messages sent to a group before you joined are not readable by you.</strong>
+            Not "hidden by the UI" — genuinely unavailable. This is the same in every serious MLS
+            deployment. It's the cost of removal being real.
+          </p>
+          <p>
+            <strong>Leaving.</strong> When a member is removed, the remaining members advance to a
+            new epoch with fresh keys derived along the vacated path. The removed device keeps
+            whatever it already had — old messages it already decrypted stay decrypted, we can't
+            reach into their machine — but everything from that epoch forward is sealed to them.
+            Removal is arithmetic, not a permission flag on a server we're asking you to trust.
+          </p>
+          <p>
+            <strong>Multi-device is the same mechanism, pointed inward.</strong> Your phone and your
+            laptop are <em>separate members of the group</em>, each with their own keys. There's no
+            master key that gets copied around, because a master key that travels is a master key
+            that can be stolen in transit. Adding your second device is an add-commit, exactly like
+            adding a person.
+          </p>
+          <p>
+            Which leads to the sharp edge, stated plainly: <strong>a new device starts empty. There
+            is no message-history backup.</strong> Your new device joins from today forward. Your old
+            messages are on your old device and nowhere else — not on our servers (we only ever had
+            sealed envelopes), and not in a backup, because we don't make one.
+          </p>
+          <p>
+            We could offer history backup. The common approach — used by some large messengers — is
+            to encrypt your history and store it on the server under a key derived from a PIN or
+            passphrase. That works, and it also creates exactly the thing this entire product exists
+            to avoid: <strong>a copy of your conversations, on our infrastructure, protected by
+            something guessable.</strong> A PIN is a small number of digits. Server-side history plus
+            a guessable key is a standing invitation to whoever eventually gets access to the server.
+          </p>
+          <p>
+            So we don't. If you want your history on a new device, you keep your old device. That is
+            a real cost and we're not going to dress it up.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            Exactly two kinds of loss are acceptable: <strong>messages sent before you joined</strong>,
+            and <strong>a new device starting empty</strong>. Everything else must work — delivery to
+            every current member, decryption, going offline and coming back, reconnecting, accepting a
+            DM request. If a message goes missing for any <em>other</em> reason, that's a bug, and we
+            treat it as one rather than as a property of the design.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/joining-leaving.jpg"
+            aria-describedby="joining-leaving-transcript-body">
+            <source src="learn/media/joining-leaving.webm" type="video/webm" />
+            <source src="learn/media/joining-leaving.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/joining-leaving.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            Lockboxes left in advance, a Welcome that only carries today's keys, pre-join messages
+            visibly failing to open, and the backup trade drawn as a fork where neither path is free.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="joining-leaving-transcript-body">
+            <p>To add you to a group, someone needs to encrypt its keys to you — even if you're
+              offline. So every device publishes a small lockbox in advance. Anyone can put something
+              in. Only you can open it.</p>
+            <p>When you're added, an existing member seals the group's current state into your
+              lockbox and sends it over. You open it, and you're in.</p>
+            <p>Now, the part people don't expect. You received the keys as they are <em>now</em>. Not
+              the old ones. MLS is built so that new keys can't be used to work out old ones — and
+              that's not a limitation, it's the entire reason removing someone actually works.</p>
+            <p>So messages sent before you joined stay sealed. Watch — it isn't that we're hiding
+              them. The key genuinely doesn't fit.</p>
+            <p>Removal is the same idea. This member is removed, the keys along their path are
+              replaced, and the next message is sealed to them. They still have their old key. It
+              opens nothing.</p>
+            <p>Your own devices work exactly the same way. Your phone and your laptop are two
+              separate members of the group, each with their own keys. Nothing is copied between them
+              — because a key that travels is a key that can be stolen on the way.</p>
+            <p>Which brings us to the trade-off we want you to hear from us, not discover later. A
+              new device starts empty. There's no history backup. Your old messages live on your old
+              device, and nowhere else.</p>
+            <p>We could do it the common way: encrypt your history, store it on our servers, protect
+              it with a PIN. Watch what that actually builds — a copy of every conversation, on our
+              infrastructure, behind a six-digit number. That's the exact thing this app exists to not
+              have. So we don't do it. The cost is real: if you want your history, keep your
+              device.</p>
+            <p>What we <em>do</em> promise is narrow and firm. Two kinds of loss are acceptable:
+              messages from before you joined, and a new device starting empty. Everything else —
+              every message to every current member, through reconnects, offline stretches, and
+              restarts — has to arrive. Anything else going missing is a bug, and we treat it as
+              one.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: the enrollment and GroupInfo flows in <a
+            href="https://github.com/actuallydan/pollis/blob/main/.codesight/wiki/mls.md"
+            target="_blank" rel="noopener noreferrer">the MLS wiki article</a>, and the two-acceptable-losses
+          policy stated verbatim in <a
+            href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md" target="_blank"
+            rel="noopener noreferrer">CLAUDE.md</a> → "Messages must work; history is bounded, not
+          flaky".
         </p>
       </section>
 
