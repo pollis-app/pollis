@@ -504,9 +504,43 @@
     }
   }
 
+  // ── Topic 2: a shift-cipher toy, to make "a key controls a reversible
+  // transform" tangible before the real thing. Pure string math, no crypto.
+  function cipherWidget() {
+    var w = document.querySelector("[data-cipher-widget]");
+    if (!w) { return; }
+    var input = w.querySelector("[data-cipher-input]");
+    var shift = w.querySelector("[data-cipher-shift]");
+    var shiftVal = w.querySelector("[data-cipher-shift-val]");
+    var out = w.querySelector("[data-cipher-out]");
+
+    function render() {
+      var k = parseInt(shift.value, 10) % 26;
+      shiftVal.textContent = String(k);
+      var text = input.value, result = "";
+      for (var i = 0; i < text.length; i++) {
+        var c = text.charCodeAt(i);
+        if (c >= 97 && c <= 122) {
+          result += String.fromCharCode((c - 97 + k) % 26 + 97);
+        } else if (c >= 65 && c <= 90) {
+          result += String.fromCharCode((c - 65 + k) % 26 + 65);
+        } else {
+          result += text[i];
+        }
+      }
+      out.textContent = result;
+    }
+
+    input.addEventListener("input", render);
+    shift.addEventListener("input", render);
+    render();
+    w.hidden = false;
+  }
+
   function init() {
     liveSth();
     hashWidget();
+    cipherWidget();
     Array.prototype.forEach.call(
       document.querySelectorAll("section.ln-section"), captionStrip);
     if (!subtle) { return; }

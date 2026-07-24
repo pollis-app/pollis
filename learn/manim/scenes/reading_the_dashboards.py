@@ -100,7 +100,7 @@ class ReadingTheDashboards(Scene):
 
     # ── Scene 1 (0:00–0:40), the artifacts page, annotated ─────────────────
     def beat_tour(self):
-        head = Text("pollis.com/artifacts", color=AMBER).scale(0.55)
+        head = Text("Pollis.Com/artifacts", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -111,10 +111,10 @@ class ReadingTheDashboards(Scene):
         self.hold_until(15)
 
         proofs = section(9.0, 1.5, "Release proofs",
-                         "is this version in the binaries log? did the tree verify? "
+                         "is this version in the binaries log? Did the tree verify? "
                          "what's inside?", color=AMBER, title_color=AMBER)
         proofs.move_to([-1.4, 0.55, 0])
-        note1 = Text("← the one that matters", color=AMBER).scale(0.34)
+        note1 = Text("← The one that matters", color=AMBER).scale(0.34)
         note1.next_to(proofs, RIGHT, buff=0.3)
         self.play(FadeIn(proofs), FadeIn(note1))
         self.hold_until(28)
@@ -127,7 +127,7 @@ class ReadingTheDashboards(Scene):
         keyb.move_to([-1.4, -2.25, 0])
         self.play(FadeIn(audit))
         self.play(FadeIn(keyb))
-        caveat = Text("the browser key check on that page is a convenience, "
+        caveat = Text("The browser key check on that page is a convenience, "
                       "not a trust anchor", color=MUTED).scale(0.34)
         caveat.move_to([0, -3.3, 0])
         self.play(FadeIn(caveat))
@@ -136,7 +136,7 @@ class ReadingTheDashboards(Scene):
 
     # ── Scene 2 (0:40–1:20), one row, decoded ──────────────────────────────
     def beat_row(self):
-        head = Text("one row = one piece of a release", color=AMBER).scale(0.55)
+        head = Text("One row = one piece of a release", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -169,14 +169,14 @@ class ReadingTheDashboards(Scene):
         ).arrange(DOWN, buff=0.2, aligned_edge=LEFT).move_to([3.0, -0.4, 0])
         for c in climb:
             self.play(FadeIn(c, shift=UP * 0.1), run_time=0.35)
-        meaning = Text("a tick is not a box someone checked, "
+        meaning = Text("A tick is not a box someone checked, "
                        "it's a proof that was recomputed, and held",
                        color=OK).scale(0.42).move_to([0, -2.8, 0])
         self.play(FadeIn(meaning))
         self.hold_until(70)
 
         pending = tag("not in log yet", AMBER, scale=0.36).move_to([0, -3.5, 0])
-        pending_note = Text("= the daily rebuild hasn't run. almost never an alarm.",
+        pending_note = Text("= The daily rebuild hasn't run. Almost never an alarm.",
                             color=MUTED).scale(0.34).next_to(pending, RIGHT, buff=0.35)
         self.play(FadeIn(pending), FadeIn(pending_note))
         self.hold_until(80)
@@ -185,7 +185,7 @@ class ReadingTheDashboards(Scene):
 
     # ── Scene 3 (1:20–1:50), the same root, three places ───────────────────
     def beat_same_root(self):
-        head = Text("the same sixty-four characters, three places",
+        head = Text("The same sixty-four characters, three places",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -210,7 +210,7 @@ class ReadingTheDashboards(Scene):
             Text("=", color=OK).scale(0.8).move_to([2.3, 0.4, 0]),
         )
         self.play(Write(eqs))
-        nothing = Text("nothing more needs saying, the picture is the argument",
+        nothing = Text("Nothing more needs saying, the picture is the argument",
                        color=MUTED).scale(0.4).move_to([0, -2.2, 0])
         self.play(FadeIn(nothing))
         self.hold_until(110)
@@ -218,7 +218,7 @@ class ReadingTheDashboards(Scene):
 
     # ── Scene 4 (1:50–2:45), the four verdicts ─────────────────────────────
     def beat_verdicts(self):
-        head = Text("in the app: Security → This build", color=AMBER).scale(0.55)
+        head = Text("In the app: Security → This build", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -244,8 +244,8 @@ class ReadingTheDashboards(Scene):
         self.hold_until(148)
 
         diff = VGroup(
-            Text('"unavailable"  =  I DON\'T KNOW', color=MUTED).scale(0.46),
-            Text('"not in public log"  =  YOU\'VE BEEN TAMPERED WITH',
+            Text('"Unavailable"  =  I DON\'T KNOW', color=MUTED).scale(0.46),
+            Text('"Not in public log"  =  YOU\'VE BEEN TAMPERED WITH',
                  color=DANGER).scale(0.46),
         ).arrange(DOWN, buff=0.22).move_to([0, -2.9, 0])
         self.play(FadeIn(diff))
@@ -255,10 +255,10 @@ class ReadingTheDashboards(Scene):
 
         self.play(FadeOut(VGroup(v, p, u, m, diff)))
         confession = VGroup(
-            Text("the difference is easy to misread,", color=FG).scale(0.46),
-            Text("so the two results are labelled clearly.",
+            Text("The difference is easy to misread,", color=FG).scale(0.46),
+            Text("So the two results are labelled clearly.",
                  color=DANGER).scale(0.46),
-            Text("could not check is not the same as something is wrong.", color=OK).scale(0.44),
+            Text("Could not check is not the same as something is wrong.", color=OK).scale(0.44),
         ).arrange(DOWN, buff=0.28).move_to([0, 0.3, 0])
         for ln in confession:
             self.play(FadeIn(ln, shift=UP * 0.12), run_time=0.4)
@@ -267,28 +267,28 @@ class ReadingTheDashboards(Scene):
 
     # ── Scene 5 (2:45–3:05), the closing honesty beat ──────────────────────
     def beat_closing(self):
-        head = Text("what green actually means", color=AMBER).scale(0.6)
+        head = Text("What green actually means", color=AMBER).scale(0.6)
         head.move_to([0, 2.7, 0])
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
-        green = section(11.4, 1.3, "the things Pollis published are consistent, "
+        green = section(11.4, 1.3, "The things Pollis published are consistent, "
                         "permanent,", "and they include the app you are running",
                         color=OK, title_color=OK).move_to([0, 1.2, 0])
         self.play(FadeIn(green))
 
         nots = VGroup(
-            Text("it does NOT mean our code has no bugs.", color=DANGER).scale(0.46),
-            Text("it does NOT mean your device is safe.", color=DANGER).scale(0.46),
-            Text("it does NOT mean the metadata went anywhere.",
+            Text("It does NOT mean our code has no bugs.", color=DANGER).scale(0.46),
+            Text("It does NOT mean your device is safe.", color=DANGER).scale(0.46),
+            Text("It does NOT mean the metadata went anywhere.",
                  color=DANGER).scale(0.46),
         ).arrange(DOWN, buff=0.26).move_to([0, -0.7, 0])
         for ln in nots:
             self.play(FadeIn(ln, shift=UP * 0.1), run_time=0.4)
 
         close = VGroup(
-            Text("we shrank what you have to take on faith,", color=FG).scale(0.48),
-            Text("and published the evidence for what's left.", color=FG).scale(0.48),
-            Text("now you can check it.", color=AMBER).scale(0.6),
+            Text("We shrank what you have to take on faith,", color=FG).scale(0.48),
+            Text("And published the evidence for what's left.", color=FG).scale(0.48),
+            Text("Now you can check it.", color=AMBER).scale(0.6),
         ).arrange(DOWN, buff=0.22).move_to([0, -2.6, 0])
         self.play(FadeIn(close))
         self.hold_until(185)

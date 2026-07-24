@@ -141,7 +141,7 @@ class ProofsAndEquivocation(Scene):
         l2 = [hpair(l1[0], l1[1]), hpair(l1[2], l1[3])]
         root = hpair(l2[0], l2[1])
 
-        heading = Text("is MY entry in the tree?", color=AMBER).scale(0.55)
+        heading = Text("Is MY entry in the tree?", color=AMBER).scale(0.55)
         heading.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
@@ -184,7 +184,7 @@ class ProofsAndEquivocation(Scene):
         self.hold_until(14)
 
         # The three siblings you're handed, the audit path.
-        sib_note = Text("you are handed only the SIBLINGS on the path up",
+        sib_note = Text("You are handed only the SIBLINGS on the path up",
                         color=MUTED).scale(0.42).move_to([0, -2.05, 0])
         self.play(FadeIn(sib_note))
         siblings = [leaf_chips[3], l1_chips[0], l2_chips[1]]
@@ -209,7 +209,7 @@ class ProofsAndEquivocation(Scene):
             self.play(FadeIn(row, shift=UP * 0.15), run_time=0.45)
             self.play(*recolor(climb_from[n], AMBER), run_time=0.3)
 
-        verdict = Text("computed root = published root  →  your entry IS in the tree",
+        verdict = Text("Computed root = published root  →  your entry IS in the tree",
                        color=OK).scale(0.46).move_to([0, -3.72, 0])
         self.play(FadeIn(verdict), Indicate(root_chip, color=OK, scale_factor=1.15))
         self.hold_until(32)
@@ -247,13 +247,13 @@ class ProofsAndEquivocation(Scene):
         # The scaling number, stated, not described (acceptance criterion).
         self.play(FadeOut(VGroup(edges, leaf_chips, l1_chips, l2_chips, root_chip,
                                  mine_label, swap, flines, fail, heading)))
-        scale_head = Text("and it barely grows", color=AMBER).scale(0.55).move_to([0, 2.4, 0])
+        scale_head = Text("And it barely grows", color=AMBER).scale(0.55).move_to([0, 2.4, 0])
         rows = VGroup(
             Text("1,000 entries        →   10 hashes", font=MONO, color=FG).scale(0.55),
             Text("1,000,000 entries    →   20 hashes", font=MONO, color=OK).scale(0.55),
             Text("1,000,000,000        →   30 hashes", font=MONO, color=FG).scale(0.55),
         ).arrange(DOWN, buff=0.3, aligned_edge=LEFT)
-        note = Text("double the list, add one step", color=MUTED).scale(0.45)
+        note = Text("Double the list, add one step", color=MUTED).scale(0.45)
         note.next_to(rows, DOWN, buff=0.6)
         self.play(AddTextLetterByLetter(scale_head, run_time=0.7))
         for r in rows:
@@ -264,7 +264,7 @@ class ProofsAndEquivocation(Scene):
 
     # ── Scene 2 (0:50–1:35), the consistency proof ─────────────────────────
     def beat_consistency(self):
-        heading = Text("is this the SAME list as last week, only longer?",
+        heading = Text("Is this the SAME list as last week, only longer?",
                        color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
@@ -297,24 +297,24 @@ class ProofsAndEquivocation(Scene):
                         [3.0 + 5.4 / 2 - 0.55, 0.35, 0],
                         stroke_color=FG, stroke_width=1.5,
                         fill_color=FG, fill_opacity=0.06)
-        inner_lab = Text("last week's tree, unchanged, in place",
+        inner_lab = Text("Last week's tree, unchanged, in place",
                          color=OK).scale(0.36).move_to([3.0 - 0.35, -1.75, 0])
-        added_lab = Text("+9 appended", color=FG).scale(0.34).move_to([5.2, 0.95, 0])
+        added_lab = Text("+9 Appended", color=FG).scale(0.34).move_to([5.2, 0.95, 0])
 
         self.play(Create(inner), FadeIn(inner_lab))
         self.play(Create(added), FadeIn(added_lab))
-        proof_note = Text("a consistency proof is the handful of hashes that show this",
+        proof_note = Text("A consistency proof is the handful of hashes that show this",
                           color=MUTED).scale(0.42).move_to([0, -2.5, 0])
         self.play(FadeIn(proof_note))
         self.hold_until(70)
 
         # The cheat: edit something already published.
-        cheat = Text("if an old entry were edited, say entry #12",
+        cheat = Text("If an old entry were edited, say entry #12",
                      color=DANGER).scale(0.45).move_to([0, -3.1, 0])
         self.play(FadeIn(cheat))
         scar = Line([-4.5, -0.6, 0], [-4.5, -0.1, 0], stroke_color=DANGER, stroke_width=5)
         scar2 = Line([1.0, -0.6, 0], [1.0, -0.1, 0], stroke_color=DANGER, stroke_width=5)
-        scar_lab = Text("entry #12, edited", color=DANGER).scale(0.32)
+        scar_lab = Text("Entry #12, edited", color=DANGER).scale(0.32)
         scar_lab.move_to([-4.5, 0.25, 0])
         self.play(Create(scar), Create(scar2), FadeIn(scar_lab), run_time=0.5)
         self.play(old_tri.animate.set_stroke(DANGER).set_fill(DANGER, opacity=0.10),
@@ -322,7 +322,7 @@ class ProofsAndEquivocation(Scene):
                   inner_lab.animate.set_color(DANGER))
         self.play(Indicate(old_tri, color=DANGER, scale_factor=1.05), run_time=0.6)
 
-        failed = Text("the old tree no longer fits inside the new one",
+        failed = Text("The old tree no longer fits inside the new one",
                       color=DANGER).scale(0.46).move_to([0, -2.5, 0])
         self.play(FadeOut(proof_note), FadeIn(failed))
         gone = Text("NO CONSISTENCY PROOF EXISTS FOR THIS, none can be manufactured",
@@ -330,7 +330,7 @@ class ProofsAndEquivocation(Scene):
         self.play(FadeOut(cheat), FadeIn(gone))
         self.hold_until(86)
 
-        turn = Text('so "append-only" is not a promise. it is something you check.',
+        turn = Text('So "append-only" is not a promise. It is something you check.',
                     color=OK).scale(0.5).move_to([0, -3.65, 0])
         self.play(FadeIn(turn))
         self.hold_until(95)
@@ -340,7 +340,7 @@ class ProofsAndEquivocation(Scene):
 
     # ── Scene 3 (1:35–2:05), the signed tree head + the pinned key ─────────
     def beat_sth(self):
-        heading = Text("who says which root is real?", color=AMBER).scale(0.55)
+        heading = Text("Who says which root is real?", color=AMBER).scale(0.55)
         heading.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
@@ -351,7 +351,7 @@ class ProofsAndEquivocation(Scene):
             Text(f"timestamp  {LIVE_TS}", font=MONO, color=FG).scale(0.42),
             Text(f"signature  {short(LIVE_SIG, 24)}", font=MONO, color=OK).scale(0.42),
         ).arrange(DOWN, buff=0.18, aligned_edge=LEFT).move_to(card.get_center())
-        card_lab = Text("a signed tree head, root, count, time, sealed together",
+        card_lab = Text("A signed tree head, root, count, time, sealed together",
                         color=MUTED).scale(0.4).next_to(card, DOWN, buff=0.25)
         self.play(Create(card))
         for f in fields:
@@ -360,7 +360,7 @@ class ProofsAndEquivocation(Scene):
         self.hold_until(110)
 
         # The pin: the key lives inside the shipped binaries, not on a server.
-        key_head = Text("the key we sign with is compiled INTO the client",
+        key_head = Text("The key we sign with is compiled INTO the client",
                         color=AMBER).scale(0.48).move_to([0, -0.65, 0])
         self.play(FadeIn(key_head))
 
@@ -374,18 +374,18 @@ class ProofsAndEquivocation(Scene):
         app = holder(-3.4, "Pollis app (signed binary)")
         cli = holder(3.4, "pollis-verify (CLI)")
         self.play(FadeIn(app), FadeIn(cli))
-        not_fetched = Text("not fetched. not configurable.", color=MUTED).scale(0.4)
+        not_fetched = Text("Not fetched. Not configurable.", color=MUTED).scale(0.4)
         not_fetched.move_to([0, -2.85, 0])
         self.play(FadeIn(not_fetched))
         self.wait(1.0)
 
         # The attack the pin defeats.
         self.play(FadeOut(VGroup(card, fields, card_lab, key_head)))
-        attack = Text("a bad server could serve its own key with a matching fake list",
+        attack = Text("A bad server could serve its own key with a matching fake list",
                       color=DANGER).scale(0.46).move_to([0, 1.9, 0])
         served = panel(6.4, 1.5, DANGER).move_to([0, 0.7, 0])
         served_txt = VGroup(
-            Text("served public_key.json", color=MUTED).scale(0.36),
+            Text("Served public_key.Json", color=MUTED).scale(0.36),
             Text("9c41a0d7…  (the server's)", font=MONO, color=DANGER).scale(0.4),
         ).arrange(DOWN, buff=0.14).move_to(served.get_center())
         self.play(FadeIn(attack))
@@ -395,7 +395,7 @@ class ProofsAndEquivocation(Scene):
             Line([1.6, 0.0, 0], [3.4, -1.3, 0], stroke_color=DANGER, stroke_width=2),
         )
         self.play(Create(arrows), run_time=0.5)
-        reject = Text("served key ≠ pinned key  →  hard ALARM, every time",
+        reject = Text("Served key ≠ pinned key  →  hard ALARM, every time",
                       color=OK).scale(0.5).move_to([0, -3.45, 0])
         self.play(FadeIn(reject),
                   app[0].animate.set_stroke(OK, width=3),
@@ -407,12 +407,12 @@ class ProofsAndEquivocation(Scene):
 
     # ── Scene 4 (2:05–2:57), equivocation, the attack this all exists for ──
     def beat_equivocation(self):
-        heading = Text("could different people be shown different lists?", color=AMBER).scale(0.6)
+        heading = Text("Could different people be shown different lists?", color=AMBER).scale(0.6)
         heading.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
         server = panel(3.0, 0.85, MUTED).move_to([0, 2.15, 0])
-        server_t = Text("the operator", color=MUTED).scale(0.36)
+        server_t = Text("The operator", color=MUTED).scale(0.36)
         server_t.move_to(server.get_center())
         self.play(FadeIn(server), FadeIn(server_t))
 
@@ -444,7 +444,7 @@ class ProofsAndEquivocation(Scene):
         self.play(Indicate(left_checks, color=OK, scale_factor=1.05),
                   Indicate(right_checks, color=OK, scale_factor=1.05), run_time=0.8)
 
-        blind = Text("both append-only. both signed. both verify. "
+        blind = Text("Both append-only. Both signed. Both verify. "
                      "neither of you can tell alone.",
                      color=DANGER).scale(0.46).move_to([0, -2.3, 0])
         self.play(FadeIn(blind))
@@ -452,7 +452,7 @@ class ProofsAndEquivocation(Scene):
 
         # …until they compare.
         self.play(FadeOut(VGroup(server, server_t, line_l, line_r, left, right, blind)))
-        compare_head = Text("so compare.", color=AMBER).scale(0.6).move_to([0, 2.3, 0])
+        compare_head = Text("So compare.", color=AMBER).scale(0.6).move_to([0, 2.3, 0])
         self.play(AddTextLetterByLetter(compare_head, run_time=0.7))
 
         def head_card(x, who, root_hex, color):
@@ -471,7 +471,7 @@ class ProofsAndEquivocation(Scene):
 
         neq = Text("≠", color=DANGER).scale(1.0).move_to([0, 0.45, 0])
         self.play(Write(neq))
-        same = Text("same tree_size. different root. both carry a valid signature.",
+        same = Text("Same tree_size. Different root. Both carry a valid signature.",
                     color=FG).scale(0.46).move_to([0, -1.4, 0])
         self.play(FadeIn(same))
         self.hold_until(162)
@@ -484,7 +484,7 @@ class ProofsAndEquivocation(Scene):
         self.play(FadeIn(stamp), Create(stamp_box), run_time=0.7)
         self.play(Indicate(VGroup(stamp, stamp_box), color=DANGER, scale_factor=1.08))
 
-        why = Text("this is why it is published, not promised.",
+        why = Text("This is why it is published, not promised.",
                    color=AMBER).scale(0.5).move_to([0, -3.3, 0])
         self.play(FadeIn(why))
         self.wait(1.6)
@@ -509,7 +509,7 @@ class ProofsAndEquivocation(Scene):
             cards.add(VGroup(b, txt))
         cards.arrange(RIGHT, buff=0.28).scale(0.92).move_to([0, 0.4, 0])
 
-        head = Text("each one closes a door", color=FG).scale(0.55).move_to([0, 2.3, 0])
+        head = Text("Each one closes a door", color=FG).scale(0.55).move_to([0, 2.3, 0])
         self.play(AddTextLetterByLetter(head, run_time=0.7))
         for c in cards:
             self.play(FadeIn(c, shift=UP * 0.15), run_time=0.3)
@@ -519,7 +519,7 @@ class ProofsAndEquivocation(Scene):
             for i in range(len(cards) - 1)
         ])
         self.play(Create(joins), run_time=0.6)
-        close = Text("nobody has to trust anybody. they just have to compare.",
+        close = Text("Nobody has to trust anybody. They just have to compare.",
                      color=AMBER).scale(0.5).move_to([0, -1.9, 0])
         self.play(FadeIn(close))
         self.hold_until(185)

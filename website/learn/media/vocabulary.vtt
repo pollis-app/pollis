@@ -23,4 +23,4 @@ Last idea: a hash. It's a fingerprint for data. Any file, any size, in, a short 
 But change one single character… and it's completely different. Not slightly. Completely. Try it yourself in the box below.
 
 01:50.000 --> 02:05.000
-Key, encryption, signature, hash. Everything else is those four ideas, arranged. And the maths is not the weak point, it essentially never is. Where the keys are kept, whether a public key really belongs to who it says, and whether the app is honest: that's what the rest of Learn is about.
+Key, encryption, signature, hash. Everything else is those four ideas, arranged. And the math is not the weak point, it essentially never is. Where the keys are kept, whether a public key really belongs to who it says, and whether the app is honest: that's what the rest of Learn is about.

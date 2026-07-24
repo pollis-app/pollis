@@ -122,7 +122,7 @@ class MerkleTrees(Scene):
             rows.add(VGroup(bar, label))
         rows.arrange(DOWN, buff=0.14).shift(LEFT * 2.4 + DOWN * 0.3)
 
-        caption = Text("we publish a list and promise to only ever add to it",
+        caption = Text("We publish a list and promise to only ever add to it",
                        color=MUTED).scale(0.42)
         caption.next_to(rows, RIGHT, buff=0.8)
 
@@ -133,14 +133,14 @@ class MerkleTrees(Scene):
 
         # The quiet edit: row #3 flips red while "you aren't looking".
         edited = rows[2]
-        watch = Text("...you miss one day...", color=MUTED).scale(0.42)
+        watch = Text("...You miss one day...", color=MUTED).scale(0.42)
         watch.next_to(rows, RIGHT, buff=0.8)
         self.play(FadeOut(caption, run_time=0.3), FadeIn(watch, run_time=0.3))
         self.play(
             edited[0].animate.set_stroke(DANGER).set_fill(DANGER, opacity=0.12),
             edited[1].animate.set_color(DANGER),
         )
-        quiet = Text("...and one entry is quietly changed.", color=DANGER).scale(0.42)
+        quiet = Text("...And one entry is quietly changed.", color=DANGER).scale(0.42)
         quiet.next_to(rows, RIGHT, buff=0.8)
         self.play(FadeOut(watch, run_time=0.3), FadeIn(quiet, run_time=0.3))
         self.wait(1.0)
@@ -171,7 +171,7 @@ class MerkleTrees(Scene):
             c = chip(leaf_h[i], color=MUTED).move_to([x, -2.35, 0])
             leaf_chips.add(c)
 
-        heading = Text("hash each entry, then hash pairs, all the way up",
+        heading = Text("Hash each entry, then hash pairs, all the way up",
                        color=AMBER).scale(0.5).to_edge().shift([0, -0.15, 0])
         self.play(AddTextLetterByLetter(heading, run_time=0.7))
         self.play(FadeIn(leaf_boxes, shift=UP * 0.2), run_time=0.8)
@@ -203,7 +203,7 @@ class MerkleTrees(Scene):
             Line(l2_chips[0].get_top(), root_chip.get_bottom(), stroke_color=LINE, stroke_width=1.5),
             Line(l2_chips[1].get_top(), root_chip.get_bottom(), stroke_color=LINE, stroke_width=1.5),
         )
-        root_label = Text("the root, one fingerprint of the whole list",
+        root_label = Text("The root, one fingerprint of the whole list",
                           color=AMBER).scale(0.4).next_to(root_chip, UP, buff=0.2)
         self.play(*[Create(e) for e in r_edges], run_time=0.5)
         self.play(FadeIn(root_chip), AddTextLetterByLetter(root_label, run_time=0.7))
@@ -211,9 +211,9 @@ class MerkleTrees(Scene):
 
         # Swap to the REAL live root.
         real = VGroup(
-            Text("the real thing, right now:", color=MUTED).scale(0.4),
+            Text("The real thing, right now:", color=MUTED).scale(0.4),
             Text(LIVE_ROOT[:32] + "…", font=MONO, color=AMBER).scale(0.42),
-            Text(f"binaries log · {LIVE_SIZE} entries · verify.pollis.com",
+            Text(f"Binaries log · {LIVE_SIZE} entries · verify.Pollis.Com",
                  color=MUTED).scale(0.36),
         ).arrange(DOWN, buff=0.14)
         real.move_to(root_label.get_center()).shift([0, 0.25, 0])
@@ -232,7 +232,7 @@ class MerkleTrees(Scene):
     # ── Scene 3 (0:52–1:26), the ripple ────────────────────────────────────
     def beat_ripple(self):
         t = self.tree
-        heading = Text("change one character, the root changes completely",
+        heading = Text("Change one character, the root changes completely",
                        color=AMBER).scale(0.5).to_edge().shift([0, -0.15, 0])
         self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
@@ -286,13 +286,13 @@ class MerkleTrees(Scene):
         ripple(2, "id:chan", run=1.1)
         self.wait(0.6)
 
-        cap2 = Text("again, a different entry, same result", color=MUTED).scale(0.4)
+        cap2 = Text("Again, a different entry, same result", color=MUTED).scale(0.4)
         cap2.move_to(cap1.get_center())
         self.play(FadeOut(cap1), FadeIn(cap2))
         ripple(6, "id:gits", run=0.7)
         self.wait(0.8)
 
-        note = Text("one character, anywhere → a different root",
+        note = Text("One character, anywhere → a different root",
                     color=FG).scale(0.44).move_to([0, 2.7, 0])
         self.play(FadeOut(cap2), FadeOut(heading), FadeIn(note))
         self.wait(0.8)
@@ -307,14 +307,14 @@ class MerkleTrees(Scene):
     # ── Scene 4 (1:26–1:44), the leverage ──────────────────────────────────
     def beat_leverage(self):
         left = VGroup(
-            Text("to check the list is unchanged", color=MUTED).scale(0.4),
-            Text("download 50,000 entries", color=DANGER).scale(0.6),
-            Text("and compare all of them", color=MUTED).scale(0.4),
+            Text("To check the list is unchanged", color=MUTED).scale(0.4),
+            Text("Download 50,000 entries", color=DANGER).scale(0.6),
+            Text("And compare all of them", color=MUTED).scale(0.4),
         ).arrange(DOWN, buff=0.2).shift([-3.4, 0, 0])
 
         right = VGroup(
-            Text("or", color=MUTED).scale(0.4),
-            Text("compare 64 characters", color=OK).scale(0.6),
+            Text("Or", color=MUTED).scale(0.4),
+            Text("Compare 64 characters", color=OK).scale(0.6),
             Text(LIVE_ROOT[:24] + "…", font=MONO, color=AMBER).scale(0.4),
         ).arrange(DOWN, buff=0.2).shift([3.4, 0, 0])
 
@@ -329,10 +329,10 @@ class MerkleTrees(Scene):
 
     # ── Scene 5 (1:44–2:30), what it does, and does not, do ──────────────────────────────
     def beat_honest(self):
-        head = Text("what it does, and does not, do", color=AMBER).scale(0.6).move_to([0, 2.6, 0])
+        head = Text("What it does, and does not, do", color=AMBER).scale(0.6).move_to([0, 2.6, 0])
         body = VGroup(
-            Text("a Merkle tree does not judge whether an entry is truthful.", color=FG).scale(0.46),
-            Text("a wrong entry could still be added; the tree just records it.", color=MUTED).scale(0.42),
+            Text("A Merkle tree does not judge whether an entry is truthful.", color=FG).scale(0.46),
+            Text("A wrong entry could still be added; the tree just records it.", color=MUTED).scale(0.42),
         ).arrange(DOWN, buff=0.25).shift([0, 1.1, 0])
 
         self.play(AddTextLetterByLetter(head, run_time=0.7))
@@ -340,10 +340,10 @@ class MerkleTrees(Scene):
         self.wait(1.2)
 
         turn = VGroup(
-            Text("what it removes is the ability to change the list quietly.", color=OK).scale(0.5),
-            Text("showing one list to you and another to someone else, impossible.",
+            Text("What it removes is the ability to change the list quietly.", color=OK).scale(0.5),
+            Text("Showing one list to you and another to someone else, impossible.",
                  color=MUTED).scale(0.4),
-            Text("or changing it later, impossible.", color=MUTED).scale(0.4),
+            Text("Or changing it later, impossible.", color=MUTED).scale(0.4),
         ).arrange(DOWN, buff=0.22).shift([0, -0.6, 0])
         self.play(FadeIn(turn, shift=UP * 0.2))
         self.wait(1.2)
@@ -362,9 +362,9 @@ class MerkleTrees(Scene):
         self.play(FadeOut(body), FadeOut(turn))
         self.play(FadeIn(r1), FadeIn(r2))
         self.play(Write(eq))
-        close = Text('you don\'t have to take our word for it.',
+        close = Text('You don\'t have to take our word for it.',
                      color=AMBER).scale(0.5).move_to([0, 0.4, 0])
-        close2 = Text("you can just check.", color=FG).scale(0.5).next_to(close, DOWN, buff=0.25)
+        close2 = Text("You can just check.", color=FG).scale(0.5).next_to(close, DOWN, buff=0.25)
         self.play(FadeIn(close), FadeIn(close2))
         self.wait(1.6)
         self.hold_until(148)
