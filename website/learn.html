@@ -704,6 +704,8 @@
             multi-device &amp; the honest history boundary</a></li>
         <li><span class="ln-track">MLS</span><a href="#window-not-door">Forward secrecy &amp;
             post-compromise security</a></li>
+        <li><span class="ln-track">IDENTITY</span><a href="#identity-keys">Identity keys, safety
+            numbers &amp; TOFU pinning</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
@@ -1378,6 +1380,142 @@
             target="_blank" rel="noopener noreferrer">the MLS wiki article</a>, and the local-storage
           caveat in <a href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md"
             target="_blank" rel="noopener noreferrer">CLAUDE.md</a> → "Storage".
+        </p>
+      </section>
+
+      <!-- ═══ Topic 6 — identity keys + safety numbers (#595) ══════════════ -->
+      <section class="ln-section" id="identity-keys">
+        <div class="ln-eyebrow">Track C · Identity · Topic 6</div>
+        <h2>Identity keys, safety numbers, and TOFU pinning</h2>
+
+        <div class="ln-prose">
+          <p>
+            Encryption protects the message. It says nothing about <em>who you're talking to</em>.
+          </p>
+          <p>
+            When you first message someone, your app fetches their public key — from our servers.
+            Right there is the gap. If we were malicious or compelled, we could hand you a key we
+            control instead of theirs, sit in the middle, and read everything. Both sides would see a
+            padlock. Nothing would look wrong. The maths would be working perfectly, on the wrong
+            key.
+          </p>
+          <p>
+            Every end-to-end encrypted messenger has this problem. It's the one that matters, and it
+            has two complementary answers.
+          </p>
+          <p>
+            <strong>Answer one: safety numbers.</strong> Your app takes your identity key and your
+            contact's, combines them, and renders the result as a short comparable code — in Pollis,
+            sixty digits shown as twelve blocks of five. It's the same in both directions: you and
+            they compute the same number from the same pair of keys. If someone substituted a key,
+            the two devices are working from different inputs, so the numbers <em>differ</em>. Compare
+            them over any channel the attacker doesn't control — hold the phones side by side, read
+            them aloud on a call, scan the QR code — and a middleman is exposed immediately.
+          </p>
+          <p>
+            The caveat is the honest one: this only works if you actually compare. Most people never
+            do. Which is why there's a second answer that works even when nobody checks.
+          </p>
+          <p>
+            <strong>Answer two: we publish every key, permanently, in public.</strong> Every identity
+            key Pollis ever publishes for an account is appended to a public, append-only log
+            (<a href="#three-logs">Topic 9</a>). Your own app quietly re-checks that the key the world
+            is being shown for <em>you</em> is the key you actually hold. If those ever disagree, your
+            device raises an alarm — that's the account-key line on the app's Security page.
+          </p>
+          <p>
+            This changes the economics of the attack completely. To substitute a key, we'd have to
+            publish the fake one to a log that anyone can read, that we cannot retroactively edit, and
+            that your own device audits. The attack stops being invisible and becomes <strong>permanent
+            public evidence of our misbehaviour</strong>. That's not a promise we're asking you to
+            believe; it's a structural property of an append-only log.
+          </p>
+          <p>
+            <strong>Trust on first use.</strong> The first time you talk to someone, your app pins the
+            key it saw. From then on, a <em>change</em> is what's flagged. Key changes do happen
+            innocently — a new phone, a reinstall — so a changed key isn't an accusation, it's a
+            prompt: re-verify before you say anything sensitive. Pollis shows a shield next to
+            verified contacts, and a distinct warning if a pinned key changed.
+          </p>
+          <p>
+            Where this leaves you: <strong>compare safety numbers once with the people who
+            matter</strong>, and let the log handle the rest.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            A safety number that nobody compares protects nobody, and your app <strong>cannot tell an
+            innocent key change from an attack</strong> — a new phone and a middleman look identical
+            from the inside, which is exactly why it asks you instead of guessing. The log narrows
+            that gap but doesn't close it: it makes a substitution permanent and public, which is a
+            deterrent and an audit trail, not a block. And none of this touches metadata
+            (<a href="#threat-model">Topic 1</a>).
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/identity-keys.jpg"
+            aria-describedby="identity-keys-transcript-body">
+            <source src="learn/media/identity-keys.webm" type="video/webm" />
+            <source src="learn/media/identity-keys.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/identity-keys.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            The substitution attack succeeding with padlocks on both screens, safety numbers matching
+            and then diverging, almost everybody walking past the comparison step, and the log that
+            catches it anyway.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="identity-keys-transcript-body">
+            <p>Encryption protects the message. It doesn't tell you who's on the other end. When you
+              first message someone, your app asks our servers for their public key. And that's the
+              gap.</p>
+            <p>Watch. Alice asks for Bob's key. We hand her one labelled "Bob" — but it's ours. Now
+              everything Alice sends opens here, gets read, and gets re-sealed for Bob. Look at their
+              screens. Padlocks. Both of them. Nothing looks wrong, because nothing <em>is</em> wrong
+              with the encryption. It's working perfectly — on the wrong key.</p>
+            <p>Every end-to-end encrypted app has this problem. Here are the two answers. First:
+              safety numbers. Your device combines your identity key with your contact's and produces
+              a short code. They do the same. Same two keys, same code — it matches.</p>
+            <p>Now run the attack again. Alice's device is mixing in our key, not Bob's. Bob's is
+              mixing in his real one. Different inputs, different codes. Compare them any way we can't
+              interfere with — hold the phones together, read them out on a call, scan the QR — and
+              the middleman is caught immediately.</p>
+            <p>The catch is obvious. It only works if you actually check. And most people never do. So
+              there's a second answer, and it works even when nobody checks.</p>
+            <p>Every identity key we publish goes into a public log that only ever grows. To pull off
+              that attack, we'd have to publish the fake key — here, in the open, permanently. And
+              your own device is reading that log. It compares what the world is being shown for you
+              against the key you actually hold. If they ever disagree, your app tells you.</p>
+            <p>Watch us try to take it back. We can't. The log doesn't work that way. That's the
+              shift: the attack stops being invisible and becomes permanent public proof that we
+              cheated. You don't have to trust us about that. It's how the log is built.</p>
+            <p>One last thing. The first time you talk to someone, your app remembers their key. If it
+              ever changes, you get a banner. Usually that's innocent — a new phone, a reinstall.
+              Sometimes it isn't. Your app can't tell the difference, which is why it asks you.</p>
+            <p>Compare safety numbers once, with the people who matter. The log handles the rest.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: the safety-number derivation and TOFU pin store in <a
+            href="https://github.com/actuallydan/pollis/blob/main/.codesight/wiki/safety.md"
+            target="_blank" rel="noopener noreferrer">the safety wiki article</a>, and the account-key
+          self-audit in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/transparency.rs"
+            target="_blank" rel="noopener noreferrer">transparency.rs</a>.
         </p>
       </section>
 
