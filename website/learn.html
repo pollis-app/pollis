@@ -650,6 +650,8 @@
       </div>
 
       <ul class="ln-toc">
+        <li><span class="ln-track">FOUNDATIONS</span><a href="#threat-model">Threat model — who can
+            see what</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
@@ -663,6 +665,128 @@
         <li><span class="ln-track">TRANSPARENCY</span><a href="#reading-the-dashboards">Reading the
             artifacts page and the in-app Security page</a></li>
       </ul>
+
+      <!-- ═══ Topic 1 — threat model (#590) ═════════════════════════════════ -->
+      <section class="ln-section" id="threat-model">
+        <div class="ln-eyebrow">Track A · Foundations · Topic 1</div>
+        <h2>Threat model — who can see what</h2>
+
+        <div class="ln-prose">
+          <p>
+            When you send a message on most apps, you're trusting a company. Not their promise —
+            their <em>ability</em>. Even a company that genuinely doesn't want to read your messages
+            can be hacked, sold, subpoenaed, or told by a court to start reading. "We would never" is
+            a statement about intent. Intent changes.
+          </p>
+          <p>
+            Pollis is built so that reading your messages isn't something we're <em>choosing</em> not
+            to do. It's something we're <strong>unable</strong> to do. Here's the honest map of who
+            sees what.
+          </p>
+          <p>
+            <strong>Your device sees everything.</strong> Obviously — it's where you type and read.
+            Your messages are decrypted on your device and nowhere else. Which also means: if someone
+            controls your device, they've won, and no amount of clever cryptography helps.
+          </p>
+          <p>
+            <strong>Our servers see metadata, never content.</strong> We run a database and a
+            delivery service, and what they hold is <em>sealed envelopes</em> — encrypted blobs we
+            cannot open, because the keys never leave your devices. What they can see is the outside
+            of the envelope: that an account sent something, roughly when, roughly how big, and which
+            conversation it belongs to. <strong>That is real information and we're not going to
+            pretend otherwise.</strong> Who you talk to and when can be sensitive on its own. We
+            minimise it where we can; we don't eliminate it today.
+          </p>
+          <p>
+            <strong>Our servers can lie about <em>who</em>, and that's the interesting attack.</strong>
+            Content is safe, but encryption relies on knowing you're using <em>the right key</em> for
+            the person you mean. A malicious or compelled server could hand you the wrong key — its
+            own — and quietly read everything. This is the attack that actually matters against a
+            system like ours, and it's why safety numbers (Topic 6) and the transparency logs
+            (<a href="#three-logs">Topic 9</a>) exist.
+          </p>
+          <p>
+            <strong>The binary you run is trusted, and that's a real assumption.</strong> Encryption
+            running in a backdoored app protects nobody. The app on your machine could, in principle,
+            be a version built just for you — which is the reason
+            <a href="#binary-transparency">binary transparency</a> exists.
+          </p>
+          <p>
+            The pattern, throughout: <strong>we shrink the set of things you have to take on faith,
+            and then publish evidence for what's left.</strong>
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">What we do not protect against</div>
+          <p>
+            Someone with control of your unlocked device. Someone who can see that you use Pollis and
+            who you talk to, from network position or server metadata. Bugs — transparency proves what
+            we published, it does not prove the code is correct
+            (<a href="#binary-transparency">Topic 10</a>). And your own past, on a new device: there
+            is no key backup, so a fresh device starts empty. That last one is a deliberate trade, not
+            an oversight.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/threat-model.jpg" aria-describedby="threat-model-transcript-body">
+            <source src="learn/media/threat-model.webm" type="video/webm" />
+            <source src="learn/media/threat-model.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/threat-model.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            One diagram, built up: a readable message, then a sealed one, then the legible outside of
+            the envelope, then the key-substitution attack — ending on the three-colour boundary this
+            whole section uses. Green is sealed, amber is visible to us, red is undefended.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="threat-model-transcript-body">
+            <p>Most messaging apps ask you to trust a company. Not their promise — their ability.
+              Even a company that doesn't want to read your messages can be broken into, bought, or
+              ordered by a court. "We would never" describes intent. Intent changes.</p>
+            <p>So Pollis is built so reading your messages isn't something we choose not to do. It's
+              something we can't do.</p>
+            <p>Your message is sealed on your device, before it goes anywhere. Our servers pass it
+              along without ever holding the key. It opens on your friend's device. We're a post
+              office handling sealed envelopes.</p>
+            <p>But look closer at the envelope, because this is the part most apps gloss over. We
+              can't see what's inside. We <em>can</em> see the outside: that your account sent
+              something, when, roughly how big, and which conversation it belongs to. That's called
+              metadata, and it can be sensitive all by itself. We're not going to tell you it doesn't
+              exist.</p>
+            <p>There's a subtler attack too. Encryption only helps if you're using the right key for
+              the right person. A dishonest server could hand you the wrong key — its own — and read
+              everything without ever breaking the maths.</p>
+            <p>That's the attack we take most seriously, and it's why the rest of this section
+              exists: safety numbers, and public logs of every key we publish. Both are things you
+              can check yourself.</p>
+            <p>Here's the full picture. Green, we cannot see. Amber, we can — and we say so. Red is
+              outside what any messenger can defend: your own device, and our own bugs.</p>
+            <p>Everything else in Learn is about shrinking the green boundary's dependence on
+              trusting us — and publishing evidence for whatever's left.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md"
+            target="_blank" rel="noopener noreferrer">docs/security-whitepaper.md</a> §1.1, and the
+          trusted/untrusted split in <a
+            href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md" target="_blank"
+            rel="noopener noreferrer">CLAUDE.md</a> → "Security model".
+        </p>
+      </section>
 
       <!-- ═══ Topic 7 — Merkle trees (M0 pilot, #596) ═══════════════════════ -->
       <section class="ln-section" id="merkle-trees">
