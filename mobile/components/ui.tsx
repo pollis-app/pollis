@@ -11,8 +11,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { palette, semantic, type as ty, r, space } from "../theme/tokens";
+import { palette, semantic, type as ty, r, space, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
+import { useLayoutClass } from "../hooks/useLayoutClass";
 import { Icon } from "./icons";
 
 /* ── Text ─────────────────────────────────────────────────────────── */
@@ -39,22 +40,43 @@ export function Txt({
 export function Screen({
   children,
   testID,
+  centered,
 }: {
   children: React.ReactNode;
   // Each route sets `screen-<route>` here so e2e flows have one stable root
   // anchor per screen. Inert in production.
   testID?: string;
+  // Single-column screens (auth, self, forms) set this. On `regular` (iPad)
+  // width it constrains + centers the content to a readable column; on
+  // `compact` (phones, narrow panes) it is a no-op — children render exactly as
+  // today, with no wrapper, so the phone tree is byte-for-byte unchanged.
+  centered?: boolean;
 }) {
   // Subscribe to the accent so the whole subtree re-renders (and the token
   // getters resolve to the new color) when it changes.
   useTheme();
+  const cls = useLayoutClass();
+  const centerBody = centered && cls === "regular";
   return (
     <SafeAreaView
       testID={testID}
       style={{ flex: 1, backgroundColor: palette.bg }}
       edges={["top", "bottom"]}
     >
-      {children}
+      {centerBody ? (
+        <View
+          style={{
+            flex: 1,
+            width: "100%",
+            maxWidth: layout.readableMaxWidth,
+            alignSelf: "center",
+          }}
+        >
+          {children}
+        </View>
+      ) : (
+        children
+      )}
     </SafeAreaView>
   );
 }

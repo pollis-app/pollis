@@ -24,7 +24,7 @@ export default function AuthEmail() {
   };
 
   return (
-    <Screen testID="screen-auth-email">
+    <Screen testID="screen-auth-email" centered>
       <Crumb segs={[{ label: "AUTH" }, { label: "Identify", leaf: true }]} />
       <View
         style={{ flex: 1, paddingHorizontal: 24, paddingTop: 30, gap: 24 }}

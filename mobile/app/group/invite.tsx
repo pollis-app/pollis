@@ -39,7 +39,7 @@ export default function InviteToGroup() {
   };
 
   return (
-    <Screen testID="screen-group-invite">
+    <Screen testID="screen-group-invite" centered>
       <Crumb
         segs={[
           { label: "GROUPS" },

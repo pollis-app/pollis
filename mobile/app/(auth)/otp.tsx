@@ -37,7 +37,7 @@ export default function AuthOTP() {
   };
 
   return (
-    <Screen testID="screen-auth-otp">
+    <Screen testID="screen-auth-otp" centered>
       <Crumb
         segs={[{ label: "AUTH" }, { label: "Verify email", leaf: true }]}
       />

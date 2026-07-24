@@ -146,4 +146,8 @@ export const layout = {
   ctx: 52,
   composer: 58,
   touchMin: 38,
+  // Max width for a single-column screen on regular (iPad) width.
+  readableMaxWidth: 560,
+  // Two-pane left (list) column width (used in Pass 2).
+  listPaneWidth: 340,
 };

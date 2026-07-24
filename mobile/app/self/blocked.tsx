@@ -17,7 +17,7 @@ export default function Blocked() {
   const unblock = useUnblockUser();
 
   return (
-    <Screen testID="screen-self-blocked">
+    <Screen testID="screen-self-blocked" centered>
       <Crumb
         segs={[{ label: "SELF" }, { label: "Blocked", leaf: true }]}
         end={String(blocked.length)}
