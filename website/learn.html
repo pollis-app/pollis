@@ -590,6 +590,8 @@
             heads, proofs &amp; equivocation</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#three-logs">Pollis's three logs — and
             what each one prevents</a></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#binary-transparency">Binary
+            transparency — and what reproducibility we actually have</a></li>
       </ul>
 
       <!-- ═══ Topic 7 — Merkle trees (M0 pilot, #596) ═══════════════════════ -->
@@ -1044,6 +1046,186 @@
           domain-separated trees" and "The commit-log invariant", plus the per-tree contexts in <a
             href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-builder/src"
             target="_blank" rel="noopener noreferrer">verifiable-log-builder/src</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Topic 10 — binary transparency (#599) ═════════════════════════ -->
+      <section class="ln-section" id="binary-transparency">
+        <div class="ln-eyebrow">Track D · Transparency · Topic 10</div>
+        <h2>Binary transparency — and what reproducibility we actually have</h2>
+
+        <div class="ln-prose">
+          <p>
+            Every other guarantee on this page assumes <strong>the app running on your machine is the
+            app whose source you can read.</strong> Nothing survives a backdoored client. So this is
+            the one to be sharpest about.
+          </p>
+          <p>
+            Code signing — the thing your operating system checks before letting an app run — proves
+            less than people assume. An Apple or Windows signature proves "the holder of this
+            company's signing key produced these bytes". It says nothing about <em>what the bytes
+            do</em>. A backdoored build, signed by us under duress or after a compromise, passes every
+            check your OS makes.
+          </p>
+          <p>
+            So we publish the fingerprint of every release into a public log. The question stops being
+            "did Pollis sign this?" and becomes <strong>"is this exact app one Pollis published to the
+            world, or one made just for you?"</strong>
+          </p>
+          <p>
+            Each release lands in the log at three <strong>layers</strong>, because "the app" isn't one
+            file. The <code>payload</code> layer is the compiled program and its resources before any
+            signature — the layer an independent third party can rebuild from source and compare. The
+            <code>signed</code> layer is what you actually downloaded, after notarization or
+            Authenticode; signing deliberately embeds unique, non-reproducible data, so the signed file
+            <em>can't</em> be byte-identical between builds — by construction, not by sloppiness. We log
+            it separately, bound to its payload.
+          </p>
+          <p>
+            The <code>exe</code> layer — the main program <em>as installed</em> — exists for a
+            specific, slightly embarrassing reason, and it's worth telling straight.
+          </p>
+          <p>
+            When we first shipped the in-app "Verify this build" button, it compared the running
+            program's fingerprint against the <code>payload</code> layer. That comparison
+            <strong>could never succeed</strong> off Linux. The payload is recorded as a fingerprint of
+            an extracted <em>directory tree</em> or an <em>installer file</em> — and an app that's
+            already installed has neither of those things anymore. It has itself. So every genuine,
+            correctly signed macOS and Windows release reported: <em>"this build is not one Pollis
+            publicly attested"</em> — the loudest alarm we have, firing on honest builds.
+          </p>
+          <p>
+            The fix was a third layer recording the fingerprint of the main program as installed, which
+            is exactly the thing a running app can measure. Two things are worth taking from that.
+            First, it's the kind of bug that only surfaces when you <em>actually build the verification
+            path and use it</em> — an argument for shipping this sort of thing rather than describing
+            it. Second, releases published before that layer existed genuinely have nothing for a
+            running app to compare against, so the app reports <strong>"can't check"</strong> rather
+            than "you've been tampered with". That distinction is the difference between a useful alarm
+            and a false accusation.
+          </p>
+          <p>
+            <strong>What it buys you.</strong> Two people download the app. One gets the public build,
+            whose fingerprint is in the log. One gets a special build made just for them — and either
+            its fingerprint isn't in the log, where that person's own app notices, or we did log it, in
+            which case it sits in public, permanently, next to the real release. There's no quiet
+            option.
+          </p>
+          <p>
+            <strong>Reproducible builds — and where we actually are.</strong> A logged fingerprint
+            proves we published these bytes. It doesn't prove those bytes came from the source code you
+            can read. Closing <em>that</em> gap means reproducible builds: anyone compiles the source at
+            a given tag and gets <strong>byte-identical</strong> output. That's hard, because ordinary
+            builds embed timestamps, absolute paths, and file ordering that differ per machine. Our
+            honest status:
+          </p>
+          <p>
+            <strong>Linux AppImage: reproducible</strong>, given the published build recipe and a
+            documented residual list — an independent rebuilder workflow, runnable from a fork with no
+            access to any Pollis secret, rebuilds it and asserts the hash matches the log.
+            <strong>macOS and Windows: not yet.</strong> Best-effort. This is the largest open gap in
+            our verification story and we're not going to imply otherwise. <strong>The signing layer:
+            never reproducible</strong>, by construction, on any platform.
+          </p>
+          <p>
+            There's also a second, independent anchor: every release carries a <strong>SLSA provenance
+            attestation and a cosign signature</strong>, recorded in a public log run by neither us nor
+            GitHub-as-us. That proves <em>which workflow built the bytes</em>, using no Pollis-held key
+            on the verification path. It answers a different question from reproducibility —
+            provenance says who built it, reproducibility says whether it matches the source — and
+            having both means a single compromised key doesn't take down the whole story.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            On macOS and Windows you currently have "these are the bytes Pollis published, and this
+            workflow built them" — <strong>not</strong> "these bytes match the source you read". Only
+            the Linux AppImage closes that loop today. We're stating it here, in your path, rather than
+            in a footnote, because the gap is real and a verification story you have to squint at isn't
+            one. The signed layer will never close it anywhere: signatures embed unique data on
+            purpose.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/binary-transparency.jpg"
+            aria-describedby="binary-transparency-transcript-body">
+            <source src="learn/media/binary-transparency.webm" type="video/webm" />
+            <source src="learn/media/binary-transparency.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/binary-transparency.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            A valid signature on a backdoored app, the three layers, the alarm we fired on our own
+            honest builds, and the reproducibility status told without flattery.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="binary-transparency-transcript-body">
+            <p>Your operating system checks that an app is signed before it runs it. That check proves
+              less than you'd think. A signature proves the company's key produced these bytes. It says
+              nothing about what the bytes do. A backdoored build — signed by us, under pressure —
+              passes every check your computer makes.</p>
+            <p>So we publish the fingerprint of every release we make, in public. The question changes.
+              Not "did they sign it?" but "is this the app they gave everyone, or one made just for
+              me?"</p>
+            <p>Each release goes in at three layers, because "the app" isn't one file. The payload: the
+              compiled program before any signature. That's the layer someone else can rebuild from
+              source and compare. The signed layer: what you actually download, after notarization.
+              Signing embeds unique data on purpose, so this can never be byte-identical twice. We log
+              it separately, tied to its payload.</p>
+            <p>And the third layer exists because of a bug we shipped. Worth telling properly. Our
+              in-app "verify this build" button compared the running app to the payload fingerprint.
+              But look at what payload actually is — a fingerprint of a whole directory, or of an
+              installer file. An app that's already installed has neither. It's not a folder anymore.
+              It's just… itself.</p>
+            <p>So the comparison failed. Every time. On every genuine macOS and Windows release. And
+              the app reported the loudest thing it can say: this build is not one Pollis published.
+              That was wrong, and it was our fault.</p>
+            <p>The fix is a third layer: the fingerprint of the main program exactly as installed.
+              Which is the one thing a running app can actually measure. Now it matches. Two lessons.
+              That bug only showed up because we built the check and used it. And releases from before
+              that layer existed have nothing to compare against — so the app says "can't check", not
+              "you've been tampered with". Those are very different sentences.</p>
+            <p>Here's what it buys you. Two people download the app. One gets the public build —
+              fingerprint's in the log. One gets a special build, just for them. Either its fingerprint
+              isn't in the log, and their own app notices — or we put it in the log, where it sits in
+              public, permanently, next to the real release. There's no quiet option.</p>
+            <p>Now the honest part. A fingerprint proves we published these bytes. It does not prove
+              they came from the source code you can read. For that you need reproducible builds —
+              anyone compiles the source and gets byte-identical output.</p>
+            <p>On Linux, we have that. An independent rebuilder, with no access to anything of ours,
+              rebuilds the AppImage and confirms the hash we logged. On macOS and Windows — not yet.
+              That's the biggest open gap in this story, and we'd rather you hear it from us. And the
+              signing layer will never be reproducible anywhere. That's by design, not neglect.</p>
+            <p>There's one more leg. Every release also carries a provenance record in a public log
+              that isn't ours, proving which build workflow produced the bytes — with no key of ours
+              involved in checking it. Different question from reproducibility, and a useful thing to
+              have when the worry is a compromised key.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/verifiable-builds-design.md"
+            target="_blank" rel="noopener noreferrer">docs/verifiable-builds-design.md</a>, the residual
+          list in <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/reproducible-builds-residuals.md"
+            target="_blank" rel="noopener noreferrer">reproducible-builds-residuals.md</a>, and the
+          independent <a
+            href="https://github.com/actuallydan/pollis/blob/main/.github/workflows/rebuild-verify.yml"
+            target="_blank" rel="noopener noreferrer">rebuild-verify workflow</a> you can run from a
+          fork. Live release hashes are on the <a href="artifacts.html">artifacts page</a>.
         </p>
       </section>
 

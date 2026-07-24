@@ -1,0 +1,50 @@
+WEBVTT
+
+NOTE Captions for "Binary transparency: payload, signed, and exe" (Topic 10). No
+NOTE audio track yet by decision; these captions carry the narration. Source of
+NOTE truth: learn/manim/scripts/binary-transparency.md
+
+00:00.000 --> 00:12.000
+Your operating system checks that an app is signed before it runs it. That check proves less than you'd think.
+
+00:12.000 --> 00:24.000
+A signature proves the company's key produced these bytes. It says nothing about what the bytes do. A backdoored build — signed by us, under pressure — passes every check your computer makes.
+
+00:24.000 --> 00:35.000
+So we publish the fingerprint of every release we make, in public. The question changes. Not "did they sign it?" but "is this the app they gave everyone, or one made just for me?"
+
+00:35.000 --> 00:50.000
+Each release goes in at three layers, because "the app" isn't one file. The payload: the compiled program before any signature. That's the layer someone else can rebuild from source and compare.
+
+00:50.000 --> 01:05.000
+The signed layer: what you actually download, after notarization. Signing embeds unique data on purpose, so this can never be byte-identical twice. We log it separately, tied to its payload.
+
+01:05.000 --> 01:15.000
+And the third layer exists because of a bug we shipped. Worth telling properly.
+
+01:15.000 --> 01:32.000
+Our in-app "verify this build" button compared the running app to the payload fingerprint. But payload is a fingerprint of a whole directory, or of an installer file. An app that's already installed has neither. It's just… itself.
+
+01:32.000 --> 01:45.000
+So the comparison failed. Every time. On every genuine macOS and Windows release. And the app reported the loudest thing it can say: this build is not one Pollis published. That was wrong, and it was our fault.
+
+01:45.000 --> 02:00.000
+The fix is a third layer: the fingerprint of the main program exactly as installed — the one thing a running app can measure. And releases from before that layer have nothing to compare against, so the app says "can't check", not "you've been tampered with".
+
+02:00.000 --> 02:20.000
+Here's what it buys you. Two people download the app. One gets the public build — its fingerprint's in the log. One gets a special build, just for them.
+
+02:20.000 --> 02:40.000
+Either its fingerprint isn't in the log, and their own app notices — or we put it in the log, where it sits in public, permanently, next to the real release. There's no quiet option.
+
+02:40.000 --> 02:55.000
+Now the honest part. A fingerprint proves we published these bytes. It does not prove they came from the source code you can read. For that you need reproducible builds — anyone compiles the source and gets byte-identical output.
+
+02:55.000 --> 03:10.000
+On Linux, we have that. An independent rebuilder, with no access to anything of ours, rebuilds the AppImage and confirms the hash we logged.
+
+03:10.000 --> 03:22.000
+On macOS and Windows — not yet. That's the biggest open gap in this story, and we'd rather you hear it from us. And the signing layer will never be reproducible anywhere. That's by design, not neglect.
+
+03:22.000 --> 03:40.000
+There's one more leg. Every release also carries a provenance record in a public log that isn't ours, proving which workflow produced the bytes — with no key of ours involved in checking it. A different question from reproducibility.
