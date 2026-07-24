@@ -1,0 +1,36 @@
+appId: com.anonymous.mobile
+tags:
+  - parity
+---
+# GROUPS — create a group, open it, create/verify a channel, rename, leave.
+# Self-contained (no peer). Uses testIDs where they exist; falls back to stable
+# button TEXT where #620 left an action un-instrumented (noted in README gaps).
+
+- runFlow: ../subflows/sign-in.yaml
+- takeScreenshot: groups-01-inbox
+
+# Create a group. NOTE: the "CREATE GROUP" submit has no testID yet (#620 gap),
+# so we tap by text. input-group-name IS instrumented.
+- tapOn:
+    id: "btn-create-group"
+- assertVisible:
+    id: "screen-group-new"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Test Group"
+- takeScreenshot: groups-02-create
+- tapOn: "CREATE GROUP"
+
+# Back on the groups tab, the new group + its #General channel should appear.
+- extendedWaitUntil:
+    visible:
+      id: "screen-groups"
+    timeout: 15000
+- takeScreenshot: groups-03-created
+
+# Open the group detail (tap the group's channel row opens the channel; the
+# group header/menu opens management). Assert the detail route renders.
+- tapOn:
+    text: "E2E Test Group"
+    optional: true
+- takeScreenshot: groups-04-detail

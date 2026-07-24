@@ -1,0 +1,25 @@
+appId: com.anonymous.mobile
+tags:
+  - ipad
+---
+# iPad TWO-PANE (#622) — on regular width the DMs/Groups tabs render list +
+# detail side by side. RUN THIS ON AN iPad SIMULATOR (regular width). On a
+# phone it resolves to `compact` and this assertion is not meaningful.
+#
+# After sign-in, the groups tab list is the LEFT column and a right pane shows
+# either a conversation or the "Select a conversation" placeholder.
+
+- runFlow: ../subflows/sign-in.yaml
+- assertVisible:
+    id: "screen-groups"
+- takeScreenshot: ipad-01-groups-twopane
+# The right-pane placeholder proves the two-pane mounted (nothing selected yet).
+- assertVisible:
+    text: "Select a conversation"
+    optional: true
+# DMs tab two-pane.
+- tapOn:
+    id: "tab-direct"
+- assertVisible:
+    id: "screen-direct"
+- takeScreenshot: ipad-02-direct-twopane

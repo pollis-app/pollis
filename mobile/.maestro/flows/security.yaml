@@ -1,0 +1,20 @@
+appId: com.anonymous.mobile
+tags:
+  - parity
+---
+# SECURITY — device list + safety/blocked entry points. Self-contained
+# (revoke/verify need a peer or a second device; captured visually here).
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-self"
+- tapOn:
+    id: "row-self-security"
+- assertVisible:
+    id: "screen-self-security"
+- takeScreenshot: security-01-devices
+# Blocked-users list.
+- tapOn:
+    id: "row-blocked-users"
+    optional: true
+- takeScreenshot: security-02-blocked

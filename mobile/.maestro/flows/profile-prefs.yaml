@@ -1,0 +1,42 @@
+appId: com.anonymous.mobile
+tags:
+  - parity
+---
+# PROFILE + PREFERENCES — accent re-theme, a behavior toggle, and a
+# display-name edit. Self-contained.
+
+- runFlow: ../subflows/sign-in.yaml
+
+# Self tab.
+- tapOn:
+    id: "tab-self"
+- assertVisible:
+    id: "screen-self"
+- takeScreenshot: prefs-01-self
+
+# Preferences: change accent (whole UI re-themes) + flip a behavior toggle.
+- tapOn:
+    id: "row-self-preferences"
+- assertVisible:
+    id: "screen-self-preferences"
+- takeScreenshot: prefs-02-preferences
+- tapOn:
+    id: "chip-accent-mint"
+- takeScreenshot: prefs-03-accent-mint
+- tapOn:
+    id: "toggle-reduce-motion"
+- takeScreenshot: prefs-04-toggle
+
+# User settings: edit display name and save.
+- tapOn:
+    id: "btn-back"
+- tapOn:
+    id: "row-self-user-settings"
+- assertVisible:
+    id: "screen-self-user-settings"
+- tapOn:
+    id: "input-display-name"
+- inputText: " E2E"
+- tapOn:
+    id: "btn-save"
+- takeScreenshot: prefs-05-saved

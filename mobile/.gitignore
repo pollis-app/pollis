@@ -56,3 +56,7 @@ modules/pollis-native/android/.cxx/
 modules/pollis-native/android/android/
 # iOS xcframework (built from Rust .a files by `ubrn build ios`)
 modules/pollis-native/PollisNativeFramework.xcframework/
+
+# Maestro e2e runtime (#619)
+.maestro/.env
+.maestro/artifacts/
