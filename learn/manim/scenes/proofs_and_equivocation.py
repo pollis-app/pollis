@@ -1,5 +1,5 @@
 """
-Topic 8 — "Signed tree heads, inclusion and consistency proofs, and
+Topic 8, "Signed tree heads, inclusion and consistency proofs, and
 equivocation" (#597).
 
 One continuous ~3:05 scene, five beats, NO audio (added later). The 8-leaf toy
@@ -13,9 +13,9 @@ Render (see learn/manim/render.sh):
 Accuracy anchors:
   - verifiable-log/src/proof.rs (verify_inclusion_proof, verify_consistency_proof)
   - verifiable-log/src/sth.rs (Sth::create_with_context, verify_with_context,
-    is_equivocation — same tree_size + different root == proof of equivocation)
+    is_equivocation, same tree_size + different root == proof of equivocation)
   - pollis-core/src/commands/transparency.rs (PINNED_LOG_PUBLIC_KEY,
-    served_key_matches_pin — a served key that differs is a hard ALARM)
+    served_key_matches_pin, a served key that differs is a hard ALARM)
   - verifiable-log-builder/src/binaries.rs → STH_CONTEXT (domain separation)
   - .github/workflows/transparency-publish.yml (post-publish self-audit +
     across-run equivocation tripwire)
@@ -30,6 +30,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -57,13 +58,13 @@ MONO = "Cascadia Code, DejaVu Sans Mono, monospace"
 config.background_color = BG
 
 # Real live binaries-log head (verify.pollis.com/v1/binaries/sth/latest.json),
-# fetched 2026-07-23 — the same head Topic 7 shows.
+# fetched 2026-07-23, the same head Topic 7 shows.
 LIVE_ROOT = "37945cb2f61ee43782259a3893336b8ba8b8679d3af1612742deeec75e46cc0c"
 LIVE_SIZE = 60
 LIVE_TS = "2026-07-18T…Z"
 LIVE_SIG = "f5e206e902c156604ed91a2bd101ae63468946f6989a116e18554ca70bf1ba45"
 
-# The real pinned Ed25519 key — pollis-core/src/commands/transparency.rs.
+# The real pinned Ed25519 key, pollis-core/src/commands/transparency.rs.
 PINNED_KEY = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
 
 # Same toy leaves as Topic 7, so the reader recognises the tree.
@@ -125,14 +126,14 @@ class ProofsAndEquivocation(Scene):
         self.beat_chain()
 
     def hold_until(self, target):
-        """Pad the scene so cumulative time reaches `target` seconds — keeps each
+        """Pad the scene so cumulative time reaches `target` seconds, keeps each
         beat on screen long enough to READ its captions (no audio yet) and matches
         the narration pacing in learn/manim/scripts/proofs-and-equivocation.md."""
         now = self.renderer.time
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:50) — the inclusion proof ───────────────────────────
+    # ── Scene 1 (0:00–0:50), the inclusion proof ───────────────────────────
     def beat_inclusion(self):
         leaf_h = [h(x) for x in LEAVES]
         l1 = [hpair(leaf_h[0], leaf_h[1]), hpair(leaf_h[2], leaf_h[3]),
@@ -142,9 +143,9 @@ class ProofsAndEquivocation(Scene):
 
         heading = Text("is MY entry in the tree?", color=AMBER).scale(0.55)
         heading.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(heading))
+        self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
-        # The tree, dimmed — we only care about one path through it.
+        # The tree, dimmed, we only care about one path through it.
         xs = [-6.1 + i * 1.75 for i in range(8)]
         leaf_chips = VGroup(*[chip(leaf_h[i], color=LINE).move_to([x, -0.9, 0])
                               for i, x in enumerate(xs)])
@@ -182,7 +183,7 @@ class ProofsAndEquivocation(Scene):
         self.play(Indicate(mine, color=AMBER, scale_factor=1.2), run_time=0.6)
         self.hold_until(14)
 
-        # The three siblings you're handed — the audit path.
+        # The three siblings you're handed, the audit path.
         sib_note = Text("you are handed only the SIBLINGS on the path up",
                         color=MUTED).scale(0.42).move_to([0, -2.05, 0])
         self.play(FadeIn(sib_note))
@@ -243,7 +244,7 @@ class ProofsAndEquivocation(Scene):
         self.play(FadeIn(fail), *recolor(root_chip, DANGER))
         self.hold_until(44)
 
-        # The scaling number — stated, not described (acceptance criterion).
+        # The scaling number, stated, not described (acceptance criterion).
         self.play(FadeOut(VGroup(edges, leaf_chips, l1_chips, l2_chips, root_chip,
                                  mine_label, swap, flines, fail, heading)))
         scale_head = Text("and it barely grows", color=AMBER).scale(0.55).move_to([0, 2.4, 0])
@@ -252,22 +253,22 @@ class ProofsAndEquivocation(Scene):
             Text("1,000,000 entries    →   20 hashes", font=MONO, color=OK).scale(0.55),
             Text("1,000,000,000        →   30 hashes", font=MONO, color=FG).scale(0.55),
         ).arrange(DOWN, buff=0.3, aligned_edge=LEFT)
-        note = Text("double the list — add one step", color=MUTED).scale(0.45)
+        note = Text("double the list, add one step", color=MUTED).scale(0.45)
         note.next_to(rows, DOWN, buff=0.6)
-        self.play(Write(scale_head))
+        self.play(AddTextLetterByLetter(scale_head, run_time=0.7))
         for r in rows:
             self.play(FadeIn(r, shift=RIGHT * 0.2), run_time=0.45)
         self.play(FadeIn(note))
         self.hold_until(50)
         self.play(FadeOut(VGroup(scale_head, rows, note)))
 
-    # ── Scene 2 (0:50–1:35) — the consistency proof ─────────────────────────
+    # ── Scene 2 (0:50–1:35), the consistency proof ─────────────────────────
     def beat_consistency(self):
         heading = Text("is this the SAME list as last week, only longer?",
                        color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(heading))
+        self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
-        # Trees drawn as triangles over a strip of leaves — the standard picture.
+        # Trees drawn as triangles over a strip of leaves, the standard picture.
         def tree(cx, base_w, apex_y, base_y, color, label):
             base_l = [cx - base_w / 2, base_y, 0]
             base_r = [cx + base_w / 2, base_y, 0]
@@ -278,12 +279,12 @@ class ProofsAndEquivocation(Scene):
             cap.next_to(tri, DOWN, buff=0.25)
             return VGroup(tri, cap), tri
 
-        old_g, old_tri = tree(-3.6, 4.2, 1.9, -0.6, MUTED, "last week — 40 entries")
+        old_g, old_tri = tree(-3.6, 4.2, 1.9, -0.6, MUTED, "last week, 40 entries")
         self.play(Create(old_tri), FadeIn(old_g[1]), run_time=0.9)
         self.wait(0.5)
 
         # Today's tree: wider base, the old one nested in place on the left.
-        new_g, new_tri = tree(3.0, 5.4, 2.3, -0.6, AMBER, "today — 49 entries")
+        new_g, new_tri = tree(3.0, 5.4, 2.3, -0.6, AMBER, "today, 49 entries")
         self.play(Create(new_tri), FadeIn(new_g[1]), run_time=0.9)
 
         inner = Polygon([3.0 - 5.4 / 2 + 4.2 / 2, 1.55, 0],
@@ -296,7 +297,7 @@ class ProofsAndEquivocation(Scene):
                         [3.0 + 5.4 / 2 - 0.55, 0.35, 0],
                         stroke_color=FG, stroke_width=1.5,
                         fill_color=FG, fill_opacity=0.06)
-        inner_lab = Text("last week's tree — unchanged, in place",
+        inner_lab = Text("last week's tree, unchanged, in place",
                          color=OK).scale(0.36).move_to([3.0 - 0.35, -1.75, 0])
         added_lab = Text("+9 appended", color=FG).scale(0.34).move_to([5.2, 0.95, 0])
 
@@ -308,7 +309,7 @@ class ProofsAndEquivocation(Scene):
         self.hold_until(70)
 
         # The cheat: edit something already published.
-        cheat = Text("now we try to cheat — edit entry #12, already published",
+        cheat = Text("if an old entry were edited, say entry #12",
                      color=DANGER).scale(0.45).move_to([0, -3.1, 0])
         self.play(FadeIn(cheat))
         scar = Line([-4.5, -0.6, 0], [-4.5, -0.1, 0], stroke_color=DANGER, stroke_width=5)
@@ -324,7 +325,7 @@ class ProofsAndEquivocation(Scene):
         failed = Text("the old tree no longer fits inside the new one",
                       color=DANGER).scale(0.46).move_to([0, -2.5, 0])
         self.play(FadeOut(proof_note), FadeIn(failed))
-        gone = Text("NO CONSISTENCY PROOF EXISTS FOR THIS — none can be manufactured",
+        gone = Text("NO CONSISTENCY PROOF EXISTS FOR THIS, none can be manufactured",
                     color=DANGER).scale(0.44).move_to([0, -3.1, 0])
         self.play(FadeOut(cheat), FadeIn(gone))
         self.hold_until(86)
@@ -337,11 +338,11 @@ class ProofsAndEquivocation(Scene):
                                  added_lab, failed, gone, turn, scar, scar2,
                                  scar_lab)))
 
-    # ── Scene 3 (1:35–2:05) — the signed tree head + the pinned key ─────────
+    # ── Scene 3 (1:35–2:05), the signed tree head + the pinned key ─────────
     def beat_sth(self):
         heading = Text("who says which root is real?", color=AMBER).scale(0.55)
         heading.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(heading))
+        self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
         card = panel(7.4, 2.5, AMBER).move_to([0, 1.35, 0])
         fields = VGroup(
@@ -350,7 +351,7 @@ class ProofsAndEquivocation(Scene):
             Text(f"timestamp  {LIVE_TS}", font=MONO, color=FG).scale(0.42),
             Text(f"signature  {short(LIVE_SIG, 24)}", font=MONO, color=OK).scale(0.42),
         ).arrange(DOWN, buff=0.18, aligned_edge=LEFT).move_to(card.get_center())
-        card_lab = Text("a signed tree head — root, count, time, sealed together",
+        card_lab = Text("a signed tree head, root, count, time, sealed together",
                         color=MUTED).scale(0.4).next_to(card, DOWN, buff=0.25)
         self.play(Create(card))
         for f in fields:
@@ -380,12 +381,12 @@ class ProofsAndEquivocation(Scene):
 
         # The attack the pin defeats.
         self.play(FadeOut(VGroup(card, fields, card_lab, key_head)))
-        attack = Text("a hostile host serves its OWN key over its own flawless fake log",
+        attack = Text("a bad server could serve its own key with a matching fake list",
                       color=DANGER).scale(0.46).move_to([0, 1.9, 0])
         served = panel(6.4, 1.5, DANGER).move_to([0, 0.7, 0])
         served_txt = VGroup(
             Text("served public_key.json", color=MUTED).scale(0.36),
-            Text("9c41a0d7…  (theirs)", font=MONO, color=DANGER).scale(0.4),
+            Text("9c41a0d7…  (the server's)", font=MONO, color=DANGER).scale(0.4),
         ).arrange(DOWN, buff=0.14).move_to(served.get_center())
         self.play(FadeIn(attack))
         self.play(Create(served), FadeIn(served_txt))
@@ -404,14 +405,14 @@ class ProofsAndEquivocation(Scene):
         self.play(FadeOut(VGroup(heading, app, cli, not_fetched, attack, served,
                                  served_txt, arrows, reject)))
 
-    # ── Scene 4 (2:05–2:57) — equivocation, the attack this all exists for ──
+    # ── Scene 4 (2:05–2:57), equivocation, the attack this all exists for ──
     def beat_equivocation(self):
-        heading = Text("the last move: two sets of books", color=AMBER).scale(0.6)
+        heading = Text("could different people be shown different lists?", color=AMBER).scale(0.6)
         heading.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(heading))
+        self.play(AddTextLetterByLetter(heading, run_time=0.7))
 
         server = panel(3.0, 0.85, MUTED).move_to([0, 2.15, 0])
-        server_t = Text("pollis, the operator", color=MUTED).scale(0.36)
+        server_t = Text("the operator", color=MUTED).scale(0.36)
         server_t.move_to(server.get_center())
         self.play(FadeIn(server), FadeIn(server_t))
 
@@ -432,8 +433,8 @@ class ProofsAndEquivocation(Scene):
 
         fake_root = h("the log served only to you")
         left, left_checks = audience(-3.6, "what the auditors are served",
-                                     LIVE_ROOT, "the honest list")
-        right, right_checks = audience(3.6, "what YOU are served",
+                                     LIVE_ROOT, "the real list")
+        right, right_checks = audience(3.6, "what you might be sent",
                                        fake_root, "…plus one key that isn't yours")
 
         line_l = Line([-0.9, 1.75, 0], [-3.6, 1.35, 0], stroke_color=LINE, stroke_width=1.5)
@@ -452,7 +453,7 @@ class ProofsAndEquivocation(Scene):
         # …until they compare.
         self.play(FadeOut(VGroup(server, server_t, line_l, line_r, left, right, blind)))
         compare_head = Text("so compare.", color=AMBER).scale(0.6).move_to([0, 2.3, 0])
-        self.play(Write(compare_head))
+        self.play(AddTextLetterByLetter(compare_head, run_time=0.7))
 
         def head_card(x, who, root_hex, color):
             b = panel(5.6, 2.2, color).move_to([x, 0.45, 0])
@@ -470,7 +471,7 @@ class ProofsAndEquivocation(Scene):
 
         neq = Text("≠", color=DANGER).scale(1.0).move_to([0, 0.45, 0])
         self.play(Write(neq))
-        same = Text("same tree_size. different root. both carry OUR signature.",
+        same = Text("same tree_size. different root. both carry a valid signature.",
                     color=FG).scale(0.46).move_to([0, -1.4, 0])
         self.play(FadeIn(same))
         self.hold_until(162)
@@ -490,7 +491,7 @@ class ProofsAndEquivocation(Scene):
         self.hold_until(177)
         self.play(FadeOut(VGroup(compare_head, a, b, neq, same, stamp, stamp_box, why)))
 
-    # ── Scene 5 (2:57–3:05) — the chain ─────────────────────────────────────
+    # ── Scene 5 (2:57–3:05), the chain ─────────────────────────────────────
     def beat_chain(self):
         links = [
             ("root", "fingerprints the list"),
@@ -509,7 +510,7 @@ class ProofsAndEquivocation(Scene):
         cards.arrange(RIGHT, buff=0.28).scale(0.92).move_to([0, 0.4, 0])
 
         head = Text("each one closes a door", color=FG).scale(0.55).move_to([0, 2.3, 0])
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
         for c in cards:
             self.play(FadeIn(c, shift=UP * 0.15), run_time=0.3)
         joins = VGroup(*[

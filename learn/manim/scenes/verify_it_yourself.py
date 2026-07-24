@@ -1,21 +1,21 @@
 """
-Topic 11 — "pollis-verify: verify it yourself" (#600).
+Topic 11, "pollis-verify: verify it yourself" (#600).
 
 One continuous ~2:45 scene, five beats, NO audio (added later). This is the
 payoff topic, so it is mostly *screen*: the real static API, a real `curl`, and
 the REAL captured output of `pollis-verify release https://verify.pollis.com
-v1.5.3` run against the live log on 2026-07-23 (tree_size 60, root 37945cb2…) —
+v1.5.3` run against the live log on 2026-07-23 (tree_size 60, root 37945cb2…),
 the same head Topics 7–9 show.
 
 Render (see learn/manim/render.sh):
     learn/manim/render.sh VerifyItYourself verify-it-yourself m
 
 Accuracy anchors:
-  - verifiable-log-serve/src/bin/pollis-verify.rs — POSITIONAL args:
+  - verifiable-log-serve/src/bin/pollis-verify.rs, POSITIONAL args:
     `pollis-verify release <BASE_URL> <TAG>` (no --base flag)
-  - verifiable_log_serve::release::verify_release — the same path the app uses
+  - verifiable_log_serve::release::verify_release, the same path the app uses
   - docs/transparency.md → "The static read API (/v1/...)"
-  - .github/workflows/verifier-release.yml — standalone binary + pinned key in
+  - .github/workflows/verifier-release.yml, standalone binary + pinned key in
     the release notes
 """
 
@@ -24,6 +24,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -111,11 +112,11 @@ class VerifyItYourself(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:30) — the API is a shelf of files ───────────────────
+    # ── Scene 1 (0:00–0:30), the API is a shelf of files ───────────────────
     def beat_shelf(self):
-        head = Text("it is barely an API — it's a shelf of files",
+        head = Text("it is barely an API, it's a shelf of files",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         files = VGroup(
             file_chip("/v1/binaries/sth/latest.json", AMBER),
@@ -149,11 +150,11 @@ class VerifyItYourself(Scene):
         self.hold_until(30)
         self.play(FadeOut(VGroup(head, files, warn, static, smart, flat, audit)))
 
-    # ── Scene 2 (0:30–1:00) — curl it, then find the same root ──────────────
+    # ── Scene 2 (0:30–1:00), curl it, then find the same root ──────────────
     def beat_curl(self):
         head = Text("fetch it yourself", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         term = panel(12.0, 2.6, LINE).move_to([0, 1.3, 0])
         lines = [
@@ -185,16 +186,16 @@ class VerifyItYourself(Scene):
         self.hold_until(60)
         self.play(FadeOut(VGroup(head, term, rows, site, root_txt, same)))
 
-    # ── Scene 3 (1:00–1:50) — the verifier runs ─────────────────────────────
+    # ── Scene 3 (1:00–1:50), the verifier runs ─────────────────────────────
     def beat_run(self):
         head = Text("files tell you what we CLAIM. the verifier CHECKS it.",
                     color=AMBER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         what = VGroup(
             Text("re-hashes every entry · rebuilds the tree · checks every proof",
                  color=MUTED).scale(0.38),
-            Text("and verifies the signature against a key COMPILED INTO IT — not fetched",
+            Text("and verifies the signature against a key COMPILED INTO IT, not fetched",
                  color=FG).scale(0.4),
         ).arrange(DOWN, buff=0.16).move_to([0, 2.3, 0])
         self.play(FadeIn(what))
@@ -224,13 +225,13 @@ class VerifyItYourself(Scene):
         self.hold_until(110)
         self.play(FadeOut(VGroup(head, what, term, rows, tie1, tie2)))
 
-    # ── Scene 4 (1:50–2:20) — the pinned key stops the swap ─────────────────
+    # ── Scene 4 (1:50–2:20), the pinned key stops the swap ─────────────────
     def beat_pinned_key(self):
-        head = Text("suppose we served you OUR key, with a perfect fake log",
+        head = Text("suppose a server sent its own key with a matching fake list",
                     color=DANGER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
-        served = card(6.4, 1.4, "served public_key.json", "9c41a0d7…  (ours, not yours)",
+        served = card(6.4, 1.4, "served public_key.json", "9c41a0d7…  (the server's, not the real one)",
                       color=DANGER, title_color=DANGER).move_to([0, 1.5, 0])
         self.play(FadeIn(served))
 
@@ -246,18 +247,18 @@ class VerifyItYourself(Scene):
         stop = Text("served key ≠ compiled-in key   →   it stops. every time.",
                     color=OK).scale(0.5).move_to([0, -2.0, 0])
         self.play(FadeIn(stop), binary.animate.set_stroke(OK, width=3.5))
-        build = Text("which is why, if you're seriously auditing us, you should "
+        build = Text("so if you are seriously auditing us, "
                      "BUILD the verifier yourself", color=AMBER).scale(0.4)
         build.move_to([0, -3.0, 0])
         self.play(FadeIn(build))
         self.hold_until(140)
         self.play(FadeOut(VGroup(head, served, binary, binary_t, arrow, stop, build)))
 
-    # ── Scene 5 (2:20–2:45) — compare notes ─────────────────────────────────
+    # ── Scene 5 (2:20–2:45), compare notes ─────────────────────────────────
     def beat_compare(self):
         head = Text("the most important thing you can do with it",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         def person(x, who):
             b = panel(5.4, 2.2, OK).move_to([x, 0.7, 0])
@@ -275,7 +276,7 @@ class VerifyItYourself(Scene):
         self.play(Write(eq))
 
         matters = VGroup(
-            Text("if those ever differed — two valid signatures over two different trees —",
+            Text("if those ever differed, two valid signatures over two different trees,",
                  color=DANGER).scale(0.42),
             Text("that is the finding that matters. and the only one you can't get alone.",
                  color=FG).scale(0.45),

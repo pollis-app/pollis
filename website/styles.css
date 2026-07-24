@@ -47,6 +47,30 @@ main {
   min-height: 100vh;
 }
 
+/* ── Reading surface ─────────────────────────────────────────── */
+/* Long-form pages put their column on a solid panel, so the dot matrix
+   never sits behind body copy. Applied to every content page's main
+   wrapper (.ln-main, .faq-main, .security-main, .kt-main, .art-main) so
+   they read the same way. */
+.reading-surface {
+  background: #000;
+  border: 1px solid var(--c-border);
+  border-radius: 14px;
+  margin: 2rem 0 3rem;
+}
+
+/* ── Links ───────────────────────────────────────────────────── */
+/* Amber by default everywhere. Without this, any link that doesn't carry
+   its own class falls back to the browser's blue, which is invisible on
+   this background. Component classes still override it. */
+a {
+  color: var(--c-accent);
+}
+
+a:hover {
+  color: #fed7aa;
+}
+
 /* ── Hero ─────────────────────────────────────────────────────── */
 .hero {
   display: flex;

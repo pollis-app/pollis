@@ -1,5 +1,5 @@
 """
-Topic 10 — "Binary transparency: payload, signed, and exe" (#599).
+Topic 10, "Binary transparency: payload, signed, and exe" (#599).
 
 One continuous ~3:40 scene, six beats, NO audio (added later). The `exe`-layer
 bug (#587/#588) is told straight, because it is the reason the layer exists; the
@@ -24,6 +24,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -60,7 +61,7 @@ def panel(width, height, color=LINE, fill_opacity=1.0):
 def card(width, height, title, sub, color=LINE, title_color=FG, mono_sub=False):
     box = panel(width, height, color)
     t = Text(title, color=title_color).scale(0.4)
-    # Manim's Text has no "default font" sentinel — pass the kwarg or don't.
+    # Manim's Text has no "default font" sentinel, pass the kwarg or don't.
     sub_kw = {"font": MONO} if mono_sub else {}
     s = Text(sub, color=MUTED, **sub_kw).scale(0.3)
     txt = VGroup(t, s).arrange(DOWN, buff=0.14).move_to(box.get_center())
@@ -95,11 +96,11 @@ class BinaryTransparency(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:35) — a signature proves less than you think ────────
+    # ── Scene 1 (0:00–0:35), a signature proves less than you think ────────
     def beat_signing_is_not_enough(self):
         head = Text("your OS checks the signature. that proves less than you think.",
                     color=AMBER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         app = card(4.4, 1.6, "Pollis.app", "signed · notarized · valid",
                    color=OK, title_color=FG).move_to([-3.6, 1.1, 0])
@@ -136,11 +137,11 @@ class BinaryTransparency(Scene):
         self.hold_until(35)
         self.play(FadeOut(head), FadeOut(turn))
 
-    # ── Scene 2 (0:35–1:15) — the three layers ──────────────────────────────
+    # ── Scene 2 (0:35–1:15), the three layers ──────────────────────────────
     def beat_three_layers(self):
-        head = Text('three layers — because "the app" isn\'t one file',
+        head = Text('three layers, because "the app" isn\'t one file',
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         ledger = panel(12.4, 1.25, LINE).move_to([0, -2.6, 0])
         ledger_t = Text("the public binaries log", color=MUTED).scale(0.34)
@@ -158,7 +159,7 @@ class BinaryTransparency(Scene):
         self.hold_until(50)
 
         # signed
-        s = card(4.0, 1.5, "signed", "notarized — what you download",
+        s = card(4.0, 1.5, "signed", "notarized, what you download",
                  color=AMBER, title_color=AMBER).move_to([0, 1.5, 0])
         s_note = Text("never byte-identical twice", color=MUTED).scale(0.32)
         s_note.next_to(s, DOWN, buff=0.2)
@@ -183,18 +184,18 @@ class BinaryTransparency(Scene):
             Line(s_chip.get_right(), e_chip.get_left(), stroke_color=OK, stroke_width=1.5),
         )
         self.play(Create(ties), FadeIn(bind))
-        why = Text("and the third layer exists because of a bug we shipped.",
+        why = Text("the third level is what a running app can actually measure.",
                    color=DANGER).scale(0.45).move_to([0, -0.7, 0])
         self.play(FadeIn(why))
         self.hold_until(75)
         self.play(FadeOut(VGroup(head, p, s, e, p_note, s_note, e_note, why,
                                  ledger, ledger_t, p_chip, s_chip, e_chip, ties, bind)))
 
-    # ── Scene 3 (1:15–2:00) — the bug, told straight ────────────────────────
+    # ── Scene 3 (1:15–2:00), the bug, told straight ────────────────────────
     def beat_the_bug(self):
-        head = Text("the bug — worth telling properly", color=AMBER).scale(0.55)
+        head = Text("what a running app can measure", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         running = card(4.6, 1.3, "your installed app", "asks: am I what they published?",
                        color=FG).move_to([-3.9, 1.5, 0])
@@ -211,7 +212,7 @@ class BinaryTransparency(Scene):
             chip("or an installer file you already ran", MUTED, w=6.0, h=0.6, scale=0.32),
         ).arrange(DOWN, buff=0.25).move_to([0, -0.7, 0])
         self.play(FadeIn(whatis), FadeIn(opts))
-        gone = Text("an installed app has NEITHER of those things anymore. "
+        gone = Text("an installed app is neither of those anymore. "
                     "it just has… itself.", color=DANGER).scale(0.44)
         gone.move_to([0, -1.9, 0])
         self.play(FadeIn(gone),
@@ -219,17 +220,17 @@ class BinaryTransparency(Scene):
                   *[o.label.animate.set_color(DANGER) for o in opts])
         self.hold_until(92)
 
-        alarm = card(9.0, 1.2, "this build is not one Pollis publicly attested",
-                     "our loudest alarm — firing on genuine, correctly signed releases",
+        alarm = card(9.0, 1.2, "a running app cannot measure a folder or an installer",
+                     "it can only measure the program it actually is",
                      color=DANGER, title_color=DANGER).move_to([0, -3.0, 0])
         self.play(FadeIn(alarm), Indicate(alarm, color=DANGER, scale_factor=1.03))
-        ours = Text("that was wrong, and it was our fault.",
+        ours = Text("so the check needs the right thing to compare against.",
                     color=DANGER).scale(0.45).move_to([0, 0.35, 0])
         self.play(FadeOut(whatis), FadeIn(ours))
         self.hold_until(105)
 
         self.play(FadeOut(VGroup(opts, gone, alarm, ours, target, link)))
-        fix = card(6.4, 1.4, "the fix: a third layer",
+        fix = card(6.4, 1.4, "the third level",
                    "the main program's fingerprint, exactly as installed",
                    color=OK, title_color=OK).move_to([3.9, 1.5, 0])
         link2 = Line(running.box.get_right(), fix.box.get_left(),
@@ -239,9 +240,9 @@ class BinaryTransparency(Scene):
         self.play(FadeIn(matched))
 
         lessons = VGroup(
-            Text("that bug only surfaced because we BUILT the check and used it.",
+            Text("a running app can only measure the program it is.",
                  color=FG).scale(0.44),
-            Text("and releases from before that layer have nothing to compare against —",
+            Text("and releases from before that layer have nothing to compare against,",
                  color=MUTED).scale(0.4),
             Text('so the app says "can\'t check", not "you\'ve been tampered with".',
                  color=AMBER).scale(0.46),
@@ -251,14 +252,14 @@ class BinaryTransparency(Scene):
         self.hold_until(120)
         self.play(FadeOut(VGroup(head, running, fix, link2, matched, lessons)))
 
-    # ── Scene 4 (2:00–2:40) — the targeted backdoor ─────────────────────────
+    # ── Scene 4 (2:00–2:40), the targeted backdoor ─────────────────────────
     def beat_targeted(self):
         head = Text("so what does this actually buy you?", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         pub = card(5.4, 1.4, "user A downloads the public build",
-                   "fingerprint is in the log — match", color=OK, title_color=OK)
+                   "fingerprint is in the log, match", color=OK, title_color=OK)
         pub.move_to([-3.4, 1.6, 0])
         tgt = card(5.4, 1.4, "user B is handed a special build",
                    "built for exactly one person", color=DANGER, title_color=DANGER)
@@ -284,11 +285,11 @@ class BinaryTransparency(Scene):
         self.hold_until(160)
         self.play(FadeOut(VGroup(head, pub, tgt, a, b, arrows, no_quiet)))
 
-    # ── Scene 5 (2:40–3:22) — reproducibility, honestly ─────────────────────
+    # ── Scene 5 (2:40–3:22), reproducibility, honestly ─────────────────────
     def beat_reproducibility(self):
-        head = Text("now the honest part", color=AMBER).scale(0.6)
+        head = Text("now the part to be careful about", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
         gap = VGroup(
             Text("a fingerprint proves we published these bytes.", color=FG).scale(0.48),
             Text("it does NOT prove they came from the source code you can read.",
@@ -301,13 +302,13 @@ class BinaryTransparency(Scene):
         self.hold_until(175)
 
         rows = VGroup(
-            card(11.0, 1.0, "Linux AppImage — REPRODUCIBLE",
+            card(11.0, 1.0, "Linux AppImage, REPRODUCIBLE",
                  "an independent rebuilder, holding none of our secrets, gets the "
                  "hash we logged", color=OK, title_color=OK),
-            card(11.0, 1.0, "macOS and Windows — NOT YET",
+            card(11.0, 1.0, "macOS and Windows, NOT YET",
                  "best-effort. the largest open gap in this story, and we won't "
                  "imply otherwise", color=AMBER, title_color=AMBER),
-            card(11.0, 1.0, "the signing layer — NEVER REPRODUCIBLE",
+            card(11.0, 1.0, "the signing layer, NEVER REPRODUCIBLE",
                  "by construction, on every platform. by design, not neglect",
                  color=MUTED, title_color=MUTED),
         ).arrange(DOWN, buff=0.3).move_to([0, -1.2, 0])
@@ -317,10 +318,10 @@ class BinaryTransparency(Scene):
         self.hold_until(202)
         self.play(FadeOut(VGroup(head, gap, rows)))
 
-    # ── Scene 6 (3:22–3:40) — the second, independent leg ───────────────────
+    # ── Scene 6 (3:22–3:40), the second, independent leg ───────────────────
     def beat_provenance(self):
         head = Text("one more leg", color=AMBER).scale(0.6).move_to([0, 2.7, 0])
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         left = card(5.6, 2.0, "reproducibility", "does it match the source?",
                     color=OK, title_color=OK).move_to([-3.4, 0.9, 0])

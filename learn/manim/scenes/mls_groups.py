@@ -1,5 +1,5 @@
 """
-Topic 3 — "MLS groups: the ratchet tree, epochs, and commits" (#592).
+Topic 3, "MLS groups: the ratchet tree, epochs, and commits" (#592).
 
 One continuous ~2:40 scene, five beats, NO audio (added later). The tree is
 BUILT on screen, never presented finished, and the naive-vs-MLS cost is shown as
@@ -14,7 +14,7 @@ Accuracy anchors:
     "How Other Devices Catch Up"
   - pollis-core/src/commands/mls.rs (OpenMLS, RFC 9420)
   - docs/transparency.md → "The commit-log invariant"
-Note: MLS does not hide metadata — Topic 1 already said so, and nothing here
+Note: MLS does not hide metadata, Topic 1 already said so, and nothing here
 implies otherwise.
 """
 
@@ -23,6 +23,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -82,11 +83,11 @@ class MlsGroups(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:30) — the obvious way, and why it hurts ─────────────
+    # ── Scene 1 (0:00–0:30), the obvious way, and why it hurts ─────────────
     def beat_naive(self):
         head = Text("the obvious way: one encrypted copy per person",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         me = chip("you", AMBER, w=1.8).move_to([-5.4, 1.4, 0])
         self.play(FadeIn(me))
@@ -111,18 +112,18 @@ class MlsGroups(Scene):
         ).arrange(DOWN, buff=0.22, aligned_edge=LEFT).move_to([0, -2.1, 0])
         for g in grow:
             self.play(FadeIn(g, shift=RIGHT * 0.15), run_time=0.35)
-        leave = Text("and when someone LEAVES, everyone needs new keys — "
+        leave = Text("and when someone LEAVES, everyone needs new keys, "
                      "everyone coordinating with everyone.", color=DANGER).scale(0.4)
         leave.move_to([0, -3.3, 0])
         self.play(FadeIn(leave))
         self.hold_until(30)
         self.play(FadeOut(VGroup(head, me, peers, copies, cnt, grow, leave)))
 
-    # ── Scene 2 (0:30–1:00) — the tree gets built ───────────────────────────
+    # ── Scene 2 (0:30–1:00), the tree gets built ───────────────────────────
     def beat_tree(self):
         head = Text("MLS arranges the group as a tree (RFC 9420)",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         xs = [-6.1 + i * 1.75 for i in range(8)]
         self.leaves = VGroup(*[chip(MEMBERS[i], FG, w=1.5).move_to([xs[i], -2.6, 0])
@@ -166,7 +167,7 @@ class MlsGroups(Scene):
         path_b = VGroup(self.leaves[3], self.l1[1], self.l2[0], self.root)
         self.play(*[m.box.animate.set_stroke(OK) for m in path_b],
                   *[m.label.animate.set_color(OK) for m in path_b])
-        shared = Text("two members' paths overlap — that shared part is the whole trick",
+        shared = Text("two members' paths overlap, that shared part is the whole trick",
                       color=OK).scale(0.42).move_to([0, -3.5, 0])
         self.play(FadeIn(shared))
         self.hold_until(60)
@@ -177,12 +178,12 @@ class MlsGroups(Scene):
                   *[m.label.animate.set_color(MUTED) for m in path_b])
         self.head3 = head
 
-    # ── Scene 3 (1:00–1:45) — an update ripples, with a live counter ────────
+    # ── Scene 3 (1:00–1:45), an update ripples, with a live counter ────────
     def beat_update(self):
         self.play(FadeOut(self.head3))
         head = Text("one update, sent to one sibling branch per level",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         actor = self.leaves[2]
         self.play(*[actor.box.animate.set_stroke(AMBER),
@@ -214,18 +215,18 @@ class MlsGroups(Scene):
         compare = VGroup(
             Text("naive:  99 messages", font=MONO, color=DANGER).scale(0.6),
             Text("MLS:     7 messages", font=MONO, color=OK).scale(0.6),
-            Text("(for a group of 100 — it's the DEPTH of the tree, not the size)",
+            Text("(for a group of 100, it's the DEPTH of the tree, not the size)",
                  color=MUTED).scale(0.38),
         ).arrange(DOWN, buff=0.25).move_to([0, 2.75, 0])
         self.play(FadeOut(head), FadeIn(compare))
         self.hold_until(105)
         self.play(FadeOut(compare))
 
-    # ── Scene 4 (1:45–2:15) — removal, and a message that stays sealed ──────
+    # ── Scene 4 (1:45–2:15), removal, and a message that stays sealed ──────
     def beat_removal(self):
         head = Text("removal is the case that matters",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         gone = self.leaves[6]
         self.play(gone.box.animate.set_stroke(DANGER),
@@ -252,11 +253,11 @@ class MlsGroups(Scene):
         self.play(FadeOut(VGroup(head, msg, sealed, removed_lab, self.leaves, self.l1, self.l2,
                                  self.root, self.w1, self.w2, self.w3)))
 
-    # ── Scene 5 (2:15–2:45) — epochs and commits ────────────────────────────
+    # ── Scene 5 (2:15–2:45), epochs and commits ────────────────────────────
     def beat_epochs(self):
         head = Text("two words you'll see everywhere: epoch, and commit",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         blocks = VGroup(*[
             chip(f"epoch {n}", FG, w=2.0, h=0.75, scale=0.32) for n in (5, 6, 7)
@@ -282,7 +283,7 @@ class MlsGroups(Scene):
                      color=DANGER).scale(0.44).move_to([0, -1.7, 0])
         self.play(FadeIn(stuck))
         hardest = VGroup(
-            Text("keeping that order right — across every device, drop, and reconnect —",
+            Text("keeping that order right, across every device, drop, and reconnect,",
                  color=FG).scale(0.42),
             Text("is the hardest problem in this app.", color=AMBER).scale(0.5),
             Text("which is why every commit goes into a public append-only log. "

@@ -1,19 +1,19 @@
 """
-Topic 2 — "Keys, encryption, signatures, and hashes — the vocabulary" (#591).
+Topic 2, "Keys, encryption, signatures, and hashes, the vocabulary" (#591).
 
 One continuous ~2:00 scene, four vignettes, NO audio (added later). Hard
 constraint from the ticket: teach four concepts with NO mathematics on screen at
-any point — physical objects only, and no "nearly correct" decryption state,
+any point, physical objects only, and no "nearly correct" decryption state,
 because that teaches exactly the wrong intuition.
 
 Render (see learn/manim/render.sh):
     learn/manim/render.sh Vocabulary vocabulary m
 
 Accuracy anchors:
-  - pollis-core/src/commands/auth.rs — Ed25519 signing keys in the OS keystore
-  - pollis-core/src/commands/mls/ds_client.rs — device-signed writes (X-Pollis-*)
-  - verifiable-log/src/merkle.rs — SHA-256 is the hash used in the logs
-  - pollis-core/src/commands/transparency.rs — the pinned log key 175ebfef…7148
+  - pollis-core/src/commands/auth.rs, Ed25519 signing keys in the OS keystore
+  - pollis-core/src/commands/mls/ds_client.rs, device-signed writes (X-Pollis-*)
+  - verifiable-log/src/merkle.rs, SHA-256 is the hash used in the logs
+  - pollis-core/src/commands/transparency.rs, the pinned log key 175ebfef…7148
 """
 
 from manim import (
@@ -21,6 +21,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -82,22 +83,22 @@ class Vocabulary(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:20) — a key is a very large number ──────────────────
+    # ── Scene 1 (0:00–0:20), a key is a very large number ──────────────────
     def beat_key(self):
         head = Text("a key is a very large number", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         k = box(REAL_KEY[:32], AMBER, w=11.0, h=1.0, scale=0.44)
         k.move_to([0, 1.5, 0])
         k2 = Text(REAL_KEY[32:], font=MONO, color=AMBER).scale(0.44)
         k2.next_to(k, DOWN, buff=0.25)
         self.play(FadeIn(k), FadeIn(k2))
-        real = Text("(that's a real one — the key our transparency log signs with)",
+        real = Text("(that's a real one, the key our transparency log signs with)",
                     color=MUTED).scale(0.36).next_to(k2, DOWN, buff=0.3)
         self.play(FadeIn(real))
 
-        # Scale, as two bars — the second one just leaves the frame.
+        # Scale, as two bars, the second one just leaves the frame.
         bar1 = panel(2.2, 0.4, FG, fill_opacity=0.5, fill=FG).move_to([-3.2, -1.4, 0])
         lab1 = Text("guesses per second, by every computer on earth",
                     color=MUTED).scale(0.32).next_to(bar1, DOWN, buff=0.18)
@@ -114,11 +115,11 @@ class Vocabulary(Scene):
         self.hold_until(20)
         self.play(FadeOut(VGroup(head, k, k2, real, bar1, lab1, bar2, lab2, note)))
 
-    # ── Scene 2 (0:20–0:40) — encryption is a lock that scrambles ───────────
+    # ── Scene 2 (0:20–0:40), encryption is a lock that scrambles ───────────
     def beat_lock(self):
         head = Text("encryption is a lock that scrambles",
                     color=AMBER).scale(0.6).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         msg = box('"see you at 7"', FG, w=4.2, h=0.9)
         msg.move_to([-4.4, 1.6, 0])
@@ -152,15 +153,15 @@ class Vocabulary(Scene):
         self.play(FadeOut(VGroup(head, msg, key, noise, arrows, right, right_out, a1,
                                  wrong, wrong_out, a2, none)))
 
-    # ── Scene 3 (0:40–1:20) — the two-key trick, and signatures ─────────────
+    # ── Scene 3 (0:40–1:20), the two-key trick, and signatures ─────────────
     def beat_two_keys(self):
         head = Text("the trick: your key comes in two different halves",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
-        pub = box("PUBLIC half — hand it to anyone", OK, w=6.4, h=1.0, scale=0.38, mono=False)
+        pub = box("PUBLIC half, hand it to anyone", OK, w=6.4, h=1.0, scale=0.38, mono=False)
         pub.move_to([-3.5, 2.0, 0])
-        priv = box("PRIVATE half — never leaves your device", AMBER, w=6.4, h=1.0,
+        priv = box("PRIVATE half, never leaves your device", AMBER, w=6.4, h=1.0,
                    scale=0.38, mono=False)
         priv.move_to([3.5, 2.0, 0])
         self.play(FadeIn(pub), FadeIn(priv))
@@ -174,7 +175,7 @@ class Vocabulary(Scene):
         cant = Text("…and now they cannot open it themselves.",
                     color=DANGER).scale(0.46).move_to([0, -0.55, 0])
         self.play(FadeIn(cant))
-        only = Text("only the private half opens it — and you never agreed on a secret first.",
+        only = Text("only the private half opens it, and you never agreed on a secret first.",
                     color=OK).scale(0.44).move_to([0, -1.25, 0])
         self.play(FadeIn(only))
         self.hold_until(65)
@@ -201,13 +202,13 @@ class Vocabulary(Scene):
         self.hold_until(80)
         self.play(FadeOut(VGroup(head, pub, priv, rev, doc, seal, check, broke, use)))
 
-    # ── Scene 4 (1:20–2:00) — a hash is a fingerprint ───────────────────────
+    # ── Scene 4 (1:20–2:00), a hash is a fingerprint ───────────────────────
     def beat_hash(self):
         head = Text("a hash is a fingerprint for data",
                     color=AMBER).scale(0.6).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
-        # Real SHA-256 digests of these two strings — check them with sha256sum.
+        # Real SHA-256 digests of these two strings, check them with sha256sum.
         a_in = box('"see you at 7"', FG, w=5.4, h=0.9).move_to([-3.6, 1.7, 0])
         a_out = box("aa0cc4…41f0", OK, w=5.0, h=0.9).move_to([3.6, 1.7, 0])
         arr1 = Line(a_in.box.get_right(), a_out.box.get_left(),
@@ -226,7 +227,7 @@ class Vocabulary(Scene):
         one = Text("one character changed → completely different. not slightly. completely.",
                    color=FG).scale(0.44).move_to([0, -1.5, 0])
         self.play(FadeIn(one))
-        try_it = Text("(there's a box below this video — type in it and watch)",
+        try_it = Text("(there's a box below this video, type in it and watch)",
                       color=AMBER).scale(0.4).move_to([0, -2.2, 0])
         self.play(FadeIn(try_it))
         self.hold_until(108)
@@ -236,7 +237,7 @@ class Vocabulary(Scene):
             Text("key · encryption · signature · hash", color=AMBER).scale(0.6),
             Text("everything else in this section is those four ideas, arranged.",
                  color=FG).scale(0.44),
-            Text("and the maths is not the weak point — it essentially never is.",
+            Text("and the maths is not the weak point, it essentially never is.",
                  color=MUTED).scale(0.42),
             Text("where keys are kept · whether a public key is really theirs · "
                  "whether the app is honest", color=MUTED).scale(0.36),

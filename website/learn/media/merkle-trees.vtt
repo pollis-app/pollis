@@ -5,7 +5,7 @@ NOTE yet by decision; these captions carry the narration. Source of truth:
 NOTE learn/manim/scripts/merkle-trees.md
 
 00:00.000 --> 00:12.000
-Say we publish a list — every key we've ever issued — and promise we'll only ever add to it. Never edit. Never delete. How would you catch us if we broke that?
+Say we publish a list, every key we've ever issued, and promise we'll only ever add to it. Never edit. Never delete. How could you check the list was never changed?
 
 00:12.000 --> 00:24.000
 You could download the whole list every day and compare. But it grows forever, and it only works if you never miss a day.
@@ -14,16 +14,16 @@ You could download the whole list every day and compare. But it grows forever, a
 Here's the real answer. Hash each entry. Take those fingerprints in pairs, and hash each pair together. Half as many. Do it again. And again.
 
 00:40.000 --> 00:52.000
-Until there's one left — the root. This is the actual root of one of our live logs, right now: sixty entries, one fingerprint.
+Until there's one left, the root. This is the actual root of one of our live logs, right now: sixty entries, one fingerprint.
 
 00:52.000 --> 01:12.000
-Watch what happens if we change one character in one entry. Its fingerprint changes, which changes its parent's, which changes the next one up — and the root is completely different.
+Watch what happens if we change one character in one entry. Its fingerprint changes, which changes its parent's, which changes the next one up, and the root is completely different.
 
 01:12.000 --> 01:26.000
-There's no way to edit an entry and keep the root the same. That would mean two different things with the same fingerprint — the exact thing these functions prevent.
+There's no way to edit an entry and keep the root the same. That would mean two different things with the same fingerprint, the exact thing these functions prevent.
 
 01:26.000 --> 01:44.000
-So the root is a fingerprint of the entire list, in sixty-four characters. You don't download fifty thousand entries to check we've been honest — you compare sixty-four characters.
+So the root is a fingerprint of the entire list, in sixty-four characters. You don't download fifty thousand entries to check we've been honest, you compare sixty-four characters.
 
 01:44.000 --> 02:04.000
 Now the honest limit. A Merkle tree doesn't stop us writing something false. Add a dishonest entry, and the tree would include it quite happily.
@@ -32,4 +32,4 @@ Now the honest limit. A Merkle tree doesn't stop us writing something false. Add
 What it takes away is our ability to lie quietly. We can't show you one list and someone else a different one. We can't change our story later. Everyone comparing roots gets the same answer.
 
 02:22.000 --> 02:30.000
-That's a smaller claim than "trust us to be honest." It's also a much better one — because you don't have to. Try it below: change any entry, and watch the root move.
+That's a smaller claim than "trust us to be honest." It's also a much better one, because you don't have to. Try it below: change any entry, and watch the root move.
