@@ -6,12 +6,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Pollis — Learn</title>
   <meta name="description"
-    content="Plain-language explainers, with animations you can watch and widgets you can poke, for everything Pollis asks you to trust — and the honest limits of each mechanism." />
+    content="Plain-language explainers, with animations you can watch and widgets you can poke, for everything Pollis asks you to trust, and the limits of each one." />
   <meta name="theme-color" content="#0f1117" />
 
   <meta property="og:title" content="Pollis — Learn" />
   <meta property="og:description"
-    content="From 'what is a key' to 'I verified the log myself' — the crypto behind Pollis, in plain language, with the honest limits stated out loud." />
+    content="From 'what is a key' to 'I verified the log myself': the cryptography behind Pollis, in plain language, with the limits of each mechanism stated plainly." />
   <meta property="og:type" content="website" />
 
   <link rel="icon" type="image/svg+xml" href="favicon.svg" />
@@ -299,45 +299,67 @@
       margin-top: 0.6rem;
     }
 
-    /* ── Transcript disclosure ────────────────────────────────── */
-    .ln-transcript {
-      margin: 1rem 0 0;
+    /* ── Read-along panel (always visible, beside/below the video) ── */
+    .ln-watch {
+      margin: 1.25rem 0 0;
       border: 1px solid var(--c-border);
-      border-radius: 6px;
+      border-radius: 8px;
       background: rgba(255, 255, 255, 0.015);
+      padding: 1rem 1.25rem 0.4rem;
     }
 
-    .ln-transcript summary {
-      cursor: pointer;
-      padding: 0.7rem 1rem;
-      font-size: 0.82rem;
+    .ln-watch-head {
+      font-size: 0.8rem;
       font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--c-accent);
+    }
+
+    .ln-watch-sub {
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: var(--c-text-muted);
+      margin: 0.35rem 0 0.75rem;
+    }
+
+    .ln-watch-body {
+      max-height: 22rem;
+      overflow-y: auto;
+      font-size: 0.9rem;
+      line-height: 1.75;
       color: var(--c-text);
-      list-style: none;
+      padding-right: 0.5rem;
     }
 
-    .ln-transcript summary::-webkit-details-marker {
-      display: none;
+    .ln-watch-body p {
+      margin-bottom: 0.85rem;
     }
 
-    .ln-transcript summary::before {
-      content: "▸ ";
-      color: var(--c-text-muted);
-    }
+    /* On wide viewports, sit the read-along beside the video. */
+    @media (min-width: 60rem) {
+      .ln-media {
+        display: flex;
+        gap: 1.5rem;
+        align-items: flex-start;
+        margin: 2rem 0;
+      }
 
-    .ln-transcript[open] summary::before {
-      content: "▾ ";
-    }
+      .ln-media .ln-figure {
+        flex: 1 1 58%;
+        min-width: 0;
+        margin: 2rem 0 0;
+      }
 
-    .ln-transcript-body {
-      padding: 0 1rem 1rem;
-      font-size: 0.85rem;
-      line-height: 1.7;
-      color: var(--c-text-muted);
-    }
+      .ln-media .ln-watch {
+        flex: 1 1 42%;
+        min-width: 0;
+        margin-top: 2rem;
+      }
 
-    .ln-transcript-body p {
-      margin-bottom: 0.75rem;
+      .ln-media .ln-watch-body {
+        max-height: 20rem;
+      }
     }
 
     /* ── Interactive widget: see learn.js ─────────────────────── */
@@ -673,164 +695,99 @@
   <div id="dot-matrix-bg"></div>
 
   <main>
-    <div class="ln-main">
+    <div class="ln-main reading-surface">
       <a href="index.html" class="ln-back">&larr; Back to Pollis</a>
 
       <div class="ln-header">
         <h1 class="ln-title">Learn</h1>
         <p class="ln-subtitle">
-          Pollis's whole pitch is <em>don't trust the operator — verify</em>. This section takes
+          Pollis's whole pitch is simple: don't trust the operator, verify. This section takes
           you from "what is a key" to "I checked the log myself", in plain language, with
-          animations you can watch and widgets you can poke.
+          animations you can watch and widgets you can try.
         </p>
       </div>
 
       <div class="ln-intro">
-        Every explainer here also states, out loud, what its mechanism <strong>doesn't</strong>
-        prove. That honesty is the point: an unverifiable verifiability claim is just marketing.
-        These pages are the friendly version — each one links out to the precise, auditor-facing
+        Every explainer here also states, plainly, what its mechanism <strong>doesn't</strong>
+        prove, because a verifiability claim you cannot verify is just marketing. These pages are
+        the friendly version. Each one links out to the precise, auditor-facing
         <a href="https://github.com/actuallydan/pollis/tree/main/docs" target="_blank"
-          rel="noopener noreferrer">design docs</a> as "the rigorous version".
+          rel="noopener noreferrer">design docs</a> for the rigorous version.
       </div>
 
       <ul class="ln-toc">
-        <li><span class="ln-track">FOUNDATIONS</span><a href="#threat-model">Threat model — who can
-            see what</a></li>
+        <li><span class="ln-track">FOUNDATIONS</span><a href="#threat-model">Who can see what</a></li>
         <li><span class="ln-track">FOUNDATIONS</span><a href="#vocabulary">Keys, encryption,
-            signatures &amp; hashes — the vocabulary</a></li>
-        <li><span class="ln-track">MLS</span><a href="#mls-groups">MLS groups — the ratchet tree,
-            epochs &amp; commits</a></li>
-        <li><span class="ln-track">MLS</span><a href="#joining-leaving">Joining, leaving,
-            multi-device &amp; the honest history boundary</a></li>
-        <li><span class="ln-track">MLS</span><a href="#window-not-door">Forward secrecy &amp;
-            post-compromise security</a></li>
-        <li><span class="ln-track">IDENTITY</span><a href="#identity-keys">Identity keys, safety
-            numbers &amp; TOFU pinning</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
+            signatures, and hashes</a></li>
+        <li><span class="ln-track">MLS</span><a href="#mls-groups">Group chats, made efficient</a></li>
+        <li><span class="ln-track">MLS</span><a href="#joining-leaving">Joining, leaving, and your
+            history</a></li>
+        <li><span class="ln-track">MLS</span><a href="#window-not-door">A stolen key is a window, not
+            a door</a></li>
+        <li><span class="ln-track">IDENTITY</span><a href="#identity-keys">Making sure you have the
+            right person's key</a></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees and
             append-only logs</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
-            heads, proofs &amp; equivocation</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#three-logs">Pollis's three logs — and
-            what each one prevents</a></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Proving an
+            entry is really in the log</a></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#three-logs">Pollis's three logs, and
+            what each one protects</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#binary-transparency">Binary
-            transparency — and what reproducibility we actually have</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#verify-it-yourself">pollis-verify —
-            verify it yourself</a></li>
+            transparency, and reproducible builds</a></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#verify-it-yourself">Verify it
+            yourself</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#reading-the-dashboards">Reading the
-            artifacts page and the in-app Security page</a></li>
+            artifacts and Security pages</a></li>
       </ul>
 
       <!-- ═══ Topic 1 — threat model (#590) ═════════════════════════════════ -->
       <section class="ln-section" id="threat-model">
         <div class="ln-eyebrow">Track A · Foundations · Topic 1</div>
-        <h2>Threat model — who can see what</h2>
+        <h2>Who can see what</h2>
 
         <div class="ln-prose">
-          <p>
-            When you send a message on most apps, you're trusting a company. Not their promise —
-            their <em>ability</em>. Even a company that genuinely doesn't want to read your messages
-            can be hacked, sold, subpoenaed, or told by a court to start reading. "We would never" is
-            a statement about intent. Intent changes.
-          </p>
-          <p>
-            Pollis is built so that reading your messages isn't something we're <em>choosing</em> not
-            to do. It's something we're <strong>unable</strong> to do. Here's the honest map of who
-            sees what.
-          </p>
-          <p>
-            <strong>Your device sees everything.</strong> Obviously — it's where you type and read.
-            Your messages are decrypted on your device and nowhere else. Which also means: if someone
-            controls your device, they've won, and no amount of clever cryptography helps.
-          </p>
-          <p>
-            <strong>Our servers see metadata, never content.</strong> We run a database and a
-            delivery service, and what they hold is <em>sealed envelopes</em> — encrypted blobs we
-            cannot open, because the keys never leave your devices. What they can see is the outside
-            of the envelope: that an account sent something, roughly when, roughly how big, and which
-            conversation it belongs to. <strong>That is real information and we're not going to
-            pretend otherwise.</strong> Who you talk to and when can be sensitive on its own. We
-            minimise it where we can; we don't eliminate it today.
-          </p>
-          <p>
-            <strong>Our servers can lie about <em>who</em>, and that's the interesting attack.</strong>
-            Content is safe, but encryption relies on knowing you're using <em>the right key</em> for
-            the person you mean. A malicious or compelled server could hand you the wrong key — its
-            own — and quietly read everything. This is the attack that actually matters against a
-            system like ours, and it's why safety numbers (Topic 6) and the transparency logs
-            (<a href="#three-logs">Topic 9</a>) exist.
-          </p>
-          <p>
-            <strong>The binary you run is trusted, and that's a real assumption.</strong> Encryption
-            running in a backdoored app protects nobody. The app on your machine could, in principle,
-            be a version built just for you — which is the reason
-            <a href="#binary-transparency">binary transparency</a> exists.
-          </p>
-          <p>
-            The pattern, throughout: <strong>we shrink the set of things you have to take on faith,
-            and then publish evidence for what's left.</strong>
-          </p>
+          <p>On most messaging apps, your privacy rests on a company keeping a promise. The trouble is that a company can be hacked, bought, or handed a court order, and none of those things care what it promised. "We would never read your messages" is a statement about intent, and intent can change.</p>
+          <p>Pollis is built differently. Reading your messages is not something we choose not to do. It is something we are not able to do. Here is the plain map of who can see what.</p>
+          <p><strong>Your device sees everything.</strong> That is where you type and read, so your messages are unscrambled there and nowhere else. The flip side: if someone gets into your unlocked device, they can read what is on it, and no clever maths can prevent that.</p>
+          <p><strong>Our servers see the outside of the envelope, never the letter inside.</strong> They carry sealed messages we cannot open, because the keys to open them never leave your devices. What they can see is ordinary delivery information: that an account sent something, roughly when, roughly how big it was, and which conversation it belongs to. That is real information, and we would rather tell you about it than pretend it is not there.</p>
+          <p><strong>Getting the right key to the right person is the part that takes care.</strong> Encryption only helps if the key your app uses really belongs to the person you meant. Safety numbers (Topic 6) and our public key logs (<a href="#three-logs">Topic 9</a>) are what let you confirm that yourself, rather than take our word for it.</p>
+          <p>The pattern runs through everything here: we keep shrinking the list of things you have to take on trust, and we publish evidence for whatever is left.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">What we do not protect against</div>
-          <p>
-            Someone with control of your unlocked device. Someone who can see that you use Pollis and
-            who you talk to, from network position or server metadata. Bugs — transparency proves what
-            we published, it does not prove the code is correct
-            (<a href="#binary-transparency">Topic 10</a>). And your own past, on a new device: there
-            is no key backup, so a fresh device starts empty. That last one is a deliberate trade, not
-            an oversight.
-          </p>
+          <div class="ln-limit-label">What this does not cover</div>
+          <p>A few things sit outside what any messenger can protect, and it is fairer to name them. Someone holding your unlocked device can read what is on it. The delivery information above, sometimes called metadata, is visible to whoever carries your traffic. And a brand new device starts empty, because there is no history backup (that trade is explained in Topic 4). Everything else, we work to protect, and to let you check.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/threat-model.jpg" aria-describedby="threat-model-transcript-body">
             <source src="learn/media/threat-model.webm" type="video/webm" />
             <source src="learn/media/threat-model.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/threat-model.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            One diagram, built up: a readable message, then a sealed one, then the legible outside of
-            the envelope, then the key-substitution attack — ending on the three-colour boundary this
-            whole section uses. Green is sealed, amber is visible to us, red is undefended.
-            No audio yet — captions and the transcript below carry the narration.
+One picture, built up step by step: a readable message, then a sealed one, then the plain delivery details on the outside of the envelope, ending on the colour key this whole section uses. Green is sealed, amber is visible to us, red is outside anyone's protection.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="threat-model-transcript-body">
-            <p>Most messaging apps ask you to trust a company. Not their promise — their ability.
-              Even a company that doesn't want to read your messages can be broken into, bought, or
-              ordered by a court. "We would never" describes intent. Intent changes.</p>
-            <p>So Pollis is built so reading your messages isn't something we choose not to do. It's
-              something we can't do.</p>
-            <p>Your message is sealed on your device, before it goes anywhere. Our servers pass it
-              along without ever holding the key. It opens on your friend's device. We're a post
-              office handling sealed envelopes.</p>
-            <p>But look closer at the envelope, because this is the part most apps gloss over. We
-              can't see what's inside. We <em>can</em> see the outside: that your account sent
-              something, when, roughly how big, and which conversation it belongs to. That's called
-              metadata, and it can be sensitive all by itself. We're not going to tell you it doesn't
-              exist.</p>
-            <p>There's a subtler attack too. Encryption only helps if you're using the right key for
-              the right person. A dishonest server could hand you the wrong key — its own — and read
-              everything without ever breaking the maths.</p>
-            <p>That's the attack we take most seriously, and it's why the rest of this section
-              exists: safety numbers, and public logs of every key we publish. Both are things you
-              can check yourself.</p>
-            <p>Here's the full picture. Green, we cannot see. Amber, we can — and we say so. Red is
-              outside what any messenger can defend: your own device, and our own bugs.</p>
-            <p>Everything else in Learn is about shrinking the green boundary's dependence on
-              trusting us — and publishing evidence for whatever's left.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="threat-model-transcript-body">
+            <p>Most messaging apps ask you to trust a company. Not its promise, its ability. A company that means well can still be hacked, bought, or ordered by a court. So Pollis is built so that reading your messages is not something we choose not to do. It is something we cannot do.</p>
+            <p>Your message is sealed on your device before it goes anywhere. Our servers pass it along without ever holding the key. It opens on your friend's device.</p>
+            <p>We cannot see what is inside. We can see the outside: that your account sent something, when, roughly how big, and which conversation it belongs to. That is called metadata, and it can be sensitive on its own, so we are not going to pretend it does not exist.</p>
+            <p>There is also a subtler point. Encryption only helps if you are using the right key for the right person. If the wrong key ever slipped in, a message could be read in the middle without breaking any of the maths. That is exactly what safety numbers and our public key logs let you check.</p>
+            <p>Here is the full picture. Green, we cannot see. Amber, we can, and we say so. Red is outside what any messenger can defend: your own device, and plain software bugs.</p>
+            <p>Everything else in Learn is about shrinking how much of the green depends on trusting us, and publishing evidence for whatever is left.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -845,121 +802,57 @@
       <!-- ═══ Topic 2 — the vocabulary (#591) ═══════════════════════════════ -->
       <section class="ln-section" id="vocabulary">
         <div class="ln-eyebrow">Track A · Foundations · Topic 2</div>
-        <h2>Keys, encryption, signatures, and hashes — the vocabulary</h2>
+        <h2>Keys, encryption, signatures, and hashes</h2>
 
         <div class="ln-prose">
-          <p>
-            Four words carry the entire rest of this section. No mathematics required for any of
-            them.
-          </p>
-          <p>
-            <strong>A key is a very large number.</strong> That's it. Large enough that guessing it
-            is not a thing that happens — not "difficult", but "there isn't enough time or energy in
-            the universe". When we say a key never leaves your device, we mean that number is stored
-            on your machine, in your operating system's keychain, and is never sent to us.
-          </p>
-          <p>
-            <strong>Encryption is a lock that scrambles.</strong> Feed in your message and a key, get
-            out noise. Feed the noise and the right key into the matching operation, get your message
-            back. Wrong key: noise stays noise. There's no "almost" — no partial credit, no getting
-            80% of the message.
-          </p>
-          <p>
-            <strong>The clever part is that there are two keys, and they're different.</strong> This
-            is the idea that makes messaging strangers possible. You have a <em>public</em> key and a
-            <em>private</em> key, mathematically joined. Anything locked with the public one can only
-            be opened by the private one. So you publish your public key to the world — the name is
-            literal — and keep the private one on your device forever. Anyone can lock a message to
-            you; only you can open it. You never have to secretly agree on anything in advance.
-          </p>
-          <p>
-            <strong>Signatures are the same trick, backwards.</strong> Lock something with your
-            <em>private</em> key and anyone with your public key can verify it came from you and
-            wasn't altered. Not secrecy — proof of authorship and integrity. Pollis uses signatures
-            constantly: every write to our servers is signed by your device, and every transparency
-            log head is signed by one specific key.
-          </p>
-          <p>
-            <strong>A hash is a fingerprint for data.</strong> Feed in any amount of data, get a
-            fixed-size string. The same input always gives the same fingerprint; any change — one
-            character, one bit — gives a completely different one. You can't work backwards from the
-            fingerprint to the data, and you can't find two different files with the same
-            fingerprint. That's what makes it useful for saying "this is exactly the file I meant"
-            without publishing the file. When you see <code>root: 37945cb2…cc0c</code> on our
-            artifacts page, that's a hash.
-          </p>
-          <p>
-            Those four ideas — key, encryption, signature, hash — carry everything that follows.
-            Everything else is arrangement.
-          </p>
+          <p>Four words show up on every page that follows. None of them needs any maths to understand.</p>
+          <p><strong>A key is just a very large number.</strong> Large enough that guessing it is not a matter of being patient, it is a matter of there not being enough time in the universe. When we say a key never leaves your device, we mean that number stays in your device's secure storage and is never sent to us.</p>
+          <p><strong>Encryption is a lock that scrambles.</strong> Put your message in with a key and out comes noise. Put the noise back in with the right key and your message returns. With the wrong key you get nothing back, not a blurry version, not most of it. Nothing.</p>
+          <p><strong>The clever part is that a key comes in two halves that are different from each other.</strong> One half is public and one is private. Anything locked with the public half can only be opened with the private half. So you can hand your public half to anyone, even publish it, while the private half stays on your device. Now anyone can send you something only you can open, and you never had to agree on a secret in advance.</p>
+          <p><strong>Signatures are the same idea in reverse.</strong> Lock something with your private half and anyone holding your public half can confirm it really came from you and was not altered. Change a single character and the check fails. Pollis uses signatures constantly, so you can tell that a record genuinely came from the right place.</p>
+          <p><strong>A hash is a fingerprint for data.</strong> Feed in anything, of any size, and get back a short string. The same input always gives the same fingerprint, and changing one character anywhere gives a completely different one. You cannot work backwards from the fingerprint to the original. That is what lets you say "this is exactly the file I meant" without publishing the file. When you see a long root code on our artifacts page, that is a hash.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            <strong>None of this protects a key that leaks.</strong> The maths is not the weak point
-            and essentially never is. The weak points are: where keys are stored, who you believe a
-            public key belongs to, and whether the software doing the locking is honest. Those are
-            exactly the three things the rest of this section is about — which is a polite way of
-            saying that "we use strong encryption" is close to meaningless on its own.
-          </p>
+          <div class="ln-limit-label">Worth knowing</div>
+          <p>Strong encryption is not the fragile part, and it almost never is. The parts that matter in practice are where keys are kept, whether a public key really belongs to the person it claims to, and whether the app doing the locking is honest. Those three questions are what the rest of this section is about.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/vocabulary.jpg" aria-describedby="vocabulary-transcript-body">
             <source src="learn/media/vocabulary.webm" type="video/webm" />
             <source src="learn/media/vocabulary.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/vocabulary.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            Four vignettes, no formulas: the size of a key, a lock with no "almost", the two-key
-            trick that lets strangers write to you, and one character changing a fingerprint
-            completely. No audio yet — captions and the transcript below carry the narration.
+Four short scenes, no formulas: the size of a key, a lock with no "almost", the two-half trick that lets strangers write to you privately, and one character changing a fingerprint completely.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="vocabulary-transcript-body">
-            <p>A key is a very large number. That's genuinely all it is. Large enough that guessing
-              it isn't hard — it's impossible, in the sense that there isn't enough time or energy in
-              the universe to try.</p>
-            <p>Encryption is a lock. Your message goes in with a key, and what comes out is noise.
-              Put the noise back in with the right key, and your message returns. Wrong key, and you
-              get nothing — not a blurry version, not most of it. Nothing.</p>
-            <p>Now the idea that makes all of this work between strangers. Your key comes in two
-              halves that are different from each other. One is public — you hand it to anyone,
-              publish it, put it on a billboard. One is private, and it never leaves your device.</p>
-            <p>Anything locked with the public half can only be opened by the private half. Watch
-              what that means: a stranger can lock a message to you, and then cannot unlock it
-              themselves. They've made something only you can open, and you never had to agree on a
-              secret first.</p>
-            <p>Run the same trick backwards and you get signatures. Stamp something with your private
-              half, and anyone with your public half can confirm it came from you and hasn't been
-              altered. Change one word, and the seal breaks.</p>
-            <p>Last idea: a hash. It's a fingerprint for data. Any file, any size, in — a short
-              string out. Same file, same fingerprint, every time. But change one single character…
-              and it's completely different. Try it yourself.</p>
-            <p>Key, encryption, signature, hash. Everything else in this section is those four ideas,
-              arranged.</p>
-            <p>One last thing. The maths is not the weak point — it essentially never is. The weak
-              points are where the keys are kept, whether you believe a public key really belongs to
-              who it says, and whether the app doing the locking is honest. That's what the rest of
-              Learn is about.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="vocabulary-transcript-body">
+            <p>A key is a very large number. Large enough that guessing it is not hard, it is out of reach, because there is not enough time to try.</p>
+            <p>Encryption is a lock. Your message goes in with a key and out comes noise. Put the noise back in with the right key and your message returns. Wrong key, and you get nothing. Not a blurry version, not most of it. Nothing.</p>
+            <p>Now the idea that makes this work between strangers. Your key comes in two halves. One is public, you hand it to anyone. One is private, and it never leaves your device. Anything locked with the public half can only be opened by the private half. A stranger can lock a message to you, and then cannot open it themselves.</p>
+            <p>Run the same idea backwards and you get signatures. Mark something with your private half and anyone with your public half can confirm it came from you and was not changed. Change one word and the check fails.</p>
+            <p>Last idea: a hash. It is a fingerprint for data. Any file, any size, in, and a short string out. Same file, same fingerprint, every time. Change one character and it is completely different. Try it yourself in the box below.</p>
+            <p>Key, encryption, signature, hash. Everything else is those four ideas arranged. And the maths is not the weak point. What matters is where the keys are kept, whether a public key really belongs to who it says, and whether the app is honest. That is what the rest of Learn is about.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <!-- Live hash widget — built + driven by learn.js -->
         <div class="ln-widget" id="hash-widget" data-hash-widget hidden>
           <div class="ln-widget-head">
             <strong>Try it.</strong> Type anything. The fingerprint below is a real SHA-256, computed
-            in your browser on every keystroke — the same function our transparency logs use.
+            in your browser on every keystroke, the same function our transparency logs use.
           </div>
           <label class="ln-hash-label" for="hash-input">your text</label>
           <input class="ln-hash-input" id="hash-input" type="text" spellcheck="false"
@@ -971,7 +864,7 @@
           </div>
           <p class="ln-widget-note">
             Nothing leaves your device. Note how much of the fingerprint changes when you alter one
-            character — that's the property everything else in this section leans on.
+            character. That is the property everything else in this section leans on.
           </p>
         </div>
 
@@ -989,123 +882,51 @@
       <!-- ═══ Topic 3 — MLS groups (#592) ═══════════════════════════════════ -->
       <section class="ln-section" id="mls-groups">
         <div class="ln-eyebrow">Track B · MLS · Topic 3</div>
-        <h2>MLS groups — the ratchet tree, epochs, and commits</h2>
+        <h2>Group chats, made efficient</h2>
 
         <div class="ln-prose">
-          <p>
-            Most people have heard "end-to-end encrypted" and picture two people and one key. That
-            picture falls apart the moment there are five people in a channel, and it falls apart
-            completely when someone leaves.
-          </p>
-          <p>
-            Start with the naive approach. Five people in a channel: to send one message privately,
-            you encrypt it separately for each of the other four. Ten people, nine copies. A hundred
-            people, ninety-nine copies, <em>every message</em>. It works — some older systems do
-            exactly this — and it gets expensive fast. Worse is what happens when someone leaves: you
-            want messages after their departure to be unreadable to them, so everyone has to agree on
-            a new key, and agreeing on a new secret among a hundred people where each pair has to
-            coordinate is a lot of work.
-          </p>
-          <p>
-            <strong>MLS</strong> (Message Layer Security, <a
-              href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank"
-              rel="noopener noreferrer">RFC 9420</a> — an actual internet standard, not something we
-            invented) solves this with a <strong>tree</strong>.
-          </p>
-          <p>
-            Picture the group as a pyramid. Every member is a leaf at the bottom. Above them, nodes
-            join pairs, then pairs of pairs, up to a single root. Each node holds a key, and the rule
-            is: <strong>you know the key of every node on the path from your leaf up to the
-            root</strong> — your own, your parent's, its parent's, all the way up. The root key is
-            therefore known to everyone, and it's what protects the group's messages.
-          </p>
-          <p>
-            Now the payoff. When something changes — someone joins, someone leaves, or someone just
-            wants fresh keys — the person making the change generates new keys along their own path
-            to the root, and encrypts each new key <em>to the sibling subtree at each level</em>.
-            Instead of talking to every member individually, they send one compact update that each
-            member can unwrap using the part of the tree they already know. The cost drops from "one
-            message per member" to roughly <strong>the depth of the tree</strong> — about seven steps
-            for a hundred people, not ninety-nine. For a thousand, about ten.
-          </p>
-          <p>
-            Two more pieces of vocabulary. <strong>An epoch</strong> is a version number for the
-            group: every time the keys change, the epoch ticks up — 5, 6, 7 — and every message is
-            sealed under a specific epoch's keys. <strong>A commit</strong> is the message that
-            causes an epoch to advance: "add Dana", "remove Sam", "here are fresh keys". Commits must
-            be applied in order by everyone, or members end up in different states and can no longer
-            read each other's messages. <strong>Keeping that order correct across devices, networks,
-            and reconnections is the single hardest engineering problem in Pollis</strong> — and it's
-            why we publish an append-only log of every commit (<a href="#three-logs">Topic 9</a>).
-          </p>
-          <p>
-            What the server does here: it stores and forwards commits. It cannot read them, cannot
-            forge them — every commit is authenticated by the sender's key — and cannot silently drop
-            one without members noticing a gap in the epoch sequence.
-          </p>
+          <p>Locking a message for one person is simple. Groups are where it gets interesting.</p>
+          <p>The obvious way is to encrypt the message separately for every member. Five people means four copies. A hundred people means ninety-nine copies of every message you send. It works, but it gets slow and expensive fast. And when someone leaves, everyone needs fresh keys, which means everyone coordinating with everyone.</p>
+          <p>Pollis uses a standard called MLS, short for Messaging Layer Security (<a href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank" rel="noopener noreferrer">RFC 9420</a>, a published internet standard). It arranges the group as a tree.</p>
+          <p>Picture a pyramid. Every member is a box along the bottom. Boxes pair up into boxes above them, and so on up to a single box at the top. Each box holds a key, and the rule is simple: you know the keys on the straight line from your own box up to the top. The key at the very top is shared by everyone, and that is the key that protects the group's messages.</p>
+          <p>The payoff comes when something changes. Whoever makes the change only has to send one small update along their line to the top, and each part of the group can unlock the piece it needs from what it already knows. The work goes from one message per member down to about the height of the tree: roughly seven steps for a hundred people, not ninety-nine. For a thousand people, about ten.</p>
+          <p>Two words you will see throughout Pollis. An <strong>epoch</strong> is the group's version number; it ticks up every time the keys change. A <strong>commit</strong> is the update that makes it tick, such as adding someone or refreshing keys. Everyone has to apply commits in the same order, and keeping that order right across every device and reconnection is one of the hardest parts of building Pollis. It is also why every commit is written to a public log you can check (<a href="#three-logs">Topic 9</a>).</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            MLS protects <em>content</em> and <em>membership changes</em>. It does nothing about
-            metadata — the server still sees that a group exists, roughly who is in it, and when
-            commits and messages flow. <a href="#threat-model">Topic 1</a> said this and it's still
-            true here. The tree also assumes every member's device applies commits in the same order;
-            when that breaks, the failure is a device that can't read new messages until it catches
-            up, not a silent loss of secrecy.
-          </p>
+          <div class="ln-limit-label">Worth knowing</div>
+          <p>The tree protects the contents of messages and who is in the group. It does not hide the fact that a group exists, or that messages are flowing, which is the metadata point from <a href="#threat-model">Topic 1</a>. And it assumes every device applies updates in the same order; when that slips, the effect is a device that cannot read new messages until it catches up, not a leak.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/mls-groups.jpg" aria-describedby="mls-groups-transcript-body">
             <source src="learn/media/mls-groups.webm" type="video/webm" />
             <source src="learn/media/mls-groups.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/mls-groups.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            The naive cost piling up, the tree being built, one update rippling sideways instead of
-            to everybody, and a removed member watching the next message stay sealed.
-            No audio yet — captions and the transcript below carry the narration.
+The copy-per-person approach piling up, then the tree being built, then one small update travelling to the top instead of to everybody, and a member who left watching the next message stay sealed.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="mls-groups-transcript-body">
-            <p>Two people sharing one key is easy. Groups are where it gets interesting. Here's the
-              obvious approach: encrypt the message separately for every person. Five people, four
-              copies. It works — but watch what happens when the group grows. A hundred people means
-              ninety-nine copies of every message you send.</p>
-            <p>And when someone leaves, everyone needs new keys, which means everyone coordinating
-              with everyone. It doesn't scale.</p>
-            <p>MLS arranges the group as a tree instead. Everyone sits at the bottom. Above them,
-              nodes pair up, all the way to a single root. Every node holds a key — and here's the
-              rule: you know the keys on the path from your own leaf to the root. Yours, your
-              parent's, and so on up. The root is known to everyone. That's what protects the group's
-              messages.</p>
-            <p>Now watch what happens when something changes. This member generates fresh keys along
-              their path — and sends each one only to the sibling branch at that level. Not to every
-              member. To one branch at each step. Everyone can unwrap what they need, using the part
-              of the tree they already know. Ninety-nine messages becomes seven.</p>
-            <p>Removal works the same way, and it's the important case. This member is removed. New
-              keys flow up the vacated path. The next message goes out — and for them, it stays
-              sealed. They're in the same room, holding the old key, and it opens nothing.</p>
-            <p>Two words you'll see everywhere in Pollis. An epoch is the group's version number — it
-              ticks up every time the keys change. A commit is the message that makes it tick.</p>
-            <p>Every member has to apply those commits in the same order. If a device misses one, it
-              falls out of step and can't read what comes next — until it catches up.</p>
-            <p>Keeping that order correct, across every device, network drop, and reconnection, is
-              the hardest problem in this app. It's also why we publish every commit to a public
-              append-only log — which is where we're going next.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="mls-groups-transcript-body">
+            <p>Locking a message for one person is easy. Groups are where it gets interesting. The obvious approach is to encrypt the message separately for every person. Five people, four copies. A hundred people means ninety-nine copies of every message. And when someone leaves, everyone needs new keys.</p>
+            <p>MLS arranges the group as a tree instead. Everyone sits along the bottom. Boxes pair up all the way to a single box at the top. Each box holds a key, and you know the keys on the line from your box up to the top. The top key is shared by everyone, and it protects the group's messages.</p>
+            <p>When something changes, the person making the change sends one small update along their line, and each part of the group unlocks the piece it needs from what it already knows. Ninety-nine messages becomes about seven.</p>
+            <p>Leaving works the same way. When a member is removed, the keys along their line are replaced. The next message goes out, and for them it stays sealed. They still hold the old key, and it opens nothing.</p>
+            <p>Two words you will see everywhere. An epoch is the group's version number. A commit is the update that makes it tick.</p>
+            <p>Everyone applies those updates in the same order. If a device misses one, it falls a step behind and cannot read what comes next until it catches up. Keeping that order right is one of the hardest parts of the app, and it is why every commit is written to a public log, which is where we go next.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: <a href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank"
@@ -1120,128 +941,54 @@
       <!-- ═══ Topic 4 — joining, leaving, multi-device (#593) ══════════════ -->
       <section class="ln-section" id="joining-leaving">
         <div class="ln-eyebrow">Track B · MLS · Topic 4</div>
-        <h2>Joining, leaving, multi-device — and the honest history boundary</h2>
+        <h2>Joining, leaving, and your history</h2>
 
         <div class="ln-prose">
-          <p>
-            <strong>Joining a group.</strong> To add you to a group, someone has to encrypt the
-            group's current keys to you — which means they need a public key of yours, available
-            before you're online. So every Pollis device publishes a small bundle in advance: a
-            <strong>key package</strong>. Think of it as a self-addressed lockbox left at the front
-            desk. When someone adds you, they use your key package to seal up the group's state and
-            send you a <strong>Welcome</strong> message. You open it with your private key, and
-            you're in — holding the current epoch's keys.
-          </p>
-          <p>
-            <strong>Here's the part that surprises people.</strong> That Welcome gives you the keys
-            as they exist <em>now</em>. It does not give you the keys from before you joined — and it
-            can't, because MLS is specifically designed so that old keys can't be derived from new
-            ones. That property is the whole point: it's what makes removing someone actually work.
-          </p>
-          <p>
-            So <strong>messages sent to a group before you joined are not readable by you.</strong>
-            Not "hidden by the UI" — genuinely unavailable. This is the same in every serious MLS
-            deployment. It's the cost of removal being real.
-          </p>
-          <p>
-            <strong>Leaving.</strong> When a member is removed, the remaining members advance to a
-            new epoch with fresh keys derived along the vacated path. The removed device keeps
-            whatever it already had — old messages it already decrypted stay decrypted, we can't
-            reach into their machine — but everything from that epoch forward is sealed to them.
-            Removal is arithmetic, not a permission flag on a server we're asking you to trust.
-          </p>
-          <p>
-            <strong>Multi-device is the same mechanism, pointed inward.</strong> Your phone and your
-            laptop are <em>separate members of the group</em>, each with their own keys. There's no
-            master key that gets copied around, because a master key that travels is a master key
-            that can be stolen in transit. Adding your second device is an add-commit, exactly like
-            adding a person.
-          </p>
-          <p>
-            Which leads to the sharp edge, stated plainly: <strong>a new device starts empty. There
-            is no message-history backup.</strong> Your new device joins from today forward. Your old
-            messages are on your old device and nowhere else — not on our servers (we only ever had
-            sealed envelopes), and not in a backup, because we don't make one.
-          </p>
-          <p>
-            We could offer history backup. The common approach — used by some large messengers — is
-            to encrypt your history and store it on the server under a key derived from a PIN or
-            passphrase. That works, and it also creates exactly the thing this entire product exists
-            to avoid: <strong>a copy of your conversations, on our infrastructure, protected by
-            something guessable.</strong> A PIN is a small number of digits. Server-side history plus
-            a guessable key is a standing invitation to whoever eventually gets access to the server.
-          </p>
-          <p>
-            So we don't. If you want your history on a new device, you keep your old device. That is
-            a real cost and we're not going to dress it up.
-          </p>
+          <p>To add you to a group, someone has to lock the group's current keys so that only you can open them, and they need to do it even while you are offline. So every Pollis device leaves a small locked box for itself in advance, called a key package. Think of a self-addressed lockbox at a front desk: anyone can drop something in, only you can open it. When someone adds you, they use that lockbox to seal up the group's current state and send you a welcome. You open it with your private half, and you are in.</p>
+          <p><strong>Here is the part that surprises people.</strong> The welcome gives you the keys as they are right now. It does not give you the keys from before you joined, and it cannot, because the design deliberately makes new keys unable to reveal old ones. That is the same property that makes removing someone actually work.</p>
+          <p>So <strong>messages sent to a group before you joined are not readable by you.</strong> Not hidden by the app, genuinely unavailable. Every serious app built on this standard works the same way. It is the price of removal meaning something.</p>
+          <p><strong>Leaving.</strong> When a member is removed, everyone else moves to fresh keys, and from that point on the departed device cannot read anything new. Whatever it already saw stays on it; we cannot reach into someone else's machine. Removal here is a property of the keys, not a setting on a server you have to trust.</p>
+          <p><strong>Your own devices work the same way.</strong> Your phone and your laptop are separate members of the group, each with their own keys. Nothing is copied between them, because a key that travels is a key that can be stolen along the way. Adding your laptop is just like adding a person.</p>
+          <p>Which leads to the one sharp edge, stated plainly: <strong>a new device starts empty. There is no history backup.</strong> A new device joins from today forward. Your old messages live on your old device and nowhere else, not on our servers, which only ever held sealed envelopes, and not in a backup, because we do not make one.</p>
+          <p>We could offer one. The usual approach is to store your history on the server, protected by a PIN or passphrase. But that recreates the exact thing this app exists to avoid: a copy of your conversations sitting on our infrastructure, guarded by something short and guessable. So we do not do it. If you want your history on a new device, keep your old device. That is a real cost, and we would rather say so than hide it.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            Exactly two kinds of loss are acceptable: <strong>messages sent before you joined</strong>,
-            and <strong>a new device starting empty</strong>. Everything else must work — delivery to
-            every current member, decryption, going offline and coming back, reconnecting, accepting a
-            DM request. If a message goes missing for any <em>other</em> reason, that's a bug, and we
-            treat it as one rather than as a property of the design.
-          </p>
+          <div class="ln-limit-label">What we promise, and what we do not</div>
+          <p>Two kinds of loss are expected: messages sent before you joined, and a new device starting empty. Everything else should just work, including delivery to every current member, going offline and back, reconnecting, and accepting a message request. If a message goes missing for any other reason, that is a bug and we treat it as one.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/joining-leaving.jpg"
-            aria-describedby="joining-leaving-transcript-body">
+            poster="learn/media/joining-leaving.jpg" aria-describedby="joining-leaving-transcript-body">
             <source src="learn/media/joining-leaving.webm" type="video/webm" />
             <source src="learn/media/joining-leaving.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/joining-leaving.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            Lockboxes left in advance, a Welcome that only carries today's keys, pre-join messages
-            visibly failing to open, and the backup trade drawn as a fork where neither path is free.
-            No audio yet — captions and the transcript below carry the narration.
+Lockboxes left in advance, a welcome that carries only today's keys, messages from before you joined staying sealed, and the backup question drawn as a choice where neither option is free.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="joining-leaving-transcript-body">
-            <p>To add you to a group, someone needs to encrypt its keys to you — even if you're
-              offline. So every device publishes a small lockbox in advance. Anyone can put something
-              in. Only you can open it.</p>
-            <p>When you're added, an existing member seals the group's current state into your
-              lockbox and sends it over. You open it, and you're in.</p>
-            <p>Now, the part people don't expect. You received the keys as they are <em>now</em>. Not
-              the old ones. MLS is built so that new keys can't be used to work out old ones — and
-              that's not a limitation, it's the entire reason removing someone actually works.</p>
-            <p>So messages sent before you joined stay sealed. Watch — it isn't that we're hiding
-              them. The key genuinely doesn't fit.</p>
-            <p>Removal is the same idea. This member is removed, the keys along their path are
-              replaced, and the next message is sealed to them. They still have their old key. It
-              opens nothing.</p>
-            <p>Your own devices work exactly the same way. Your phone and your laptop are two
-              separate members of the group, each with their own keys. Nothing is copied between them
-              — because a key that travels is a key that can be stolen on the way.</p>
-            <p>Which brings us to the trade-off we want you to hear from us, not discover later. A
-              new device starts empty. There's no history backup. Your old messages live on your old
-              device, and nowhere else.</p>
-            <p>We could do it the common way: encrypt your history, store it on our servers, protect
-              it with a PIN. Watch what that actually builds — a copy of every conversation, on our
-              infrastructure, behind a six-digit number. That's the exact thing this app exists to not
-              have. So we don't do it. The cost is real: if you want your history, keep your
-              device.</p>
-            <p>What we <em>do</em> promise is narrow and firm. Two kinds of loss are acceptable:
-              messages from before you joined, and a new device starting empty. Everything else —
-              every message to every current member, through reconnects, offline stretches, and
-              restarts — has to arrive. Anything else going missing is a bug, and we treat it as
-              one.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="joining-leaving-transcript-body">
+            <p>To add you to a group, someone needs to lock its keys so only you can open them, even while you are offline. So every device leaves a small lockbox in advance. Anyone can drop something in. Only you can open it.</p>
+            <p>When you are added, an existing member seals the group's current state into your lockbox and sends it over. You open it, and you are in.</p>
+            <p>Now the part people do not expect. You received the keys as they are now, not the older ones. New keys cannot be used to work out old ones, and that is the very thing that makes removing someone work.</p>
+            <p>So messages sent before you joined stay sealed. It is not that the app is hiding them. The key genuinely does not fit.</p>
+            <p>Removing someone is the same idea. Their line of keys is replaced, and the next message is sealed to them. What they already saw stays on their device. We cannot reach into it.</p>
+            <p>Your own devices work the same way. Your phone and laptop are separate members, each with their own keys. Nothing is copied between them, because a key that travels can be stolen along the way.</p>
+            <p>Which brings up the trade we would rather you hear from us. A new device starts empty. There is no history backup. We could store your history on our servers behind a PIN, but that would put a copy of every conversation on our infrastructure behind a short, guessable code, which is exactly what this app exists to avoid. So we do not. If you want your history, keep your device.</p>
+            <p>What we do promise is narrow and firm. Two kinds of loss are expected: messages from before you joined, and a new device starting empty. Everything else has to arrive, and anything else going missing is a bug.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: the enrollment and GroupInfo flows in <a
@@ -1257,120 +1004,50 @@
       <!-- ═══ Topic 5 — forward secrecy + PCS (#594) ═══════════════════════ -->
       <section class="ln-section" id="window-not-door">
         <div class="ln-eyebrow">Track B · MLS · Topic 5</div>
-        <h2>Forward secrecy and post-compromise security — a stolen key is a window, not a door</h2>
+        <h2>A stolen key is a window, not a door</h2>
 
         <div class="ln-prose">
-          <p>
-            Assume the worst: someone gets a key off your device today. Not a theoretical adversary —
-            a real compromise. What did they just get? Two questions follow, and they point in
-            opposite directions in time.
-          </p>
-          <p>
-            <strong>Forward secrecy answers "what about the past?"</strong> Answer: nothing. Keys
-            move forward through a one-way step. Each new key is derived from the previous one by a
-            function that can't be run backwards — like knowing a number is the result of mixing two
-            paints, but being unable to recover the original colours. Old keys are deleted once used.
-            So a key stolen today opens today's messages; yesterday's are already unreachable, because
-            the material that made them no longer exists anywhere.
-          </p>
-          <p>
-            There's a limit worth being precise about: <strong>this protects ciphertext, not your
-            screen.</strong> If yesterday's messages are still displayed in your app on that device,
-            an attacker with the device reads them off the screen. Forward secrecy means an attacker
-            who captured your <em>encrypted traffic</em> months ago, and steals a key today, still
-            can't decrypt what they captured. That's the actual guarantee, and it's a strong one.
-          </p>
-          <p>
-            <strong>Post-compromise security answers "what about the future?"</strong> This is the
-            less familiar and more remarkable half. Normally, a stolen key means permanent compromise
-            — you're read forever, or until you notice and start over. MLS is built so the group
-            <em>heals</em>.
-          </p>
-          <p>
-            Every commit — every add, every removal, every routine key update — replaces keys along a
-            path in the tree. Once a member the attacker isn't controlling performs an update that
-            refreshes the compromised path, the attacker's stolen key stops working. <strong>The group
-            recovers without anyone having detected the break.</strong> Healing is a property of
-            normal operation, not of incident response.
-          </p>
-          <p>
-            That's why the tree work in <a href="#mls-groups">Topic 3</a> matters. Cheap rekeying
-            means you can rekey often. Rekeying often means the window in which a stolen key is useful
-            is short — bounded by ordinary group activity rather than by how fast someone notices an
-            intrusion. Together: <strong>a stolen key is a window, not a door.</strong> It doesn't
-            open backwards, and it closes on its own.
-          </p>
+          <p>Suppose the worst has happened and someone lifts a key off your device today. What did they actually get? Two questions follow, one pointing backward in time and one pointing forward.</p>
+          <p><strong>The past: forward secrecy.</strong> The answer is nothing. Keys only move forward, through a one-way step. Each new key is made from the previous one by a process that cannot be run in reverse, like mixing two paints and being unable to separate them again. Used keys are thrown away. So a key stolen today opens today's messages, and yesterday's are already out of reach, because the material that made them no longer exists anywhere.</p>
+          <p>One thing to be precise about: this protects the scrambled traffic, not your screen. If yesterday's messages are still on display in your app, someone holding your unlocked device can read them off the screen. The real guarantee is that someone who quietly recorded your encrypted traffic months ago still cannot open it, even with a key stolen today. That is a strong promise.</p>
+          <p><strong>The future: post-compromise security.</strong> This is the less familiar and more surprising half. Normally a stolen key means you stay compromised until you notice and start over. Here, the group heals on its own. Every ordinary update, such as adding a member or a routine key refresh, replaces keys along part of the tree. As soon as a member the attacker does not control makes an update, the stolen key stops working, and nobody has to notice anything for that to happen.</p>
+          <p>This is why the tree from <a href="#mls-groups">Topic 3</a> was worth the effort. Because rekeying is cheap, it happens often, and the more often it happens, the shorter the window in which a stolen key is any use. A stolen key is a window, not a door: it does not open backward, and it closes on its own.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            If the attacker keeps <strong>continuous</strong> access to your device, they receive
-            every update as you do — healing needs them to be locked out at some point, so PCS
-            recovers from a <em>past</em> compromise, not an ongoing one. Anything already decrypted
-            and stored on your device is readable by whoever holds the device; that's not a
-            cryptography question. Neither property does anything about metadata — the server still
-            saw the envelopes go by. And healing is driven by group activity, so a silent group rekeys
-            rarely. None of this means messages delete themselves; it means a stolen key opens a
-            bounded slice of time.
-          </p>
+          <div class="ln-limit-label">The limits, stated plainly</div>
+          <p>If someone keeps continuous access to your device, they receive every update you do and stay in, so this recovers from a break that has ended, not one still in progress. Anything already unscrambled and sitting on your device can be read by whoever holds the device. Neither property touches metadata. And healing happens through activity, so a very quiet group refreshes its keys less often. None of this means messages delete themselves; it means a stolen key only opens a limited slice of time.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/window-not-door.jpg"
-            aria-describedby="window-not-door-transcript-body">
+            poster="learn/media/window-not-door.jpg" aria-describedby="window-not-door-transcript-body">
             <source src="learn/media/window-not-door.webm" type="video/webm" />
             <source src="learn/media/window-not-door.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/window-not-door.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            Time runs left to right throughout: a one-way key chain refusing to reverse, the caveat
-            about an unlocked screen, a real break healing on a routine commit, and the window
-            narrowing as the group talks.
-            No audio yet — captions and the transcript below carry the narration.
+Time runs left to right throughout: a one-way key chain that will not reverse, the note about an unlocked screen, a real break that heals on an ordinary update, and the window narrowing as the group stays active.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="window-not-door-transcript-body">
-            <p>Let's assume the worst has already happened. Someone has a key from your device.
-              Today. What did they just get? Two questions: what about the past, and what about the
-              future.</p>
-            <p>The past first. They try yesterday's messages — and get nothing. Here's why. Keys move
-              forward in one-way steps. Each key is made from the one before it, through a process
-              that can't be reversed. Like mixing paint: easy forwards, impossible backwards. And once
-              a key is used, it's deleted.</p>
-            <p>So the key they hold opens today. Yesterday's key doesn't exist anymore — not on your
-              device, not on our servers, not anywhere. That's forward secrecy.</p>
-            <p>One honest caveat, because this gets overstated. If your old messages are still on
-              your screen, someone holding your unlocked device just reads them. Forward secrecy
-              protects encrypted traffic — someone who recorded your data months ago and steals a key
-              today still can't open what they recorded. That's the real promise, and it's a good
-              one.</p>
-            <p>Now the future — and this is the part I find genuinely surprising. Normally a stolen
-              key means you're compromised forever. Here, the attacker is reading. Epoch seven. Epoch
-              eight. This is a real break.</p>
-            <p>Then someone else in the group — someone the attacker doesn't control — does something
-              completely ordinary. Adds a member. Or just refreshes their keys, which happens
-              routinely. New keys flow up the path. Epoch nine arrives.</p>
-            <p>And the attacker is out. Nobody detected anything. Nobody responded to an incident. The
-              group healed by carrying on normally.</p>
-            <p>That's post-compromise security, and it's why the tree was worth the trouble. Cheap
-              rekeying means frequent rekeying, and frequent rekeying means a stolen key is useful for
-              a short window rather than forever. Sealed on the left by forward secrecy. Sealed on the
-              right by the next commit.</p>
-            <p>The limit: if they never lose access to your device, they get every update you do, and
-              they stay in. This recovers from a break that ended. It doesn't fix one that's still
-              happening.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="window-not-door-transcript-body">
+            <p>Suppose the worst has already happened. Someone has a key from your device, today. What did they get? Two questions: what about the past, and what about the future.</p>
+            <p>The past first. They try yesterday's messages and get nothing. Keys move forward in one-way steps. Each key is made from the one before it, through a process that cannot be reversed, like mixing paint. And once a key is used, it is thrown away. Yesterday's key does not exist anywhere anymore.</p>
+            <p>One point, because this gets overstated. If your old messages are still on your screen, someone holding your unlocked device can read them. Forward secrecy protects recorded traffic: someone who captured your data months ago still cannot open it with today's key.</p>
+            <p>Now the future. Normally a stolen key means you are compromised for a long time. Here, someone else in the group, someone the attacker does not control, does something ordinary, like refreshing their keys. New keys flow along the tree, and the stolen key stops working. Nobody had to detect anything. The group healed by carrying on.</p>
+            <p>Sealed on the left by forward secrecy. Sealed on the right by the next update. A stolen key is a window, not a door, and the more the group talks, the narrower it gets.</p>
+            <p>The limit: if someone never loses access to your device, they get every update you do and stay in. This recovers from a break that ended, not one still happening.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: the key schedule in <a
@@ -1386,128 +1063,53 @@
       <!-- ═══ Topic 6 — identity keys + safety numbers (#595) ══════════════ -->
       <section class="ln-section" id="identity-keys">
         <div class="ln-eyebrow">Track C · Identity · Topic 6</div>
-        <h2>Identity keys, safety numbers, and TOFU pinning</h2>
+        <h2>Making sure you have the right person's key</h2>
 
         <div class="ln-prose">
-          <p>
-            Encryption protects the message. It says nothing about <em>who you're talking to</em>.
-          </p>
-          <p>
-            When you first message someone, your app fetches their public key — from our servers.
-            Right there is the gap. If we were malicious or compelled, we could hand you a key we
-            control instead of theirs, sit in the middle, and read everything. Both sides would see a
-            padlock. Nothing would look wrong. The maths would be working perfectly, on the wrong
-            key.
-          </p>
-          <p>
-            Every end-to-end encrypted messenger has this problem. It's the one that matters, and it
-            has two complementary answers.
-          </p>
-          <p>
-            <strong>Answer one: safety numbers.</strong> Your app takes your identity key and your
-            contact's, combines them, and renders the result as a short comparable code — in Pollis,
-            sixty digits shown as twelve blocks of five. It's the same in both directions: you and
-            they compute the same number from the same pair of keys. If someone substituted a key,
-            the two devices are working from different inputs, so the numbers <em>differ</em>. Compare
-            them over any channel the attacker doesn't control — hold the phones side by side, read
-            them aloud on a call, scan the QR code — and a middleman is exposed immediately.
-          </p>
-          <p>
-            The caveat is the honest one: this only works if you actually compare. Most people never
-            do. Which is why there's a second answer that works even when nobody checks.
-          </p>
-          <p>
-            <strong>Answer two: we publish every key, permanently, in public.</strong> Every identity
-            key Pollis ever publishes for an account is appended to a public, append-only log
-            (<a href="#three-logs">Topic 9</a>). Your own app quietly re-checks that the key the world
-            is being shown for <em>you</em> is the key you actually hold. If those ever disagree, your
-            device raises an alarm — that's the account-key line on the app's Security page.
-          </p>
-          <p>
-            This changes the economics of the attack completely. To substitute a key, we'd have to
-            publish the fake one to a log that anyone can read, that we cannot retroactively edit, and
-            that your own device audits. The attack stops being invisible and becomes <strong>permanent
-            public evidence of our misbehaviour</strong>. That's not a promise we're asking you to
-            believe; it's a structural property of an append-only log.
-          </p>
-          <p>
-            <strong>Trust on first use.</strong> The first time you talk to someone, your app pins the
-            key it saw. From then on, a <em>change</em> is what's flagged. Key changes do happen
-            innocently — a new phone, a reinstall — so a changed key isn't an accusation, it's a
-            prompt: re-verify before you say anything sensitive. Pollis shows a shield next to
-            verified contacts, and a distinct warning if a pinned key changed.
-          </p>
-          <p>
-            Where this leaves you: <strong>compare safety numbers once with the people who
-            matter</strong>, and let the log handle the rest.
-          </p>
+          <p>Encryption protects your message. On its own, it does not tell you who is on the other end.</p>
+          <p>When you first message someone, your app fetches their public key from our servers. That is the one moment worth being careful about. If the wrong key were ever handed over, a message could be read in the middle, and both sides would still see a padlock, because the encryption itself is working perfectly, just on the wrong key. Every encrypted messenger has this same gap. Pollis closes it two ways.</p>
+          <p><strong>First, safety numbers.</strong> Your app combines your key and your contact's key into a short code, shown as a set of digit blocks. Both of you compute the same code from the same pair of keys. If the keys ever differed, the codes would differ too. Compare them over any channel an eavesdropper cannot touch, by holding your phones side by side, reading them aloud on a call, or scanning a QR code, and a mismatch shows up immediately. Matching numbers mean you are talking to the key you think you are.</p>
+          <p>The catch is that this only helps if you actually compare, and most people never do. So there is a second safeguard that works even when nobody checks.</p>
+          <p><strong>Second, every key we publish is public and permanent.</strong> Every identity key Pollis lists for an account is added to a public log that can only grow, never be quietly edited (<a href="#three-logs">Topic 9</a>). Your own app keeps checking that the key the world sees for you matches the key you actually hold, and it warns you if they ever disagree. That means a substituted key could not stay hidden: it would sit in a public record for anyone to see, and your own device would flag it. You do not have to trust that promise; it follows from how the log is built.</p>
+          <p><strong>Trust on first use.</strong> The first time you talk to someone, your app remembers their key. After that, a change is what gets flagged. Changes are usually innocent, like a new phone or a reinstall, so a flag is not an accusation, it is a nudge to re-check before you share anything sensitive. Pollis shows a shield next to verified contacts, and a distinct warning when a remembered key has changed.</p>
+          <p>In short: compare safety numbers once with the people who matter, and let the log handle the rest.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            A safety number that nobody compares protects nobody, and your app <strong>cannot tell an
-            innocent key change from an attack</strong> — a new phone and a middleman look identical
-            from the inside, which is exactly why it asks you instead of guessing. The log narrows
-            that gap but doesn't close it: it makes a substitution permanent and public, which is a
-            deterrent and an audit trail, not a block. And none of this touches metadata
-            (<a href="#threat-model">Topic 1</a>).
-          </p>
+          <div class="ln-limit-label">Worth knowing</div>
+          <p>A safety number that nobody compares protects nobody, and your app cannot tell an innocent key change from a real problem, which is exactly why it asks you rather than guessing. The public log narrows the gap by making any swapped key permanent and visible, which is a strong deterrent and a record, though not a physical block. And none of this affects metadata (<a href="#threat-model">Topic 1</a>).</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/identity-keys.jpg"
-            aria-describedby="identity-keys-transcript-body">
+            poster="learn/media/identity-keys.jpg" aria-describedby="identity-keys-transcript-body">
             <source src="learn/media/identity-keys.webm" type="video/webm" />
             <source src="learn/media/identity-keys.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/identity-keys.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            The substitution attack succeeding with padlocks on both screens, safety numbers matching
-            and then diverging, almost everybody walking past the comparison step, and the log that
-            catches it anyway.
-            No audio yet — captions and the transcript below carry the narration.
+A message being read in the middle while both screens still show a padlock, safety numbers matching and then not matching, most people walking past the comparison step, and the public log that catches a swap anyway.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="identity-keys-transcript-body">
-            <p>Encryption protects the message. It doesn't tell you who's on the other end. When you
-              first message someone, your app asks our servers for their public key. And that's the
-              gap.</p>
-            <p>Watch. Alice asks for Bob's key. We hand her one labelled "Bob" — but it's ours. Now
-              everything Alice sends opens here, gets read, and gets re-sealed for Bob. Look at their
-              screens. Padlocks. Both of them. Nothing looks wrong, because nothing <em>is</em> wrong
-              with the encryption. It's working perfectly — on the wrong key.</p>
-            <p>Every end-to-end encrypted app has this problem. Here are the two answers. First:
-              safety numbers. Your device combines your identity key with your contact's and produces
-              a short code. They do the same. Same two keys, same code — it matches.</p>
-            <p>Now run the attack again. Alice's device is mixing in our key, not Bob's. Bob's is
-              mixing in his real one. Different inputs, different codes. Compare them any way we can't
-              interfere with — hold the phones together, read them out on a call, scan the QR — and
-              the middleman is caught immediately.</p>
-            <p>The catch is obvious. It only works if you actually check. And most people never do. So
-              there's a second answer, and it works even when nobody checks.</p>
-            <p>Every identity key we publish goes into a public log that only ever grows. To pull off
-              that attack, we'd have to publish the fake key — here, in the open, permanently. And
-              your own device is reading that log. It compares what the world is being shown for you
-              against the key you actually hold. If they ever disagree, your app tells you.</p>
-            <p>Watch us try to take it back. We can't. The log doesn't work that way. That's the
-              shift: the attack stops being invisible and becomes permanent public proof that we
-              cheated. You don't have to trust us about that. It's how the log is built.</p>
-            <p>One last thing. The first time you talk to someone, your app remembers their key. If it
-              ever changes, you get a banner. Usually that's innocent — a new phone, a reinstall.
-              Sometimes it isn't. Your app can't tell the difference, which is why it asks you.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="identity-keys-transcript-body">
+            <p>Encryption protects the message. It does not tell you who is on the other end. When you first message someone, your app fetches their public key from our servers. That is the gap.</p>
+            <p>If the wrong key were handed over, a message could be opened in the middle, read, and re-sealed. Both screens would still show a padlock, because nothing is wrong with the encryption. It is working perfectly, on the wrong key. Every encrypted app has this problem. Here are the two safeguards.</p>
+            <p>First, safety numbers. Your device combines your key with your contact's and produces a short code. They do the same. Same two keys, same code. If the keys differed, the codes would differ. Compare them any way an eavesdropper cannot touch, side by side, read aloud, or by QR code, and a mismatch shows up right away.</p>
+            <p>The catch is you have to actually check, and most people never do. So there is a second safeguard that works even when nobody checks.</p>
+            <p>Every identity key we publish goes into a public log that can only grow. A swapped key would have to appear there, in the open, permanently, and it could not be quietly removed later. Your own device reads that log and compares it against the key you hold. If they ever disagree, your app tells you. The swap stops being invisible and becomes a public record.</p>
+            <p>One last thing. The first time you talk to someone, your app remembers their key. If it changes, you get a note. Usually that is innocent, a new phone or a reinstall. Sometimes it is not. Your app cannot tell the difference, which is why it asks you.</p>
             <p>Compare safety numbers once, with the people who matter. The log handles the rest.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: the safety-number derivation and TOFU pin store in <a
@@ -1525,110 +1127,55 @@
         <h2>Merkle trees and append-only logs</h2>
 
         <div class="ln-prose">
-          <p>
-            Suppose we publish a list — every identity key we've ever issued, say — and claim
-            we'll only ever <em>add</em> to it, never quietly edit or delete. How would you catch
-            us if we cheated?
-          </p>
-          <p>
-            Downloading the whole list every day and comparing doesn't scale, and it only works
-            if you never miss a day. The real answer is a structure called a <strong>Merkle
-            tree</strong>, and once you see it, it's hard to unsee.
-          </p>
-          <p>
-            Start with hashes: a fingerprint of any data, where changing one bit changes the
-            fingerprint completely. Now build upward. Take your list of entries and hash each one.
-            Take those hashes in pairs and hash <em>each pair together</em>, giving half as many.
-            Pair those and hash again. Keep going until one hash is left.
-          </p>
-          <p>
-            That final hash is the <strong>root</strong>. On our artifacts page right now it looks
-            like this — a single fingerprint of the entire binaries log:
-          </p>
-          <code class="ln-root">root: 37945cb2f61ee43782259a3893336b8ba8b8679d3af1612742deeec75e46cc0c</code>
-          <p>
-            Here's the property that makes it worth the trouble: <strong>the root depends on every
-            single entry.</strong> Change one character in one entry, anywhere, and its hash
-            changes; so does its parent's, all the way up. The root becomes completely different.
-            There's no way to alter an entry and keep the root the same — that would require two
-            different pieces of data with the same fingerprint, the exact thing hash functions are
-            built to make impossible.
-          </p>
-          <p>
-            So the root is a fingerprint of the whole list, in 64 characters. That's the leverage:
-            instead of downloading a list that grows forever, you compare one short root. If you
-            know the correct root, any claimed version of the list either matches or doesn't —
-            there's no partial agreement.
-          </p>
+          <p>Suppose we publish a list, say every identity key we have ever issued, and promise to only ever add to it, never quietly edit or delete. How could you confirm that for yourself, without taking our word for it?</p>
+          <p>Downloading the whole list every day and comparing does not scale, and it only works if you never miss a day. The real answer is a structure called a <strong>Merkle tree</strong>, and once you see it, it is hard to unsee.</p>
+          <p>Start with hashes, the fingerprints from the last topic. Take your list of entries and hash each one. Take those hashes in pairs and hash each pair together, giving half as many. Pair those and hash again. Keep going until a single hash is left.</p>
+          <p>That final hash is the <strong>root</strong>. On our artifacts page right now it looks like this, a single fingerprint of the entire binaries log:</p>
+          <p><code class="ln-root">root: 37945cb2f61ee43782259a3893336b8ba8b8679d3af1612742deeec75e46cc0c</code></p>
+          <p>Here is the property that makes it worth the trouble: the root depends on every single entry. Change one character anywhere, and its hash changes, and so does its parent's, all the way up. The root becomes completely different. There is no way to alter an entry and keep the root the same, because that would need two different pieces of data with the same fingerprint, which is exactly what hash functions are built to prevent.</p>
+          <p>So the root is a fingerprint of the whole list, in sixty-four characters. That is the leverage. Instead of downloading a list that grows forever, you compare one short root. If you know the correct root, any claimed version of the list either matches or it does not.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            A Merkle tree <strong>doesn't stop us from writing something false.</strong> We could
-            add a dishonest entry, and the tree would happily include it. What it removes is our
-            ability to be dishonest <em>quietly</em> — to show you one list and someone else
-            another, or to change our story later. That's a smaller claim than "we're honest", and
-            a much better one, because you don't have to take our word for it.
-          </p>
+          <div class="ln-limit-label">What it does and does not do</div>
+          <p>A Merkle tree does not decide whether an entry is truthful; it only makes the whole list tamper-evident. What it removes is the ability to show one version of the list to you and a different version to someone else, or to change the story later. That is a smaller claim than "trust us", and a much more useful one, because you can confirm it yourself instead of believing it.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/merkle-trees.jpg" aria-describedby="merkle-transcript-body">
+            poster="learn/media/merkle-trees.jpg" aria-describedby="merkle-trees-transcript-body">
             <source src="learn/media/merkle-trees.webm" type="video/webm" />
             <source src="learn/media/merkle-trees.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/merkle-trees.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            Building the tree bottom-up, then changing one entry and watching the root move.
-            No audio yet — captions and the transcript below carry the narration.
+Building the tree from the bottom up, then changing one entry and watching the root move.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="merkle-transcript-body">
-            <p>Say we publish a list — every key we've ever issued — and we promise we'll only
-              ever add to it. Never edit. Never delete. How would you catch us if we broke that
-              promise?</p>
-            <p>You could download the whole list every day and compare. But it grows forever, and
-              it only works if you never miss a day. And if you did miss a day, we could change
-              something, and you'd never know.</p>
-            <p>Here's the real answer. Take every entry. Hash each one — that's the fingerprint
-              idea from earlier. Now take those fingerprints in pairs, and hash each pair together.
-              Half as many. Do it again. And again. Until there's one left. That's called the
-              root.</p>
-            <p>This is the actual root of one of our live logs, right now. And here's why it
-              matters. Watch what happens if we change one character — one — in an entry. Its
-              fingerprint changes. Which changes its parent's. Which changes the next one up. And
-              the root is completely different.</p>
-            <p>There's no way to edit an entry and keep the root the same. That would mean finding
-              two different things with the same fingerprint — the exact thing these functions are
-              built to prevent. So the root is a fingerprint of the entire list, in sixty-four
-              characters. You don't download fifty thousand entries to check we've been honest.
-              You compare sixty-four characters.</p>
-            <p>Now, the honest limit — and it matters. A Merkle tree doesn't stop us writing
-              something false. We could add a dishonest entry right now, and the tree would
-              include it quite happily. What it takes away is our ability to lie quietly. We can't
-              show you one list and someone else a different one. We can't change our story later.
-              Everything we publish is permanent, and everyone comparing roots gets the same
-              answer.</p>
-            <p>That's a smaller claim than "trust us to be honest". It's also a much better one —
-              because you don't have to. Try it: change any entry and watch the root move.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="merkle-trees-transcript-body">
+            <p>Say we publish a list, every key we have ever issued, and we promise to only ever add to it. Never edit, never delete. How could you confirm that for yourself?</p>
+            <p>You could download the whole list every day and compare. But it grows forever, and it only works if you never miss a day.</p>
+            <p>Here is the real answer. Take every entry and hash it. Take those fingerprints in pairs and hash each pair together. Half as many. Do it again, and again, until one is left. That is the root.</p>
+            <p>This is the actual root of one of our live logs right now. Watch what happens if one character in one entry changes. Its fingerprint changes, which changes its parent's, which changes the next one up, and the root is completely different.</p>
+            <p>There is no way to edit an entry and keep the root the same. That would mean two different things with the same fingerprint, which these functions are built to prevent. So the root is a fingerprint of the entire list, in sixty-four characters. You do not download fifty thousand entries to check the list; you compare sixty-four characters.</p>
+            <p>A Merkle tree does not decide whether an entry is truthful. What it removes is the ability to show one version of the list to one person and a different version to another, or to change it later. Everyone comparing roots gets the same answer. Try it: change any entry and watch the root move.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <!-- Interactive Merkle widget — built + driven by learn.js -->
         <div class="ln-widget" id="merkle-widget" data-merkle-widget hidden>
           <div class="ln-widget-head">
             <strong>Try it.</strong> Edit any entry below. Every hash on the path up to the root
-            recomputes live (real SHA-256, in your browser) — the changed path lights up amber.
+            recomputes live, using real SHA-256 in your browser, and the changed path lights up amber.
           </div>
           <div class="ln-widget-canvas" data-canvas>
             <svg class="ln-widget-svg" data-edges aria-hidden="true"></svg>
@@ -1655,152 +1202,61 @@
       <!-- ═══ Topic 8 — STHs, proofs, equivocation (#597) ═══════════════════ -->
       <section class="ln-section" id="proofs-and-equivocation">
         <div class="ln-eyebrow">Track D · Transparency · Topic 8</div>
-        <h2>Signed tree heads, proofs, and equivocation</h2>
+        <h2>Proving an entry is really in the log</h2>
 
         <div class="ln-prose">
-          <p>
-            You have a root: 64 characters fingerprinting an entire list. Two questions follow.
-          </p>
-          <p>
-            <strong>"Is my entry actually in there?"</strong> — the inclusion proof. You could
-            download every entry and rebuild the tree, but you don't need to. You only need the
-            hashes of the <em>siblings</em> along the path from your entry up to the root. Hash your
-            entry, combine it with the sibling you were given, hash that, combine with the next
-            sibling, and keep climbing. If you arrive at the published root, your entry is in the
-            tree. If you arrive at anything else, it isn't.
-          </p>
-          <p>
-            For a list of a thousand entries, that's about ten hashes. For a million, about twenty.
-            <strong>The proof grows like the logarithm of the list</strong> — double the entries,
-            add one step. That's why this scales to logs that never stop growing.
-          </p>
-          <p>
-            <strong>"Is this the same list as before, only longer?"</strong> — the consistency
-            proof. This is the one that enforces "append-only". You saw a root last week; there's a
-            new root today. A consistency proof is a small set of hashes demonstrating that the old
-            tree is contained inside the new one — everything you saw before is still there,
-            unchanged, and the difference is purely additions.
-          </p>
-          <p>
-            If we had edited an old entry, or removed one, <strong>no such proof could exist.</strong>
-            We couldn't fake it any more than we could fake a matching root. So "append-only" stops
-            being a policy we promise and becomes a property you verify.
-          </p>
-          <p>
-            <strong>So who says which root is the real one?</strong> We sign it. Periodically we
-            publish a <strong>signed tree head</strong> — the root, the number of entries, a
-            timestamp, and a signature over all of it. The signature is made with one specific
-            Ed25519 key, and Pollis apps and the <code>pollis-verify</code> tool have that key's
-            public half <strong>hard-coded</strong>:
-          </p>
-          <code class="ln-root">pinned key: 175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148</code>
-          <p>
-            That pinning matters more than it looks. If the key were simply fetched from our server,
-            a malicious server could serve its own key alongside a self-consistent fake tree, and
-            everything would "verify" beautifully. Because the key is compiled into the client, a
-            substituted key is detected immediately — in our own code that's a hard alarm, never a
-            warning.
-          </p>
-          <p>
-            <strong>And now the attack this is all really about: equivocation.</strong> A log that
-            only ever grows, with signed heads and proofs, still leaves one move: show
-            <em>different people different logs</em>. A clean, append-only, perfectly-signed log for
-            auditors — and a second one, with an extra key in it, served only to you. Each is
-            internally consistent. Each verifies. They just aren't the same log.
-          </p>
-          <p>
-            The defence isn't cryptographic — it's social, and it's the reason "publish it" beats
-            "promise it". Any two parties who compare the heads they were served will disagree, and
-            since each head is <em>signed by us</em>, the pair is undeniable, permanent proof of
-            misbehaviour. Nobody has to trust anybody; they just have to compare. Two heads claiming
-            the same entry count with different roots is precisely what our own tooling flags as
-            equivocation, and our publishing job keeps an across-run tripwire looking for exactly
-            that.
-          </p>
-          <p>
-            So the chain is: a root fingerprints the list → an inclusion proof puts your entry in it
-            → a consistency proof stops us rewriting it → a signature under a pinned key says it's
-            ours → and comparison between observers stops us keeping two sets of books.
-          </p>
+          <p>You have a root: sixty-four characters standing in for an entire list. Two useful questions follow.</p>
+          <p><strong>Is my entry actually in there?</strong> This is the inclusion proof. You do not need the whole list. You only need the fingerprints of the neighbours along the path from your entry up to the root. Hash your entry, combine it with the neighbour you were given, hash that, combine with the next neighbour, and keep climbing. If you land on the published root, your entry is in the tree. If you land on anything else, it is not.</p>
+          <p>For a list of a thousand entries, that is about ten hashes. For a million, about twenty. The proof grows very slowly: double the list, add one step. That is why this keeps working for logs that never stop growing.</p>
+          <p><strong>Is this the same list as before, only longer?</strong> This is the consistency proof, and it is what makes "append-only" real. You saw a root last week and there is a new root today. A consistency proof is a small set of fingerprints showing that last week's list sits unchanged inside today's, with new entries only added on the end. If an old entry had been edited or removed, no such proof could exist. Append-only stops being a policy we state and becomes something you can confirm.</p>
+          <p><strong>Who says which root is the real one?</strong> We sign it. Periodically we publish a signed statement, called a signed tree head, that ties together the root, the number of entries, a timestamp, and a signature over all of it. The signature uses one specific key, and the Pollis apps and the verifier tool carry that key's public half built in:</p>
+          <p><code class="ln-root">pinned key: 175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148</code></p>
+          <p>Building the key into the app matters. If the app simply downloaded the key from a server, a bad server could hand over its own key alongside a self-consistent fake list, and everything would appear to check out. Because the key is compiled in, a substituted key is spotted immediately.</p>
+          <p><strong>One question remains: could different people be shown different lists?</strong> This is called equivocation, and it is the case the whole design is built to catch. Even a perfectly signed, append-only log could in principle show one clean list to auditors and a slightly different one to a single person, each internally consistent. The defence is refreshingly simple. Any two people who compare the signed heads they were shown will spot the difference at once, and because each head is signed, that difference is permanent, undeniable proof of a problem. Nobody has to trust anybody; they just have to compare. Our own publishing job checks what is actually being served for exactly this.</p>
+          <p>So the chain is: a root fingerprints the list, an inclusion proof puts your entry in it, a consistency proof stops it being rewritten, a signature under a built-in key says it is ours, and comparison between people stops two different versions being served.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            None of this makes equivocation <strong>impossible</strong> — it makes it
-            <strong>undeniable once someone compares.</strong> If literally nobody ever checks the
-            head they were served against anyone else's, two sets of books can sit side by side
-            forever. The cryptography guarantees that comparison would settle it instantly; it can't
-            guarantee that the comparison happens. Today the routine comparison is our own
-            publishing job re-auditing what's actually being served plus a tripwire that fails loudly
-            if a head at a given size ever changes — and anyone running <code>pollis-verify</code>.
-            More independent observers is strictly better, and that's a limitation we'd rather state
-            than paper over.
-          </p>
+          <div class="ln-limit-label">Where the guarantee ends</div>
+          <p>None of this makes serving two different lists impossible; it makes it undeniable the moment anyone compares. If literally nobody ever checks their signed head against anyone else's, two versions could sit side by side unnoticed. The maths guarantees the comparison would settle it instantly; it cannot force the comparison to happen. Today that routine check is done by our own publishing job and by anyone running the verifier, and more independent checkers is always better.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/proofs-and-equivocation.jpg"
-            aria-describedby="proofs-transcript-body">
+            poster="learn/media/proofs-and-equivocation.jpg" aria-describedby="proofs-and-equivocation-transcript-body">
             <source src="learn/media/proofs-and-equivocation.webm" type="video/webm" />
             <source src="learn/media/proofs-and-equivocation.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/proofs-and-equivocation.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            Climbing an audit path, watching a forged entry miss the root, a cheat that can't produce
-            a consistency proof, and the two-sets-of-books attack that comparison defeats.
-            No audio yet — captions and the transcript below carry the narration.
+Climbing an audit path, watching a made-up entry miss the root, a rewrite that cannot produce a consistency proof, and the two-versions case that comparison settles.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="proofs-transcript-body">
-            <p>You've got a root — sixty-four characters standing in for an entire list. Two
-              questions. First: is <em>my</em> entry actually in there?</p>
-            <p>You don't need the whole list. You need the siblings along the path from your entry
-              to the top. Hash yours. Combine with this sibling. Hash. Combine with the next.
-              Climb.</p>
-            <p>If you land on the published root, your entry is in the tree. If you land anywhere
-              else, it isn't. A million entries needs about twenty hashes. Double the list, add one
-              step. That's why this works for logs that grow forever.</p>
-            <p>Second question: is this the same list as last week, with things only added? Here's
-              last week's tree, and here's today's. A consistency proof shows the old one sitting
-              inside the new one — untouched — with the new entries added on the end.</p>
-            <p>Now watch us try to cheat. We edit an old entry. The old tree no longer fits inside
-              the new one. No proof exists. We can't manufacture one. So "append-only" isn't a
-              promise. It's something you check.</p>
-            <p>But who says which root is real? We sign it — the root, the count, the time, all
-              sealed together. That's a signed tree head.</p>
-            <p>And the key we sign with is baked into the app and the verifier. Not downloaded. That
-              matters. If it were fetched, a dishonest server could hand you its own key with a
-              perfect fake log attached, and everything would verify. Because it's built in, we can
-              try — and get caught instantly.</p>
-            <p>Which leaves one last move. And this is the one worth understanding. We could keep
-              two sets of books. A clean log for the auditors. And a second one, just for you, with
-              one extra key in it. Both append-only. Both signed. Both verify perfectly. Neither of
-              you can tell alone.</p>
-            <p>So compare. Two signed heads, side by side. They disagree — and both carry our
-              signature. There's no explanation for that. It's permanent, public proof we
-              cheated.</p>
-            <p>That's the whole reason this is published rather than promised. Not because comparing
-              is cryptographically clever, but because it makes lying to two people at once
-              impossible to survive.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="proofs-and-equivocation-transcript-body">
+            <p>You have a root, sixty-four characters standing in for an entire list. Two questions. First: is my entry actually in there?</p>
+            <p>You do not need the whole list. You need the neighbours along the path from your entry to the top. Hash yours, combine it with a neighbour, hash, combine with the next, and climb. If you land on the published root, your entry is in the tree. If you land anywhere else, it is not. A million entries needs about twenty hashes. Double the list, add one step.</p>
+            <p>Second question: is this the same list as last week, only longer? A consistency proof shows last week's tree sitting inside today's, unchanged, with the new entries added on the end. If an old entry had been edited, no such proof could exist. So append-only is not a promise, it is something you check.</p>
+            <p>Who says which root is real? We sign it: the root, the count, and the time, sealed together. That is a signed tree head. And the key we sign with is built into the app and the verifier, not downloaded. If it were downloaded, a bad server could hand over its own key with a matching fake list, and everything would appear to check out. Because it is built in, that is caught right away.</p>
+            <p>Which leaves one question: could different people be shown different lists? A clean one for the auditors, and a slightly different one for a single person. Each on its own would check out. Neither person could tell alone.</p>
+            <p>So they compare. Two signed heads, side by side. They differ, and both carry a signature, so there is no explaining it away. That is why this is published rather than promised: comparing makes serving two versions impossible to get away with.</p>
             <p>Root. Inclusion. Consistency. Signature. Comparison. Each one closes a door.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <!-- Same widget component as Topic 7, in proof mode — see learn.js -->
         <div class="ln-widget" id="proof-widget" data-merkle-widget data-proof hidden>
           <div class="ln-widget-head">
             <strong>Prove an entry.</strong> Pick one, and you'll be handed only the sibling hashes
-            on its path. Climb one step at a time and check where you land — then tamper with any
+            on its path. Climb one step at a time and check where you land, then tamper with any
             sibling you were given and watch the proof stop working.
           </div>
           <div class="ln-widget-canvas" data-canvas>
@@ -1821,7 +1277,7 @@
           <p class="ln-proof-verdict" data-proof-verdict aria-live="polite"></p>
 
           <p class="ln-widget-note">
-            The sibling fields are editable on purpose — that's the forgery attempt. Everything is
+            The sibling fields are editable on purpose, so you can see a wrong value fail. Everything is
             real SHA-256 computed in your browser with <code>crypto.subtle</code>; nothing leaves
             your device.
           </p>
@@ -1843,126 +1299,52 @@
       <!-- ═══ Topic 9 — the three logs (#598) ═══════════════════════════════ -->
       <section class="ln-section" id="three-logs">
         <div class="ln-eyebrow">Track D · Transparency · Topic 9</div>
-        <h2>Pollis's three logs — and what each one prevents</h2>
+        <h2>Pollis's three logs, and what each one protects</h2>
 
         <div class="ln-prose">
-          <p>
-            Three separate append-only logs, one signing key, one static site at
-            <code>verify.pollis.com</code>. Each is worth describing by the attack it closes rather
-            than by what's in it.
-          </p>
-          <p>
-            <strong>Log 1 — account keys. Stops: us handing you the wrong person's key.</strong>
-            Every identity key Pollis publishes for an account goes in here, in order, with a
-            version number. To substitute a key, we'd have to publish it — permanently, in public,
-            where the real owner's own device is checking. The rule this log enforces is that
-            versions only ever move forward: we can't insert an older key retroactively or renumber
-            history.
-          </p>
-          <p>
-            <strong>Log 2 — the MLS commit log. Stops: us quietly rewriting a group's
-            history.</strong> A group advances through epochs, and every member must apply the same
-            commits in the same order — exactly the sort of thing a malicious server could tamper
-            with by reordering, dropping, or forking it. So every commit is logged, and the rule is
-            that a conversation is a straight line: <strong>each epoch appears once</strong>, and two
-            different commits can never claim the same epoch. A fork is rejected at write time.
-          </p>
-          <p>
-            Note what this log holds: <em>sealed</em> commits. Publishing them exposes the shape of a
-            conversation, never its content — the server never had the keys, and neither does anyone
-            reading the log.
-          </p>
-          <p>
-            <strong>Log 3 — binaries. Stops: us shipping you a custom backdoored app.</strong> Every
-            released installer's hashes go here. Its rule is no silent re-issue: the same release tag
-            and platform can't come to mean different bytes later. If we ever built a special version
-            for one person, its fingerprint is either in a public log everyone can read — or
-            conspicuously missing from it. Both are detectable.
-          </p>
-          <p>
-            <strong>Why three logs and not one big one.</strong> Because a signed head for one tree
-            must never be usable as a head for another. If all three shared a signature format, an
-            attacker holding a valid head for the commit log could try to present it as a head for
-            the binaries log. So each tree signs under its own <strong>domain-separated
-            context</strong> — the signature commits to <em>which tree</em> it belongs to:
-          </p>
-          <code class="ln-root">pollis-verifiable-log:sth:v1&nbsp;&nbsp;·&nbsp;&nbsp;…:sth:v1:account-keys&nbsp;&nbsp;·&nbsp;&nbsp;…:sth:v1:binaries</code>
-          <p>
-            A head from one tree fails verification against another, structurally. Different
-            questions, different logs, non-interchangeable proofs. They share one signing key and one
-            static site, which keeps the thing you have to trust down to a single pinned key.
-          </p>
+          <p>Three separate append-only logs, one signing key, one public site at <code>verify.pollis.com</code>. Each is easiest to understand by the problem it protects against.</p>
+          <p><strong>Log 1, account keys. It protects against the wrong person's key being used for you.</strong> Every identity key we list for an account goes in here, in order, with a version number. For a swapped key to be accepted, it would have to be published here, in public, in a record your own device audits. The rule is that versions only move forward, so an older key cannot be slipped back in and history cannot be renumbered.</p>
+          <p><strong>Log 2, the message-order log. It protects against a group's history being quietly rewritten.</strong> A group moves forward in epochs, and everyone applies the same updates in the same order. That order is exactly what a bad server might try to reorder or split. So every update is logged, and the rule is that a conversation is a single straight line: each epoch appears once, and two different updates can never claim the same epoch. A split is refused when it is written.</p>
+          <p>Note what this log holds: sealed updates. Publishing them reveals the shape of a conversation, never its content. The server never had the keys, and neither does anyone reading the log.</p>
+          <p><strong>Log 3, binaries. It protects against a special, tampered app being shipped to one person.</strong> The fingerprints of every released installer go in here. The rule is that the same release and platform cannot come to mean different files later. If a version were ever built for a single person, its fingerprint would either sit in a public log everyone can read, or be conspicuously missing from it. Either way it is detectable.</p>
+          <p><strong>Why three logs and not one.</strong> A signed statement about one log must never be reusable as a statement about another. So each log signs under its own separate label, and a statement from one log fails to verify against another by design. Different questions, different logs, non-interchangeable proofs. They share one key and one site, which keeps the thing you have to trust down to a single built-in key.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            None of these logs makes us honest. A dishonest entry can be written to any of them; what
-            changes is that it becomes permanent, public, and comparable across every observer —
-            <strong>undeniable rather than impossible</strong>. They also do nothing about bugs: a log
-            proves what we published, not that what we published is correct. And there's an
-            operational limit worth stating plainly — the logs are rebuilt and republished on a
-            <strong>daily</strong> schedule, so a brand-new release or a just-published key can be
-            genuinely absent for a while. "Not in the log <em>yet</em>" and "not in the log" are
-            different statements, and the app deliberately shows the first as
-            <strong>pending</strong> rather than an alarm.
-          </p>
+          <div class="ln-limit-label">What these logs do and do not do</div>
+          <p>These logs make tampering permanent and public rather than physically impossible, and they say nothing about ordinary software bugs: a log proves what was published, not that it was correct. There is also a timing point. The logs are rebuilt and republished on a daily schedule, so a brand-new release or a just-published key can genuinely not be in them yet. "Not in the log yet" and "not in the log" are different, and the app shows the first as pending rather than an alarm.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/three-logs.jpg" aria-describedby="three-logs-transcript-body">
             <source src="learn/media/three-logs.webm" type="video/webm" />
             <source src="learn/media/three-logs.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/three-logs.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            Each log introduced by the attack it closes, a fork getting slammed shut, and a signed
-            head that physically won't fit another tree's slot.
-            No audio yet — captions and the transcript below carry the narration.
+Each log introduced by the problem it protects against, an attempted split being refused, and a signed statement that will not fit another log's slot.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="three-logs-transcript-body">
-            <p>Three logs. One signing key. One address: verify dot pollis dot com.</p>
-            <p>The first holds every identity key we've ever published. Remember the attack where we
-              hand you the wrong key? To do that, we'd have to write the fake key <em>here</em> —
-              permanently, in public, where the real owner's own app is looking. And the rule on this
-              log is that versions only move forward. We can't slip an old key back in, or renumber
-              history.</p>
-            <p>The second holds every commit in every conversation. Groups move forward in epochs,
-              and everyone has to apply them in the same order. So watch what a dishonest server
-              would try: two different commits, both claiming to be epoch eight. The group splits —
-              half in one reality, half in another.</p>
-            <p>The log's rule makes that impossible. One epoch, one commit. The fork is rejected, and
-              the attempt is on the record. And look closely at what's actually stored — it's sealed.
-              The log publishes the <em>order</em> of a conversation. Never a word of its content. We
-              never had the keys either.</p>
-            <p>The third holds the fingerprint of every app we've ever released. If we ever built a
-              special version for one person, that fingerprint is either in this public log — where
-              anyone can see it — or missing from it, where that person's own app notices. There's no
-              third option.</p>
-            <p>Why three logs instead of one? Because a signed head for one must never work as a head
-              for another. Take a valid head from the commit log, and try to pass it off as one for
-              the binaries log. It doesn't fit. Each tree signs under its own context, so the
-              signature says which tree it belongs to.</p>
-            <p>And the limits, plainly. These don't make us honest. We could write something
-              dishonest to any of them. What changes is that it's permanent, public, and identical
-              for everyone who looks — undeniable, not impossible. They also say nothing about bugs.
-              A log proves what we published. It doesn't prove it's correct.</p>
-            <p>One practical note. The logs rebuild once a day. So a brand-new release, or a key
-              published an hour ago, may genuinely not be in there yet. That's why your app says
-              "pending" instead of raising an alarm. Not in the log <em>yet</em> is a different thing
-              from not in the log.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="three-logs-transcript-body">
+            <p>Three logs. One signing key. One address: verify dot pollis dot com. Each one protects against a different problem.</p>
+            <p>The first holds every identity key we have published. For a swapped key to be used, it would have to be written here, in public, where the real owner's app is checking. And the rule is that versions only move forward. An old key cannot be slipped back in.</p>
+            <p>The second holds every update in every conversation. Groups move forward in epochs, and everyone applies the same updates in the same order. If a server tried to split the history, showing two different updates as the same epoch, the rule would refuse it: one epoch, one update. And what is stored is sealed. The log shows the order of a conversation, never a word of its content.</p>
+            <p>The third holds the fingerprint of every app we release. If a special version were built for one person, its fingerprint would either be in this public log, where anyone can see it, or missing from it, where that person's own app would notice. There is no third option.</p>
+            <p>Why three logs instead of one? Because a signed statement about one must never work for another. A valid statement from the message log does not fit the binaries log. Each log signs under its own label, so the signature says which log it belongs to.</p>
+            <p>And the limits, plainly. These make tampering permanent and public, not impossible. They also say nothing about bugs. A log proves what was published, not that it is correct.</p>
+            <p>One practical note. The logs rebuild once a day, so something published an hour ago may genuinely not be in them yet. That is why your app says pending instead of raising an alarm.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -1977,168 +1359,54 @@
       <!-- ═══ Topic 10 — binary transparency (#599) ═════════════════════════ -->
       <section class="ln-section" id="binary-transparency">
         <div class="ln-eyebrow">Track D · Transparency · Topic 10</div>
-        <h2>Binary transparency — and what reproducibility we actually have</h2>
+        <h2>Binary transparency, and reproducible builds</h2>
 
         <div class="ln-prose">
-          <p>
-            Every other guarantee on this page assumes <strong>the app running on your machine is the
-            app whose source you can read.</strong> Nothing survives a backdoored client. So this is
-            the one to be sharpest about.
-          </p>
-          <p>
-            Code signing — the thing your operating system checks before letting an app run — proves
-            less than people assume. An Apple or Windows signature proves "the holder of this
-            company's signing key produced these bytes". It says nothing about <em>what the bytes
-            do</em>. A backdoored build, signed by us under duress or after a compromise, passes every
-            check your OS makes.
-          </p>
-          <p>
-            So we publish the fingerprint of every release into a public log. The question stops being
-            "did Pollis sign this?" and becomes <strong>"is this exact app one Pollis published to the
-            world, or one made just for you?"</strong>
-          </p>
-          <p>
-            Each release lands in the log at three <strong>layers</strong>, because "the app" isn't one
-            file. The <code>payload</code> layer is the compiled program and its resources before any
-            signature — the layer an independent third party can rebuild from source and compare. The
-            <code>signed</code> layer is what you actually downloaded, after notarization or
-            Authenticode; signing deliberately embeds unique, non-reproducible data, so the signed file
-            <em>can't</em> be byte-identical between builds — by construction, not by sloppiness. We log
-            it separately, bound to its payload.
-          </p>
-          <p>
-            The <code>exe</code> layer — the main program <em>as installed</em> — exists for a
-            specific, slightly embarrassing reason, and it's worth telling straight.
-          </p>
-          <p>
-            When we first shipped the in-app "Verify this build" button, it compared the running
-            program's fingerprint against the <code>payload</code> layer. That comparison
-            <strong>could never succeed</strong> off Linux. The payload is recorded as a fingerprint of
-            an extracted <em>directory tree</em> or an <em>installer file</em> — and an app that's
-            already installed has neither of those things anymore. It has itself. So every genuine,
-            correctly signed macOS and Windows release reported: <em>"this build is not one Pollis
-            publicly attested"</em> — the loudest alarm we have, firing on honest builds.
-          </p>
-          <p>
-            The fix was a third layer recording the fingerprint of the main program as installed, which
-            is exactly the thing a running app can measure. Two things are worth taking from that.
-            First, it's the kind of bug that only surfaces when you <em>actually build the verification
-            path and use it</em> — an argument for shipping this sort of thing rather than describing
-            it. Second, releases published before that layer existed genuinely have nothing for a
-            running app to compare against, so the app reports <strong>"can't check"</strong> rather
-            than "you've been tampered with". That distinction is the difference between a useful alarm
-            and a false accusation.
-          </p>
-          <p>
-            <strong>What it buys you.</strong> Two people download the app. One gets the public build,
-            whose fingerprint is in the log. One gets a special build made just for them — and either
-            its fingerprint isn't in the log, where that person's own app notices, or we did log it, in
-            which case it sits in public, permanently, next to the real release. There's no quiet
-            option.
-          </p>
-          <p>
-            <strong>Reproducible builds — and where we actually are.</strong> A logged fingerprint
-            proves we published these bytes. It doesn't prove those bytes came from the source code you
-            can read. Closing <em>that</em> gap means reproducible builds: anyone compiles the source at
-            a given tag and gets <strong>byte-identical</strong> output. That's hard, because ordinary
-            builds embed timestamps, absolute paths, and file ordering that differ per machine. Our
-            honest status:
-          </p>
-          <p>
-            <strong>Linux AppImage: reproducible</strong>, given the published build recipe and a
-            documented residual list — an independent rebuilder workflow, runnable from a fork with no
-            access to any Pollis secret, rebuilds it and asserts the hash matches the log.
-            <strong>macOS and Windows: not yet.</strong> Best-effort. This is the largest open gap in
-            our verification story and we're not going to imply otherwise. <strong>The signing layer:
-            never reproducible</strong>, by construction, on any platform.
-          </p>
-          <p>
-            There's also a second, independent anchor: every release carries a <strong>SLSA provenance
-            attestation and a cosign signature</strong>, recorded in a public log run by neither us nor
-            GitHub-as-us. That proves <em>which workflow built the bytes</em>, using no Pollis-held key
-            on the verification path. It answers a different question from reproducibility —
-            provenance says who built it, reproducibility says whether it matches the source — and
-            having both means a single compromised key doesn't take down the whole story.
-          </p>
+          <p>Everything else on these pages assumes one thing: that the app running on your machine is the app whose source you can read. Nothing survives a tampered app, so this is the part to be most careful about.</p>
+          <p>Code signing, the check your operating system runs before letting an app start, proves less than people assume. An Apple or Windows signature proves that the holder of the company's signing key produced these exact bytes. It says nothing about what those bytes do. A tampered build that was still signed with the right key would pass every check your system makes.</p>
+          <p>So we publish the fingerprint of every release into a public log. The question stops being "did Pollis sign this?" and becomes "is this exact app the same one Pollis published to everyone, or a different one?"</p>
+          <p>Each release is recorded at three levels, because "the app" is not one file. The <strong>payload</strong> is the program and its resources before any signature; this is the level an independent person can rebuild from source and compare. The <strong>signed</strong> level is what you actually download, after Apple or Windows wraps it; signing deliberately mixes in unique data, so the signed file cannot be identical between two builds, by design. The <strong>installed program</strong> level records the fingerprint of the main program exactly as it sits on your machine, which is the one thing a running app can measure about itself. The app's built-in "verify this build" check compares the program you are running against that recorded fingerprint.</p>
+          <p><strong>What this buys you.</strong> Suppose two people download the app. One gets the public build, whose fingerprint is in the log. If a different build were ever made for one person, its fingerprint would either be missing from the log, which that person's own app would notice, or present in the log, sitting in public next to the normal release for everyone to see. There is no quiet third option.</p>
+          <p><strong>Reproducible builds, and where we actually are.</strong> A logged fingerprint proves we published these bytes. It does not by itself prove those bytes came from the source code you can read. Closing that gap needs reproducible builds, where anyone compiling the source at a given version gets a byte-for-byte identical result. That is hard, because ordinary builds bake in timestamps, file paths, and ordering that differ from machine to machine. Where we stand today:</p>
+          <p><strong>Linux is reproducible.</strong> An independent rebuild, run from a public copy of the source with none of our secrets, produces the same fingerprint we logged. <strong>macOS and Windows are not there yet.</strong> This is the largest open gap in our verification story, and we would rather state it than gloss over it. The signing wrapper is never reproducible on any platform, by design.</p>
+          <p>There is also a second, independent record. Every release carries a build provenance record, stored in a public log that is not ours, proving which automated workflow produced the bytes, with no Pollis key involved in checking it. That answers a different question from reproducibility: provenance says who built it, reproducibility says whether it matches the source. Having both means a single compromised key does not undo the whole story.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            On macOS and Windows you currently have "these are the bytes Pollis published, and this
-            workflow built them" — <strong>not</strong> "these bytes match the source you read". Only
-            the Linux AppImage closes that loop today. We're stating it here, in your path, rather than
-            in a footnote, because the gap is real and a verification story you have to squint at isn't
-            one. The signed layer will never close it anywhere: signatures embed unique data on
-            purpose.
-          </p>
+          <div class="ln-limit-label">Where the guarantee ends today</div>
+          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux build closes that last loop today. We state it here, in your path rather than in a footnote, because a verification story you have to squint at is not one. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/binary-transparency.jpg"
-            aria-describedby="binary-transparency-transcript-body">
+            poster="learn/media/binary-transparency.jpg" aria-describedby="binary-transparency-transcript-body">
             <source src="learn/media/binary-transparency.webm" type="video/webm" />
             <source src="learn/media/binary-transparency.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/binary-transparency.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            A valid signature on a backdoored app, the three layers, the alarm we fired on our own
-            honest builds, and the reproducibility status told without flattery.
-            No audio yet — captions and the transcript below carry the narration.
+A valid signature on a tampered app, the three levels a release is recorded at, the two ways a special build gives itself away, and the reproducibility status stated without spin.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="binary-transparency-transcript-body">
-            <p>Your operating system checks that an app is signed before it runs it. That check proves
-              less than you'd think. A signature proves the company's key produced these bytes. It says
-              nothing about what the bytes do. A backdoored build — signed by us, under pressure —
-              passes every check your computer makes.</p>
-            <p>So we publish the fingerprint of every release we make, in public. The question changes.
-              Not "did they sign it?" but "is this the app they gave everyone, or one made just for
-              me?"</p>
-            <p>Each release goes in at three layers, because "the app" isn't one file. The payload: the
-              compiled program before any signature. That's the layer someone else can rebuild from
-              source and compare. The signed layer: what you actually download, after notarization.
-              Signing embeds unique data on purpose, so this can never be byte-identical twice. We log
-              it separately, tied to its payload.</p>
-            <p>And the third layer exists because of a bug we shipped. Worth telling properly. Our
-              in-app "verify this build" button compared the running app to the payload fingerprint.
-              But look at what payload actually is — a fingerprint of a whole directory, or of an
-              installer file. An app that's already installed has neither. It's not a folder anymore.
-              It's just… itself.</p>
-            <p>So the comparison failed. Every time. On every genuine macOS and Windows release. And
-              the app reported the loudest thing it can say: this build is not one Pollis published.
-              That was wrong, and it was our fault.</p>
-            <p>The fix is a third layer: the fingerprint of the main program exactly as installed.
-              Which is the one thing a running app can actually measure. Now it matches. Two lessons.
-              That bug only showed up because we built the check and used it. And releases from before
-              that layer existed have nothing to compare against — so the app says "can't check", not
-              "you've been tampered with". Those are very different sentences.</p>
-            <p>Here's what it buys you. Two people download the app. One gets the public build —
-              fingerprint's in the log. One gets a special build, just for them. Either its fingerprint
-              isn't in the log, and their own app notices — or we put it in the log, where it sits in
-              public, permanently, next to the real release. There's no quiet option.</p>
-            <p>Now the honest part. A fingerprint proves we published these bytes. It does not prove
-              they came from the source code you can read. For that you need reproducible builds —
-              anyone compiles the source and gets byte-identical output.</p>
-            <p>On Linux, we have that. An independent rebuilder, with no access to anything of ours,
-              rebuilds the AppImage and confirms the hash we logged. On macOS and Windows — not yet.
-              That's the biggest open gap in this story, and we'd rather you hear it from us. And the
-              signing layer will never be reproducible anywhere. That's by design, not neglect.</p>
-            <p>There's one more leg. Every release also carries a provenance record in a public log
-              that isn't ours, proving which build workflow produced the bytes — with no key of ours
-              involved in checking it. Different question from reproducibility, and a useful thing to
-              have when the worry is a compromised key.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="binary-transparency-transcript-body">
+            <p>Your operating system checks that an app is signed before it runs it. That check proves less than you would think. A signature proves the company's key produced these bytes. It says nothing about what the bytes do. A tampered build that was still signed with the right key would pass every check your computer makes.</p>
+            <p>So we publish the fingerprint of every release, in public. The question changes. Not "did they sign it?" but "is this the app they gave everyone, or a different one?"</p>
+            <p>Each release is recorded at three levels, because the app is not one file. The payload is the program before any signature; that is the level someone else can rebuild from source. The signed level is what you download, after notarization, which mixes in unique data on purpose, so it is never identical twice. And the installed-program level is the fingerprint of the main program as it sits on your machine, which is what a running app can measure about itself.</p>
+            <p>Here is what it buys you. Two people download the app. One gets the public build, whose fingerprint is in the log. If a different build were made for one person, its fingerprint is either missing from the log, which their own app notices, or in the log, in public next to the real release. There is no quiet option.</p>
+            <p>Now the part to be careful about. A fingerprint proves we published these bytes. It does not prove they came from the source code you can read. For that you need reproducible builds: anyone compiling the source gets an identical result.</p>
+            <p>On Linux, we have that. An independent rebuild, with none of our secrets, produces the same fingerprint we logged. On macOS and Windows, not yet. That is the biggest open gap, and we would rather you hear it from us. And the signing wrapper is never reproducible anywhere, by design.</p>
+            <p>There is one more record. Every release carries a build provenance record in a public log that is not ours, proving which workflow produced the bytes, with no key of ours involved in checking it. A different question from reproducibility, and a useful one when the worry is a compromised key.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -2157,69 +1425,71 @@
       <!-- ═══ Topic 11 — verify it yourself (#600) ══════════════════════════ -->
       <section class="ln-section" id="verify-it-yourself">
         <div class="ln-eyebrow">Track D · Transparency · Topic 11</div>
-        <h2>pollis-verify — verify it yourself</h2>
+        <h2>Verify it yourself</h2>
 
         <div class="ln-prose">
           <p>
-            Everything above explains what <em>could</em> be checked. This one has you actually check
-            it, on your own machine, in about two minutes. There are two ways in: reading the files
-            directly, and running the verifier.
+            Everything above explains what could be checked. This topic has you
+            actually check it, on your own machine, in about two minutes. There are
+            two ways in: reading the files directly, and running the verifier.
           </p>
           <p>
-            <strong>The verification API is just files.</strong> There's no clever API.
-            <code>verify.pollis.com</code> serves a directory of static JSON — no server-side logic, no
-            database query, nothing that could behave differently depending on who's asking. That's
-            deliberate: a server that <em>computes</em> an answer can compute a different answer for
-            you than for someone else. A server handing out flat files it wrote in advance has a much
-            harder time, and the daily publish job re-reads what's actually being served to confirm it
+            <strong>The verification data is just files.</strong> There is no clever
+            service. <code>verify.pollis.com</code> serves a folder of plain JSON
+            files, with no server-side logic and no database lookup, so nothing can
+            behave differently depending on who is asking. That is deliberate: a
+            service that computes an answer could compute a different answer for
+            different people, while a folder of files written in advance cannot, and
+            our daily job re-reads what is actually being served to confirm it
             matches what was signed.
           </p>
           <p>
-            <code>/v1/&lt;tree&gt;/sth/latest.json</code> is the current signed tree head;
-            <code>/v1/&lt;tree&gt;/entries.json</code> is the log's entries;
-            <code>/verify/release/&lt;tag&gt;</code> is a pre-computed report for one release. And
-            <code>/v1/&lt;tree&gt;/public_key.json</code> is the key the heads are signed with —
-            <strong>which you should not trust.</strong> It's served for convenience; the whole point
-            (Topic 8) is that real verifiers compare it against a key they already have. If it
-            disagrees, that alone is the alarm.
+            <code>/v1/&lt;log&gt;/sth/latest.json</code> is the current signed
+            statement; <code>/v1/&lt;log&gt;/entries.json</code> is the log's
+            entries; <code>/verify/release/&lt;tag&gt;</code> is a ready-made report
+            for one release. And <code>/v1/&lt;log&gt;/public_key.json</code> is the
+            key the statements are signed with, which you should not simply trust: it
+            is served for convenience, and the whole point (Topic 8) is that real
+            verification compares it against a key you already have.
           </p>
-          <p>Fetch the current head yourself — this works in any terminal, on any OS:</p>
+          <p>Fetch the current statement yourself, in any terminal, on any system:</p>
           <pre class="ln-pre"><code>curl -s https://verify.pollis.com/v1/binaries/sth/latest.json</code></pre>
 
           <div class="ln-live" data-live-sth hidden>
             <div class="ln-live-label">Live, fetched by your browser just now:</div>
-            <div class="ln-live-row"><span>tree_size</span><b data-live-size>…</b></div>
-            <div class="ln-live-row"><span>root</span><b data-live-root>…</b></div>
+            <div class="ln-live-row"><span>tree_size</span><b data-live-size>&#8230;</b></div>
+            <div class="ln-live-row"><span>root</span><b data-live-root>&#8230;</b></div>
             <div class="ln-live-note">
-              That's the same number the <a href="artifacts.html">artifacts page</a> shows, and the
-              same root the animations above use. Two places, one value.
+              That is the same value the <a href="artifacts.html">artifacts page</a>
+              shows, and the same root the animations above use. Two places, one
+              value.
             </div>
           </div>
 
           <p>
-            <strong>The verifier does the actual checking.</strong> Reading JSON tells you what we
-            <em>claim</em>. <code>pollis-verify</code> is a small standalone program that checks the
-            claims: it re-hashes entries, rebuilds the tree, verifies proofs against the signed head,
-            checks the signature against a key <strong>compiled into the binary</strong>, and re-runs
-            the same rules the log enforces on writes. Crucially it's the <em>same verification
-            code</em> the app uses — not a reimplementation that could drift into agreeing with us by
-            accident.
+            <strong>The verifier does the actual checking.</strong> Reading the JSON
+            tells you what is claimed. <code>pollis-verify</code> is a small
+            standalone program that checks the claims: it re-hashes entries, rebuilds
+            the tree, checks the proofs against the signed statement, checks the
+            signature against a key built into the program, and re-runs the same
+            rules the log enforces. It is the same checking code the app uses, not a
+            separate version that might happen to agree by accident.
           </p>
-          <p>Four subcommands, four questions. Arguments are positional, in this order:</p>
-          <pre class="ln-pre"><code># is the whole log internally consistent and append-only?
+          <p>Four commands, four questions. Arguments come in this order:</p>
+          <pre class="ln-pre"><code># is the whole log consistent and append-only?
 pollis-verify remote  https://verify.pollis.com
 
 # what keys have we published for this user, in what order?
 pollis-verify account https://verify.pollis.com &lt;user-id&gt;
 
-# is this conversation's commit chain a straight, unforked line?
+# is this conversation's history a single unbroken line?
 pollis-verify group   https://verify.pollis.com &lt;conversation-id&gt;
 
-# are this release's binaries in the log, with valid proofs?
+# are this release's files in the log, with valid proofs?
 pollis-verify release https://verify.pollis.com v1.5.3</code></pre>
           <p>
-            Here's a real run of that last command against the live log — captured 2026-07-23, not
-            mocked up:
+            Here is a real run of that last command against the live log, captured
+            2026-07-23, not mocked up:
           </p>
           <pre class="ln-pre"><code>$ pollis-verify release https://verify.pollis.com v1.5.3
 
@@ -2227,108 +1497,83 @@ Release: v1.5.3
 Found:   yes
 STH:     tree_size 60  root 37945cb2f61ee43782259a3893336b8ba8b8679d3af1612742deeec75e46cc0c
 Artifacts (publish order):
-  darwin   aarch64  dmg       payload  payload 774c8f…ea92  artifact 774c8f…ea92  [included ✓]
-  darwin   aarch64  dmg       signed   payload 774c8f…ea92  artifact eef7ae…c155  [included ✓]
-  darwin   aarch64  dmg       exe      payload 774c8f…ea92  artifact 77fc24…bea5  [included ✓]
-  windows  x86_64   nsis      payload  payload 88547f…7926  artifact 88547f…7926  [included ✓]
-  windows  x86_64   nsis      signed   payload 88547f…7926  artifact 16edeb…e92b  [included ✓]
-  windows  x86_64   nsis      exe      payload 88547f…7926  artifact 0f4c0f…73a6  [included ✓]
-  linux    x86_64   appimage  payload  payload 9b1ab1…e653  artifact 9b1ab1…e653  [included ✓]
-  linux    x86_64   deb       payload  payload 7f19ec…1a5a  artifact 7f19ec…1a5a  [included ✓]
-  linux    x86_64   deb       exe      payload 7f19ec…1a5a  artifact 5d9281…55b5  [included ✓]
-  linux    x86_64   rpm       payload  payload 586cfa…cbaa  artifact 586cfa…cbaa  [included ✓]
-  linux    x86_64   rpm       exe      payload 586cfa…cbaa  artifact e45d0c…400b  [included ✓]
+  darwin   aarch64  dmg       payload  payload 774c8f&#8230;ea92  artifact 774c8f&#8230;ea92  [included &#10003;]
+  darwin   aarch64  dmg       signed   payload 774c8f&#8230;ea92  artifact eef7ae&#8230;c155  [included &#10003;]
+  darwin   aarch64  dmg       exe      payload 774c8f&#8230;ea92  artifact 77fc24&#8230;bea5  [included &#10003;]
+  windows  x86_64   nsis      payload  payload 88547f&#8230;7926  artifact 88547f&#8230;7926  [included &#10003;]
+  windows  x86_64   nsis      signed   payload 88547f&#8230;7926  artifact 16edeb&#8230;e92b  [included &#10003;]
+  windows  x86_64   nsis      exe      payload 88547f&#8230;7926  artifact 0f4c0f&#8230;73a6  [included &#10003;]
+  linux    x86_64   appimage  payload  payload 9b1ab1&#8230;e653  artifact 9b1ab1&#8230;e653  [included &#10003;]
+  linux    x86_64   deb       payload  payload 7f19ec&#8230;1a5a  artifact 7f19ec&#8230;1a5a  [included &#10003;]
+  linux    x86_64   deb       exe      payload 7f19ec&#8230;1a5a  artifact 5d9281&#8230;55b5  [included &#10003;]
+  linux    x86_64   rpm       payload  payload 586cfa&#8230;cbaa  artifact 586cfa&#8230;cbaa  [included &#10003;]
+  linux    x86_64   rpm       exe      payload 586cfa&#8230;cbaa  artifact e45d0c&#8230;400b  [included &#10003;]
 
 PASS: release binaries tree is valid</code></pre>
           <p>
-            Read that against what you now know. <code>tree_size 60</code> and the root are the signed
-            head from Topic 8 — the same one the <code>curl</code> above returns. Each
-            <code>[included ✓]</code> is an inclusion proof that actually verified: not a status field
-            we wrote down, a computation that succeeded on your machine. The
-            <code>payload</code> / <code>signed</code> / <code>exe</code> layers are Topic 10. And
-            <code>PASS</code> means the whole tree replayed cleanly under the pinned key, with every
-            rule holding.
+            Read that against what you now know. <code>tree_size 60</code> and the
+            root are the signed statement from Topic 8, the same one the
+            <code>curl</code> above returns. Each <code>[included &#10003;]</code> is
+            a proof that actually checked out, a computation that succeeded on your
+            machine, not a status someone typed in. The
+            <code>payload</code> / <code>signed</code> / <code>exe</code> levels are
+            from Topic 10. And <code>PASS</code> means the whole tree replayed cleanly
+            under the built-in key, with every rule holding.
           </p>
           <p>
-            <strong>What a failure looks like.</strong> A <code>FAIL</code> is not necessarily "you've
-            been attacked". It could mean the log is mid-republish, or that a release is newer than the
-            last daily rebuild (Topic 9). What <em>would</em> be serious is a valid signature over a
-            tree that contradicts one someone else was served — the equivocation case. Which is why the
-            most valuable thing you can do with this tool is <strong>compare notes with someone else
-            running it.</strong> That comparison is the entire social basis of transparency logging.
+            <strong>What a failure looks like.</strong> A <code>FAIL</code> is not
+            necessarily a sign of an attack. It can simply mean the log is
+            mid-rebuild, or that a release is newer than the last daily rebuild
+            (Topic 9). The result that would genuinely matter is a valid signature
+            over a tree that disagrees with one someone else was served, which is the
+            two-versions case from Topic 8. That is why the most valuable thing you
+            can do with this tool is compare results with someone else running it.
+            That comparison is the whole basis of a transparency log.
           </p>
           <p>
-            <strong>Where it comes from.</strong> <code>pollis-verify</code> is published as a
-            standalone binary with checksums, and the pinned key is printed in the release notes. It's
-            also buildable from source — and if you're seriously auditing us,
-            <strong>build it</strong>, because a verifier we hand you is a verifier we could have
-            tampered with. The verifier being open and rebuildable is what stops it from being one more
-            thing you have to trust.
+            <strong>Where it comes from.</strong> <code>pollis-verify</code> ships as
+            a standalone program with checksums, and its built-in key is printed in
+            the release notes. It is also buildable from source, and if you are
+            seriously auditing us, build it, so you can read exactly what it does
+            first. A verifier being open and rebuildable is what keeps it from being
+            one more thing you have to take on trust.
           </p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            A <code>PASS</code> on your machine proves the log you were served is internally
-            consistent, append-only, and signed by the pinned key. It cannot tell you whether
-            <em>someone else</em> was served the same log — that's the one question a single run can
-            never answer, no matter how carefully it's written. And a binary we hand you checking a key
-            we compiled in is only as good as your decision to build it yourself. Both gaps close the
-            same way: more people running it, comparing results.
-          </p>
+          <div class="ln-limit-label">Where the guarantee ends</div>
+          <p>A <code>PASS</code> on your machine proves the log you were served is consistent, append-only, and signed by the built-in key. It cannot tell you whether someone else was served the same log; that is the one question a single run cannot answer, which is why comparing with other people matters. And a program we hand you, checking a key we built in, is only as strong as your choice to build it from source yourself. Both gaps close the same way: more people running it, comparing results.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/verify-it-yourself.jpg"
-            aria-describedby="verify-transcript-body">
+            poster="learn/media/verify-it-yourself.jpg" aria-describedby="verify-it-yourself-transcript-body">
             <source src="learn/media/verify-it-yourself.webm" type="video/webm" />
             <source src="learn/media/verify-it-yourself.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/verify-it-yourself.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the commands above run without
-              it.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            The static file shelf, a real <code>curl</code>, the real verifier output landing on
-            <code>PASS</code>, and the comparison only two people can do.
-            No audio yet — captions and the transcript below carry the narration.
+The folder of plain files, a real command-line fetch, the real verifier output landing on PASS, and the comparison only two people can do.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="verify-transcript-body">
-            <p>Everything we've talked about is checkable. Here's how, in about two minutes. First,
-              the API — and it's barely an API. It's a shelf of static files. No database, no logic,
-              nothing that can decide to behave differently depending on who's asking.</p>
-            <p>That's on purpose. A server that computes an answer can compute a different one for
-              you. A server handing out files it wrote in advance has a much harder time.</p>
-            <p>You can fetch any of them right now. Here's the current signed head — root, entry
-              count, signature. And here's the same root on our website. Same sixty-four characters.
-              Two different places.</p>
-            <p>But reading files only tells you what we claim. To check the claims, use the verifier.
-              It's a small program you download — or build yourself, and if you're seriously auditing
-              us, build it. It re-hashes every entry, rebuilds the tree, checks every proof, and
-              verifies the signature against a key compiled into it. Not fetched. Compiled in. One
-              command.</p>
-            <p>Watch what comes back. Tree size, sixty. The root — the same one we just fetched. Then
-              every artifact in the release, each with a tick. Those ticks aren't a status we wrote
-              down. Each one is an inclusion proof that your machine just recomputed and confirmed.
-              And the last line — PASS — means the whole tree replayed cleanly, every rule holding,
-              under a key we couldn't swap on you.</p>
-            <p>Speaking of which. Suppose we served you our own signing key, with a perfect fake log
-              to match. The verifier compares it to the key built into it — and stops.</p>
-            <p>One last thing, and it's the most important use of this tool. Two people, different
-              countries, different networks, same command. Same root. Same PASS.</p>
-            <p>If those ever differed — two valid signatures over two different trees — that's the
-              finding that matters. It's also the only one you can't get alone. So run it. And compare
-              with someone.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="verify-it-yourself-transcript-body">
+            <p>Everything we have talked about is checkable, in about two minutes. First, the data, which is barely a service at all. It is a folder of plain files. No database, no logic, nothing that can behave differently depending on who is asking. A service that computes an answer could give different people different answers. A folder of files written in advance cannot.</p>
+            <p>You can fetch any of them right now. Here is the current signed statement: the root, the entry count, and a signature. And here is the same root on our website. Same sixty-four characters, two different places.</p>
+            <p>But reading the files only tells you what is claimed. To check the claims, use the verifier. It is a small program you download, or build yourself, and if you are seriously auditing us, build it. It re-hashes every entry, rebuilds the tree, checks every proof, and checks the signature against a key built into it. Not downloaded. Built in. One command.</p>
+            <p>Watch what comes back. Tree size, sixty. The root, the same one you just fetched. Then every file in the release, each with a tick. Those ticks are not a status someone wrote down. Each one is a proof your machine just recomputed. And PASS means the whole tree checked out under a key that cannot be swapped on you.</p>
+            <p>A failure does not always mean an attack. It can mean the log is mid-rebuild, or a release is newer than the last daily rebuild. The result that would matter is two valid signatures over two different trees, which is the two-versions case, and the only one you cannot spot alone.</p>
+            <p>So run it, and compare with someone.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -2346,142 +1591,57 @@ PASS: release binaries tree is valid</code></pre>
       <!-- ═══ Topic 12 — reading the dashboards (#601) ══════════════════════ -->
       <section class="ln-section" id="reading-the-dashboards">
         <div class="ln-eyebrow">Track D · Transparency · Topic 12</div>
-        <h2>Reading the artifacts page and the in-app Security page</h2>
+        <h2>Reading the artifacts page and the Security page</h2>
 
         <div class="ln-prose">
-          <p>
-            You now have every concept needed to read our public dashboards. Here's the tour — this
-            is the legend for the map.
-          </p>
-          <p>
-            <strong>On the website: the <a href="artifacts.html">artifacts page</a>.</strong>
-            <em>Latest releases</em> is the current version of each thing we ship, with download
-            links. (Fun aside: for a while this displayed <code>vv1.5.2</code> — a duplicated prefix —
-            and the same bug meant the release-proofs lookup was querying a tag that could never
-            exist, so the card permanently reported the newest release as missing from the log. A
-            cosmetic-looking typo was hiding a functional failure.)
-          </p>
-          <p>
-            <em>Release proofs</em> is the heart of it: for the current release tag, was it found in
-            the binaries log, did the tree verify, and what's in it. You'll see a row per artifact
-            with the fields from Topic 10 — platform, bundle, layer
-            (<code>payload</code>/<code>signed</code>/<code>exe</code>), the payload hash, the
-            artifact hash, and an inclusion tick. Read a tick as <em>"a proof was verified"</em>, not
-            <em>"a box was checked"</em>. <code>tree size</code> and <code>root</code> are the signed
-            tree head from Topic 8 — and the root is the same string you'd get from <code>curl</code>
-            or from <code>pollis-verify</code>. If it says <strong>not in log yet</strong>, that's
-            usually the daily rebuild (Topic 9), not an alarm.
-          </p>
-          <p>
-            <em>Daily transparency self-audit</em> shows the current signed head of all three trees
-            (Topic 9), republished daily — the "we re-check what we actually served" surface,
-            including the tripwire that would catch us serving two different histories over time. And
-            <em>the one key you trust</em> is the pinned Ed25519 key, <code>175ebfef…7148</code>:
-            everything above reduces to that single string. Worth reading the honest note attached —
-            the page compares the served key against this constant in your browser, which is a
-            convenience, not a trust anchor. Real verification uses a key you obtained independently
-            (Topic 11).
-          </p>
-          <p>
-            <strong>In the app: the Security page.</strong> <em>This build</em> gives you a version,
-            a commit, and a verdict from the in-app check (Topic 10). There are four:
-          </p>
-          <p>
-            <strong>Build publicly verified</strong> — this exact binary's fingerprint is in the
-            public log for this release. <strong>Build publication pending</strong> — the release
-            isn't in the republished tree yet; normal right after a release.
-            <strong>Verification unavailable</strong> — couldn't check: the log was unreachable, or
-            this release predates the <code>exe</code> layer so there's nothing comparable. <em>Not
-            an accusation.</em> <strong>Build not in public log</strong> — the loud one: the tag is
-            published, a comparable fingerprint exists, and ours isn't among them.
-          </p>
-          <p>
-            The distinction between those last two is the whole difference between a useful alarm and
-            crying wolf — "I don't know" versus "you've been tampered with" — and we got it wrong
-            once (Topic 10).
-          </p>
-          <p>
-            Below that: <em>account key</em>, your own device re-checking that the identity key the
-            world is shown for you is the key you actually hold (Topics 6 and 9) — silent when fine.
-            <em>Devices and security events</em>, an append-only local record of enrollments,
-            rejections, and identity resets; not cryptography, just an audit trail worth reading if
-            something feels wrong. And <em>safety numbers</em> per contact, with a distinct warning
-            for a pinned key that changed.
-          </p>
+          <p>By now you have every idea you need to read our public dashboards. Here is the tour, which is really just the key to the map.</p>
+          <p><strong>On the website: the <a href="artifacts.html">artifacts page</a>.</strong> <em>Latest releases</em> shows the current version of each thing we ship, with download links.</p>
+          <p><em>Release proofs</em> is the heart of it: for the current release, was it found in the binaries log, did the tree check out, and what is inside. You will see a row per file with the fields from <a href="#binary-transparency">Topic 10</a>: platform, package, level, and two fingerprints, each with a tick. Read a tick as "a proof was checked", not "a box was ticked". The tree size and root are the signed statement from <a href="#proofs-and-equivocation">Topic 8</a>, and the root is the same string you would get from the command line or the verifier tool. If a row says <strong>not in log yet</strong>, that is usually the daily rebuild (<a href="#three-logs">Topic 9</a>), not a problem.</p>
+          <p><em>Daily transparency self-audit</em> shows the current signed statement for all three logs, republished each day. And <em>the one key you trust</em> is the built-in signing key that everything above reduces to. The page also notes something worth reading: the key check it runs in your browser is a convenience, not the real safeguard. Real verification uses a key you obtained independently (<a href="#verify-it-yourself">Topic 11</a>).</p>
+          <p><strong>In the app: the Security page.</strong> <em>This build</em> gives you a version, a commit, and a verdict from the in-app check (<a href="#binary-transparency">Topic 10</a>). There are four possible results. <strong>Build publicly verified</strong> means this exact app's fingerprint is in the public log for this release. <strong>Build publication pending</strong> means the release is not in the rebuilt log yet, which is normal right after a release. <strong>Verification unavailable</strong> means the check could not run, because the log was unreachable or this release predates the installed-program record; this is not an accusation. <strong>Build not in public log</strong> is the loud one: the release is published, a comparable fingerprint exists, and this one is not among them.</p>
+          <p>The difference between those last two is the difference between "could not check" and "checked, and something is wrong." It is worth keeping straight.</p>
+          <p>Below that, <em>account key</em> is your own device confirming that the key the world sees for you matches the key you hold (Topics 6 and 9), quiet when all is well. <em>Devices and security events</em> is a running record of enrollments and resets, worth a look if something feels off. And <em>safety numbers</em> per contact carry the shield states from <a href="#identity-keys">Topic 6</a>, including a distinct warning when a remembered key has changed.</p>
         </div>
 
         <div class="ln-limit">
-          <div class="ln-limit-label">The honest limit</div>
-          <p>
-            Green across every one of these surfaces means: <strong>the things Pollis published are
-            consistent, permanent, and include the app you're running.</strong> It does not mean the
-            code is free of bugs, that your device isn't compromised, or that metadata isn't visible
-            to the people who carry your traffic. We've shrunk what you have to take on faith and
-            published the evidence for what's left — which is the whole promise, and a smaller one
-            than "trust us".
-          </p>
+          <div class="ln-limit-label">What green actually means</div>
+          <p>Green across these surfaces means the things Pollis published are consistent, permanent, and include the app you are running. It does not mean the code is free of bugs, that your device is uncompromised, or that metadata is invisible to whoever carries your traffic. The point of this whole section is that we keep shrinking what you have to take on trust, and publish the evidence for what remains.</p>
         </div>
 
+        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
-            poster="learn/media/reading-the-dashboards.jpg"
-            aria-describedby="dashboards-transcript-body">
+            poster="learn/media/reading-the-dashboards.jpg" aria-describedby="reading-the-dashboards-transcript-body">
             <source src="learn/media/reading-the-dashboards.webm" type="video/webm" />
             <source src="learn/media/reading-the-dashboards.mp4" type="video/mp4" />
-            <track kind="captions" srclang="en" label="English" default
+            <track kind="captions" srclang="en" label="English"
               src="learn/media/reading-the-dashboards.vtt" />
           </video>
-          <noscript>
-            <p class="ln-noscript">This animation is an enhancement — the text above and the
-              transcript below teach the same thing without video.</p>
-          </noscript>
           <figcaption class="ln-figcaption">
-            Both dashboards annotated, one artifact row taken apart, the same root in three places,
-            and the four build verdicts — with the most time on the two that get confused.
-            No audio yet — captions and the transcript below carry the narration.
+Both dashboards labelled, a single release row taken apart, the same root shown in three places, and the four build results with the most attention on the two that are easy to confuse.
           </figcaption>
         </figure>
 
-        <details class="ln-transcript">
-          <summary>Read the transcript</summary>
-          <div class="ln-transcript-body" id="dashboards-transcript-body">
-            <p>You've got every idea you need to read our dashboards. Let's go through them. Latest
-              releases — what we currently ship, and where to get it.</p>
-            <p>Release proofs. This is the one that matters. For the current version: is it in the
-              binaries log, did the tree check out, and what's inside.</p>
-            <p>Each row is one piece of a release. Platform. Bundle. Layer — payload, signed, or exe,
-              the three from earlier. The hashes. And a tick. Read that tick carefully. It doesn't
-              mean someone marked a box. It means an inclusion proof was recomputed and it held.</p>
-            <p>Tree size and root — that's the signed head. And this root is the same string you'd get
-              by fetching the file yourself, or by running the verifier. If it says "not in log yet",
-              that's almost always the daily rebuild. Not an alarm.</p>
-            <p>Below, the daily self-audit: the current head of all three logs. And at the bottom, the
-              one key everything reduces to. Note what that page says about itself — the key check in
-              your browser is a convenience, not a trust anchor. Real verification uses a key you got
-              independently.</p>
-            <p>Now inside the app. "This build" tells you whether the exact binary you're running is
-              in the public log. Four possible answers, and the difference between two of them matters
-              a lot.</p>
-            <p>"Pending" means the log hasn't rebuilt yet. "Unavailable" means we couldn't check — the
-              log was unreachable, or this release is older than the layer that makes checking
-              possible. And "not in public log" is the loud one: the release is published, there's
-              something to compare against, and yours isn't it.</p>
-            <p>"Unavailable" versus "not in the log" is the difference between "I don't know" and
-              "you've been tampered with". We shipped that wrong once, and every honest macOS build
-              was accused of being fake. It's fixed — and it's exactly why the distinction is worth
-              labouring.</p>
-            <p>Below that: your account key, being re-checked against the public log. Your devices.
-              Your security events. And safety numbers for each contact.</p>
-            <p>And here's the honest ending. Everything green means the things we published are
-              consistent, permanent, and include the app you're running. It does not mean our code has
-              no bugs. It does not mean your device is safe. And it does not mean the metadata we
-              talked about has gone anywhere. We've shrunk what you have to take on faith, and
-              published evidence for what's left. That's the whole promise. Now you can check it.</p>
+        <div class="ln-watch">
+          <div class="ln-watch-head">Read along</div>
+          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
+            them on with the CC button if you prefer, or just read the same words
+            here.</p>
+          <div class="ln-watch-body" id="reading-the-dashboards-transcript-body">
+            <p>You have every idea you need to read our dashboards. Latest releases shows what we currently ship, and where to get it.</p>
+            <p>Release proofs is the one that matters. For the current version: is it in the binaries log, did the tree check out, and what is inside.</p>
+            <p>Each row is one part of a release. Platform. Package. Level, which is one of the three from earlier. Two fingerprints. And a tick. Read that tick carefully. It does not mean someone ticked a box. It means a proof was recomputed and it held. The tree size and root are the signed statement, and this root is the same string you would get from the command line or the verifier. If it says not in log yet, that is almost always the daily rebuild, not a problem.</p>
+            <p>Below that, the daily self-audit shows the current statement for all three logs, and at the bottom, the one key everything reduces to. The page also notes that its in-browser key check is a convenience, not the real safeguard. Real verification uses a key you obtained independently.</p>
+            <p>Now in the app. This build tells you whether the exact app you are running is in the public log. Four possible results. Pending means the log has not rebuilt yet. Unavailable means the check could not run, because the log was unreachable or the release is older than the record it compares against. And not in public log is the loud one: the release is published, there is something to compare against, and this one is not it.</p>
+            <p>Unavailable versus not in the log is the difference between "I could not check" and "I checked, and something is wrong." It is worth keeping straight.</p>
+            <p>Below that: your account key, checked against the public log. Your devices. Your security events. And safety numbers for each contact.</p>
+            <p>Green across all of it means the things we published are consistent, permanent, and include the app you are running. It does not mean the code has no bugs, that your device is safe, or that metadata has gone anywhere. We keep shrinking what you take on trust, and publish the evidence for what is left. Now you can check it.</p>
           </div>
-        </details>
+        </div>
+        </div>
 
         <p class="ln-deeper">
-          The rigorous version: the page itself — <a href="artifacts.html">artifacts</a> — plus <a
+          The rigorous version: the page itself, the <a href="artifacts.html">artifacts</a> page, plus <a
             href="https://github.com/actuallydan/pollis/blob/main/website/artifacts.js"
             target="_blank" rel="noopener noreferrer">artifacts.js</a> for how the proofs are rendered
           and <a
