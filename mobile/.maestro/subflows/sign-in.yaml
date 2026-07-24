@@ -1,0 +1,66 @@
+appId: com.anonymous.mobile
+---
+# Reusable fresh sign-in: email -> OTP -> create PIN (x2) -> land on the tabs.
+# Assumes a disposable dev-DS account (first run signs it up). Reads
+# ${MAESTRO_EMAIL}, ${MAESTRO_OTP}, ${MAESTRO_PIN} from the runner's -e env.
+#
+# NOTE (Mac operator): this box could not RUN Maestro, so timing/branch steps
+# are authored best-effort against the real testIDs. On the first run, confirm
+# the PIN keypad auto-advances at 6 digits and whether an emergency-kit screen
+# appears; adjust the `optional` steps if needed.
+
+- clearState
+- launchApp
+
+# --- Email ---
+- assertVisible:
+    id: "screen-auth-email"
+- tapOn:
+    id: "input-email"
+- inputText: "${MAESTRO_EMAIL}"
+- tapOn:
+    id: "btn-submit-email"
+
+# --- OTP ---
+- assertVisible:
+    id: "screen-auth-otp"
+- tapOn:
+    id: "input-otp"
+- inputText: "${MAESTRO_OTP}"
+- tapOn:
+    id: "btn-submit-otp"
+
+# --- PIN (new device): enter, then confirm. Keypad auto-advances at 6 digits.
+# The taps below assume MAESTRO_PIN=123456; keep them in sync with env.example.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 15000
+- runFlow: enter-pin.yaml
+- runFlow: enter-pin.yaml
+
+# --- Optional emergency-kit acknowledgement (first signup only) ---
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-emergency-kit"
+    commands:
+      - tapOn:
+          id: "toggle-recovery-ack"
+      - tapOn:
+          id: "btn-continue"
+
+# --- Optional "initializing" continue (it usually auto-advances) ---
+- runFlow:
+    when:
+      visible:
+        id: "btn-continue"
+    commands:
+      - tapOn:
+          id: "btn-continue"
+
+# --- Landed on the tabs ---
+- extendedWaitUntil:
+    visible:
+      id: "screen-groups"
+    timeout: 20000

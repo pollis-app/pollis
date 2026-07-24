@@ -1,0 +1,17 @@
+appId: com.anonymous.mobile
+tags:
+  - parity
+---
+# SEARCH — the search tab: type a query, capture results (may be empty on a
+# fresh account, which is still a valid visual state). Self-contained.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-search"
+- assertVisible:
+    id: "screen-search"
+- takeScreenshot: search-01-empty
+- tapOn:
+    id: "input-search"
+- inputText: "test"
+- takeScreenshot: search-02-results

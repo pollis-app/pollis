@@ -1,0 +1,17 @@
+appId: com.anonymous.mobile
+---
+# Enter the 6-digit device PIN on the keypad. Assumes MAESTRO_PIN=123456 — keep
+# these taps in sync with env.example. Called twice by sign-in (create +
+# confirm); the keypad auto-advances the stage once 6 digits are entered.
+- tapOn:
+    id: "btn-pin-1"
+- tapOn:
+    id: "btn-pin-2"
+- tapOn:
+    id: "btn-pin-3"
+- tapOn:
+    id: "btn-pin-4"
+- tapOn:
+    id: "btn-pin-5"
+- tapOn:
+    id: "btn-pin-6"

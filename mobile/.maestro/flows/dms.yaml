@@ -1,0 +1,36 @@
+appId: com.anonymous.mobile
+tags:
+  - parity
+  - two-client
+---
+# DMs — start a DM with the seeded peer, send a message. The ACCEPT + REPLY
+# side runs on a SECOND device (see README "Two-client flows"); this file drives
+# the initiator. Requires ${MAESTRO_PEER_HANDLE} to exist on the dev DS.
+
+- runFlow: ../subflows/sign-in.yaml
+- tapOn:
+    id: "tab-direct"
+- assertVisible:
+    id: "screen-direct"
+- takeScreenshot: dms-01-list
+- tapOn:
+    id: "btn-new-dm"
+- assertVisible:
+    id: "screen-dm-new"
+- tapOn:
+    id: "input-user-search"
+- inputText: "${MAESTRO_PEER_HANDLE}"
+- takeScreenshot: dms-02-search
+# The exact-match result row starts the DM when tapped.
+- tapOn:
+    id: "row-user-${MAESTRO_PEER_HANDLE}"
+    optional: true
+- takeScreenshot: dms-03-opened
+- tapOn:
+    id: "input-composer"
+    optional: true
+- inputText: "hello peer"
+- tapOn:
+    id: "btn-send"
+    optional: true
+- takeScreenshot: dms-04-sent

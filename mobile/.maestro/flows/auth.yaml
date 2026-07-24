@@ -1,0 +1,62 @@
+appId: com.anonymous.mobile
+tags:
+  - parity
+  - smoke
+---
+# AUTH — email -> OTP -> create PIN -> land on inbox. Screenshots at each state.
+# This is also the smoke flow: if it passes, the bridge + dev DS + keystore are
+# all live end-to-end. Self-contained (signs up a fresh disposable account).
+
+- clearState
+- launchApp
+
+- assertVisible:
+    id: "screen-auth-email"
+- takeScreenshot: auth-01-email
+- tapOn:
+    id: "input-email"
+- inputText: "${MAESTRO_EMAIL}"
+- tapOn:
+    id: "btn-submit-email"
+
+- assertVisible:
+    id: "screen-auth-otp"
+- takeScreenshot: auth-02-otp
+- tapOn:
+    id: "input-otp"
+- inputText: "${MAESTRO_OTP}"
+- tapOn:
+    id: "btn-submit-otp"
+
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-pin"
+    timeout: 15000
+- takeScreenshot: auth-03-pin-create
+- runFlow: ../subflows/enter-pin.yaml
+- runFlow: ../subflows/enter-pin.yaml
+
+- runFlow:
+    when:
+      visible:
+        id: "screen-auth-emergency-kit"
+    commands:
+      - takeScreenshot: auth-04-emergency-kit
+      - tapOn:
+          id: "toggle-recovery-ack"
+      - tapOn:
+          id: "btn-continue"
+
+- runFlow:
+    when:
+      visible:
+        id: "btn-continue"
+    commands:
+      - tapOn:
+          id: "btn-continue"
+
+- extendedWaitUntil:
+    visible:
+      id: "screen-groups"
+    timeout: 20000
+- takeScreenshot: auth-05-inbox

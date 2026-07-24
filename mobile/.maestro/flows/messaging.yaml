@@ -1,0 +1,65 @@
+appId: com.anonymous.mobile
+tags:
+  - parity
+---
+# MESSAGING — send / edit / delete / react in a self-owned channel.
+# Self-contained: creates a group (→ #General channel) so there's a
+# conversation to post into without a peer.
+
+- runFlow: ../subflows/sign-in.yaml
+
+# Make a group so we have a channel to post in.
+- tapOn:
+    id: "btn-create-group"
+- tapOn:
+    id: "input-group-name"
+- inputText: "E2E Msg Group"
+- tapOn: "CREATE GROUP"
+- extendedWaitUntil:
+    visible:
+      id: "screen-groups"
+    timeout: 15000
+
+# Open the group's channel (the row-channel-<id> id is dynamic; tap the first
+# channel row by its General label).
+- tapOn:
+    text: "General"
+    optional: true
+- assertVisible:
+    id: "screen-chat"
+- takeScreenshot: messaging-01-empty-channel
+
+# Send a message.
+- tapOn:
+    id: "input-composer"
+- inputText: "hello from maestro"
+- tapOn:
+    id: "btn-send"
+- assertVisible: "hello from maestro"
+- takeScreenshot: messaging-02-sent
+
+# Long-press the message to reveal edit/delete/react actions, then edit.
+- longPressOn: "hello from maestro"
+- takeScreenshot: messaging-03-actions
+- tapOn:
+    id: "btn-edit"
+- tapOn:
+    id: "input-edit-composer"
+- inputText: " (edited)"
+- tapOn:
+    id: "btn-edit-save"
+- assertVisible: "hello from maestro (edited)"
+- takeScreenshot: messaging-04-edited
+
+# React to the message.
+- longPressOn: "hello from maestro (edited)"
+- tapOn:
+    id: "btn-react-0"
+    optional: true
+- takeScreenshot: messaging-05-reacted
+
+# Delete it.
+- longPressOn: "hello from maestro (edited)"
+- tapOn:
+    id: "btn-delete"
+- takeScreenshot: messaging-06-deleted

@@ -1,0 +1,18 @@
+# Maestro workspace config for the Pollis mobile e2e + visual suite (#619).
+#
+# Runs on a LOCAL Mac (macOS Tahoe / Xcode 26) driving the iOS Simulator,
+# an iPad Simulator, and an Android emulator. This box (headless Linux) can
+# only AUTHOR these flows — it cannot run them. See README.md.
+#
+# `maestro test mobile/.maestro/flows` runs the whole suite; a single file
+# runs one flow. The runner script (`mobile/scripts/maestro-run.sh`) wraps
+# this to boot the right device and collect the screenshot gallery.
+
+# Run every flow under flows/ (subflows/ are included via runFlow, never run
+# directly).
+flows:
+  - flows/*.yaml
+
+# Screenshots/recordings land here per run; the runner script moves them into
+# a dated, per-platform gallery for the visual evaluator.
+# (Maestro writes takeScreenshot output relative to the flow's working dir.)
