@@ -662,6 +662,7 @@ export function Ctx({
   name,
   actions,
   testID,
+  hideBack,
 }: {
   cr?: string;
   name: React.ReactNode;
@@ -669,6 +670,9 @@ export function Ctx({
   // Optional anchor on the context strip container. The back Pressable always
   // carries `btn-back` for navigation flows.
   testID?: string;
+  // Two-pane embedded mode (issue #622): the conversation sits in a pane with
+  // nothing to pop, so the back affordance is omitted. Default keeps back.
+  hideBack?: boolean;
 }) {
   const router = useRouter();
   return (
@@ -686,23 +690,25 @@ export function Ctx({
         backgroundColor: palette.bg,
       }}
     >
-      <Pressable
-        onPress={() => router.back()}
-        testID="btn-back"
-        accessibilityRole="button"
-        accessibilityLabel="Back"
-        style={{
-          width: 38,
-          height: 38,
-          alignItems: "center",
-          justifyContent: "center",
-          borderWidth: 1,
-          borderColor: semantic.hair,
-          borderRadius: r.sm,
-        }}
-      >
-        <Icon.arrowLeft />
-      </Pressable>
+      {hideBack ? null : (
+        <Pressable
+          onPress={() => router.back()}
+          testID="btn-back"
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          style={{
+            width: 38,
+            height: 38,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: 1,
+            borderColor: semantic.hair,
+            borderRadius: r.sm,
+          }}
+        >
+          <Icon.arrowLeft />
+        </Pressable>
+      )}
       <View style={{ flex: 1, minWidth: 0 }}>
         {cr ? (
           <Text style={[ty.label, { fontSize: 9, letterSpacing: 1.8 }]}>
