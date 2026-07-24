@@ -1,3 +1,19 @@
+# ── Environment ─────────────────────────────────────────────────────────────
+
+variable "env" {
+  description = <<-EOT
+    Deployment environment. "prod" (the default) reproduces the ORIGINAL resource
+    names exactly, so re-applying prod is a no-op. Any other value (e.g. "test")
+    namespaces every named resource — S3 bucket, SSM params, Lambda, ASG, IAM
+    roles, SG, alarms, budget — so a second isolated pool can stand up in the SAME
+    account+region without colliding. Point a non-prod env at your dev/test hosts
+    (relay_allowlist) + a throwaway signing key to exercise the real AWS infra end
+    to end, then `terraform destroy` it.
+  EOT
+  type        = string
+  default     = "prod"
+}
+
 # ── Pool sizing & placement ─────────────────────────────────────────────────
 
 variable "primary_region" {

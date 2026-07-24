@@ -19,7 +19,7 @@ data "aws_availability_zones" "available" {
 
 locals {
   azs         = slice(data.aws_availability_zones.available.names, 0, var.az_count)
-  name        = "pollis-relay-${var.region}"
+  name        = "${var.name_prefix}-${var.region}"
   vpc_cidr    = "10.20.0.0/16"
   subnet_bits = 8
 }

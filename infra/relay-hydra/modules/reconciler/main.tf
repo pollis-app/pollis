@@ -13,8 +13,8 @@ terraform {
 data "aws_caller_identity" "current" {}
 
 locals {
-  function_name = "pollis-relay-hydra-reconciler"
-  metric_ns     = "PollisRelayHydra"
+  function_name = "${var.name_prefix}-reconciler"
+  metric_ns     = var.metric_namespace
 }
 
 # ── Package (zero deps: SDK v3 + node:crypto are in the runtime) ─────────────
