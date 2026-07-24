@@ -206,7 +206,7 @@
             <p>The server can see <strong>who</strong> is messaging <strong>when</strong>, but not <strong>what</strong>.</p>
           </div>
           <div class="dev">
-            <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. Private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) through the <code>keyring</code> crate — never on disk, never sent anywhere.</p>
+            <p>Client-side MLS encryption (RFC 9420) via <code>openmls</code>. Private keys live in the OS keystore (macOS Keychain / Windows Credential Manager / Linux Secret Service) through the <code>keyring</code> crate, never on disk, never sent anywhere.</p>
             <p>Voice is end-to-end encrypted too: audio frames are AES-128-GCM encrypted by libwebrtc's <code>FrameCryptor</code> post-Opus / pre-SRTP, keyed by a 32-byte secret derived from the channel's MLS group via <code>MlsGroup::export_secret("pollis/voice/v1", epoch, 32)</code>. The LiveKit SFU forwards ciphertext only; the key rotates on every MLS epoch advance.</p>
             <p>Server sees: user IDs, group/channel membership, message timestamps, sizes, public keys, voice presence and RTP routing metadata. Server does not see: message plaintext, file contents, voice audio, private keys.</p>
           </div>
@@ -217,12 +217,12 @@
         <div class="faq-question">Can the server tell who sent a message?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Not from what it stores. The saved record of a message no longer says who sent it — only the people in the conversation can tell, from the sealed contents. So a database breach, or a legal demand for stored data, can't reveal who said what.</p>
+            <p>Not from what it stores. The saved record of a message no longer says who sent it, only the people in the conversation can tell, from the sealed contents. So a database breach, or a legal demand for stored data, can't reveal who said what.</p>
             <p>One honest caveat, stated plainly: at the instant you hit send, the delivery server still checks that you're allowed to post in that conversation, so in that moment it does see it's you. Removing even that is future work.</p>
           </div>
           <div class="dev">
             <p>Sealed sender (shipped). MLS already authenticates the sender inside the ciphertext via the message's <code>BasicCredential</code> (<code>{user_id}:{device_id}</code>), so the plaintext <code>sender_id</code> the server used to store was cryptographically redundant. The stored envelope is now sealed (migration <code>000008_message_envelope_sealed_sender.sql</code>) and the recipient attributes the message from the MLS credential on decrypt, not from a server column.</p>
-            <p>Scope is at-rest only: the Delivery Service still authenticates the send with an <code>X-Pollis-User</code> header, so it sees the sender at the live moment. Anonymous membership proofs — which would remove even that — are future work, not shipped.</p>
+            <p>Scope is at-rest only: the Delivery Service still authenticates the send with an <code>X-Pollis-User</code> header, so it sees the sender at the live moment. Anonymous membership proofs (which would remove even that) are future work, not shipped.</p>
           </div>
         </div>
       </div>
@@ -231,10 +231,10 @@
         <div class="faq-question">Does the length of my messages give anything away?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>No. Every text message is padded out to a standard size before it's sealed, so its length reveals nothing — the server can't tell a one-word reply from a long paragraph by measuring it. (Attachments are handled separately and aren't padded.)</p>
+            <p>No. Every text message is padded out to a standard size before it's sealed, so its length reveals nothing, the server can't tell a one-word reply from a long paragraph by measuring it. (Attachments are handled separately and aren't padded.)</p>
           </div>
           <div class="dev">
-            <p>Text plaintext is padded to fixed size buckets before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>), so ciphertext size no longer correlates with message length. Attachments are the exception — they're shared via convergent encryption keyed on real file size, so they aren't bucketed.</p>
+            <p>Text plaintext is padded to fixed size buckets before MLS encryption (<code>pollis-core/src/commands/messages/framing.rs</code>), so ciphertext size no longer correlates with message length. Attachments are the exception, they're shared via convergent encryption keyed on real file size, so they aren't bucketed.</p>
           </div>
         </div>
       </div>
@@ -243,10 +243,10 @@
         <div class="faq-question">Do notifications leak who's messaging me?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>No. The real-time "new message" ping that tells your app to go fetch something no longer carries who sent it. It's just a nudge — your device learns the real sender only after it opens the sealed message.</p>
+            <p>No. The real-time "new message" ping that tells your app to go fetch something no longer carries who sent it. It's just a nudge, your device learns the real sender only after it opens the sealed message.</p>
           </div>
           <div class="dev">
-            <p>The realtime signalling payload for <code>new_message</code> is stripped of <code>sender_id</code> — it's a wake-up ping only, and the recipient re-derives the sender from the decrypted MLS envelope. Same metadata-minimization work as sealed sender.</p>
+            <p>The realtime signalling payload for <code>new_message</code> is stripped of <code>sender_id</code>, it's a wake-up ping only, and the recipient re-derives the sender from the decrypted MLS envelope. Same metadata-minimization work as sealed sender.</p>
           </div>
         </div>
       </div>
@@ -255,7 +255,7 @@
         <div class="faq-question">What happens if someone's cryptographic key changes?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Pollis detects it automatically and warns you. A red shield appears next to that person's name in every conversation you share — direct messages, group member lists, channels — and an inline notice shows up in the chat so you can re-verify them out-of-band (in person, by phone, however you trust).</p>
+            <p>Pollis detects it automatically and warns you. A red shield appears next to that person's name in every conversation you share (direct messages, group member lists, channels) and an inline notice shows up in the chat so you can re-verify them out-of-band (in person, by phone, however you trust).</p>
             <p>You only need to verify a person once. After that, the green shield follows them everywhere they appear in your account. If their key ever changes, all those shields turn red at the same moment.</p>
           </div>
           <div class="dev">
@@ -273,7 +273,7 @@
             <p>If you need a permanent archive of everything you've ever said, Pollis isn't the right tool.</p>
           </div>
           <div class="dev">
-            <p>Message history is not a product guarantee. A new device joining an existing MLS group receives keys for the current epoch only — no historical backfill. Identity reset wipes local message storage. No encrypted cloud backup (no Megolm-style key-backup), and none is planned. This is explicit in <code>CLAUDE.md</code> as a design principle: simpler model, smaller attack surface, no key escrow.</p>
+            <p>Message history is not a product guarantee. A new device joining an existing MLS group receives keys for the current epoch only, no historical backfill. Identity reset wipes local message storage. No encrypted cloud backup (no Megolm-style key-backup), and none is planned. This is explicit in <code>CLAUDE.md</code> as a design principle: simpler model, smaller attack surface, no key escrow.</p>
           </div>
         </div>
       </div>
@@ -285,7 +285,7 @@
             <p>macOS, Windows, and Linux.</p>
           </div>
           <div class="dev">
-            <p>macOS (universal binary — Apple Silicon + Intel), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID on macOS, Azure Trusted Signing on Windows.</p>
+            <p>macOS (universal binary, Apple Silicon + Intel), Windows x64, Linux (<code>.deb</code>, <code>.rpm</code>, <code>.AppImage</code>, AUR). Binaries are code-signed: Apple Developer ID on macOS, Azure Trusted Signing on Windows.</p>
           </div>
         </div>
       </div>
@@ -297,7 +297,7 @@
             <p>No.</p>
           </div>
           <div class="dev">
-            <p>No. Voice/media is implemented directly in Rust (not in the webview), so mobile isn't a UI-only port — it would require native clients.</p>
+            <p>No. Voice/media is implemented directly in Rust (not in the webview), so mobile isn't a UI-only port, it would require native clients.</p>
           </div>
         </div>
       </div>
@@ -318,7 +318,7 @@
         <div class="faq-question">How do I know the app I downloaded hasn't been tampered with?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Pollis publishes a fingerprint of every version it releases into a public, tamper-evident log. A small tool, <code>pollis-verify</code>, lets anyone confirm that the app they're running is one Pollis has publicly published — so nobody can quietly slip a single person a tampered build without it either showing up in that public log forever or being conspicuously missing from it.</p>
+            <p>Pollis publishes a fingerprint of every version it releases into a public, tamper-evident log. A small tool, <code>pollis-verify</code>, lets anyone confirm that the app they're running is one Pollis has publicly published, so nobody can quietly slip a single person a tampered build without it either showing up in that public log forever or being conspicuously missing from it.</p>
             <p>Honest caveat: this proves the app matches what Pollis published, not yet that those bytes were built from the public source. Letting outsiders rebuild it byte-for-byte and confirm the match is still being worked on.</p>
           </div>
           <div class="dev">
@@ -356,7 +356,7 @@
         <div class="faq-question">Do you store my email address?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Yes — we need it to send you sign-in codes. No phone number required.</p>
+            <p>Yes, we need it to send you sign-in codes. No phone number required.</p>
           </div>
           <div class="dev">
             <p>Yes. Email OTP is the auth primitive, so the email is stored server-side to deliver the OTP and bind it to the account. Session tokens are held in the OS keystore.</p>
@@ -368,7 +368,7 @@
         <div class="faq-question">How do I create or join a group?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>Anyone can create a group inside the app. To add someone, invite them by their Pollis username — they need an account already.</p>
+            <p>Anyone can create a group inside the app. To add someone, invite them by their Pollis username, they need an account already.</p>
           </div>
           <div class="dev">
             <p>Groups are created via the <code>create_group</code> backend command; members are added by username via <code>invite_to_group</code>. Adding someone generates an MLS Welcome that seeds their device into the group ratchet at the current epoch. DMs are implemented as 2-person MLS groups.</p>
@@ -380,7 +380,7 @@
         <div class="faq-question">What happens if the server goes down?</div>
         <div class="faq-answer">
           <div class="plain">
-            <p>You won't be able to send or receive new messages until it's back, but you can still open the app and read what you already have. A server outage is never a privacy problem — only a reachability one.</p>
+            <p>You won't be able to send or receive new messages until it's back, but you can still open the app and read what you already have. A server outage is never a privacy problem, only a reachability one.</p>
           </div>
           <div class="dev">
             <p>The server is required for message delivery, MLS commit routing, and R2 uploads. Read-only operation against the local encrypted SQLite store still works during an outage. Because the server can't decrypt, downtime has no confidentiality impact.</p>
@@ -407,7 +407,7 @@
             <p>Pollis is in open preview and has not been independently audited. If your physical safety depends on unbreakable communication, use a mature, audited tool built for that threat model.</p>
           </div>
           <div class="dev">
-            <p>Open preview status — no third-party cryptographic audit yet. Protocol choices (MLS, keystore-backed identity, client-side encryption) target a Slack-style workspace threat model, not a nation-state adversary. For high-risk use, pick a tool with a documented audit history.</p>
+            <p>Open preview status, no third-party cryptographic audit yet. Protocol choices (MLS, keystore-backed identity, client-side encryption) target a Slack-style workspace threat model, not a nation-state adversary. For high-risk use, pick a tool with a documented audit history.</p>
           </div>
         </div>
       </div>
