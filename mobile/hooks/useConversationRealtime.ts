@@ -13,9 +13,13 @@
 
 import { useEffect, useRef } from "react";
 import type { Room } from "livekit-client";
+import { useQueryClient } from "@tanstack/react-query";
 import { connectRealtime, disconnectRealtime } from "../lib/realtime/client";
 import type { RealtimeEvent } from "../lib/realtime/events";
 import { useIngestConversation, type ConversationKind } from "./queries/useMessages";
+import { groupQueryKeys } from "./queries/useUserGroups";
+import { groupInviteQueryKeys } from "./queries/useGroupInvites";
+import { dmQueryKeys } from "./queries/useDMChannels";
 
 export function useConversationRealtime(
   conversationId: string | null,
@@ -23,11 +27,14 @@ export function useConversationRealtime(
   groupId?: string,
 ) {
   const ingest = useIngestConversation();
+  const queryClient = useQueryClient();
 
   // Refs keep the (stable-identity) data handler reading current values
   // without forcing a reconnect on every render.
   const ingestRef = useRef(ingest);
   ingestRef.current = ingest;
+  const qcRef = useRef(queryClient);
+  qcRef.current = queryClient;
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
 
@@ -46,6 +53,31 @@ export function useConversationRealtime(
     let room: Room | null = null;
 
     const handleEvent = (event: RealtimeEvent) => {
+      // Membership / role events arrive on the conversation (group) room.
+      // Data-refresh parity only — invalidate the affected queries so the
+      // member list and group/DM lists reflect live changes. Banner UX
+      // (desktop's ephemeral rosterChangeStore notices) is future work.
+      if (event.type === "member_role_changed") {
+        // Mirror desktop: refresh the affected group's member list and the
+        // groups list (which embeds the current user's role).
+        void qcRef.current.invalidateQueries({
+          queryKey: groupInviteQueryKeys.members(event.group_id),
+        });
+        void qcRef.current.invalidateQueries({ queryKey: groupQueryKeys.all });
+        return;
+      }
+      if (event.type === "roster_changed") {
+        // Mirror desktop's INTENT (data only): refresh the affected
+        // conversation's member/detail queries plus the groups and DM lists
+        // so membership reflects live. The ephemeral roster BANNER UI is a
+        // separate enhancement, not ported here.
+        void qcRef.current.invalidateQueries({
+          queryKey: groupInviteQueryKeys.members(event.conversation_id),
+        });
+        void qcRef.current.invalidateQueries({ queryKey: groupQueryKeys.all });
+        void qcRef.current.invalidateQueries({ queryKey: dmQueryKeys.all });
+        return;
+      }
       if (
         event.type !== "new_message" &&
         event.type !== "edited_message" &&
