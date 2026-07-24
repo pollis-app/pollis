@@ -122,7 +122,7 @@ export default function Preferences() {
   };
 
   return (
-    <Screen testID="screen-self-preferences">
+    <Screen testID="screen-self-preferences" centered>
       <Crumb segs={[{ label: "SELF" }, { label: "Preferences", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12 }}>

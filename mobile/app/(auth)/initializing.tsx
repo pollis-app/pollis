@@ -102,7 +102,7 @@ function Initializing() {
   ];
 
   return (
-    <Screen testID="screen-auth-initializing">
+    <Screen testID="screen-auth-initializing" centered>
       <Corner pos="tl" />
       <Corner pos="tr" />
       <Corner pos="bl" />

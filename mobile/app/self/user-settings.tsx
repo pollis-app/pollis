@@ -56,7 +56,7 @@ function UserSettings() {
   const avatarLabel = (handle || currentUser?.username || "us").slice(0, 2);
 
   return (
-    <Screen testID="screen-self-user-settings">
+    <Screen testID="screen-self-user-settings" centered>
       <Crumb
         segs={[{ label: "SELF" }, { label: "User settings", leaf: true }]}
       />

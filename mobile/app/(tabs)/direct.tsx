@@ -20,6 +20,9 @@ import {
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useLayoutClass } from "../../hooks/useLayoutClass";
+import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
+import { ChatView } from "../chat/[id]";
 
 function Direct() {
   const router = useRouter();
@@ -27,9 +30,18 @@ function Direct() {
   const { data: requests = [] } = useDMRequests();
   const acceptRequest = useAcceptDMRequest();
   const setSelectedConversationId = appStore.setSelectedConversationId;
+  const selectedConversationId = appStore.selectedConversationId;
+  // On regular (iPad) width the list is the left column of a two-pane
+  // master-detail; on compact it is the whole screen with push navigation.
+  const isRegular = useLayoutClass() === "regular";
+  const selectedDm = dms.find((d) => d.id === selectedConversationId);
+  const selectedHandle = selectedDm?.user2_identifier || undefined;
 
-  return (
-    <Screen testID="screen-direct">
+  // The single-column content — rendered as the whole screen on compact, or as
+  // the left list column of the two-pane on regular. Byte-for-byte identical on
+  // compact save for the row onPress, which only skips the push on regular.
+  const listColumn = (
+    <>
       <Crumb segs={[{ label: "DIRECT", leaf: true }]} end={String(dms.length)} />
       <Body>
         {requests.length > 0 ? (
@@ -117,12 +129,17 @@ function Direct() {
               key={d.id}
               testID={`row-dm-${d.id}`}
               minHeight={64}
+              selected={isRegular && selectedConversationId === d.id}
               onPress={() => {
                 setSelectedConversationId(d.id);
-                router.push({
-                  pathname: "/chat/[id]",
-                  params: { id: d.id, kind: "dm", name: handle },
-                });
+                // On regular the right pane updates in place; on compact push
+                // the conversation as today.
+                if (!isRegular) {
+                  router.push({
+                    pathname: "/chat/[id]",
+                    params: { id: d.id, kind: "dm", name: handle },
+                  });
+                }
               }}
               glyph={<Avatar label={label} />}
               name={
@@ -150,6 +167,30 @@ function Direct() {
           NEW DIRECT MESSAGE
         </Button>
       </BottomAction>
+    </>
+  );
+
+  return (
+    <Screen testID="screen-direct">
+      {isRegular ? (
+        <TwoPane
+          list={listColumn}
+          detail={
+            selectedConversationId ? (
+              <ChatView
+                conversationId={selectedConversationId}
+                kind="dm"
+                embedded
+                name={selectedHandle}
+              />
+            ) : (
+              <DetailPlaceholder />
+            )
+          }
+        />
+      ) : (
+        listColumn
+      )}
     </Screen>
   );
 }

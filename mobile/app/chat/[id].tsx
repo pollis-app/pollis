@@ -3,7 +3,7 @@ import { View, Text, ScrollView, TextInput, Pressable } from "react-native";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Screen, Crumb, Avatar, Ctx, CtxAct } from "../../components/ui";
 import { Icon } from "../../components/icons";
-import { semantic, type as ty, fonts, r } from "../../theme/tokens";
+import { palette, semantic, type as ty, fonts, r } from "../../theme/tokens";
 import {
   useMessages,
   useSendMessage,
@@ -157,16 +157,31 @@ function Msg({
   );
 }
 
-function TextChat() {
+// Props let this screen double as an embedded right-pane conversation on the
+// two-pane (regular/iPad) layout. Route usage passes NO props, so every value
+// falls back to the route params exactly as before.
+type ChatViewProps = {
+  conversationId?: string | null;
+  kind?: ConversationKind | null;
+  groupId?: string;
+  name?: string;
+  embedded?: boolean;
+};
+
+function TextChat(props: ChatViewProps = {}) {
   const router = useRouter();
   const params = useLocalSearchParams<{
     id?: string;
     kind?: string;
     name?: string;
   }>();
-  const conversationId = params.id ?? null;
+  const embedded = props.embedded ?? false;
+  const conversationId = props.conversationId ?? params.id ?? null;
   const kind: ConversationKind | null =
-    params.kind === "channel" || params.kind === "dm" ? params.kind : null;
+    props.kind ??
+    (params.kind === "channel" || params.kind === "dm" ? params.kind : null);
+  const displayName =
+    props.name ?? (typeof params.name === "string" ? params.name : undefined);
 
   const [draft, setDraft] = useState("");
   const [actionTarget, setActionTarget] = useState<Message | null>(null);
@@ -188,7 +203,9 @@ function TextChat() {
   // group room is named by group_id (set on the store when a channel was
   // opened); DMs use the conversation_id directly. No-op when realtime is
   // unavailable.
-  const groupId = kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined;
+  const groupId =
+    props.groupId ??
+    (kind === "channel" ? appStore.selectedGroupId ?? undefined : undefined);
   useConversationRealtime(conversationId, kind, groupId);
 
   // Contextual notification permission: opening a conversation is the first
@@ -264,12 +281,12 @@ function TextChat() {
   }, [kind, messages, currentUser?.id]);
 
   const title =
-    (typeof params.name === "string" && params.name.trim()) ||
+    (displayName && displayName.trim()) ||
     peerName ||
     (kind === "dm" ? "Direct message" : "Channel");
 
-  return (
-    <Screen testID="screen-chat">
+  const content = (
+    <>
       <Crumb segs={[{ label: ctxLabel, leaf: true }]} />
       <ScrollView
         ref={scrollRef}
@@ -366,6 +383,7 @@ function TextChat() {
       </ScrollView>
 
       <Ctx
+        hideBack={embedded}
         cr={ctxLabel}
         name={
           <View
@@ -747,8 +765,19 @@ function TextChat() {
           </Pressable>
         </Pressable>
       ) : null}
-    </Screen>
+    </>
+  );
+
+  // Embedded (two-pane right column) sits inside the list screen's own
+  // <Screen>/SafeAreaView, so wrap in a plain View to avoid double-insetting.
+  // Route usage renders the full <Screen> exactly as before.
+  return embedded ? (
+    <View style={{ flex: 1, backgroundColor: palette.bg }}>{content}</View>
+  ) : (
+    <Screen testID="screen-chat">{content}</Screen>
   );
 }
+
+export const ChatView = observer(TextChat);
 
 export default observer(TextChat);

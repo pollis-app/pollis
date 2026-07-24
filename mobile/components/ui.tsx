@@ -11,8 +11,9 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { palette, semantic, type as ty, r, space } from "../theme/tokens";
+import { palette, semantic, type as ty, r, space, layout } from "../theme/tokens";
 import { useTheme } from "./theme";
+import { useLayoutClass } from "../hooks/useLayoutClass";
 import { Icon } from "./icons";
 
 /* ── Text ─────────────────────────────────────────────────────────── */
@@ -39,22 +40,43 @@ export function Txt({
 export function Screen({
   children,
   testID,
+  centered,
 }: {
   children: React.ReactNode;
   // Each route sets `screen-<route>` here so e2e flows have one stable root
   // anchor per screen. Inert in production.
   testID?: string;
+  // Single-column screens (auth, self, forms) set this. On `regular` (iPad)
+  // width it constrains + centers the content to a readable column; on
+  // `compact` (phones, narrow panes) it is a no-op — children render exactly as
+  // today, with no wrapper, so the phone tree is byte-for-byte unchanged.
+  centered?: boolean;
 }) {
   // Subscribe to the accent so the whole subtree re-renders (and the token
   // getters resolve to the new color) when it changes.
   useTheme();
+  const cls = useLayoutClass();
+  const centerBody = centered && cls === "regular";
   return (
     <SafeAreaView
       testID={testID}
       style={{ flex: 1, backgroundColor: palette.bg }}
       edges={["top", "bottom"]}
     >
-      {children}
+      {centerBody ? (
+        <View
+          style={{
+            flex: 1,
+            width: "100%",
+            maxWidth: layout.readableMaxWidth,
+            alignSelf: "center",
+          }}
+        >
+          {children}
+        </View>
+      ) : (
+        children
+      )}
     </SafeAreaView>
   );
 }
@@ -640,6 +662,7 @@ export function Ctx({
   name,
   actions,
   testID,
+  hideBack,
 }: {
   cr?: string;
   name: React.ReactNode;
@@ -647,6 +670,9 @@ export function Ctx({
   // Optional anchor on the context strip container. The back Pressable always
   // carries `btn-back` for navigation flows.
   testID?: string;
+  // Two-pane embedded mode (issue #622): the conversation sits in a pane with
+  // nothing to pop, so the back affordance is omitted. Default keeps back.
+  hideBack?: boolean;
 }) {
   const router = useRouter();
   return (
@@ -664,23 +690,25 @@ export function Ctx({
         backgroundColor: palette.bg,
       }}
     >
-      <Pressable
-        onPress={() => router.back()}
-        testID="btn-back"
-        accessibilityRole="button"
-        accessibilityLabel="Back"
-        style={{
-          width: 38,
-          height: 38,
-          alignItems: "center",
-          justifyContent: "center",
-          borderWidth: 1,
-          borderColor: semantic.hair,
-          borderRadius: r.sm,
-        }}
-      >
-        <Icon.arrowLeft />
-      </Pressable>
+      {hideBack ? null : (
+        <Pressable
+          onPress={() => router.back()}
+          testID="btn-back"
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          style={{
+            width: 38,
+            height: 38,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: 1,
+            borderColor: semantic.hair,
+            borderRadius: r.sm,
+          }}
+        >
+          <Icon.arrowLeft />
+        </Pressable>
+      )}
       <View style={{ flex: 1, minWidth: 0 }}>
         {cr ? (
           <Text style={[ty.label, { fontSize: 9, letterSpacing: 1.8 }]}>

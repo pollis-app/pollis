@@ -77,7 +77,7 @@ export default function Enrollment() {
   };
 
   return (
-    <Screen testID="screen-auth-enrollment">
+    <Screen testID="screen-auth-enrollment" centered>
       <Crumb segs={[{ label: "AUTH" }, { label: "Pair device", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 24, paddingTop: 24, gap: 18 }}>

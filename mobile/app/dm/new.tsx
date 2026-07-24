@@ -40,7 +40,7 @@ export default function NewDM() {
     !search.isLoading && !search.isError && query.trim().length >= 2 && !found;
 
   return (
-    <Screen testID="screen-dm-new">
+    <Screen testID="screen-dm-new" centered>
       <Crumb
         segs={[{ label: "DIRECT" }, { label: "New", leaf: true }]}
       />

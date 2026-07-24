@@ -50,7 +50,7 @@ function NewGroup() {
   };
 
   return (
-    <Screen testID="screen-group-new">
+    <Screen testID="screen-group-new" centered>
       <Crumb segs={[{ label: "GROUPS" }, { label: "New", leaf: true }]} />
       <Body>
         <View style={{ paddingHorizontal: 18, paddingTop: 12, gap: 16 }}>

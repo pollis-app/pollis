@@ -78,7 +78,7 @@ function ChangeEmail() {
   const error = requestOtp.error ?? verify.error;
 
   return (
-    <Screen testID="screen-self-change-email">
+    <Screen testID="screen-self-change-email" centered>
       <Crumb
         segs={[
           { label: "SELF" },

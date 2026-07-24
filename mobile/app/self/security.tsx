@@ -76,7 +76,7 @@ export default function Security() {
   };
 
   return (
-    <Screen testID="screen-self-security">
+    <Screen testID="screen-self-security" centered>
       <Crumb segs={[{ label: "SELF" }, { label: "Security", leaf: true }]} />
       <Body>
         {pendingEnrollments.length > 0 ? (

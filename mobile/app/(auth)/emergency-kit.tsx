@@ -43,7 +43,7 @@ function EmergencyKit() {
   };
 
   return (
-    <Screen testID="screen-auth-emergency-kit">
+    <Screen testID="screen-auth-emergency-kit" centered>
       <Crumb
         segs={[{ label: "AUTH" }, { label: "Emergency kit", leaf: true }]}
       />

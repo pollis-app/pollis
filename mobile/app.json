@@ -4,7 +4,7 @@
     "slug": "mobile",
     "scheme": "pollis",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
@@ -21,7 +21,16 @@
         "tinted": "./assets/ios-tinted.png"
       },
       "infoPlist": {
-        "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop."
+        "NSCameraUsageDescription": "Pollis needs your camera to scan the pairing QR code from your desktop.",
+        "UISupportedInterfaceOrientations": [
+          "UIInterfaceOrientationPortrait"
+        ],
+        "UISupportedInterfaceOrientations~ipad": [
+          "UIInterfaceOrientationPortrait",
+          "UIInterfaceOrientationPortraitUpsideDown",
+          "UIInterfaceOrientationLandscapeLeft",
+          "UIInterfaceOrientationLandscapeRight"
+        ]
       },
       "bundleIdentifier": "com.anonymous.mobile"
     },

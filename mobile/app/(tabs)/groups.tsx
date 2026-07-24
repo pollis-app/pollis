@@ -20,6 +20,9 @@ import {
 } from "../../hooks/queries";
 import { appStore } from "../../stores/appStore";
 import { observer } from "mobx-react-lite";
+import { useLayoutClass } from "../../hooks/useLayoutClass";
+import { TwoPane, DetailPlaceholder } from "../../components/MasterDetail";
+import { ChatView } from "../chat/[id]";
 
 function Groups() {
   const router = useRouter();
@@ -29,11 +32,19 @@ function Groups() {
   const declineInvite = useDeclineGroupInvite();
   const setSelectedGroupId = appStore.setSelectedGroupId;
   const setSelectedChannelId = appStore.setSelectedChannelId;
+  const selectedGroupId = appStore.selectedGroupId;
+  const selectedChannelId = appStore.selectedChannelId;
+  // On regular (iPad) width the list is the left column of a two-pane
+  // master-detail; on compact it is the whole screen with push navigation.
+  const isRegular = useLayoutClass() === "regular";
 
   const totalChannels = groups.reduce((acc, g) => acc + g.channels.length, 0);
 
-  return (
-    <Screen testID="screen-groups">
+  // The single-column content — rendered as the whole screen on compact, or as
+  // the left list column of the two-pane on regular. Byte-for-byte identical on
+  // compact save for the row onPress, which only skips the push on regular.
+  const listColumn = (
+    <>
       <Crumb segs={[{ label: "GROUPS", leaf: true }]} end={String(totalChannels)} />
       <Body>
         {invites.length > 0 ? (
@@ -130,16 +141,21 @@ function Groups() {
               <ListRow
                 key={c.id}
                 testID={`row-channel-${c.id}`}
+                selected={isRegular && selectedChannelId === c.id}
                 glyph={<Icon.hash color={semantic.mute} />}
                 name={c.name}
                 sub={c.description ?? undefined}
                 onPress={() => {
                   setSelectedGroupId(g.id);
                   setSelectedChannelId(c.id);
-                  router.push({
-                    pathname: "/chat/[id]",
-                    params: { id: c.id, kind: "channel", name: c.name },
-                  });
+                  // On regular the right pane updates in place; on compact push
+                  // the channel chat as today.
+                  if (!isRegular) {
+                    router.push({
+                      pathname: "/chat/[id]",
+                      params: { id: c.id, kind: "channel", name: c.name },
+                    });
+                  }
                 }}
               />
             ))}
@@ -165,6 +181,30 @@ function Groups() {
           Join Group
         </Button>
       </BottomAction>
+    </>
+  );
+
+  return (
+    <Screen testID="screen-groups">
+      {isRegular ? (
+        <TwoPane
+          list={listColumn}
+          detail={
+            selectedChannelId ? (
+              <ChatView
+                conversationId={selectedChannelId}
+                kind="channel"
+                groupId={selectedGroupId ?? undefined}
+                embedded
+              />
+            ) : (
+              <DetailPlaceholder />
+            )
+          }
+        />
+      ) : (
+        listColumn
+      )}
     </Screen>
   );
 }

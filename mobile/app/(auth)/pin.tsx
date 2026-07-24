@@ -141,7 +141,7 @@ function AuthPIN() {
     unlockMutation.isPending;
 
   return (
-    <Screen testID="screen-auth-pin">
+    <Screen testID="screen-auth-pin" centered>
       <Crumb
         segs={[
           { label: "AUTH" },
