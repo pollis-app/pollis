@@ -44,8 +44,17 @@ if [ ! -s "$TMP/identity.key" ] || [ ! -s "$TMP/identity.key.crt" ]; then
   exit 1
 fi
 
-KEY_B64="$(base64 -w0 "$TMP/identity.key")"
-CERT_B64="$(base64 -w0 "$TMP/identity.key.crt")"
+# The relay runs as root in the container, so the identity it writes into the bind
+# mount is root-owned 0600 — the host user can stat it (hence the -s checks above)
+# but not read it. Stream the bytes back out THROUGH the image instead of chown'ing
+# the host copies: `cat` runs as root inside, we base64 on the host.
+KEY_B64="$(docker run --rm -v "$TMP:/id" --entrypoint cat "$IMAGE" /id/identity.key | base64 -w0)"
+CERT_B64="$(docker run --rm -v "$TMP:/id" --entrypoint cat "$IMAGE" /id/identity.key.crt | base64 -w0)"
+
+if [ -z "$KEY_B64" ] || [ -z "$CERT_B64" ]; then
+  echo "failed to read the generated identity out of the container" >&2
+  exit 1
+fi
 
 aws ssm put-parameter --region "$REGION" --name "$KEY_PARAM" --type SecureString \
   --overwrite --value "$KEY_B64" \
