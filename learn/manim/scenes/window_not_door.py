@@ -1,9 +1,9 @@
 """
-Topic 5 — "Forward secrecy and post-compromise security" (#594).
+Topic 5, "Forward secrecy and post-compromise security" (#594).
 
 One continuous ~2:45 scene, six beats, NO audio (added later). Time runs left to
 right in every beat so both properties are literally directional. The page and
-this scene never say or imply "messages delete themselves" — the claim is about
+this scene never say or imply "messages delete themselves", the claim is about
 what a stolen key opens, backwards and forwards.
 
 Render (see learn/manim/render.sh):
@@ -12,7 +12,7 @@ Render (see learn/manim/render.sh):
 Accuracy anchors:
   - OpenMLS / RFC 9420 §8 key schedule; pollis-core/src/commands/mls.rs
   - .codesight/wiki/mls.md → "Reconcile Flow" (epoch advances on every commit)
-  - CLAUDE.md → "Storage" (local ciphertext + MLS state — the "screen" caveat)
+  - CLAUDE.md → "Storage" (local ciphertext + MLS state, the "screen" caveat)
   - docs/security-whitepaper.md + Topic 1 (metadata is untouched by either
     property)
 """
@@ -22,6 +22,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -90,11 +91,11 @@ class WindowNotDoor(Scene):
         ])
         return axis, marks
 
-    # ── Scene 1 (0:00–0:20) — assume the worst ──────────────────────────────
+    # ── Scene 1 (0:00–0:20), assume the worst ──────────────────────────────
     def beat_setup(self):
         head = Text("assume the worst: someone has a key off your device, today",
                     color=AMBER).scale(0.52).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         self.axis, self.marks = self.timeline()
         self.play(Create(self.axis), FadeIn(self.marks))
@@ -112,15 +113,15 @@ class WindowNotDoor(Scene):
         self.hold_until(20)
         self.play(FadeOut(q1), FadeOut(q2), FadeOut(head))
 
-    # ── Scene 2 (0:20–0:55) — forward secrecy ───────────────────────────────
+    # ── Scene 2 (0:20–0:55), forward secrecy ───────────────────────────────
     def beat_forward_secrecy(self):
         head = Text("the past: forward secrecy", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         for i in (1, 0):
             self.play(Indicate(self.marks[i], color=DANGER, scale_factor=1.1), run_time=0.4)
-        nothing = Text("they try yesterday's messages — and get nothing.",
+        nothing = Text("they try yesterday's messages, and get nothing.",
                        color=DANGER).scale(0.48).move_to([0, -1.1, 0])
         self.play(FadeIn(nothing),
                   *[self.marks[i].box.animate.set_stroke(OK) for i in (0, 1)],
@@ -148,19 +149,19 @@ class WindowNotDoor(Scene):
         self.play(FadeIn(refused))
         self.play(*[c.box.animate.set_stroke(MUTED).set_opacity(0.35) for c in chain[:2]],
                   *[c.label.animate.set_opacity(0.35) for c in chain[:2]])
-        deleted = Text("and once a key is used, it is deleted — "
+        deleted = Text("and once a key is used, it is deleted, "
                        "not on your device, not on our servers, nowhere.",
                        color=FG).scale(0.42).move_to([0, -3.8, 0])
         self.play(FadeIn(deleted))
         self.hold_until(55)
         self.play(FadeOut(VGroup(head, chain, arrows, back, refused, oneway, deleted)))
 
-    # ── Scene 3 (0:55–1:20) — the caveat that gets skipped ──────────────────
+    # ── Scene 3 (0:55–1:20), the caveat that gets skipped ──────────────────
     def beat_caveat(self):
-        head = Text("the honest caveat — do not skip this one",
+        head = Text("one important caveat",
                     color=DANGER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         spine = VGroup(self.axis, self.marks, self.stolen, self.stolen_arrow)
-        self.play(Write(head), spine.animate.set_opacity(0.0))
+        self.play(AddTextLetterByLetter(head, run_time=0.7), spine.animate.set_opacity(0.0))
 
         screen = panel(7.0, 2.6, DANGER).move_to([0, -1.4, 0])
         lines = VGroup(
@@ -175,7 +176,7 @@ class WindowNotDoor(Scene):
                      "that is not a cryptography question.",
                      color=DANGER).scale(0.44).move_to([0, -3.2, 0])
         self.play(FadeIn(reads))
-        real = Text("what forward secrecy DOES promise: traffic recorded months ago "
+        real = Text("what forward secrecy does protect: traffic recorded months ago "
                     "stays sealed, even with today's key.", color=OK).scale(0.4)
         real.move_to([0, 1.7, 0])
         self.play(FadeIn(real))
@@ -183,11 +184,11 @@ class WindowNotDoor(Scene):
         self.play(FadeOut(VGroup(head, screen, lines, cap, reads, real)),
                   spine.animate.set_opacity(1.0))
 
-    # ── Scene 4 (1:20–2:00) — post-compromise security ──────────────────────
+    # ── Scene 4 (1:20–2:00), post-compromise security ──────────────────────
     def beat_pcs(self):
         head = Text("the future: post-compromise security",
                     color=AMBER).scale(0.6).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         reading = Text("the attacker is reading. this is a real break.",
                        color=DANGER).scale(0.46).move_to([0, -1.1, 0])
@@ -208,7 +209,7 @@ class WindowNotDoor(Scene):
                   self.marks[4].label.animate.set_color(OK))
         self.play(Indicate(self.marks[4], color=OK, scale_factor=1.15), run_time=0.6)
 
-        out = Text("epoch 9 arrives — and the attacker is out.",
+        out = Text("epoch 9 arrives, and the attacker is out.",
                    color=OK).scale(0.5).move_to([0, -1.1, 0])
         self.play(FadeOut(flow), FadeIn(out),
                   self.stolen.box.animate.set_stroke(MUTED).set_opacity(0.35),
@@ -223,11 +224,11 @@ class WindowNotDoor(Scene):
         self.hold_until(120)
         self.play(FadeOut(VGroup(head, ordinary, out, nobody, healed)))
 
-    # ── Scene 5 (2:00–2:25) — the window ────────────────────────────────────
+    # ── Scene 5 (2:00–2:25), the window ────────────────────────────────────
     def beat_window(self):
         head = Text("a stolen key is a window, not a door",
                     color=AMBER).scale(0.6).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         band = panel(5.2, 1.5, DANGER, fill_opacity=0.12, fill=DANGER)
         band.move_to([0, 0.4, 0])
@@ -241,7 +242,7 @@ class WindowNotDoor(Scene):
         narrow = panel(2.2, 1.5, DANGER, fill_opacity=0.12, fill=DANGER)
         narrow.move_to([0, 0.4, 0])
         self.play(band.animate.become(narrow), run_time=1.0)
-        more = Text("the more the group talks, the narrower it gets — "
+        more = Text("the more the group talks, the narrower it gets, "
                     "which is what cheap rekeying bought us.",
                     color=FG).scale(0.44).move_to([0, -2.0, 0])
         self.play(FadeIn(more))
@@ -249,11 +250,11 @@ class WindowNotDoor(Scene):
         self.play(FadeOut(VGroup(head, band, left_wall, right_wall, more,
                                  self.axis, self.marks, self.stolen, self.stolen_arrow)))
 
-    # ── Scene 6 (2:25–2:50) — the limits ────────────────────────────────────
+    # ── Scene 6 (2:25–2:50), the limits ────────────────────────────────────
     def beat_limits(self):
-        head = Text("the limits, because this gets oversold",
+        head = Text("the limits, stated plainly",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         rows = VGroup(
             chip("continuous access to your device → they get every update too",

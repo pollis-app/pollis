@@ -1,5 +1,5 @@
 """
-Topic 12 — "Reading the artifacts page and the in-app Security page" (#601).
+Topic 12, "Reading the artifacts page and the in-app Security page" (#601).
 
 One continuous ~3:00 scene, five beats, NO audio (added later). The dashboards
 are drawn as faithful RECREATIONS in the site palette rather than screenshots, so
@@ -11,11 +11,11 @@ Render (see learn/manim/render.sh):
 
 Accuracy anchors:
   - website/artifacts.html, website/artifacts.js (renderReleaseProofs, vTag)
-  - frontend/src/components/Security/BuildVerifyLine.tsx — the four verdict
+  - frontend/src/components/Security/BuildVerifyLine.tsx, the four verdict
     strings, verbatim
-  - frontend/src/pages/SecurityPage.tsx — the Security page surfaces
-  - pollis-core/src/commands/transparency.rs — BuildVerifyStatus semantics
-  - PR #587 — the `vv` prefix bug that hid a functional lookup failure
+  - frontend/src/pages/SecurityPage.tsx, the Security page surfaces
+  - pollis-core/src/commands/transparency.rs, BuildVerifyStatus semantics
+  - PR #587, the `vv` prefix bug that hid a functional lookup failure
   - Live values: verify.pollis.com binaries head, tree_size 60, root 37945cb2…
 """
 
@@ -24,6 +24,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -97,11 +98,11 @@ class ReadingTheDashboards(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:40) — the artifacts page, annotated ─────────────────
+    # ── Scene 1 (0:00–0:40), the artifacts page, annotated ─────────────────
     def beat_tour(self):
         head = Text("pollis.com/artifacts", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         releases = section(9.0, 1.1, "Latest releases",
                            "what we ship right now, and where to get it")
@@ -133,11 +134,11 @@ class ReadingTheDashboards(Scene):
         self.hold_until(40)
         self.play(FadeOut(VGroup(head, releases, proofs, note1, audit, keyb, caveat)))
 
-    # ── Scene 2 (0:40–1:20) — one row, decoded ──────────────────────────────
+    # ── Scene 2 (0:40–1:20), one row, decoded ──────────────────────────────
     def beat_row(self):
         head = Text("one row = one piece of a release", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         row = Text("darwin   aarch64   dmg   payload   774c8f…ea92   774c8f…ea92   [included ✓]",
                    font=MONO, color=FG).scale(0.36).move_to([0, 2.0, 0])
@@ -168,7 +169,7 @@ class ReadingTheDashboards(Scene):
         ).arrange(DOWN, buff=0.2, aligned_edge=LEFT).move_to([3.0, -0.4, 0])
         for c in climb:
             self.play(FadeIn(c, shift=UP * 0.1), run_time=0.35)
-        meaning = Text("a tick is not a box someone checked — "
+        meaning = Text("a tick is not a box someone checked, "
                        "it's a proof that was recomputed, and held",
                        color=OK).scale(0.42).move_to([0, -2.8, 0])
         self.play(FadeIn(meaning))
@@ -182,11 +183,11 @@ class ReadingTheDashboards(Scene):
         self.play(FadeOut(VGroup(head, box, row, parts, climb, meaning,
                                  pending, pending_note)))
 
-    # ── Scene 3 (1:20–1:50) — the same root, three places ───────────────────
+    # ── Scene 3 (1:20–1:50), the same root, three places ───────────────────
     def beat_same_root(self):
         head = Text("the same sixty-four characters, three places",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         def place(x, where, how):
             b = panel(4.3, 2.4, OK).move_to([x, 0.4, 0])
@@ -209,23 +210,23 @@ class ReadingTheDashboards(Scene):
             Text("=", color=OK).scale(0.8).move_to([2.3, 0.4, 0]),
         )
         self.play(Write(eqs))
-        nothing = Text("nothing more needs saying — the picture is the argument",
+        nothing = Text("nothing more needs saying, the picture is the argument",
                        color=MUTED).scale(0.4).move_to([0, -2.2, 0])
         self.play(FadeIn(nothing))
         self.hold_until(110)
         self.play(FadeOut(VGroup(head, a, b, c, eqs, nothing)))
 
-    # ── Scene 4 (1:50–2:45) — the four verdicts ─────────────────────────────
+    # ── Scene 4 (1:50–2:45), the four verdicts ─────────────────────────────
     def beat_verdicts(self):
         head = Text("in the app: Security → This build", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         v = section(11.0, 0.95, "Build publicly verified",
                     "this exact binary's fingerprint is in the public log",
                     color=OK, title_color=OK).move_to([0, 2.1, 0])
         p = section(11.0, 0.95, "Build publication pending",
-                    "the release isn't in the republished tree yet — normal right "
+                    "the release isn't in the republished tree yet, normal right "
                     "after a release", color=MUTED).move_to([0, 0.95, 0])
         self.play(FadeIn(v))
         self.play(FadeIn(p))
@@ -235,7 +236,7 @@ class ReadingTheDashboards(Scene):
                     "couldn't check: log unreachable, or this release predates the "
                     "exe layer", color=MUTED).move_to([0, -0.3, 0])
         m = section(11.0, 1.05, "Build not in public log",
-                    "the tag is published, a comparable fingerprint exists — and "
+                    "the tag is published, a comparable fingerprint exists, and "
                     "ours isn't among them", color=DANGER,
                     title_color=DANGER).move_to([0, -1.6, 0])
         self.play(FadeIn(u))
@@ -254,21 +255,21 @@ class ReadingTheDashboards(Scene):
 
         self.play(FadeOut(VGroup(v, p, u, m, diff)))
         confession = VGroup(
-            Text("we shipped that distinction wrong once —", color=FG).scale(0.46),
-            Text("and every honest macOS build was accused of being fake.",
+            Text("the difference is easy to misread,", color=FG).scale(0.46),
+            Text("so the two results are labelled clearly.",
                  color=DANGER).scale(0.46),
-            Text("fixed. and exactly why it's worth labouring.", color=OK).scale(0.44),
+            Text("could not check is not the same as something is wrong.", color=OK).scale(0.44),
         ).arrange(DOWN, buff=0.28).move_to([0, 0.3, 0])
         for ln in confession:
             self.play(FadeIn(ln, shift=UP * 0.12), run_time=0.4)
         self.hold_until(170)
         self.play(FadeOut(VGroup(head, confession)))
 
-    # ── Scene 5 (2:45–3:05) — the closing honesty beat ──────────────────────
+    # ── Scene 5 (2:45–3:05), the closing honesty beat ──────────────────────
     def beat_closing(self):
         head = Text("what green actually means", color=AMBER).scale(0.6)
         head.move_to([0, 2.7, 0])
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         green = section(11.4, 1.3, "the things Pollis published are consistent, "
                         "permanent,", "and they include the app you are running",

@@ -1,9 +1,9 @@
 """
-Topic 4 — "Joining, leaving, multi-device, and the honest history boundary" (#593).
+Topic 4, "Joining, leaving, multi-device, and the honest history boundary" (#593).
 
 One continuous ~2:50 scene, six beats, NO audio (added later). The load-bearing
 beat is the history boundary: pre-join messages are shown TRYING to open and
-visibly failing, because "not hidden — unavailable" is the point. The final beat
+visibly failing, because "not hidden, unavailable" is the point. The final beat
 draws the backup trade as a fork where neither path is free.
 
 Render (see learn/manim/render.sh):
@@ -21,6 +21,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -89,14 +90,14 @@ class JoiningLeaving(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:25) — key packages ──────────────────────────────────
+    # ── Scene 1 (0:00–0:25), key packages ──────────────────────────────────
     def beat_key_packages(self):
         head = Text("every device leaves a lockbox at the front desk, in advance",
                     color=AMBER).scale(0.52).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         shelf = panel(11.0, 1.6, MUTED).move_to([0, -1.2, 0])
-        shelf_t = Text("the server — holds them, cannot open them",
+        shelf_t = Text("the server, holds them, cannot open them",
                        color=MUTED).scale(0.34).next_to(shelf, DOWN, buff=0.2)
         self.play(FadeIn(shelf), FadeIn(shelf_t))
 
@@ -118,11 +119,11 @@ class JoiningLeaving(Scene):
         self.play(FadeOut(VGroup(head, devices, note)))
         self.shelf, self.shelf_t, self.boxes = shelf, shelf_t, boxes
 
-    # ── Scene 2 (0:25–0:55) — add + welcome ─────────────────────────────────
+    # ── Scene 2 (0:25–0:55), add + welcome ─────────────────────────────────
     def beat_welcome(self):
         head = Text("adding you: a Welcome, sealed to your lockbox",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         member = chip("an existing member", FG, w=4.2, h=0.8, scale=0.32)
         member.move_to([-4.2, 1.6, 0])
@@ -134,7 +135,7 @@ class JoiningLeaving(Scene):
         welcome = chip("Welcome: the group's state, as of NOW", OK, w=7.4, h=0.8, scale=0.34)
         welcome.move_to([1.2, 0.5, 0])
         self.play(FadeIn(welcome, shift=RIGHT * 0.3))
-        joined = chip("you're in — holding this epoch's keys", OK, w=7.0, h=0.8, scale=0.34)
+        joined = chip("you're in, holding this epoch's keys", OK, w=7.0, h=0.8, scale=0.34)
         joined.move_to([1.2, -2.9, 0])
         self.play(welcome.animate.move_to([1.2, -2.9, 0]), run_time=0.9)
         self.play(FadeOut(welcome), FadeIn(joined))
@@ -142,11 +143,11 @@ class JoiningLeaving(Scene):
         self.play(FadeOut(VGroup(head, member, picked, joined, self.shelf,
                                  self.shelf_t, self.boxes[0], self.boxes[2])))
 
-    # ── Scene 3 (0:55–1:30) — the history boundary ──────────────────────────
+    # ── Scene 3 (0:55–1:30), the history boundary ──────────────────────────
     def beat_boundary(self):
         head = Text("the part people don't expect", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         line = Line([0, 2.2, 0], [0, -2.2, 0], stroke_color=AMBER, stroke_width=3)
         line_lab = Text("the moment you joined", color=AMBER).scale(0.34)
@@ -164,7 +165,7 @@ class JoiningLeaving(Scene):
         self.play(FadeIn(ok_lab))
         self.hold_until(70)
 
-        # Try to open the old ones — and visibly fail.
+        # Try to open the old ones, and visibly fail.
         trying = Text("trying your key on the older ones…", color=FG).scale(0.42)
         trying.move_to([0, -2.9, 0])
         self.play(FadeIn(trying))
@@ -172,21 +173,21 @@ class JoiningLeaving(Scene):
             self.play(Indicate(b, color=DANGER, scale_factor=1.08), run_time=0.3)
         self.play(*[b.box.animate.set_stroke(DANGER) for b in before],
                   *[b.label.animate.set_color(DANGER) for b in before])
-        failed = Text("the key genuinely does not fit. not hidden — UNAVAILABLE.",
+        failed = Text("the key genuinely does not fit. not hidden, UNAVAILABLE.",
                       color=DANGER).scale(0.48).move_to([0, -2.9, 0])
         self.play(FadeOut(trying), FadeIn(failed))
-        why = Text("new keys can't be used to work out old ones — "
+        why = Text("new keys can't be used to work out old ones, "
                    "that's what makes removal real (topic 5)",
                    color=MUTED).scale(0.38).move_to([0, -3.5, 0])
         self.play(FadeIn(why))
         self.hold_until(90)
         self.play(FadeOut(VGroup(head, before, after, line, line_lab, ok_lab, failed, why)))
 
-    # ── Scene 4 (1:30–1:55) — removal, mirroring topic 3 ────────────────────
+    # ── Scene 4 (1:30–1:55), removal, mirroring topic 3 ────────────────────
     def beat_removal(self):
         head = Text("leaving is the same idea, pointed the other way",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         who = chip("the removed device", DANGER, w=4.6, h=0.8, scale=0.34)
         who.move_to([-4.0, 1.2, 0])
@@ -204,25 +205,25 @@ class JoiningLeaving(Scene):
         nxt = chip("everything from this epoch forward ▓▓▓▓▓▓▓▓", DANGER, w=8.4,
                    h=0.8, scale=0.34).move_to([0, -2.1, 0])
         self.play(FadeIn(nxt))
-        arith = Text("removal is arithmetic — not a permission flag on a server "
+        arith = Text("removal is arithmetic, not a permission flag on a server "
                      "you're asked to trust.", color=OK).scale(0.44)
         arith.move_to([0, -3.1, 0])
         self.play(FadeIn(arith))
         self.hold_until(115)
         self.play(FadeOut(VGroup(head, who, keys, kept, honest, nxt, arith)))
 
-    # ── Scene 5 (1:55–2:20) — multi-device is the same mechanism ────────────
+    # ── Scene 5 (1:55–2:20), multi-device is the same mechanism ────────────
     def beat_multi_device(self):
         head = Text("your own devices are separate members",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         phone = card(4.6, 1.4, "your phone", "its own keys, its own leaf",
                      color=OK, title_color=OK).move_to([-3.4, 1.5, 0])
         laptop = card(4.6, 1.4, "your laptop", "its own keys, its own leaf",
                       color=OK, title_color=OK).move_to([3.4, 1.5, 0])
         self.play(FadeIn(phone), FadeIn(laptop))
-        nolink = Text("nothing is copied between them — a key that travels is a key "
+        nolink = Text("nothing is copied between them, a key that travels is a key "
                       "that can be stolen on the way", color=MUTED).scale(0.38)
         nolink.move_to([0, 0.35, 0])
         self.play(FadeIn(nolink))
@@ -238,11 +239,11 @@ class JoiningLeaving(Scene):
         self.hold_until(140)
         self.play(FadeOut(VGroup(head, phone, laptop, nolink, newlap, empty)))
 
-    # ── Scene 6 (2:20–2:55) — the trade, as a fork ──────────────────────────
+    # ── Scene 6 (2:20–2:55), the trade, as a fork ──────────────────────────
     def beat_trade(self):
-        head = Text("the trade — hear it from us, not later",
+        head = Text("the trade, hear it from us, not later",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         a = panel(6.2, 3.0, DANGER).move_to([-3.5, 0.5, 0])
         a_t = VGroup(
@@ -266,7 +267,7 @@ class JoiningLeaving(Scene):
 
         self.play(FadeIn(a), FadeIn(a_t))
         self.play(FadeIn(b), FadeIn(b_t))
-        pick = Text("we take B. neither path is free, and we're not going to dress it up.",
+        pick = Text("we choose B. neither option is free, and we would rather say so.",
                     color=AMBER).scale(0.46).move_to([0, -1.6, 0])
         self.play(FadeIn(pick))
         self.hold_until(160)

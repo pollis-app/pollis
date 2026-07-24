@@ -5,25 +5,25 @@ NOTE boundary" (Topic 4). No audio track yet by decision; these captions carry
 NOTE the narration. Source of truth: learn/manim/scripts/joining-leaving.md
 
 00:00.000 --> 00:25.000
-To add you to a group, someone needs to encrypt its keys to you — even if you're offline. So every device publishes a small lockbox in advance. Anyone can put something in. Only you can open it.
+To add you to a group, someone needs to encrypt its keys to you, even if you're offline. So every device publishes a small lockbox in advance. Anyone can put something in. Only you can open it.
 
 00:25.000 --> 00:55.000
 When you're added, an existing member seals the group's current state into your lockbox and sends it over. You open it, and you're in.
 
 00:55.000 --> 01:15.000
-Now, the part people don't expect. You received the keys as they are now. Not the old ones. MLS is built so that new keys can't be used to work out old ones — and that's not a limitation, it's the entire reason removing someone actually works.
+Now, the part people don't expect. You received the keys as they are now. Not the old ones. MLS is built so that new keys can't be used to work out old ones, and that's not a limitation, it's the entire reason removing someone actually works.
 
 01:15.000 --> 01:30.000
-So messages sent before you joined stay sealed. Watch — it isn't that we're hiding them. The key genuinely doesn't fit.
+So messages sent before you joined stay sealed. Watch, it isn't that we're hiding them. The key genuinely doesn't fit.
 
 01:30.000 --> 01:55.000
-Removal is the same idea. This member is removed, the keys along their path are replaced, and the next message is sealed to them. They still have their old key. It opens nothing. What they already decrypted stays decrypted — we can't reach into their machine.
+Removal is the same idea. This member is removed, the keys along their path are replaced, and the next message is sealed to them. They still have their old key. It opens nothing. What they already decrypted stays decrypted, we can't reach into their machine.
 
 01:55.000 --> 02:20.000
-Your own devices work exactly the same way. Your phone and your laptop are two separate members of the group, each with their own keys. Nothing is copied between them — because a key that travels is a key that can be stolen on the way.
+Your own devices work exactly the same way. Your phone and your laptop are two separate members of the group, each with their own keys. Nothing is copied between them, because a key that travels is a key that can be stolen on the way.
 
 02:20.000 --> 02:40.000
-Which brings us to the trade-off we want you to hear from us, not discover later. A new device starts empty. There's no history backup. We could encrypt your history and store it on our servers behind a PIN — but watch what that builds: a copy of every conversation, on our infrastructure, behind a six-digit number.
+Which brings us to the trade-off we want you to hear from us, not discover later. A new device starts empty. There's no history backup. We could encrypt your history and store it on our servers behind a PIN, but watch what that builds: a copy of every conversation, on our infrastructure, behind a six-digit number.
 
 02:40.000 --> 02:55.000
 That's the exact thing this app exists to not have. So we don't do it. Two kinds of loss are acceptable: messages from before you joined, and a new device starting empty. Everything else has to arrive. Anything else going missing is a bug.

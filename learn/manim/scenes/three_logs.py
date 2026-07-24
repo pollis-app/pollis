@@ -1,5 +1,5 @@
 """
-Topic 9 — "Pollis's three logs, and what each one prevents" (#598).
+Topic 9, "Pollis's three logs, and what each one prevents" (#598).
 
 One continuous ~3:00 scene, six beats, NO audio (added later). Each log is
 introduced by the ATTACK it closes, not by its data model (acceptance criterion),
@@ -22,6 +22,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -99,7 +100,7 @@ class ThreeLogs(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:20) — three shelves, one seal ───────────────────────
+    # ── Scene 1 (0:00–0:20), three shelves, one seal ───────────────────────
     def beat_shelves(self):
         site = labelled(5.0, 0.9, "verify.pollis.com", "one static site, no login",
                         color=AMBER, title_color=AMBER).move_to([0, 2.9, 0])
@@ -126,21 +127,21 @@ class ThreeLogs(Scene):
         ])
         self.play(Create(stems), run_time=0.6)
 
-        note = Text("three append-only logs — each one closes a different attack",
+        note = Text("three append-only logs, each one closes a different attack",
                     color=MUTED).scale(0.42).move_to([0, -1.6, 0])
         self.play(FadeIn(note))
         self.hold_until(20)
         self.play(FadeOut(VGroup(site, seal, seal_t, logs, stems, note)))
 
-    # ── Scene 2 (0:20–1:00) — account keys ──────────────────────────────────
+    # ── Scene 2 (0:20–1:00), account keys ──────────────────────────────────
     def beat_account_keys(self):
-        head = Text("log 1 — account keys", color=AMBER).scale(0.55)
+        head = Text("log 1, account keys", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        stops = Text("stops: us handing you the wrong person's key",
+        stops = Text("protects against the wrong key being used for you",
                      color=FG).scale(0.45).next_to(head, DOWN, buff=0.25)
-        self.play(Write(head), FadeIn(stops))
+        self.play(AddTextLetterByLetter(head, run_time=0.7), FadeIn(stops))
 
-        # The substitution attempt, compressed — the reader met it in Topic 6.
+        # The substitution attempt, compressed, the reader met it in Topic 6.
         you = block("you", MUTED, w=1.6, h=0.7, scale=0.34).move_to([-4.8, 0.9, 0])
         us = block("us", DANGER, w=1.6, h=0.7, scale=0.34).move_to([0, 0.9, 0])
         real = block("ariel's real key", OK, w=3.0, h=0.6, scale=0.3).move_to([4.4, 1.6, 0])
@@ -160,10 +161,10 @@ class ThreeLogs(Scene):
         landed = block("ariel v4  ← the fake", DANGER, w=3.4, h=0.55, scale=0.3)
         landed.move_to([2.4, -1.4, 0])
         self.play(FadeIn(landed, shift=DOWN * 0.3))
-        indelible = Text("to substitute a key we must PUBLISH it — permanently, in public",
+        indelible = Text("any published key is permanent and public",
                          color=DANGER).scale(0.4).move_to([0, -2.6, 0])
         self.play(FadeIn(indelible))
-        watcher = Text("…where ariel's own device is reading   →   ALARM",
+        watcher = Text("…where ariel's own device checks it   →   flagged",
                        color=OK).scale(0.42).move_to([0, -3.2, 0])
         self.play(FadeIn(watcher))
         self.hold_until(40)
@@ -177,20 +178,20 @@ class ThreeLogs(Scene):
         attempt.move_to([0, 0.4, 0])
         self.play(FadeIn(attempt))
         self.play(attempt.animate.move_to([0, -0.55, 0]), run_time=0.7)
-        bounce = Text("rejected — history cannot be renumbered",
+        bounce = Text("rejected, history cannot be renumbered",
                       color=DANGER).scale(0.42).move_to([0, -0.5, 0])
         self.play(attempt.animate.move_to([0, 0.4, 0]).set_opacity(0.35), FadeIn(bounce))
         self.hold_until(60)
         self.play(FadeOut(VGroup(head, stops, ledger, ledger_t, rows, landed,
                                  rule, attempt, bounce)))
 
-    # ── Scene 3 (1:00–1:45) — the MLS commit log ────────────────────────────
+    # ── Scene 3 (1:00–1:45), the MLS commit log ────────────────────────────
     def beat_commit_log(self):
-        head = Text("log 2 — MLS commits", color=AMBER).scale(0.55)
+        head = Text("log 2, MLS commits", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        stops = Text("stops: us quietly rewriting a group's history",
+        stops = Text("protects a group's history from being rewritten",
                      color=FG).scale(0.45).next_to(head, DOWN, buff=0.25)
-        self.play(Write(head), FadeIn(stops))
+        self.play(AddTextLetterByLetter(head, run_time=0.7), FadeIn(stops))
 
         chain = VGroup(*[block(f"epoch {n}", MUTED, w=1.7, h=0.7, scale=0.32)
                          for n in (5, 6, 7)]).arrange(RIGHT, buff=0.7)
@@ -200,7 +201,7 @@ class ThreeLogs(Scene):
                  stroke_color=LINE, stroke_width=2) for i in range(2)
         ])
         self.play(FadeIn(chain), Create(joins), run_time=0.9)
-        order = Text("a group moves forward in epochs — every member applies the "
+        order = Text("a group moves forward in epochs, every member applies the "
                      "same commits, in the same order", color=MUTED).scale(0.42)
         order.move_to([0, -0.4, 0])
         self.play(FadeIn(order))
@@ -220,7 +221,7 @@ class ThreeLogs(Scene):
         self.play(FadeOut(order), FadeIn(forked))
         self.hold_until(32 + 60)
 
-        rule = Text("the invariant: one epoch, one commit — the second is rejected",
+        rule = Text("the invariant: one epoch, one commit, the second is rejected",
                     color=OK).scale(0.45).move_to([0, -1.1, 0])
         self.play(FadeOut(forked), FadeIn(rule),
                   dn8.box.animate.set_stroke(LINE), dn8.label.animate.set_color(LINE),
@@ -235,20 +236,20 @@ class ThreeLogs(Scene):
             Text("payload: ██████████████████  (sealed)", font=MONO, color=FG).scale(0.32),
         ).arrange(DOWN, buff=0.12).move_to(sealed.get_center())
         self.play(FadeIn(sealed), FadeIn(sealed_t))
-        seal_note = Text("order is public. content never is — we never had the keys either.",
+        seal_note = Text("order is public. content never is, we never had the keys either.",
                          color=AMBER).scale(0.42).move_to([0, -3.4, 0])
         self.play(FadeIn(seal_note))
         self.hold_until(45 + 60)
         self.play(FadeOut(VGroup(head, stops, chain, joins, up8, dn8, fa, fb,
                                  half_a, half_b, rule, sealed, sealed_t, seal_note)))
 
-    # ── Scene 4 (1:45–2:10) — binaries ──────────────────────────────────────
+    # ── Scene 4 (1:45–2:10), binaries ──────────────────────────────────────
     def beat_binaries(self):
-        head = Text("log 3 — binaries", color=AMBER).scale(0.55)
+        head = Text("log 3, binaries", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        stops = Text("stops: us shipping YOU a custom, backdoored app",
+        stops = Text("protects against a tampered app made for one person",
                      color=FG).scale(0.45).next_to(head, DOWN, buff=0.25)
-        self.play(Write(head), FadeIn(stops))
+        self.play(AddTextLetterByLetter(head, run_time=0.7), FadeIn(stops))
 
         build = block("a special build, just for you", DANGER, w=5.4, h=0.7, scale=0.34)
         build.move_to([0, 1.5, 0])
@@ -264,7 +265,7 @@ class ThreeLogs(Scene):
         ra = Line(build.get_bottom(), right.box.get_top(), stroke_color=LINE, stroke_width=1.5)
         self.play(Create(la), Create(ra), FadeIn(left), FadeIn(right))
 
-        both = Text("there is no third option — both branches end in detection",
+        both = Text("there is no third option, both branches end in detection",
                     color=AMBER).scale(0.45).move_to([0, -2.2, 0])
         self.play(FadeIn(both))
         onward = Text("(topic 10 takes this apart layer by layer)",
@@ -273,11 +274,11 @@ class ThreeLogs(Scene):
         self.hold_until(130)
         self.play(FadeOut(VGroup(head, stops, build, left, right, la, ra, both, onward)))
 
-    # ── Scene 5 (2:10–2:40) — domain separation ─────────────────────────────
+    # ── Scene 5 (2:10–2:40), domain separation ─────────────────────────────
     def beat_domain_separation(self):
         head = Text("why three logs, and not one big one?", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
         because = Text("because a signed head for one must never work as a head for another",
                        color=FG).scale(0.45).move_to([0, 2.1, 0])
         self.play(FadeIn(because))
@@ -289,7 +290,7 @@ class ThreeLogs(Scene):
             Text("a valid head from the commit log", color=MUTED).scale(0.32),
             Text(CTX_COMMITS, font=MONO, color=AMBER).scale(0.3),
         ).arrange(DOWN, buff=0.14).move_to(card.get_center())
-        # Its "tooth" — the shape the signature commits to.
+        # Its "tooth", the shape the signature commits to.
         tooth = Polygon([-3.4 - 0.5, -0.25, 0], [-3.4 + 0.5, -0.25, 0], [-3.4, -0.75, 0],
                         stroke_color=AMBER, stroke_width=2,
                         fill_color=AMBER, fill_opacity=0.12)
@@ -306,11 +307,11 @@ class ThreeLogs(Scene):
                                  fill_color=BG, fill_opacity=1).move_to([3.4, 0.1, 0])
         self.play(FadeIn(slot_box), FadeIn(slot_t), Create(notch))
 
-        # Try to slot it in — the shapes don't match.
+        # Try to slot it in, the shapes don't match.
         group = VGroup(card, card_t, tooth)
         self.play(group.animate.shift(RIGHT * 6.8), run_time=1.0)
         self.play(group.animate.shift(LEFT * 0.9), run_time=0.35)
-        reject = Text("it does not fit — the signature commits to WHICH tree it belongs to",
+        reject = Text("it does not fit, the signature commits to WHICH tree it belongs to",
                       color=DANGER).scale(0.44).move_to([0, -2.3, 0])
         self.play(FadeIn(reject),
                   tooth.animate.set_stroke(DANGER).set_fill(DANGER, opacity=0.15))
@@ -321,26 +322,26 @@ class ThreeLogs(Scene):
         self.play(FadeOut(VGroup(head, because, group, slot_box, slot_t, notch,
                                  reject, third)))
 
-    # ── Scene 6 (2:40–3:00) — the honest limits ─────────────────────────────
+    # ── Scene 6 (2:40–3:00), what these logs do, and do not, do ─────────────────────────────
     def beat_limits(self):
-        head = Text("the honest limits", color=AMBER).scale(0.6).move_to([0, 2.6, 0])
-        self.play(Write(head))
+        head = Text("what these logs do, and do not, do", color=AMBER).scale(0.6).move_to([0, 2.6, 0])
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
         lines = VGroup(
-            Text("these make lying UNDENIABLE, not impossible.", color=FG).scale(0.5),
-            Text("we could write something dishonest to any of them —", color=MUTED).scale(0.4),
+            Text("these make tampering permanent and public, not impossible.", color=FG).scale(0.5),
+            Text("a wrong entry could be written to any of them,", color=MUTED).scale(0.4),
             Text("it would just be permanent, public, and the same for everyone.",
                  color=MUTED).scale(0.4),
-            Text("they prove what we PUBLISHED. not that it is bug-free.",
+            Text("they prove what was published, not that it is bug-free.",
                  color=FG).scale(0.5),
         ).arrange(DOWN, buff=0.28).move_to([0, 0.9, 0])
         for ln in lines:
             self.play(FadeIn(ln, shift=UP * 0.12), run_time=0.4)
         self.hold_until(172)
 
-        clock = labelled(9.6, 1.6, "the logs rebuild once a day — 06:47 UTC",
+        clock = labelled(9.6, 1.6, "the logs rebuild once a day, 06:47 UTC",
                          'so a brand-new release can be genuinely absent for a while',
                          color=OK, title_color=OK).move_to([0, -1.9, 0])
-        pending = Text('your app says "pending", not "alarm" — '
+        pending = Text('your app says "pending", not "alarm", '
                        'not in the log YET is not the same as not in the log',
                        color=AMBER).scale(0.42).move_to([0, -3.1, 0])
         self.play(FadeIn(clock))

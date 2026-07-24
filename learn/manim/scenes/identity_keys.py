@@ -1,8 +1,8 @@
 """
-Topic 6 — "Identity keys, safety numbers, and TOFU pinning" (#595).
+Topic 6, "Identity keys, safety numbers, and TOFU pinning" (#595).
 
 One continuous ~2:45 scene, five beats, NO audio (added later). The attack beat
-shows padlocks on BOTH screens while the attack succeeds — that image is the
+shows padlocks on BOTH screens while the attack succeeds, that image is the
 reason the topic exists. The page then states plainly that safety numbers only
 help if you compare, and presents the account-key log as the answer for when
 nobody does.
@@ -25,6 +25,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -49,7 +50,7 @@ MONO = "Cascadia Code, DejaVu Sans Mono, monospace"
 
 config.background_color = BG
 
-# Shape only — a real safety number is 60 decimal digits in twelve 5-digit
+# Shape only, a real safety number is 60 decimal digits in twelve 5-digit
 # blocks (see .codesight/wiki/safety.md). These stand in for two devices'
 # renderings of the same pair of keys, and for the mismatch under attack.
 SAFE_MATCH = ("40317  85290  11648", "73025  99164  20873")
@@ -102,11 +103,11 @@ class IdentityKeys(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:35) — the attack, shown working ─────────────────────
+    # ── Scene 1 (0:00–0:35), the attack, shown working ─────────────────────
     def beat_attack(self):
         head = Text("encryption protects the message. not WHO is on the other end.",
                     color=AMBER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         alice = chip("alice", FG, w=2.6, h=0.8, scale=0.34).move_to([-5.0, 1.6, 0])
         server = chip("our server", DANGER, w=3.2, h=0.8, scale=0.34).move_to([0, 1.6, 0])
@@ -147,11 +148,11 @@ class IdentityKeys(Scene):
         self.play(FadeOut(VGroup(head, alice, server, bob, ask, peel, flow, opens,
                                  locks, both)))
 
-    # ── Scene 2 (0:35–1:10) — safety numbers ────────────────────────────────
+    # ── Scene 2 (0:35–1:10), safety numbers ────────────────────────────────
     def beat_safety_numbers(self):
         head = Text("answer one: safety numbers", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         mix = chip("your identity key  +  their identity key", FG, w=8.6, h=0.8, scale=0.34)
         mix.move_to([0, 2.0, 0])
@@ -168,13 +169,13 @@ class IdentityKeys(Scene):
         self.hold_until(52)
 
         # Under attack the inputs differ, so the numbers differ.
-        attacked = Text("now run the attack again: alice is mixing in the SERVER's key",
+        attacked = Text("now with a swapped key: alice mixes in a different key, not bob's",
                         color=DANGER).scale(0.44).move_to([0, -1.1, 0])
         a2 = phone(-3.5, 0.4, "on alice's device", SAFE_OTHER, color=DANGER)
         self.play(FadeOut(same), FadeIn(attacked), FadeOut(a), FadeIn(a2))
         neq = Text("≠", color=DANGER).scale(0.9).move_to([0, 0.4, 0])
         self.play(FadeOut(eq), Write(neq))
-        compare = Text("compare them any way we can't interfere with — side by side, "
+        compare = Text("compare them any way we can't interfere with, side by side, "
                        "read aloud, scan the QR", color=FG).scale(0.42)
         compare.move_to([0, -2.1, 0])
         self.play(FadeIn(compare))
@@ -184,10 +185,10 @@ class IdentityKeys(Scene):
         self.hold_until(70)
         self.play(FadeOut(VGroup(head, mix, a2, b, neq, attacked, compare, caught)))
 
-    # ── Scene 3 (1:10–1:30) — the honest gap ────────────────────────────────
+    # ── Scene 3 (1:10–1:30), the honest gap ────────────────────────────────
     def beat_nobody_checks(self):
         head = Text("the catch", color=AMBER).scale(0.6).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         queue = VGroup(*[chip(f"user {i + 1}", MUTED, w=1.9, h=0.6) for i in range(6)])
         queue.arrange(RIGHT, buff=0.35).move_to([0, 1.2, 0])
@@ -203,20 +204,20 @@ class IdentityKeys(Scene):
         only = Text("it only works if you actually check. most people never do.",
                     color=DANGER).scale(0.5).move_to([0, -2.9, 0])
         self.play(FadeIn(only))
-        so = Text("so there's a second answer — one that works even when nobody checks.",
+        so = Text("so there's a second answer, one that works even when nobody checks.",
                   color=OK).scale(0.44).move_to([0, -3.5, 0])
         self.play(FadeIn(so))
         self.hold_until(90)
         self.play(FadeOut(VGroup(head, queue, gate, only, so)))
 
-    # ── Scene 4 (1:30–2:15) — the log answer ────────────────────────────────
+    # ── Scene 4 (1:30–2:15), the log answer ────────────────────────────────
     def beat_log(self):
         head = Text("answer two: we publish every key, permanently, in public",
                     color=AMBER).scale(0.52).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         ledger = panel(11.6, 1.6, LINE).move_to([0, 1.4, 0])
-        ledger_t = Text("the account-key log — append-only, readable by anyone",
+        ledger_t = Text("the account-key log, append-only, readable by anyone",
                         color=MUTED).scale(0.34).next_to(ledger, UP, buff=0.15)
         rows = VGroup(*[chip(f"alice v{v}", MUTED, w=2.2, h=0.6) for v in (1, 2, 3)])
         rows.arrange(RIGHT, buff=0.5).move_to([-2.6, 1.4, 0])
@@ -224,14 +225,14 @@ class IdentityKeys(Scene):
 
         fake = chip("alice v4 ← the fake", DANGER, w=3.6, h=0.6)
         fake.move_to([3.4, 1.4, 0])
-        must = Text("to substitute a key, we would have to publish it HERE",
+        must = Text("any swapped key would have to appear here, in public",
                     color=DANGER).scale(0.44).move_to([0, 0.1, 0])
         self.play(FadeIn(fake, shift=DOWN * 0.3), FadeIn(must))
 
         # And it can't be taken back.
         self.play(fake.animate.shift(UP * 0.5).set_opacity(0.6), run_time=0.4)
         self.play(fake.animate.shift(DOWN * 0.5).set_opacity(1.0), run_time=0.4)
-        cant = Text("…and then we cannot take it back. the log doesn't work that way.",
+        cant = Text("and it could not be quietly removed later.",
                     color=DANGER).scale(0.44).move_to([0, -0.6, 0])
         self.play(FadeIn(cant))
         self.hold_until(115)
@@ -242,18 +243,18 @@ class IdentityKeys(Scene):
         alarm = chip("what the world is shown  ≠  the key I hold   →   ALARM",
                      DANGER, w=9.6, h=0.8, scale=0.34).move_to([0, -2.7, 0])
         self.play(FadeIn(alarm))
-        shift = Text("the attack stops being invisible and becomes permanent public evidence.",
+        shift = Text("a swap stops being invisible and becomes a permanent public record.",
                      color=OK).scale(0.46).move_to([0, -3.5, 0])
         self.play(FadeIn(shift))
         self.hold_until(135)
         self.play(FadeOut(VGroup(head, ledger, ledger_t, rows, fake, must, cant,
                                  device, alarm, shift)))
 
-    # ── Scene 5 (2:15–2:45) — TOFU ──────────────────────────────────────────
+    # ── Scene 5 (2:15–2:45), TOFU ──────────────────────────────────────────
     def beat_tofu(self):
         head = Text("trust on first use", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         first = chip("first conversation → your app pins the key it saw",
                      OK, w=9.4, h=0.8, scale=0.34).move_to([0, 2.0, 0])
@@ -275,7 +276,7 @@ class IdentityKeys(Scene):
         self.play(FadeIn(innocent), FadeIn(innocent_t))
         self.play(FadeIn(attack), FadeIn(attack_t))
 
-        cannot = Text("your app cannot tell these apart — which is exactly why it asks YOU.",
+        cannot = Text("your app cannot tell these apart, which is exactly why it asks YOU.",
                       color=FG).scale(0.46).move_to([0, -2.1, 0])
         self.play(FadeIn(cannot))
         close = Text("compare safety numbers once, with the people who matter. "

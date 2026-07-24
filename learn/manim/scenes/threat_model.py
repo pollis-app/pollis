@@ -1,5 +1,5 @@
 """
-Topic 1 — "Threat model: who can see what" (#590).
+Topic 1, "Threat model: who can see what" (#590).
 
 One continuous ~2:10 scene, five beats, NO audio (added later). Built as ONE
 diagram that accumulates rather than five unrelated scenes, so the reader leaves
@@ -26,6 +26,7 @@ from manim import (
     LEFT,
     RIGHT,
     UP,
+    AddTextLetterByLetter,
     Create,
     FadeIn,
     FadeOut,
@@ -93,11 +94,11 @@ class ThreatModel(Scene):
         if target > now:
             self.wait(target - now)
 
-    # ── Scene 1 (0:00–0:20) — how most apps work ────────────────────────────
+    # ── Scene 1 (0:00–0:20), how most apps work ────────────────────────────
     def beat_most_apps(self):
         head = Text("most apps ask you to trust a company's ABILITY, not its promise",
                     color=AMBER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         self.you = node(-4.8, 0.4, "your device", "where you type")
         self.server = node(0, 0.4, "their servers", "database + delivery")
@@ -127,11 +128,11 @@ class ThreatModel(Scene):
         self.hold_until(20)
         self.play(FadeOut(VGroup(msg, readable, why, head)))
 
-    # ── Scene 2 (0:20–0:45) — sealed on your device ─────────────────────────
+    # ── Scene 2 (0:20–0:45), sealed on your device ─────────────────────────
     def beat_sealed(self):
         head = Text("pollis seals it before it leaves your device",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         keys = VGroup(
             Text("🔑 key stays here", color=OK).scale(0.34).next_to(self.you, UP, buff=0.2),
@@ -158,11 +159,11 @@ class ThreatModel(Scene):
         self.hold_until(45)
         self.play(FadeOut(VGroup(head, keys, opened, cant, post)))
 
-    # ── Scene 3 (0:45–1:15) — the outside of the envelope ───────────────────
+    # ── Scene 3 (0:45–1:15), the outside of the envelope ───────────────────
     def beat_metadata(self):
         head = Text("but look at the OUTSIDE of the envelope",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
         self.play(FadeOut(self.you), FadeOut(self.them), FadeOut(self.wires),
                   self.server.animate.move_to([0, 2.4, 0]).scale(0.9))
 
@@ -189,19 +190,19 @@ class ThreatModel(Scene):
         self.hold_until(75)
         self.play(FadeOut(VGroup(head, env, inside, fields, honest, honest2, self.server)))
 
-    # ── Scene 4 (1:15–1:45) — the attack that actually matters ──────────────
+    # ── Scene 4 (1:15–1:45), the attack that actually matters ──────────────
     def beat_key_substitution(self):
-        head = Text("the subtler attack: the wrong key for the right person",
+        head = Text("the subtler risk: the wrong key for the right person",
                     color=DANGER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         a = node(-4.6, 1.4, "you", "asking for bob's key", w=3.0, h=1.1)
-        s = node(0, 1.4, "our server", "hands you a key", w=3.4, h=1.1,
+        s = node(0, 1.4, "a server", "hands you a key", w=3.4, h=1.1,
                  color=DANGER, title_color=DANGER)
         b = node(4.6, 1.4, "bob", "has his own key", w=3.0, h=1.1)
         self.play(FadeIn(a), FadeIn(s), FadeIn(b))
 
-        label = envelope(DANGER, 'labelled "bob" — actually ours', w=6.0, scale=0.34)
+        label = envelope(DANGER, "labelled bob, the wrong key", w=6.0, scale=0.34)
         label.move_to([0, -0.1, 0])
         self.play(FadeIn(label))
         opens = Text("now everything opens here, in the middle. "
@@ -224,28 +225,28 @@ class ThreatModel(Scene):
         self.hold_until(110)
         self.play(FadeOut(VGroup(head, a, s, b, label, opens, gates, shut)))
 
-    # ── Scene 5 (1:45–2:15) — the boundary diagram (the hero image) ─────────
+    # ── Scene 5 (1:45–2:15), the boundary diagram (the hero image) ─────────
     def beat_boundary(self):
         head = Text("the whole picture", color=AMBER).scale(0.6).move_to([0, 3.3, 0])
-        self.play(Write(head))
+        self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         green = panel(12.4, 1.55, OK, fill_opacity=0.07, fill=OK).move_to([0, 1.85, 0])
         green_t = VGroup(
-            Text("GREEN — we cannot see it", color=OK).scale(0.42),
+            Text("GREEN, we cannot see it", color=OK).scale(0.42),
             Text("message contents · your private keys · anything decrypted on your device",
                  color=MUTED).scale(0.32),
         ).arrange(DOWN, buff=0.12).move_to(green.get_center())
 
         amber = panel(12.4, 1.55, AMBER, fill_opacity=0.07, fill=AMBER).move_to([0, 0.1, 0])
         amber_t = VGroup(
-            Text("AMBER — we CAN see it, and we say so", color=AMBER).scale(0.42),
+            Text("AMBER, we CAN see it, and we say so", color=AMBER).scale(0.42),
             Text("who sent · when · roughly how big · which conversation",
                  color=MUTED).scale(0.32),
         ).arrange(DOWN, buff=0.12).move_to(amber.get_center())
 
         red = panel(12.4, 1.85, DANGER, fill_opacity=0.07, fill=DANGER).move_to([0, -1.85, 0])
         red_t = VGroup(
-            Text("RED — outside what any messenger defends", color=DANGER).scale(0.42),
+            Text("RED, outside what any messenger defends", color=DANGER).scale(0.42),
             Text("someone holding your unlocked device · our own bugs",
                  color=MUTED).scale(0.32),
             Text("· a new device starts empty: there is no key backup (topic 4)",
@@ -256,7 +257,7 @@ class ThreatModel(Scene):
         self.play(FadeIn(amber), FadeIn(amber_t))
         self.play(FadeIn(red), FadeIn(red_t))
 
-        close = Text("we shrink what you take on faith — and publish evidence for what's left.",
+        close = Text("we shrink what you take on faith, and publish evidence for what's left.",
                      color=FG).scale(0.44).move_to([0, -3.4, 0])
         self.play(FadeIn(close))
         self.hold_until(133)

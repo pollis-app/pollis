@@ -5,7 +5,7 @@ NOTE by decision; these captions carry the narration. Source of truth:
 NOTE learn/manim/scripts/threat-model.md
 
 00:00.000 --> 00:12.000
-Most messaging apps ask you to trust a company. Not their promise — their ability. Even a company that doesn't want to read your messages can be broken into, bought, or ordered by a court.
+Most messaging apps ask you to trust a company. Not their promise, their ability. Even a company that doesn't want to read your messages can be broken into, bought, or ordered by a court.
 
 00:12.000 --> 00:20.000
 "We would never" describes intent. Intent changes. So Pollis is built so reading your messages isn't something we choose not to do. It's something we can't do.
@@ -20,13 +20,13 @@ But look closer at the envelope, because this is the part most apps gloss over. 
 That your account sent something, when, roughly how big, and which conversation it belongs to. That's called metadata, and it can be sensitive all by itself. We're not going to tell you it doesn't exist.
 
 01:15.000 --> 01:30.000
-There's a subtler attack too. Encryption only helps if you're using the right key for the right person. A dishonest server could hand you the wrong key — its own — and read everything without ever breaking the maths.
+There's a subtler attack too. Encryption only helps if you're using the right key for the right person. A dishonest server could hand you the wrong key, its own, and read everything without ever breaking the maths.
 
 01:30.000 --> 01:45.000
 That's the attack we take most seriously, and it's why the rest of this section exists: safety numbers, and public logs of every key we publish. Both are things you can check yourself.
 
 01:45.000 --> 02:05.000
-Here's the full picture. Green, we cannot see. Amber, we can — and we say so. Red is outside what any messenger can defend: your own device, and our own bugs.
+Here's the full picture. Green, we cannot see. Amber, we can, and we say so. Red is outside what any messenger can defend: your own device, and our own bugs.
 
 02:05.000 --> 02:15.000
-Everything else in Learn is about shrinking how much of the green depends on trusting us — and publishing evidence for whatever's left.
+Everything else in Learn is about shrinking how much of the green depends on trusting us, and publishing evidence for whatever's left.

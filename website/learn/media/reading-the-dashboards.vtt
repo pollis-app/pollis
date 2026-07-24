@@ -5,7 +5,7 @@ NOTE No audio track yet by decision; these captions carry the narration. Source
 NOTE of truth: learn/manim/scripts/reading-the-dashboards.md
 
 00:00.000 --> 00:15.000
-You've got every idea you need to read our dashboards. Let's go through them. Latest releases — what we currently ship, and where to get it.
+You've got every idea you need to read our dashboards. Let's go through them. Latest releases, what we currently ship, and where to get it.
 
 00:15.000 --> 00:28.000
 Release proofs. This is the one that matters. For the current version: is it in the binaries log, did the tree check out, and what's inside.
@@ -14,7 +14,7 @@ Release proofs. This is the one that matters. For the current version: is it in 
 Below that, the daily self-audit: the current head of all three logs. And at the bottom, the one key everything reduces to.
 
 00:40.000 --> 00:55.000
-Each row is one piece of a release. Platform. Bundle. Layer — payload, signed, or exe, the three from earlier. The hashes. And a tick.
+Each row is one piece of a release. Platform. Bundle. Layer, payload, signed, or exe, the three from earlier. The hashes. And a tick.
 
 00:55.000 --> 01:10.000
 Read that tick carefully. It doesn't mean someone marked a box. It means an inclusion proof was recomputed, and it held.
@@ -23,19 +23,19 @@ Read that tick carefully. It doesn't mean someone marked a box. It means an incl
 And if it says "not in log yet", that's almost always the daily rebuild. Not an alarm.
 
 01:20.000 --> 01:50.000
-Tree size and root — that's the signed head. This root is the same string you'd get by fetching the file yourself, or by running the verifier. Also note what that page says about itself: the key check in your browser is a convenience, not a trust anchor.
+Tree size and root, that's the signed head. This root is the same string you'd get by fetching the file yourself, or by running the verifier. Also note what that page says about itself: the key check in your browser is a convenience, not a trust anchor.
 
 01:50.000 --> 02:05.000
 Now inside the app. "This build" tells you whether the exact binary you're running is in the public log. Four possible answers, and the difference between two of them matters a lot.
 
 02:05.000 --> 02:20.000
-"Pending" means the log hasn't rebuilt yet. "Unavailable" means we couldn't check — the log was unreachable, or this release is older than the layer that makes checking possible.
+"Pending" means the log hasn't rebuilt yet. "Unavailable" means we couldn't check, the log was unreachable, or this release is older than the layer that makes checking possible.
 
 02:20.000 --> 02:32.000
 And "not in public log" is the loud one: the release is published, there's something to compare against, and yours isn't it.
 
 02:32.000 --> 02:45.000
-"Unavailable" versus "not in the log" is the difference between "I don't know" and "you've been tampered with". We shipped that wrong once, and every honest macOS build was accused of being fake.
+"Unavailable" versus "not in the log" is the difference between "I don't know" and "you've been tampered with". We shipped that wrong once, and the two results are labelled clearly.
 
 02:45.000 --> 02:55.000
 And here's the honest ending. Everything green means the things we published are consistent, permanent, and include the app you're running.
