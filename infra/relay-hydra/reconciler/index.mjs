@@ -68,8 +68,16 @@ export const handler = async () => {
       // Unhealthy so the ASG terminates + relaunches it. ShouldRespectGracePeriod
       // shields nodes still pulling the image on first boot (see the ASG's
       // health_check_grace_period).
-      if (unhealthy.length > 0) {
+      //
+      // Guard: only self-heal when at least one node in the region is healthy. If
+      // EVERY node is failing it's almost certainly systemic (a bad image push, bad
+      // config, an SSM/identity problem) — replacing them all just churns instances
+      // into the same failure and bills for it. Leave them for the alarms (healthy-
+      // nodes floor + reconcile failures, both now paging) to surface instead.
+      if (unhealthy.length > 0 && healthy.length > 0) {
         await markUnhealthy(region, unhealthy);
+      } else if (unhealthy.length > 0) {
+        console.error(`${region}: all ${unhealthy.length} node(s) unhealthy — NOT self-healing (looks systemic, not per-node); leaving for the alarms`);
       }
 
       for (const { ip } of healthy) {
