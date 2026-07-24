@@ -1,0 +1,26 @@
+WEBVTT
+
+NOTE Captions for "Keys, encryption, signatures, and hashes" (Topic 2). No audio
+NOTE track yet by decision; these captions carry the narration. Source of truth:
+NOTE learn/manim/scripts/vocabulary.md
+
+00:00.000 --> 00:20.000
+A key is a very large number. That's genuinely all it is. Large enough that guessing it isn't hard — it's impossible, in the sense that there isn't enough time or energy in the universe to try.
+
+00:20.000 --> 00:40.000
+Encryption is a lock. Your message goes in with a key, and what comes out is noise. Put the noise back in with the right key, and your message returns. Wrong key, and you get nothing — not a blurry version, not most of it. Nothing.
+
+00:40.000 --> 01:05.000
+Now the idea that makes all of this work between strangers. Your key comes in two halves that are different. One is public — hand it to anyone. One is private, and never leaves your device. Anything locked with the public half can only be opened by the private half.
+
+01:05.000 --> 01:20.000
+Run the same trick backwards and you get signatures. Stamp something with your private half, and anyone with your public half can confirm it came from you and hasn't been altered. Change one word, and the seal breaks.
+
+01:20.000 --> 01:35.000
+Last idea: a hash. It's a fingerprint for data. Any file, any size, in — a short string out. Same file, same fingerprint, every time.
+
+01:35.000 --> 01:50.000
+But change one single character… and it's completely different. Not slightly. Completely. Try it yourself in the box below.
+
+01:50.000 --> 02:05.000
+Key, encryption, signature, hash. Everything else is those four ideas, arranged. And the maths is not the weak point — it essentially never is. Where the keys are kept, whether a public key really belongs to who it says, and whether the app is honest: that's what the rest of Learn is about.

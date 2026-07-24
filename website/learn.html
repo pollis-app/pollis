@@ -595,6 +595,50 @@
       line-height: 1.6;
     }
 
+    /* ── Live hash widget (Topic 2) ───────────────────────────── */
+    .ln-hash-label {
+      display: block;
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--c-text-muted);
+      margin-bottom: 0.35rem;
+    }
+
+    .ln-hash-input {
+      width: 100%;
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.85rem;
+      padding: 0.5rem 0.7rem;
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      background: var(--c-bg);
+      color: var(--c-text);
+    }
+
+    .ln-hash-input:focus {
+      outline: none;
+      border-color: var(--c-accent);
+    }
+
+    .ln-hash-out {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      word-break: break-all;
+      color: var(--c-text-muted);
+      margin-top: 0.85rem;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      background: #000;
+    }
+
+    .ln-hash-moved {
+      color: var(--c-accent);
+      font-weight: 700;
+    }
+
     /* ── "The rigorous version" out-link ──────────────────────── */
     .ln-deeper {
       font-size: 0.82rem;
@@ -652,6 +696,8 @@
       <ul class="ln-toc">
         <li><span class="ln-track">FOUNDATIONS</span><a href="#threat-model">Threat model — who can
             see what</a></li>
+        <li><span class="ln-track">FOUNDATIONS</span><a href="#vocabulary">Keys, encryption,
+            signatures &amp; hashes — the vocabulary</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
@@ -785,6 +831,150 @@
           trusted/untrusted split in <a
             href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md" target="_blank"
             rel="noopener noreferrer">CLAUDE.md</a> → "Security model".
+        </p>
+      </section>
+
+      <!-- ═══ Topic 2 — the vocabulary (#591) ═══════════════════════════════ -->
+      <section class="ln-section" id="vocabulary">
+        <div class="ln-eyebrow">Track A · Foundations · Topic 2</div>
+        <h2>Keys, encryption, signatures, and hashes — the vocabulary</h2>
+
+        <div class="ln-prose">
+          <p>
+            Four words carry the entire rest of this section. No mathematics required for any of
+            them.
+          </p>
+          <p>
+            <strong>A key is a very large number.</strong> That's it. Large enough that guessing it
+            is not a thing that happens — not "difficult", but "there isn't enough time or energy in
+            the universe". When we say a key never leaves your device, we mean that number is stored
+            on your machine, in your operating system's keychain, and is never sent to us.
+          </p>
+          <p>
+            <strong>Encryption is a lock that scrambles.</strong> Feed in your message and a key, get
+            out noise. Feed the noise and the right key into the matching operation, get your message
+            back. Wrong key: noise stays noise. There's no "almost" — no partial credit, no getting
+            80% of the message.
+          </p>
+          <p>
+            <strong>The clever part is that there are two keys, and they're different.</strong> This
+            is the idea that makes messaging strangers possible. You have a <em>public</em> key and a
+            <em>private</em> key, mathematically joined. Anything locked with the public one can only
+            be opened by the private one. So you publish your public key to the world — the name is
+            literal — and keep the private one on your device forever. Anyone can lock a message to
+            you; only you can open it. You never have to secretly agree on anything in advance.
+          </p>
+          <p>
+            <strong>Signatures are the same trick, backwards.</strong> Lock something with your
+            <em>private</em> key and anyone with your public key can verify it came from you and
+            wasn't altered. Not secrecy — proof of authorship and integrity. Pollis uses signatures
+            constantly: every write to our servers is signed by your device, and every transparency
+            log head is signed by one specific key.
+          </p>
+          <p>
+            <strong>A hash is a fingerprint for data.</strong> Feed in any amount of data, get a
+            fixed-size string. The same input always gives the same fingerprint; any change — one
+            character, one bit — gives a completely different one. You can't work backwards from the
+            fingerprint to the data, and you can't find two different files with the same
+            fingerprint. That's what makes it useful for saying "this is exactly the file I meant"
+            without publishing the file. When you see <code>root: 37945cb2…cc0c</code> on our
+            artifacts page, that's a hash.
+          </p>
+          <p>
+            Those four ideas — key, encryption, signature, hash — carry everything that follows.
+            Everything else is arrangement.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            <strong>None of this protects a key that leaks.</strong> The maths is not the weak point
+            and essentially never is. The weak points are: where keys are stored, who you believe a
+            public key belongs to, and whether the software doing the locking is honest. Those are
+            exactly the three things the rest of this section is about — which is a polite way of
+            saying that "we use strong encryption" is close to meaningless on its own.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/vocabulary.jpg" aria-describedby="vocabulary-transcript-body">
+            <source src="learn/media/vocabulary.webm" type="video/webm" />
+            <source src="learn/media/vocabulary.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/vocabulary.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            Four vignettes, no formulas: the size of a key, a lock with no "almost", the two-key
+            trick that lets strangers write to you, and one character changing a fingerprint
+            completely. No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="vocabulary-transcript-body">
+            <p>A key is a very large number. That's genuinely all it is. Large enough that guessing
+              it isn't hard — it's impossible, in the sense that there isn't enough time or energy in
+              the universe to try.</p>
+            <p>Encryption is a lock. Your message goes in with a key, and what comes out is noise.
+              Put the noise back in with the right key, and your message returns. Wrong key, and you
+              get nothing — not a blurry version, not most of it. Nothing.</p>
+            <p>Now the idea that makes all of this work between strangers. Your key comes in two
+              halves that are different from each other. One is public — you hand it to anyone,
+              publish it, put it on a billboard. One is private, and it never leaves your device.</p>
+            <p>Anything locked with the public half can only be opened by the private half. Watch
+              what that means: a stranger can lock a message to you, and then cannot unlock it
+              themselves. They've made something only you can open, and you never had to agree on a
+              secret first.</p>
+            <p>Run the same trick backwards and you get signatures. Stamp something with your private
+              half, and anyone with your public half can confirm it came from you and hasn't been
+              altered. Change one word, and the seal breaks.</p>
+            <p>Last idea: a hash. It's a fingerprint for data. Any file, any size, in — a short
+              string out. Same file, same fingerprint, every time. But change one single character…
+              and it's completely different. Try it yourself.</p>
+            <p>Key, encryption, signature, hash. Everything else in this section is those four ideas,
+              arranged.</p>
+            <p>One last thing. The maths is not the weak point — it essentially never is. The weak
+              points are where the keys are kept, whether you believe a public key really belongs to
+              who it says, and whether the app doing the locking is honest. That's what the rest of
+              Learn is about.</p>
+          </div>
+        </details>
+
+        <!-- Live hash widget — built + driven by learn.js -->
+        <div class="ln-widget" id="hash-widget" data-hash-widget hidden>
+          <div class="ln-widget-head">
+            <strong>Try it.</strong> Type anything. The fingerprint below is a real SHA-256, computed
+            in your browser on every keystroke — the same function our transparency logs use.
+          </div>
+          <label class="ln-hash-label" for="hash-input">your text</label>
+          <input class="ln-hash-input" id="hash-input" type="text" spellcheck="false"
+            autocomplete="off" value="see you at 7" data-hash-input />
+          <div class="ln-hash-out" data-hash-out>…</div>
+          <div class="ln-proof-controls">
+            <button type="button" class="ln-proof-btn" data-hash-nudge>Change one character</button>
+            <span class="ln-proof-label" data-hash-note></span>
+          </div>
+          <p class="ln-widget-note">
+            Nothing leaves your device. Note how much of the fingerprint changes when you alter one
+            character — that's the property everything else in this section leans on.
+          </p>
+        </div>
+
+        <p class="ln-deeper">
+          The rigorous version: the Ed25519 keys and OS-keystore storage in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/auth.rs"
+            target="_blank" rel="noopener noreferrer">auth.rs</a>, the device-signed writes in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/mls/ds_client.rs"
+            target="_blank" rel="noopener noreferrer">ds_client.rs</a>, and the SHA-256 hashing in <a
+            href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/merkle.rs"
+            target="_blank" rel="noopener noreferrer">merkle.rs</a>.
         </p>
       </section>
 
