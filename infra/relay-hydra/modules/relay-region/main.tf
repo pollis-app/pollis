@@ -230,6 +230,13 @@ resource "aws_autoscaling_group" "relay" {
   vpc_zone_identifier = [for s in aws_subnet.public : s.id]
   health_check_type   = "EC2"
 
+  # The reconciler marks a node Unhealthy (via SetInstanceHealth) when its relay
+  # container is dead but the instance is still EC2-reachable. This grace period is
+  # the window, measured from launch, in which that flag is ignored so a node still
+  # running user-data (dnf install docker + image pull, ~2-3 min) isn't reaped
+  # mid-boot. 10 min leaves comfortable headroom over a cold image pull.
+  health_check_grace_period = 600
+
   mixed_instances_policy {
     instances_distribution {
       # Guarantee `node_floor` on-demand nodes; everything above is Spot. Spot

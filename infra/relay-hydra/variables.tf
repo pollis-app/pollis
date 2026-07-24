@@ -132,3 +132,9 @@ variable "budget_alert_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "alarm_email_addresses" {
+  description = "Emails subscribed to the SNS topic the CloudWatch alarms (reconcile failures, Lambda errors, healthy-node floor) notify. Each address must confirm the AWS subscription email. Empty = alarms fire to the topic but nobody is subscribed."
+  type        = list(string)
+  default     = []
+}

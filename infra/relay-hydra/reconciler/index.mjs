@@ -19,7 +19,7 @@
 // bytes the client base64-decodes and verifies (see scripts/verify-directory.mjs
 // and test/directory-contract.test.mjs, which run the client's verification path).
 
-import { AutoScalingClient, DescribeAutoScalingGroupsCommand, UpdateAutoScalingGroupCommand } from "@aws-sdk/client-auto-scaling";
+import { AutoScalingClient, DescribeAutoScalingGroupsCommand, UpdateAutoScalingGroupCommand, SetInstanceHealthCommand } from "@aws-sdk/client-auto-scaling";
 import { EC2Client, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
@@ -59,10 +59,28 @@ export const handler = async () => {
       await setDesiredCapacity(region, asgName, target);
 
       const nodes = await discoverInServiceNodes(region, asgName);
-      const healthy = await healthCheck(nodes);
+      const { healthy, unhealthy } = await healthCheck(nodes);
       perRegionHealthy[region] = healthy.length;
 
-      for (const ip of healthy) {
+      // Self-heal: an instance that's InService (EC2-reachable) but whose relay
+      // container is dead answers no /version, so the ASG's EC2 health check would
+      // never replace it — it would linger and bill while serving nothing. Mark it
+      // Unhealthy so the ASG terminates + relaunches it. ShouldRespectGracePeriod
+      // shields nodes still pulling the image on first boot (see the ASG's
+      // health_check_grace_period).
+      //
+      // Guard: only self-heal when at least one node in the region is healthy. If
+      // EVERY node is failing it's almost certainly systemic (a bad image push, bad
+      // config, an SSM/identity problem) — replacing them all just churns instances
+      // into the same failure and bills for it. Leave them for the alarms (healthy-
+      // nodes floor + reconcile failures, both now paging) to surface instead.
+      if (unhealthy.length > 0 && healthy.length > 0) {
+        await markUnhealthy(region, unhealthy);
+      } else if (unhealthy.length > 0) {
+        console.error(`${region}: all ${unhealthy.length} node(s) unhealthy — NOT self-healing (looks systemic, not per-node); leaving for the alarms`);
+      }
+
+      for (const { ip } of healthy) {
         relays.push({ addr: `${ip}:${RELAY_PORT}`, region, cert_b64: certB64 });
       }
     } catch (err) {
@@ -156,34 +174,59 @@ async function discoverInServiceNodes(region, asgName) {
   }
 
   const desc = await ec2.send(new DescribeInstancesCommand({ InstanceIds: instanceIds }));
-  const ips = [];
+  const nodes = [];
   for (const reservation of desc.Reservations ?? []) {
     for (const inst of reservation.Instances ?? []) {
+      // A node with no public IP yet is still wiring up its ENI — skip it this
+      // cycle rather than treat it as a dead relay (it isn't advertised, and the
+      // grace period covers it if it's genuinely mid-boot).
       if (inst.PublicIpAddress) {
-        ips.push(inst.PublicIpAddress);
+        nodes.push({ instanceId: inst.InstanceId, ip: inst.PublicIpAddress });
       }
     }
   }
-  return ips;
+  return nodes;
+}
+
+// Flag failed nodes as Unhealthy so the ASG replaces them. Scoped to the app=
+// pollis-relay ASGs by the reconciler's IAM policy. ShouldRespectGracePeriod keeps
+// a freshly-launched node (still pulling the image) from being killed mid-boot.
+async function markUnhealthy(region, unhealthyNodes) {
+  const asg = new AutoScalingClient({ region });
+  for (const { instanceId } of unhealthyNodes) {
+    try {
+      await asg.send(new SetInstanceHealthCommand({
+        InstanceId: instanceId,
+        HealthStatus: "Unhealthy",
+        ShouldRespectGracePeriod: true,
+      }));
+      console.log(`${region}: marked ${instanceId} Unhealthy (no /version) — ASG will replace it`);
+    } catch (err) {
+      console.error(`${region}: failed to mark ${instanceId} unhealthy:`, err);
+    }
+  }
 }
 
 // --- Health check ------------------------------------------------------------
 
-async function healthCheck(ips) {
-  const results = await Promise.all(ips.map(async (ip) => {
+async function healthCheck(nodes) {
+  const results = await Promise.all(nodes.map(async (node) => {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
     try {
       // Treat any 200 as healthy; parse the JSON only if we want the SHA.
-      const res = await fetch(`http://${ip}:${HEALTH_PORT}/version`, { signal: controller.signal });
-      return res.ok ? ip : null;
+      const res = await fetch(`http://${node.ip}:${HEALTH_PORT}/version`, { signal: controller.signal });
+      return { node, ok: res.ok };
     } catch {
-      return null;
+      return { node, ok: false };
     } finally {
       clearTimeout(timer);
     }
   }));
-  return results.filter(Boolean);
+  return {
+    healthy: results.filter((r) => r.ok).map((r) => r.node),
+    unhealthy: results.filter((r) => !r.ok).map((r) => r.node),
+  };
 }
 
 // --- Metrics -----------------------------------------------------------------

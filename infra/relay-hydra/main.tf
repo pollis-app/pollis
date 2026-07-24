@@ -63,6 +63,8 @@ module "reconciler" {
   health_port = var.health_port
   node_floor  = var.node_floor
   node_max    = var.node_max
+
+  alarm_email_addresses = var.alarm_email_addresses
 }
 
 # ── Guardrail: AWS Budgets alert at the §0 hard cap ─────────────────────────
