@@ -702,6 +702,8 @@
             epochs &amp; commits</a></li>
         <li><span class="ln-track">MLS</span><a href="#joining-leaving">Joining, leaving,
             multi-device &amp; the honest history boundary</a></li>
+        <li><span class="ln-track">MLS</span><a href="#window-not-door">Forward secrecy &amp;
+            post-compromise security</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
@@ -1247,6 +1249,135 @@
             href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md" target="_blank"
             rel="noopener noreferrer">CLAUDE.md</a> → "Messages must work; history is bounded, not
           flaky".
+        </p>
+      </section>
+
+      <!-- ═══ Topic 5 — forward secrecy + PCS (#594) ═══════════════════════ -->
+      <section class="ln-section" id="window-not-door">
+        <div class="ln-eyebrow">Track B · MLS · Topic 5</div>
+        <h2>Forward secrecy and post-compromise security — a stolen key is a window, not a door</h2>
+
+        <div class="ln-prose">
+          <p>
+            Assume the worst: someone gets a key off your device today. Not a theoretical adversary —
+            a real compromise. What did they just get? Two questions follow, and they point in
+            opposite directions in time.
+          </p>
+          <p>
+            <strong>Forward secrecy answers "what about the past?"</strong> Answer: nothing. Keys
+            move forward through a one-way step. Each new key is derived from the previous one by a
+            function that can't be run backwards — like knowing a number is the result of mixing two
+            paints, but being unable to recover the original colours. Old keys are deleted once used.
+            So a key stolen today opens today's messages; yesterday's are already unreachable, because
+            the material that made them no longer exists anywhere.
+          </p>
+          <p>
+            There's a limit worth being precise about: <strong>this protects ciphertext, not your
+            screen.</strong> If yesterday's messages are still displayed in your app on that device,
+            an attacker with the device reads them off the screen. Forward secrecy means an attacker
+            who captured your <em>encrypted traffic</em> months ago, and steals a key today, still
+            can't decrypt what they captured. That's the actual guarantee, and it's a strong one.
+          </p>
+          <p>
+            <strong>Post-compromise security answers "what about the future?"</strong> This is the
+            less familiar and more remarkable half. Normally, a stolen key means permanent compromise
+            — you're read forever, or until you notice and start over. MLS is built so the group
+            <em>heals</em>.
+          </p>
+          <p>
+            Every commit — every add, every removal, every routine key update — replaces keys along a
+            path in the tree. Once a member the attacker isn't controlling performs an update that
+            refreshes the compromised path, the attacker's stolen key stops working. <strong>The group
+            recovers without anyone having detected the break.</strong> Healing is a property of
+            normal operation, not of incident response.
+          </p>
+          <p>
+            That's why the tree work in <a href="#mls-groups">Topic 3</a> matters. Cheap rekeying
+            means you can rekey often. Rekeying often means the window in which a stolen key is useful
+            is short — bounded by ordinary group activity rather than by how fast someone notices an
+            intrusion. Together: <strong>a stolen key is a window, not a door.</strong> It doesn't
+            open backwards, and it closes on its own.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            If the attacker keeps <strong>continuous</strong> access to your device, they receive
+            every update as you do — healing needs them to be locked out at some point, so PCS
+            recovers from a <em>past</em> compromise, not an ongoing one. Anything already decrypted
+            and stored on your device is readable by whoever holds the device; that's not a
+            cryptography question. Neither property does anything about metadata — the server still
+            saw the envelopes go by. And healing is driven by group activity, so a silent group rekeys
+            rarely. None of this means messages delete themselves; it means a stolen key opens a
+            bounded slice of time.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/window-not-door.jpg"
+            aria-describedby="window-not-door-transcript-body">
+            <source src="learn/media/window-not-door.webm" type="video/webm" />
+            <source src="learn/media/window-not-door.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/window-not-door.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            Time runs left to right throughout: a one-way key chain refusing to reverse, the caveat
+            about an unlocked screen, a real break healing on a routine commit, and the window
+            narrowing as the group talks.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="window-not-door-transcript-body">
+            <p>Let's assume the worst has already happened. Someone has a key from your device.
+              Today. What did they just get? Two questions: what about the past, and what about the
+              future.</p>
+            <p>The past first. They try yesterday's messages — and get nothing. Here's why. Keys move
+              forward in one-way steps. Each key is made from the one before it, through a process
+              that can't be reversed. Like mixing paint: easy forwards, impossible backwards. And once
+              a key is used, it's deleted.</p>
+            <p>So the key they hold opens today. Yesterday's key doesn't exist anymore — not on your
+              device, not on our servers, not anywhere. That's forward secrecy.</p>
+            <p>One honest caveat, because this gets overstated. If your old messages are still on
+              your screen, someone holding your unlocked device just reads them. Forward secrecy
+              protects encrypted traffic — someone who recorded your data months ago and steals a key
+              today still can't open what they recorded. That's the real promise, and it's a good
+              one.</p>
+            <p>Now the future — and this is the part I find genuinely surprising. Normally a stolen
+              key means you're compromised forever. Here, the attacker is reading. Epoch seven. Epoch
+              eight. This is a real break.</p>
+            <p>Then someone else in the group — someone the attacker doesn't control — does something
+              completely ordinary. Adds a member. Or just refreshes their keys, which happens
+              routinely. New keys flow up the path. Epoch nine arrives.</p>
+            <p>And the attacker is out. Nobody detected anything. Nobody responded to an incident. The
+              group healed by carrying on normally.</p>
+            <p>That's post-compromise security, and it's why the tree was worth the trouble. Cheap
+              rekeying means frequent rekeying, and frequent rekeying means a stolen key is useful for
+              a short window rather than forever. Sealed on the left by forward secrecy. Sealed on the
+              right by the next commit.</p>
+            <p>The limit: if they never lose access to your device, they get every update you do, and
+              they stay in. This recovers from a break that ended. It doesn't fix one that's still
+              happening.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: the key schedule in <a
+            href="https://www.rfc-editor.org/rfc/rfc9420.html#section-8" target="_blank"
+            rel="noopener noreferrer">RFC 9420 §8</a>, the epoch advance in <a
+            href="https://github.com/actuallydan/pollis/blob/main/.codesight/wiki/mls.md"
+            target="_blank" rel="noopener noreferrer">the MLS wiki article</a>, and the local-storage
+          caveat in <a href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md"
+            target="_blank" rel="noopener noreferrer">CLAUDE.md</a> → "Storage".
         </p>
       </section>
 

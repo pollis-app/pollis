@@ -1,0 +1,29 @@
+WEBVTT
+
+NOTE Captions for "Forward secrecy and post-compromise security" (Topic 5). No
+NOTE audio track yet by decision; these captions carry the narration. Source of
+NOTE truth: learn/manim/scripts/window-not-door.md
+
+00:00.000 --> 00:20.000
+Let's assume the worst has already happened. Someone has a key from your device. Today. What did they just get? Two questions: what about the past, and what about the future.
+
+00:20.000 --> 00:35.000
+The past first. They try yesterday's messages — and get nothing.
+
+00:35.000 --> 00:55.000
+Here's why. Keys move forward in one-way steps. Each key is made from the one before it, through a process that can't be reversed. Like mixing paint: easy forwards, impossible backwards. And once a key is used, it's deleted — not on your device, not on our servers, not anywhere.
+
+00:55.000 --> 01:20.000
+One honest caveat, because this gets overstated. If your old messages are still on your screen, someone holding your unlocked device just reads them. Forward secrecy protects encrypted traffic — someone who recorded your data months ago and steals a key today still can't open what they recorded.
+
+01:20.000 --> 01:40.000
+Now the future. Normally a stolen key means you're compromised forever. Here, the attacker is reading. Epoch seven. Epoch eight. This is a real break.
+
+01:40.000 --> 02:00.000
+Then someone else in the group — someone the attacker doesn't control — does something completely ordinary. New keys flow up the path. Epoch nine arrives. And the attacker is out. Nobody detected anything. The group healed by carrying on normally.
+
+02:00.000 --> 02:25.000
+Sealed on the left by forward secrecy. Sealed on the right by the next commit. A stolen key is a window, not a door — and the more the group talks, the narrower it gets. That's what cheap rekeying bought us.
+
+02:25.000 --> 02:50.000
+The limits: if they never lose access to your device, they get every update you do and they stay in. Anything already decrypted on your device is readable by whoever holds it. Neither property touches metadata. This recovers from a break that ended — not one that's still happening.
