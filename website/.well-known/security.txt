@@ -1,0 +1,13 @@
+# Security policy for Pollis (pollis.com)
+# https://securitytxt.org/
+
+Contact: https://github.com/actuallydan/pollis/security/advisories/new
+Contact: https://github.com/actuallydan/pollis/issues
+Policy: https://github.com/actuallydan/pollis/security/policy
+Preferred-Languages: en
+Canonical: https://pollis.com/.well-known/security.txt
+
+# Please report vulnerabilities privately via a GitHub security advisory
+# (the first Contact link) rather than a public issue. Pollis is open source;
+# the transparency tooling and verifier are at
+# https://github.com/actuallydan/pollis

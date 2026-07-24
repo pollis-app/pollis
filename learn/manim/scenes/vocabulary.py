@@ -100,26 +100,26 @@ class Vocabulary(Scene):
         self.hold_until(8)
         self.play(FadeOut(real))
 
-        # How large is "large"? Compare the number of possible keys to something
-        # concrete: the number of atoms in the observable universe.
+        # How large is "large"? Use the thermodynamic argument, which needs no
+        # shaky size comparison.
         rows = VGroup(
-            Text("Possible keys", color=FG).scale(0.5),
-            Text("2^256  ≈  10^77", font=MONO, color=AMBER).scale(0.66),
-        ).arrange(DOWN, buff=0.22).move_to([0, -0.4, 0])
+            Text("A symmetric key is one of", color=FG).scale(0.46),
+            Text("2^256  possible values", font=MONO, color=AMBER).scale(0.62),
+        ).arrange(DOWN, buff=0.22).move_to([0, -0.3, 0])
         self.play(FadeIn(rows[0]))
         self.play(FadeIn(rows[1]))
         self.hold_until(14)
 
-        compare = VGroup(
-            Text("Atoms in the observable universe", color=MUTED).scale(0.42),
-            Text("≈  10^80", font=MONO, color=MUTED).scale(0.46),
-        ).arrange(DOWN, buff=0.14).move_to([0, -2.1, 0])
-        self.play(FadeIn(compare))
-        note = Text("Picking the right key by guessing is not slow. It does not finish.",
-                    color=FG).scale(0.46).move_to([0, -3.2, 0])
+        compare = Text("Just counting through the far smaller 2^128 would take more",
+                       color=MUTED).scale(0.42).move_to([0, -1.9, 0])
+        compare2 = Text("energy than the Sun will emit for the rest of its life.",
+                        color=MUTED).scale(0.42).move_to([0, -2.4, 0])
+        self.play(FadeIn(compare), FadeIn(compare2))
+        note = Text("Guessing does not take a long time. It cannot finish.",
+                    color=FG).scale(0.48).move_to([0, -3.3, 0])
         self.play(FadeIn(note))
         self.hold_until(20)
-        self.play(FadeOut(VGroup(head, k, k2, rows, compare, note)))
+        self.play(FadeOut(VGroup(head, k, k2, rows, compare, compare2, note)))
 
     # ── Scene 2 (0:20–0:40), encryption is a lock that scrambles ───────────
     def beat_lock(self):
