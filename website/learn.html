@@ -698,6 +698,8 @@
             see what</a></li>
         <li><span class="ln-track">FOUNDATIONS</span><a href="#vocabulary">Keys, encryption,
             signatures &amp; hashes — the vocabulary</a></li>
+        <li><span class="ln-track">MLS</span><a href="#mls-groups">MLS groups — the ratchet tree,
+            epochs &amp; commits</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees &amp;
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Signed tree
@@ -975,6 +977,137 @@
             target="_blank" rel="noopener noreferrer">ds_client.rs</a>, and the SHA-256 hashing in <a
             href="https://github.com/actuallydan/pollis/blob/main/verifiable-log/src/merkle.rs"
             target="_blank" rel="noopener noreferrer">merkle.rs</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Topic 3 — MLS groups (#592) ═══════════════════════════════════ -->
+      <section class="ln-section" id="mls-groups">
+        <div class="ln-eyebrow">Track B · MLS · Topic 3</div>
+        <h2>MLS groups — the ratchet tree, epochs, and commits</h2>
+
+        <div class="ln-prose">
+          <p>
+            Most people have heard "end-to-end encrypted" and picture two people and one key. That
+            picture falls apart the moment there are five people in a channel, and it falls apart
+            completely when someone leaves.
+          </p>
+          <p>
+            Start with the naive approach. Five people in a channel: to send one message privately,
+            you encrypt it separately for each of the other four. Ten people, nine copies. A hundred
+            people, ninety-nine copies, <em>every message</em>. It works — some older systems do
+            exactly this — and it gets expensive fast. Worse is what happens when someone leaves: you
+            want messages after their departure to be unreadable to them, so everyone has to agree on
+            a new key, and agreeing on a new secret among a hundred people where each pair has to
+            coordinate is a lot of work.
+          </p>
+          <p>
+            <strong>MLS</strong> (Message Layer Security, <a
+              href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank"
+              rel="noopener noreferrer">RFC 9420</a> — an actual internet standard, not something we
+            invented) solves this with a <strong>tree</strong>.
+          </p>
+          <p>
+            Picture the group as a pyramid. Every member is a leaf at the bottom. Above them, nodes
+            join pairs, then pairs of pairs, up to a single root. Each node holds a key, and the rule
+            is: <strong>you know the key of every node on the path from your leaf up to the
+            root</strong> — your own, your parent's, its parent's, all the way up. The root key is
+            therefore known to everyone, and it's what protects the group's messages.
+          </p>
+          <p>
+            Now the payoff. When something changes — someone joins, someone leaves, or someone just
+            wants fresh keys — the person making the change generates new keys along their own path
+            to the root, and encrypts each new key <em>to the sibling subtree at each level</em>.
+            Instead of talking to every member individually, they send one compact update that each
+            member can unwrap using the part of the tree they already know. The cost drops from "one
+            message per member" to roughly <strong>the depth of the tree</strong> — about seven steps
+            for a hundred people, not ninety-nine. For a thousand, about ten.
+          </p>
+          <p>
+            Two more pieces of vocabulary. <strong>An epoch</strong> is a version number for the
+            group: every time the keys change, the epoch ticks up — 5, 6, 7 — and every message is
+            sealed under a specific epoch's keys. <strong>A commit</strong> is the message that
+            causes an epoch to advance: "add Dana", "remove Sam", "here are fresh keys". Commits must
+            be applied in order by everyone, or members end up in different states and can no longer
+            read each other's messages. <strong>Keeping that order correct across devices, networks,
+            and reconnections is the single hardest engineering problem in Pollis</strong> — and it's
+            why we publish an append-only log of every commit (<a href="#three-logs">Topic 9</a>).
+          </p>
+          <p>
+            What the server does here: it stores and forwards commits. It cannot read them, cannot
+            forge them — every commit is authenticated by the sender's key — and cannot silently drop
+            one without members noticing a gap in the epoch sequence.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            MLS protects <em>content</em> and <em>membership changes</em>. It does nothing about
+            metadata — the server still sees that a group exists, roughly who is in it, and when
+            commits and messages flow. <a href="#threat-model">Topic 1</a> said this and it's still
+            true here. The tree also assumes every member's device applies commits in the same order;
+            when that breaks, the failure is a device that can't read new messages until it catches
+            up, not a silent loss of secrecy.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/mls-groups.jpg" aria-describedby="mls-groups-transcript-body">
+            <source src="learn/media/mls-groups.webm" type="video/webm" />
+            <source src="learn/media/mls-groups.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/mls-groups.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            The naive cost piling up, the tree being built, one update rippling sideways instead of
+            to everybody, and a removed member watching the next message stay sealed.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="mls-groups-transcript-body">
+            <p>Two people sharing one key is easy. Groups are where it gets interesting. Here's the
+              obvious approach: encrypt the message separately for every person. Five people, four
+              copies. It works — but watch what happens when the group grows. A hundred people means
+              ninety-nine copies of every message you send.</p>
+            <p>And when someone leaves, everyone needs new keys, which means everyone coordinating
+              with everyone. It doesn't scale.</p>
+            <p>MLS arranges the group as a tree instead. Everyone sits at the bottom. Above them,
+              nodes pair up, all the way to a single root. Every node holds a key — and here's the
+              rule: you know the keys on the path from your own leaf to the root. Yours, your
+              parent's, and so on up. The root is known to everyone. That's what protects the group's
+              messages.</p>
+            <p>Now watch what happens when something changes. This member generates fresh keys along
+              their path — and sends each one only to the sibling branch at that level. Not to every
+              member. To one branch at each step. Everyone can unwrap what they need, using the part
+              of the tree they already know. Ninety-nine messages becomes seven.</p>
+            <p>Removal works the same way, and it's the important case. This member is removed. New
+              keys flow up the vacated path. The next message goes out — and for them, it stays
+              sealed. They're in the same room, holding the old key, and it opens nothing.</p>
+            <p>Two words you'll see everywhere in Pollis. An epoch is the group's version number — it
+              ticks up every time the keys change. A commit is the message that makes it tick.</p>
+            <p>Every member has to apply those commits in the same order. If a device misses one, it
+              falls out of step and can't read what comes next — until it catches up.</p>
+            <p>Keeping that order correct, across every device, network drop, and reconnection, is
+              the hardest problem in this app. It's also why we publish every commit to a public
+              append-only log — which is where we're going next.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: <a href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank"
+            rel="noopener noreferrer">RFC 9420</a> itself, our OpenMLS usage in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/mls.rs"
+            target="_blank" rel="noopener noreferrer">mls.rs</a>, and the ordering invariant in <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            target="_blank" rel="noopener noreferrer">docs/transparency.md</a>.
         </p>
       </section>
 
