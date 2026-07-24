@@ -58,10 +58,11 @@ data "aws_iam_policy_document" "reconciler" {
     resources = ["*"]
   }
 
-  # Scale only pollis-relay ASGs.
+  # Scale only pollis-relay ASGs; SetInstanceHealth lets the reconciler flag a
+  # dead-container node so the ASG replaces it (self-heal).
   statement {
     sid       = "ScaleAsg"
-    actions   = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:SetDesiredCapacity"]
+    actions   = ["autoscaling:UpdateAutoScalingGroup", "autoscaling:SetDesiredCapacity", "autoscaling:SetInstanceHealth"]
     resources = ["*"]
     condition {
       test     = "StringEquals"
@@ -183,7 +184,49 @@ resource "aws_lambda_permission" "events" {
   source_arn    = aws_cloudwatch_event_rule.schedule.arn
 }
 
+# ── Alarm notifications: SNS topic + email subscriptions ────────────────────
+# The alarms below all route to this topic. Email subscriptions require a one-time
+# confirmation click in the mail AWS sends (Terraform can't auto-confirm — the
+# subscription sits "pending confirmation" until then).
+
+resource "aws_sns_topic" "alarms" {
+  name = "${local.function_name}-alarms"
+  tags = { app = "pollis-relay" }
+}
+
+resource "aws_sns_topic_subscription" "alarm_emails" {
+  for_each  = toset(var.alarm_email_addresses)
+  topic_arn = aws_sns_topic.alarms.arn
+  protocol  = "email"
+  endpoint  = each.value
+}
+
+# Let CloudWatch alarms publish to the topic.
+data "aws_iam_policy_document" "alarms_topic" {
+  statement {
+    sid       = "AllowCloudWatchAlarmsPublish"
+    actions   = ["sns:Publish"]
+    resources = [aws_sns_topic.alarms.arn]
+    principals {
+      type        = "Service"
+      identifiers = ["cloudwatch.amazonaws.com"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceAccount"
+      values   = [data.aws_caller_identity.current.account_id]
+    }
+  }
+}
+
+resource "aws_sns_topic_policy" "alarms" {
+  arn    = aws_sns_topic.alarms.arn
+  policy = data.aws_iam_policy_document.alarms_topic.json
+}
+
 # ── Alarms (a handful; $0.10 each) ──────────────────────────────────────────
+# Each fires AND recovers to the SNS topic (alarm_actions + ok_actions) so a
+# resolved issue sends an all-clear, not silence.
 
 resource "aws_cloudwatch_metric_alarm" "reconcile_failures" {
   alarm_name          = "${local.function_name}-reconcile-failures"
@@ -195,6 +238,8 @@ resource "aws_cloudwatch_metric_alarm" "reconcile_failures" {
   statistic           = "Maximum"
   threshold           = 0
   treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
   tags                = { app = "pollis-relay" }
 }
 
@@ -209,6 +254,8 @@ resource "aws_cloudwatch_metric_alarm" "lambda_errors" {
   threshold           = 0
   treat_missing_data  = "notBreaching"
   dimensions          = { FunctionName = aws_lambda_function.reconciler.function_name }
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
   tags                = { app = "pollis-relay" }
 }
 
@@ -227,5 +274,7 @@ resource "aws_cloudwatch_metric_alarm" "healthy_nodes" {
   threshold           = 1
   treat_missing_data  = "breaching"
   dimensions          = { Region = each.key }
+  alarm_actions       = [aws_sns_topic.alarms.arn]
+  ok_actions          = [aws_sns_topic.alarms.arn]
   tags                = { app = "pollis-relay" }
 }

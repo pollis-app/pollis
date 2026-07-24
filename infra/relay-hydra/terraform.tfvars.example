@@ -19,3 +19,7 @@ relay_allowlist = "prod-actuallydan.aws-us-east-1.turso.io,api.pollis.com,4bd9ab
 # $20/mo hard cap alert. Add emails to get notified.
 monthly_budget_usd  = 20
 budget_alert_emails = []
+
+# CloudWatch alarms (reconcile failures, Lambda errors, healthy-node floor) → SNS →
+# email. Each address must confirm the subscription email AWS sends.
+alarm_email_addresses = []

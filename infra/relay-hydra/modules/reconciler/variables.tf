@@ -63,3 +63,9 @@ variable "node_floor" {
 variable "node_max" {
   type = number
 }
+
+variable "alarm_email_addresses" {
+  description = "Emails subscribed to the SNS topic the CloudWatch alarms notify. Each address must confirm the subscription via the email AWS sends. Empty = the topic still exists and alarms still fire to it, but nobody is subscribed."
+  type        = list(string)
+  default     = []
+}
