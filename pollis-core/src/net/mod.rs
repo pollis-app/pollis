@@ -4,4 +4,5 @@
 //! shared reqwest client seam, and the libsql SOCKS connector. All of it is
 //! INERT unless `POLLIS_OVERLAY` selects a non-off mode at runtime.
 
+pub mod directory;
 pub mod overlay;

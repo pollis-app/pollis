@@ -25,7 +25,10 @@ use hyper::Uri;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
 use tower_service::Service;
+
+use super::directory;
 
 use pollis_relay::circuit::{Circuit, CircuitFactory, Hop};
 use pollis_relay::client::ClientIdentity;
@@ -448,6 +451,239 @@ fn load_pinned_cert(s: &str) -> Option<CertificateDer<'static>> {
         .map(CertificateDer::from)
 }
 
+// ── Dynamic pool: the signed directory (design §14.1, issue #616) ──────────
+//
+// When `POLLIS_OVERLAY_DIRECTORY_URL` + `_KEY` are configured, the pool is not a
+// static list but a signed directory (`crate::net::directory`) the client fetches
+// + verifies and REFRESHES as the hosted pool's membership changes (nodes rotate
+// on Spot reclamation / self-heal). A `SwappableFactory` holds the live pool and
+// the refresh loop swaps it in place — no shim restart, no DB reconnect.
+
+/// Refresh the directory this long BEFORE it expires, so the pool is never serving
+/// from an expired directory. The reconciler re-signs every couple of minutes with
+/// a ~1h expiry, so at steady state this refetches roughly hourly.
+const DIRECTORY_REFRESH_SKEW: Duration = Duration::from_secs(5 * 60);
+/// Clamp the computed sleep so a pathological `expires_at` can neither tight-loop
+/// nor park refresh forever.
+const DIRECTORY_MIN_REFRESH: Duration = Duration::from_secs(30);
+const DIRECTORY_MAX_REFRESH: Duration = Duration::from_secs(55 * 60);
+/// After a failed fetch, retry on this fixed backoff — recover lazily, keep the
+/// previous pool meanwhile (mirrors `RemoteDb::with_retry`; never poll tightly).
+const DIRECTORY_RETRY_BACKOFF: Duration = Duration::from_secs(60);
+/// Floor on the interval between fetches, so an on-exhaustion notify storm during
+/// an outage can never hammer the directory host.
+const DIRECTORY_MIN_REFETCH: Duration = Duration::from_secs(15);
+
+/// Map a verified [`directory::Directory`] to the factory's endpoint pool. Each
+/// entry carries its OWN pinned cert (the format supports per-node certs; v0.5
+/// shares one across the pool, but we consume whatever is listed). Entries whose
+/// `cert_b64` is not valid base64/DER are skipped — never dial a relay we cannot
+/// pin.
+fn directory_to_endpoints(dir: &directory::Directory) -> Vec<RelayEndpoint> {
+    use base64::Engine as _;
+    dir.relays
+        .iter()
+        .filter_map(|r| {
+            let der = base64::engine::general_purpose::STANDARD
+                .decode(r.cert_b64.trim())
+                .ok()?;
+            Some(RelayEndpoint {
+                addr: r.addr.clone(),
+                cert: CertificateDer::from(der),
+            })
+        })
+        .collect()
+}
+
+/// Seconds to sleep before the next scheduled refresh, derived from the current
+/// directory's `expires_at` minus the skew, clamped to a sane window.
+fn until_refresh(expires_at: i64) -> Duration {
+    let now = now_unix_secs() as i64;
+    let secs = (expires_at - now).saturating_sub(DIRECTORY_REFRESH_SKEW.as_secs() as i64);
+    Duration::from_secs(secs.max(0) as u64).clamp(DIRECTORY_MIN_REFRESH, DIRECTORY_MAX_REFRESH)
+}
+
+/// Owns the directory refresh task and aborts it when the factory drops (overlay
+/// stopped or rebuilt) — so no orphan refresh loop outlives the pool it feeds.
+struct AbortOnDrop(JoinHandle<()>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// A [`CircuitFactory`] whose relay pool can be swapped live, so the refresh loop
+/// replaces the pool as membership changes without restarting the shim. `connect`
+/// reads the current pool per call (a cheap `Arc` clone; the lock is never held
+/// across I/O) and, when a dial fully fails, nudges the refresh loop — the pool it
+/// holds may be stale.
+struct SwappableFactory {
+    inner: Mutex<Arc<dyn CircuitFactory>>,
+    /// Pinged when a connect exhausts the current pool: membership likely changed
+    /// under us, so refetch out of band instead of waiting for the schedule.
+    refresh_notify: tokio::sync::Notify,
+    /// Aborts the refresh task on drop. `Option` only so it can be set AFTER the
+    /// `Arc<SwappableFactory>` exists (the task holds a `Weak` back to it).
+    refresh_task: Mutex<Option<AbortOnDrop>>,
+}
+
+impl SwappableFactory {
+    fn new(initial: Arc<dyn CircuitFactory>) -> Self {
+        SwappableFactory {
+            inner: Mutex::new(initial),
+            refresh_notify: tokio::sync::Notify::new(),
+            refresh_task: Mutex::new(None),
+        }
+    }
+
+    fn current(&self) -> Arc<dyn CircuitFactory> {
+        self.inner.lock().unwrap().clone()
+    }
+
+    fn swap(&self, next: Arc<dyn CircuitFactory>) {
+        *self.inner.lock().unwrap() = next;
+    }
+}
+
+#[async_trait::async_trait]
+impl CircuitFactory for SwappableFactory {
+    async fn connect(&self, host: &str, port: u16) -> anyhow::Result<BoxedStream> {
+        let factory = self.current();
+        match factory.connect(host, port).await {
+            Ok(stream) => Ok(stream),
+            Err(e) => {
+                // Pool exhausted — likely stale membership. Nudge a refetch; the
+                // refresh loop's debounce keeps this from hammering the host.
+                self.refresh_notify.notify_one();
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Fetch + verify the directory and build a fresh relay pool from it. Returns the
+/// new factory and the directory's `expires_at` (to schedule the next refresh).
+/// Fails (fail-closed) if the fetch, verification, or every listed cert fails.
+async fn fetch_and_build_pool(
+    url: &str,
+    key: &str,
+    state: &Weak<AppState>,
+    cooldown: Duration,
+    dial_timeout: Duration,
+) -> anyhow::Result<(Arc<dyn CircuitFactory>, i64)> {
+    let bytes = directory::fetch_directory(url).await?;
+    let now = now_unix_secs() as i64;
+    let dir = directory::verify_directory(&bytes, key, now)?;
+    let endpoints = directory_to_endpoints(&dir);
+    if endpoints.is_empty() {
+        anyhow::bail!("overlay: directory verified but no relay had a usable pinned cert");
+    }
+    let factory: Arc<dyn CircuitFactory> = Arc::new(RealRelayFactory::new(
+        state.clone(),
+        endpoints,
+        cooldown,
+        dial_timeout,
+    ));
+    Ok((factory, dir.expires_at))
+}
+
+/// The directory refresh loop: keep the [`SwappableFactory`]'s pool current. Wakes
+/// on either the expiry-derived schedule OR an on-exhaustion notify (debounced by
+/// [`DIRECTORY_MIN_REFETCH`]). On success it swaps the pool and schedules the next
+/// refresh near the new directory's expiry; on failure it keeps the existing pool
+/// and retries on a fixed backoff. Exits when the factory is dropped (overlay
+/// stopped) — the `Weak` upgrade fails. This is event-driven + lazy, not a
+/// keepalive poll: it sleeps on the directory's own TTL and on real dial failures.
+async fn directory_refresh_loop(
+    factory: Weak<SwappableFactory>,
+    state: Weak<AppState>,
+    url: String,
+    key: String,
+    cooldown: Duration,
+    dial_timeout: Duration,
+    mut next_sleep: Duration,
+) {
+    let mut last_fetch = Instant::now();
+    loop {
+        let sf = match factory.upgrade() {
+            Some(sf) => sf,
+            None => return,
+        };
+        tokio::select! {
+            _ = tokio::time::sleep(next_sleep) => {}
+            _ = sf.refresh_notify.notified() => {}
+        }
+        drop(sf);
+
+        // Debounce: never refetch more often than DIRECTORY_MIN_REFETCH.
+        let since = last_fetch.elapsed();
+        if since < DIRECTORY_MIN_REFETCH {
+            tokio::time::sleep(DIRECTORY_MIN_REFETCH - since).await;
+        }
+        last_fetch = Instant::now();
+
+        match fetch_and_build_pool(&url, &key, &state, cooldown, dial_timeout).await {
+            Ok((next_factory, expires_at)) => match factory.upgrade() {
+                Some(sf) => {
+                    sf.swap(next_factory);
+                    next_sleep = until_refresh(expires_at);
+                }
+                None => return,
+            },
+            Err(e) => {
+                eprintln!("[overlay] directory refresh failed, keeping current pool: {e}");
+                next_sleep = DIRECTORY_RETRY_BACKOFF;
+            }
+        }
+    }
+}
+
+/// Build the DYNAMIC (directory-backed) circuit factory: one initial fetch so the
+/// pool is usable immediately, then spawn the refresh loop that keeps it current.
+/// If the initial fetch fails the factory starts empty (fail-closed: Prefer→direct,
+/// Strict→degrade) and the refresh loop recovers it.
+async fn build_directory_factory(state: &Arc<AppState>) -> Arc<dyn CircuitFactory> {
+    // Both are Some here — start_overlay_shim only calls this when configured.
+    let url = state.config.overlay_directory_url.clone().unwrap_or_default();
+    let key = state.config.overlay_directory_key.clone().unwrap_or_default();
+    let weak_state = Arc::downgrade(state);
+
+    let (initial, next_sleep) = match fetch_and_build_pool(
+        &url,
+        &key,
+        &weak_state,
+        RELAY_DEAD_COOLDOWN,
+        RELAY_DIAL_TIMEOUT,
+    )
+    .await
+    {
+        Ok((factory, expires_at)) => (factory, until_refresh(expires_at)),
+        Err(e) => {
+            eprintln!("[overlay] initial directory fetch failed, fail-closed until refresh: {e}");
+            let empty: Arc<dyn CircuitFactory> = Arc::new(RealRelayFactory::new(
+                weak_state.clone(),
+                Vec::new(),
+                RELAY_DEAD_COOLDOWN,
+                RELAY_DIAL_TIMEOUT,
+            ));
+            (empty, DIRECTORY_RETRY_BACKOFF)
+        }
+    };
+
+    let swappable = Arc::new(SwappableFactory::new(initial));
+    let task = tokio::spawn(directory_refresh_loop(
+        Arc::downgrade(&swappable),
+        weak_state,
+        url,
+        key,
+        RELAY_DEAD_COOLDOWN,
+        RELAY_DIAL_TIMEOUT,
+        next_sleep,
+    ));
+    *swappable.refresh_task.lock().unwrap() = Some(AbortOnDrop(task));
+    swappable
+}
+
 /// Start the overlay shim for `state` under `mode` (must be non-off). Builds the
 /// routing policy + the real circuit factory and binds the loopback SOCKS5 shim.
 /// The returned handle owns the shim task (aborted on drop) and lets the caller
@@ -459,21 +695,33 @@ pub(crate) async fn start_overlay_shim(
     mode: OverlayMode,
 ) -> Result<OverlayHandle> {
     let policy = overlay_policy(&state.config, mode);
-    let endpoints = load_relay_endpoints(&state.config);
-    let factory: Arc<dyn CircuitFactory> = Arc::new(RealRelayFactory::new(
-        Arc::downgrade(state),
-        endpoints,
-        RELAY_DEAD_COOLDOWN,
-        RELAY_DIAL_TIMEOUT,
-    ));
+    // Dynamic pool (signed directory) when configured; else the static v0 list.
+    let factory: Arc<dyn CircuitFactory> = if state.config.overlay_directory_configured() {
+        build_directory_factory(state).await
+    } else {
+        Arc::new(RealRelayFactory::new(
+            Arc::downgrade(state),
+            load_relay_endpoints(&state.config),
+            RELAY_DEAD_COOLDOWN,
+            RELAY_DIAL_TIMEOUT,
+        ))
+    };
     let handle = OverlayShim::start(policy, factory)
         .await
         .map_err(|e| Error::Other(anyhow::anyhow!("overlay shim start: {e}")))?;
-    let relay = state
-        .config
-        .overlay_relay_url
-        .as_deref()
-        .unwrap_or("<none configured>");
+    let relay = if state.config.overlay_directory_configured() {
+        state
+            .config
+            .overlay_directory_url
+            .as_deref()
+            .unwrap_or("<directory>")
+    } else {
+        state
+            .config
+            .overlay_relay_url
+            .as_deref()
+            .unwrap_or("<none configured>")
+    };
     eprintln!(
         "[overlay] shim on {} (mode={mode:?}, relay={relay})",
         handle.socks_addr()
@@ -707,6 +955,8 @@ mod tests {
             overlay_mode: mode,
             overlay_relay_url: relay.map(|s| s.to_string()),
             overlay_relay_cert: None,
+            overlay_directory_url: None,
+            overlay_directory_key: None,
         }
     }
 
