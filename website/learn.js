@@ -402,8 +402,57 @@
       .catch(function () { /* stay hidden — the page reads fine without it */ });
   }
 
+  // ── Topic 2: a live SHA-256 of whatever the reader types ────────────────
+  // The point of the widget is the avalanche: change one character, the whole
+  // fingerprint changes. Ships `hidden`, revealed only if crypto.subtle exists.
+  function hashWidget() {
+    var w = document.querySelector("[data-hash-widget]");
+    if (!w || !subtle) { return; }
+    var input = w.querySelector("[data-hash-input]");
+    var out = w.querySelector("[data-hash-out]");
+    var nudge = w.querySelector("[data-hash-nudge]");
+    var note = w.querySelector("[data-hash-note]");
+    var prev = null;
+
+    function render() {
+      var value = input.value;
+      sha256Hex(value).then(function (hex) {
+        // Colour only the characters that moved, so the avalanche is visible
+        // rather than merely claimed.
+        var html = "";
+        for (var i = 0; i < hex.length; i++) {
+          var moved = prev !== null && prev[i] !== hex[i];
+          html += moved ? '<b class="ln-hash-moved">' + hex[i] + "</b>" : hex[i];
+        }
+        out.innerHTML = html;
+        if (prev !== null) {
+          var same = 0;
+          for (var j = 0; j < hex.length; j++) {
+            if (prev[j] === hex[j]) { same += 1; }
+          }
+          note.textContent = (hex.length - same) + " of " + hex.length +
+            " characters changed";
+        }
+        prev = hex;
+      });
+    }
+
+    input.addEventListener("input", render);
+    nudge.addEventListener("click", function () {
+      // Flip the last character to something adjacent — one character, no more.
+      var v = input.value;
+      var last = v.slice(-1);
+      var next = last === "7" ? "8" : last === "8" ? "7" : last === "z" ? "y" : "z";
+      input.value = v.slice(0, -1) + next;
+      render();
+    });
+    render();
+    w.hidden = false;
+  }
+
   function init() {
     liveSth();
+    hashWidget();
     if (!subtle) { return; }
     Array.prototype.forEach.call(
       document.querySelectorAll("[data-merkle-widget]"), build);
