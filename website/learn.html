@@ -660,6 +660,8 @@
             transparency — and what reproducibility we actually have</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#verify-it-yourself">pollis-verify —
             verify it yourself</a></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#reading-the-dashboards">Reading the
+            artifacts page and the in-app Security page</a></li>
       </ul>
 
       <!-- ═══ Topic 7 — Merkle trees (M0 pilot, #596) ═══════════════════════ -->
@@ -1483,6 +1485,153 @@ PASS: release binaries tree is valid</code></pre>
           layout in <a
             href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">docs/transparency.md</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Topic 12 — reading the dashboards (#601) ══════════════════════ -->
+      <section class="ln-section" id="reading-the-dashboards">
+        <div class="ln-eyebrow">Track D · Transparency · Topic 12</div>
+        <h2>Reading the artifacts page and the in-app Security page</h2>
+
+        <div class="ln-prose">
+          <p>
+            You now have every concept needed to read our public dashboards. Here's the tour — this
+            is the legend for the map.
+          </p>
+          <p>
+            <strong>On the website: the <a href="artifacts.html">artifacts page</a>.</strong>
+            <em>Latest releases</em> is the current version of each thing we ship, with download
+            links. (Fun aside: for a while this displayed <code>vv1.5.2</code> — a duplicated prefix —
+            and the same bug meant the release-proofs lookup was querying a tag that could never
+            exist, so the card permanently reported the newest release as missing from the log. A
+            cosmetic-looking typo was hiding a functional failure.)
+          </p>
+          <p>
+            <em>Release proofs</em> is the heart of it: for the current release tag, was it found in
+            the binaries log, did the tree verify, and what's in it. You'll see a row per artifact
+            with the fields from Topic 10 — platform, bundle, layer
+            (<code>payload</code>/<code>signed</code>/<code>exe</code>), the payload hash, the
+            artifact hash, and an inclusion tick. Read a tick as <em>"a proof was verified"</em>, not
+            <em>"a box was checked"</em>. <code>tree size</code> and <code>root</code> are the signed
+            tree head from Topic 8 — and the root is the same string you'd get from <code>curl</code>
+            or from <code>pollis-verify</code>. If it says <strong>not in log yet</strong>, that's
+            usually the daily rebuild (Topic 9), not an alarm.
+          </p>
+          <p>
+            <em>Daily transparency self-audit</em> shows the current signed head of all three trees
+            (Topic 9), republished daily — the "we re-check what we actually served" surface,
+            including the tripwire that would catch us serving two different histories over time. And
+            <em>the one key you trust</em> is the pinned Ed25519 key, <code>175ebfef…7148</code>:
+            everything above reduces to that single string. Worth reading the honest note attached —
+            the page compares the served key against this constant in your browser, which is a
+            convenience, not a trust anchor. Real verification uses a key you obtained independently
+            (Topic 11).
+          </p>
+          <p>
+            <strong>In the app: the Security page.</strong> <em>This build</em> gives you a version,
+            a commit, and a verdict from the in-app check (Topic 10). There are four:
+          </p>
+          <p>
+            <strong>Build publicly verified</strong> — this exact binary's fingerprint is in the
+            public log for this release. <strong>Build publication pending</strong> — the release
+            isn't in the republished tree yet; normal right after a release.
+            <strong>Verification unavailable</strong> — couldn't check: the log was unreachable, or
+            this release predates the <code>exe</code> layer so there's nothing comparable. <em>Not
+            an accusation.</em> <strong>Build not in public log</strong> — the loud one: the tag is
+            published, a comparable fingerprint exists, and ours isn't among them.
+          </p>
+          <p>
+            The distinction between those last two is the whole difference between a useful alarm and
+            crying wolf — "I don't know" versus "you've been tampered with" — and we got it wrong
+            once (Topic 10).
+          </p>
+          <p>
+            Below that: <em>account key</em>, your own device re-checking that the identity key the
+            world is shown for you is the key you actually hold (Topics 6 and 9) — silent when fine.
+            <em>Devices and security events</em>, an append-only local record of enrollments,
+            rejections, and identity resets; not cryptography, just an audit trail worth reading if
+            something feels wrong. And <em>safety numbers</em> per contact, with a distinct warning
+            for a pinned key that changed.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            Green across every one of these surfaces means: <strong>the things Pollis published are
+            consistent, permanent, and include the app you're running.</strong> It does not mean the
+            code is free of bugs, that your device isn't compromised, or that metadata isn't visible
+            to the people who carry your traffic. We've shrunk what you have to take on faith and
+            published the evidence for what's left — which is the whole promise, and a smaller one
+            than "trust us".
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/reading-the-dashboards.jpg"
+            aria-describedby="dashboards-transcript-body">
+            <source src="learn/media/reading-the-dashboards.webm" type="video/webm" />
+            <source src="learn/media/reading-the-dashboards.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/reading-the-dashboards.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the text above and the
+              transcript below teach the same thing without video.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            Both dashboards annotated, one artifact row taken apart, the same root in three places,
+            and the four build verdicts — with the most time on the two that get confused.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="dashboards-transcript-body">
+            <p>You've got every idea you need to read our dashboards. Let's go through them. Latest
+              releases — what we currently ship, and where to get it.</p>
+            <p>Release proofs. This is the one that matters. For the current version: is it in the
+              binaries log, did the tree check out, and what's inside.</p>
+            <p>Each row is one piece of a release. Platform. Bundle. Layer — payload, signed, or exe,
+              the three from earlier. The hashes. And a tick. Read that tick carefully. It doesn't
+              mean someone marked a box. It means an inclusion proof was recomputed and it held.</p>
+            <p>Tree size and root — that's the signed head. And this root is the same string you'd get
+              by fetching the file yourself, or by running the verifier. If it says "not in log yet",
+              that's almost always the daily rebuild. Not an alarm.</p>
+            <p>Below, the daily self-audit: the current head of all three logs. And at the bottom, the
+              one key everything reduces to. Note what that page says about itself — the key check in
+              your browser is a convenience, not a trust anchor. Real verification uses a key you got
+              independently.</p>
+            <p>Now inside the app. "This build" tells you whether the exact binary you're running is
+              in the public log. Four possible answers, and the difference between two of them matters
+              a lot.</p>
+            <p>"Pending" means the log hasn't rebuilt yet. "Unavailable" means we couldn't check — the
+              log was unreachable, or this release is older than the layer that makes checking
+              possible. And "not in public log" is the loud one: the release is published, there's
+              something to compare against, and yours isn't it.</p>
+            <p>"Unavailable" versus "not in the log" is the difference between "I don't know" and
+              "you've been tampered with". We shipped that wrong once, and every honest macOS build
+              was accused of being fake. It's fixed — and it's exactly why the distinction is worth
+              labouring.</p>
+            <p>Below that: your account key, being re-checked against the public log. Your devices.
+              Your security events. And safety numbers for each contact.</p>
+            <p>And here's the honest ending. Everything green means the things we published are
+              consistent, permanent, and include the app you're running. It does not mean our code has
+              no bugs. It does not mean your device is safe. And it does not mean the metadata we
+              talked about has gone anywhere. We've shrunk what you have to take on faith, and
+              published evidence for what's left. That's the whole promise. Now you can check it.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: the page itself — <a href="artifacts.html">artifacts</a> — plus <a
+            href="https://github.com/actuallydan/pollis/blob/main/website/artifacts.js"
+            target="_blank" rel="noopener noreferrer">artifacts.js</a> for how the proofs are rendered
+          and <a
+            href="https://github.com/actuallydan/pollis/blob/main/frontend/src/components/Security/BuildVerifyLine.tsx"
+            target="_blank" rel="noopener noreferrer">BuildVerifyLine.tsx</a> for the four verdicts.
         </p>
       </section>
 
