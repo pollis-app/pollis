@@ -176,6 +176,72 @@
       word-break: break-all;
     }
 
+    /* ── Copy-pasteable command blocks ────────────────────────── */
+    .ln-pre {
+      margin: 1.25rem 0;
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      background: #000;
+      overflow-x: auto;
+    }
+
+    .ln-pre code {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.75rem;
+      line-height: 1.6;
+      color: var(--c-text);
+      background: none;
+      padding: 0;
+      white-space: pre;
+      word-break: normal;
+    }
+
+    /* ── Live value pulled from verify.pollis.com by learn.js ─── */
+    .ln-live {
+      margin: 1.25rem 0;
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--c-border);
+      border-left: 3px solid var(--ln-ok);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .ln-live-label {
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--ln-ok);
+      margin-bottom: 0.5rem;
+    }
+
+    .ln-live-row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: baseline;
+      font-size: 0.78rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .ln-live-row span {
+      color: var(--c-text-muted);
+      min-width: 5rem;
+    }
+
+    .ln-live-row b {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-weight: 400;
+      color: var(--c-accent);
+      word-break: break-all;
+    }
+
+    .ln-live-note {
+      font-size: 0.75rem;
+      color: var(--c-text-muted);
+      margin-top: 0.6rem;
+      line-height: 1.6;
+    }
+
     /* ── The honest-limit callout — load-bearing, per the epic ── */
     .ln-limit {
       border: 1px solid var(--c-border);
@@ -592,6 +658,8 @@
             what each one prevents</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#binary-transparency">Binary
             transparency — and what reproducibility we actually have</a></li>
+        <li><span class="ln-track">TRANSPARENCY</span><a href="#verify-it-yourself">pollis-verify —
+            verify it yourself</a></li>
       </ul>
 
       <!-- ═══ Topic 7 — Merkle trees (M0 pilot, #596) ═══════════════════════ -->
@@ -1226,6 +1294,195 @@
             href="https://github.com/actuallydan/pollis/blob/main/.github/workflows/rebuild-verify.yml"
             target="_blank" rel="noopener noreferrer">rebuild-verify workflow</a> you can run from a
           fork. Live release hashes are on the <a href="artifacts.html">artifacts page</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Topic 11 — verify it yourself (#600) ══════════════════════════ -->
+      <section class="ln-section" id="verify-it-yourself">
+        <div class="ln-eyebrow">Track D · Transparency · Topic 11</div>
+        <h2>pollis-verify — verify it yourself</h2>
+
+        <div class="ln-prose">
+          <p>
+            Everything above explains what <em>could</em> be checked. This one has you actually check
+            it, on your own machine, in about two minutes. There are two ways in: reading the files
+            directly, and running the verifier.
+          </p>
+          <p>
+            <strong>The verification API is just files.</strong> There's no clever API.
+            <code>verify.pollis.com</code> serves a directory of static JSON — no server-side logic, no
+            database query, nothing that could behave differently depending on who's asking. That's
+            deliberate: a server that <em>computes</em> an answer can compute a different answer for
+            you than for someone else. A server handing out flat files it wrote in advance has a much
+            harder time, and the daily publish job re-reads what's actually being served to confirm it
+            matches what was signed.
+          </p>
+          <p>
+            <code>/v1/&lt;tree&gt;/sth/latest.json</code> is the current signed tree head;
+            <code>/v1/&lt;tree&gt;/entries.json</code> is the log's entries;
+            <code>/verify/release/&lt;tag&gt;</code> is a pre-computed report for one release. And
+            <code>/v1/&lt;tree&gt;/public_key.json</code> is the key the heads are signed with —
+            <strong>which you should not trust.</strong> It's served for convenience; the whole point
+            (Topic 8) is that real verifiers compare it against a key they already have. If it
+            disagrees, that alone is the alarm.
+          </p>
+          <p>Fetch the current head yourself — this works in any terminal, on any OS:</p>
+          <pre class="ln-pre"><code>curl -s https://verify.pollis.com/v1/binaries/sth/latest.json</code></pre>
+
+          <div class="ln-live" data-live-sth hidden>
+            <div class="ln-live-label">Live, fetched by your browser just now:</div>
+            <div class="ln-live-row"><span>tree_size</span><b data-live-size>…</b></div>
+            <div class="ln-live-row"><span>root</span><b data-live-root>…</b></div>
+            <div class="ln-live-note">
+              That's the same number the <a href="artifacts.html">artifacts page</a> shows, and the
+              same root the animations above use. Two places, one value.
+            </div>
+          </div>
+
+          <p>
+            <strong>The verifier does the actual checking.</strong> Reading JSON tells you what we
+            <em>claim</em>. <code>pollis-verify</code> is a small standalone program that checks the
+            claims: it re-hashes entries, rebuilds the tree, verifies proofs against the signed head,
+            checks the signature against a key <strong>compiled into the binary</strong>, and re-runs
+            the same rules the log enforces on writes. Crucially it's the <em>same verification
+            code</em> the app uses — not a reimplementation that could drift into agreeing with us by
+            accident.
+          </p>
+          <p>Four subcommands, four questions. Arguments are positional, in this order:</p>
+          <pre class="ln-pre"><code># is the whole log internally consistent and append-only?
+pollis-verify remote  https://verify.pollis.com
+
+# what keys have we published for this user, in what order?
+pollis-verify account https://verify.pollis.com &lt;user-id&gt;
+
+# is this conversation's commit chain a straight, unforked line?
+pollis-verify group   https://verify.pollis.com &lt;conversation-id&gt;
+
+# are this release's binaries in the log, with valid proofs?
+pollis-verify release https://verify.pollis.com v1.5.3</code></pre>
+          <p>
+            Here's a real run of that last command against the live log — captured 2026-07-23, not
+            mocked up:
+          </p>
+          <pre class="ln-pre"><code>$ pollis-verify release https://verify.pollis.com v1.5.3
+
+Release: v1.5.3
+Found:   yes
+STH:     tree_size 60  root 37945cb2f61ee43782259a3893336b8ba8b8679d3af1612742deeec75e46cc0c
+Artifacts (publish order):
+  darwin   aarch64  dmg       payload  payload 774c8f…ea92  artifact 774c8f…ea92  [included ✓]
+  darwin   aarch64  dmg       signed   payload 774c8f…ea92  artifact eef7ae…c155  [included ✓]
+  darwin   aarch64  dmg       exe      payload 774c8f…ea92  artifact 77fc24…bea5  [included ✓]
+  windows  x86_64   nsis      payload  payload 88547f…7926  artifact 88547f…7926  [included ✓]
+  windows  x86_64   nsis      signed   payload 88547f…7926  artifact 16edeb…e92b  [included ✓]
+  windows  x86_64   nsis      exe      payload 88547f…7926  artifact 0f4c0f…73a6  [included ✓]
+  linux    x86_64   appimage  payload  payload 9b1ab1…e653  artifact 9b1ab1…e653  [included ✓]
+  linux    x86_64   deb       payload  payload 7f19ec…1a5a  artifact 7f19ec…1a5a  [included ✓]
+  linux    x86_64   deb       exe      payload 7f19ec…1a5a  artifact 5d9281…55b5  [included ✓]
+  linux    x86_64   rpm       payload  payload 586cfa…cbaa  artifact 586cfa…cbaa  [included ✓]
+  linux    x86_64   rpm       exe      payload 586cfa…cbaa  artifact e45d0c…400b  [included ✓]
+
+PASS: release binaries tree is valid</code></pre>
+          <p>
+            Read that against what you now know. <code>tree_size 60</code> and the root are the signed
+            head from Topic 8 — the same one the <code>curl</code> above returns. Each
+            <code>[included ✓]</code> is an inclusion proof that actually verified: not a status field
+            we wrote down, a computation that succeeded on your machine. The
+            <code>payload</code> / <code>signed</code> / <code>exe</code> layers are Topic 10. And
+            <code>PASS</code> means the whole tree replayed cleanly under the pinned key, with every
+            rule holding.
+          </p>
+          <p>
+            <strong>What a failure looks like.</strong> A <code>FAIL</code> is not necessarily "you've
+            been attacked". It could mean the log is mid-republish, or that a release is newer than the
+            last daily rebuild (Topic 9). What <em>would</em> be serious is a valid signature over a
+            tree that contradicts one someone else was served — the equivocation case. Which is why the
+            most valuable thing you can do with this tool is <strong>compare notes with someone else
+            running it.</strong> That comparison is the entire social basis of transparency logging.
+          </p>
+          <p>
+            <strong>Where it comes from.</strong> <code>pollis-verify</code> is published as a
+            standalone binary with checksums, and the pinned key is printed in the release notes. It's
+            also buildable from source — and if you're seriously auditing us,
+            <strong>build it</strong>, because a verifier we hand you is a verifier we could have
+            tampered with. The verifier being open and rebuildable is what stops it from being one more
+            thing you have to trust.
+          </p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The honest limit</div>
+          <p>
+            A <code>PASS</code> on your machine proves the log you were served is internally
+            consistent, append-only, and signed by the pinned key. It cannot tell you whether
+            <em>someone else</em> was served the same log — that's the one question a single run can
+            never answer, no matter how carefully it's written. And a binary we hand you checking a key
+            we compiled in is only as good as your decision to build it yourself. Both gaps close the
+            same way: more people running it, comparing results.
+          </p>
+        </div>
+
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/verify-it-yourself.jpg"
+            aria-describedby="verify-transcript-body">
+            <source src="learn/media/verify-it-yourself.webm" type="video/webm" />
+            <source src="learn/media/verify-it-yourself.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English" default
+              src="learn/media/verify-it-yourself.vtt" />
+          </video>
+          <noscript>
+            <p class="ln-noscript">This animation is an enhancement — the commands above run without
+              it.</p>
+          </noscript>
+          <figcaption class="ln-figcaption">
+            The static file shelf, a real <code>curl</code>, the real verifier output landing on
+            <code>PASS</code>, and the comparison only two people can do.
+            No audio yet — captions and the transcript below carry the narration.
+          </figcaption>
+        </figure>
+
+        <details class="ln-transcript">
+          <summary>Read the transcript</summary>
+          <div class="ln-transcript-body" id="verify-transcript-body">
+            <p>Everything we've talked about is checkable. Here's how, in about two minutes. First,
+              the API — and it's barely an API. It's a shelf of static files. No database, no logic,
+              nothing that can decide to behave differently depending on who's asking.</p>
+            <p>That's on purpose. A server that computes an answer can compute a different one for
+              you. A server handing out files it wrote in advance has a much harder time.</p>
+            <p>You can fetch any of them right now. Here's the current signed head — root, entry
+              count, signature. And here's the same root on our website. Same sixty-four characters.
+              Two different places.</p>
+            <p>But reading files only tells you what we claim. To check the claims, use the verifier.
+              It's a small program you download — or build yourself, and if you're seriously auditing
+              us, build it. It re-hashes every entry, rebuilds the tree, checks every proof, and
+              verifies the signature against a key compiled into it. Not fetched. Compiled in. One
+              command.</p>
+            <p>Watch what comes back. Tree size, sixty. The root — the same one we just fetched. Then
+              every artifact in the release, each with a tick. Those ticks aren't a status we wrote
+              down. Each one is an inclusion proof that your machine just recomputed and confirmed.
+              And the last line — PASS — means the whole tree replayed cleanly, every rule holding,
+              under a key we couldn't swap on you.</p>
+            <p>Speaking of which. Suppose we served you our own signing key, with a perfect fake log
+              to match. The verifier compares it to the key built into it — and stops.</p>
+            <p>One last thing, and it's the most important use of this tool. Two people, different
+              countries, different networks, same command. Same root. Same PASS.</p>
+            <p>If those ever differed — two valid signatures over two different trees — that's the
+              finding that matters. It's also the only one you can't get alone. So run it. And compare
+              with someone.</p>
+          </div>
+        </details>
+
+        <p class="ln-deeper">
+          The rigorous version: <a
+            href="https://github.com/actuallydan/pollis/blob/main/verifiable-log-serve/src/bin/pollis-verify.rs"
+            target="_blank" rel="noopener noreferrer">pollis-verify.rs</a> (the CLI you just ran), the
+          shared verification path in <a
+            href="https://github.com/actuallydan/pollis/tree/main/verifiable-log-serve/src"
+            target="_blank" rel="noopener noreferrer">verifiable-log-serve</a>, and the static API
+          layout in <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
+            target="_blank" rel="noopener noreferrer">docs/transparency.md</a>.
         </p>
       </section>
 

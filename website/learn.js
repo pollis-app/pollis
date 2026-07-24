@@ -382,7 +382,28 @@
     widget.hidden = false;
   }
 
+  // ── Topic 11: show the live signed tree head next to the page's example ──
+  // Progressive enhancement — the block ships `hidden` and only appears if the
+  // fetch actually succeeds, so a blocked request or JS-off reader just sees the
+  // curl command and the captured output, which teach the same thing.
+  var STH_URL = "https://verify.pollis.com/v1/binaries/sth/latest.json";
+
+  function liveSth() {
+    var box = document.querySelector("[data-live-sth]");
+    if (!box || typeof fetch !== "function") { return; }
+    fetch(STH_URL, { mode: "cors" })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (sth) {
+        if (!sth || !sth.root_hash) { return; }
+        box.querySelector("[data-live-size]").textContent = String(sth.tree_size);
+        box.querySelector("[data-live-root]").textContent = sth.root_hash;
+        box.hidden = false;
+      })
+      .catch(function () { /* stay hidden — the page reads fine without it */ });
+  }
+
   function init() {
+    liveSth();
     if (!subtle) { return; }
     Array.prototype.forEach.call(
       document.querySelectorAll("[data-merkle-widget]"), build);
