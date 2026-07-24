@@ -510,6 +510,19 @@ removes the per-call-`Client::new()` anti-pattern (connection-pool win for free)
     rate + concurrency limits (`Rejected(RateLimited)`). Operational-separation commitment written up
     in **`docs/relay-operations.md`**. Bootstrap/OTP traffic (a device with no cert yet) cannot
     cert-authenticate and stays DIRECT — documented, mirrors the DS session-vs-device split.
+  - **Slice 2b (landed) — the signed-directory client (#616, the hydra's client half).** The pool is
+    no longer a hardcoded list: when `POLLIS_OVERLAY_DIRECTORY_URL` + `POLLIS_OVERLAY_DIRECTORY_KEY`
+    are configured, the client fetches a **signed directory** of live relays, verifies its Ed25519
+    signature over the exact payload bytes against the pinned key (`crate::net::directory`, byte-
+    identical to `infra/relay-hydra/lib/directory-verify.mjs` — the §3 frozen contract), and feeds the
+    result into the same `RealRelayFactory` pool. A `SwappableFactory` wraps the pool so a refresh loop
+    can replace membership live (near `expires_at`, and on-demand when the pool is exhausted) with no
+    shim restart or DB reconnect. Each directory entry carries its own pinned cert (per-node identities
+    for free). Fail-closed is preserved end to end: a rejected/unreachable directory yields an empty
+    pool → `prefer` direct, `strict` degrade, never a silent unverified send. The directory FETCH is
+    deliberately direct (it bootstraps the pool it cannot yet route through; integrity comes from the
+    signature, not the transport). The static `POLLIS_OVERLAY_RELAY` path (Slice 2a) remains the
+    operator/hand-provisioned fallback; the directory supersedes it when both vars are set.
 - **Slice 3 — one-hop latency measurement** against the §6.4 budget (de-risk item 3), on the real
   control plane, before any "ship v0" call.
 

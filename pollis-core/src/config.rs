@@ -52,9 +52,30 @@ pub struct Config {
     /// endpoint). Kept separate from the endpoint so a future pool can pin one
     /// cert while listing several addresses.
     pub overlay_relay_cert: Option<String>,
+    /// URL of the signed relay **directory** (`POLLIS_OVERLAY_DIRECTORY_URL`, e.g.
+    /// `https://relays.pollis.com/directory.json`). When set (with the key below),
+    /// the overlay pool is DYNAMIC: the client fetches this directory, verifies it
+    /// (§3), and refreshes it as membership changes — superseding the static
+    /// `POLLIS_OVERLAY_RELAY` list. Absent → the static list is used (v0). See
+    /// `crate::net::directory` and issue #616.
+    pub overlay_directory_url: Option<String>,
+    /// The pinned Ed25519 directory-signing PUBLIC key
+    /// (`POLLIS_OVERLAY_DIRECTORY_KEY`): base64 (STANDARD) of the raw 32 bytes. The
+    /// client verifies every fetched directory against exactly this key, so a
+    /// rolled-back or forged directory fails closed. Required alongside the URL —
+    /// a URL without a key is treated as "directory not configured" (fail-safe).
+    pub overlay_directory_key: Option<String>,
 }
 
 impl Config {
+    /// True when BOTH the directory URL and pinned key are set — the DYNAMIC pool
+    /// path. A URL without a key (or vice versa) is deliberately NOT configured:
+    /// verifying against a key is non-negotiable, so a half-config fails safe to
+    /// the static list rather than fetching an unverifiable directory.
+    pub fn overlay_directory_configured(&self) -> bool {
+        self.overlay_directory_url.is_some() && self.overlay_directory_key.is_some()
+    }
+
     /// The configured relay endpoints, in order. `RealRelayFactory` treats them
     /// as a pool — tries them in health order and fails over to the first
     /// success. Empty when unconfigured.
@@ -112,6 +133,14 @@ impl Config {
             overlay_relay_cert: option_env!("POLLIS_OVERLAY_RELAY_CERT")
                 .map(|s| s.to_string())
                 .or_else(|| std::env::var("POLLIS_OVERLAY_RELAY_CERT").ok())
+                .filter(|s| !s.is_empty()),
+            overlay_directory_url: option_env!("POLLIS_OVERLAY_DIRECTORY_URL")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("POLLIS_OVERLAY_DIRECTORY_URL").ok())
+                .filter(|s| !s.is_empty()),
+            overlay_directory_key: option_env!("POLLIS_OVERLAY_DIRECTORY_KEY")
+                .map(|s| s.to_string())
+                .or_else(|| std::env::var("POLLIS_OVERLAY_DIRECTORY_KEY").ok())
                 .filter(|s| !s.is_empty()),
         })
     }
@@ -172,6 +201,8 @@ impl Config {
             overlay_mode: pollis_relay::OverlayMode::Off,
             overlay_relay_url: None,
             overlay_relay_cert: None,
+            overlay_directory_url: None,
+            overlay_directory_key: None,
         })
     }
 }

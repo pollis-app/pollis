@@ -156,6 +156,8 @@ async fn init_pollis_inner(config_json: String) -> Result<(), BridgeError> {
                 overlay_mode: pollis_relay::OverlayMode::Off,
                 overlay_relay_url: None,
                 overlay_relay_cert: None,
+                overlay_directory_url: None,
+                overlay_directory_key: None,
             };
             let state = AppState::new(config).await?;
             Ok::<Arc<AppState>, BridgeError>(Arc::new(state))

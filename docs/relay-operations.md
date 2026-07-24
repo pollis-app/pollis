@@ -259,21 +259,45 @@ you can). Mount the identity volume so a restart keeps the same pinned cert.
 
 Bake the pool into the client build (the same `option_env!` mechanism as every
 other first-party endpoint; a runtime env var of the same name overrides for local
-testing):
+testing). There are two ways to supply the pool — pick ONE:
+
+**A. Dynamic signed directory (recommended — the hydra, #616).** The client fetches
+a signed, self-updating directory of live relays and refreshes it as pool
+membership changes (Spot reclamation / self-heal node replacement), so you never
+re-ship the client when nodes rotate:
+
+- `POLLIS_OVERLAY_DIRECTORY_URL` = the stable directory URL, e.g.
+  `https://relays.pollis.com/directory.json`.
+- `POLLIS_OVERLAY_DIRECTORY_KEY` = the base64 (STANDARD) of the 32-byte Ed25519
+  directory-signing **public** key (printed by `infra/relay-hydra/scripts/mint-signing-key.sh`).
+
+The client (`crate::net::directory` → `SwappableFactory` in `net/overlay.rs`)
+fetches the envelope, verifies the Ed25519 signature over the exact payload bytes
+against the pinned key, and rejects (fail-closed → `prefer` direct / `strict`
+degrade) on bad signature, `version != 1`, expiry, malformed JSON, or empty relays
+— the §3 contract, byte-identical to `infra/relay-hydra/lib/directory-verify.mjs`.
+It refreshes near the directory's `expires_at` (and on-demand when the pool is
+exhausted), swapping the live pool with **no shim restart**. Each directory entry
+carries its own pinned cert, so per-node identities work automatically. When BOTH
+vars are set, this path supersedes `POLLIS_OVERLAY_RELAY` below.
+
+**B. Static endpoint list (v0 / operator-provisioned hosts).** For a hand-managed
+pool with stable addresses:
 
 - `POLLIS_OVERLAY_RELAY` = the **comma-separated** endpoint list, e.g.
   `relay1.pollis.com:9444,relay2.pollis.com:9444`.
 - `POLLIS_OVERLAY_RELAY_CERT` = the pinned cert from Step 1 (base64 of the DER, or
   a path to the DER file).
 
-The client (`RealRelayFactory`, `pollis-core/src/net/overlay.rs`) treats the list
-as a **pool** (design §4 above): it dials endpoints in health order and takes the
-first success; a failed dial marks that endpoint dead for a 30 s cooldown and the
-next candidate is tried; only when **every** endpoint fails does a connect error
-(so `prefer` still falls back to direct, `strict` still degrades — but never on a
-single dead relay). A rotating start index spreads load; each dial is bounded (8 s)
-so an unreachable node fails over fast. One shared `POLLIS_OVERLAY_RELAY_CERT`
-pins every endpoint (all first-party, same identity).
+Either way, the client (`RealRelayFactory`, `pollis-core/src/net/overlay.rs`) treats
+the resolved set as a **pool** (design §4 above): it dials endpoints in health order
+and takes the first success; a failed dial marks that endpoint dead for a 30 s
+cooldown and the next candidate is tried; only when **every** endpoint fails does a
+connect error (so `prefer` still falls back to direct, `strict` still degrades — but
+never on a single dead relay). A rotating start index spreads load; each dial is
+bounded (8 s) so an unreachable node fails over fast. In the static path one shared
+`POLLIS_OVERLAY_RELAY_CERT` pins every endpoint; the directory path pins each node
+against its own advertised cert.
 
 ### Step 4 — verify
 
