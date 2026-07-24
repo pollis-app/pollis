@@ -450,9 +450,65 @@
     w.hidden = false;
   }
 
+  // ── Caption strip: mirror the active subtitle line under each video ─────
+  // Each video keeps its caption track off as an overlay (mode "hidden"), which
+  // still fires cuechange, so we can print the current cue below the frame with
+  // the previous and next lines faded. The <details> transcript is the fallback
+  // when this can't run.
+  function captionStrip(section) {
+    var video = section.querySelector("video.ln-video");
+    var strip = section.querySelector("[data-caption-strip]");
+    if (!video || !strip) { return; }
+    var prevEl = strip.querySelector(".ln-cap-prev");
+    var curEl = strip.querySelector(".ln-cap-cur");
+    var nextEl = strip.querySelector(".ln-cap-next");
+
+    function textAt(cues, i) {
+      return (i >= 0 && i < cues.length) ? cues[i].text.replace(/\n/g, " ") : "";
+    }
+
+    function paint(track) {
+      var cues = track.cues;
+      if (!cues || !cues.length) { return; }
+      // Index of the cue covering the current time (or the last one before it).
+      var t = video.currentTime, idx = -1;
+      for (var i = 0; i < cues.length; i++) {
+        if (t >= cues[i].startTime && t <= cues[i].endTime) { idx = i; break; }
+        if (t > cues[i].endTime) { idx = i; }
+      }
+      // Before playback starts, preview the first line as the "next" cue.
+      if (idx === -1) {
+        prevEl.textContent = "";
+        curEl.textContent = "";
+        nextEl.textContent = textAt(cues, 0);
+        return;
+      }
+      prevEl.textContent = textAt(cues, idx - 1);
+      curEl.textContent = textAt(cues, idx);
+      nextEl.textContent = textAt(cues, idx + 1);
+    }
+
+    var track = video.textTracks && video.textTracks[0];
+    if (!track) { return; }
+    // "hidden" processes cues (fires cuechange) without drawing them on the video.
+    track.mode = "hidden";
+    track.addEventListener("cuechange", function () { paint(track); });
+    // cuechange doesn't fire while paused/seeking between cues, so also follow time.
+    video.addEventListener("timeupdate", function () { paint(track); });
+    video.addEventListener("seeked", function () { paint(track); });
+    // The track's cues may load a beat late; try now and on the track load event.
+    paint(track);
+    var trackEl = video.querySelector("track");
+    if (trackEl) {
+      trackEl.addEventListener("load", function () { track.mode = "hidden"; paint(track); });
+    }
+  }
+
   function init() {
     liveSth();
     hashWidget();
+    Array.prototype.forEach.call(
+      document.querySelectorAll("section.ln-section"), captionStrip);
     if (!subtle) { return; }
     Array.prototype.forEach.call(
       document.querySelectorAll("[data-merkle-widget]"), build);

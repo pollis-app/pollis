@@ -299,67 +299,82 @@
       margin-top: 0.6rem;
     }
 
-    /* ── Read-along panel (always visible, beside/below the video) ── */
-    .ln-watch {
-      margin: 1.25rem 0 0;
-      border: 1px solid var(--c-border);
+    /* ── Caption strip: the active subtitle line, just under the video ── */
+    /* Driven by learn.js off the video's own caption track (cuechange), so it
+       stays in sync. The video keeps its full width; captions are not overlaid
+       on the frame. The current line is bright, the previous/next are faded. */
+    .ln-caption-strip {
+      margin: 0.5rem 0 0;
+      min-height: 5.4rem;
+      padding: 0.6rem 1rem;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.15rem;
+      text-align: center;
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.015);
-      padding: 1rem 1.25rem 0.4rem;
+      border: 1px solid var(--c-border);
     }
 
-    .ln-watch-head {
-      font-size: 0.8rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--c-accent);
+    .ln-cap-line {
+      line-height: 1.5;
+      transition: color 0.15s, opacity 0.15s;
     }
 
-    .ln-watch-sub {
-      font-size: 0.78rem;
-      line-height: 1.6;
-      color: var(--c-text-muted);
-      margin: 0.35rem 0 0.75rem;
-    }
-
-    .ln-watch-body {
-      max-height: 22rem;
-      overflow-y: auto;
-      font-size: 0.9rem;
-      line-height: 1.75;
+    .ln-cap-cur {
+      font-size: 0.98rem;
       color: var(--c-text);
-      padding-right: 0.5rem;
+      font-weight: 500;
+      min-height: 1.5em;
     }
 
-    .ln-watch-body p {
-      margin-bottom: 0.85rem;
+    .ln-cap-prev,
+    .ln-cap-next {
+      font-size: 0.82rem;
+      color: var(--c-text-muted);
+      opacity: 0.45;
     }
 
-    /* On wide viewports, sit the read-along beside the video. */
-    @media (min-width: 60rem) {
-      .ln-media {
-        display: flex;
-        gap: 1.5rem;
-        align-items: flex-start;
-        margin: 2rem 0;
-      }
+    /* ── Full transcript (collapsed; also the no-JS fallback) ─────── */
+    .ln-transcript {
+      margin: 1rem 0 0;
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.015);
+    }
 
-      .ln-media .ln-figure {
-        flex: 1 1 58%;
-        min-width: 0;
-        margin: 2rem 0 0;
-      }
+    .ln-transcript summary {
+      cursor: pointer;
+      padding: 0.7rem 1rem;
+      font-size: 0.82rem;
+      font-weight: 700;
+      color: var(--c-text);
+      list-style: none;
+    }
 
-      .ln-media .ln-watch {
-        flex: 1 1 42%;
-        min-width: 0;
-        margin-top: 2rem;
-      }
+    .ln-transcript summary::-webkit-details-marker {
+      display: none;
+    }
 
-      .ln-media .ln-watch-body {
-        max-height: 20rem;
-      }
+    .ln-transcript summary::before {
+      content: "\25B8  ";
+      color: var(--c-text-muted);
+    }
+
+    .ln-transcript[open] summary::before {
+      content: "\25BE  ";
+    }
+
+    .ln-transcript-body {
+      padding: 0 1rem 1rem;
+      font-size: 0.88rem;
+      line-height: 1.75;
+      color: var(--c-text-muted);
+    }
+
+    .ln-transcript-body p {
+      margin-bottom: 0.75rem;
     }
 
     /* ── Interactive widget: see learn.js ─────────────────────── */
@@ -759,7 +774,6 @@
           <p>A few things sit outside what any messenger can protect, and it is fairer to name them. Someone holding your unlocked device can read what is on it. The delivery information above, sometimes called metadata, is visible to whoever carries your traffic. And a brand new device starts empty, because there is no history backup (that trade is explained in Topic 4). Everything else, we work to protect, and to let you check.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/threat-model.jpg" aria-describedby="threat-model-transcript-body">
@@ -773,21 +787,23 @@ One picture, built up step by step: a readable message, then a sealed one, then 
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="threat-model-transcript-body">
-            <p>Most messaging apps ask you to trust a company. Not its promise, its ability. A company that means well can still be hacked, bought, or ordered by a court. So Pollis is built so that reading your messages is not something we choose not to do. It is something we cannot do.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="threat-model-transcript-body">
+<p>Most messaging apps ask you to trust a company. Not its promise, its ability. A company that means well can still be hacked, bought, or ordered by a court. So Pollis is built so that reading your messages is not something we choose not to do. It is something we cannot do.</p>
             <p>Your message is sealed on your device before it goes anywhere. Our servers pass it along without ever holding the key. It opens on your friend's device.</p>
             <p>We cannot see what is inside. We can see the outside: that your account sent something, when, roughly how big, and which conversation it belongs to. That is called metadata, and it can be sensitive on its own, so we are not going to pretend it does not exist.</p>
             <p>There is also a subtler point. Encryption only helps if you are using the right key for the right person. If the wrong key ever slipped in, a message could be read in the middle without breaking any of the maths. That is exactly what safety numbers and our public key logs let you check.</p>
             <p>Here is the full picture. Green, we cannot see. Amber, we can, and we say so. Red is outside what any messenger can defend: your own device, and plain software bugs.</p>
             <p>Everything else in Learn is about shrinking how much of the green depends on trusting us, and publishing evidence for whatever is left.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -818,7 +834,6 @@ One picture, built up step by step: a readable message, then a sealed one, then 
           <p>Strong encryption is not the fragile part, and it almost never is. The parts that matter in practice are where keys are kept, whether a public key really belongs to the person it claims to, and whether the app doing the locking is honest. Those three questions are what the rest of this section is about.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/vocabulary.jpg" aria-describedby="vocabulary-transcript-body">
@@ -832,21 +847,23 @@ Four short scenes, no formulas: the size of a key, a lock with no "almost", the 
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="vocabulary-transcript-body">
-            <p>A key is a very large number. Large enough that guessing it is not hard, it is out of reach, because there is not enough time to try.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="vocabulary-transcript-body">
+<p>A key is a very large number. Large enough that guessing it is not hard, it is out of reach, because there is not enough time to try.</p>
             <p>Encryption is a lock. Your message goes in with a key and out comes noise. Put the noise back in with the right key and your message returns. Wrong key, and you get nothing. Not a blurry version, not most of it. Nothing.</p>
             <p>Now the idea that makes this work between strangers. Your key comes in two halves. One is public, you hand it to anyone. One is private, and it never leaves your device. Anything locked with the public half can only be opened by the private half. A stranger can lock a message to you, and then cannot open it themselves.</p>
             <p>Run the same idea backwards and you get signatures. Mark something with your private half and anyone with your public half can confirm it came from you and was not changed. Change one word and the check fails.</p>
             <p>Last idea: a hash. It is a fingerprint for data. Any file, any size, in, and a short string out. Same file, same fingerprint, every time. Change one character and it is completely different. Try it yourself in the box below.</p>
             <p>Key, encryption, signature, hash. Everything else is those four ideas arranged. And the maths is not the weak point. What matters is where the keys are kept, whether a public key really belongs to who it says, and whether the app is honest. That is what the rest of Learn is about.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <!-- Live hash widget — built + driven by learn.js -->
         <div class="ln-widget" id="hash-widget" data-hash-widget hidden>
@@ -898,7 +915,6 @@ Four short scenes, no formulas: the size of a key, a lock with no "almost", the 
           <p>The tree protects the contents of messages and who is in the group. It does not hide the fact that a group exists, or that messages are flowing, which is the metadata point from <a href="#threat-model">Topic 1</a>. And it assumes every device applies updates in the same order; when that slips, the effect is a device that cannot read new messages until it catches up, not a leak.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/mls-groups.jpg" aria-describedby="mls-groups-transcript-body">
@@ -912,21 +928,23 @@ The copy-per-person approach piling up, then the tree being built, then one smal
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="mls-groups-transcript-body">
-            <p>Locking a message for one person is easy. Groups are where it gets interesting. The obvious approach is to encrypt the message separately for every person. Five people, four copies. A hundred people means ninety-nine copies of every message. And when someone leaves, everyone needs new keys.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="mls-groups-transcript-body">
+<p>Locking a message for one person is easy. Groups are where it gets interesting. The obvious approach is to encrypt the message separately for every person. Five people, four copies. A hundred people means ninety-nine copies of every message. And when someone leaves, everyone needs new keys.</p>
             <p>MLS arranges the group as a tree instead. Everyone sits along the bottom. Boxes pair up all the way to a single box at the top. Each box holds a key, and you know the keys on the line from your box up to the top. The top key is shared by everyone, and it protects the group's messages.</p>
             <p>When something changes, the person making the change sends one small update along their line, and each part of the group unlocks the piece it needs from what it already knows. Ninety-nine messages becomes about seven.</p>
             <p>Leaving works the same way. When a member is removed, the keys along their line are replaced. The next message goes out, and for them it stays sealed. They still hold the old key, and it opens nothing.</p>
             <p>Two words you will see everywhere. An epoch is the group's version number. A commit is the update that makes it tick.</p>
             <p>Everyone applies those updates in the same order. If a device misses one, it falls a step behind and cannot read what comes next until it catches up. Keeping that order right is one of the hardest parts of the app, and it is why every commit is written to a public log, which is where we go next.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: <a href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank"
@@ -958,7 +976,6 @@ The copy-per-person approach piling up, then the tree being built, then one smal
           <p>Two kinds of loss are expected: messages sent before you joined, and a new device starting empty. Everything else should just work, including delivery to every current member, going offline and back, reconnecting, and accepting a message request. If a message goes missing for any other reason, that is a bug and we treat it as one.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/joining-leaving.jpg" aria-describedby="joining-leaving-transcript-body">
@@ -972,13 +989,16 @@ Lockboxes left in advance, a welcome that carries only today's keys, messages fr
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="joining-leaving-transcript-body">
-            <p>To add you to a group, someone needs to lock its keys so only you can open them, even while you are offline. So every device leaves a small lockbox in advance. Anyone can drop something in. Only you can open it.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="joining-leaving-transcript-body">
+<p>To add you to a group, someone needs to lock its keys so only you can open them, even while you are offline. So every device leaves a small lockbox in advance. Anyone can drop something in. Only you can open it.</p>
             <p>When you are added, an existing member seals the group's current state into your lockbox and sends it over. You open it, and you are in.</p>
             <p>Now the part people do not expect. You received the keys as they are now, not the older ones. New keys cannot be used to work out old ones, and that is the very thing that makes removing someone work.</p>
             <p>So messages sent before you joined stay sealed. It is not that the app is hiding them. The key genuinely does not fit.</p>
@@ -987,8 +1007,7 @@ Lockboxes left in advance, a welcome that carries only today's keys, messages fr
             <p>Which brings up the trade we would rather you hear from us. A new device starts empty. There is no history backup. We could store your history on our servers behind a PIN, but that would put a copy of every conversation on our infrastructure behind a short, guessable code, which is exactly what this app exists to avoid. So we do not. If you want your history, keep your device.</p>
             <p>What we do promise is narrow and firm. Two kinds of loss are expected: messages from before you joined, and a new device starting empty. Everything else has to arrive, and anything else going missing is a bug.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: the enrollment and GroupInfo flows in <a
@@ -1019,7 +1038,6 @@ Lockboxes left in advance, a welcome that carries only today's keys, messages fr
           <p>If someone keeps continuous access to your device, they receive every update you do and stay in, so this recovers from a break that has ended, not one still in progress. Anything already unscrambled and sitting on your device can be read by whoever holds the device. Neither property touches metadata. And healing happens through activity, so a very quiet group refreshes its keys less often. None of this means messages delete themselves; it means a stolen key only opens a limited slice of time.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/window-not-door.jpg" aria-describedby="window-not-door-transcript-body">
@@ -1033,21 +1051,23 @@ Time runs left to right throughout: a one-way key chain that will not reverse, t
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="window-not-door-transcript-body">
-            <p>Suppose the worst has already happened. Someone has a key from your device, today. What did they get? Two questions: what about the past, and what about the future.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="window-not-door-transcript-body">
+<p>Suppose the worst has already happened. Someone has a key from your device, today. What did they get? Two questions: what about the past, and what about the future.</p>
             <p>The past first. They try yesterday's messages and get nothing. Keys move forward in one-way steps. Each key is made from the one before it, through a process that cannot be reversed, like mixing paint. And once a key is used, it is thrown away. Yesterday's key does not exist anywhere anymore.</p>
             <p>One point, because this gets overstated. If your old messages are still on your screen, someone holding your unlocked device can read them. Forward secrecy protects recorded traffic: someone who captured your data months ago still cannot open it with today's key.</p>
             <p>Now the future. Normally a stolen key means you are compromised for a long time. Here, someone else in the group, someone the attacker does not control, does something ordinary, like refreshing their keys. New keys flow along the tree, and the stolen key stops working. Nobody had to detect anything. The group healed by carrying on.</p>
             <p>Sealed on the left by forward secrecy. Sealed on the right by the next update. A stolen key is a window, not a door, and the more the group talks, the narrower it gets.</p>
             <p>The limit: if someone never loses access to your device, they get every update you do and stay in. This recovers from a break that ended, not one still happening.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: the key schedule in <a
@@ -1080,7 +1100,6 @@ Time runs left to right throughout: a one-way key chain that will not reverse, t
           <p>A safety number that nobody compares protects nobody, and your app cannot tell an innocent key change from a real problem, which is exactly why it asks you rather than guessing. The public log narrows the gap by making any swapped key permanent and visible, which is a strong deterrent and a record, though not a physical block. And none of this affects metadata (<a href="#threat-model">Topic 1</a>).</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/identity-keys.jpg" aria-describedby="identity-keys-transcript-body">
@@ -1094,13 +1113,16 @@ A message being read in the middle while both screens still show a padlock, safe
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="identity-keys-transcript-body">
-            <p>Encryption protects the message. It does not tell you who is on the other end. When you first message someone, your app fetches their public key from our servers. That is the gap.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="identity-keys-transcript-body">
+<p>Encryption protects the message. It does not tell you who is on the other end. When you first message someone, your app fetches their public key from our servers. That is the gap.</p>
             <p>If the wrong key were handed over, a message could be opened in the middle, read, and re-sealed. Both screens would still show a padlock, because nothing is wrong with the encryption. It is working perfectly, on the wrong key. Every encrypted app has this problem. Here are the two safeguards.</p>
             <p>First, safety numbers. Your device combines your key with your contact's and produces a short code. They do the same. Same two keys, same code. If the keys differed, the codes would differ. Compare them any way an eavesdropper cannot touch, side by side, read aloud, or by QR code, and a mismatch shows up right away.</p>
             <p>The catch is you have to actually check, and most people never do. So there is a second safeguard that works even when nobody checks.</p>
@@ -1108,8 +1130,7 @@ A message being read in the middle while both screens still show a padlock, safe
             <p>One last thing. The first time you talk to someone, your app remembers their key. If it changes, you get a note. Usually that is innocent, a new phone or a reinstall. Sometimes it is not. Your app cannot tell the difference, which is why it asks you.</p>
             <p>Compare safety numbers once, with the people who matter. The log handles the rest.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: the safety-number derivation and TOFU pin store in <a
@@ -1141,7 +1162,6 @@ A message being read in the middle while both screens still show a padlock, safe
           <p>A Merkle tree does not decide whether an entry is truthful; it only makes the whole list tamper-evident. What it removes is the ability to show one version of the list to you and a different version to someone else, or to change the story later. That is a smaller claim than "trust us", and a much more useful one, because you can confirm it yourself instead of believing it.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/merkle-trees.jpg" aria-describedby="merkle-trees-transcript-body">
@@ -1155,21 +1175,23 @@ Building the tree from the bottom up, then changing one entry and watching the r
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="merkle-trees-transcript-body">
-            <p>Say we publish a list, every key we have ever issued, and we promise to only ever add to it. Never edit, never delete. How could you confirm that for yourself?</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="merkle-trees-transcript-body">
+<p>Say we publish a list, every key we have ever issued, and we promise to only ever add to it. Never edit, never delete. How could you confirm that for yourself?</p>
             <p>You could download the whole list every day and compare. But it grows forever, and it only works if you never miss a day.</p>
             <p>Here is the real answer. Take every entry and hash it. Take those fingerprints in pairs and hash each pair together. Half as many. Do it again, and again, until one is left. That is the root.</p>
             <p>This is the actual root of one of our live logs right now. Watch what happens if one character in one entry changes. Its fingerprint changes, which changes its parent's, which changes the next one up, and the root is completely different.</p>
             <p>There is no way to edit an entry and keep the root the same. That would mean two different things with the same fingerprint, which these functions are built to prevent. So the root is a fingerprint of the entire list, in sixty-four characters. You do not download fifty thousand entries to check the list; you compare sixty-four characters.</p>
             <p>A Merkle tree does not decide whether an entry is truthful. What it removes is the ability to show one version of the list to one person and a different version to another, or to change it later. Everyone comparing roots gets the same answer. Try it: change any entry and watch the root move.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <!-- Interactive Merkle widget — built + driven by learn.js -->
         <div class="ln-widget" id="merkle-widget" data-merkle-widget hidden>
@@ -1221,7 +1243,6 @@ Building the tree from the bottom up, then changing one entry and watching the r
           <p>None of this makes serving two different lists impossible; it makes it undeniable the moment anyone compares. If literally nobody ever checks their signed head against anyone else's, two versions could sit side by side unnoticed. The maths guarantees the comparison would settle it instantly; it cannot force the comparison to happen. Today that routine check is done by our own publishing job and by anyone running the verifier, and more independent checkers is always better.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/proofs-and-equivocation.jpg" aria-describedby="proofs-and-equivocation-transcript-body">
@@ -1235,13 +1256,16 @@ Climbing an audit path, watching a made-up entry miss the root, a rewrite that c
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="proofs-and-equivocation-transcript-body">
-            <p>You have a root, sixty-four characters standing in for an entire list. Two questions. First: is my entry actually in there?</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="proofs-and-equivocation-transcript-body">
+<p>You have a root, sixty-four characters standing in for an entire list. Two questions. First: is my entry actually in there?</p>
             <p>You do not need the whole list. You need the neighbours along the path from your entry to the top. Hash yours, combine it with a neighbour, hash, combine with the next, and climb. If you land on the published root, your entry is in the tree. If you land anywhere else, it is not. A million entries needs about twenty hashes. Double the list, add one step.</p>
             <p>Second question: is this the same list as last week, only longer? A consistency proof shows last week's tree sitting inside today's, unchanged, with the new entries added on the end. If an old entry had been edited, no such proof could exist. So append-only is not a promise, it is something you check.</p>
             <p>Who says which root is real? We sign it: the root, the count, and the time, sealed together. That is a signed tree head. And the key we sign with is built into the app and the verifier, not downloaded. If it were downloaded, a bad server could hand over its own key with a matching fake list, and everything would appear to check out. Because it is built in, that is caught right away.</p>
@@ -1249,8 +1273,7 @@ Climbing an audit path, watching a made-up entry miss the root, a rewrite that c
             <p>So they compare. Two signed heads, side by side. They differ, and both carry a signature, so there is no explaining it away. That is why this is published rather than promised: comparing makes serving two versions impossible to get away with.</p>
             <p>Root. Inclusion. Consistency. Signature. Comparison. Each one closes a door.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <!-- Same widget component as Topic 7, in proof mode — see learn.js -->
         <div class="ln-widget" id="proof-widget" data-merkle-widget data-proof hidden>
@@ -1315,7 +1338,6 @@ Climbing an audit path, watching a made-up entry miss the root, a rewrite that c
           <p>These logs make tampering permanent and public rather than physically impossible, and they say nothing about ordinary software bugs: a log proves what was published, not that it was correct. There is also a timing point. The logs are rebuilt and republished on a daily schedule, so a brand-new release or a just-published key can genuinely not be in them yet. "Not in the log yet" and "not in the log" are different, and the app shows the first as pending rather than an alarm.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/three-logs.jpg" aria-describedby="three-logs-transcript-body">
@@ -1329,13 +1351,16 @@ Each log introduced by the problem it protects against, an attempted split being
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="three-logs-transcript-body">
-            <p>Three logs. One signing key. One address: verify dot pollis dot com. Each one protects against a different problem.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="three-logs-transcript-body">
+<p>Three logs. One signing key. One address: verify dot pollis dot com. Each one protects against a different problem.</p>
             <p>The first holds every identity key we have published. For a swapped key to be used, it would have to be written here, in public, where the real owner's app is checking. And the rule is that versions only move forward. An old key cannot be slipped back in.</p>
             <p>The second holds every update in every conversation. Groups move forward in epochs, and everyone applies the same updates in the same order. If a server tried to split the history, showing two different updates as the same epoch, the rule would refuse it: one epoch, one update. And what is stored is sealed. The log shows the order of a conversation, never a word of its content.</p>
             <p>The third holds the fingerprint of every app we release. If a special version were built for one person, its fingerprint would either be in this public log, where anyone can see it, or missing from it, where that person's own app would notice. There is no third option.</p>
@@ -1343,8 +1368,7 @@ Each log introduced by the problem it protects against, an attempted split being
             <p>And the limits, plainly. These make tampering permanent and public, not impossible. They also say nothing about bugs. A log proves what was published, not that it is correct.</p>
             <p>One practical note. The logs rebuild once a day, so something published an hour ago may genuinely not be in them yet. That is why your app says pending instead of raising an alarm.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -1377,7 +1401,6 @@ Each log introduced by the problem it protects against, an attempted split being
           <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux build closes that last loop today. We state it here, in your path rather than in a footnote, because a verification story you have to squint at is not one. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/binary-transparency.jpg" aria-describedby="binary-transparency-transcript-body">
@@ -1391,13 +1414,16 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="binary-transparency-transcript-body">
-            <p>Your operating system checks that an app is signed before it runs it. That check proves less than you would think. A signature proves the company's key produced these bytes. It says nothing about what the bytes do. A tampered build that was still signed with the right key would pass every check your computer makes.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="binary-transparency-transcript-body">
+<p>Your operating system checks that an app is signed before it runs it. That check proves less than you would think. A signature proves the company's key produced these bytes. It says nothing about what the bytes do. A tampered build that was still signed with the right key would pass every check your computer makes.</p>
             <p>So we publish the fingerprint of every release, in public. The question changes. Not "did they sign it?" but "is this the app they gave everyone, or a different one?"</p>
             <p>Each release is recorded at three levels, because the app is not one file. The payload is the program before any signature; that is the level someone else can rebuild from source. The signed level is what you download, after notarization, which mixes in unique data on purpose, so it is never identical twice. And the installed-program level is the fingerprint of the main program as it sits on your machine, which is what a running app can measure about itself.</p>
             <p>Here is what it buys you. Two people download the app. One gets the public build, whose fingerprint is in the log. If a different build were made for one person, its fingerprint is either missing from the log, which their own app notices, or in the log, in public next to the real release. There is no quiet option.</p>
@@ -1405,8 +1431,7 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             <p>On Linux, we have that. An independent rebuild, with none of our secrets, produces the same fingerprint we logged. On macOS and Windows, not yet. That is the biggest open gap, and we would rather you hear it from us. And the signing wrapper is never reproducible anywhere, by design.</p>
             <p>There is one more record. Every release carries a build provenance record in a public log that is not ours, proving which workflow produced the bytes, with no key of ours involved in checking it. A different question from reproducibility, and a useful one when the worry is a compromised key.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -1545,7 +1570,6 @@ PASS: release binaries tree is valid</code></pre>
           <p>A <code>PASS</code> on your machine proves the log you were served is consistent, append-only, and signed by the built-in key. It cannot tell you whether someone else was served the same log; that is the one question a single run cannot answer, which is why comparing with other people matters. And a program we hand you, checking a key we built in, is only as strong as your choice to build it from source yourself. Both gaps close the same way: more people running it, comparing results.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/verify-it-yourself.jpg" aria-describedby="verify-it-yourself-transcript-body">
@@ -1559,21 +1583,23 @@ The folder of plain files, a real command-line fetch, the real verifier output l
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="verify-it-yourself-transcript-body">
-            <p>Everything we have talked about is checkable, in about two minutes. First, the data, which is barely a service at all. It is a folder of plain files. No database, no logic, nothing that can behave differently depending on who is asking. A service that computes an answer could give different people different answers. A folder of files written in advance cannot.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="verify-it-yourself-transcript-body">
+<p>Everything we have talked about is checkable, in about two minutes. First, the data, which is barely a service at all. It is a folder of plain files. No database, no logic, nothing that can behave differently depending on who is asking. A service that computes an answer could give different people different answers. A folder of files written in advance cannot.</p>
             <p>You can fetch any of them right now. Here is the current signed statement: the root, the entry count, and a signature. And here is the same root on our website. Same sixty-four characters, two different places.</p>
             <p>But reading the files only tells you what is claimed. To check the claims, use the verifier. It is a small program you download, or build yourself, and if you are seriously auditing us, build it. It re-hashes every entry, rebuilds the tree, checks every proof, and checks the signature against a key built into it. Not downloaded. Built in. One command.</p>
             <p>Watch what comes back. Tree size, sixty. The root, the same one you just fetched. Then every file in the release, each with a tick. Those ticks are not a status someone wrote down. Each one is a proof your machine just recomputed. And PASS means the whole tree checked out under a key that cannot be swapped on you.</p>
             <p>A failure does not always mean an attack. It can mean the log is mid-rebuild, or a release is newer than the last daily rebuild. The result that would matter is two valid signatures over two different trees, which is the two-versions case, and the only one you cannot spot alone.</p>
             <p>So run it, and compare with someone.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: <a
@@ -1608,7 +1634,6 @@ The folder of plain files, a real command-line fetch, the real verifier output l
           <p>Green across these surfaces means the things Pollis published are consistent, permanent, and include the app you are running. It does not mean the code is free of bugs, that your device is uncompromised, or that metadata is invisible to whoever carries your traffic. The point of this whole section is that we keep shrinking what you have to take on trust, and publish the evidence for what remains.</p>
         </div>
 
-        <div class="ln-media">
         <figure class="ln-figure">
           <video class="ln-video" controls playsinline preload="none"
             poster="learn/media/reading-the-dashboards.jpg" aria-describedby="reading-the-dashboards-transcript-body">
@@ -1622,13 +1647,16 @@ Both dashboards labelled, a single release row taken apart, the same root shown 
           </figcaption>
         </figure>
 
-        <div class="ln-watch">
-          <div class="ln-watch-head">Read along</div>
-          <p class="ln-watch-sub">No audio yet. Captions are off by default; turn
-            them on with the CC button if you prefer, or just read the same words
-            here.</p>
-          <div class="ln-watch-body" id="reading-the-dashboards-transcript-body">
-            <p>You have every idea you need to read our dashboards. Latest releases shows what we currently ship, and where to get it.</p>
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="reading-the-dashboards-transcript-body">
+<p>You have every idea you need to read our dashboards. Latest releases shows what we currently ship, and where to get it.</p>
             <p>Release proofs is the one that matters. For the current version: is it in the binaries log, did the tree check out, and what is inside.</p>
             <p>Each row is one part of a release. Platform. Package. Level, which is one of the three from earlier. Two fingerprints. And a tick. Read that tick carefully. It does not mean someone ticked a box. It means a proof was recomputed and it held. The tree size and root are the signed statement, and this root is the same string you would get from the command line or the verifier. If it says not in log yet, that is almost always the daily rebuild, not a problem.</p>
             <p>Below that, the daily self-audit shows the current statement for all three logs, and at the bottom, the one key everything reduces to. The page also notes that its in-browser key check is a convenience, not the real safeguard. Real verification uses a key you obtained independently.</p>
@@ -1637,8 +1665,7 @@ Both dashboards labelled, a single release row taken apart, the same root shown 
             <p>Below that: your account key, checked against the public log. Your devices. Your security events. And safety numbers for each contact.</p>
             <p>Green across all of it means the things we published are consistent, permanent, and include the app you are running. It does not mean the code has no bugs, that your device is safe, or that metadata has gone anywhere. We keep shrinking what you take on trust, and publish the evidence for what is left. Now you can check it.</p>
           </div>
-        </div>
-        </div>
+        </details>
 
         <p class="ln-deeper">
           The rigorous version: the page itself, the <a href="artifacts.html">artifacts</a> page, plus <a
