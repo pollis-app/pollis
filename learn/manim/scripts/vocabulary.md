@@ -41,7 +41,7 @@ Completely. Try it yourself in the box below.
 
 **[01:50–02:05] Scene 4 — the close**
 Key, encryption, signature, hash. Everything else in this section is those four
-ideas, arranged. One last thing: the maths is not the weak point — it essentially
+ideas, arranged. One last thing: the math is not the weak point — it essentially
 never is. The weak points are where the keys are kept, whether you believe a
 public key really belongs to who it says, and whether the app doing the locking
 is honest. That's what the rest of Learn is about.

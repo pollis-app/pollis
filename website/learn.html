@@ -676,6 +676,57 @@
       font-weight: 700;
     }
 
+    /* ── Toy cipher widget (Topic 2) ──────────────────────────── */
+    .ln-cipher-key {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-top: 0.85rem;
+      font-size: 0.85rem;
+      color: var(--c-text-muted);
+    }
+
+    .ln-cipher-key input[type="range"] {
+      flex: 1;
+      accent-color: var(--c-accent);
+    }
+
+    .ln-cipher-key b {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      color: var(--c-accent);
+      min-width: 1.5rem;
+      text-align: right;
+    }
+
+    /* ── Embedded video (Topic 3 MLS talk) ────────────────────── */
+    .ln-embed {
+      margin: 2rem 0 0;
+    }
+
+    .ln-embed-head {
+      font-size: 0.85rem;
+      color: var(--c-text);
+      margin-bottom: 0.75rem;
+    }
+
+    .ln-embed-frame {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: 1px solid var(--c-border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+    }
+
+    .ln-embed-frame iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+    }
+
     /* ── "The rigorous version" out-link ──────────────────────── */
     .ln-deeper {
       font-size: 0.82rem;
@@ -731,6 +782,8 @@
       </div>
 
       <ul class="ln-toc">
+        <li><span class="ln-track">START HERE</span><a href="#the-problem">The problem with most
+            messaging apps</a></li>
         <li><span class="ln-track">FOUNDATIONS</span><a href="#threat-model">Who can see what</a></li>
         <li><span class="ln-track">FOUNDATIONS</span><a href="#vocabulary">Keys, encryption,
             signatures, and hashes</a></li>
@@ -755,6 +808,103 @@
             artifacts and Security pages</a></li>
       </ul>
 
+      <!-- ═══ The Problem (intro) ═══════════════════════════════════════════ -->
+      <section class="ln-section" id="the-problem">
+        <div class="ln-eyebrow">Start here</div>
+        <h2>The problem with most messaging apps</h2>
+
+        <div class="ln-prose">
+          <p>Think about how you message people today. On Facebook Messenger, Instagram DMs, Snapchat,
+            Discord, Slack, or Telegram's default chats, your message travels from your phone to the
+            company's servers, gets stored there, and is then delivered to whoever you sent it to. The
+            important detail is the middle step: the company holds a readable copy of what you wrote.</p>
+          <p>That copy is convenient. It powers search, backups, and syncing between your phone and
+            laptop. But it also means the message is only as private as the company's promise not to
+            look, and the security of every system that promise depends on. In practice that copy can
+            be:</p>
+          <p><strong>Read to target ads or train models.</strong> Several of these platforms make
+            money from knowing about you. What you talk about, who you talk to, and how often is
+            valuable, and the readable copy is where that value comes from.</p>
+          <p><strong>Handed over on demand.</strong> If a company can read your messages, it can be
+            compelled to share them with a government or law enforcement, and often does. That
+            includes requests that have nothing to do with any crime you committed. Journalists,
+            activists, protesters, and ordinary people have had private messages pulled this way. (For
+            background, see the
+            <a href="https://www.theguardian.com/us-news/the-nsa-files" target="_blank"
+              rel="noopener noreferrer">Guardian's NSA Files</a> and
+            <a href="https://en.wikipedia.org/wiki/Global_surveillance_disclosures_(2013%E2%80%93present)"
+              target="_blank" rel="noopener noreferrer">the 2013 global surveillance disclosures</a>,
+            and the <a href="https://www.eff.org/issues/privacy" target="_blank"
+              rel="noopener noreferrer">EFF's ongoing coverage of surveillance</a>.)</p>
+          <p><strong>Stolen in a breach.</strong> A readable central copy is a target. When a
+            company is hacked, everything it could read, an attacker can too.</p>
+          <p>None of this requires the company to be evil. A well-meaning company can still be bought,
+            breached, or served with a court order, and a policy of "we won't look" can change with a
+            new owner or a new law. The only way to take those risks off the table is to build the
+            system so the company <em>cannot</em> read your messages in the first place, even if it
+            wanted to or were forced to. That is what Pollis does, and the rest of this section
+            explains how, one idea at a time.</p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">Where this fits</div>
+          <p>Making the contents unreadable to the operator is the foundation, and it is what the next
+            few topics build. It is not the whole story: things like who you talk to and when still
+            need care, and the later transparency topics show how Pollis lets you check its claims
+            rather than trust them. Start with the next topic, which maps out exactly who can see what.</p>
+        </div>
+
+        <div class="ln-media">
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/the-problem.jpg" aria-describedby="the-problem-transcript-body">
+            <source src="learn/media/the-problem.webm" type="video/webm" />
+            <source src="learn/media/the-problem.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English"
+              src="learn/media/the-problem.vtt" />
+          </video>
+          <figcaption class="ln-figcaption">
+            How an ordinary messaging app carries a readable copy of your message through its servers,
+            and the three ways that copy can be used against you.
+          </figcaption>
+        </figure>
+
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="the-problem-transcript-body">
+            <p>Think about how you message someone on most apps today. Your message goes from your
+              phone to the company's servers, gets stored there, and is then sent on to your friend.
+              The key detail is that middle step: the company keeps a readable copy of what you
+              wrote.</p>
+            <p>That copy is useful. It powers search, backups, and syncing across your devices. But it
+              also means your message is only as private as the company's promise not to look, and the
+              security of everything that promise relies on.</p>
+            <p>That readable copy can be used to target ads or train models, because what you say and
+              who you say it to is valuable. It can be handed to a government or law enforcement on
+              demand, including for reasons that have nothing to do with any crime. And it can be
+              stolen in a breach, because a central readable copy is a tempting target.</p>
+            <p>None of this needs the company to be evil. A good company can still be bought,
+              breached, or ordered by a court, and a policy can change. The only real fix is to build
+              the app so the company cannot read your messages at all. That is what Pollis does, and
+              the rest of this section explains how.</p>
+          </div>
+        </details>
+        </div>
+
+        <p class="ln-deeper">
+          Related reading: <a href="https://en.wikipedia.org/wiki/End-to-end_encryption"
+            target="_blank" rel="noopener noreferrer">end-to-end encryption</a> on Wikipedia, and
+          <a href="https://signal.org/" target="_blank" rel="noopener noreferrer">Signal</a>, a
+          widely used private messenger built on the same principle.
+        </p>
+      </section>
+
       <!-- ═══ Topic 1 — threat model (#590) ═════════════════════════════════ -->
       <section class="ln-section" id="threat-model">
         <div class="ln-eyebrow">Track A · Foundations · Topic 1</div>
@@ -763,15 +913,15 @@
         <div class="ln-prose">
           <p>On most messaging apps, your privacy rests on a company keeping a promise. The trouble is that a company can be hacked, bought, or handed a court order, and none of those things care what it promised. "We would never read your messages" is a statement about intent, and intent can change.</p>
           <p>Pollis is built differently. Reading your messages is not something we choose not to do. It is something we are not able to do. Here is the plain map of who can see what.</p>
-          <p><strong>Your device sees everything.</strong> That is where you type and read, so your messages are unscrambled there and nowhere else. The flip side: if someone gets into your unlocked device, they can read what is on it, and no clever maths can prevent that.</p>
-          <p><strong>Our servers see the outside of the envelope, never the letter inside.</strong> They carry sealed messages we cannot open, because the keys to open them never leave your devices. What they can see is ordinary delivery information: that an account sent something, roughly when, roughly how big it was, and which conversation it belongs to. That is real information, and we would rather tell you about it than pretend it is not there.</p>
-          <p><strong>Getting the right key to the right person is the part that takes care.</strong> Encryption only helps if the key your app uses really belongs to the person you meant. Safety numbers (Topic 6) and our public key logs (<a href="#three-logs">Topic 9</a>) are what let you confirm that yourself, rather than take our word for it.</p>
+          <p><strong>Your device sees everything.</strong> That is where you type and read, so your messages are unscrambled there and nowhere else. The flip side: if someone gets into your unlocked device, they can read what is on it, and no clever math can prevent that.</p>
+          <p><strong>Our servers see the outside of the envelope, never the letter inside.</strong> They carry sealed messages we cannot open, because the keys to open them never leave your devices. What they can see is ordinary delivery information: that an account sent something, roughly when, roughly how big it was, and which conversation it belongs to. Later sections show how Pollis works to shrink even that.</p>
+          <p><strong>Getting the right key to the right person is the part that takes care.</strong> Encryption only helps if the key your app uses really belongs to the person you meant. Safety numbers (<a href="#identity-keys">Topic 6</a>) and our public key logs (<a href="#three-logs">Topic 9</a>) are what let you confirm that yourself, rather than take our word for it.</p>
           <p>The pattern runs through everything here: we keep shrinking the list of things you have to take on trust, and we publish evidence for whatever is left.</p>
         </div>
 
         <div class="ln-limit">
           <div class="ln-limit-label">What this does not cover</div>
-          <p>A few things sit outside what any messenger can protect, and it is fairer to name them. Someone holding your unlocked device can read what is on it. The delivery information above, sometimes called metadata, is visible to whoever carries your traffic. And a brand new device starts empty, because there is no history backup (that trade is explained in Topic 4). Everything else, we work to protect, and to let you check.</p>
+          <p>A few things sit outside what any messenger can protect, and each is handled elsewhere in this section. Someone holding your unlocked device can read what is on it. The delivery information above, sometimes called metadata, is visible to whoever carries your traffic, and Pollis keeps shrinking it. And a brand new device starts empty, because there is no history backup (the reasoning is in <a href="#joining-leaving">Topic 4</a>). Everything else, we work to protect, and to let you check.</p>
         </div>
 
         <figure class="ln-figure">
@@ -798,8 +948,8 @@ One picture, built up step by step: a readable message, then a sealed one, then 
           <div class="ln-transcript-body" id="threat-model-transcript-body">
 <p>Most messaging apps ask you to trust a company. Not its promise, its ability. A company that means well can still be hacked, bought, or ordered by a court. So Pollis is built so that reading your messages is not something we choose not to do. It is something we cannot do.</p>
             <p>Your message is sealed on your device before it goes anywhere. Our servers pass it along without ever holding the key. It opens on your friend's device.</p>
-            <p>We cannot see what is inside. We can see the outside: that your account sent something, when, roughly how big, and which conversation it belongs to. That is called metadata, and it can be sensitive on its own, so we are not going to pretend it does not exist.</p>
-            <p>There is also a subtler point. Encryption only helps if you are using the right key for the right person. If the wrong key ever slipped in, a message could be read in the middle without breaking any of the maths. That is exactly what safety numbers and our public key logs let you check.</p>
+            <p>We cannot see what is inside. We can see the outside: that your account sent something, when, roughly how big, and which conversation it belongs to. That is called metadata, and it can be sensitive on its own, which is why later sections show how Pollis shrinks it.</p>
+            <p>There is also a subtler point. Encryption only helps if you are using the right key for the right person. If the wrong key ever slipped in, a message could be read in the middle without breaking any of the math. That is exactly what safety numbers and our public key logs let you check.</p>
             <p>Here is the full picture. Green, we cannot see. Amber, we can, and we say so. Red is outside what any messenger can defend: your own device, and plain software bugs.</p>
             <p>Everything else in Learn is about shrinking how much of the green depends on trusting us, and publishing evidence for whatever is left.</p>
           </div>
@@ -821,12 +971,69 @@ One picture, built up step by step: a readable message, then a sealed one, then 
         <h2>Keys, encryption, signatures, and hashes</h2>
 
         <div class="ln-prose">
-          <p>Four words show up on every page that follows. None of them needs any maths to understand.</p>
-          <p><strong>A key is just a very large number.</strong> Large enough that guessing it is not a matter of being patient, it is a matter of there not being enough time in the universe. When we say a key never leaves your device, we mean that number stays in your device's secure storage and is never sent to us.</p>
-          <p><strong>Encryption is a lock that scrambles.</strong> Put your message in with a key and out comes noise. Put the noise back in with the right key and your message returns. With the wrong key you get nothing back, not a blurry version, not most of it. Nothing.</p>
-          <p><strong>The clever part is that a key comes in two halves that are different from each other.</strong> One half is public and one is private. Anything locked with the public half can only be opened with the private half. So you can hand your public half to anyone, even publish it, while the private half stays on your device. Now anyone can send you something only you can open, and you never had to agree on a secret in advance.</p>
-          <p><strong>Signatures are the same idea in reverse.</strong> Lock something with your private half and anyone holding your public half can confirm it really came from you and was not altered. Change a single character and the check fails. Pollis uses signatures constantly, so you can tell that a record genuinely came from the right place.</p>
-          <p><strong>A hash is a fingerprint for data.</strong> Feed in anything, of any size, and get back a short string. The same input always gives the same fingerprint, and changing one character anywhere gives a completely different one. You cannot work backwards from the fingerprint to the original. That is what lets you say "this is exactly the file I meant" without publishing the file. When you see a long root code on our artifacts page, that is a hash.</p>
+          <p>The last topic described the problem: an ordinary app keeps a readable copy of your
+            messages. <strong>Encryption</strong> is the tool that removes that copy. In plain terms,
+            encryption scrambles a message so that only someone with the right key can turn it back
+            into readable text (<a href="https://en.wikipedia.org/wiki/Encryption" target="_blank"
+              rel="noopener noreferrer">Wikipedia's definition</a> puts it as encoding information so
+            that only authorized parties can access it). When it is done end to end, the message is
+            scrambled on your device and only unscrambled on your friend's, so the servers in between
+            carry noise they cannot read (see
+            <a href="https://en.wikipedia.org/wiki/End-to-end_encryption" target="_blank"
+              rel="noopener noreferrer">end-to-end encryption</a>, and how
+            <a href="https://signal.org/" target="_blank" rel="noopener noreferrer">Signal</a>
+            describes the same idea).</p>
+          <p>This is ordinary, legitimate technology. The same encryption protects your online
+            banking, the padlock in your browser's address bar, your phone's stored data, your work
+            VPN, and your password manager. Private conversation is simply one more everyday use of
+            it. It matters because surveillance of private citizens is not hypothetical: the
+            <a href="https://en.wikipedia.org/wiki/Global_surveillance_disclosures_(2013%E2%80%93present)"
+              target="_blank" rel="noopener noreferrer">2013 disclosures</a> documented bulk
+            collection of ordinary people's communications, and the
+            <a href="https://www.eff.org/issues/privacy" target="_blank"
+              rel="noopener noreferrer">EFF</a> tracks cases where private messages were demanded for
+            reasons unrelated to any crime. Encryption is what keeps "private" meaning private.</p>
+          <p>With that in mind, here are four words that show up on every page that follows. None of
+            them needs any math to understand.</p>
+          <p><strong>A key is just a very large, randomly chosen number.</strong> It is chosen from a
+            set so enormous that guessing the right one is not a matter of patience. A modern key has
+            about 2<sup>256</sup> possibilities, which is more than the number of atoms in the
+            observable universe. When we say a key never leaves your device, we mean that number stays
+            in your device's secure storage and is never sent to us.</p>
+          <p><strong>Encryption is a lock that scrambles.</strong> Put your message in with a key and
+            out comes noise. Put the noise back in with the right key and your message returns. With
+            the wrong key you get nothing back, not a blurry version, not most of it. Nothing.</p>
+          <p><strong>The clever part is that a key can come in two halves that are different from each
+            other.</strong> One half is public and one is private. Anything locked with the public
+            half can only be opened with the private half. So you can hand your public half to anyone,
+            even publish it, while the private half stays on your device. Now anyone can send you
+            something only you can open, and you never had to agree on a secret in advance.</p>
+          <p><strong>Signatures are the same idea in reverse.</strong> Lock something with your
+            private half and anyone holding your public half can confirm it really came from you and
+            was not altered. Change a single character and the check fails. Pollis uses signatures
+            constantly, so you can tell that a record genuinely came from the right place.</p>
+          <p><strong>A hash is a fingerprint for data.</strong> Feed in anything, of any size, and get
+            back a short string. The same input always gives the same fingerprint, and changing one
+            character anywhere gives a completely different one. You cannot work backwards from the
+            fingerprint to the original. That is what lets you say "this is exactly the file I meant"
+            without publishing the file. When you see a long root code on our artifacts page, that is
+            a hash.</p>
+          <p><strong>The names you might hear.</strong> These ideas are carried out by specific,
+            public, well-studied algorithms. For scrambling messages with a shared key, common ones
+            are <a href="https://en.wikipedia.org/wiki/Advanced_Encryption_Standard" target="_blank"
+              rel="noopener noreferrer">AES</a> and
+            <a href="https://en.wikipedia.org/wiki/ChaCha20-Poly1305" target="_blank"
+              rel="noopener noreferrer">ChaCha20</a>. For the two-half (public and private) trick,
+            common ones are <a href="https://en.wikipedia.org/wiki/RSA_(cryptosystem)" target="_blank"
+              rel="noopener noreferrer">RSA</a> and elliptic-curve schemes like
+            <a href="https://en.wikipedia.org/wiki/EdDSA" target="_blank"
+              rel="noopener noreferrer">Ed25519</a>, which Pollis uses for signatures. For
+            fingerprints, the standard family is
+            <a href="https://en.wikipedia.org/wiki/SHA-2" target="_blank"
+              rel="noopener noreferrer">SHA-2</a>, and Pollis uses SHA-256 from it. You do not need to
+            know how any of them work to use Pollis, but they are public, which is a feature: anyone
+            can study them, and their security does not depend on keeping the method secret, only the
+            key.</p>
         </div>
 
         <div class="ln-limit">
@@ -861,7 +1068,7 @@ Four short scenes, no formulas: the size of a key, a lock with no "almost", the 
             <p>Now the idea that makes this work between strangers. Your key comes in two halves. One is public, you hand it to anyone. One is private, and it never leaves your device. Anything locked with the public half can only be opened by the private half. A stranger can lock a message to you, and then cannot open it themselves.</p>
             <p>Run the same idea backwards and you get signatures. Mark something with your private half and anyone with your public half can confirm it came from you and was not changed. Change one word and the check fails.</p>
             <p>Last idea: a hash. It is a fingerprint for data. Any file, any size, in, and a short string out. Same file, same fingerprint, every time. Change one character and it is completely different. Try it yourself in the box below.</p>
-            <p>Key, encryption, signature, hash. Everything else is those four ideas arranged. And the maths is not the weak point. What matters is where the keys are kept, whether a public key really belongs to who it says, and whether the app is honest. That is what the rest of Learn is about.</p>
+            <p>Key, encryption, signature, hash. Everything else is those four ideas arranged. And the math is not the weak point. What matters is where the keys are kept, whether a public key really belongs to who it says, and whether the app is honest. That is what the rest of Learn is about.</p>
           </div>
         </details>
 
@@ -882,6 +1089,30 @@ Four short scenes, no formulas: the size of a key, a lock with no "almost", the 
           <p class="ln-widget-note">
             Nothing leaves your device. Note how much of the fingerprint changes when you alter one
             character. That is the property everything else in this section leans on.
+          </p>
+        </div>
+
+        <!-- Toy cipher widget — a shift cipher you can turn by hand -->
+        <div class="ln-widget" id="cipher-widget" data-cipher-widget hidden>
+          <div class="ln-widget-head">
+            <strong>A tiny encryption toy.</strong> This is the oldest, simplest cipher: shift every
+            letter forward by a key number. Turn the key and watch the text scramble and come back.
+            Real encryption is the same idea (a reversible transform controlled by a key), just with
+            math strong enough that the key can't be guessed.
+          </div>
+          <label class="ln-hash-label" for="cipher-input">your text</label>
+          <input class="ln-hash-input" id="cipher-input" type="text" spellcheck="false"
+            autocomplete="off" value="meet me at seven" data-cipher-input />
+          <div class="ln-cipher-key">
+            <label for="cipher-shift">key (shift):</label>
+            <input type="range" id="cipher-shift" min="0" max="25" value="3" data-cipher-shift />
+            <b data-cipher-shift-val>3</b>
+          </div>
+          <div class="ln-hash-out" data-cipher-out>…</div>
+          <p class="ln-widget-note">
+            With only 26 possible keys, anyone can crack this by trying them all, which is exactly why
+            real keys are astronomically large numbers instead of 0 to 25. Same shape, unguessable
+            scale.
           </p>
         </div>
 
@@ -946,6 +1177,16 @@ The copy-per-person approach piling up, then the tree being built, then one smal
           </div>
         </details>
 
+        <div class="ln-embed">
+          <p class="ln-embed-head">Want to go deeper on MLS? This talk explains the ratchet tree well:</p>
+          <div class="ln-embed-frame">
+            <iframe src="https://www.youtube-nocookie.com/embed/FESp2LHd42U"
+              title="Messaging Layer Security (MLS) explained" loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+          </div>
+        </div>
+
         <p class="ln-deeper">
           The rigorous version: <a href="https://www.rfc-editor.org/rfc/rfc9420.html" target="_blank"
             rel="noopener noreferrer">RFC 9420</a> itself, our OpenMLS usage in <a
@@ -968,7 +1209,7 @@ The copy-per-person approach piling up, then the tree being built, then one smal
           <p><strong>Leaving.</strong> When a member is removed, everyone else moves to fresh keys, and from that point on the departed device cannot read anything new. Whatever it already saw stays on it; we cannot reach into someone else's machine. Removal here is a property of the keys, not a setting on a server you have to trust.</p>
           <p><strong>Your own devices work the same way.</strong> Your phone and your laptop are separate members of the group, each with their own keys. Nothing is copied between them, because a key that travels is a key that can be stolen along the way. Adding your laptop is just like adding a person.</p>
           <p>Which leads to the one sharp edge, stated plainly: <strong>a new device starts empty. There is no history backup.</strong> A new device joins from today forward. Your old messages live on your old device and nowhere else, not on our servers, which only ever held sealed envelopes, and not in a backup, because we do not make one.</p>
-          <p>We could offer one. The usual approach is to store your history on the server, protected by a PIN or passphrase. But that recreates the exact thing this app exists to avoid: a copy of your conversations sitting on our infrastructure, guarded by something short and guessable. So we do not do it. If you want your history on a new device, keep your old device. That is a real cost, and we would rather say so than hide it.</p>
+          <p>We could offer one. The usual approach is to store your history on the server, protected by a PIN or passphrase. But that recreates the exact thing this app exists to avoid: a copy of your conversations sitting on our infrastructure, guarded by something short and guessable. So we do not do it. If you want your history on a new device, keep your old device. That is a deliberate trade for a smaller attack surface, and the section on identity keys shows what still protects you.</p>
         </div>
 
         <div class="ln-limit">
@@ -1004,7 +1245,7 @@ Lockboxes left in advance, a welcome that carries only today's keys, messages fr
             <p>So messages sent before you joined stay sealed. It is not that the app is hiding them. The key genuinely does not fit.</p>
             <p>Removing someone is the same idea. Their line of keys is replaced, and the next message is sealed to them. What they already saw stays on their device. We cannot reach into it.</p>
             <p>Your own devices work the same way. Your phone and laptop are separate members, each with their own keys. Nothing is copied between them, because a key that travels can be stolen along the way.</p>
-            <p>Which brings up the trade we would rather you hear from us. A new device starts empty. There is no history backup. We could store your history on our servers behind a PIN, but that would put a copy of every conversation on our infrastructure behind a short, guessable code, which is exactly what this app exists to avoid. So we do not. If you want your history, keep your device.</p>
+            <p>Which brings up one deliberate trade. A new device starts empty. There is no history backup. We could store your history on our servers behind a PIN, but that would put a copy of every conversation on our infrastructure behind a short, guessable code, which is exactly what this app exists to avoid. So we do not. If you want your history, keep your device.</p>
             <p>What we do promise is narrow and firm. Two kinds of loss are expected: messages from before you joined, and a new device starting empty. Everything else has to arrive, and anything else going missing is a bug.</p>
           </div>
         </details>
@@ -1240,7 +1481,7 @@ Building the tree from the bottom up, then changing one entry and watching the r
 
         <div class="ln-limit">
           <div class="ln-limit-label">Where the guarantee ends</div>
-          <p>None of this makes serving two different lists impossible; it makes it undeniable the moment anyone compares. If literally nobody ever checks their signed head against anyone else's, two versions could sit side by side unnoticed. The maths guarantees the comparison would settle it instantly; it cannot force the comparison to happen. Today that routine check is done by our own publishing job and by anyone running the verifier, and more independent checkers is always better.</p>
+          <p>None of this makes serving two different lists impossible; it makes it undeniable the moment anyone compares. If literally nobody ever checks their signed head against anyone else's, two versions could sit side by side unnoticed. The math guarantees the comparison would settle it instantly; it cannot force the comparison to happen. Today that routine check is done by our own publishing job and by anyone running the verifier, and more independent checkers is always better.</p>
         </div>
 
         <figure class="ln-figure">
@@ -1392,13 +1633,13 @@ Each log introduced by the problem it protects against, an attempted split being
           <p>Each release is recorded at three levels, because "the app" is not one file. The <strong>payload</strong> is the program and its resources before any signature; this is the level an independent person can rebuild from source and compare. The <strong>signed</strong> level is what you actually download, after Apple or Windows wraps it; signing deliberately mixes in unique data, so the signed file cannot be identical between two builds, by design. The <strong>installed program</strong> level records the fingerprint of the main program exactly as it sits on your machine, which is the one thing a running app can measure about itself. The app's built-in "verify this build" check compares the program you are running against that recorded fingerprint.</p>
           <p><strong>What this buys you.</strong> Suppose two people download the app. One gets the public build, whose fingerprint is in the log. If a different build were ever made for one person, its fingerprint would either be missing from the log, which that person's own app would notice, or present in the log, sitting in public next to the normal release for everyone to see. There is no quiet third option.</p>
           <p><strong>Reproducible builds, and where we actually are.</strong> A logged fingerprint proves we published these bytes. It does not by itself prove those bytes came from the source code you can read. Closing that gap needs reproducible builds, where anyone compiling the source at a given version gets a byte-for-byte identical result. That is hard, because ordinary builds bake in timestamps, file paths, and ordering that differ from machine to machine. Where we stand today:</p>
-          <p><strong>Linux is reproducible.</strong> An independent rebuild, run from a public copy of the source with none of our secrets, produces the same fingerprint we logged. <strong>macOS and Windows are not there yet.</strong> This is the largest open gap in our verification story, and we would rather state it than gloss over it. The signing wrapper is never reproducible on any platform, by design.</p>
+          <p><strong>Linux is reproducible.</strong> An independent rebuild, run from a public copy of the source with none of our secrets, produces the same fingerprint we logged. <strong>macOS and Windows are not there yet.</strong> This is the current frontier of the work, and the reproducible Linux build below shows where it is already closed. The signing wrapper is never reproducible on any platform, by design.</p>
           <p>There is also a second, independent record. Every release carries a build provenance record, stored in a public log that is not ours, proving which automated workflow produced the bytes, with no Pollis key involved in checking it. That answers a different question from reproducibility: provenance says who built it, reproducibility says whether it matches the source. Having both means a single compromised key does not undo the whole story.</p>
         </div>
 
         <div class="ln-limit">
           <div class="ln-limit-label">Where the guarantee ends today</div>
-          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux build closes that last loop today. We state it here, in your path rather than in a footnote, because a verification story you have to squint at is not one. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
+          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux build closes that last loop today. The Linux build already closes this loop today, and the same approach is being extended to the other platforms. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
         </div>
 
         <figure class="ln-figure">
@@ -1428,7 +1669,7 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             <p>Each release is recorded at three levels, because the app is not one file. The payload is the program before any signature; that is the level someone else can rebuild from source. The signed level is what you download, after notarization, which mixes in unique data on purpose, so it is never identical twice. And the installed-program level is the fingerprint of the main program as it sits on your machine, which is what a running app can measure about itself.</p>
             <p>Here is what it buys you. Two people download the app. One gets the public build, whose fingerprint is in the log. If a different build were made for one person, its fingerprint is either missing from the log, which their own app notices, or in the log, in public next to the real release. There is no quiet option.</p>
             <p>Now the part to be careful about. A fingerprint proves we published these bytes. It does not prove they came from the source code you can read. For that you need reproducible builds: anyone compiling the source gets an identical result.</p>
-            <p>On Linux, we have that. An independent rebuild, with none of our secrets, produces the same fingerprint we logged. On macOS and Windows, not yet. That is the biggest open gap, and we would rather you hear it from us. And the signing wrapper is never reproducible anywhere, by design.</p>
+            <p>On Linux, we have that. An independent rebuild, with none of our secrets, produces the same fingerprint we logged. On macOS and Windows, not yet. That is the current frontier, and the Linux build shows the approach already working. And the signing wrapper is never reproducible anywhere, by design.</p>
             <p>There is one more record. Every release carries a build provenance record in a public log that is not ours, proving which workflow produced the bytes, with no key of ours involved in checking it. A different question from reproducibility, and a useful one when the worry is a compromised key.</p>
           </div>
         </details>

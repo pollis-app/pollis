@@ -35,7 +35,7 @@ We're not going to tell you it doesn't exist.
 **[01:15–01:30] Scene 4 — the subtler attack**
 There's a subtler attack too. Encryption only helps if you're using the right key
 for the right person. A dishonest server could hand you the wrong key — its own —
-and read everything without ever breaking the maths.
+and read everything without ever breaking the math.
 
 **[01:30–01:45] Scene 4 — the two defences**
 That's the attack we take most seriously, and it's why the rest of this section

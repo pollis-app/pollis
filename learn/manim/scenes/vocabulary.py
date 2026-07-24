@@ -85,7 +85,7 @@ class Vocabulary(Scene):
 
     # ── Scene 1 (0:00–0:20), a key is a very large number ──────────────────
     def beat_key(self):
-        head = Text("a key is a very large number", color=AMBER).scale(0.6)
+        head = Text("A key is a very large number", color=AMBER).scale(0.6)
         head.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -94,30 +94,36 @@ class Vocabulary(Scene):
         k2 = Text(REAL_KEY[32:], font=MONO, color=AMBER).scale(0.44)
         k2.next_to(k, DOWN, buff=0.25)
         self.play(FadeIn(k), FadeIn(k2))
-        real = Text("(that's a real one, the key our transparency log signs with)",
+        real = Text("(That's a real one, the key our transparency log signs with)",
                     color=MUTED).scale(0.36).next_to(k2, DOWN, buff=0.3)
         self.play(FadeIn(real))
+        self.hold_until(8)
+        self.play(FadeOut(real))
 
-        # Scale, as two bars, the second one just leaves the frame.
-        bar1 = panel(2.2, 0.4, FG, fill_opacity=0.5, fill=FG).move_to([-3.2, -1.4, 0])
-        lab1 = Text("guesses per second, by every computer on earth",
-                    color=MUTED).scale(0.32).next_to(bar1, DOWN, buff=0.18)
-        self.play(Create(bar1), FadeIn(lab1))
+        # How large is "large"? Compare the number of possible keys to something
+        # concrete: the number of atoms in the observable universe.
+        rows = VGroup(
+            Text("Possible keys", color=FG).scale(0.5),
+            Text("2^256  ≈  10^77", font=MONO, color=AMBER).scale(0.66),
+        ).arrange(DOWN, buff=0.22).move_to([0, -0.4, 0])
+        self.play(FadeIn(rows[0]))
+        self.play(FadeIn(rows[1]))
+        self.hold_until(14)
 
-        bar2 = panel(13.5, 0.4, DANGER, fill_opacity=0.5, fill=DANGER)
-        bar2.move_to([1.0, -2.5, 0])
-        lab2 = Text("guesses needed →  (this bar does not stop at the edge of the screen)",
-                    color=DANGER).scale(0.32).next_to(bar2, DOWN, buff=0.18)
-        self.play(Create(bar2), FadeIn(lab2))
-        note = Text("not 'hard to guess'. there is not enough time or energy in the universe.",
-                    color=FG).scale(0.42).move_to([0, -3.6, 0])
+        compare = VGroup(
+            Text("Atoms in the observable universe", color=MUTED).scale(0.42),
+            Text("≈  10^80", font=MONO, color=MUTED).scale(0.46),
+        ).arrange(DOWN, buff=0.14).move_to([0, -2.1, 0])
+        self.play(FadeIn(compare))
+        note = Text("Picking the right key by guessing is not slow. It does not finish.",
+                    color=FG).scale(0.46).move_to([0, -3.2, 0])
         self.play(FadeIn(note))
         self.hold_until(20)
-        self.play(FadeOut(VGroup(head, k, k2, real, bar1, lab1, bar2, lab2, note)))
+        self.play(FadeOut(VGroup(head, k, k2, rows, compare, note)))
 
     # ── Scene 2 (0:20–0:40), encryption is a lock that scrambles ───────────
     def beat_lock(self):
-        head = Text("encryption is a lock that scrambles",
+        head = Text("Encryption is a lock that scrambles",
                     color=AMBER).scale(0.6).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -146,7 +152,7 @@ class Vocabulary(Scene):
         a2 = Line(wrong.box.get_right(), wrong_out.box.get_left(),
                   stroke_color=DANGER, stroke_width=2)
         self.play(FadeIn(wrong), Create(a2), FadeIn(wrong_out))
-        none = Text("there is no 'almost'. no partial credit. no 80% of the message.",
+        none = Text("There is no 'almost'. No partial credit. No 80% of the message.",
                     color=FG).scale(0.46).move_to([0, -3.2, 0])
         self.play(FadeIn(none))
         self.hold_until(40)
@@ -155,7 +161,7 @@ class Vocabulary(Scene):
 
     # ── Scene 3 (0:40–1:20), the two-key trick, and signatures ─────────────
     def beat_two_keys(self):
-        head = Text("the trick: your key comes in two different halves",
+        head = Text("The trick: your key comes in two different halves",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -172,17 +178,17 @@ class Vocabulary(Scene):
         locked = box("▓▓▓▓▓▓▓▓▓▓  locked to you", OK, w=6.0, h=0.9).move_to([3.5, 0.5, 0])
         self.play(FadeIn(stranger))
         self.play(FadeIn(locked, shift=RIGHT * 0.25))
-        cant = Text("…and now they cannot open it themselves.",
+        cant = Text("…And now they cannot open it themselves.",
                     color=DANGER).scale(0.46).move_to([0, -0.55, 0])
         self.play(FadeIn(cant))
-        only = Text("only the private half opens it, and you never agreed on a secret first.",
+        only = Text("Only the private half opens it, and you never agreed on a secret first.",
                     color=OK).scale(0.44).move_to([0, -1.25, 0])
         self.play(FadeIn(only))
         self.hold_until(65)
 
         # Backwards: signatures.
         self.play(FadeOut(VGroup(stranger, locked, cant, only)))
-        rev = Text("run it backwards and you get signatures",
+        rev = Text("Run it backwards and you get signatures",
                    color=AMBER).scale(0.5).move_to([0, 0.7, 0])
         self.play(FadeIn(rev))
         doc = box("a document + your PRIVATE half", AMBER, w=6.6, h=0.9, scale=0.36,
@@ -190,13 +196,13 @@ class Vocabulary(Scene):
         seal = box("sealed: provably from you", OK, w=6.0, h=0.9, scale=0.36,
                    mono=False).move_to([3.5, -0.5, 0])
         self.play(FadeIn(doc), FadeIn(seal))
-        check = Text("anyone with your public half can check the seal",
+        check = Text("Anyone with your public half can check the seal",
                      color=MUTED).scale(0.42).move_to([0, -1.6, 0])
         self.play(FadeIn(check))
         broke = box("change one word → the seal breaks", DANGER, w=8.0, h=0.9,
                     scale=0.4, mono=False).move_to([0, -2.7, 0])
         self.play(FadeIn(broke))
-        use = Text("pollis signs every write from your device, and every transparency-log head",
+        use = Text("Pollis signs every write from your device, and every transparency-log head",
                    color=MUTED).scale(0.36).move_to([0, -3.6, 0])
         self.play(FadeIn(use))
         self.hold_until(80)
@@ -204,7 +210,7 @@ class Vocabulary(Scene):
 
     # ── Scene 4 (1:20–2:00), a hash is a fingerprint ───────────────────────
     def beat_hash(self):
-        head = Text("a hash is a fingerprint for data",
+        head = Text("A hash is a fingerprint for data",
                     color=AMBER).scale(0.6).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -214,7 +220,7 @@ class Vocabulary(Scene):
         arr1 = Line(a_in.box.get_right(), a_out.box.get_left(),
                     stroke_color=LINE, stroke_width=2)
         self.play(FadeIn(a_in), Create(arr1), FadeIn(a_out))
-        same = Text("same input → same fingerprint, every time, forever",
+        same = Text("Same input → same fingerprint, every time, forever",
                     color=MUTED).scale(0.4).move_to([0, 0.75, 0])
         self.play(FadeIn(same))
         self.hold_until(92)
@@ -224,22 +230,22 @@ class Vocabulary(Scene):
         arr2 = Line(b_in.box.get_right(), b_out.box.get_left(),
                     stroke_color=DANGER, stroke_width=2)
         self.play(FadeIn(b_in), Create(arr2), FadeIn(b_out))
-        one = Text("one character changed → completely different. not slightly. completely.",
+        one = Text("One character changed → completely different. Not slightly. Completely.",
                    color=FG).scale(0.44).move_to([0, -1.5, 0])
         self.play(FadeIn(one))
-        try_it = Text("(there's a box below this video, type in it and watch)",
+        try_it = Text("(There's a box below this video, type in it and watch)",
                       color=AMBER).scale(0.4).move_to([0, -2.2, 0])
         self.play(FadeIn(try_it))
         self.hold_until(108)
 
         self.play(FadeOut(VGroup(a_in, a_out, arr1, same, b_in, b_out, arr2, one, try_it)))
         close = VGroup(
-            Text("key · encryption · signature · hash", color=AMBER).scale(0.6),
-            Text("everything else in this section is those four ideas, arranged.",
+            Text("Key · encryption · signature · hash", color=AMBER).scale(0.6),
+            Text("Everything else in this section is those four ideas, arranged.",
                  color=FG).scale(0.44),
-            Text("and the maths is not the weak point, it essentially never is.",
+            Text("And the math is not the weak point, it essentially never is.",
                  color=MUTED).scale(0.42),
-            Text("where keys are kept · whether a public key is really theirs · "
+            Text("Where keys are kept · whether a public key is really theirs · "
                  "whether the app is honest", color=MUTED).scale(0.36),
         ).arrange(DOWN, buff=0.3).move_to([0, 0.2, 0])
         for ln in close:

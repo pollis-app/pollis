@@ -114,7 +114,7 @@ class VerifyItYourself(Scene):
 
     # ── Scene 1 (0:00–0:30), the API is a shelf of files ───────────────────
     def beat_shelf(self):
-        head = Text("it is barely an API, it's a shelf of files",
+        head = Text("It is barely an API, it's a shelf of files",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -128,22 +128,22 @@ class VerifyItYourself(Scene):
         for f in files:
             self.play(FadeIn(f, shift=RIGHT * 0.15), run_time=0.3)
 
-        warn = Text("← do NOT trust this one: compare it to a key you already have",
+        warn = Text("← Do NOT trust this one: compare it to a key you already have",
                     color=DANGER).scale(0.32).next_to(files[2], RIGHT, buff=0.3)
-        static = Text("static JSON. no database. no logic.",
+        static = Text("Static JSON. No database. No logic.",
                       color=MUTED).scale(0.4).next_to(files, DOWN, buff=0.35)
         self.play(FadeIn(warn), FadeIn(static))
         self.hold_until(15)
 
-        smart = card(5.6, 1.6, "a server that COMPUTES an answer",
+        smart = card(5.6, 1.6, "A server that COMPUTES an answer",
                      "can compute a different one for you",
                      color=DANGER, title_color=DANGER).move_to([3.6, 1.6, 0])
-        flat = card(5.6, 1.6, "a server handing out pre-written files",
+        flat = card(5.6, 1.6, "A server handing out pre-written files",
                     "has a much harder time doing that",
                     color=OK, title_color=OK).move_to([3.6, -0.7, 0])
         self.play(FadeIn(smart))
         self.play(FadeIn(flat))
-        audit = Text("and the daily publish job re-reads its own shelf to confirm "
+        audit = Text("And the daily publish job re-reads its own shelf to confirm "
                      "it matches what was signed", color=MUTED).scale(0.36)
         audit.move_to([0, -3.0, 0])
         self.play(FadeIn(audit))
@@ -152,7 +152,7 @@ class VerifyItYourself(Scene):
 
     # ── Scene 2 (0:30–1:00), curl it, then find the same root ──────────────
     def beat_curl(self):
-        head = Text("fetch it yourself", color=AMBER).scale(0.55)
+        head = Text("Fetch it yourself", color=AMBER).scale(0.55)
         head.to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -175,12 +175,12 @@ class VerifyItYourself(Scene):
             self.play(FadeIn(r, shift=RIGHT * 0.1), run_time=0.22)
         self.hold_until(45)
 
-        site = card(5.6, 1.5, "pollis.com/artifacts", "the same root, published on the site",
+        site = card(5.6, 1.5, "Pollis.Com/artifacts", "the same root, published on the site",
                     color=AMBER, title_color=AMBER).move_to([0, -1.3, 0])
         root_txt = Text(LIVE_ROOT[:40] + "…", font=MONO, color=OK).scale(0.34)
         root_txt.move_to([0, -2.4, 0])
         self.play(FadeIn(site), FadeIn(root_txt))
-        same = Text("same sixty-four characters. two different places.",
+        same = Text("Same sixty-four characters. Two different places.",
                     color=FG).scale(0.45).move_to([0, -3.2, 0])
         self.play(FadeIn(same), Indicate(rows[3], color=OK, scale_factor=1.05))
         self.hold_until(60)
@@ -188,14 +188,14 @@ class VerifyItYourself(Scene):
 
     # ── Scene 3 (1:00–1:50), the verifier runs ─────────────────────────────
     def beat_run(self):
-        head = Text("files tell you what we CLAIM. the verifier CHECKS it.",
+        head = Text("Files tell you what we CLAIM. The verifier CHECKS it.",
                     color=AMBER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         what = VGroup(
-            Text("re-hashes every entry · rebuilds the tree · checks every proof",
+            Text("Re-hashes every entry · rebuilds the tree · checks every proof",
                  color=MUTED).scale(0.38),
-            Text("and verifies the signature against a key COMPILED INTO IT, not fetched",
+            Text("And verifies the signature against a key COMPILED INTO IT, not fetched",
                  color=FG).scale(0.4),
         ).arrange(DOWN, buff=0.16).move_to([0, 2.3, 0])
         self.play(FadeIn(what))
@@ -214,10 +214,10 @@ class VerifyItYourself(Scene):
         # Annotate the two lines that tie back to earlier topics.
         sth_row = rows[3]
         self.play(Indicate(sth_row, color=AMBER, scale_factor=1.04), run_time=0.7)
-        tie1 = Text("← the signed head from topic 8", color=AMBER).scale(0.34)
+        tie1 = Text("← The signed head from topic 8", color=AMBER).scale(0.34)
         tie1.next_to(sth_row, RIGHT, buff=0.3)
         self.play(FadeIn(tie1))
-        tie2 = Text("← each tick is an inclusion proof YOUR machine just recomputed",
+        tie2 = Text("← Each tick is an inclusion proof YOUR machine just recomputed",
                     color=OK).scale(0.32)
         tie2.move_to([0, -3.55, 0])
         self.play(FadeIn(tie2))
@@ -227,27 +227,27 @@ class VerifyItYourself(Scene):
 
     # ── Scene 4 (1:50–2:20), the pinned key stops the swap ─────────────────
     def beat_pinned_key(self):
-        head = Text("suppose a server sent its own key with a matching fake list",
+        head = Text("Suppose a server sent its own key with a matching fake list",
                     color=DANGER).scale(0.5).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
-        served = card(6.4, 1.4, "served public_key.json", "9c41a0d7…  (the server's, not the real one)",
+        served = card(6.4, 1.4, "Served public_key.Json", "9c41a0d7…  (the server's, not the real one)",
                       color=DANGER, title_color=DANGER).move_to([0, 1.5, 0])
         self.play(FadeIn(served))
 
         binary = panel(7.4, 1.5, OK).move_to([0, -0.6, 0])
         binary_t = VGroup(
-            Text("the pollis-verify binary you downloaded (or built)", color=OK).scale(0.36),
+            Text("The pollis-verify binary you downloaded (or built)", color=OK).scale(0.36),
             Text(PINNED_KEY[:36] + "…", font=MONO, color=MUTED).scale(0.32),
         ).arrange(DOWN, buff=0.12).move_to(binary.get_center())
         arrow = Line(served.box.get_bottom(), binary.get_top(),
                      stroke_color=DANGER, stroke_width=2)
         self.play(Create(arrow), FadeIn(binary), FadeIn(binary_t))
 
-        stop = Text("served key ≠ compiled-in key   →   it stops. every time.",
+        stop = Text("Served key ≠ compiled-in key   →   it stops. Every time.",
                     color=OK).scale(0.5).move_to([0, -2.0, 0])
         self.play(FadeIn(stop), binary.animate.set_stroke(OK, width=3.5))
-        build = Text("so if you are seriously auditing us, "
+        build = Text("So if you are seriously auditing us, "
                      "BUILD the verifier yourself", color=AMBER).scale(0.4)
         build.move_to([0, -3.0, 0])
         self.play(FadeIn(build))
@@ -256,7 +256,7 @@ class VerifyItYourself(Scene):
 
     # ── Scene 5 (2:20–2:45), compare notes ─────────────────────────────────
     def beat_compare(self):
-        head = Text("the most important thing you can do with it",
+        head = Text("The most important thing you can do with it",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -276,13 +276,13 @@ class VerifyItYourself(Scene):
         self.play(Write(eq))
 
         matters = VGroup(
-            Text("if those ever differed, two valid signatures over two different trees,",
+            Text("If those ever differed, two valid signatures over two different trees,",
                  color=DANGER).scale(0.42),
-            Text("that is the finding that matters. and the only one you can't get alone.",
+            Text("That is the finding that matters. And the only one you can't get alone.",
                  color=FG).scale(0.45),
         ).arrange(DOWN, buff=0.22).move_to([0, -1.7, 0])
         self.play(FadeIn(matters))
-        close = Text("so run it. and compare with someone.",
+        close = Text("So run it. And compare with someone.",
                      color=AMBER).scale(0.55).move_to([0, -3.0, 0])
         self.play(FadeIn(close))
         self.hold_until(165)

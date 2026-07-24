@@ -85,7 +85,7 @@ class MlsGroups(Scene):
 
     # ── Scene 1 (0:00–0:30), the obvious way, and why it hurts ─────────────
     def beat_naive(self):
-        head = Text("the obvious way: one encrypted copy per person",
+        head = Text("The obvious way: one encrypted copy per person",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -100,7 +100,7 @@ class MlsGroups(Scene):
         ])
         for c in copies:
             self.play(Create(c), run_time=0.25)
-        cnt = Text("5 people  →  4 copies of every message",
+        cnt = Text("5 People  →  4 copies of every message",
                    color=FG).scale(0.46).move_to([0, -0.8, 0])
         self.play(FadeIn(cnt))
         self.hold_until(15)
@@ -112,7 +112,7 @@ class MlsGroups(Scene):
         ).arrange(DOWN, buff=0.22, aligned_edge=LEFT).move_to([0, -2.1, 0])
         for g in grow:
             self.play(FadeIn(g, shift=RIGHT * 0.15), run_time=0.35)
-        leave = Text("and when someone LEAVES, everyone needs new keys, "
+        leave = Text("And when someone LEAVES, everyone needs new keys, "
                      "everyone coordinating with everyone.", color=DANGER).scale(0.4)
         leave.move_to([0, -3.3, 0])
         self.play(FadeIn(leave))
@@ -155,7 +155,7 @@ class MlsGroups(Scene):
         self.play(Create(self.w2), FadeIn(self.l2), run_time=0.8)
         self.play(Create(self.w3), FadeIn(self.root), run_time=0.8)
 
-        rule = Text("the rule: you know the keys on the path from YOUR leaf to the root",
+        rule = Text("The rule: you know the keys on the path from YOUR leaf to the root",
                     color=FG).scale(0.44).move_to([0, 2.7, 0])
         self.play(FadeIn(rule))
 
@@ -167,7 +167,7 @@ class MlsGroups(Scene):
         path_b = VGroup(self.leaves[3], self.l1[1], self.l2[0], self.root)
         self.play(*[m.box.animate.set_stroke(OK) for m in path_b],
                   *[m.label.animate.set_color(OK) for m in path_b])
-        shared = Text("two members' paths overlap, that shared part is the whole trick",
+        shared = Text("Two members' paths overlap, that shared part is the whole trick",
                       color=OK).scale(0.42).move_to([0, -3.5, 0])
         self.play(FadeIn(shared))
         self.hold_until(60)
@@ -181,7 +181,7 @@ class MlsGroups(Scene):
     # ── Scene 3 (1:00–1:45), an update ripples, with a live counter ────────
     def beat_update(self):
         self.play(FadeOut(self.head3))
-        head = Text("one update, sent to one sibling branch per level",
+        head = Text("One update, sent to one sibling branch per level",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -215,7 +215,7 @@ class MlsGroups(Scene):
         compare = VGroup(
             Text("naive:  99 messages", font=MONO, color=DANGER).scale(0.6),
             Text("MLS:     7 messages", font=MONO, color=OK).scale(0.6),
-            Text("(for a group of 100, it's the DEPTH of the tree, not the size)",
+            Text("(For a group of 100, it's the DEPTH of the tree, not the size)",
                  color=MUTED).scale(0.38),
         ).arrange(DOWN, buff=0.25).move_to([0, 2.75, 0])
         self.play(FadeOut(head), FadeIn(compare))
@@ -224,14 +224,14 @@ class MlsGroups(Scene):
 
     # ── Scene 4 (1:45–2:15), removal, and a message that stays sealed ──────
     def beat_removal(self):
-        head = Text("removal is the case that matters",
+        head = Text("Removal is the case that matters",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
         gone = self.leaves[6]
         self.play(gone.box.animate.set_stroke(DANGER),
                   gone.label.animate.set_color(DANGER))
-        removed_lab = Text("removed", color=DANGER).scale(0.3)
+        removed_lab = Text("Removed", color=DANGER).scale(0.3)
         removed_lab.next_to(gone, DOWN, buff=0.15)
         self.play(gone.animate.set_opacity(0.45), FadeIn(removed_lab))
 
@@ -245,7 +245,7 @@ class MlsGroups(Scene):
         msg.move_to([0, 2.6, 0])
         self.play(FadeIn(msg))
         self.play(msg.animate.move_to([0, -3.5, 0]), run_time=1.0)
-        sealed = Text("still sealed. they hold the old key, and it opens nothing.",
+        sealed = Text("Still sealed. They hold the old key, and it opens nothing.",
                       color=DANGER).scale(0.46).move_to([0, 2.6, 0])
         self.play(msg.box.animate.set_stroke(DANGER),
                   msg.label.animate.set_color(DANGER), FadeIn(sealed))
@@ -255,7 +255,7 @@ class MlsGroups(Scene):
 
     # ── Scene 5 (2:15–2:45), epochs and commits ────────────────────────────
     def beat_epochs(self):
-        head = Text("two words you'll see everywhere: epoch, and commit",
+        head = Text("Two words you'll see everywhere: epoch, and commit",
                     color=AMBER).scale(0.55).to_edge(UP).shift(DOWN * 0.1)
         self.play(AddTextLetterByLetter(head, run_time=0.7))
 
@@ -267,11 +267,11 @@ class MlsGroups(Scene):
                  stroke_color=LINE, stroke_width=2) for i in range(2)
         ])
         labels = VGroup(
-            Text('commit: "add dana"', color=MUTED).scale(0.32).next_to(joins[0], UP, buff=0.15),
-            Text('commit: "remove sam"', color=MUTED).scale(0.32).next_to(joins[1], UP, buff=0.15),
+            Text('Commit: "add dana"', color=MUTED).scale(0.32).next_to(joins[0], UP, buff=0.15),
+            Text('Commit: "remove sam"', color=MUTED).scale(0.32).next_to(joins[1], UP, buff=0.15),
         )
         self.play(FadeIn(blocks), Create(joins), FadeIn(labels))
-        defn = Text("an epoch is the group's version number. a commit is what makes it tick.",
+        defn = Text("An epoch is the group's version number. A commit is what makes it tick.",
                     color=FG).scale(0.44).move_to([0, 0.35, 0])
         self.play(FadeIn(defn))
         self.hold_until(150)
@@ -279,14 +279,14 @@ class MlsGroups(Scene):
         device = chip("a device that missed epoch 6", DANGER, w=6.0, h=0.7, scale=0.34)
         device.move_to([0, -0.9, 0])
         self.play(FadeIn(device))
-        stuck = Text("→ out of step. cannot read epoch 7 until it catches up.",
+        stuck = Text("→ Out of step. Cannot read epoch 7 until it catches up.",
                      color=DANGER).scale(0.44).move_to([0, -1.7, 0])
         self.play(FadeIn(stuck))
         hardest = VGroup(
-            Text("keeping that order right, across every device, drop, and reconnect,",
+            Text("Keeping that order right, across every device, drop, and reconnect,",
                  color=FG).scale(0.42),
-            Text("is the hardest problem in this app.", color=AMBER).scale(0.5),
-            Text("which is why every commit goes into a public append-only log. "
+            Text("Is the hardest problem in this app.", color=AMBER).scale(0.5),
+            Text("Which is why every commit goes into a public append-only log. "
                  "that's next.", color=MUTED).scale(0.4),
         ).arrange(DOWN, buff=0.24).move_to([0, -2.9, 0])
         self.play(FadeIn(hardest))
