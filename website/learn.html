@@ -916,6 +916,7 @@
           <p><strong>Your device sees everything.</strong> That is where you type and read, so your messages are unscrambled there and nowhere else. The flip side: if someone gets into your unlocked device, they can read what is on it, and no clever math can prevent that.</p>
           <p><strong>Our servers see the outside of the envelope, never the letter inside.</strong> They carry sealed messages we cannot open, because the keys to open them never leave your devices. What they can see is ordinary delivery information: that an account sent something, roughly when, roughly how big it was, and which conversation it belongs to. Later sections show how Pollis works to shrink even that.</p>
           <p><strong>Getting the right key to the right person is the part that takes care.</strong> Encryption only helps if the key your app uses really belongs to the person you meant. Safety numbers (<a href="#identity-keys">Topic 6</a>) and our public key logs (<a href="#three-logs">Topic 9</a>) are what let you confirm that yourself, rather than take our word for it.</p>
+          <p><strong>Calls are covered too.</strong> Voice and video are relayed through a media server for performance, but the audio and video frames are encrypted end to end before they leave your device, using a key derived from the same MLS group that protects the group's messages. The media server forwards those frames without the key, so it relays encrypted media it cannot watch or listen to, and the key rotates automatically as people join or leave. Calls are one place people wrongly assume the server can listen in; here it cannot.</p>
           <p>The pattern runs through everything here: we keep shrinking the list of things you have to take on trust, and we publish evidence for whatever is left.</p>
         </div>
 
@@ -995,11 +996,19 @@ One picture, built up step by step: a readable message, then a sealed one, then 
             reasons unrelated to any crime. Encryption is what keeps "private" meaning private.</p>
           <p>With that in mind, here are four words that show up on every page that follows. None of
             them needs any math to understand.</p>
-          <p><strong>A key is just a very large, randomly chosen number.</strong> It is chosen from a
-            set so enormous that guessing the right one is not a matter of patience. A modern key has
-            about 2<sup>256</sup> possibilities, which is more than the number of atoms in the
-            observable universe. When we say a key never leaves your device, we mean that number stays
-            in your device's secure storage and is never sent to us.</p>
+          <p><strong>A key is just a very large, randomly chosen number.</strong> How large depends
+            on the algorithm, but the point is that you cannot find the right one by trying them all.
+            A symmetric key (the kind AES-256 or ChaCha20 uses) is one of 2 to the 256th possible
+            values. Here is why that is out of reach, without relying on any shaky size comparison:
+            even a perfect computer running at the theoretical minimum energy per step would need more
+            energy than the Sun emits in its entire remaining lifetime just to count through a much
+            smaller 2-to-the-128th space, let alone 2-to-the-256th. (This is
+            <a href="https://www.schneier.com/blog/archives/2009/09/the_doghouse_cr.html"
+              target="_blank" rel="noopener noreferrer">Bruce Schneier's</a> well-known thermodynamic
+            argument.) Public-key algorithms use different math, and a 256-bit elliptic-curve key of
+            the kind Pollis uses provides roughly 128 bits of security, which is itself far beyond any
+            feasible attack. When we say a key never leaves your device, we mean that number stays in
+            your device's secure storage and is never sent to us.</p>
           <p><strong>Encryption is a lock that scrambles.</strong> Put your message in with a key and
             out comes noise. Put the noise back in with the right key and your message returns. With
             the wrong key you get nothing back, not a blurry version, not most of it. Nothing.</p>
@@ -1019,16 +1028,24 @@ One picture, built up step by step: a readable message, then a sealed one, then 
             without publishing the file. When you see a long root code on our artifacts page, that is
             a hash.</p>
           <p><strong>The names you might hear.</strong> These ideas are carried out by specific,
-            public, well-studied algorithms. For scrambling messages with a shared key, common ones
-            are <a href="https://en.wikipedia.org/wiki/Advanced_Encryption_Standard" target="_blank"
+            public, well-studied algorithms, and it is worth being precise about which does what. For
+            scrambling a message with a shared key, common ones are
+            <a href="https://en.wikipedia.org/wiki/Advanced_Encryption_Standard" target="_blank"
               rel="noopener noreferrer">AES</a> and
             <a href="https://en.wikipedia.org/wiki/ChaCha20-Poly1305" target="_blank"
-              rel="noopener noreferrer">ChaCha20</a>. For the two-half (public and private) trick,
-            common ones are <a href="https://en.wikipedia.org/wiki/RSA_(cryptosystem)" target="_blank"
-              rel="noopener noreferrer">RSA</a> and elliptic-curve schemes like
+              rel="noopener noreferrer">ChaCha20</a>. For agreeing on that shared key over an
+            untrusted network without meeting first, Pollis uses
+            <a href="https://en.wikipedia.org/wiki/Curve25519" target="_blank"
+              rel="noopener noreferrer">X25519</a>, an elliptic-curve key exchange, which is also the
+            mechanism MLS uses under the hood (via
+            <a href="https://en.wikipedia.org/wiki/Hybrid_Public_Key_Encryption" target="_blank"
+              rel="noopener noreferrer">HPKE</a>). For proving who wrote something, Pollis uses
             <a href="https://en.wikipedia.org/wiki/EdDSA" target="_blank"
-              rel="noopener noreferrer">Ed25519</a>, which Pollis uses for signatures. For
-            fingerprints, the standard family is
+              rel="noopener noreferrer">Ed25519</a> signatures; note that Ed25519 signs, it does not
+            encrypt.
+            <a href="https://en.wikipedia.org/wiki/RSA_(cryptosystem)" target="_blank"
+              rel="noopener noreferrer">RSA</a> is an older algorithm that can do both key exchange and
+            signatures. For fingerprints, the standard family is
             <a href="https://en.wikipedia.org/wiki/SHA-2" target="_blank"
               rel="noopener noreferrer">SHA-2</a>, and Pollis uses SHA-256 from it. You do not need to
             know how any of them work to use Pollis, but they are public, which is a feature: anyone
@@ -1269,7 +1286,7 @@ Lockboxes left in advance, a welcome that carries only today's keys, messages fr
         <div class="ln-prose">
           <p>Suppose the worst has happened and someone lifts a key off your device today. What did they actually get? Two questions follow, one pointing backward in time and one pointing forward.</p>
           <p><strong>The past: forward secrecy.</strong> The answer is nothing. Keys only move forward, through a one-way step. Each new key is made from the previous one by a process that cannot be run in reverse, like mixing two paints and being unable to separate them again. Used keys are thrown away. So a key stolen today opens today's messages, and yesterday's are already out of reach, because the material that made them no longer exists anywhere.</p>
-          <p>One thing to be precise about: this protects the scrambled traffic, not your screen. If yesterday's messages are still on display in your app, someone holding your unlocked device can read them off the screen. The real guarantee is that someone who quietly recorded your encrypted traffic months ago still cannot open it, even with a key stolen today. That is a strong promise.</p>
+          <p>One thing to be precise about: forward secrecy protects your <em>recorded network traffic</em>, not your device. Your messages are stored on your own device in a local database, decrypted, so that the app can show them to you instantly; that database is protected by a key held in your operating system's keystore. So if someone gets into your device while it is unlocked, they can read your history directly, because the means to read it is right there with it. What forward secrecy guarantees is narrower and still valuable: someone who quietly recorded your encrypted traffic months ago cannot open it, even with a key stolen from your device today. One caveat on the word "yesterday": to cope with messages that arrive out of order, the protocol keeps a small, bounded set of recent message keys around briefly, so the boundary is that retention window rather than a hard midnight line.</p>
           <p><strong>The future: post-compromise security.</strong> This is the less familiar and more surprising half. Normally a stolen key means you stay compromised until you notice and start over. Here, the group heals on its own. Every ordinary update, such as adding a member or a routine key refresh, replaces keys along part of the tree. As soon as a member the attacker does not control makes an update, the stolen key stops working, and nobody has to notice anything for that to happen.</p>
           <p>This is why the tree from <a href="#mls-groups">Topic 3</a> was worth the effort. Because rekeying is cheap, it happens often, and the more often it happens, the shorter the window in which a stolen key is any use. A stolen key is a window, not a door: it does not open backward, and it closes on its own.</p>
         </div>
@@ -1568,15 +1585,15 @@ Climbing an audit path, watching a made-up entry miss the root, a rewrite that c
         <div class="ln-prose">
           <p>Three separate append-only logs, one signing key, one public site at <code>verify.pollis.com</code>. Each is easiest to understand by the problem it protects against.</p>
           <p><strong>Log 1, account keys. It protects against the wrong person's key being used for you.</strong> Every identity key we list for an account goes in here, in order, with a version number. For a swapped key to be accepted, it would have to be published here, in public, in a record your own device audits. The rule is that versions only move forward, so an older key cannot be slipped back in and history cannot be renumbered.</p>
-          <p><strong>Log 2, the message-order log. It protects against a group's history being quietly rewritten.</strong> A group moves forward in epochs, and everyone applies the same updates in the same order. That order is exactly what a bad server might try to reorder or split. So every update is logged, and the rule is that a conversation is a single straight line: each epoch appears once, and two different updates can never claim the same epoch. A split is refused when it is written.</p>
-          <p>Note what this log holds: sealed updates. Publishing them reveals the shape of a conversation, never its content. The server never had the keys, and neither does anyone reading the log.</p>
+          <p><strong>Log 2, the message-order log. It protects against a group's history being quietly rewritten.</strong> A group moves forward in epochs, and everyone applies the same updates in the same order. That order is exactly what a bad server might try to reorder or split. So every update is logged, and the rule is that a conversation is a single straight line: each epoch appears once, and two different updates can never claim the same epoch. The log's rule refuses a split, and if a server ever managed to record one anyway, both entries would sit in the public, signed log forever, where anyone comparing them can see it.</p>
+          <p>Be clear about what this log does and does not expose. It never contains message <em>content</em>: each entry stores only the fingerprint of a sealed update, and the server never had the keys to open it. But the entry itself is public, and it does carry structural metadata in the clear: a conversation identifier, the account id of whoever made the change, the epoch number, an ordering value, and a timestamp. Anyone on the internet can read <code>verify.pollis.com/v1/entries.json</code> and, from it, build a picture of which accounts are active in which groups and how often those groups change, even though they can never read a single word that was said. That is a real cost, not a footnote, and it is the honest counterweight to the guarantee above.</p>
           <p><strong>Log 3, binaries. It protects against a special, tampered app being shipped to one person.</strong> The fingerprints of every released installer go in here. The rule is that the same release and platform cannot come to mean different files later. If a version were ever built for a single person, its fingerprint would either sit in a public log everyone can read, or be conspicuously missing from it. Either way it is detectable.</p>
           <p><strong>Why three logs and not one.</strong> A signed statement about one log must never be reusable as a statement about another. So each log signs under its own separate label, and a statement from one log fails to verify against another by design. Different questions, different logs, non-interchangeable proofs. They share one key and one site, which keeps the thing you have to trust down to a single built-in key.</p>
         </div>
 
         <div class="ln-limit">
           <div class="ln-limit-label">What these logs do and do not do</div>
-          <p>These logs make tampering permanent and public rather than physically impossible, and they say nothing about ordinary software bugs: a log proves what was published, not that it was correct. There is also a timing point. The logs are rebuilt and republished on a daily schedule, so a brand-new release or a just-published key can genuinely not be in them yet. "Not in the log yet" and "not in the log" are different, and the app shows the first as pending rather than an alarm.</p>
+          <p>These logs make tampering permanent and public rather than physically impossible, and they say nothing about ordinary software bugs: a log proves what was published, not that it was correct. They also carry a real privacy cost of their own: the commit log above publishes structural metadata about every conversation, so the transparency that lets you catch tampering is paid for in public activity metadata. Reducing that (for example, rotating the identifiers rather than using stable ones) is open work. There is also a timing point. The logs are rebuilt and republished on a daily schedule, so a brand-new release or a just-published key can genuinely not be in them yet. "Not in the log yet" and "not in the log" are different, and the app shows the first as pending rather than an alarm.</p>
         </div>
 
         <figure class="ln-figure">
@@ -1639,7 +1656,7 @@ Each log introduced by the problem it protects against, an attempted split being
 
         <div class="ln-limit">
           <div class="ln-limit-label">Where the guarantee ends today</div>
-          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux build closes that last loop today. The Linux build already closes this loop today, and the same approach is being extended to the other platforms. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
+          <p>On macOS and Windows you currently have "these are the bytes Pollis published, and this workflow built them," but not yet "these bytes match the source you can read." Only the Linux build closes that last loop today, and the same approach is being extended to macOS and Windows. The signing wrapper will never close it on any platform, because signatures mix in unique data on purpose.</p>
         </div>
 
         <figure class="ln-figure">
