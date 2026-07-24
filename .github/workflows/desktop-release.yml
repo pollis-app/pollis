@@ -105,6 +105,13 @@ jobs:
           echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
           echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+          # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
+          # public key. option_env! bakes them into the client so the pool is
+          # reachable; the overlay stays OFF until a user opts in via Settings.
+          # Rotating the signing key requires a coordinated client rebuild (clients
+          # pin this key). Absent → the app builds fine and the overlay is inert.
+          echo "POLLIS_OVERLAY_DIRECTORY_URL=${{ secrets.POLLIS_OVERLAY_DIRECTORY_URL }}" >> $GITHUB_ENV
+          echo "POLLIS_OVERLAY_DIRECTORY_KEY=${{ secrets.POLLIS_OVERLAY_DIRECTORY_KEY }}" >> $GITHUB_ENV
 
       # webrtc-audio-processing-sys (vendored): meson + ninja drive the C++
       # build, clang/cmake are already on macOS GitHub runners.
@@ -197,6 +204,13 @@ jobs:
           echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
           echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+          # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
+          # public key. option_env! bakes them into the client so the pool is
+          # reachable; the overlay stays OFF until a user opts in via Settings.
+          # Rotating the signing key requires a coordinated client rebuild (clients
+          # pin this key). Absent → the app builds fine and the overlay is inert.
+          echo "POLLIS_OVERLAY_DIRECTORY_URL=${{ secrets.POLLIS_OVERLAY_DIRECTORY_URL }}" >> $GITHUB_ENV
+          echo "POLLIS_OVERLAY_DIRECTORY_KEY=${{ secrets.POLLIS_OVERLAY_DIRECTORY_KEY }}" >> $GITHUB_ENV
 
       - name: Install dependencies
         run: pnpm install
@@ -423,6 +437,13 @@ jobs:
           echo "LOG_DB_URL=${{ secrets.LOG_DB_URL }}" >> $GITHUB_ENV
           echo "LOG_DB_TOKEN=${{ secrets.LOG_DB_TOKEN }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+          # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
+          # public key. option_env! bakes them into the client so the pool is
+          # reachable; the overlay stays OFF until a user opts in via Settings.
+          # Rotating the signing key requires a coordinated client rebuild (clients
+          # pin this key). Absent → the app builds fine and the overlay is inert.
+          echo "POLLIS_OVERLAY_DIRECTORY_URL=${{ secrets.POLLIS_OVERLAY_DIRECTORY_URL }}" >> $GITHUB_ENV
+          echo "POLLIS_OVERLAY_DIRECTORY_KEY=${{ secrets.POLLIS_OVERLAY_DIRECTORY_KEY }}" >> $GITHUB_ENV
 
       # --frozen-lockfile: fail (don't silently re-resolve) if pnpm-lock.yaml
       # drifted — the Linux payload is the reproducible unit, so its JS inputs
@@ -548,6 +569,13 @@ jobs:
           echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
           echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+          # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
+          # public key. option_env! bakes them into the client so the pool is
+          # reachable; the overlay stays OFF until a user opts in via Settings.
+          # Rotating the signing key requires a coordinated client rebuild (clients
+          # pin this key). Absent → the app builds fine and the overlay is inert.
+          echo "POLLIS_OVERLAY_DIRECTORY_URL=${{ secrets.POLLIS_OVERLAY_DIRECTORY_URL }}" >> $GITHUB_ENV
+          echo "POLLIS_OVERLAY_DIRECTORY_KEY=${{ secrets.POLLIS_OVERLAY_DIRECTORY_KEY }}" >> $GITHUB_ENV
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -903,6 +931,13 @@ jobs:
           echo "R2_ACCESS_KEY_ID=${{ secrets.R2_ACCESS_KEY_ID }}" >> $GITHUB_ENV
           echo "R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}" >> $GITHUB_ENV
           echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+          # Relay overlay (#616/#455): the signed-directory URL + pinned Ed25519
+          # public key. option_env! bakes them into the client so the pool is
+          # reachable; the overlay stays OFF until a user opts in via Settings.
+          # Rotating the signing key requires a coordinated client rebuild (clients
+          # pin this key). Absent → the app builds fine and the overlay is inert.
+          echo "POLLIS_OVERLAY_DIRECTORY_URL=${{ secrets.POLLIS_OVERLAY_DIRECTORY_URL }}" >> $GITHUB_ENV
+          echo "POLLIS_OVERLAY_DIRECTORY_KEY=${{ secrets.POLLIS_OVERLAY_DIRECTORY_KEY }}" >> $GITHUB_ENV
 
       # Same all-artifacts download the release / attest jobs use — the built +
       # signed installers and updater bundles under artifacts/pollis-{macos,
