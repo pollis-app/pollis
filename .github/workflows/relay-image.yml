@@ -70,9 +70,30 @@ jobs:
         run: cargo test -p pollis-relay -p pollis-device-cert
 
   # Build the container image and (on dispatch/push, not PRs) publish to GHCR.
+  #
+  # MULTI-ARCH (amd64 + arm64) — arm64 is REQUIRED, not a nicety: the hydra's AWS
+  # pool (infra/relay-hydra/, #616) runs Graviton `t4g.nano` nodes because the §0
+  # budget math depends on it. An amd64-only image makes every node fail at boot
+  # with `no matching manifest for linux/arm64/v8`, cloud-init aborts, and the ASG
+  # happily keeps billing for instances that never run the relay.
+  #
+  # Each platform builds on its OWN NATIVE RUNNER (free for public repos) and pushes
+  # by digest; the `manifest` job then stitches the digests into one tag. Native
+  # beats QEMU here by a wide margin — cross-emulating a release build of the Rust
+  # workspace (ring's assembly, quinn, rustls) turns minutes into tens of minutes.
   image:
     needs: test
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       # Required to push the image to GHCR with the built-in GITHUB_TOKEN.
@@ -113,14 +134,106 @@ jobs:
 
       # Build from the REPO ROOT so the whole cargo workspace resolves; bake the
       # git SHA so /version reports the running build (the DS #509 tripwire shape).
-      - name: Build + push image
+      #
+      # PR / build-only: just prove this platform still assembles. No push, so no
+      # digest to hand the manifest job.
+      - name: Build image (build-only)
+        if: steps.mode.outputs.push != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: pollis-relay/Dockerfile
-          push: ${{ steps.mode.outputs.push == 'true' }}
+          platforms: ${{ matrix.platform }}
+          push: false
           build-args: |
             GIT_SHA=${{ steps.sha.outputs.sha }}
-          tags: |
-            ${{ env.IMAGE }}:${{ steps.sha.outputs.sha }}
-            ${{ env.IMAGE }}:latest
+
+      # Publish path: push an untagged, per-platform image and record its digest.
+      # Tagging happens once, in `manifest` — tagging here would have the two
+      # platforms race to overwrite `:latest` with a single-arch image, which is
+      # exactly the failure this job exists to prevent.
+      - name: Build + push by digest
+        id: build
+        if: steps.mode.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: pollis-relay/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            GIT_SHA=${{ steps.sha.outputs.sha }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        if: steps.mode.outputs.push == 'true'
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        if: steps.mode.outputs.push == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Stitch the per-platform digests into ONE multi-arch tag. Without this the
+  # registry holds two unrelated single-arch images and no manifest list, so an
+  # arm64 node still finds no matching manifest.
+  manifest:
+    needs: image
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.publish)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout ${{ inputs.ref || github.sha }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - name: Resolve build SHA
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest list + push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t "${IMAGE}:${{ steps.sha.outputs.sha }}" \
+            -t "${IMAGE}:latest" \
+            $(printf "${IMAGE}@sha256:%s " *)
+
+      # Fail loudly if arm64 is somehow missing — that is the exact regression that
+      # silently bricks every Graviton node in the hydra pool.
+      - name: Verify both platforms are present
+        run: |
+          docker buildx imagetools inspect "${IMAGE}:latest" --raw > /tmp/manifest.json
+          cat /tmp/manifest.json
+          for arch in amd64 arm64; do
+            if ! grep -q "\"architecture\": *\"$arch\"" /tmp/manifest.json; then
+              echo "::error::manifest list is missing linux/$arch"
+              exit 1
+            fi
+          done
+          echo "manifest list contains both linux/amd64 and linux/arm64"

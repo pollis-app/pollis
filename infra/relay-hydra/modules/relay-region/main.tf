@@ -43,14 +43,18 @@ resource "aws_internet_gateway" "this" {
   tags   = { Name = local.name }
 }
 
+// Keyed by AZ INDEX, not AZ name: the name list comes from a data source and is
+// unknown at plan time, and for_each keys must be static. The apply-time AZ name
+// therefore goes in the value position (see the `availability_zone` attribute) —
+// which is what Terraform's "unknown values in for_each" guidance prescribes.
 resource "aws_subnet" "public" {
-  for_each = { for idx, az in local.azs : az => idx }
+  for_each = toset([for idx in range(var.az_count) : tostring(idx)])
 
   vpc_id                  = aws_vpc.this.id
-  availability_zone       = each.key
-  cidr_block              = cidrsubnet(local.vpc_cidr, local.subnet_bits, each.value)
+  availability_zone       = local.azs[tonumber(each.key)]
+  cidr_block              = cidrsubnet(local.vpc_cidr, local.subnet_bits, tonumber(each.key))
   map_public_ip_on_launch = true
-  tags                    = { Name = "${local.name}-${each.key}" }
+  tags                    = { Name = "${local.name}-${local.azs[tonumber(each.key)]}" }
 }
 
 resource "aws_route_table" "public" {
