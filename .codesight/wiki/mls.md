@@ -12,6 +12,7 @@ Source: `pollis-core/src/commands/mls.rs`
 - **GroupInfo**: a snapshot of the group tree at a specific epoch. Stored in `mls_group_info`. Used for external-join.
 - **KeyPackage**: a one-time-use cryptographic token published by each device. Consumed when the device is added to a group.
 - **External Join**: a device adds itself to a group using published GroupInfo, without needing a Welcome from an existing member.
+- **Ciphersuite**: fixed per group at creation. Pollis uses `CS_CLASSIC` (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, code point `0x0001`) everywhere. Since #454 P1b it is an explicit argument to the only two functions that mint suite-bound material — `create_mls_group_in_suite` and `build_key_package_in_suite` — paired with the crypto backend that serves it (`PollisProvider` for classic, `PollisPqProvider` for the not-yet-selected `CS_HYBRID`). Signing is Ed25519 under both suites (`SIGNATURE_SCHEME`), so a device keeps ONE signing key and one `device_cert` regardless. A key package's suite is stored in `mls_key_package.ciphersuite` so the DS can serve a claim from the right pool without parsing the blob.
 
 ## Key Functions
 

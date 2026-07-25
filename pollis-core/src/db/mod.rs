@@ -78,6 +78,11 @@ pub const POST_BASELINE_MIGRATIONS: &[(u32, &str, &str)] = &[
         "directory_index",
         include_str!("migrations/000009_directory_index.sql"),
     ),
+    (
+        10,
+        "key_package_ciphersuite",
+        include_str!("migrations/000010_key_package_ciphersuite.sql"),
+    ),
 ];
 
 pub mod queries {

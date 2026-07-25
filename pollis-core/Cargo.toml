@@ -139,7 +139,28 @@ axum = { version = "0.8", features = ["ws"] }
 bytes = "1"
 openmls = "0.8"
 openmls_traits = "0.5"
+# The crypto backend for the CLASSIC suite Pollis ships today, and the only one
+# any production path constructs (`PollisProvider`). Its `aes-gcm` compares
+# authentication tags in constant time via `subtle` — see the libcrux note below
+# for why that decides the split.
 openmls_rust_crypto = "0.5"
+# The crypto backend for the POST-QUANTUM HYBRID suite only (`PollisPqProvider`,
+# #454). It is the sole released provider implementing X-Wing; RustCrypto
+# `unimplemented!()`-panics on that suite.
+#
+# It is deliberately NOT used for the classic suite even though it supports it:
+# the classic AEAD is AES-128-GCM and libcrux's AES-GCM has an UNPATCHED
+# non-constant-time tag check (RUSTSEC-2026-0211, `libcrux-aesgcm <= 0.0.8`; the
+# fix ships only as the renamed `libcrux-aes` 0.0.9, which `libcrux-aead 0.0.6`
+# — and therefore this crate — does not use). Routing today's message decrypts
+# through it would be a side-channel regression. The hybrid suite is
+# ChaCha20-Poly1305-based, so that advisory does not reach it. `deny.toml`
+# records the reachability argument for each libcrux advisory.
+#
+# We compose its `CryptoProvider` with our own SQLite-backed `MlsStore`; we
+# deliberately do NOT use its bundled `Provider`, which hardcodes in-memory
+# storage and would silently drop all MLS group state on restart.
+openmls_libcrux_crypto = "0.3"
 # `test-utils` exposes `SignatureKeyPair::private()` — the ONLY accessor for the
 # raw device signing seed. The overlay relay handshake (`net::overlay`) must sign
 # with the SAME Ed25519 device key the cert chain certifies, so it needs the seed

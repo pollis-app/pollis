@@ -13,7 +13,10 @@ use crate::error::Result;
 use crate::state::AppState;
 
 use super::device::{load_or_create_device_signer, verify_added_devices, VerifyOutcome};
-use super::provider::{make_credential, parse_credential_user_id, PollisProvider, CS};
+use super::provider::{
+    make_credential, parse_credential_user_id, MlsProvider, PollisProvider, CS_CLASSIC,
+    SIGNATURE_SCHEME,
+};
 
 // ── GroupInfo publishing ─────────────────────────────────────────────────────
 
@@ -352,7 +355,7 @@ async fn external_join_attempt(
         let credential = make_credential(user_id, &device_id);
         let sig_pub = OpenMlsSignaturePublicKey::new(
             sig_pub_bytes.into(),
-            CS.signature_algorithm(),
+            SIGNATURE_SCHEME,
         )
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
         let cred_with_key = CredentialWithKey {
@@ -489,6 +492,63 @@ async fn external_join_attempt(
 
 // ── Phase 3: Group / DM creation ─────────────────────────────────────────────
 
+/// Create a fresh MLS group for `conversation_id` in an explicit ciphersuite,
+/// with `creator_user_id`:`device_id` as the sole initial member.
+///
+/// `suite` and `provider` must agree — `CS_CLASSIC` with `PollisProvider`,
+/// `CS_HYBRID` with `PollisPqProvider` — because each crypto backend implements
+/// only one of the two (see `provider.rs`). This is the one place a group's
+/// suite is decided; every later operation on the group inherits it from the
+/// stored group state, so nothing downstream needs a suite argument.
+///
+/// The suite is a parameter rather than a constant so the choice is visible at
+/// the call site. It is NOT configurable: `init_mls_group`, the only production
+/// caller, always passes `CS_CLASSIC` (#454 P2 is what makes the choice real).
+///
+/// Sync: the caller owns the local-DB guard.
+pub(super) fn create_mls_group_in_suite<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    creator_user_id: &str,
+    device_id: &str,
+    suite: Ciphersuite,
+) -> Result<()>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let (sig_keys, sig_pub_bytes) =
+        load_or_create_device_signer(provider, creator_user_id, device_id)?;
+
+    let credential = make_credential(creator_user_id, device_id);
+    let sig_pub = OpenMlsSignaturePublicKey::new(
+        sig_pub_bytes.into(),
+        SIGNATURE_SCHEME,
+    ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+    let cred_with_key = CredentialWithKey {
+        credential,
+        signature_key: sig_pub.into(),
+    };
+
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+
+    // Delete any stale group with the same ID so the create below never
+    // collides.  This is a no-op on first creation and essential during
+    // repair (where the old group still exists but is broken/outdated).
+    if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
+        let _ = old.delete(provider.storage());
+    }
+
+    let config = MlsGroupCreateConfig::builder()
+        .ciphersuite(suite)
+        .use_ratchet_tree_extension(true)
+        .build();
+
+    MlsGroup::new_with_group_id(provider, &sig_keys, &config, group_id, cred_with_key)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create mls group: {e}")))?;
+
+    Ok(())
+}
+
 /// Internal: create a fresh MLS group for `conversation_id` with
 /// `creator_user_id` as the sole initial member.  Group state is persisted in
 /// the local `mls_kv` table via `MlsStore`.
@@ -512,36 +572,13 @@ pub async fn init_mls_group(
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
         let provider = PollisProvider::new(db.conn());
-
-        let (sig_keys, sig_pub_bytes) =
-            load_or_create_device_signer(&provider, creator_user_id, &device_id)?;
-
-        let credential = make_credential(creator_user_id, &device_id);
-        let sig_pub = OpenMlsSignaturePublicKey::new(
-            sig_pub_bytes.into(),
-            CS.signature_algorithm(),
-        ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
-        let cred_with_key = CredentialWithKey {
-            credential,
-            signature_key: sig_pub.into(),
-        };
-
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-
-        // Delete any stale group with the same ID so the create below never
-        // collides.  This is a no-op on first creation and essential during
-        // repair (where the old group still exists but is broken/outdated).
-        if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
-            let _ = old.delete(provider.storage());
-        }
-
-        let config = MlsGroupCreateConfig::builder()
-            .ciphersuite(CS)
-            .use_ratchet_tree_extension(true)
-            .build();
-
-        MlsGroup::new_with_group_id(&provider, &sig_keys, &config, group_id, cred_with_key)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("create mls group: {e}")))?;
+        create_mls_group_in_suite(
+            &provider,
+            conversation_id,
+            creator_user_id,
+            &device_id,
+            CS_CLASSIC,
+        )?;
     }
 
     // Publish the epoch-0 GroupInfo so a future device enrolling via the
@@ -559,10 +596,18 @@ pub async fn init_mls_group(
 ///
 /// Returns `(MlsGroup, SignatureKeyPair)` ready for use with the provider whose
 /// connection was passed to `PollisProvider::new`.
-pub(super) fn load_group_with_signer(
-    provider: &PollisProvider<'_>,
+///
+/// Takes no ciphersuite: a group's suite is part of the stored group state, and
+/// the signer is `SIGNATURE_SCHEME` under either suite (see `provider.rs`).
+/// Generic over the crypto backend so a hybrid group reloads through this same
+/// path with `PollisPqProvider`.
+pub(super) fn load_group_with_signer<C>(
+    provider: &MlsProvider<'_, C>,
     conversation_id: &str,
-) -> crate::error::Result<(MlsGroup, SignatureKeyPair)> {
+) -> crate::error::Result<(MlsGroup, SignatureKeyPair)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
 
     let mut group = MlsGroup::load(provider.storage(), &group_id)
@@ -583,7 +628,7 @@ pub(super) fn load_group_with_signer(
     let signer = SignatureKeyPair::read(
         provider.storage(),
         &sig_pub_bytes,
-        CS.signature_algorithm(),
+        SIGNATURE_SCHEME,
     )
     .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
 

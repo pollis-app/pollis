@@ -24,6 +24,7 @@
 
 use std::sync::Arc;
 
+use openmls::prelude::Ciphersuite;
 use openmls_traits::signatures::Signer;
 use sha2::{Digest, Sha256};
 
@@ -158,14 +159,22 @@ pub async fn ds_post(
 /// Device-signed via [`ds_post`]: the claimer is a fully-enrolled device, and the
 /// signature is the only thing the DS binds the claim to (any authenticated user
 /// may claim a peer's package — that is how you add them).
+///
+/// `ciphersuite` names the suite pool to claim from; the DS never returns a
+/// package from another suite, so a suite the target cannot serve comes back as
+/// `Ok(None)` rather than a silently downgraded package. Passed explicitly so
+/// the choice is visible at the call site; every caller passes `CS_CLASSIC`
+/// until #454 P2.
 pub async fn ds_claim_key_package(
     state: &Arc<AppState>,
     target_user_id: &str,
     target_device_id: Option<&str>,
+    ciphersuite: Ciphersuite,
 ) -> Result<Option<Vec<u8>>> {
     let body = serde_json::json!({
         "target_user_id": target_user_id,
         "target_device_id": target_device_id,
+        "ciphersuite": u16::from(ciphersuite),
     });
     let resp = ds_post(state, "/v1/key-packages/claim", &body).await?;
     let status = resp.status();
