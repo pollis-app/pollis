@@ -1,6 +1,9 @@
 # Post-Quantum Hybrid MLS — Design
 
-**Status:** design proposal (decision-quality). Not yet implemented.
+**Status:** design accepted; implementation started. **P0 (spike) is complete** and
+**P1a (crypto-provider swap) has landed** — `PollisProvider` now runs on the libcrux
+crypto backend, so the hybrid suite is reachable (`pollis-core/src/commands/mls/provider.rs`).
+No group has changed suite: every production path is still classical (§8).
 **Scope:** migrate Pollis's MLS key exchange from classical X25519 to a hybrid
 X25519 + ML-KEM-768 construction, transparently, without breaking existing
 groups, existing devices, or the "messages must work" doctrine.
@@ -44,8 +47,8 @@ the code as it is today.
   **crypto provider**, never OpenMLS itself: `openmls_rust_crypto 0.5.1` `unimplemented!()`
   -panics on this suite (`src/provider.rs:61`), while `openmls_libcrux_crypto 0.3.1`
   implements it (`src/crypto.rs:60`, via `hpke_rs_crypto`'s `KemAlgorithm::XWingDraft06`).
-  So the route is: keep `openmls = "0.8"`, enable its `libcrux-provider` feature, add
-  `openmls_libcrux_crypto = "0.3.1"` — **no version bump, no fork, no `[patch.crates-io]`.**
+  So the route is: keep `openmls = "0.8"` and take a direct dependency on
+  `openmls_libcrux_crypto = "0.3"` — **no version bump, no fork, no `[patch.crates-io]`.**
   The catch: the only hybrid suite on offer is a ChaCha20-Poly1305 suite, so the AEAD
   changes *with* the KEM (AES-128-GCM → ChaCha20-Poly1305, nominal level 128 → 256);
   Ed25519 signatures are unchanged. (§7.)
@@ -58,7 +61,7 @@ the code as it is today.
   long overlap window so an old-app device is never un-addable. Never a flag day.
   The live risk is no longer availability but **code-point churn** — `0x004D` is an
   experimental X-Wing draft-06 point that OpenMLS `main` has since moved behind a feature
-  flag and the IETF has since dropped; pin the version *and* the feature name and budget
+  flag and the IETF has since dropped; pin both dependency versions and budget
   for a second suite migration when the IETF suites stabilise (§7). (§3, §8.)
 
 ---
@@ -658,8 +661,12 @@ churn, and it is managed by pinning.**
   that the ML-KEM primitives are already in `Cargo.lock` but unreachable was right about
   the primitives and wrong about the reason: the ciphersuite *is* registered; Pollis merely
   instantiates the one provider that refuses it.
-- **The route, pinned:** keep `openmls = "0.8"`, enable its `libcrux-provider` feature,
-  add `openmls_libcrux_crypto = "0.3.1"`. That is the whole dependency change.
+- **The route, pinned:** keep `openmls = "0.8"` and add a direct dependency on
+  `openmls_libcrux_crypto = "0.3"`. That is the whole dependency change. OpenMLS also
+  offers an optional `libcrux-provider` feature, but it does nothing except pull in
+  `dep:openmls_libcrux_crypto`; the direct dependency is equivalent and keeps the
+  provenance of the provider visible in our own `Cargo.toml` rather than behind an
+  upstream feature flag. As shipped: `pollis-core/Cargo.toml`.
 
 ### 7.2 P0 is DONE — proven end-to-end, headless
 
@@ -713,10 +720,10 @@ The suite works today, but `0x004D` is a moving target and must be pinned as one
   `draft-ietf-mls-pq-ciphersuites` (openmls/openmls#2046 merged 2026-06-11,
   openmls/openmls#2118 2026-07-16) — **and has moved `0x004D` behind that same flag.** So
   the next OpenMLS release is a **breaking change for this usage**: the suite we rely on
-  moves from always-on to feature-gated. **Pin both the version and the feature name**
-  (`openmls = "0.8"`, feature `libcrux-provider`, `openmls_libcrux_crypto = "0.3.1"`, suite
-  `0x004D`), and treat a future OpenMLS bump as a **tracked migration**, not a routine
-  dependency update.
+  moves from always-on to feature-gated. **Pin the versions** (`openmls = "0.8"`,
+  `openmls_libcrux_crypto = "0.3"`, suite `0x004D`), and treat a future OpenMLS bump as a
+  **tracked migration**, not a routine dependency update — the bump is where `0x004D`
+  becomes conditional on the `draft-ietf-mls-pq-ciphersuites` feature.
 - The new draft suites are not a drop-in replacement yet either: openmls/openmls#2104
   (open) notes they are currently implemented with SHA256 where the draft specifies
   SHAKE256 — known-wrong and unreleased.
@@ -761,10 +768,10 @@ now our own plumbing, not an upstream dependency.
 two-client crate on `openmls 0.8.1` + `openmls_libcrux_crypto 0.3.1` (stock cargo, no
 patch) created a hybrid `0x004D` group and round-tripped an application message plus an
 `export_secret` between two clients, headless (§7.2). **Decision recorded:** no version
-bump and no fork — keep `openmls = "0.8"`, enable its `libcrux-provider` feature, add
-`openmls_libcrux_crypto = "0.3.1"`, suite `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519`
-(`0x004D`). The one dependency risk carried forward is code-point churn (§7.4): pin the
-version *and* the feature name, and treat a future OpenMLS bump as a tracked migration.
+bump and no fork — keep `openmls = "0.8"`, add a direct dependency on
+`openmls_libcrux_crypto = "0.3"`, suite `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519`
+(`0x004D`). The one dependency risk carried forward is code-point churn (§7.4): pin both
+versions, and treat a future OpenMLS bump as a tracked migration.
 **No remaining upstream gate.**
 
 **Phase 1a — Provider swap (no suite change, no behaviour change).** Move `PollisProvider`
@@ -826,8 +833,8 @@ uptake.
 the suite ships in the pinned `openmls_traits 0.5.0` and the libcrux provider (proven
 building and running headless) implements it, so no upstream availability gate remains.
 The residual dependency is *pinning discipline* against code-point churn (§7.4) — pin the
-OpenMLS version and the `libcrux-provider` feature name, and track a future OpenMLS bump as
-a migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) a
+OpenMLS and `openmls_libcrux_crypto` versions, and track a future OpenMLS bump as a
+migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) a
 coordination point with the machine-checked-correctness program, which lands before this
 work in the program sequence: its M4 TLA+ spec (Gapless ∧ HeadMonotone per conversation,
 `docs/machine-checked-correctness-design.md`) and the transparency-log verifier both
@@ -852,8 +859,8 @@ Welcomes) — **not** signatures, which HNDL does not threaten, so signatures st
 classical for now. **Feasibility (verified in P0):** no version bump and no fork are
 needed. The hybrid suite `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` (`0x004D`)
 already exists in the pinned `openmls_traits 0.5.0` enum; the only missing piece was the
-crypto provider. Keep `openmls = "0.8"`, enable its `libcrux-provider` feature, add
-`openmls_libcrux_crypto = "0.3.1"` (which implements the suite — `openmls_rust_crypto 0.5.1`
+crypto provider. Keep `openmls = "0.8"` and add a direct dependency on
+`openmls_libcrux_crypto = "0.3"` (which implements the suite — `openmls_rust_crypto 0.5.1`
 panics on it) — and a full hybrid group flow is proven headless with stock cargo. The
 bundled AEAD change (AES-128-GCM → ChaCha20-Poly1305, level 128 → 256) rides with the
 suite; Ed25519 signatures are unchanged. The live risk is **code-point churn**, not
@@ -876,9 +883,8 @@ move AES-128-GCM → ChaCha20-Poly1305 (level 128 → 256) while classic groups 
 AES-128-GCM.
 
 **Phased milestones:**
-- **P0 — Spike: DONE.** Route pinned and proven headless (`openmls 0.8` +
-  `libcrux-provider` feature + `openmls_libcrux_crypto 0.3.1`, suite `0x004D`); no bump,
-  no fork.
+- **P0 — Spike: DONE.** Route pinned and proven headless (`openmls 0.8` + a direct
+  `openmls_libcrux_crypto 0.3` dependency, suite `0x004D`); no bump, no fork.
 - **P1a — Provider swap:** `PollisProvider` moves `RustCrypto` → libcrux `CryptoProvider`,
   suite unchanged (byte-identical); gate on the full suite + a `supports()` regression test.
 - **P1b — Suite parametrisation:** suite-aware call sites + additive migrations + DS
@@ -906,10 +912,10 @@ AES-128-GCM.
   protect already-sent classic traffic.
 
 **Dependencies / risks:** no upstream availability gate remains — P0 proved the pinned
-route (`openmls 0.8` + `libcrux-provider` + `openmls_libcrux_crypto 0.3.1`, suite `0x004D`)
+route (`openmls 0.8` + `openmls_libcrux_crypto 0.3`, suite `0x004D`)
 builds and round-trips headless. Residual risk is **code-point churn**: `0x004D` is
-experimental and OpenMLS `main` feature-gates it, so pin the version *and* the
-`libcrux-provider` feature and treat an OpenMLS bump as a tracked migration; budget a
+experimental and OpenMLS `main` feature-gates it, so pin both versions and treat an
+OpenMLS bump as a tracked migration; budget a
 second suite migration when the IETF `draft-ietf-mls-pq-ciphersuites` suites
 (`0x004E`/`0x004F`/`0x0052`) stabilise. Also carry the group-size cost decision (commits
 are linear in N, ~8× classic — §4.1) into P3/P4.
