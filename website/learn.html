@@ -87,6 +87,36 @@
       color: var(--c-text);
     }
 
+    /* ── 60-second summary ────────────────────────────────────── */
+    .ln-tldr {
+      border: 2px solid var(--c-accent);
+      border-radius: 8px;
+      padding: 1.25rem 1.5rem;
+      margin: 2rem 0 1.5rem;
+      background: rgba(253, 186, 116, 0.05);
+    }
+
+    .ln-tldr-label {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--c-accent);
+      margin-bottom: 0.6rem;
+    }
+
+    .ln-tldr p {
+      font-size: 0.95rem;
+      line-height: 1.7;
+      color: var(--c-text);
+    }
+
+    .ln-tldr-start {
+      font-size: 0.85rem !important;
+      color: var(--c-text-muted) !important;
+      margin-top: 0.75rem;
+    }
+
     /* ── Table of contents ────────────────────────────────────── */
     .ln-toc {
       list-style: none;
@@ -773,6 +803,18 @@
         </p>
       </div>
 
+      <div class="ln-tldr">
+        <div class="ln-tldr-label">The 60-second version</div>
+        <p>Pollis is a Slack-style messenger where the company running it cannot read your messages
+          or calls, because they are encrypted on your device and only unlocked on the devices of the
+          people you are talking to. It also publishes a public, tamper-evident log of the keys and
+          app versions it hands out, so you can check for yourself that no one slipped in a fake, and
+          you never have to take that on faith. The cost is that recovery depends on a key only you
+          hold, so keeping it safe is on you. Everything below is that, explained one idea at a time.</p>
+        <p class="ln-tldr-start">New here? Start with
+          <a href="#the-problem">the problem</a>, then read straight down.</p>
+      </div>
+
       <div class="ln-intro">
         Every explainer here also states, plainly, what its mechanism <strong>doesn't</strong>
         prove, because a verifiability claim you cannot verify is just marketing. These pages are
@@ -794,6 +836,8 @@
             a door</a></li>
         <li><span class="ln-track">IDENTITY</span><a href="#identity-keys">Making sure you have the
             right person's key</a></li>
+        <li><span class="ln-track">IDENTITY</span><a href="#recovery">Losing a device, and getting
+            back in</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees and
             append-only logs</a></li>
         <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Proving an
@@ -914,7 +958,7 @@
           <p>On most messaging apps, your privacy rests on a company keeping a promise. The trouble is that a company can be hacked, bought, or handed a court order, and none of those things care what it promised. "We would never read your messages" is a statement about intent, and intent can change.</p>
           <p>Pollis is built differently. Reading your messages is not something we choose not to do. It is something we are not able to do. Here is the plain map of who can see what.</p>
           <p><strong>Your device sees everything.</strong> That is where you type and read, so your messages are unscrambled there and nowhere else. The flip side: if someone gets into your unlocked device, they can read what is on it, and no clever math can prevent that.</p>
-          <p><strong>Our servers see the outside of the envelope, never the letter inside.</strong> They carry sealed messages we cannot open, because the keys to open them never leave your devices. What they can see is ordinary delivery information: that an account sent something, roughly when, roughly how big it was, and which conversation it belongs to. Later sections show how Pollis works to shrink even that.</p>
+          <p><strong>Our servers see the outside of the envelope, never the letter inside.</strong> They carry sealed messages we cannot open, because the keys to open them never leave your devices. What they can see is ordinary delivery information: that an account sent something, roughly when, roughly how big it was, and which conversation it belongs to. Later sections show how Pollis works to shrink even that. The upshot for the hard cases: even under a court order, the most any server can produce is what it can see, which is that delivery metadata, never your messages, your calls, or your keys, because those never exist on our side in a form anyone could read.</p>
           <p><strong>Getting the right key to the right person is the part that takes care.</strong> Encryption only helps if the key your app uses really belongs to the person you meant. Safety numbers (<a href="#identity-keys">Topic 6</a>) and our public key logs (<a href="#three-logs">Topic 9</a>) are what let you confirm that yourself, rather than take our word for it.</p>
           <p><strong>Calls are covered too.</strong> Voice and video are relayed through a media server for performance, but the audio and video frames are encrypted end to end before they leave your device, using a key derived from the same MLS group that protects the group's messages. The media server forwards those frames without the key, so it relays encrypted media it cannot watch or listen to, and the key rotates automatically as people join or leave. Calls are one place people wrongly assume the server can listen in; here it cannot.</p>
           <p>The pattern runs through everything here: we keep shrinking the list of things you have to take on trust, and we publish evidence for whatever is left.</p>
@@ -1349,6 +1393,7 @@ Time runs left to right throughout: a one-way key chain that will not reverse, t
           <p><strong>First, safety numbers.</strong> Your app combines your key and your contact's key into a short code, shown as a set of digit blocks. Both of you compute the same code from the same pair of keys. If the keys ever differed, the codes would differ too. Compare them over any channel an eavesdropper cannot touch, by holding your phones side by side, reading them aloud on a call, or scanning a QR code, and a mismatch shows up immediately. Matching numbers mean you are talking to the key you think you are.</p>
           <p>The catch is that this only helps if you actually compare, and most people never do. So there is a second safeguard that works even when nobody checks.</p>
           <p><strong>Second, every key we publish is public and permanent.</strong> Every identity key Pollis lists for an account is added to a public log that can only grow, never be quietly edited (<a href="#three-logs">Topic 9</a>). Your own app keeps checking that the key the world sees for you matches the key you actually hold, and it warns you if they ever disagree. That means a substituted key could not stay hidden: it would sit in a public record for anyone to see, and your own device would flag it. You do not have to trust that promise; it follows from how the log is built.</p>
+          <p><strong>Your device is its own auditor.</strong> This check runs on your device, against the public log, and raises a clear, prominent alert the moment it sees a mismatch. The log is rebuilt and republished on a daily schedule, so a swapped key comes to light within about a day. That is the same cadence Certificate Transparency uses to keep the web's certificates honest, and it means the window in which a swap could go unnoticed is short and bounded, not open-ended.</p>
           <p><strong>Trust on first use.</strong> The first time you talk to someone, your app remembers their key. After that, a change is what gets flagged. Changes are usually innocent, like a new phone or a reinstall, so a flag is not an accusation, it is a nudge to re-check before you share anything sensitive. Pollis shows a shield next to verified contacts, and a distinct warning when a remembered key has changed.</p>
           <p>In short: compare safety numbers once with the people who matter, and let the log handle the rest.</p>
         </div>
@@ -1397,6 +1442,104 @@ A message being read in the middle while both screens still show a padlock, safe
           self-audit in <a
             href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/transparency.rs"
             target="_blank" rel="noopener noreferrer">transparency.rs</a>.
+        </p>
+      </section>
+
+      <!-- ═══ Identity — losing a device, and recovery ══════════════════════ -->
+      <section class="ln-section" id="recovery">
+        <div class="ln-eyebrow">Track C · Identity</div>
+        <h2>Losing a device, and getting back in</h2>
+
+        <div class="ln-prose">
+          <p>Because the whole point is that no company can read your account, there is a matching
+            rule: no company can open your account for you either, not even us. So recovery is built
+            around something only you hold. Two things do the work, and they are worth keeping
+            straight.</p>
+          <p><strong>Your PIN protects a device. Your Secret Key protects your account.</strong> The
+            PIN is a short code, local to one device, that unlocks the keys stored in that device's
+            keychain; it is never sent anywhere and we never know it. The Secret Key is a long,
+            random recovery code (it looks like <code>A3-9XK4Q-7MTP2-…</code>) shown to you exactly
+            once when you sign up. You write it down and keep it safe, the way you would a house
+            deed.</p>
+          <p><strong>How recovery works.</strong> The server does keep a copy of your account key, so
+            you can get back in on a fresh device, but it keeps that copy locked in a box that only
+            your Secret Key can open. The unlocking uses standard cryptography (HKDF-SHA256 to turn
+            your Secret Key into an unwrapping key, then AES-256-GCM to open the box), and the server
+            never holds your Secret Key. So the company cannot open your account, and neither can
+            anyone who steals the stored box.</p>
+          <p><strong>Adding a device, two ways.</strong> The easy path is to approve the new device
+            from one you already have: both show the same six-digit code, you confirm they match, and
+            the two devices agree on a private key right in front of the server without revealing it
+            (an X25519 key agreement, the same family from <a href="#vocabulary">Topic 2</a>). The
+            code you compare is the human-checkable part, so even a server that could tamper with its
+            own database cannot slip in a fake approval. The other path is your Secret Key, which does
+            the same recovery without needing a second device. Either way, the new device then joins
+            every group you are in and starts from today forward, with no back-history, which is the
+            boundary from <a href="#joining-leaving">Topic 4</a>.</p>
+          <p>Keep your Secret Key somewhere safe, and losing a device is a non-event: sign in on a new
+            one and carry on.</p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The one hard rule</div>
+          <p>If you lose your Secret Key <em>and</em> every device you were ever signed in on at the
+            same time, the account starts fresh. That is the direct consequence of the guarantee that
+            makes Pollis worth using: no one, including us, holds a spare key to your account, so there
+            is no one to ask for a copy. It is the same trade as a home safe with no manufacturer
+            override. Which is exactly why the Secret Key is worth writing down.</p>
+        </div>
+
+        <div class="ln-media">
+        <figure class="ln-figure">
+          <video class="ln-video" controls playsinline preload="none"
+            poster="learn/media/recovery.jpg" aria-describedby="recovery-transcript-body">
+            <source src="learn/media/recovery.webm" type="video/webm" />
+            <source src="learn/media/recovery.mp4" type="video/mp4" />
+            <track kind="captions" srclang="en" label="English"
+              src="learn/media/recovery.vtt" />
+          </video>
+          <figcaption class="ln-figcaption">
+            The two keys and their jobs, the box on the server only your Secret Key opens, the two
+            ways to add a device, and the one deliberate limit.
+          </figcaption>
+        </figure>
+
+        <div class="ln-caption-strip" data-caption-strip aria-hidden="true">
+          <div class="ln-cap-line ln-cap-prev"></div>
+          <div class="ln-cap-line ln-cap-cur"></div>
+          <div class="ln-cap-line ln-cap-next"></div>
+        </div>
+
+        <details class="ln-transcript">
+          <summary>Full transcript</summary>
+          <div class="ln-transcript-body" id="recovery-transcript-body">
+            <p>Two keys, two jobs. Your PIN unlocks one device, and it is local to that device; we
+              never see it. Your Secret Key recovers your whole account. It is shown to you exactly
+              once, and you write it down and keep it safe, like the deed to a house.</p>
+            <p>Here is how recovery works. The server keeps a copy of your account key, but it keeps it
+              locked in a box. Only your Secret Key opens that box, and the server does not have your
+              Secret Key. So the company cannot open your account, and neither can anyone who steals
+              the box.</p>
+            <p>To sign in on a new device you have two ways. The easy way is to approve it from a
+              device you already have: the two show the same six-digit code, you confirm they match,
+              and they agree on a private key in plain sight of the server. The other way is your
+              Secret Key, the same recovery without a second device. Either way, the new device then
+              joins every group you are in, from today forward, with no old history, which is the
+              boundary from Topic 4.</p>
+            <p>And one hard rule. If you lose your Secret Key and every device you were ever signed in
+              on, the account starts fresh. No one holds a spare key to your account, including us.
+              That is the price of a door only you can open, and it is the point.</p>
+          </div>
+        </details>
+        </div>
+
+        <p class="ln-deeper">
+          The rigorous version: the recovery and device-enrollment flows in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/auth.rs"
+            target="_blank" rel="noopener noreferrer">auth.rs</a>, and the account-key and
+          device-certificate model in <a
+            href="https://github.com/actuallydan/pollis/blob/main/docs/security-whitepaper.md"
+            target="_blank" rel="noopener noreferrer">the security whitepaper</a>.
         </p>
       </section>
 
