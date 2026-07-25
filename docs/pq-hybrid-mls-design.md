@@ -1,10 +1,14 @@
 # Post-Quantum Hybrid MLS — Design
 
-**Status:** design accepted; implementation started. **P0 (spike) is complete** and
+**Status:** design accepted; implementation started. **P0 (spike) is complete**,
 **P1a (crypto-provider routing) has landed** — the hybrid suite is reachable through a
 second, hybrid-only provider, while every production path stays on the existing RustCrypto
 backend for security reasons set out in §7.3
-(`pollis-core/src/commands/mls/provider.rs`). No group has changed suite (§8).
+(`pollis-core/src/commands/mls/provider.rs`) — and **P1b (suite parametrisation) has
+landed**: the ciphersuite is now an explicit argument to the two functions that mint
+suite-bound material, `mls_key_package.ciphersuite` and `user_device.pq_capable` exist as
+additive columns, and the DS claims key packages from a per-suite pool. Every production
+caller still passes `CS_CLASSIC`, so no group has changed suite (§8).
 **Scope:** migrate Pollis's MLS key exchange from classical X25519 to a hybrid
 X25519 + ML-KEM-768 construction, transparently, without breaking existing
 groups, existing devices, or the "messages must work" doctrine.
@@ -765,9 +769,16 @@ twice.**
 
 ### 7.5 In-tree work (our side), verified against `origin/main`
 
-- **Suite plumbing:** 31 references to `CS` / `.ciphersuite()` — 9 signature-key-gen,
-  2 KeyPackage build, 4 group build, 16 tests. Entry points: `provider.rs`, `device.rs`,
-  `key_packages.rs`, `group_state.rs`, `reconcile.rs`. These become suite-aware (P1b).
+- **Suite plumbing (P1b — DONE):** the 31 references to `CS` / `.ciphersuite()` split far
+  more cleanly than the raw count suggested. Both suites sign with Ed25519, so all 9
+  signature-key-gen sites are suite-INVARIANT and now read a `SIGNATURE_SCHEME` constant
+  rather than taking a suite parameter — a device keeps ONE signing key and one
+  `device_cert` across suites, which is the behaviour the cross-signing design already
+  assumed. Only the two families that mint suite-bound material became parametrised:
+  group creation (`create_mls_group_in_suite`) and KeyPackage construction
+  (`build_key_package_in_suite`), each taking the suite alongside the provider that serves
+  it. Parametrising the signature sites too would have been busywork encoding a
+  distinction that does not exist.
 - **DS monotone-head rule** is enforced **solely** in `pollis-delivery/src/commit.rs`:
   `head_epoch` (`commit.rs:131`) and the conditional
   `INSERT ... WHERE ?2 = (SELECT COALESCE(MAX(epoch), -1) + 1 ...)` in `submit_commit`
@@ -916,8 +927,16 @@ AES-128-GCM.
   `PollisPqProvider` (libcrux, hybrid-only) over one shared `MlsStore`; no production path
   changes backend, so behaviour is byte-identical. Gate on the full suite + the `supports()`
   regression test + `classic_provider_never_routes_to_libcrux` (§7.3).
-- **P1b — Suite parametrisation:** suite-aware call sites + additive migrations + DS
-  claim-by-suite, defaulting to classic (zero behaviour change).
+- **P1b — Suite parametrisation: DONE.** `CS_CLASSIC` / `CS_HYBRID` / `SIGNATURE_SCHEME`;
+  the suite is an explicit argument to `create_mls_group_in_suite` and
+  `build_key_package_in_suite` (and to `ds_claim_key_package`), with every production
+  caller passing `CS_CLASSIC`. Additive migration `000010` adds
+  `mls_key_package.ciphersuite` (default `1`) and `user_device.pq_capable` (default `0`).
+  The DS publishes and claims per suite, defaulting to classic when the field is absent,
+  so an already-shipped client is bit-for-bit unaffected; a replenish now replaces only
+  the pools it publishes, which matters the moment P2 gives a device two pools. Gated by
+  a full two-party round-trip driven through the production seams on BOTH suites, plus
+  DS tests that the two pools cannot contaminate each other.
 - **P2 — Hybrid key packages** (Front B): dual KP pools, claim-by-suite.
 - **P3 — New groups hybrid** (Front A).
 - **P4 — Migrate existing groups** (Front C) at epoch boundary, capability-gated.

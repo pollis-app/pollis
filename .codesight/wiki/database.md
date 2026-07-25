@@ -204,14 +204,16 @@ that class of bug.
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
 - `mls_signature_pub` BLOB _(migration 13)_
+- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? inert until #454 P2)_
 
-### mls_key_package _(migration 3 + 11)_
+### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
 - `ref_hash` TEXT PK _(KeyPackageRef hash, hex)_
 - `user_id` TEXT NOT NULL FK users
 - `key_package` BLOB NOT NULL _(TLS-serialized KeyPackage)_
 - `claimed` INTEGER NOT NULL DEFAULT 0
 - `created_at` TEXT NOT NULL DEFAULT now
 - `device_id` TEXT _(migration 11)_
+- `ciphersuite` INTEGER NOT NULL DEFAULT 1 _(post-baseline 000010; MLS code point, 1 = classic. A column and not derived-on-read because `key_package` is an opaque TLS blob the DS must not parse. Claims narrow on it, so the classic and hybrid pools stay disjoint — see `pollis-delivery/src/devices.rs`.)_
 
 ### mls_commit_log _(migration 3 + 14)_
 - `seq` INTEGER PK AUTOINCREMENT
