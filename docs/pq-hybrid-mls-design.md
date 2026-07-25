@@ -33,32 +33,33 @@ the code as it is today.
   is secure if *either* primitive holds. This is the IETF/NIST-endorsed posture and
   it protects us against both a future CRQC *and* a not-yet-discovered flaw in the
   young ML-KEM implementation. The concrete instantiation is **X-Wing**
-  (`draft-connolly-cfrg-xwing-kem`) as the DHKEM, matching the MLS PQ ciphersuite
-  drafts. (§2.)
+  (`draft-connolly-cfrg-xwing-kem`) as the DHKEM, shipping today as the experimental
+  OpenMLS code point `0x004D` — a point we pin deliberately (§7). (§2.)
 
-- **Feasibility, honestly: the installed stack cannot do this today without upstream
-  work.** Pollis pins `openmls 0.8.1` with `openmls_rust_crypto 0.5.1`
-  (`pollis-core/Cargo.toml:110-113`, `Cargo.lock:5390-5455`). OpenMLS 0.8.1's
-  `Ciphersuite` enum contains only the seven classical RFC 9420 suites — **no PQ /
-  X-Wing suite exists in this version.** The single suite constant Pollis uses,
-  `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`
-  (`pollis-core/src/commands/mls/provider.rs:57`), is classical. Interestingly, the
-  ML-KEM code is *already in the build*: `openmls_rust_crypto 0.5.1` pulls
-  `hpke-rs 0.6.1`, whose sibling `hpke-rs-libcrux 0.6.1` + `libcrux-ml-kem 0.0.8` are
-  present in `Cargo.lock` (`Cargo.lock:3090-3133, 4042-4055`) — but the provider
-  Pollis instantiates uses the `hpke-rs-rust-crypto` backend
-  (`Cargo.lock:5443-5445`), which is classical-only. **The primitives are compiled;
-  the ciphersuite that would reach them is not.** The path forward is an OpenMLS
-  version bump (to a release that lands the MLS PQ ciphersuite) or a pinned
-  fork/patch, plus switching the crypto provider to the libcrux/X-Wing backend. (§7.)
+- **Feasibility, honestly: the pinned stack can already do this — the P0 spike proved
+  it end-to-end, headless, with stock cargo.** The hybrid suite
+  `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` (code point `0x004D`) already exists,
+  un-feature-gated, in the pinned `openmls_traits 0.5.0` `Ciphersuite` enum (added
+  upstream in openmls/openmls#1546, 2024-04). The only ever-missing piece was the
+  **crypto provider**, never OpenMLS itself: `openmls_rust_crypto 0.5.1` `unimplemented!()`
+  -panics on this suite (`src/provider.rs:61`), while `openmls_libcrux_crypto 0.3.1`
+  implements it (`src/crypto.rs:60`, via `hpke_rs_crypto`'s `KemAlgorithm::XWingDraft06`).
+  So the route is: keep `openmls = "0.8"`, enable its `libcrux-provider` feature, add
+  `openmls_libcrux_crypto = "0.3.1"` — **no version bump, no fork, no `[patch.crates-io]`.**
+  The catch: the only hybrid suite on offer is a ChaCha20-Poly1305 suite, so the AEAD
+  changes *with* the KEM (AES-128-GCM → ChaCha20-Poly1305, nominal level 128 → 256);
+  Ed25519 signatures are unchanged. (§7.)
 
-- **Recommendation: do it, in phases, gated behind the box's headless MLS harness —
-  but Phase 0 is a spike to nail the exact OpenMLS/provider version that ships an
-  X-Wing suite, because everything downstream depends on it.** Ship new groups on the
-  hybrid suite first; migrate existing groups at an epoch boundary via a
+- **Recommendation: do it, in phases, gated behind the box's headless MLS harness.
+  Phase 0 is DONE** — the pinned route above is proven (two clients: KeyPackage → Add →
+  Welcome → join → application message → `export_secret`, all green). Ship new groups on
+  the hybrid suite first; migrate existing groups at an epoch boundary via a
   ciphersuite-transition commit; publish key packages in **both** suites during a
   long overlap window so an old-app device is never un-addable. Never a flag day.
-  (§3, §8.)
+  The live risk is no longer availability but **code-point churn** — `0x004D` is an
+  experimental X-Wing draft-06 point that OpenMLS `main` has since moved behind a feature
+  flag and the IETF has since dropped; pin the version *and* the feature name and budget
+  for a second suite migration when the IETF suites stabilise (§7). (§3, §8.)
 
 ---
 
@@ -148,17 +149,20 @@ Two concrete instantiations exist, and they are not mutually exclusive:
    `hpke-rs-libcrux` / `libcrux-kem` already implement (the crates are in our lock,
    `Cargo.lock:4017-4029`). The MLS PQ ciphersuite drafts build their DHKEM on
    X-Wing-shaped constructions.
-2. **The MLS-specific PQ ciphersuite drafts** (`draft-ietf-mls-*` PQ work) — these
+2. **The MLS-specific PQ ciphersuite drafts** (`draft-ietf-mls-pq-ciphersuites`) — these
    register new MLS `Ciphersuite` code points that carry a hybrid KEM. This is the
    *right* long-term target because it means an interoperable, standard code point
-   rather than a Pollis-private suite.
+   rather than an experimental one. Note the drafts are still moving: the suite we ship
+   today (`0x004D`, X-Wing) is a 2024 experimental point that draft-06 (2026-07) has
+   since *dropped* in favour of new code points, so "standard" here is a moving target we
+   track, not a settled destination (§7).
 
-**Choice: target the standard MLS PQ ciphersuite code point, instantiated over an
-X-Wing-style KEM.** ML-KEM-768 (NIST security category 3, ≈AES-192-equivalent
-classical, comfortably PQ-adequate) is the sweet spot the drafts, Signal, and iMessage
-all landed on — not the smaller -512 (category 1) nor the larger -1024. Pairing it
-with X25519 keeps the classical floor at the 128-bit level the rest of Pollis's suite
-already sits at (whitepaper §6.1).
+**Choice: ship the X-Wing hybrid code point the pinned stack already carries (`0x004D`,
+§7), and track the standardising IETF suites for a later second migration.** ML-KEM-768
+(NIST security category 3, ≈AES-192-equivalent classical, comfortably PQ-adequate) is the
+sweet spot the drafts, Signal, and iMessage all landed on — not the smaller -512
+(category 1) nor the larger -1024. Pairing it with X25519 keeps the classical floor at the
+128-bit level the rest of Pollis's suite already sits at (whitepaper §6.1).
 
 ### 2.2 Why hybrid and not PQ-only
 
@@ -175,18 +179,27 @@ Two independent reasons, both of which matter for a security product:
    the PQ guarantee *and* keeps the classical one. The only cost is size/latency (§4),
    which we bound.
 
-### 2.3 The symmetric primitives are fine as-is
+### 2.3 The symmetric primitives — the AEAD changes with the suite
 
-AES-128-GCM (application messages) and AES-256-GCM (SQLCipher, attachments) are
-symmetric. Grover's algorithm gives at most a quadratic speedup, i.e. AES-128 → 64-bit
-*quantum* work factor and AES-256 → 128-bit. AES-256 is unambiguously PQ-safe.
-AES-128 inside the MLS suite is the MTI level and matches every other 128-bit
-primitive in the suite (whitepaper §6.1); it is *weakened* but not *broken* by Grover,
-and the realistic cost of 2⁶⁴ *sequential-depth-bounded* quantum operations is far
-beyond any near-term CRQC. **We do not change the AEAD in Phase 1.** A later hardening
-pass could move application messages to AES-256-GCM by selecting an
-`..._AES256GCM_...` variant of the hybrid suite, but that is orthogonal to HNDL and
-not on this critical path.
+AES-128-GCM (application messages in *classic* groups) and AES-256-GCM (SQLCipher,
+attachments) are symmetric. Grover's algorithm gives at most a quadratic speedup, i.e.
+AES-128 → 64-bit *quantum* work factor and AES-256 → 128-bit. AES-256 is unambiguously
+PQ-safe. AES-128 inside the classic MLS suite is the MTI level and matches every other
+128-bit primitive in that suite (whitepaper §6.1); it is *weakened* but not *broken* by
+Grover, and the realistic cost of 2⁶⁴ *sequential-depth-bounded* quantum operations is far
+beyond any near-term CRQC.
+
+**One correction we make loudly, because it was wrong in an earlier draft: the hybrid
+suite is not AEAD-neutral.** The only hybrid suite the pinned stack offers is
+`MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` — there is no AES-GCM hybrid variant to
+select — so moving a group to hybrid *bundles* the AEAD change AES-128-GCM →
+ChaCha20-Poly1305 with the KEM change, and the suite's nominal security-level label moves
+128 → 256. This is not a regression: ChaCha20-Poly1305 is a 256-bit-key AEAD, at least as
+strong as AES-128-GCM against both classical and Grover attacks, and it is the AEAD Signal
+and WireGuard already lean on. What we *cannot* claim is "AEAD unchanged" — classic groups
+keep AES-128-GCM, hybrid groups run ChaCha20-Poly1305, and there is no knob to decouple
+the AEAD from the KEM. (Signatures *do* stay Ed25519 — §2.4 — that part of the argument
+holds.)
 
 ### 2.4 Signatures: keep them classical (for now) — argued
 
@@ -247,14 +260,14 @@ replacing it:
 pub(crate) const CS_CLASSIC: Ciphersuite =
     Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;      // today
 pub(crate) const CS_HYBRID: Ciphersuite =
-    Ciphersuite::<the MLS PQ hybrid code point>;                    // after openmls bump
+    Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;     // 0x004D, already in the pinned enum (§7)
 ```
 
 Every call site that currently hard-codes `CS` (`key_packages.rs`, `device.rs`,
 `group_state.rs`) becomes suite-aware. The device keeps a **stable signing key per
 suite** — note `load_or_create_device_signer` keys the signer on
-`CS.signature_algorithm()` (`device.rs:76-90`); since Phase 1 keeps Ed25519 for both
-suites, the *same* signing key and the *same* `device_cert` cover both suites' leaves.
+`CS.signature_algorithm()` (`device.rs:76-90`); since both suites keep Ed25519
+signatures, the *same* signing key and the *same* `device_cert` cover both suites' leaves.
 This is a happy consequence of the "signatures stay classical" decision: cross-signing,
 the DS auth credential (whichever scheme is live when this ships — §3.5), and the
 transparency log are all unchanged by this work.
@@ -299,7 +312,7 @@ One consequence must be engineered, not hand-waved: **a successor group restarts
 epoch 0, and the rest of the system enforces per-conversation epoch monotonicity.** The
 DS sole-writer rule accepts a commit only at the current head — the conditional insert
 `WHERE ?2 = (SELECT COALESCE(MAX(epoch), -1) + 1 …)` keyed on `conversation_id`
-(`pollis-delivery/src/commit.rs:147`, in `submit_commit`, `commit.rs:137`) — so it would
+(`pollis-delivery/src/commit.rs:179-213`, in `submit_commit`) — so it would
 flatly reject the successor's epoch-0 commit; the transparency log's commit-log
 invariant ("within a conversation, `epoch` strictly increases in `seq` order",
 `docs/transparency.md` §"The commit-log invariant") aborts the build on an epoch reset;
@@ -374,7 +387,7 @@ add migrations, so the number is claimed when the work lands, not reserved here)
 - **`mls_commit_log` gets a suite-generation column** (the Front-C lineage mechanism,
   §3.2). `ALTER TABLE mls_commit_log ADD COLUMN generation INTEGER NOT NULL DEFAULT 0;`
   Every existing row is generation 0, correct by default. The DS head rule
-  (`commit.rs:147`) widens from `(conversation_id, epoch)` to
+  (`commit.rs:179-213`) widens from `(conversation_id, epoch)` to
   `(conversation_id, generation, epoch)`: within a generation it is byte-for-byte
   today's head+1 rule; epoch 0 is accepted only as the opening commit of generation
   N+1, and only from a migration commit referencing the closed head of generation N.
@@ -430,33 +443,55 @@ disciplined. The size delta is the dominant cost; the CPU delta is negligible.
 | KEM ciphertext (per HPKE seal, in Welcome / commit path secret) | 32 B | 1088 B | ~1120 B |
 | KEM private key (local only) | 32 B | 2400 B | ~2432 B |
 
-Implications, mapped to Pollis's actual payloads:
+Implications, mapped to Pollis's actual payloads. The per-message sizes below are
+**measured in-box**, `--release`, with `use_ratchet_tree_extension(true)` (as Pollis sets
+at `group_state.rs:508`), a single committer, TLS-serialised bytes:
 
-- **KeyPackage size:** a classic KP is a few hundred bytes; a hybrid KP grows by
-  ~1.2 KB for the init key, landing at ~1.5–2 KB. With TARGET=5 packages per suite per
-  device (`key_packages.rs:94`), a hybrid-capable device stores/publishes ~10 KB of
-  hybrid KP material in `mls_key_package` (base64-inflated ~33% over the DS wire,
+| N | classic self-update / add / welcome | X-Wing self-update / add / welcome |
+|---|---|---|
+| 2   | 490 / 805 / 1034     | 3949 / 7819 / 8048       |
+| 8   | 1052 / 1367 / 2220   | 13415 / 17287 / 18722    |
+| 32  | 3090 / 3405 / 6578   | 43965 / 47835 / 53890    |
+| 100 | 8736 / 9017 / 18622  | 126037 / 128688 / 147691 |
+
+- **Commit size grows LINEARLY in N, not `log2(N)`.** An earlier draft of this document
+  estimated `~1.1 KB × log2(N)`; that estimate was wrong. Measured, a hybrid commit is
+  roughly **8× the classic commit at every group size**, and both grow linearly in N. The
+  linear behaviour is *persistent*, not a bulk-add artifact: three successive self-updates
+  by the same member produced byte-identical commits. The cause is structural — the other
+  members' parent nodes stay blank, so every copath resolution resolves to individual
+  leaves (one HPKE ciphertext each) rather than to a single subtree key. At N=100 a hybrid
+  self-update commit is ~126 KB; base64 over the DS (~33% inflation, `key_packages.rs:26-37`)
+  makes it a **~168 KB write on the membership-churn hot path.**
+  `mls_commit_log.commit_data` (`000000_baseline.sql:111`) and the DS `submit_commit`
+  write carry this. **This is the number to watch.**
+- **Disabling the ratchet-tree extension does NOT help the commit.** It is tempting to
+  reach for `use_ratchet_tree_extension(false)` as a mitigation; it is not one. Turning it
+  off collapses the **Welcome only** (at N=100: 147691 → 1467 bytes) and leaves the commit
+  *unchanged* (126037 bytes either way), because the ratchet tree rides in the
+  GroupInfo/Welcome, not in the commit. The extension is not the lever for the number that
+  matters; the linear copath cost is.
+- **KeyPackage size:** a hybrid KP carries a 1216-byte `hpke_init_key` (ML-KEM-768 public
+  key 1184 B + X25519 32 B — the byte count the P0 spike observed, confirming real hybrid
+  encapsulation), landing the KP at ~1.5–2 KB. With TARGET=5 packages per suite per device
+  (`key_packages.rs:94`), a hybrid-capable device stores/publishes ~10 KB of hybrid KP
+  material in `mls_key_package` (base64-inflated ~33% over the DS wire,
   `key_packages.rs:26-37`). Small in absolute terms.
-- **Welcome size:** a Welcome HPKE-seals the group secrets to each joiner's init key.
-  The per-recipient ciphertext grows ~1.1 KB. `mls_welcome.welcome_data`
-  (`000000_baseline.sql:128`) and the DS `/v1/...` welcome writes carry it. For a
-  Welcome to N joiners this is ~1.1 KB × N extra — the one place size scales with
-  membership.
-- **Commit size:** the expensive case. A TreeKEM commit that updates a path encrypts a
-  path secret to each affected subtree's HPKE key. In a group of N members a full path
-  update is O(log N) HPKE ciphertexts, each ~1.1 KB larger under hybrid. So a commit in
-  a large group grows by roughly `1.1 KB × log2(N)` — e.g. ~11 KB extra for a 1000-member
-  group's full-path commit. `mls_commit_log.commit_data` (`000000_baseline.sql:111`) and
-  the DS `submit_commit` write carry this. **This is the number to watch**, because
-  membership churn commits are the hot path and the ratchet-tree extension
-  (`use_ratchet_tree_extension(true)`, set at `group_state.rs:508`) already inlines the
-  full tree into GroupInfo/Welcome.
-- **Turso / DS payloads:** all of the above are base64-encoded in JSON bodies through
-  the DS (`ds_client.rs`), a ~33% inflation on already-larger blobs, then stored as
-  BLOBs in Turso. The bandwidth and storage cost is real but bounded — kilobytes, not
-  megabytes — and dwarfed by any attachment (R2, whitepaper §9). It is *not* dwarfed by
-  a plain text message, so the *relative* overhead of a small text-only group's commits
-  goes up noticeably.
+- **Welcome size:** a Welcome HPKE-seals the group secrets to each joiner and (with the
+  ratchet-tree extension on) inlines the tree; at N=100 a hybrid Welcome is ~148 KB.
+  `mls_welcome.welcome_data` (`000000_baseline.sql:128`) and the DS `/v1/...` welcome
+  writes carry it. As above, this is the *one* payload the ratchet-tree extension
+  dominates, so it is also the one place turning the extension off would help — at the cost
+  of every joiner having to fetch the tree separately.
+- **Turso / DS payloads:** all of the above are base64-encoded in JSON bodies through the
+  DS (`ds_client.rs`), a ~33% inflation on already-larger blobs, then stored as BLOBs in
+  Turso. For a large hybrid group the commit is now the dominant metadata write — a
+  ~168 KB base64 body per churn commit at N=100 — no longer dwarfed by anything but an
+  attachment (R2, whitepaper §9).
+- **Open decision for P3/P4 (§8):** the linear commit cost forces a real choice on this
+  measured data, not on an estimate — either a **group-size threshold above which groups
+  stay classic**, or an **explicitly accepted cost** for large hybrid groups. This
+  document does not pre-decide it; it flags it as owned by the P3/P4 phases (§4.3, §8).
 
 ### 4.2 Latency: negligible
 
@@ -473,18 +508,29 @@ MLS crypto already runs in the Rust core off the render thread
 
 - **Suite-scoped, not global:** classic groups keep classic (small) commits. Only
   hybrid groups pay the size cost, and only for the KEM-bearing fields.
-- **Keep the AEAD at 128 and signatures classical in Phase 1** (§2.3, §2.4) so we do
-  *not* stack ML-DSA's multi-KB-per-signature cost on top of the KEM cost. That single
-  decision is the biggest lever keeping commit/KeyPackage sizes down.
+- **Keep signatures classical in Phase 1** (§2.4) so we do *not* stack ML-DSA's
+  multi-KB-per-signature cost — on *every* leaf and *every* commit — on top of the KEM
+  cost. That single decision is the biggest lever keeping commit/KeyPackage sizes down.
+  (The AEAD is *not* a lever we hold: the hybrid suite is ChaCha20-Poly1305 by
+  construction — §2.3 — but that swap is roughly size-neutral versus AES-128-GCM, so it
+  does not move the commit-size numbers; the KEM does.)
+- **Decide the large-group policy on measured data** (§4.1): the commit cost is linear in
+  N and ~8× classic, so P3/P4 must either cap hybrid at a group-size threshold or accept
+  the cost explicitly. This is the dominant size lever, and disabling the ratchet-tree
+  extension is *not* an alternative to it (it only shrinks Welcomes, §4.1).
 - **KP pool size stays at 5 per suite** — resist inflating it; replenishment already
   tops up after each Welcome (`key_packages.rs:141`).
 - **Measure in-box** (§5): the marathon fuzzer already exercises large, churny groups
   headless; add commit/Welcome byte-size assertions so a regression that balloons
   payloads is caught before it ships.
 
-Net: hybrid MLS costs Pollis **kilobytes per commit/Welcome and microseconds per op**.
-That is a defensible price for post-quantum confidentiality, and it does not threaten
-the "fast" positioning as long as we hold the line on signatures + AEAD.
+Net: hybrid MLS costs Pollis **microseconds per op**, but its commit size is **linear in
+group size and ~8× the classic commit** — a ~168 KB base64 DS write for a 100-member churn
+commit (§4.1). That is a defensible price for post-quantum confidentiality in small and
+mid-size groups, but it is a real cost that grows with the group, which is why the
+large-group policy is an explicit P3/P4 decision, not a rounding error. The "fast"
+positioning holds as long as we keep signatures classical and make that group-size call
+deliberately.
 
 ---
 
@@ -592,87 +638,151 @@ be worse than not shipping.
 
 ## 7. Feasibility assessment — installed stack vs. what's needed
 
-**Honest bottom line: the installed OpenMLS lacks any PQ ciphersuite. This needs an
-upstream version bump (or a pinned fork), not just Pollis-side code.**
+**Honest bottom line: the pinned stack already ships the hybrid ciphersuite. The P0
+spike proved a full hybrid group flow end-to-end, headless, with stock cargo — no version
+bump, no fork, no `[patch.crates-io]`. The live risk is not availability; it is code-point
+churn, and it is managed by pinning.**
 
-What the tree has today:
+### 7.1 What the pinned tree can already do
 
-- `openmls = "0.8"` → locked `openmls 0.8.1` (`Cargo.toml:110`, `Cargo.lock:5391`).
-  The `Ciphersuite` enum in 0.8.1 is the seven classical RFC 9420 suites; **no X-Wing /
-  ML-KEM MLS code point exists in this release.** Pollis uses exactly one:
-  `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (`provider.rs:57`).
-- `openmls_rust_crypto = "0.5"` → locked `0.5.1`, whose HPKE backend is
-  `hpke-rs-rust-crypto` (`Cargo.lock:5443-5445`) — **classical only** (aes-gcm,
-  chacha, k256, p256; no ML-KEM path reachable).
-- **The ML-KEM primitives are already compiled but unreachable.** `hpke-rs 0.6.1`
-  declares all three backends as dependencies, so `hpke-rs-libcrux 0.6.1` and
-  `libcrux-ml-kem 0.0.8` sit in `Cargo.lock` (`Cargo.lock:3090-3133, 4042-4055`) — but
-  the *provider Pollis instantiates* (`RustCrypto`, `provider.rs:38-52`) never selects
-  the libcrux/X-Wing backend. So the crates being present is a red herring for
-  reachability; it is, however, encouraging for the build (the toolchain already
-  compiles ML-KEM cleanly, including in the headless box).
+- The suite **exists in the pinned enum.** `openmls_traits 0.5.0` (already locked) defines
+  `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519 = 0x004D` in its `Ciphersuite` enum,
+  **not** feature-gated (added upstream in openmls/openmls#1546, 2024-04). The earlier
+  claim that "no PQ suite exists in this version" was simply wrong — it confused the
+  missing *provider* for a missing *suite*.
+- The missing piece was only ever the **crypto provider.** `openmls_rust_crypto 0.5.1` —
+  the provider Pollis instantiates — `unimplemented!()`-panics on this suite
+  (`src/provider.rs:61`). `openmls_libcrux_crypto 0.3.1` (published the same day as the
+  0.8.1 release) implements it (`src/crypto.rs:60`, mapping to
+  `hpke_rs_crypto::types::KemAlgorithm::XWingDraft06`). So the earlier observation (§1.3)
+  that the ML-KEM primitives are already in `Cargo.lock` but unreachable was right about
+  the primitives and wrong about the reason: the ciphersuite *is* registered; Pollis merely
+  instantiates the one provider that refuses it.
+- **The route, pinned:** keep `openmls = "0.8"`, enable its `libcrux-provider` feature,
+  add `openmls_libcrux_crypto = "0.3.1"`. That is the whole dependency change.
 
-What is needed, in order of preference:
+### 7.2 P0 is DONE — proven end-to-end, headless
 
-1. **Upstream bump (preferred).** Move to an OpenMLS release that (a) registers the MLS
-   PQ/X-Wing ciphersuite code point in its `Ciphersuite` enum and (b) ships (or is
-   compatible with) an `openmls_libcrux_crypto`-style provider that routes that suite's
-   HPKE through `hpke-rs-libcrux` / `libcrux-kem`. As of this writing OpenMLS PQ support
-   is *in flight* upstream, tracking the still-evolving MLS PQ ciphersuite drafts — so
-   the exact target version is a **Phase 0 spike deliverable**, not a number we can pin
-   today. The bump itself is non-trivial: 0.8 → a newer major may move the
-   `openmls_traits` storage API (Pollis implements `StorageProvider` in
-   `signal/mls_storage.rs`, whitepaper §6.1) and the provider trait
-   (`OpenMlsProvider`, `provider.rs:37`). Budget real integration effort for the bump
-   independent of the PQ work.
-2. **Pinned fork / patch (fallback).** If upstream has not yet released a stable PQ
-   suite when we want to ship, fork OpenMLS at our current major, backport the X-Wing
-   ciphersuite registration + a libcrux-backed provider, and pin via a
-   `[patch.crates-io]`. Higher maintenance burden (we own the fork until upstream
-   catches up), and it means shipping a *Pollis-private* code point that only
-   interoperates with other Pollis clients — acceptable, since Pollis is a closed fleet
-   (one binary, one DS), but it forfeits standards interop and must be reconciled with
-   the real code point later. Prefer (1); use (2) only if timeline forces it.
-3. **Wait (explicit non-choice, stated for completeness).** Given HNDL's "act now"
-   logic (§1.3), waiting is the option we are arguing *against*. But it is the correct
-   choice if the Phase 0 spike finds the upstream suite too unstable to depend on
-   (draft still churning code points) — in which case we ship the *scaffolding*
-   (dual-suite plumbing, schema, tests) now and flip the hybrid suite on the moment
-   upstream stabilises. That de-risks the timeline without betting on an unstable draft.
+A two-client throwaway crate on `openmls 0.8.1` + `openmls_libcrux_crypto 0.3.1`, stock
+cargo, no patches, ran the full flow — KeyPackage → Add → Welcome → join → application
+message → `export_secret` (the voice-frame-key path). Output:
 
-In-tree vs. upstream split:
+```
+bob kp init_key len = 1216
+welcome secrets = 1
+bob joined: epoch GroupEpoch(1), cs MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519
+bob decrypted: "hello pq world"
+```
 
-- **Upstream (out of our control):** the ciphersuite code point + libcrux provider in
-  OpenMLS. This is the dependency gate.
-- **In-tree (our work):** dual-suite constants + suite-aware call sites
-  (`provider.rs`, `key_packages.rs`, `device.rs`, `group_state.rs`, `reconcile.rs`);
-  the additive migrations (§3.4); the Front-A/B/C rollout logic and the §3.3 interop
-  gate; the DS claim-by-suite parameter (`ds_client.rs`); and the S1–S6 harness tests.
-  All of this can be *built and tested against the classic suite today* (treating
-  `CS_HYBRID` as an alias of `CS_CLASSIC` until the real suite lands), so we make
-  progress in-tree *before* the upstream gate clears — the scaffolding is the long pole
-  and it does not block on OpenMLS.
+The 1216-byte `hpke_init_key` is exactly ML-KEM-768 public key (1184) + X25519 (32),
+confirming real hybrid encapsulation — not a stubbed or classical-only path.
+
+### 7.3 The provider swap into Pollis is drop-in
+
+- `PollisProvider` (`pollis-core/src/commands/mls/provider.rs:16-27`) composes
+  `RustCrypto` + the custom `MlsStore`. `openmls_libcrux_crypto` `pub use`s its
+  `CryptoProvider` (`src/lib.rs:6`), so Pollis swaps only the crypto half and keeps
+  `MlsStore` untouched — storage is ciphersuite-agnostic, storing opaque blobs in `mls_kv`
+  (`pollis-core/src/signal/mls_storage.rs:223`).
+- **One provider covers the whole dual-suite window.** The libcrux provider *also* serves
+  Pollis's current `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`: the full two-party flow
+  ran under it on classic-AES, classic-ChaCha, *and* X-Wing — all green. So there is no
+  per-group provider routing and no mixed-provider hazard; one provider instance handles
+  both suites through the entire migration.
+- **WARNING — do not use the crate's bundled `Provider` type.** It hardcodes
+  `openmls_memory_storage::MemoryStorage` (`src/lib.rs:13`) and would silently lose all
+  MLS group state on restart. Pollis must compose `openmls_libcrux_crypto::CryptoProvider`
+  with its own `MlsStore`, exactly as `PollisProvider` does today with `RustCrypto`.
+- **SHARP EDGE — the libcrux provider's `supports()` self-contradicts.** Its `supports()`
+  returns `Err(UnsupportedCiphersuite)` for Pollis's *current* AES-GCM suite — it demands
+  `hpke_aead == ChaCha20Poly1305` (`src/crypto.rs:48-51`) — while its own
+  `supported_ciphersuites()` lists that same AES-GCM suite. No path in the full flow
+  consults `supports()`, so classic groups work today; but anything that *starts* calling
+  `supports()` would break every classic group. P1a pins this with a regression test (§8).
+
+### 7.4 The live risk: code-point churn, not availability
+
+The suite works today, but `0x004D` is a moving target and must be pinned as one:
+
+- `0x004D` is an **experimental** 2024 OpenMLS code point (X-Wing draft-06). The IANA MLS
+  ciphersuite registry has **zero** post-quantum entries; nothing here is standards-final.
+- `draft-ietf-mls-pq-ciphersuites-06` (2026-07-21) **dropped X-Wing**, moving to
+  provisional code points `0x004E` / `0x004F` / `0x0052` built on
+  `draft-irtf-cfrg-concrete-hybrid-kems`. WG state: "Waiting for WG Chair Go-Ahead."
+- OpenMLS `main` implements those new suites behind a new feature flag
+  `draft-ietf-mls-pq-ciphersuites` (openmls/openmls#2046 merged 2026-06-11,
+  openmls/openmls#2118 2026-07-16) — **and has moved `0x004D` behind that same flag.** So
+  the next OpenMLS release is a **breaking change for this usage**: the suite we rely on
+  moves from always-on to feature-gated. **Pin both the version and the feature name**
+  (`openmls = "0.8"`, feature `libcrux-provider`, `openmls_libcrux_crypto = "0.3.1"`, suite
+  `0x004D`), and treat a future OpenMLS bump as a **tracked migration**, not a routine
+  dependency update.
+- The new draft suites are not a drop-in replacement yet either: openmls/openmls#2104
+  (open) notes they are currently implemented with SHA256 where the draft specifies
+  SHAKE256 — known-wrong and unreleased.
+
+**What this means for shipping.** Pollis is a closed fleet (one binary, one DS), so
+shipping a private/experimental code point is *tolerable* — every client and the DS move
+together, and there is no third-party interop to honour. But budget for a **second suite
+migration** when the IETF suites stabilise (`0x004E`/`0x004F`/`0x0052`, SHAKE256 fixed, WG
+go-ahead). Crucially, that is an argument **for** building the `mls_commit_log.generation`
+machinery (§3.2, §3.4) properly rather than against it: the same suite-generation lineage
+that carries classic → X-Wing carries X-Wing → the IETF suite later. **Built once, used
+twice.**
+
+### 7.5 In-tree work (our side), verified against `origin/main`
+
+- **Suite plumbing:** 31 references to `CS` / `.ciphersuite()` — 9 signature-key-gen,
+  2 KeyPackage build, 4 group build, 16 tests. Entry points: `provider.rs`, `device.rs`,
+  `key_packages.rs`, `group_state.rs`, `reconcile.rs`. These become suite-aware (P1b).
+- **DS monotone-head rule** is enforced **solely** in `pollis-delivery/src/commit.rs`:
+  `head_epoch` (`commit.rs:131`) and the conditional
+  `INSERT ... WHERE ?2 = (SELECT COALESCE(MAX(epoch), -1) + 1 ...)` in `submit_commit`
+  (`commit.rs:179-213`), keyed `(conversation_id, epoch)` by the `idx_mls_commit_unique`
+  index. That single site is the one that widens to `(conversation, generation, epoch)`
+  (§3.2, §3.4).
+- **Capability advertisement is genuinely new:** `user_device` advertises **no**
+  capabilities today (only `mls_signature_pub`), so `pq_capable` (§3.4) is a new
+  advertisement channel, not an extension of an existing one.
+- **The provider swap (P1a)** changes `PollisProvider` from `RustCrypto` to
+  `openmls_libcrux_crypto::CryptoProvider`, keeping `MlsStore`. Because the suite is
+  unchanged in P1a, behaviour is byte-identical; the gate is the whole existing suite
+  passing under the new backend, plus the `supports()` regression test from §7.3.
+
+All of the in-tree work builds and tests against the classic suite today, and the crypto
+route is already proven (§7.2), so there is **no external gate left** — the long pole is
+now our own plumbing, not an upstream dependency.
 
 ---
 
 ## 8. Phased roadmap, acceptance criteria, dependencies
 
-**Phase 0 — Spike: pin the upstream target.** Determine the exact OpenMLS
-version/provider that ships an MLS hybrid (X-Wing / ML-KEM-768) ciphersuite, or confirm
-a fork is required. Prototype a single hybrid group in isolation (two headless clients)
-to confirm the libcrux provider builds and runs *in the box* (`--no-default-features`,
-headless). **Acceptance:** a throwaway binary creates a hybrid group and round-trips one
-message between two clients headless; a written decision recorded: bump vs. fork vs.
-scaffold-and-wait, with the pinned version or fork ref.
-**Dependency:** upstream OpenMLS PQ status. This phase is the gate for everything else.
+**Phase 0 — Spike: COMPLETE.** ✅ The crypto route is pinned and proven. A throwaway
+two-client crate on `openmls 0.8.1` + `openmls_libcrux_crypto 0.3.1` (stock cargo, no
+patch) created a hybrid `0x004D` group and round-tripped an application message plus an
+`export_secret` between two clients, headless (§7.2). **Decision recorded:** no version
+bump and no fork — keep `openmls = "0.8"`, enable its `libcrux-provider` feature, add
+`openmls_libcrux_crypto = "0.3.1"`, suite `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519`
+(`0x004D`). The one dependency risk carried forward is code-point churn (§7.4): pin the
+version *and* the feature name, and treat a future OpenMLS bump as a tracked migration.
+**No remaining upstream gate.**
 
-**Phase 1 — In-tree scaffolding (no behaviour change).** Introduce `CS_CLASSIC` /
-`CS_HYBRID` (aliased to classic until Phase 0 clears), make every `CS` call site
-suite-aware, add the additive migrations (§3.4), and the DS claim-by-suite parameter —
-all defaulting to classic so runtime behaviour is byte-identical to today.
-**Acceptance:** full existing `flows` suite + marathon fuzzer pass unchanged, headless,
-on `ci/mls-test-gate`; a schema diff shows only additive migrations; no group's observed
-suite changes.
+**Phase 1a — Provider swap (no suite change, no behaviour change).** Move `PollisProvider`
+from `RustCrypto` to `openmls_libcrux_crypto::CryptoProvider`, keeping the custom
+`MlsStore` (§7.3). The suite is unchanged, so behaviour is byte-identical. **Do not** adopt
+the crate's bundled `Provider` type (it hardcodes in-memory storage — §7.3).
+**Acceptance:** the entire existing `flows` suite + marathon fuzzer pass headless on
+`ci/mls-test-gate` under the new crypto backend; plus a regression test pinning the
+`supports()` self-contradiction (§7.3) so no future call site can silently break classic
+groups.
+
+**Phase 1b — Suite parametrisation (no behaviour change).** Introduce `CS_CLASSIC` /
+`CS_HYBRID`, make every `CS` call site suite-aware (the 31 references in §7.5), add the
+additive migrations (§3.4), and the DS claim-by-suite parameter — all defaulting to classic
+so runtime behaviour is byte-identical to today.
+**Acceptance:** full existing `flows` suite + marathon fuzzer pass unchanged, headless, on
+`ci/mls-test-gate`; a schema diff shows only additive migrations; no group's observed suite
+changes.
 
 **Phase 2 — Hybrid key packages (Front B).** Hybrid-capable devices publish both KP
 pools; DS claims by suite; `pq_capable` set. Still no group goes hybrid.
@@ -683,14 +793,18 @@ within budget (§4.3).
 **Phase 3 — New groups hybrid (Front A).** New groups whose full invited roster is
 hybrid-capable are created on `CS_HYBRID`; old-app-inclusive rosters stay classic.
 **Acceptance:** S1 passes; an old app invited into a mixed roster gets a classic group
-and reads every message; voice-key export works on hybrid groups.
+and reads every message; voice-key export works on hybrid groups; the large-group cost
+decision (§4.1 — group-size threshold vs. explicitly accepted cost) is made on the
+measured commit data and recorded here.
 
 **Phase 4 — Migrate existing groups (Front C).** The epoch-boundary suite-transition
 commit, gated by the §3.3 "every member hybrid-capable" rule, plus the bounded
 scheduled migration for idle groups.
 **Acceptance:** S2, S4, S5, S6 all pass headless; the fuzzer's convergence invariant
 holds across the suite boundary with zero dropped/undecryptable messages for any
-throughout-member; payload-size budget holds under churn.
+throughout-member; payload-size budget holds under churn; the P3 large-group policy (§4.1)
+is honoured by the migration path (a group above the threshold, if one is set, is not
+migrated to hybrid).
 
 **Phase 5 — Fleet completion & (optional) hardening.** Once telemetry/heuristics show
 the fleet is effectively all-hybrid, consider retiring classic KP publication (a
@@ -708,12 +822,14 @@ uptake.
   unrepresentable, enforced at the claim/reconcile chokepoint).
 - Everything builds and gates **headless in-box**.
 
-**Dependencies summary:** (1) OpenMLS PQ ciphersuite upstream — the hard gate;
-(2) libcrux-backed provider building headless (already plausible — crates compile in
-tree); (3) the OpenMLS storage/provider API surface stability across the version bump;
-(4) DS write endpoints extended for suite-tagged KP claim/publish; (5) a coordination
-point with the machine-checked-correctness program, which lands before this work in
-the program sequence: its M4 TLA+ spec (Gapless ∧ HeadMonotone per conversation,
+**Dependencies summary:** (1) ~~OpenMLS PQ ciphersuite upstream~~ — **resolved in P0**:
+the suite ships in the pinned `openmls_traits 0.5.0` and the libcrux provider (proven
+building and running headless) implements it, so no upstream availability gate remains.
+The residual dependency is *pinning discipline* against code-point churn (§7.4) — pin the
+OpenMLS version and the `libcrux-provider` feature name, and track a future OpenMLS bump as
+a migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) a
+coordination point with the machine-checked-correctness program, which lands before this
+work in the program sequence: its M4 TLA+ spec (Gapless ∧ HeadMonotone per conversation,
 `docs/machine-checked-correctness-design.md`) and the transparency-log verifier both
 enforce per-conversation epoch monotonicity, and both must be extended from
 `(conversation, epoch)` to `(conversation, generation, epoch)` (§3.2, §3.4) before the
@@ -733,10 +849,17 @@ a multi-year sensitivity horizon, this is the top unaddressed cryptographic risk
 (Signal PQXDH, iMessage PQ3) already ship hybrid PQ key exchange; Pollis does not. The
 exposed asset is the KEM/HPKE key agreement (TreeKEM path secrets, KeyPackage init keys,
 Welcomes) — **not** signatures, which HNDL does not threaten, so signatures stay
-classical for now. **Feasibility caveat:** the pinned `openmls 0.8.1` /
-`openmls_rust_crypto 0.5.1` (`Cargo.lock:5391,5434`) has **no PQ ciphersuite**; the
-ML-KEM crates (`libcrux-ml-kem 0.0.8`) are already compiled but unreachable through
-Pollis's provider. This requires an OpenMLS version bump or a pinned fork.
+classical for now. **Feasibility (verified in P0):** no version bump and no fork are
+needed. The hybrid suite `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` (`0x004D`)
+already exists in the pinned `openmls_traits 0.5.0` enum; the only missing piece was the
+crypto provider. Keep `openmls = "0.8"`, enable its `libcrux-provider` feature, add
+`openmls_libcrux_crypto = "0.3.1"` (which implements the suite — `openmls_rust_crypto 0.5.1`
+panics on it) — and a full hybrid group flow is proven headless with stock cargo. The
+bundled AEAD change (AES-128-GCM → ChaCha20-Poly1305, level 128 → 256) rides with the
+suite; Ed25519 signatures are unchanged. The live risk is **code-point churn**, not
+availability: `0x004D` is an experimental X-Wing point that OpenMLS `main` moves behind a
+feature flag and the IETF has dropped in favour of `0x004E`/`0x004F`/`0x0052` — pin the
+version and feature name, and budget a second suite migration later.
 
 **Approach:** dual-suite, epoch-boundaried, never a flag day. New groups go hybrid once
 the roster is capable; existing groups migrate at a clean commit boundary into a hybrid
@@ -747,13 +870,19 @@ group's epoch lineage is tracked by an additive `mls_commit_log.generation` colu
 the DS monotone-head rule widens to `(conversation, generation, epoch)` and epoch
 monotonicity is preserved — never an epoch reset under the old key. Schema changes
 are additive only (suite-tag `mls_key_package`, `mls_commit_log.generation`, optional
-`user_device.pq_capable`). Signatures + AEAD unchanged in Phase 1.
+`user_device.pq_capable`). Signatures stay Ed25519 (unchanged); the AEAD is **not**
+unchanged — the only available hybrid suite bundles ChaCha20-Poly1305, so hybrid groups
+move AES-128-GCM → ChaCha20-Poly1305 (level 128 → 256) while classic groups keep
+AES-128-GCM.
 
 **Phased milestones:**
-- **P0 — Spike:** pin the OpenMLS version/provider that ships X-Wing/ML-KEM-768, or
-  decide fork; prove one hybrid group round-trips headless in-box.
-- **P1 — Scaffolding:** suite-aware call sites + additive migrations + DS claim-by-suite,
-  aliased to classic (zero behaviour change).
+- **P0 — Spike: DONE.** Route pinned and proven headless (`openmls 0.8` +
+  `libcrux-provider` feature + `openmls_libcrux_crypto 0.3.1`, suite `0x004D`); no bump,
+  no fork.
+- **P1a — Provider swap:** `PollisProvider` moves `RustCrypto` → libcrux `CryptoProvider`,
+  suite unchanged (byte-identical); gate on the full suite + a `supports()` regression test.
+- **P1b — Suite parametrisation:** suite-aware call sites + additive migrations + DS
+  claim-by-suite, defaulting to classic (zero behaviour change).
 - **P2 — Hybrid key packages** (Front B): dual KP pools, claim-by-suite.
 - **P3 — New groups hybrid** (Front A).
 - **P4 — Migrate existing groups** (Front C) at epoch boundary, capability-gated.
@@ -776,6 +905,11 @@ are additive only (suite-tag `mls_key_package`, `mls_commit_log.generation`, opt
   not "fully post-quantum"; does not fix metadata or endpoint compromise; does not
   protect already-sent classic traffic.
 
-**Dependencies / risks:** OpenMLS PQ ciphersuite upstream (hard gate; version TBD in
-P0); OpenMLS storage/provider API churn across the version bump (`signal/mls_storage.rs`,
-`provider.rs`); libcrux provider building headless (`--no-default-features`).
+**Dependencies / risks:** no upstream availability gate remains — P0 proved the pinned
+route (`openmls 0.8` + `libcrux-provider` + `openmls_libcrux_crypto 0.3.1`, suite `0x004D`)
+builds and round-trips headless. Residual risk is **code-point churn**: `0x004D` is
+experimental and OpenMLS `main` feature-gates it, so pin the version *and* the
+`libcrux-provider` feature and treat an OpenMLS bump as a tracked migration; budget a
+second suite migration when the IETF `draft-ietf-mls-pq-ciphersuites` suites
+(`0x004E`/`0x004F`/`0x0052`) stabilise. Also carry the group-size cost decision (commits
+are linear in N, ~8× classic — §4.1) into P3/P4.
