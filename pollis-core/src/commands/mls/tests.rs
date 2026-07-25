@@ -12,7 +12,7 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 // so the test bodies (which were originally `use super::*` from the
 // single-file module) can keep referencing them by short name.
 use super::group_state::load_group_with_signer;
-use super::provider::CS;
+use super::provider::{PollisPqProvider, CS};
 
 /// Create an in-memory SQLite DB with the `mls_kv` table.
 fn make_db() -> rusqlite::Connection {
@@ -1757,7 +1757,7 @@ fn cross_provider_rustcrypto_libcrux_interop() {
 #[test]
 fn libcrux_supports_self_contradiction_is_pinned() {
     let db = make_db();
-    let provider = PollisProvider::new(&db);
+    let provider = PollisPqProvider::new(&db);
     let crypto = provider.crypto();
 
     // Half 1: `supports()` REJECTS the very suite Pollis ships on.
@@ -1795,9 +1795,9 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
     let alice_db = make_db();
     let bob_db = make_db();
 
-    // The suite must be advertised by the shipping provider.
+    // The suite must be advertised by the PQ provider.
     {
-        let provider = PollisProvider::new(&alice_db);
+        let provider = PollisPqProvider::new(&alice_db);
         assert!(
             provider.crypto().supported_ciphersuites().contains(&HYBRID),
             "libcrux provider must advertise the PQ hybrid suite — later #454 \
@@ -1807,7 +1807,7 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
 
     // Bob builds a KeyPackage on the HYBRID suite.
     let (bob_kp_bytes, bob_hpke_init_len) = {
-        let provider = PollisProvider::new(&bob_db);
+        let provider = PollisPqProvider::new(&bob_db);
         let sig = SignatureKeyPair::new(HYBRID.signature_algorithm()).unwrap();
         sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
@@ -1839,8 +1839,8 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
 
     // Alice creates the group on the hybrid suite and adds Bob.
     let alice_sig = SignatureKeyPair::new(HYBRID.signature_algorithm()).unwrap();
-    let welcome_bytes = {
-        let provider = PollisProvider::new(&alice_db);
+    let (welcome_bytes, mut alice_group) = {
+        let provider = PollisPqProvider::new(&alice_db);
         alice_sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
             alice_sig.to_public_vec().into(),
@@ -1873,12 +1873,19 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
         let (_commit, welcome, _) =
             group.add_members(&provider, &alice_sig, &[kp]).unwrap();
         group.merge_pending_commit(&provider).unwrap();
-        welcome.tls_serialize_detached().unwrap()
+        (welcome.tls_serialize_detached().unwrap(), group)
     };
 
-    // Bob joins via the hybrid Welcome.
+    // Bob joins via the hybrid Welcome, then an application message must
+    // decrypt end-to-end on the hybrid suite.
+    //
+    // Driven through openmls directly rather than through `try_mls_encrypt` /
+    // `try_mls_decrypt`: those production helpers construct `PollisProvider`
+    // (RustCrypto), which is CORRECT — no production path may select the hybrid
+    // suite until #454 P1b makes the suite an explicit parameter. Reaching for
+    // them here would only prove that RustCrypto panics on X-Wing.
     {
-        let provider = PollisProvider::new(&bob_db);
+        let provider = PollisPqProvider::new(&bob_db);
         let mut reader: &[u8] = &welcome_bytes;
         let welcome = match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
             MlsMessageBodyIn::Welcome(w) => w,
@@ -1887,18 +1894,38 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
         let join_config = MlsGroupJoinConfig::builder()
             .use_ratchet_tree_extension(true)
             .build();
-        StagedWelcome::new_from_welcome(&provider, &join_config, welcome, None)
-            .unwrap()
-            .into_group(&provider)
-            .unwrap();
-    }
+        let mut bob_group =
+            StagedWelcome::new_from_welcome(&provider, &join_config, welcome, None)
+                .unwrap()
+                .into_group(&provider)
+                .unwrap();
+        assert_eq!(bob_group.ciphersuite(), HYBRID);
 
-    // An application message must decrypt end-to-end on the hybrid suite.
-    let ct = try_mls_encrypt(&alice_db, "01JTEST0000000000XWINGHYBRD", b"pq hello").unwrap();
-    let (pt, sender) =
-        try_mls_decrypt(&bob_db, "01JTEST0000000000XWINGHYBRD", &ct).unwrap();
-    assert_eq!(pt, b"pq hello");
-    assert_eq!(sender, "alice");
+        let ct = {
+            let provider = PollisPqProvider::new(&alice_db);
+            alice_group
+                .create_message(&provider, &alice_sig, b"pq hello")
+                .unwrap()
+                .tls_serialize_detached()
+                .unwrap()
+        };
+        let mut reader: &[u8] = &ct;
+        let pm = MlsMessageIn::tls_deserialize(&mut reader)
+            .unwrap()
+            .try_into_protocol_message()
+            .unwrap();
+        let processed = bob_group.process_message(&provider, pm).unwrap();
+        assert_eq!(
+            parse_credential_user_id(processed.credential()),
+            "alice"
+        );
+        match processed.into_content() {
+            ProcessedMessageContent::ApplicationMessage(m) => {
+                assert_eq!(m.into_bytes(), b"pq hello");
+            }
+            _ => panic!("expected application message on the hybrid suite"),
+        }
+    }
 }
 
 /// T4. `validate_key_package` must not panic on a hybrid KeyPackage.
@@ -1907,50 +1934,94 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
 /// `unimplemented!()`-PANICS on the X-Wing suite, so the moment #454 P2 mints
 /// real hybrid KeyPackages, validating one would have aborted the process
 /// rather than returning an error. The signature is now generic over
-/// `OpenMlsCrypto` and callers pass `provider.crypto()` (libcrux), which serves
-/// BOTH suites.
+/// `OpenMlsCrypto`, so each caller passes the backend that matches the suite it
+/// is serving — `PollisProvider` for classic, `PollisPqProvider` for hybrid.
 ///
-/// This test runs it over both suites through the exact provider Pollis ships,
-/// and asserts the returned `KeyPackageRef` matches the one openmls computes —
-/// i.e. it validates rather than merely not crashing. It also pins the
-/// credential mismatch path, which must stay a normal `Err`.
+/// Asserts the returned `KeyPackageRef` equals the one openmls computes, so this
+/// proves validation actually happened rather than merely not crashing, and pins
+/// the credential-mismatch path as a normal `Err` on both suites.
+fn validate_key_package_round_trip(provider: &impl OpenMlsProvider, suite: Ciphersuite) {
+    let sig = SignatureKeyPair::new(suite.signature_algorithm()).unwrap();
+    sig.store(provider.storage()).unwrap();
+    let sig_pub = OpenMlsSignaturePublicKey::new(
+        sig.to_public_vec().into(),
+        suite.signature_algorithm(),
+    )
+    .unwrap();
+    let cwk = CredentialWithKey {
+        credential: make_credential("alice", "alice_dev"),
+        signature_key: sig_pub.into(),
+    };
+    let bundle = KeyPackage::builder().build(suite, provider, &sig, cwk).unwrap();
+    let kp_bytes = bundle.key_package().tls_serialize_detached().unwrap();
+    let expected_ref = bundle.key_package().hash_ref(provider.crypto()).unwrap();
+
+    // The call that would have panicked under RustCrypto on the hybrid suite.
+    let got = validate_key_package(&kp_bytes, "alice", provider.crypto())
+        .unwrap_or_else(|e| panic!("validate failed on {suite:?}: {e}"));
+    assert_eq!(
+        got,
+        hex::encode(expected_ref.as_slice()),
+        "validate_key_package must return the real KeyPackageRef on {suite:?}"
+    );
+
+    assert!(
+        validate_key_package(&kp_bytes, "mallory", provider.crypto()).is_err(),
+        "credential mismatch must be rejected on {suite:?}"
+    );
+}
+
 #[test]
 fn validate_key_package_handles_both_suites() {
-    const HYBRID: Ciphersuite =
-        Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;
+    let classic_db = make_db();
+    validate_key_package_round_trip(&PollisProvider::new(&classic_db), CS);
 
-    for suite in [CS, HYBRID] {
-        let db = make_db();
-        let provider = PollisProvider::new(&db);
+    let hybrid_db = make_db();
+    validate_key_package_round_trip(
+        &PollisPqProvider::new(&hybrid_db),
+        Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
+    );
+}
 
-        let sig = SignatureKeyPair::new(suite.signature_algorithm()).unwrap();
-        sig.store(provider.storage()).unwrap();
-        let sig_pub = OpenMlsSignaturePublicKey::new(
-            sig.to_public_vec().into(),
-            suite.signature_algorithm(),
-        )
-        .unwrap();
-        let cwk = CredentialWithKey {
-            credential: make_credential("alice", "alice_dev"),
-            signature_key: sig_pub.into(),
-        };
-        let bundle = KeyPackage::builder().build(suite, &provider, &sig, cwk).unwrap();
-        let kp_bytes = bundle.key_package().tls_serialize_detached().unwrap();
-        let expected_ref = bundle.key_package().hash_ref(provider.crypto()).unwrap();
-
-        // The call that would have panicked under RustCrypto on `suite == HYBRID`.
-        let got = validate_key_package(&kp_bytes, "alice", provider.crypto())
-            .unwrap_or_else(|e| panic!("validate failed on {suite:?}: {e}"));
-        assert_eq!(
-            got,
-            hex::encode(expected_ref.as_slice()),
-            "validate_key_package must return the real KeyPackageRef on {suite:?}"
-        );
-
-        // A credential for a different user must be a normal Err on both suites.
-        assert!(
-            validate_key_package(&kp_bytes, "mallory", provider.crypto()).is_err(),
-            "credential mismatch must be rejected on {suite:?}"
-        );
+/// T5. **The routing invariant.** `PollisProvider` — the provider EVERY
+/// production path constructs — must be backed by RustCrypto, never libcrux.
+///
+/// This is not stylistic. `deny.toml` carries an ignore for RUSTSEC-2026-0211
+/// (libcrux AES-GCM decryption uses a non-constant-time authentication-tag
+/// check, unpatched in `libcrux-aesgcm`) whose stated reason is that Pollis
+/// never routes AES-GCM through libcrux. Pollis's classic suite IS AES-128-GCM,
+/// so if someone "simplifies" the two providers into one libcrux-backed
+/// provider, that ignore silently becomes a lie and every message decrypt picks
+/// up a timing side channel.
+///
+/// Type-level, so it cannot be satisfied by accident at runtime.
+#[test]
+fn classic_provider_never_routes_to_libcrux() {
+    fn backend_of<P: OpenMlsProvider>(_: &P) -> &'static str {
+        std::any::type_name::<P::CryptoProvider>()
     }
+
+    let db = make_db();
+    let classic = PollisProvider::new(&db);
+    assert!(
+        backend_of(&classic).contains("openmls_rust_crypto"),
+        "PollisProvider must stay RustCrypto-backed (RUSTSEC-2026-0211: libcrux \
+         AES-GCM decrypt is not constant-time and our classic suite is AES-GCM); \
+         got {}",
+        backend_of(&classic)
+    );
+    assert_eq!(
+        CS.aead_algorithm(),
+        AeadType::Aes128Gcm,
+        "the classic suite is AES-GCM — the premise of the routing split above"
+    );
+
+    // …and the PQ provider is the libcrux one, since it is the only backend
+    // that implements X-Wing.
+    let pq = PollisPqProvider::new(&db);
+    assert!(
+        backend_of(&pq).contains("libcrux"),
+        "PollisPqProvider must stay libcrux-backed; got {}",
+        backend_of(&pq)
+    );
 }

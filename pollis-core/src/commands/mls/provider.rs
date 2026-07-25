@@ -5,44 +5,28 @@
 
 use openmls::prelude::*;
 use openmls_libcrux_crypto::CryptoProvider as LibcruxCrypto;
+use openmls_rust_crypto::RustCrypto;
 use openmls_traits::OpenMlsProvider;
 
 use crate::signal::mls_storage::MlsStore;
 
 // ── Provider ─────────────────────────────────────────────────────────────────
 
-/// Combines the libcrux-backed `CryptoProvider` with our SQLite-backed
-/// `MlsStore` to satisfy the `OpenMlsProvider` bound required by all openmls
-/// API calls.
+/// An OpenMLS provider: some crypto backend `C` composed with our SQLite-backed
+/// `MlsStore`. Storage is ciphersuite- and backend-agnostic (it stores opaque
+/// blobs in `mls_kv`), so only the crypto half varies.
 ///
-/// We use libcrux (not `openmls_rust_crypto::RustCrypto`) because RustCrypto
-/// `unimplemented!()`-panics on the post-quantum hybrid ciphersuite that later
-/// phases of #454 depend on, while libcrux implements it and serves the classic
-/// suite Pollis ships today equally well (proven behaviour-preserving and
-/// wire-compatible with RustCrypto by the cross-provider interop test in
-/// `commands/mls/tests.rs`). We deliberately compose libcrux's `CryptoProvider`
-/// rather than its bundled `Provider`, which hardcodes an in-memory storage
-/// backend that would silently drop all MLS group state on restart.
-pub struct PollisProvider<'a> {
-    crypto: LibcruxCrypto,
+/// **The crypto backend is chosen by ciphersuite, and that choice is load-bearing
+/// for security — see `PollisProvider` and `PollisPqProvider` below.** We compose
+/// a backend with our own store rather than using either crate's bundled
+/// `Provider` type: those hardcode in-memory storage, which would silently drop
+/// all MLS group state on restart.
+pub struct MlsProvider<'a, C> {
+    crypto: C,
     store: MlsStore<'a>,
 }
 
-impl<'a> PollisProvider<'a> {
-    pub fn new(conn: &'a rusqlite::Connection) -> Self {
-        Self {
-            // `CryptoProvider::new()` is fallible only because it seeds a CSPRNG
-            // from the OS RNG. If the OS RNG is unavailable every other crypto
-            // path in the app is already fatally broken, so panicking here (vs.
-            // rippling a `Result` through `new`'s many call sites in a purely
-            // behaviour-preserving change) surfaces the same unrecoverable
-            // condition without weakening any signature.
-            crypto: LibcruxCrypto::new()
-                .expect("OS RNG unavailable — no crypto path in the app can work"),
-            store: MlsStore::new(conn),
-        }
-    }
-
+impl<'a, C> MlsProvider<'a, C> {
     /// Borrow the raw sqlite connection backing `mls_kv`. Used for custom
     /// rows Pollis writes alongside openmls state (e.g. the stable per-
     /// device signing key reference).
@@ -51,11 +35,14 @@ impl<'a> PollisProvider<'a> {
     }
 }
 
-impl<'a> OpenMlsProvider for PollisProvider<'a> {
-    // libcrux's `CryptoProvider` serves as BOTH the crypto and rand provider
-    // (it holds the reseeding CSPRNG), exactly as `RustCrypto` did for both.
-    type CryptoProvider = LibcruxCrypto;
-    type RandProvider = LibcruxCrypto;
+impl<'a, C> OpenMlsProvider for MlsProvider<'a, C>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    // Both backends serve as crypto AND rand provider (each holds its own
+    // CSPRNG), so both associated types point at the same value.
+    type CryptoProvider = C;
+    type RandProvider = C;
     type StorageProvider = MlsStore<'a>;
 
     fn storage(&self) -> &Self::StorageProvider {
@@ -68,6 +55,61 @@ impl<'a> OpenMlsProvider for PollisProvider<'a> {
 
     fn rand(&self) -> &Self::RandProvider {
         &self.crypto
+    }
+}
+
+/// **The provider every production path uses.** Backed by
+/// `openmls_rust_crypto::RustCrypto`, which serves the classic suite `CS`.
+///
+/// Why not libcrux for everything, when libcrux serves the classic suite too and
+/// would spare us a second backend? Because the classic suite's AEAD is
+/// AES-128-GCM, and libcrux's AES-GCM implementation has an **unpatched**
+/// non-constant-time authentication-tag check (RUSTSEC-2026-0211,
+/// `libcrux-aesgcm <= 0.0.8`; the fix exists only in the renamed `libcrux-aes`
+/// 0.0.9, which no released `openmls_libcrux_crypto` depends on). Routing every
+/// message decrypt through that would be a real side-channel regression against
+/// today's shipping behaviour, traded for a post-quantum capability nothing yet
+/// uses. RustCrypto's `aes-gcm` compares tags with `subtle`'s constant-time
+/// primitives, so classic traffic stays where it is.
+///
+/// This routing is what makes the `RUSTSEC-2026-0211` entry in `deny.toml`
+/// truthful. It is pinned by `classic_provider_never_routes_to_libcrux` in
+/// `commands/mls/tests.rs` — do not "simplify" the two providers into one
+/// without re-reading that test and the advisory.
+pub type PollisProvider<'a> = MlsProvider<'a, RustCrypto>;
+
+/// The provider for the post-quantum hybrid suite (#454). Backed by
+/// `openmls_libcrux_crypto::CryptoProvider`, the only released backend that
+/// implements `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` — `RustCrypto`
+/// `unimplemented!()`-panics on it.
+///
+/// **Nothing in production constructs this yet.** It exists so the hybrid suite
+/// stays reachable and tested while the phased rollout (#454 P2-P4) lands. Its
+/// suite is ChaCha20-Poly1305-based, so the AES-GCM advisory above does not
+/// apply to it.
+pub type PollisPqProvider<'a> = MlsProvider<'a, LibcruxCrypto>;
+
+impl<'a> PollisProvider<'a> {
+    pub fn new(conn: &'a rusqlite::Connection) -> Self {
+        Self {
+            crypto: RustCrypto::default(),
+            store: MlsStore::new(conn),
+        }
+    }
+}
+
+impl<'a> PollisPqProvider<'a> {
+    pub fn new(conn: &'a rusqlite::Connection) -> Self {
+        Self {
+            // `CryptoProvider::new()` is fallible only because it seeds a CSPRNG
+            // from the OS RNG. If the OS RNG is unavailable every other crypto
+            // path in the app is already fatally broken, so panicking here (vs.
+            // rippling a `Result` through every call site) surfaces the same
+            // unrecoverable condition without weakening any signature.
+            crypto: LibcruxCrypto::new()
+                .expect("OS RNG unavailable — no crypto path in the app can work"),
+            store: MlsStore::new(conn),
+        }
     }
 }
 

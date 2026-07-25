@@ -1191,11 +1191,19 @@ version = "0.2.185"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-aead]]
+version = "0.0.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-aead]]
 version = "0.0.7"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-aesgcm]]
 version = "0.0.7"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-chacha20poly1305]]
+version = "0.0.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-chacha20poly1305]]
@@ -1207,6 +1215,10 @@ version = "0.0.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-ecdh]]
+version = "0.0.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-ed25519]]
 version = "0.0.6"
 criteria = "safe-to-deploy"
 
@@ -1240,6 +1252,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-platform]]
 version = "0.0.3"
+criteria = "safe-to-deploy"
+
+[[exemptions.libcrux-poly1305]]
+version = "0.0.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.libcrux-poly1305]]
@@ -1616,6 +1632,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.openmls_basic_credential]]
 version = "0.5.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.openmls_libcrux_crypto]]
+version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.openmls_memory_storage]]

@@ -1,9 +1,10 @@
 # Post-Quantum Hybrid MLS — Design
 
 **Status:** design accepted; implementation started. **P0 (spike) is complete** and
-**P1a (crypto-provider swap) has landed** — `PollisProvider` now runs on the libcrux
-crypto backend, so the hybrid suite is reachable (`pollis-core/src/commands/mls/provider.rs`).
-No group has changed suite: every production path is still classical (§8).
+**P1a (crypto-provider routing) has landed** — the hybrid suite is reachable through a
+second, hybrid-only provider, while every production path stays on the existing RustCrypto
+backend for security reasons set out in §7.3
+(`pollis-core/src/commands/mls/provider.rs`). No group has changed suite (§8).
 **Scope:** migrate Pollis's MLS key exchange from classical X25519 to a hybrid
 X25519 + ML-KEM-768 construction, transparently, without breaking existing
 groups, existing devices, or the "messages must work" doctrine.
@@ -684,22 +685,47 @@ bob decrypted: "hello pq world"
 The 1216-byte `hpke_init_key` is exactly ML-KEM-768 public key (1184) + X25519 (32),
 confirming real hybrid encapsulation — not a stubbed or classical-only path.
 
-### 7.3 The provider swap into Pollis is drop-in
+### 7.3 Provider integration: drop-in, but suite-routed on purpose
 
-- `PollisProvider` (`pollis-core/src/commands/mls/provider.rs:16-27`) composes
-  `RustCrypto` + the custom `MlsStore`. `openmls_libcrux_crypto` `pub use`s its
-  `CryptoProvider` (`src/lib.rs:6`), so Pollis swaps only the crypto half and keeps
-  `MlsStore` untouched — storage is ciphersuite-agnostic, storing opaque blobs in `mls_kv`
+- The provider is generic over its crypto half (`pollis-core/src/commands/mls/provider.rs`):
+  `MlsProvider<C>` composes any backend `C` with the custom `MlsStore`.
+  `openmls_libcrux_crypto` `pub use`s its `CryptoProvider` (`src/lib.rs:6`), so adding a
+  hybrid-capable provider means adding one type alias and leaves `MlsStore` untouched —
+  storage is ciphersuite- and backend-agnostic, storing opaque blobs in `mls_kv`
   (`pollis-core/src/signal/mls_storage.rs:223`).
-- **One provider covers the whole dual-suite window.** The libcrux provider *also* serves
-  Pollis's current `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`: the full two-party flow
-  ran under it on classic-AES, classic-ChaCha, *and* X-Wing — all green. So there is no
-  per-group provider routing and no mixed-provider hazard; one provider instance handles
-  both suites through the entire migration.
+- **The libcrux provider *can* serve both suites — and we deliberately do not let it.**
+  The full two-party flow ran under it on classic-AES, classic-ChaCha *and* X-Wing, all
+  green, so a single-provider design is technically available. It was rejected on a
+  security ground discovered when the supply-chain gate was run against the change:
+  `openmls_libcrux_crypto 0.3.1` pulls `libcrux-aead 0.0.6` with default features, and
+  **`libcrux-aesgcm <= 0.0.8` checks the AES-GCM authentication tag in non-constant time
+  (RUSTSEC-2026-0211, `patched = []`)**. Pollis's *current* suite is AES-128-GCM, so a
+  wholesale swap would move every message decrypt in the shipping app onto a timing side
+  channel — a real regression today, bought with a post-quantum capability nothing yet
+  uses. The fix exists only in the renamed `libcrux-aes 0.0.9`, which no released
+  `openmls_libcrux_crypto` depends on.
+- **Therefore: the crypto provider is routed by ciphersuite.** `PollisProvider`
+  (RustCrypto, constant-time `subtle` tag compare) serves the classic suite and is the
+  only provider any production path constructs; `PollisPqProvider` (libcrux) serves the
+  ChaCha20-Poly1305 hybrid suite and is constructed nowhere in production yet. Both
+  compose the same untouched `MlsStore`. The mixed-provider hazard this creates is
+  *bounded and already measured*: RustCrypto-backed and libcrux-backed clients interoperate
+  in one classic group in all four direction combinations (KeyPackage, Welcome/join,
+  application messages both ways, a cross-provider self-update commit, and byte-identical
+  `export_secret`), pinned by the cross-provider interop test. The routing itself is pinned
+  by `classic_provider_never_routes_to_libcrux`, which is also the stated basis of the
+  `deny.toml` entry for RUSTSEC-2026-0211 — if the providers are ever merged, that ignore
+  becomes a lie and the test fails first.
+- **Budget the other five libcrux advisories too.** Adding the provider pulls
+  RUSTSEC-2026-0209/0210 (`libcrux-aesgcm`), -0124 (`libcrux-chacha20poly1305`), -0075
+  (`libcrux-ed25519`) and -0073 (`libcrux-poly1305`) into the graph. Under the routing
+  above none are reachable from live traffic; -0124 and -0073 *do* sit on the hybrid path
+  and must be re-argued (not merely re-ignored) before P2 puts a real group on that suite.
+  Reasons are recorded per-ID in `deny.toml`.
 - **WARNING — do not use the crate's bundled `Provider` type.** It hardcodes
   `openmls_memory_storage::MemoryStorage` (`src/lib.rs:13`) and would silently lose all
-  MLS group state on restart. Pollis must compose `openmls_libcrux_crypto::CryptoProvider`
-  with its own `MlsStore`, exactly as `PollisProvider` does today with `RustCrypto`.
+  MLS group state on restart. Pollis composes `openmls_libcrux_crypto::CryptoProvider`
+  with its own `MlsStore`, exactly as `PollisProvider` does with `RustCrypto`.
 - **SHARP EDGE — the libcrux provider's `supports()` self-contradicts.** Its `supports()`
   returns `Err(UnsupportedCiphersuite)` for Pollis's *current* AES-GCM suite — it demands
   `hpke_aead == ChaCha20Poly1305` (`src/crypto.rs:48-51`) — while its own
@@ -751,10 +777,11 @@ twice.**
 - **Capability advertisement is genuinely new:** `user_device` advertises **no**
   capabilities today (only `mls_signature_pub`), so `pq_capable` (§3.4) is a new
   advertisement channel, not an extension of an existing one.
-- **The provider swap (P1a)** changes `PollisProvider` from `RustCrypto` to
-  `openmls_libcrux_crypto::CryptoProvider`, keeping `MlsStore`. Because the suite is
-  unchanged in P1a, behaviour is byte-identical; the gate is the whole existing suite
-  passing under the new backend, plus the `supports()` regression test from §7.3.
+- **The provider work (P1a)** generalises `PollisProvider` over its crypto backend and
+  adds a second alias, `PollisPqProvider`, wired to libcrux — it does **not** move the
+  classic suite off RustCrypto (§7.3). Behaviour on every production path is therefore
+  byte-identical; the gate is the whole existing suite passing, plus the `supports()`
+  regression test and the routing-invariant test from §7.3.
 
 All of the in-tree work builds and tests against the classic suite today, and the crypto
 route is already proven (§7.2), so there is **no external gate left** — the long pole is
@@ -885,8 +912,10 @@ AES-128-GCM.
 **Phased milestones:**
 - **P0 — Spike: DONE.** Route pinned and proven headless (`openmls 0.8` + a direct
   `openmls_libcrux_crypto 0.3` dependency, suite `0x004D`); no bump, no fork.
-- **P1a — Provider swap:** `PollisProvider` moves `RustCrypto` → libcrux `CryptoProvider`,
-  suite unchanged (byte-identical); gate on the full suite + a `supports()` regression test.
+- **P1a — Provider routing:** `PollisProvider` (RustCrypto, classic) and
+  `PollisPqProvider` (libcrux, hybrid-only) over one shared `MlsStore`; no production path
+  changes backend, so behaviour is byte-identical. Gate on the full suite + the `supports()`
+  regression test + `classic_provider_never_routes_to_libcrux` (§7.3).
 - **P1b — Suite parametrisation:** suite-aware call sites + additive migrations + DS
   claim-by-suite, defaulting to classic (zero behaviour change).
 - **P2 — Hybrid key packages** (Front B): dual KP pools, claim-by-suite.

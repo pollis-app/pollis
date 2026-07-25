@@ -139,14 +139,27 @@ axum = { version = "0.8", features = ["ws"] }
 bytes = "1"
 openmls = "0.8"
 openmls_traits = "0.5"
-# libcrux-backed crypto provider. Serves BOTH the classic suite Pollis uses
-# today AND the post-quantum hybrid suite (X-Wing) that later phases of #454
-# need — `openmls_rust_crypto::RustCrypto` `unimplemented!()`-panics on the
-# hybrid suite, so swapping to this provider is the prerequisite that unlocks
-# PQ. This is a behaviour-preserving swap on the classic suite (proven by the
-# cross-provider interop test in `commands/mls/tests.rs`). We compose its
-# `CryptoProvider` with our own SQLite-backed `MlsStore`; we deliberately do
-# NOT use its bundled `Provider`, which hardcodes in-memory storage.
+# The crypto backend for the CLASSIC suite Pollis ships today, and the only one
+# any production path constructs (`PollisProvider`). Its `aes-gcm` compares
+# authentication tags in constant time via `subtle` — see the libcrux note below
+# for why that decides the split.
+openmls_rust_crypto = "0.5"
+# The crypto backend for the POST-QUANTUM HYBRID suite only (`PollisPqProvider`,
+# #454). It is the sole released provider implementing X-Wing; RustCrypto
+# `unimplemented!()`-panics on that suite.
+#
+# It is deliberately NOT used for the classic suite even though it supports it:
+# the classic AEAD is AES-128-GCM and libcrux's AES-GCM has an UNPATCHED
+# non-constant-time tag check (RUSTSEC-2026-0211, `libcrux-aesgcm <= 0.0.8`; the
+# fix ships only as the renamed `libcrux-aes` 0.0.9, which `libcrux-aead 0.0.6`
+# — and therefore this crate — does not use). Routing today's message decrypts
+# through it would be a side-channel regression. The hybrid suite is
+# ChaCha20-Poly1305-based, so that advisory does not reach it. `deny.toml`
+# records the reachability argument for each libcrux advisory.
+#
+# We compose its `CryptoProvider` with our own SQLite-backed `MlsStore`; we
+# deliberately do NOT use its bundled `Provider`, which hardcodes in-memory
+# storage and would silently drop all MLS group state on restart.
 openmls_libcrux_crypto = "0.3"
 # `test-utils` exposes `SignatureKeyPair::private()` — the ONLY accessor for the
 # raw device signing seed. The overlay relay handshake (`net::overlay`) must sign
@@ -280,12 +293,5 @@ required-features = ["cli"]
 # same proof shape as `pollis-relay/tests/proof.rs` T2. rustls 0.23 / tokio-rustls
 # 0.26 are already in the lockfile (reqwest + quinn); no new supply-chain crates.
 [dev-dependencies]
-# TEST-ONLY. No shipping path may construct RustCrypto: it `unimplemented!()`-
-# panics on the post-quantum hybrid suite (#454), so a production call site
-# holding one is a latent panic the moment P2 mints hybrid KeyPackages. Keeping
-# it here means the compiler enforces that. Tests need it because it stands in
-# for the "old app" in the cross-provider interop test (`commands/mls/tests.rs`),
-# which proves an old<->new staged rollout cannot split a live MLS group.
-openmls_rust_crypto = "0.5"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
