@@ -6,7 +6,7 @@
 //! Both route owner-scoped writes through the Delivery Service.
 
 use openmls::prelude::*;
-use openmls_rust_crypto::RustCrypto;
+use openmls_traits::crypto::OpenMlsCrypto;
 use openmls_traits::OpenMlsProvider;
 
 use std::sync::Arc;
@@ -207,10 +207,17 @@ pub(super) async fn replenish_key_packages(
 /// well-formed and matches the expected user's credential.
 ///
 /// Returns the hex-encoded `KeyPackageRef` on success so callers can store it.
+///
+/// Generic over the crypto backend rather than naming a concrete provider: the
+/// suite a KeyPackage was built for is inside the blob, so validating one built
+/// for a suite the passed backend does not implement is a *runtime* outcome.
+/// Pinning `&RustCrypto` here would make that outcome an `unimplemented!()`
+/// panic the moment #454's hybrid suite produces real KeyPackages. Callers pass
+/// `provider.crypto()`, which is the libcrux backend that covers both suites.
 pub fn validate_key_package(
     kp_bytes: &[u8],
     expected_user_id: &str,
-    crypto: &RustCrypto,
+    crypto: &impl OpenMlsCrypto,
 ) -> Result<String> {
     let mut reader: &[u8] = kp_bytes;
     let kp_in = KeyPackageIn::tls_deserialize(&mut reader)

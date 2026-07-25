@@ -1900,3 +1900,57 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
     assert_eq!(pt, b"pq hello");
     assert_eq!(sender, "alice");
 }
+
+/// T4. `validate_key_package` must not panic on a hybrid KeyPackage.
+///
+/// `validate_key_package` used to take a concrete `&RustCrypto`. That backend
+/// `unimplemented!()`-PANICS on the X-Wing suite, so the moment #454 P2 mints
+/// real hybrid KeyPackages, validating one would have aborted the process
+/// rather than returning an error. The signature is now generic over
+/// `OpenMlsCrypto` and callers pass `provider.crypto()` (libcrux), which serves
+/// BOTH suites.
+///
+/// This test runs it over both suites through the exact provider Pollis ships,
+/// and asserts the returned `KeyPackageRef` matches the one openmls computes —
+/// i.e. it validates rather than merely not crashing. It also pins the
+/// credential mismatch path, which must stay a normal `Err`.
+#[test]
+fn validate_key_package_handles_both_suites() {
+    const HYBRID: Ciphersuite =
+        Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;
+
+    for suite in [CS, HYBRID] {
+        let db = make_db();
+        let provider = PollisProvider::new(&db);
+
+        let sig = SignatureKeyPair::new(suite.signature_algorithm()).unwrap();
+        sig.store(provider.storage()).unwrap();
+        let sig_pub = OpenMlsSignaturePublicKey::new(
+            sig.to_public_vec().into(),
+            suite.signature_algorithm(),
+        )
+        .unwrap();
+        let cwk = CredentialWithKey {
+            credential: make_credential("alice", "alice_dev"),
+            signature_key: sig_pub.into(),
+        };
+        let bundle = KeyPackage::builder().build(suite, &provider, &sig, cwk).unwrap();
+        let kp_bytes = bundle.key_package().tls_serialize_detached().unwrap();
+        let expected_ref = bundle.key_package().hash_ref(provider.crypto()).unwrap();
+
+        // The call that would have panicked under RustCrypto on `suite == HYBRID`.
+        let got = validate_key_package(&kp_bytes, "alice", provider.crypto())
+            .unwrap_or_else(|e| panic!("validate failed on {suite:?}: {e}"));
+        assert_eq!(
+            got,
+            hex::encode(expected_ref.as_slice()),
+            "validate_key_package must return the real KeyPackageRef on {suite:?}"
+        );
+
+        // A credential for a different user must be a normal Err on both suites.
+        assert!(
+            validate_key_package(&kp_bytes, "mallory", provider.crypto()).is_err(),
+            "credential mismatch must be rejected on {suite:?}"
+        );
+    }
+}

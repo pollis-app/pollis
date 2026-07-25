@@ -148,12 +148,6 @@ openmls_traits = "0.5"
 # `CryptoProvider` with our own SQLite-backed `MlsStore`; we deliberately do
 # NOT use its bundled `Provider`, which hardcodes in-memory storage.
 openmls_libcrux_crypto = "0.3"
-# `PollisProvider` no longer uses RustCrypto, but it is still needed by non-test
-# code — `validate_key_package` takes `&RustCrypto` — and by the cross-provider
-# interop test (`commands/mls/tests.rs`), where RustCrypto stands in for the
-# "old app" to prove an old<->new staged rollout can share one MLS group. So it
-# stays a regular dependency rather than moving to dev-dependencies.
-openmls_rust_crypto = "0.5"
 # `test-utils` exposes `SignatureKeyPair::private()` — the ONLY accessor for the
 # raw device signing seed. The overlay relay handshake (`net::overlay`) must sign
 # with the SAME Ed25519 device key the cert chain certifies, so it needs the seed
@@ -286,5 +280,12 @@ required-features = ["cli"]
 # same proof shape as `pollis-relay/tests/proof.rs` T2. rustls 0.23 / tokio-rustls
 # 0.26 are already in the lockfile (reqwest + quinn); no new supply-chain crates.
 [dev-dependencies]
+# TEST-ONLY. No shipping path may construct RustCrypto: it `unimplemented!()`-
+# panics on the post-quantum hybrid suite (#454), so a production call site
+# holding one is a latent panic the moment P2 mints hybrid KeyPackages. Keeping
+# it here means the compiler enforces that. Tests need it because it stands in
+# for the "old app" in the cross-provider interop test (`commands/mls/tests.rs`),
+# which proves an old<->new staged rollout cannot split a live MLS group.
+openmls_rust_crypto = "0.5"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
