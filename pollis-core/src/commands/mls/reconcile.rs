@@ -14,7 +14,10 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 
 use crate::state::AppState;
 
-use super::provider::{parse_credential_device_id, parse_credential_user_id, PollisProvider, CS};
+use super::provider::{
+    parse_credential_device_id, parse_credential_user_id, PollisProvider, CS_CLASSIC,
+    SIGNATURE_SCHEME,
+};
 
 /// Result of the compare-and-swap commit submission in `reconcile_group_mls_impl`.
 enum SubmitOutcome {
@@ -576,7 +579,8 @@ pub async fn reconcile_group_mls_impl(
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
     for (uid, did) in &devices_to_claim {
         let claimed: Option<Vec<u8>> =
-            crate::commands::mls::ds_claim_key_package(state, uid, Some(did)).await?;
+            crate::commands::mls::ds_claim_key_package(state, uid, Some(did), CS_CLASSIC)
+                .await?;
         if let Some(kp) = claimed {
             kp_tuples.push((uid.clone(), did.clone(), kp));
         }
@@ -614,7 +618,7 @@ pub async fn reconcile_group_mls_impl(
         let signer = SignatureKeyPair::read(
             provider.storage(),
             &sig_pub_bytes,
-            CS.signature_algorithm(),
+            SIGNATURE_SCHEME,
         )
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
 

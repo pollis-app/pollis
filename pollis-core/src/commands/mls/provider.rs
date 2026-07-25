@@ -1,7 +1,13 @@
 //! MLS provider and credential helpers.
 //!
-//! Houses `PollisProvider` (the OpenMls provider wiring crypto + storage),
-//! the ciphersuite constant, and the credential format used in MLS leaves.
+//! Houses `PollisProvider` (the OpenMls provider wiring crypto + storage), the
+//! ciphersuite constants and the suite-invariant signature scheme, and the
+//! credential format used in MLS leaves.
+//!
+//! Suite and provider are chosen together — `CS_CLASSIC` with `PollisProvider`,
+//! `CS_HYBRID` with `PollisPqProvider` — because each crypto backend implements
+//! only one of the two. The functions that create suite-bound material take
+//! both as arguments so a caller cannot silently mismatch them.
 
 use openmls::prelude::*;
 use openmls_libcrux_crypto::CryptoProvider as LibcruxCrypto;
@@ -59,7 +65,7 @@ where
 }
 
 /// **The provider every production path uses.** Backed by
-/// `openmls_rust_crypto::RustCrypto`, which serves the classic suite `CS`.
+/// `openmls_rust_crypto::RustCrypto`, which serves [`CS_CLASSIC`].
 ///
 /// Why not libcrux for everything, when libcrux serves the classic suite too and
 /// would spare us a second backend? Because the classic suite's AEAD is
@@ -113,9 +119,45 @@ impl<'a> PollisPqProvider<'a> {
     }
 }
 
-// ── Ciphersuite ───────────────────────────────────────────────────────────────
+// ── Ciphersuites ──────────────────────────────────────────────────────────────
 
-pub(crate) const CS: Ciphersuite = Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+/// The suite every Pollis group uses today: MLS code point `0x0001` —
+/// X25519 + AES-128-GCM + SHA-256 + Ed25519. Served by [`PollisProvider`].
+///
+/// Every production call site passes this explicitly rather than relying on a
+/// default, so "which suite is this group / key package?" is answerable by
+/// reading the call and not by tracing a constant.
+pub(crate) const CS_CLASSIC: Ciphersuite =
+    Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
+
+/// The post-quantum hybrid suite (#454): MLS code point `0x004D` — X-Wing
+/// (X25519 + ML-KEM-768) + ChaCha20-Poly1305 + SHA-256 + Ed25519.
+///
+/// Served ONLY by [`PollisPqProvider`]; `RustCrypto` `unimplemented!()`-panics
+/// on it, so pairing this suite with [`PollisProvider`] is a crash, not a
+/// fallback. **Nothing in production selects it yet** — it exists so the suite
+/// stays compiled, reachable and tested while #454 P2-P4 land.
+///
+/// The code point is still a moving target upstream (`draft-ietf-mls-pq-
+/// ciphersuites-06` dropped X-Wing in favour of `0x004E`/`0x004F`/`0x0052`), so
+/// treat `0x004D` as experimental until the draft settles — see
+/// `docs/pq-hybrid-mls-design.md` §7.
+/// Unused outside tests until #454 P2 — that is the whole point of this phase:
+/// the seam exists and is exercised, but no production path selects it yet.
+#[allow(dead_code)]
+pub(crate) const CS_HYBRID: Ciphersuite =
+    Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;
+
+/// The signature scheme, which is deliberately NOT a per-suite parameter.
+///
+/// Both suites above sign with Ed25519, so a device's stable signing key — the
+/// same key that signs DS requests and that `user_device.device_cert` certifies
+/// — is shared across them by design. Sites that only need
+/// `Ciphersuite::signature_algorithm()` (device signer load/create, group
+/// reload, credential construction) therefore take no suite argument; they use
+/// this constant, and `signature_scheme_is_suite_invariant` in `tests.rs` pins
+/// that both suites really do agree with it.
+pub(crate) const SIGNATURE_SCHEME: SignatureScheme = SignatureScheme::ED25519;
 
 // ── Credential helpers ───────────────────────────────────────────────────────
 

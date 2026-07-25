@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::state::AppState;
 
-use super::provider::{PollisProvider, CS};
+use super::provider::{MlsProvider, PollisProvider, SIGNATURE_SCHEME};
 
 // ── Per-device stable MLS signing key ────────────────────────────────────────
 
@@ -60,11 +60,20 @@ fn store_stable_device_sig_pub_bytes(
 ///
 /// Returns `(SignatureKeyPair, pub_bytes)`. The pub_bytes are also what
 /// gets signed into the `device_cert` in `user_device`.
-pub fn load_or_create_device_signer(
-    provider: &PollisProvider<'_>,
+///
+/// Generic over the crypto backend, and takes no ciphersuite: the signing key
+/// is `SIGNATURE_SCHEME` (Ed25519) under both suites, and both providers share
+/// the same `mls_kv` storage, so a device presents the SAME signing key whether
+/// it is acting in a classic or a hybrid group. That is deliberate — the
+/// device cert certifies one key, not one key per suite.
+pub fn load_or_create_device_signer<C>(
+    provider: &MlsProvider<'_, C>,
     user_id: &str,
     device_id: &str,
-) -> crate::error::Result<(SignatureKeyPair, Vec<u8>)> {
+) -> crate::error::Result<(SignatureKeyPair, Vec<u8>)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     // Fast path: pub bytes are stashed → recover the private side from
     // openmls storage and return.
     if let Some(pub_bytes) = load_stable_device_sig_pub_bytes(
@@ -75,7 +84,7 @@ pub fn load_or_create_device_signer(
         if let Some(kp) = SignatureKeyPair::read(
             provider.storage(),
             &pub_bytes,
-            CS.signature_algorithm(),
+            SIGNATURE_SCHEME,
         ) {
             return Ok((kp, pub_bytes));
         }
@@ -87,7 +96,7 @@ pub fn load_or_create_device_signer(
     }
 
     // Slow path: create, store, stash.
-    let sig_keys = SignatureKeyPair::new(CS.signature_algorithm())
+    let sig_keys = SignatureKeyPair::new(SIGNATURE_SCHEME)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig key gen: {e}")))?;
     sig_keys
         .store(provider.storage())

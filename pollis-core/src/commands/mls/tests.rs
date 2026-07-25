@@ -11,8 +11,9 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 // Re-export the private items from submodules into this `tests` module
 // so the test bodies (which were originally `use super::*` from the
 // single-file module) can keep referencing them by short name.
-use super::group_state::load_group_with_signer;
-use super::provider::{PollisPqProvider, CS};
+use super::group_state::{create_mls_group_in_suite, load_group_with_signer};
+use super::key_packages::build_key_package_in_suite;
+use super::provider::{MlsProvider, PollisPqProvider, CS_CLASSIC, CS_HYBRID, SIGNATURE_SCHEME};
 
 /// Create an in-memory SQLite DB with the `mls_kv` table.
 fn make_db() -> rusqlite::Connection {
@@ -42,13 +43,13 @@ fn create_group(
     user_id: &str,
 ) -> SignatureKeyPair {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, &test_device_id(user_id));
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS.signature_algorithm(),
+        CS_CLASSIC.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -57,7 +58,7 @@ fn create_group(
 
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
     let config = MlsGroupCreateConfig::builder()
-        .ciphersuite(CS)
+        .ciphersuite(CS_CLASSIC)
         .use_ratchet_tree_extension(true)
         .build();
 
@@ -70,13 +71,13 @@ fn create_group(
 /// Generate a key package for `user_id` in `conn` and return the TLS bytes.
 fn gen_key_package(conn: &rusqlite::Connection, user_id: &str) -> Vec<u8> {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, &test_device_id(user_id));
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS.signature_algorithm(),
+        CS_CLASSIC.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -84,7 +85,7 @@ fn gen_key_package(conn: &rusqlite::Connection, user_id: &str) -> Vec<u8> {
     };
 
     let bundle = KeyPackage::builder()
-        .build(CS, &provider, &sig_keys, cred_with_key)
+        .build(CS_CLASSIC, &provider, &sig_keys, cred_with_key)
         .unwrap();
 
     bundle.key_package().tls_serialize_detached().unwrap()
@@ -698,13 +699,13 @@ fn create_group_with_device(
     device_id: &str,
 ) -> SignatureKeyPair {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, device_id);
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS.signature_algorithm(),
+        CS_CLASSIC.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -713,7 +714,7 @@ fn create_group_with_device(
 
     let group_id = GroupId::from_slice(conversation_id.as_bytes());
     let config = MlsGroupCreateConfig::builder()
-        .ciphersuite(CS)
+        .ciphersuite(CS_CLASSIC)
         .use_ratchet_tree_extension(true)
         .build();
 
@@ -730,13 +731,13 @@ fn gen_key_package_with_device(
     device_id: &str,
 ) -> Vec<u8> {
     let provider = PollisProvider::new(conn);
-    let sig_keys = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+    let sig_keys = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
     sig_keys.store(provider.storage()).unwrap();
 
     let credential = make_credential(user_id, device_id);
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS.signature_algorithm(),
+        CS_CLASSIC.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -744,7 +745,7 @@ fn gen_key_package_with_device(
     };
 
     let bundle = KeyPackage::builder()
-        .build(CS, &provider, &sig_keys, cred_with_key)
+        .build(CS_CLASSIC, &provider, &sig_keys, cred_with_key)
         .unwrap();
 
     bundle.key_package().tls_serialize_detached().unwrap()
@@ -766,7 +767,7 @@ fn gen_key_package_with_existing_signer(
     let credential = make_credential(user_id, device_id);
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig_keys.to_public_vec().into(),
-        CS.signature_algorithm(),
+        CS_CLASSIC.signature_algorithm(),
     ).unwrap();
     let cred_with_key = CredentialWithKey {
         credential,
@@ -774,7 +775,7 @@ fn gen_key_package_with_existing_signer(
     };
 
     let bundle = KeyPackage::builder()
-        .build(CS, &provider, sig_keys, cred_with_key)
+        .build(CS_CLASSIC, &provider, sig_keys, cred_with_key)
         .unwrap();
 
     bundle.key_package().tls_serialize_detached().unwrap()
@@ -1030,7 +1031,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     // enrollments (simulates `load_or_create_device_signer`).
     let bob_signer = {
         let provider = PollisProvider::new(&bob_db);
-        let sk = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+        let sk = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
         sk.store(provider.storage()).unwrap();
         sk
     };
@@ -1057,7 +1058,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     let bob_db_v2 = make_db();
     let bob_signer_v2 = {
         let provider = PollisProvider::new(&bob_db_v2);
-        let sk = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+        let sk = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
         sk.store(provider.storage()).unwrap();
         sk
     };
@@ -1546,7 +1547,7 @@ fn reconcile_e2e_remove_then_communicate() {
 fn cred_with_key(sig: &SignatureKeyPair, user: &str, device: &str) -> CredentialWithKey {
     let sig_pub = OpenMlsSignaturePublicKey::new(
         sig.to_public_vec().into(),
-        CS.signature_algorithm(),
+        CS_CLASSIC.signature_algorithm(),
     )
     .unwrap();
     CredentialWithKey {
@@ -1573,16 +1574,16 @@ fn cross_provider_classic_flow<A: OpenMlsProvider, B: OpenMlsProvider>(
     let group_id = GroupId::from_slice(b"01JTEST0000000000CROSSPROV");
 
     // Creator ("alice") identity.
-    let alice_sig = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+    let alice_sig = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
     alice_sig.store(creator.storage()).unwrap();
     let alice_cwk = cred_with_key(&alice_sig, "alice", "alice_dev");
 
     // Joiner ("bob") identity + KeyPackage, built with the JOINER's provider.
-    let bob_sig = SignatureKeyPair::new(CS.signature_algorithm()).unwrap();
+    let bob_sig = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
     bob_sig.store(joiner.storage()).unwrap();
     let bob_cwk = cred_with_key(&bob_sig, "bob", "bob_dev");
     let bob_kp_bytes = KeyPackage::builder()
-        .build(CS, joiner, &bob_sig, bob_cwk)
+        .build(CS_CLASSIC, joiner, &bob_sig, bob_cwk)
         .unwrap()
         .key_package()
         .tls_serialize_detached()
@@ -1590,7 +1591,7 @@ fn cross_provider_classic_flow<A: OpenMlsProvider, B: OpenMlsProvider>(
 
     // Creator creates the group.
     let config = MlsGroupCreateConfig::builder()
-        .ciphersuite(CS)
+        .ciphersuite(CS_CLASSIC)
         .use_ratchet_tree_extension(true)
         .build();
     let mut alice_group = MlsGroup::new_with_group_id(
@@ -1762,14 +1763,14 @@ fn libcrux_supports_self_contradiction_is_pinned() {
 
     // Half 1: `supports()` REJECTS the very suite Pollis ships on.
     assert!(
-        matches!(crypto.supports(CS), Err(CryptoError::UnsupportedCiphersuite)),
+        matches!(crypto.supports(CS_CLASSIC), Err(CryptoError::UnsupportedCiphersuite)),
         "upstream changed: libcrux supports() now accepts our AES-GCM suite — \
          re-evaluate whether any flow consults supports() before relying on it"
     );
 
     // Half 2: …yet `supported_ciphersuites()` INCLUDES that same suite.
     assert!(
-        crypto.supported_ciphersuites().contains(&CS),
+        crypto.supported_ciphersuites().contains(&CS_CLASSIC),
         "upstream changed: libcrux dropped our AES-GCM suite from \
          supported_ciphersuites() — classic groups may no longer be serviceable"
     );
@@ -1777,10 +1778,10 @@ fn libcrux_supports_self_contradiction_is_pinned() {
 
 /// T3. Hybrid suite reachability — landing the P0 proof as a permanent test.
 ///
-/// Pollis does NOT yet use the post-quantum hybrid suite; the production
-/// ciphersuite constant `CS` is unchanged and suite parametrisation is a later
-/// phase (#454 P1b). This test guards only that the CAPABILITY stays reachable
-/// through the EXACT provider Pollis ships (`PollisProvider` = libcrux crypto +
+/// Pollis does NOT yet use the post-quantum hybrid suite: every production call
+/// site passes `CS_CLASSIC`, and choosing `CS_HYBRID` for a real conversation is
+/// #454 P2. This test guards only that the CAPABILITY stays reachable through
+/// the exact PQ provider Pollis would use (`PollisPqProvider` = libcrux crypto +
 /// our `MlsStore`), since every later phase depends on it.
 ///
 /// It asserts the suite is advertised, runs a full two-party round-trip on it,
@@ -1789,9 +1790,6 @@ fn libcrux_supports_self_contradiction_is_pinned() {
 /// `hpke_init_key` is 1216 bytes: ML-KEM-768 public key (1184) + X25519 (32).
 #[test]
 fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
-    const HYBRID: Ciphersuite =
-        Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;
-
     let alice_db = make_db();
     let bob_db = make_db();
 
@@ -1799,20 +1797,20 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
     {
         let provider = PollisPqProvider::new(&alice_db);
         assert!(
-            provider.crypto().supported_ciphersuites().contains(&HYBRID),
+            provider.crypto().supported_ciphersuites().contains(&CS_HYBRID),
             "libcrux provider must advertise the PQ hybrid suite — later #454 \
              phases depend on it"
         );
     }
 
-    // Bob builds a KeyPackage on the HYBRID suite.
+    // Bob builds a KeyPackage on the CS_HYBRID suite.
     let (bob_kp_bytes, bob_hpke_init_len) = {
         let provider = PollisPqProvider::new(&bob_db);
-        let sig = SignatureKeyPair::new(HYBRID.signature_algorithm()).unwrap();
+        let sig = SignatureKeyPair::new(CS_HYBRID.signature_algorithm()).unwrap();
         sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
             sig.to_public_vec().into(),
-            HYBRID.signature_algorithm(),
+            CS_HYBRID.signature_algorithm(),
         )
         .unwrap();
         let cwk = CredentialWithKey {
@@ -1820,7 +1818,7 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
             signature_key: sig_pub.into(),
         };
         let bundle = KeyPackage::builder()
-            .build(HYBRID, &provider, &sig, cwk)
+            .build(CS_HYBRID, &provider, &sig, cwk)
             .unwrap();
         let init_len = bundle.key_package().hpke_init_key().as_slice().len();
         (
@@ -1838,13 +1836,13 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
     );
 
     // Alice creates the group on the hybrid suite and adds Bob.
-    let alice_sig = SignatureKeyPair::new(HYBRID.signature_algorithm()).unwrap();
+    let alice_sig = SignatureKeyPair::new(CS_HYBRID.signature_algorithm()).unwrap();
     let (welcome_bytes, mut alice_group) = {
         let provider = PollisPqProvider::new(&alice_db);
         alice_sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
             alice_sig.to_public_vec().into(),
-            HYBRID.signature_algorithm(),
+            CS_HYBRID.signature_algorithm(),
         )
         .unwrap();
         let cwk = CredentialWithKey {
@@ -1852,7 +1850,7 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
             signature_key: sig_pub.into(),
         };
         let config = MlsGroupCreateConfig::builder()
-            .ciphersuite(HYBRID)
+            .ciphersuite(CS_HYBRID)
             .use_ratchet_tree_extension(true)
             .build();
         let group_id = GroupId::from_slice(b"01JTEST0000000000XWINGHYBRD");
@@ -1881,9 +1879,9 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
     //
     // Driven through openmls directly rather than through `try_mls_encrypt` /
     // `try_mls_decrypt`: those production helpers construct `PollisProvider`
-    // (RustCrypto), which is CORRECT — no production path may select the hybrid
-    // suite until #454 P1b makes the suite an explicit parameter. Reaching for
-    // them here would only prove that RustCrypto panics on X-Wing.
+    // (RustCrypto), which is CORRECT — no production path selects the hybrid
+    // suite until #454 P2. Reaching for them here would only prove that
+    // RustCrypto panics on X-Wing.
     {
         let provider = PollisPqProvider::new(&bob_db);
         let mut reader: &[u8] = &welcome_bytes;
@@ -1899,7 +1897,7 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
                 .unwrap()
                 .into_group(&provider)
                 .unwrap();
-        assert_eq!(bob_group.ciphersuite(), HYBRID);
+        assert_eq!(bob_group.ciphersuite(), CS_HYBRID);
 
         let ct = {
             let provider = PollisPqProvider::new(&alice_db);
@@ -1974,13 +1972,10 @@ fn validate_key_package_round_trip(provider: &impl OpenMlsProvider, suite: Ciphe
 #[test]
 fn validate_key_package_handles_both_suites() {
     let classic_db = make_db();
-    validate_key_package_round_trip(&PollisProvider::new(&classic_db), CS);
+    validate_key_package_round_trip(&PollisProvider::new(&classic_db), CS_CLASSIC);
 
     let hybrid_db = make_db();
-    validate_key_package_round_trip(
-        &PollisPqProvider::new(&hybrid_db),
-        Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519,
-    );
+    validate_key_package_round_trip(&PollisPqProvider::new(&hybrid_db), CS_HYBRID);
 }
 
 /// T5. **The routing invariant.** `PollisProvider` — the provider EVERY
@@ -2011,7 +2006,7 @@ fn classic_provider_never_routes_to_libcrux() {
         backend_of(&classic)
     );
     assert_eq!(
-        CS.aead_algorithm(),
+        CS_CLASSIC.aead_algorithm(),
         AeadType::Aes128Gcm,
         "the classic suite is AES-GCM — the premise of the routing split above"
     );
@@ -2023,5 +2018,179 @@ fn classic_provider_never_routes_to_libcrux() {
         backend_of(&pq).contains("libcrux"),
         "PollisPqProvider must stay libcrux-backed; got {}",
         backend_of(&pq)
+    );
+}
+
+// ── #454 P1b: the ciphersuite is a real parameter, not a constant ────────────
+
+/// The signature scheme is shared by both suites, which is why the many call
+/// sites that only need `signature_algorithm()` take no suite argument and use
+/// `SIGNATURE_SCHEME` instead (see `provider.rs`).
+///
+/// If a future suite ever signs with something other than Ed25519, this fails
+/// first and points at every site that assumed otherwise — including the device
+/// cross-signing cert, which certifies ONE key per device, not one per suite.
+#[test]
+fn signature_scheme_is_suite_invariant() {
+    assert_eq!(CS_CLASSIC.signature_algorithm(), SIGNATURE_SCHEME);
+    assert_eq!(CS_HYBRID.signature_algorithm(), SIGNATURE_SCHEME);
+}
+
+/// Drive a full two-party flow — create group, build KeyPackage, validate, add,
+/// Welcome, join, application message — entirely through the PRODUCTION suite
+/// seams (`create_mls_group_in_suite`, `build_key_package_in_suite`,
+/// `load_group_with_signer`, `validate_key_package`) at an arbitrary suite.
+///
+/// Deliberately not hand-rolled openmls: the point is that the parametrisation
+/// is real in the code Pollis actually ships, not merely that openmls can do it.
+fn suite_seam_round_trip<CA, CB>(
+    alice: &MlsProvider<'_, CA>,
+    bob: &MlsProvider<'_, CB>,
+    suite: Ciphersuite,
+    conversation_id: &str,
+) where
+    CA: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+    CB: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    create_mls_group_in_suite(alice, conversation_id, "alice", "alice_dev", suite)
+        .unwrap_or_else(|e| panic!("create group on {suite:?}: {e}"));
+
+    let (_bob_ref, bob_kp_bytes) = build_key_package_in_suite(bob, "bob", "bob_dev", suite)
+        .unwrap_or_else(|e| panic!("build key package on {suite:?}: {e}"));
+
+    let (mut alice_group, alice_sig) =
+        load_group_with_signer(alice, conversation_id).expect("reload alice's group");
+    assert_eq!(
+        alice_group.ciphersuite(),
+        suite,
+        "the group must be created in the suite the caller asked for"
+    );
+
+    // The production validator must accept the package on this suite (it is
+    // generic over the backend precisely so the hybrid case is not a panic).
+    validate_key_package(&bob_kp_bytes, "bob", alice.crypto())
+        .unwrap_or_else(|e| panic!("validate key package on {suite:?}: {e}"));
+
+    let welcome_bytes = {
+        let mut reader: &[u8] = &bob_kp_bytes;
+        let kp = KeyPackageIn::tls_deserialize(&mut reader)
+            .unwrap()
+            .validate(alice.crypto(), ProtocolVersion::Mls10)
+            .unwrap();
+        let (_commit, welcome, _) = alice_group.add_members(alice, &alice_sig, &[kp]).unwrap();
+        alice_group.merge_pending_commit(alice).unwrap();
+        welcome.tls_serialize_detached().unwrap()
+    };
+
+    let mut reader: &[u8] = &welcome_bytes;
+    let welcome = match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::Welcome(w) => w,
+        _ => panic!("expected a Welcome"),
+    };
+    let join_config = MlsGroupJoinConfig::builder()
+        .use_ratchet_tree_extension(true)
+        .build();
+    let mut bob_group = StagedWelcome::new_from_welcome(bob, &join_config, welcome, None)
+        .unwrap()
+        .into_group(bob)
+        .unwrap();
+    assert_eq!(
+        bob_group.ciphersuite(),
+        suite,
+        "the joiner must land in the same suite the creator chose"
+    );
+
+    let ct = alice_group
+        .create_message(alice, &alice_sig, b"seam check")
+        .unwrap()
+        .tls_serialize_detached()
+        .unwrap();
+    let mut reader: &[u8] = &ct;
+    let pm = MlsMessageIn::tls_deserialize(&mut reader)
+        .unwrap()
+        .try_into_protocol_message()
+        .unwrap();
+    let processed = bob_group.process_message(bob, pm).unwrap();
+    assert_eq!(parse_credential_user_id(processed.credential()), "alice");
+    match processed.into_content() {
+        ProcessedMessageContent::ApplicationMessage(m) => {
+            assert_eq!(m.into_bytes(), b"seam check");
+        }
+        _ => panic!("expected an application message on {suite:?}"),
+    }
+}
+
+/// The classic suite still round-trips through the (now parametrised) seams,
+/// and reports the classic code point. This is the no-behaviour-change half of
+/// P1b: production passes `CS_CLASSIC` everywhere, so this is the path every
+/// user is on.
+#[test]
+fn classic_suite_round_trips_through_the_production_seams() {
+    let alice_db = make_db();
+    let bob_db = make_db();
+    let alice = PollisProvider::new(&alice_db);
+    let bob = PollisProvider::new(&bob_db);
+
+    suite_seam_round_trip(&alice, &bob, CS_CLASSIC, "01JTESTSEAMCLASSIC00000000");
+    assert_eq!(u16::from(CS_CLASSIC), 0x0001);
+}
+
+/// The seam is REAL, not cosmetic: passing `CS_HYBRID` produces a genuinely
+/// post-quantum group through the same production functions, with the PQ
+/// provider that serves that suite.
+///
+/// Nothing in production selects this yet — `init_mls_group` and
+/// `build_one_key_package` both pass `CS_CLASSIC`. Making a real conversation
+/// hybrid is #454 P2; this test only guarantees P2 has a working seam to use.
+#[test]
+fn hybrid_suite_round_trips_through_the_production_seams() {
+    let alice_db = make_db();
+    let bob_db = make_db();
+    let alice = PollisPqProvider::new(&alice_db);
+    let bob = PollisPqProvider::new(&bob_db);
+
+    suite_seam_round_trip(&alice, &bob, CS_HYBRID, "01JTESTSEAMHYBRID000000000");
+    assert_eq!(u16::from(CS_HYBRID), 0x004D);
+}
+
+/// The two suites are genuinely different key exchanges, which is the entire
+/// point of #454. Asserted structurally on the KeyPackage the production builder
+/// emits: X25519 alone is a 32-byte HPKE init key, X-Wing is ML-KEM-768's 1184
+/// plus X25519's 32.
+#[test]
+fn the_two_suites_produce_structurally_different_key_packages() {
+    let classic_db = make_db();
+    let hybrid_db = make_db();
+
+    let classic = PollisProvider::new(&classic_db);
+    let (_, classic_kp) =
+        build_key_package_in_suite(&classic, "bob", "bob_dev", CS_CLASSIC).unwrap();
+    let hybrid = PollisPqProvider::new(&hybrid_db);
+    let (_, hybrid_kp) =
+        build_key_package_in_suite(&hybrid, "bob", "bob_dev", CS_HYBRID).unwrap();
+
+    // Each package is validated by the backend that serves its suite — the
+    // classic one cannot validate an X-Wing package, it would have to implement
+    // X-Wing to do so.
+    fn init_key_len(bytes: &[u8], crypto: &impl openmls_traits::crypto::OpenMlsCrypto) -> usize {
+        let mut reader: &[u8] = bytes;
+        KeyPackageIn::tls_deserialize(&mut reader)
+            .unwrap()
+            .validate(crypto, ProtocolVersion::Mls10)
+            .unwrap()
+            .hpke_init_key()
+            .as_slice()
+            .len()
+    }
+
+    assert_eq!(
+        init_key_len(&classic_kp, classic.crypto()),
+        32,
+        "the classic init key is a bare X25519 public key"
+    );
+    assert_eq!(
+        init_key_len(&hybrid_kp, hybrid.crypto()),
+        1216,
+        "the hybrid init key must be ML-KEM-768 (1184) + X25519 (32)"
     );
 }
