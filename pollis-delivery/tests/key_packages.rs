@@ -15,18 +15,16 @@ use std::sync::Arc;
 
 use pollis_delivery::db::Db;
 use pollis_delivery::devices::{
-    apply_claim_key_package, apply_publish_key_packages, ClaimKeyPackageBody, ClaimOutcome,
-    KeyPackageEntry, PublishKeyPackagesBody, CIPHERSUITE_CLASSIC,
+    apply_claim_key_package, apply_publish_key_packages, apply_replenish_key_packages,
+    ClaimKeyPackageBody, ClaimOutcome, KeyPackageEntry, PublishKeyPackagesBody,
+    ReplenishKeyPackagesBody, CIPHERSUITE_CLASSIC, CIPHERSUITE_HYBRID,
 };
 use pollis_delivery::writes::WriteOutcome;
 
-/// The experimental X-Wing hybrid code point (#454). Only its DISTINCTNESS from
-/// the classic one matters to the DS — the suite is a routing label here, never
-/// something the DS interprets.
-const CIPHERSUITE_HYBRID: i64 = 0x004D;
-
-// Minimal slice of `mls_key_package` — the columns the claim reads/writes. No
-// `users` FK (foreign_keys=OFF in the local test DB) so the test is self-contained.
+// Minimal slices of `mls_key_package` + `user_device` — the columns these writes
+// read/touch. No `users` FK (foreign_keys=OFF in the local test DB) so the test
+// is self-contained. `user_device.pq_capable` mirrors migration `000010`: NOT
+// NULL DEFAULT 0, so a device is classic-only until a hybrid publish flips it.
 const SCHEMA: &str = "\
 CREATE TABLE mls_key_package (\
   ref_hash    TEXT PRIMARY KEY,\
@@ -36,6 +34,12 @@ CREATE TABLE mls_key_package (\
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),\
   device_id   TEXT,\
   ciphersuite INTEGER NOT NULL DEFAULT 1\
+);\
+CREATE TABLE user_device (\
+  user_id    TEXT NOT NULL,\
+  device_id  TEXT NOT NULL,\
+  pq_capable INTEGER NOT NULL DEFAULT 0,\
+  PRIMARY KEY (user_id, device_id)\
 );";
 
 async fn fresh_db() -> Arc<Db> {
@@ -256,6 +260,62 @@ async fn publish_one(db: &Db, user: &str, device: &str, ref_hash: &str, suite: O
     }
 }
 
+/// Register a device row so `pq_capable` has somewhere to be flipped.
+async fn insert_device(db: &Db, user: &str, device: &str) {
+    db.conn()
+        .unwrap()
+        .execute(
+            "INSERT INTO user_device (user_id, device_id) VALUES (?1, ?2)",
+            libsql::params![user.to_string(), device.to_string()],
+        )
+        .await
+        .unwrap();
+}
+
+/// Read a device's `pq_capable` flag.
+async fn pq_capable(db: &Db, user: &str, device: &str) -> i64 {
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT pq_capable FROM user_device WHERE user_id = ?1 AND device_id = ?2",
+            libsql::params![user.to_string(), device.to_string()],
+        )
+        .await
+        .unwrap();
+    rows.next().await.unwrap().expect("device row").get::<i64>(0).unwrap()
+}
+
+/// Count a device's unclaimed packages in one suite.
+async fn unclaimed_in_suite(db: &Db, user: &str, device: &str, suite: i64) -> i64 {
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM mls_key_package \
+             WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3",
+            libsql::params![user.to_string(), device.to_string(), suite],
+        )
+        .await
+        .unwrap();
+    rows.next().await.unwrap().expect("count row").get::<i64>(0).unwrap()
+}
+
+/// A replenish body publishing `refs` in one suite (the client's rotation shape).
+fn replenish_body(user: &str, device: &str, suite: i64, refs: &[&str]) -> ReplenishKeyPackagesBody {
+    use base64::Engine as _;
+    ReplenishKeyPackagesBody {
+        device_id: device.to_string(),
+        packages: refs
+            .iter()
+            .map(|r| KeyPackageEntry {
+                ref_hash: r.to_string(),
+                key_package: base64::engine::general_purpose::STANDARD.encode(r.as_bytes()),
+                ciphersuite: Some(suite),
+            })
+            .collect(),
+        user_id: Some(user.to_string()),
+    }
+}
+
 async fn stored_suite(db: &Db, ref_hash: &str) -> i64 {
     let conn = db.conn().unwrap();
     let mut rows = conn
@@ -368,4 +428,103 @@ async fn the_two_suite_pools_do_not_contaminate_each_other() {
         apply_claim_key_package(&conn, &device_body("bob", "dev1")).await.unwrap(),
         ClaimOutcome::NoKeyPackage
     ));
+}
+
+// ── #454 P2: pq_capable is derived from the hybrid pool, per-suite rotation ───
+
+/// Publishing a hybrid pool is what makes a device `pq_capable` — and ONLY a
+/// hybrid pool does. The DS derives the flag from what actually landed in
+/// `mls_key_package`, never from a client assertion, so the flag and the pool can
+/// never disagree. A classic-only publish must leave it off.
+#[tokio::test(flavor = "multi_thread")]
+async fn publishing_a_hybrid_pool_flips_pq_capable_and_classic_does_not() {
+    let db = fresh_db().await;
+    insert_device(&db, "bob", "dev1").await;
+    assert_eq!(pq_capable(&db, "bob", "dev1").await, 0, "a fresh device is classic-only");
+
+    // A classic publish must NOT set the flag.
+    publish_one(&db, "bob", "dev1", "ref-classic", Some(CIPHERSUITE_CLASSIC)).await;
+    assert_eq!(
+        pq_capable(&db, "bob", "dev1").await,
+        0,
+        "a classic-only publish must never advertise PQ capability"
+    );
+
+    // A hybrid publish flips it on.
+    publish_one(&db, "bob", "dev1", "ref-hybrid", Some(CIPHERSUITE_HYBRID)).await;
+    assert_eq!(
+        pq_capable(&db, "bob", "dev1").await,
+        1,
+        "publishing a hybrid pool must flip pq_capable on"
+    );
+
+    // Scoped to the publishing device only — a sibling device stays classic.
+    insert_device(&db, "bob", "dev2").await;
+    publish_one(&db, "bob", "dev2", "ref-classic-2", Some(CIPHERSUITE_CLASSIC)).await;
+    assert_eq!(pq_capable(&db, "bob", "dev2").await, 0, "the flag is per device");
+}
+
+/// A rotation (`replenish`) of ONE suite must leave the OTHER suite's pool intact.
+/// The DS scopes its DELETE to the suites present in the request, so a classic
+/// rotation cannot drain the hybrid pool (or vice versa) — the invariant the P2
+/// client relies on when it rotates both pools in one call.
+#[tokio::test(flavor = "multi_thread")]
+async fn rotating_one_suite_leaves_the_other_pool_intact() {
+    let db = fresh_db().await;
+    insert_device(&db, "bob", "dev1").await;
+
+    // Seed both pools via replenish.
+    let conn = db.conn().unwrap();
+    apply_replenish_key_packages(
+        &conn,
+        Some("bob"),
+        &replenish_body("bob", "dev1", CIPHERSUITE_CLASSIC, &["c1", "c2"]),
+    )
+    .await
+    .unwrap();
+    apply_replenish_key_packages(
+        &conn,
+        Some("bob"),
+        &replenish_body("bob", "dev1", CIPHERSUITE_HYBRID, &["h1", "h2"]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_CLASSIC).await, 2);
+    assert_eq!(unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_HYBRID).await, 2);
+    assert_eq!(pq_capable(&db, "bob", "dev1").await, 1, "the hybrid seed made it pq_capable");
+
+    // Rotate ONLY the classic pool. The hybrid pool must survive untouched.
+    apply_replenish_key_packages(
+        &conn,
+        Some("bob"),
+        &replenish_body("bob", "dev1", CIPHERSUITE_CLASSIC, &["c3", "c4", "c5"]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_CLASSIC).await,
+        3,
+        "the classic pool was replaced by the new rotation"
+    );
+    assert_eq!(
+        unclaimed_in_suite(&db, "bob", "dev1", CIPHERSUITE_HYBRID).await,
+        2,
+        "a classic rotation must NOT drain the hybrid pool"
+    );
+
+    // The old classic refs are gone (rotated out); the hybrid refs remain.
+    assert_eq!(stored_suite(&db, "h1").await, CIPHERSUITE_HYBRID);
+    let conn = db.conn().unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*) FROM mls_key_package WHERE ref_hash IN ('c1','c2')",
+            (),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.next().await.unwrap().unwrap().get::<i64>(0).unwrap(),
+        0,
+        "the superseded classic packages were deleted"
+    );
 }

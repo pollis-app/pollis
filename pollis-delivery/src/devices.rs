@@ -86,6 +86,16 @@ fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 /// exactly the behaviour they have today.
 pub const CIPHERSUITE_CLASSIC: i64 = 0x0001;
 
+/// The MLS code point of `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` — the
+/// post-quantum hybrid suite (#454). A device that publishes a pool in this suite
+/// is, by that act, `pq_capable`: it holds hybrid KeyPackage private keys and can
+/// join a hybrid group. Publishing hybrid packages is therefore what flips
+/// `user_device.pq_capable` on (see [`mark_pq_capable`]).
+///
+/// Like [`CIPHERSUITE_CLASSIC`] the DS only uses this as a routing/label value; it
+/// never parses the opaque `key_package` blob to confirm the suite.
+pub const CIPHERSUITE_HYBRID: i64 = 0x004D;
+
 /// One published key package: its hex hash-ref and the TLS-serialized
 /// `KeyPackage` bytes, base64 (STANDARD) since they are binary.
 #[derive(Deserialize)]
@@ -109,6 +119,35 @@ impl KeyPackageEntry {
     fn suite(&self) -> i64 {
         self.ciphersuite.unwrap_or(CIPHERSUITE_CLASSIC)
     }
+}
+
+/// Flip `user_device.pq_capable` on for `(actor, device_id)` when this write
+/// published at least one hybrid package. Publishing a hybrid pool is the ONLY
+/// thing that sets the flag (the replenish path runs the same UPDATE inside its
+/// transaction): a device advertises post-quantum capability by the *fact of having published a
+/// hybrid KeyPackage pool*, not by a client-asserted claim — so the server derives
+/// it from what actually landed in `mls_key_package`, keeping the flag and the
+/// pool from ever disagreeing (invalid-states-unrepresentable; CLAUDE.md forbids a
+/// client-side `user_device` UPDATE, so publication is the seam that earns it).
+///
+/// Monotonic on purpose: a later classic-only top-up never clears it — a device
+/// does not lose hybrid capability by replenishing its classic pool. Scoped
+/// `user_id = actor`, so a caller can only ever mark its own device. A no-op when
+/// no suite in the batch is hybrid.
+async fn mark_pq_capable(
+    conn: &Connection,
+    actor: &str,
+    device_id: &str,
+    suites: impl IntoIterator<Item = i64>,
+) -> anyhow::Result<()> {
+    if suites.into_iter().any(|s| s == CIPHERSUITE_HYBRID) {
+        conn.execute(
+            "UPDATE user_device SET pq_capable = 1 WHERE user_id = ?1 AND device_id = ?2",
+            libsql::params![actor.to_string(), device_id.to_string()],
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 // ── POST /v1/key-packages ────────────────────────────────────────────────────
@@ -182,6 +221,8 @@ pub async fn apply_publish_key_packages(
         )
         .await?;
     }
+    // A hybrid pool having landed is what makes the device pq_capable.
+    mark_pq_capable(conn, &actor, &body.device_id, body.packages.iter().map(|p| p.suite())).await?;
     Ok(WriteOutcome::Ok)
 }
 
@@ -277,6 +318,17 @@ pub async fn apply_replenish_key_packages(
                 body.device_id.clone(),
                 *suite,
             ],
+        )
+        .await?;
+    }
+    // In the same transaction as the pool it rotated in: a hybrid rotation makes
+    // the device pq_capable, and the flag flips atomically with the pool landing
+    // so the two can never be observed disagreeing. Monotonic — a classic-only
+    // rotation leaves an already-set flag alone.
+    if suites.contains(&CIPHERSUITE_HYBRID) {
+        tx.execute(
+            "UPDATE user_device SET pq_capable = 1 WHERE user_id = ?1 AND device_id = ?2",
+            libsql::params![actor.clone(), body.device_id.clone()],
         )
         .await?;
     }

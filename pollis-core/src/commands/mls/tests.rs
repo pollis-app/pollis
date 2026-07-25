@@ -2139,9 +2139,10 @@ fn classic_suite_round_trips_through_the_production_seams() {
 /// post-quantum group through the same production functions, with the PQ
 /// provider that serves that suite.
 ///
-/// Nothing in production selects this yet — `init_mls_group` and
-/// `build_one_key_package` both pass `CS_CLASSIC`. Making a real conversation
-/// hybrid is #454 P2; this test only guarantees P2 has a working seam to use.
+/// No GROUP selects this yet — `init_mls_group` and every add path still pass
+/// `CS_CLASSIC` (#454 P2 gives devices a hybrid KeyPackage pool but keeps every
+/// group classic; making a real conversation hybrid is P3/P4). This test
+/// guarantees those later phases have a working group seam to use.
 #[test]
 fn hybrid_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();

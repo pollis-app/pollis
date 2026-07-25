@@ -829,11 +829,34 @@ so runtime behaviour is byte-identical to today.
 `ci/mls-test-gate`; a schema diff shows only additive migrations; no group's observed suite
 changes.
 
-**Phase 2 — Hybrid key packages (Front B).** Hybrid-capable devices publish both KP
+**Phase 2 — Hybrid key packages (Front B): DONE.** ✅ Hybrid-capable devices publish both KP
 pools; DS claims by suite; `pq_capable` set. Still no group goes hybrid.
 **Acceptance:** S3's first half (mixed fleet, no migration) passes; a device advertises
 both pools; claiming a classic KP for an old-app add still works; KP-size assertions
 within budget (§4.3).
+**What shipped:**
+- `ensure_mls_key_package` (rotate) and `replenish_key_packages` (top-up) iterate
+  `PUBLISHED_SUITES = [CS_CLASSIC, CS_HYBRID]`, building each pool through its
+  paired provider (`PollisProvider`/RustCrypto for classic,
+  `PollisPqProvider`/libcrux for hybrid) and rotating/topping-up **per suite** so
+  neither pool is ever silently drained. The rotation sends both pools in one
+  `/v1/key-packages/replenish`; the DS already scopes its DELETE per suite.
+- `pq_capable` is flipped to `1` by the DS `apply_publish_key_packages` /
+  `apply_replenish_key_packages` **only** when the write carries a hybrid package —
+  derived from what actually landed in `mls_key_package`, never a client-side
+  `user_device` UPDATE (CLAUDE.md). Monotonic: a later classic-only top-up never
+  clears it. The classic no-DS fallback mirrors this in
+  `insert_packages_direct`.
+- **No group changed suite:** `init_mls_group` and every add/invite path still pass
+  `CS_CLASSIC` — untouched.
+- Tests: `pq_key_packages::hybrid_device_advertises_both_pools_and_pq_capable`
+  (flows) proves both pools publish, `pq_capable` flips only after the hybrid pool
+  lands, and a suite-less (old-app) classic claim still succeeds and draws from the
+  classic pool only; DS `publishing_a_hybrid_pool_flips_pq_capable_and_classic_does_not`
+  and `rotating_one_suite_leaves_the_other_pool_intact`;
+  `claiming_hybrid_against_a_classic_only_pool_finds_nothing` (P1b, the classic-only
+  → no-KP outcome) and the `the_two_suites_produce_structurally_different_key_packages`
+  KP-size pins (classic init key 32 B, hybrid 1216 B).
 
 **Phase 3 — New groups hybrid (Front A).** New groups whose full invited roster is
 hybrid-capable are created on `CS_HYBRID`; old-app-inclusive rosters stay classic.
@@ -937,7 +960,9 @@ AES-128-GCM.
   the pools it publishes, which matters the moment P2 gives a device two pools. Gated by
   a full two-party round-trip driven through the production seams on BOTH suites, plus
   DS tests that the two pools cannot contaminate each other.
-- **P2 — Hybrid key packages** (Front B): dual KP pools, claim-by-suite.
+- **P2 — Hybrid key packages** (Front B): **DONE.** Dual KP pools published + rotated
+  per suite, claim-by-suite, `pq_capable` derived server-side from the published
+  hybrid pool. No group goes hybrid yet.
 - **P3 — New groups hybrid** (Front A).
 - **P4 — Migrate existing groups** (Front C) at epoch boundary, capability-gated.
 - **P5 — Fleet completion**; classic retirement only after measured full-hybrid uptake;

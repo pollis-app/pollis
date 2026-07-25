@@ -25,6 +25,8 @@ mod heavy_churn;
 mod messages;
 #[path = "flows/model.rs"]
 mod model;
+#[path = "flows/pq_key_packages.rs"]
+mod pq_key_packages;
 #[path = "flows/rejoin.rs"]
 mod rejoin;
 #[path = "flows/sealed_sender.rs"]

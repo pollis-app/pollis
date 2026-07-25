@@ -17,9 +17,20 @@ use crate::state::AppState;
 
 use super::device::load_or_create_device_signer;
 use super::provider::{
-    make_credential, parse_credential_user_id, MlsProvider, PollisProvider, CS_CLASSIC,
-    SIGNATURE_SCHEME,
+    make_credential, parse_credential_user_id, MlsProvider, PollisPqProvider, PollisProvider,
+    CS_CLASSIC, CS_HYBRID, SIGNATURE_SCHEME,
 };
+
+/// The ciphersuites every P2+ device maintains a KeyPackage pool for. A hybrid-
+/// capable build (all of them from #454 P2 on) keeps a classic pool AND a hybrid
+/// pool side by side, so a peer adding this device can claim in either suite:
+/// classic for a mixed-fleet / old-app add, hybrid once P3/P4 create hybrid
+/// groups. Publish and replenish both iterate this so neither pool is ever
+/// silently drained while the other is topped up.
+///
+/// Order matters only cosmetically; the DS scopes every rotation per suite, so
+/// publishing both in one call rotates each independently.
+const PUBLISHED_SUITES: [Ciphersuite; 2] = [CS_CLASSIC, CS_HYBRID];
 
 // ── Key-package pool ──────────────────────────────────────────────────────────
 
@@ -96,23 +107,32 @@ where
     Ok((ref_hex, kp_bytes))
 }
 
-/// Build one fresh classic-suite `KeyPackage` for this device backed by the
-/// current local DB. Locks the local DB for the (sync) openmls work, dropping
-/// the guard before returning.
+/// Build one fresh `KeyPackage` for this device in `suite`, backed by the current
+/// local DB. Locks the local DB for the (sync) openmls work, dropping the guard
+/// before returning.
 ///
-/// The suite is passed explicitly, and is `CS_CLASSIC` for every package this
-/// build publishes — no production path selects the hybrid suite yet (#454 P2).
-async fn build_one_key_package(
+/// The provider is chosen by suite and that pairing is security-load-bearing
+/// (see `provider.rs`): `CS_CLASSIC` builds through `PollisProvider` (RustCrypto),
+/// `CS_HYBRID` through `PollisPqProvider` (libcrux). Selecting the wrong backend
+/// is a crash, not a downgrade — `RustCrypto` `unimplemented!()`-panics on X-Wing
+/// — so the match here is the client-side analogue of the DS's disjoint pools.
+async fn build_one_key_package_in_suite(
     state: &Arc<AppState>,
     user_id: &str,
     device_id: &str,
+    suite: Ciphersuite,
 ) -> Result<(String, Vec<u8>)> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
     })?;
-    let provider = PollisProvider::new(db.conn());
-    build_key_package_in_suite(&provider, user_id, device_id, CS_CLASSIC)
+    if suite == CS_HYBRID {
+        let provider = PollisPqProvider::new(db.conn());
+        build_key_package_in_suite(&provider, user_id, device_id, suite)
+    } else {
+        let provider = PollisProvider::new(db.conn());
+        build_key_package_in_suite(&provider, user_id, device_id, suite)
+    }
 }
 
 /// Rotate key packages: delete unclaimed packages for this device from the
@@ -127,45 +147,87 @@ pub async fn ensure_mls_key_package(
 ) -> Result<()> {
     const TARGET: i64 = 5;
 
-    // Build TARGET fresh packages locally (their private keys live in the local
-    // DB) before any remote write, so the DS replenish is a single batched call.
-    let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(TARGET as usize);
-    for _ in 0..TARGET {
-        pairs.push(build_one_key_package(state, user_id, device_id).await?);
+    // Build TARGET fresh packages PER SUITE locally (their private keys live in
+    // the local DB) before any remote write, so the DS replenish is a single
+    // batched call carrying both pools. Rotating both suites in one call is what
+    // stops a rotation from silently draining the pool it did not republish: the
+    // DS scopes its DELETE to exactly the suites present here.
+    let mut all_packages: Vec<serde_json::Value> = Vec::new();
+    for &suite in &PUBLISHED_SUITES {
+        let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(TARGET as usize);
+        for _ in 0..TARGET {
+            pairs.push(build_one_key_package_in_suite(state, user_id, device_id, suite).await?);
+        }
+        all_packages.extend(kp_packages_json(&pairs, suite));
     }
 
     // DS seam: the replenish endpoint clears this device's stale unclaimed
-    // packages and inserts the fresh pool in ONE transaction (owner-scoped to the
-    // signer); else do the equivalent delete-then-insert directly.
+    // packages (per suite) and inserts the fresh pools in ONE transaction
+    // (owner-scoped to the signer), and flips `pq_capable` on off the hybrid pool
+    // it just stored; else do the equivalent delete-then-insert directly.
     match state.config.pollis_delivery_url.as_deref() {
         Some(_) => {
             let body = serde_json::json!({
                 "device_id": device_id,
-                "packages": kp_packages_json(&pairs, CS_CLASSIC),
+                "packages": all_packages,
                 "user_id": user_id,
             });
             crate::commands::mls::ds_post_ok(state, "/v1/key-packages/replenish", &body).await?;
         }
         None => {
             let conn = state.remote_db.conn().await?;
-            // Remove unclaimed packages for THIS device only — their private keys
-            // may no longer exist in the current local DB (e.g. after a wipe).
-            // Also clean up legacy packages with NULL device_id for this user.
-            conn.execute(
-                "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
-                 AND (device_id = ?2 OR device_id IS NULL)",
-                libsql::params![user_id, device_id],
-            ).await?;
-            for (ref_hex, kp_bytes) in &pairs {
+            // Remove unclaimed packages for THIS device only, SCOPED PER SUITE so
+            // one suite's rotation never drops the other's pool — their private
+            // keys may no longer exist in the current local DB (e.g. after a
+            // wipe). Also clean up legacy packages with NULL device_id.
+            for &suite in &PUBLISHED_SUITES {
                 conn.execute(
-                    "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                    libsql::params![ref_hex.clone(), user_id, kp_bytes.clone(), device_id],
+                    "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
+                     AND (device_id = ?2 OR device_id IS NULL) AND ciphersuite = ?3",
+                    libsql::params![user_id, device_id, i64::from(u16::from(suite))],
                 ).await?;
             }
+            insert_packages_direct(&conn, user_id, device_id, &all_packages).await?;
         }
     }
 
+    Ok(())
+}
+
+/// Direct-path INSERT of a `kp_packages_json` array into the remote table,
+/// carrying each package's ciphersuite so the two pools stay disjoint even off
+/// the DS seam. Also mirrors the DS's `pq_capable` derivation for the no-DS
+/// fallback. Used only when `pollis_delivery_url` is unset (never in production).
+async fn insert_packages_direct(
+    conn: &libsql::Connection,
+    user_id: &str,
+    device_id: &str,
+    packages: &[serde_json::Value],
+) -> Result<()> {
+    use base64::Engine as _;
+    let mut published_hybrid = false;
+    for pkg in packages {
+        let ref_hex = pkg["ref_hash"].as_str().unwrap_or_default().to_string();
+        let kp_bytes = base64::engine::general_purpose::STANDARD
+            .decode(pkg["key_package"].as_str().unwrap_or_default())
+            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("kp b64: {e}")))?;
+        let suite = pkg["ciphersuite"].as_i64().unwrap_or(i64::from(u16::from(CS_CLASSIC)));
+        if suite == i64::from(u16::from(CS_HYBRID)) {
+            published_hybrid = true;
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO mls_key_package \
+             (ref_hash, user_id, key_package, device_id, ciphersuite) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            libsql::params![ref_hex, user_id, kp_bytes, device_id, suite],
+        ).await?;
+    }
+    if published_hybrid {
+        conn.execute(
+            "UPDATE user_device SET pq_capable = 1 WHERE user_id = ?1 AND device_id = ?2",
+            libsql::params![user_id, device_id],
+        ).await?;
+    }
     Ok(())
 }
 
@@ -179,56 +241,65 @@ pub(super) async fn replenish_key_packages(
 ) -> Result<()> {
     const TARGET: i64 = 5;
 
-    // Counting remaining packages is a READ — it stays direct on the local
-    // libsql handle even when DS writes are enabled.
-    let remaining: i64 = {
-        let conn = state.remote_db.conn().await?;
-        let mut rows = conn.query(
-            "SELECT COUNT(*) FROM mls_key_package WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0",
-            libsql::params![user_id, device_id],
-        ).await?;
-        let n = if let Some(row) = rows.next().await? {
-            row.get(0)?
-        } else {
-            0
+    // Top up EACH suite independently. Counting the whole device's pool as one
+    // number would let a drained hybrid pool hide behind a full classic one (5
+    // classic + 0 hybrid reads as "5, nothing needed") and slowly starve the
+    // hybrid side — so the count and the top-up are both per suite.
+    let mut all_packages: Vec<serde_json::Value> = Vec::new();
+    for &suite in &PUBLISHED_SUITES {
+        let suite_code = i64::from(u16::from(suite));
+        // Counting remaining packages is a READ — it stays direct on the local
+        // libsql handle even when DS writes are enabled.
+        let remaining: i64 = {
+            let conn = state.remote_db.conn().await?;
+            let mut rows = conn.query(
+                "SELECT COUNT(*) FROM mls_key_package \
+                 WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 AND ciphersuite = ?3",
+                libsql::params![user_id, device_id, suite_code],
+            ).await?;
+            let n = if let Some(row) = rows.next().await? {
+                row.get(0)?
+            } else {
+                0
+            };
+            drop(rows);
+            n
         };
-        drop(rows);
-        n
-    };
 
-    let needed = TARGET - remaining;
-    if needed <= 0 {
+        let needed = TARGET - remaining;
+        if needed <= 0 {
+            continue;
+        }
+
+        eprintln!("[mls] replenish suite {suite_code:#06x}: {remaining} unclaimed KPs, publishing {needed} more");
+
+        // Build the top-up packages locally before any remote write.
+        let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(needed as usize);
+        for _ in 0..needed {
+            pairs.push(build_one_key_package_in_suite(state, user_id, device_id, suite).await?);
+        }
+        all_packages.extend(kp_packages_json(&pairs, suite));
+    }
+
+    if all_packages.is_empty() {
         return Ok(());
     }
 
-    eprintln!("[mls] replenish: {remaining} unclaimed KPs, publishing {needed} more");
-
-    // Build the top-up packages locally before any remote write.
-    let mut pairs: Vec<(String, Vec<u8>)> = Vec::with_capacity(needed as usize);
-    for _ in 0..needed {
-        pairs.push(build_one_key_package(state, user_id, device_id).await?);
-    }
-
     // DS seam: a top-up is insert-only (no delete), so it routes through the
-    // owner-scoped publish endpoint; else INSERT OR IGNORE directly.
+    // owner-scoped publish endpoint — which also flips `pq_capable` when the
+    // batch carries hybrid packages; else INSERT OR IGNORE directly.
     match state.config.pollis_delivery_url.as_deref() {
         Some(_) => {
             let body = serde_json::json!({
                 "device_id": device_id,
-                "packages": kp_packages_json(&pairs, CS_CLASSIC),
+                "packages": all_packages,
                 "user_id": user_id,
             });
             crate::commands::mls::ds_post_ok(state, "/v1/key-packages", &body).await?;
         }
         None => {
             let conn = state.remote_db.conn().await?;
-            for (ref_hex, kp_bytes) in &pairs {
-                conn.execute(
-                    "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
-                     VALUES (?1, ?2, ?3, ?4)",
-                    libsql::params![ref_hex.clone(), user_id, kp_bytes.clone(), device_id],
-                ).await?;
-            }
+            insert_packages_direct(&conn, user_id, device_id, &all_packages).await?;
         }
     }
 

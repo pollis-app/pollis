@@ -10,9 +10,9 @@ Source: `pollis-core/src/commands/mls.rs`
 - **Commit**: an MLS operation that changes the group tree (add/remove members). Serialized to `mls_commit_log`.
 - **Welcome**: an MLS message that lets a new member join at a specific epoch. Serialized to `mls_welcome`.
 - **GroupInfo**: a snapshot of the group tree at a specific epoch. Stored in `mls_group_info`. Used for external-join.
-- **KeyPackage**: a one-time-use cryptographic token published by each device. Consumed when the device is added to a group.
+- **KeyPackage**: a one-time-use cryptographic token published by each device. Consumed when the device is added to a group. Since #454 P2 each device publishes TWO disjoint pools — a classic (`CS_CLASSIC`) pool and a post-quantum hybrid (`CS_HYBRID`) pool — so a peer adding it can claim in whichever suite the new group uses. `ensure_mls_key_package`/`replenish_key_packages` build each suite's pool through its matching provider (RustCrypto for classic, libcrux for hybrid) and rotate/top-up each independently.
 - **External Join**: a device adds itself to a group using published GroupInfo, without needing a Welcome from an existing member.
-- **Ciphersuite**: fixed per group at creation. Pollis uses `CS_CLASSIC` (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, code point `0x0001`) everywhere. Since #454 P1b it is an explicit argument to the only two functions that mint suite-bound material — `create_mls_group_in_suite` and `build_key_package_in_suite` — paired with the crypto backend that serves it (`PollisProvider` for classic, `PollisPqProvider` for the not-yet-selected `CS_HYBRID`). Signing is Ed25519 under both suites (`SIGNATURE_SCHEME`), so a device keeps ONE signing key and one `device_cert` regardless. A key package's suite is stored in `mls_key_package.ciphersuite` so the DS can serve a claim from the right pool without parsing the blob.
+- **Ciphersuite**: fixed per group at creation. Every Pollis GROUP is still `CS_CLASSIC` (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`, code point `0x0001`) — no group goes hybrid until #454 P3/P4. Since #454 P1b the suite is an explicit argument to the only two functions that mint suite-bound material — `create_mls_group_in_suite` and `build_key_package_in_suite` — paired with the crypto backend that serves it (`PollisProvider` for classic, `PollisPqProvider` for `CS_HYBRID`, code point `0x004D`). Signing is Ed25519 under both suites (`SIGNATURE_SCHEME`), so a device keeps ONE signing key and one `device_cert` regardless. A key package's suite is stored in `mls_key_package.ciphersuite` so the DS can serve a claim from the right pool without parsing the blob. A device that has published a hybrid pool is flagged `user_device.pq_capable = 1` — set by the DS publish/replenish endpoints from the pool that actually landed (never a client-side UPDATE), so the flag can never disagree with the device's real hybrid readiness.
 
 ## Key Functions
 
@@ -24,8 +24,8 @@ Source: `pollis-core/src/commands/mls.rs`
 | `poll_mls_welcomes_inner` | mls.rs | Fetches and applies pending Welcome messages |
 | `apply_welcome` | mls.rs | Deserializes and applies a single Welcome |
 | `publish_group_info` | mls.rs | Exports and stores current GroupInfo for external-join |
-| `ensure_mls_key_package` | mls.rs | Publishes 5 fresh KeyPackages for this device |
-| `init_mls_group` | mls.rs | Creates a new MLS group (called from create_group/create_dm) |
+| `ensure_mls_key_package` | mls.rs | Rotates this device's pools: publishes 5 fresh KeyPackages per suite (classic + hybrid) in one replenish, per-suite scoped |
+| `init_mls_group` | mls.rs | Creates a new MLS group — always `CS_CLASSIC` (no group goes hybrid pre-P3) |
 | `has_local_group` | mls.rs | Checks if a local MLS group exists for a conversation |
 
 ## Reconcile Flow (the core operation)
@@ -243,7 +243,7 @@ When a new device (deviceC) enrolls for an existing user:
 1. **Approval path**: existing device approves → wraps `account_id_key` for deviceC
 2. **DeviceC's `finalize_enrollment`**:
    - Publishes device cert (`ensure_device_cert`)
-   - Publishes 5 KeyPackages (`ensure_mls_key_package`)
+   - Publishes 5 KeyPackages per suite — classic + hybrid (`ensure_mls_key_package`), flipping `pq_capable` on once the hybrid pool lands
    - External-joins every group the user belongs to (`external_join_group`)
 3. **Other devices** process deviceC's external-join commits on next read/send
 

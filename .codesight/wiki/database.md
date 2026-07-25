@@ -215,7 +215,7 @@ that class of bug.
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
 - `mls_signature_pub` BLOB _(migration 13)_
-- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? inert until #454 P2)_
+- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? Since #454 P2 the DS publish/replenish endpoints set it to 1 when a device publishes a hybrid KeyPackage pool — derived server-side from what landed in `mls_key_package`, never a client UPDATE.)_
 
 ### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
 - `ref_hash` TEXT PK _(KeyPackageRef hash, hex)_
