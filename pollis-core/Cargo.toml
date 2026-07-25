@@ -139,6 +139,20 @@ axum = { version = "0.8", features = ["ws"] }
 bytes = "1"
 openmls = "0.8"
 openmls_traits = "0.5"
+# libcrux-backed crypto provider. Serves BOTH the classic suite Pollis uses
+# today AND the post-quantum hybrid suite (X-Wing) that later phases of #454
+# need — `openmls_rust_crypto::RustCrypto` `unimplemented!()`-panics on the
+# hybrid suite, so swapping to this provider is the prerequisite that unlocks
+# PQ. This is a behaviour-preserving swap on the classic suite (proven by the
+# cross-provider interop test in `commands/mls/tests.rs`). We compose its
+# `CryptoProvider` with our own SQLite-backed `MlsStore`; we deliberately do
+# NOT use its bundled `Provider`, which hardcodes in-memory storage.
+openmls_libcrux_crypto = "0.3"
+# `PollisProvider` no longer uses RustCrypto, but it is still needed by non-test
+# code — `validate_key_package` takes `&RustCrypto` — and by the cross-provider
+# interop test (`commands/mls/tests.rs`), where RustCrypto stands in for the
+# "old app" to prove an old<->new staged rollout can share one MLS group. So it
+# stays a regular dependency rather than moving to dev-dependencies.
 openmls_rust_crypto = "0.5"
 # `test-utils` exposes `SignatureKeyPair::private()` — the ONLY accessor for the
 # raw device signing seed. The overlay relay handshake (`net::overlay`) must sign

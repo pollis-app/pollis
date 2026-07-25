@@ -198,7 +198,7 @@ Verification failures currently log a warning and proceed (the comment block at 
 ### 6.1 Standard and library
 
 - **Specification:** RFC 9420 — The Messaging Layer Security (MLS) Protocol.
-- **Implementation:** `openmls` 0.8 (https://github.com/openmls/openmls), with `openmls_rust_crypto` 0.5 providing the crypto provider over the `RustCrypto` AEAD/HKDF/HPKE primitives, and a Pollis-defined `MlsStore` (`pollis-core/src/signal/mls_storage.rs`) implementing the `openmls_traits::storage::StorageProvider` trait against the local SQLCipher `mls_kv` table.
+- **Implementation:** `openmls` 0.8 (https://github.com/openmls/openmls), with `openmls_libcrux_crypto` 0.3 providing the crypto/rand provider over libcrux's formally-verified AEAD/HKDF/HPKE primitives, and a Pollis-defined `MlsStore` (`pollis-core/src/signal/mls_storage.rs`) implementing the `openmls_traits::storage::StorageProvider` trait against the local SQLCipher `mls_kv` table. libcrux (rather than `openmls_rust_crypto`) is the provider because it implements the post-quantum hybrid ciphersuite for later phases while serving the current classic suite identically and wire-compatibly — an old (`openmls_rust_crypto`) build and a new (libcrux) build interoperate in one MLS group, so a staged desktop rollout cannot split a group (pinned by the cross-provider interop test in `pollis-core/src/commands/mls/tests.rs`).
 - **Cipher suite:** `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` (single `const CS` at the top of `mls.rs`). This is suite 1 in RFC 9420 §17.1, MTI for MLS 1.0:
   - HPKE (RFC 9180): DHKEM(X25519, HKDF-SHA256), HKDF-SHA256, AES-128-GCM
   - Hash: SHA-256

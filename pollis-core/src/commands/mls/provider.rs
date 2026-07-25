@@ -4,24 +4,41 @@
 //! the ciphersuite constant, and the credential format used in MLS leaves.
 
 use openmls::prelude::*;
-use openmls_rust_crypto::RustCrypto;
+use openmls_libcrux_crypto::CryptoProvider as LibcruxCrypto;
 use openmls_traits::OpenMlsProvider;
 
 use crate::signal::mls_storage::MlsStore;
 
 // ── Provider ─────────────────────────────────────────────────────────────────
 
-/// Combines `RustCrypto` with our SQLite-backed `MlsStore` to satisfy the
-/// `OpenMlsProvider` bound required by all openmls API calls.
+/// Combines the libcrux-backed `CryptoProvider` with our SQLite-backed
+/// `MlsStore` to satisfy the `OpenMlsProvider` bound required by all openmls
+/// API calls.
+///
+/// We use libcrux (not `openmls_rust_crypto::RustCrypto`) because RustCrypto
+/// `unimplemented!()`-panics on the post-quantum hybrid ciphersuite that later
+/// phases of #454 depend on, while libcrux implements it and serves the classic
+/// suite Pollis ships today equally well (proven behaviour-preserving and
+/// wire-compatible with RustCrypto by the cross-provider interop test in
+/// `commands/mls/tests.rs`). We deliberately compose libcrux's `CryptoProvider`
+/// rather than its bundled `Provider`, which hardcodes an in-memory storage
+/// backend that would silently drop all MLS group state on restart.
 pub struct PollisProvider<'a> {
-    crypto: RustCrypto,
+    crypto: LibcruxCrypto,
     store: MlsStore<'a>,
 }
 
 impl<'a> PollisProvider<'a> {
     pub fn new(conn: &'a rusqlite::Connection) -> Self {
         Self {
-            crypto: RustCrypto::default(),
+            // `CryptoProvider::new()` is fallible only because it seeds a CSPRNG
+            // from the OS RNG. If the OS RNG is unavailable every other crypto
+            // path in the app is already fatally broken, so panicking here (vs.
+            // rippling a `Result` through `new`'s many call sites in a purely
+            // behaviour-preserving change) surfaces the same unrecoverable
+            // condition without weakening any signature.
+            crypto: LibcruxCrypto::new()
+                .expect("OS RNG unavailable — no crypto path in the app can work"),
             store: MlsStore::new(conn),
         }
     }
@@ -35,8 +52,10 @@ impl<'a> PollisProvider<'a> {
 }
 
 impl<'a> OpenMlsProvider for PollisProvider<'a> {
-    type CryptoProvider = RustCrypto;
-    type RandProvider = RustCrypto;
+    // libcrux's `CryptoProvider` serves as BOTH the crypto and rand provider
+    // (it holds the reseeding CSPRNG), exactly as `RustCrypto` did for both.
+    type CryptoProvider = LibcruxCrypto;
+    type RandProvider = LibcruxCrypto;
     type StorageProvider = MlsStore<'a>;
 
     fn storage(&self) -> &Self::StorageProvider {
