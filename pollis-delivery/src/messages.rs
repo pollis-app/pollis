@@ -160,36 +160,51 @@ async fn channel_group_role(
     })
 }
 
+/// A DS-issued timestamp for the textual `sent_at` / `created_at` columns.
+///
+/// These columns are compared **lexically** — the message watermark advances on
+/// `sent_at > cursor` — so a DS timestamp has to sort correctly against the
+/// client-issued ones it shares a column with. Clients write
+/// `chrono::Utc::now().to_rfc3339()`, which carries sub-second digits, so the DS
+/// must emit them too: an earlier hand-rolled whole-second formatter produced
+/// `…T09:00:00+00:00`, which sorts BELOW `…T09:00:00.123456789+00:00` because
+/// `'+'` (0x2B) < `'.'` (0x2E). An admin delete tombstone written in the same
+/// wall-clock second as the message it redacts therefore landed under every
+/// recipient's watermark and was never fetched — the delete silently did
+/// nothing. Always emitting nanoseconds restores the ordering (a shorter
+/// fraction is a prefix of a longer one, so lexical order matches chronological
+/// order across both precisions).
 fn now_rfc3339() -> String {
-    // RFC3339 with no extra deps — mirrors pollis-core's chrono output closely
-    // enough for the textual `sent_at`/`created_at` columns (lexical ordering is
-    // all the GC/watermark logic relies on).
-    chrono_like_now()
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Nanos, false)
 }
 
-/// Minimal RFC3339-ish timestamp. pollis-delivery has no `chrono` dep, so format
-/// the unix epoch as an ISO-8601 UTC string. Only used for tombstone/reaction
-/// rows whose timestamps are compared lexically, never parsed.
-fn chrono_like_now() -> String {
-    let secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0) as i64;
-    // Days since epoch → civil date (Howard Hinnant's algorithm).
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    let (hh, mm, ss) = (rem / 3600, (rem % 3600) / 60, rem % 60);
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}+00:00")
+/// The `sent_at` an envelope must carry to be guaranteed visible to every
+/// member of `conversation_id`, given `floor` — the greatest `sent_at` already
+/// in that conversation.
+///
+/// Precision parity (see [`now_rfc3339`]) fixes ordering between two correct
+/// clocks, but `sent_at` for ordinary messages comes from the *client's* clock
+/// while a tombstone's comes from the *DS's*. A client running ahead would put
+/// its messages — and so every recipient's watermark — in the DS's future, and
+/// the tombstone would again sort underneath and never be fetched. Stamping the
+/// tombstone strictly after everything already in the conversation removes the
+/// dependence on the two clocks agreeing: the cursor cannot already be past it.
+///
+/// Falls back to `now` when the floor is absent or unparseable, which is the
+/// pre-existing behaviour and never worse than it.
+fn sent_at_after(now: String, floor: Option<String>) -> String {
+    let Some(floor) = floor else {
+        return now;
+    };
+    if floor < now {
+        return now;
+    }
+    match chrono::DateTime::parse_from_rfc3339(&floor) {
+        Ok(t) => (t + chrono::Duration::nanoseconds(1))
+            .to_utc()
+            .to_rfc3339_opts(chrono::SecondsFormat::Nanos, false),
+        Err(_) => now,
+    }
 }
 
 // ── POST /v1/messages/send ───────────────────────────────────────────────────
@@ -482,7 +497,22 @@ pub async fn apply_delete_message(
     }
 
     let tombstone_id = Ulid::new().to_string();
-    let now = now_rfc3339();
+    // Read the conversation's high-water `sent_at` BEFORE the deletes below
+    // remove the target — a recipient's watermark can be anywhere up to this
+    // value, and the tombstone is only ever fetched if it sorts above it.
+    let floor: Option<String> = {
+        let mut rows = conn
+            .query(
+                "SELECT MAX(sent_at) FROM message_envelope WHERE conversation_id = ?1",
+                libsql::params![body.conversation_id.clone()],
+            )
+            .await?;
+        match rows.next().await? {
+            Some(row) => row.get::<Option<String>>(0)?,
+            None => None,
+        }
+    };
+    let now = sent_at_after(now_rfc3339(), floor);
     let tx = conn.transaction().await?;
     tx.execute(
         "DELETE FROM message_envelope WHERE id = ?1",
@@ -828,4 +858,91 @@ pub async fn apply_delete_attachment(
     )
     .await?;
     Ok(WriteOutcome::Ok)
+}
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::*;
+
+    /// The exact shape a client writes for `sent_at` (`pollis-core` sends
+    /// `chrono::Utc::now().to_rfc3339()`, i.e. `SecondsFormat::AutoSi`).
+    fn client_stamp(nanos: u32) -> String {
+        chrono::DateTime::from_timestamp(1_800_000_000, nanos)
+            .expect("valid instant")
+            .to_rfc3339()
+    }
+
+    /// The regression: a DS timestamp must sort ABOVE a client timestamp taken
+    /// earlier in the same wall-clock second. The old whole-second formatter
+    /// emitted `…:20+00:00`, and `'+'` (0x2B) < `'.'` (0x2E), so it sorted
+    /// BELOW `…:20.000000001+00:00` — an admin tombstone written in the same
+    /// second as the message it redacts fell under every recipient's watermark
+    /// and was never fetched, so the delete silently did nothing.
+    #[test]
+    fn a_ds_stamp_sorts_above_a_client_stamp_from_the_same_second() {
+        let client = client_stamp(1);
+        let ds = chrono::DateTime::from_timestamp(1_800_000_000, 500_000_000)
+            .expect("valid instant")
+            .to_rfc3339_opts(chrono::SecondsFormat::Nanos, false);
+        assert!(
+            ds > client,
+            "DS stamp {ds} must sort above same-second client stamp {client}"
+        );
+
+        // What the old formatter produced, pinned as the thing we must not regress to.
+        let whole_second = "2027-01-15T08:00:00+00:00";
+        assert!(
+            whole_second < client.as_str(),
+            "a whole-second stamp sorts below a sub-second one — this is the bug"
+        );
+    }
+
+    /// Lexical order must match chronological order across every fraction width
+    /// chrono's `AutoSi` can emit (0, 3, 6, 9 digits), because both formats live
+    /// in the same column and the watermark only ever compares them as text.
+    #[test]
+    fn lexical_order_matches_chronological_order_across_precisions() {
+        let stamps = [
+            client_stamp(0),
+            client_stamp(1_000_000),
+            client_stamp(1_001_000),
+            client_stamp(1_001_001),
+            client_stamp(999_999_999),
+        ];
+        for pair in stamps.windows(2) {
+            assert!(
+                pair[0] < pair[1],
+                "{} must sort below {}",
+                pair[0],
+                pair[1]
+            );
+        }
+    }
+
+    /// A tombstone must outrank everything already in the conversation even when
+    /// the client's clock runs ahead of the DS's — otherwise the recipient's
+    /// watermark is already past it and it is never fetched.
+    #[test]
+    fn a_tombstone_outranks_a_conversation_stamped_in_the_future() {
+        let now = now_rfc3339();
+        let ahead = chrono::Utc::now() + chrono::Duration::hours(1);
+        let floor = ahead.to_rfc3339();
+
+        let stamped = sent_at_after(now.clone(), Some(floor.clone()));
+        assert!(
+            stamped > floor,
+            "tombstone {stamped} must sort above the conversation's high-water mark {floor}"
+        );
+    }
+
+    /// When nothing in the conversation is ahead of the DS clock, the tombstone
+    /// keeps the plain current time — the guard only ever pushes forward.
+    #[test]
+    fn the_floor_guard_is_a_no_op_when_the_conversation_is_behind() {
+        let now = now_rfc3339();
+        let behind = (chrono::Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
+        assert_eq!(sent_at_after(now.clone(), Some(behind)), now);
+        assert_eq!(sent_at_after(now.clone(), None), now);
+        assert_eq!(sent_at_after(now.clone(), Some("not-a-timestamp".into())), now);
+    }
 }

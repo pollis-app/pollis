@@ -90,6 +90,17 @@ original envelope. A `type='delete'` **tombstone** (empty ciphertext,
 `target_message_id` set) is written only by **admin-delete** (server-authorized
 moderation); recipients apply it epoch-independently on ingest.
 
+**`sent_at` is compared lexically, so its precision is load-bearing.** The
+message cursor advances on `sent_at > watermark`, and this one column carries
+both client-issued stamps (`chrono::Utc::now().to_rfc3339()`, sub-second) and
+DS-issued ones. A DS stamp must therefore also carry sub-second digits: a
+whole-second `…T09:00:00+00:00` sorts *below* `…T09:00:00.123456789+00:00`
+(`'+'` 0x2B < `'.'` 0x2E), which silently buried admin tombstones written in the
+same second as the message they redact — the delete appeared to succeed and no
+recipient ever applied it. The DS additionally stamps a tombstone strictly above
+the conversation's existing high-water `sent_at`, so client/DS clock skew cannot
+reintroduce the same burial.
+
 **Sealed sender (#331, #607).** Attribution is taken from the MLS credential inside
 the ciphertext, never from `sender_id` — the ingest reader ([mls.md](./mls.md#sealed-sender-331))
 decrypts and reads the credential's `{user_id}:{device_id}`, so a server-written
