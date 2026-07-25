@@ -298,7 +298,7 @@ function AuthPIN() {
             <Text
               style={{
                 fontFamily: fonts.sora400,
-                fontSize: k === "bk" ? 18 : 22,
+                fontSize: k === "bk" ? 26 : 22,
                 color: k === "bk" ? semantic.ink2 : semantic.ink,
               }}
             >

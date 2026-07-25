@@ -73,10 +73,19 @@ OUT="$MAE/artifacts/$DATE/$PLATFORM"
 mkdir -p "$OUT"
 
 echo "==> running: $TARGET  (platform=$PLATFORM)"
-# Run from OUT so takeScreenshot writes the PNGs into the gallery dir.
-( cd "$OUT" && maestro "${DEVICE_SEL[@]}" test "${ENV_ARGS[@]}" "$TARGET" ) || {
+# Maestro ignores cwd for screenshot output — takeScreenshot always lands
+# under its own ~/.maestro/tests/<run>/ debug tree regardless of `cd`.
+# --debug-output redirects that whole tree under DEBUG instead, then we
+# flatten the actual PNGs (takeScreenshot = the named gallery shots,
+# screenshots/step-* = failure captures) into OUT below.
+DEBUG="$OUT/.debug"
+mkdir -p "$DEBUG"
+maestro "${DEVICE_SEL[@]}" test --debug-output "$DEBUG" "${ENV_ARGS[@]}" "$TARGET" || {
   echo "!! flow reported failures — screenshots (incl. the failing state) are in $OUT" >&2
 }
+
+find "$DEBUG" \( -path "*/takeScreenshot/*.png" -o -path "*/screenshots/*.png" \) -exec cp {} "$OUT/" \; 2>/dev/null || true
+rm -rf "$DEBUG"
 
 echo "==> screenshots in: $OUT"
 ls -1 "$OUT"/*.png 2>/dev/null || echo "(no screenshots captured)"

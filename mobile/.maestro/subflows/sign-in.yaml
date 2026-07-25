@@ -6,7 +6,7 @@ appId: com.anonymous.mobile
 #
 # NOTE (Mac operator): this box could not RUN Maestro, so timing/branch steps
 # are authored best-effort against the real testIDs. On the first run, confirm
-# the PIN keypad auto-advances at 6 digits and whether an emergency-kit screen
+# the PIN keypad auto-advances at 4 digits and whether an emergency-kit screen
 # appears; adjust the `optional` steps if needed.
 
 - clearState
@@ -24,14 +24,15 @@ appId: com.anonymous.mobile
 # --- OTP ---
 - assertVisible:
     id: "screen-auth-otp"
-- tapOn:
-    id: "input-otp"
+# input-otp is an opacity:0 proxy over the 6 visual boxes, autoFocus'd on
+# mount — Maestro can't tapOn a non-hittable element, but it's already
+# focused, so inputText alone reaches it.
 - inputText: "${MAESTRO_OTP}"
 - tapOn:
     id: "btn-submit-otp"
 
-# --- PIN (new device): enter, then confirm. Keypad auto-advances at 6 digits.
-# The taps below assume MAESTRO_PIN=123456; keep them in sync with env.example.
+# --- PIN (new device): enter, then confirm. Keypad auto-advances at 4 digits.
+# The taps below assume MAESTRO_PIN=1234; keep them in sync with env.example.
 - extendedWaitUntil:
     visible:
       id: "screen-auth-pin"
@@ -40,6 +41,14 @@ appId: com.anonymous.mobile
 - runFlow: enter-pin.yaml
 
 # --- Optional emergency-kit acknowledgement (first signup only) ---
+# Mounts asynchronously after PIN confirm (key generation) — `runFlow: when:`
+# checks visibility once, immediately, so it needs a real wait first or it
+# skips a screen that's still one frame away.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-emergency-kit"
+    timeout: 15000
+    optional: true
 - runFlow:
     when:
       visible:

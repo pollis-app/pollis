@@ -4,12 +4,19 @@ rust:
 
 android:
   jniLibs: android/src/main/jniLibs
+  # Mobile drops the desktop media stack + OS-keychain feature (uses its own
+  # ios_kek/android_kek path instead — see pollis-core/Cargo.toml's `media`/
+  # `os-keystore` default-feature comments). Without this, default features
+  # pull in webrtc-audio-processing, which is target-gated out on
+  # android/ios and fails to compile.
+  cargoExtras: ["--no-default-features"]
   targets:
     - arm64-v8a
     - armeabi-v7a
     - x86_64
 
 ios:
+  cargoExtras: ["--no-default-features"]
   targets:
     - aarch64-apple-ios
     - aarch64-apple-ios-sim

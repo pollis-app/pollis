@@ -15,9 +15,11 @@ tags:
     id: "input-group-name"
 - inputText: "E2E Msg Group"
 - tapOn: "CREATE GROUP"
+# CREATE GROUP navigates straight into the new group's detail screen (not
+# back to the groups list) — see groups.yaml.
 - extendedWaitUntil:
     visible:
-      id: "screen-groups"
+      id: "screen-group"
     timeout: 15000
 
 # Open the group's channel (the row-channel-<id> id is dynamic; tap the first
@@ -29,17 +31,41 @@ tags:
     id: "screen-chat"
 - takeScreenshot: messaging-01-empty-channel
 
-# Send a message.
+# Send a message. The whole message row collapses into ONE compound
+# accessibility node (Pressable sets accessibilityLabel={`${name}: ${text}`}
+# in chat/[id].tsx), which does NOT include the "sending…"/timestamp text —
+# so that status is not independently queryable, and a bare-text selector
+# like "hello from maestro" never matches the compound "name: text" label
+# (Maestro requires a full match, not substring — use a `.*...*` regex, or
+# better, the stable `row-message-<id>` testID).
 - tapOn:
     id: "input-composer"
 - inputText: "hello from maestro"
 - tapOn:
     id: "btn-send"
-- assertVisible: "hello from maestro"
+- extendedWaitUntil:
+    visible: ".*hello from maestro.*"
+    timeout: 10000
 - takeScreenshot: messaging-02-sent
 
-# Long-press the message to reveal edit/delete/react actions, then edit.
-- longPressOn: "hello from maestro"
+# onLongPress is disabled while the message is still `pending` (see
+# chat/[id].tsx) — the first message in a fresh group pays for MLS
+# key-package/group-setup + DS round-trips before it clears. Observed
+# anywhere from ~15s to 60s+ in practice (dev DS/Turso latency variance) —
+# flag this as a perf characteristic worth the team's attention, not
+# something to keep chasing with bigger timeouts. There's no queryable
+# "no longer pending" signal, so this is a deliberate flat delay (Maestro
+# has no plain sleep command): wait on a condition that will never resolve,
+# `optional: true` so the timeout itself is the point.
+- extendedWaitUntil:
+    visible:
+      id: "__never_matches__"
+    timeout: 30000
+    optional: true
+
+# Long-press the message (by stable id, not text — see note above) to
+# reveal edit/delete/react actions, then edit.
+- runFlow: ../subflows/long-press-message.yaml
 - takeScreenshot: messaging-03-actions
 - tapOn:
     id: "btn-edit"
@@ -48,18 +74,20 @@ tags:
 - inputText: " (edited)"
 - tapOn:
     id: "btn-edit-save"
-- assertVisible: "hello from maestro (edited)"
+- extendedWaitUntil:
+    visible: ".*hello from maestro \\(edited\\).*"
+    timeout: 15000
 - takeScreenshot: messaging-04-edited
 
 # React to the message.
-- longPressOn: "hello from maestro (edited)"
+- runFlow: ../subflows/long-press-message.yaml
 - tapOn:
     id: "btn-react-0"
     optional: true
 - takeScreenshot: messaging-05-reacted
 
 # Delete it.
-- longPressOn: "hello from maestro (edited)"
+- runFlow: ../subflows/long-press-message.yaml
 - tapOn:
     id: "btn-delete"
 - takeScreenshot: messaging-06-deleted

@@ -22,8 +22,9 @@ tags:
 - assertVisible:
     id: "screen-auth-otp"
 - takeScreenshot: auth-02-otp
-- tapOn:
-    id: "input-otp"
+# input-otp is an opacity:0 proxy over the 6 visual boxes, autoFocus'd on
+# mount — Maestro can't tapOn a non-hittable element, but it's already
+# focused, so inputText alone reaches it.
 - inputText: "${MAESTRO_OTP}"
 - tapOn:
     id: "btn-submit-otp"
@@ -36,6 +37,14 @@ tags:
 - runFlow: ../subflows/enter-pin.yaml
 - runFlow: ../subflows/enter-pin.yaml
 
+# The emergency-kit screen mounts asynchronously after PIN confirm (key
+# generation); `runFlow: when:` checks visibility once, immediately, so it
+# needs a real wait first or it skips a screen that's still one frame away.
+- extendedWaitUntil:
+    visible:
+      id: "screen-auth-emergency-kit"
+    timeout: 15000
+    optional: true
 - runFlow:
     when:
       visible:

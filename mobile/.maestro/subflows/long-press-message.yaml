@@ -1,0 +1,44 @@
+appId: com.anonymous.mobile
+---
+# Long-press a message row to open its action sheet (react/edit/delete).
+# The very first long-press attempt in a flow is observed to occasionally
+# not register the gesture (app is mid-layout-shift right after a message
+# settles) even though the identical gesture succeeds immediately on retry
+# — so try up to 3 times rather than trust a single attempt. Unrolled
+# (not `repeat:`) since `repeat: times:` did not reliably iterate here.
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-edit"
+    commands:
+      - longPressOn:
+          id: "row-message-.*"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-edit"
+          timeout: 4000
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-edit"
+    commands:
+      - longPressOn:
+          id: "row-message-.*"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-edit"
+          timeout: 4000
+          optional: true
+- runFlow:
+    when:
+      notVisible:
+        id: "btn-edit"
+    commands:
+      - longPressOn:
+          id: "row-message-.*"
+      - extendedWaitUntil:
+          visible:
+            id: "btn-edit"
+          timeout: 4000
+          optional: true

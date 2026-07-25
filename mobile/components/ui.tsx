@@ -5,6 +5,8 @@ import {
   TextInput,
   Pressable,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
   StyleProp,
   ViewStyle,
   TextStyle,
@@ -63,20 +65,29 @@ export function Screen({
       style={{ flex: 1, backgroundColor: palette.bg }}
       edges={["top", "bottom"]}
     >
-      {centerBody ? (
-        <View
-          style={{
-            flex: 1,
-            width: "100%",
-            maxWidth: layout.readableMaxWidth,
-            alignSelf: "center",
-          }}
-        >
-          {children}
-        </View>
-      ) : (
-        children
-      )}
+      {/* Every screen pins its primary action to <BottomAction> at the
+          bottom, with a <Field> above it and no per-screen keyboard
+          handling — without this, the keyboard covers the action and
+          swallows its taps instead of reaching it. */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+      >
+        {centerBody ? (
+          <View
+            style={{
+              flex: 1,
+              width: "100%",
+              maxWidth: layout.readableMaxWidth,
+              alignSelf: "center",
+            }}
+          >
+            {children}
+          </View>
+        ) : (
+          children
+        )}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

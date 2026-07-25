@@ -5,8 +5,27 @@
 //! loopback SOCKS5 shim via `socks5h://` (proxy-side DNS, so the real hostname
 //! reaches the relay and the inner TLS still terminates at the real service);
 //! when off, it is a plain client identical to `reqwest::Client::new()`.
+//!
+//! [`http_client`] caches and clones rather than building fresh each call —
+//! `reqwest::Client` is `Arc`-backed internally (cloning is cheap and shares
+//! the connection pool), but a *freshly built* client starts with an empty
+//! pool, so a per-call `.build()` silently pays a full TCP+TLS handshake on
+//! every single request. Benchmarked on the mobile dev build: ~3-4.5s per DS
+//! POST with a fresh client each time, on a control plane that chains a dozen
+//! of them sequentially through onboarding/group-setup — the dominant cost
+//! wasn't the DS's own work, it was reconnecting from scratch every time.
+
+use std::net::SocketAddr;
+use std::sync::{Mutex, OnceLock};
 
 use crate::shim::OverlayHandle;
+
+static DIRECT_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+// Overlay mode is off-by-default and rare relative to the direct path, but
+// still needs to reuse its connection pool across calls when it IS on. Keyed
+// by socks_addr (stable across a live Prefer/Strict mode flip — same shim,
+// same port — so a cached client stays valid through that).
+static OVERLAY_CLIENT: Mutex<Option<(SocketAddr, reqwest::Client)>> = Mutex::new(None);
 
 /// A reqwest client builder wired for the current overlay state. Prefer this
 /// over building the client directly when you need to customize TLS roots etc.;
@@ -24,10 +43,32 @@ pub fn http_client_builder(overlay: Option<&OverlayHandle>) -> reqwest::ClientBu
     builder
 }
 
-/// Build a reqwest client for the current overlay state. `Some` → routed through
-/// the shim; `None` → a plain direct client (the overlay is genuinely inert).
+/// A reqwest client for the current overlay state, reused across calls so
+/// callers share one connection pool instead of reconnecting from scratch
+/// every request. `Some` → routed through the shim; `None` → a plain direct
+/// client (the overlay is genuinely inert).
 pub fn http_client(overlay: Option<&OverlayHandle>) -> reqwest::Client {
-    http_client_builder(overlay)
-        .build()
-        .expect("reqwest client builds with default TLS")
+    match overlay {
+        None => DIRECT_CLIENT
+            .get_or_init(|| {
+                http_client_builder(None)
+                    .build()
+                    .expect("reqwest client builds with default TLS")
+            })
+            .clone(),
+        Some(handle) => {
+            let addr = handle.socks_addr();
+            let mut cached = OVERLAY_CLIENT.lock().unwrap();
+            if let Some((cached_addr, client)) = cached.as_ref() {
+                if *cached_addr == addr {
+                    return client.clone();
+                }
+            }
+            let client = http_client_builder(Some(handle))
+                .build()
+                .expect("reqwest client builds with default TLS");
+            *cached = Some((addr, client.clone()));
+            client
+        }
+    }
 }

@@ -21,16 +21,12 @@ tags:
 - takeScreenshot: groups-02-create
 - tapOn: "CREATE GROUP"
 
-# Back on the groups tab, the new group + its #General channel should appear.
+# CREATE GROUP navigates straight into the new group's detail screen (not
+# back to the groups list) — better UX than assumed, matching Slack/Discord's
+# drop-into-the-new-channel pattern. Its #General channel should be visible.
 - extendedWaitUntil:
     visible:
-      id: "screen-groups"
+      id: "screen-group"
     timeout: 15000
+- assertVisible: "General"
 - takeScreenshot: groups-03-created
-
-# Open the group detail (tap the group's channel row opens the channel; the
-# group header/menu opens management). Assert the detail route renders.
-- tapOn:
-    text: "E2E Test Group"
-    optional: true
-- takeScreenshot: groups-04-detail

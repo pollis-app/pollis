@@ -615,6 +615,11 @@ function TextChat(props: ChatViewProps = {}) {
       {actionTarget ? (
         <Pressable
           onPress={() => setActionTarget(null)}
+          // Neither wrapper has its own accessibilityLabel, so leaving them
+          // `accessible` (Pressable's default) makes iOS collapse every
+          // child button below into ONE opaque compound element — a
+          // VoiceOver user could never reach Edit/Delete/react individually.
+          accessible={false}
           style={{
             position: "absolute",
             top: 0,
@@ -627,6 +632,7 @@ function TextChat(props: ChatViewProps = {}) {
         >
           <Pressable
             onPress={(e) => e.stopPropagation()}
+            accessible={false}
             style={{
               backgroundColor: semantic.cardBg,
               borderTopWidth: 1,
