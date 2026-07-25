@@ -76,6 +76,16 @@ fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 
 // ── Key-package entries ──────────────────────────────────────────────────────
 
+/// The MLS code point of `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` — the
+/// suite every Pollis group has ever used, and the default for any request that
+/// does not name one.
+///
+/// Every currently deployed client omits the suite field entirely, and every row
+/// written before the `ciphersuite` column existed carries this value from the
+/// column default (migration `000010`), so defaulting here keeps old clients on
+/// exactly the behaviour they have today.
+pub const CIPHERSUITE_CLASSIC: i64 = 0x0001;
+
 /// One published key package: its hex hash-ref and the TLS-serialized
 /// `KeyPackage` bytes, base64 (STANDARD) since they are binary.
 #[derive(Deserialize)]
@@ -83,6 +93,22 @@ pub struct KeyPackageEntry {
     pub ref_hash: String,
     /// base64 (STANDARD) of the TLS-serialized `KeyPackage`.
     pub key_package: String,
+    /// MLS ciphersuite code point this package was built with. Optional: absent
+    /// means [`CIPHERSUITE_CLASSIC`], which is what every pre-#454 client sends.
+    ///
+    /// Client-supplied, so this is a ROUTING HINT and nothing more — the real
+    /// suite lives inside the opaque `key_package` blob and MLS rejects a
+    /// mismatch at validation. Mistagging can at worst cost a failed add; it
+    /// cannot bypass anything.
+    #[serde(default)]
+    pub ciphersuite: Option<i64>,
+}
+
+impl KeyPackageEntry {
+    /// The suite to persist for this package, defaulting to classic.
+    fn suite(&self) -> i64 {
+        self.ciphersuite.unwrap_or(CIPHERSUITE_CLASSIC)
+    }
 }
 
 // ── POST /v1/key-packages ────────────────────────────────────────────────────
@@ -143,9 +169,16 @@ pub async fn apply_publish_key_packages(
             Err(e) => return Err(e),
         };
         conn.execute(
-            "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
-             VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![pkg.ref_hash.clone(), actor.clone(), kp, body.device_id.clone()],
+            "INSERT OR IGNORE INTO mls_key_package \
+             (ref_hash, user_id, key_package, device_id, ciphersuite) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            libsql::params![
+                pkg.ref_hash.clone(),
+                actor.clone(),
+                kp,
+                body.device_id.clone(),
+                pkg.suite(),
+            ],
         )
         .await?;
     }
@@ -198,25 +231,52 @@ pub async fn apply_replenish_key_packages(
         Err(o) => return Ok(o),
     };
     // Decode every package up front so a bad blob aborts before we touch the DB.
-    let mut decoded: Vec<(String, Vec<u8>)> = Vec::with_capacity(body.packages.len());
+    let mut decoded: Vec<(String, Vec<u8>, i64)> = Vec::with_capacity(body.packages.len());
     for pkg in &body.packages {
-        decoded.push((pkg.ref_hash.clone(), b64_decode(&pkg.key_package)?));
+        decoded.push((pkg.ref_hash.clone(), b64_decode(&pkg.key_package)?, pkg.suite()));
     }
+    // A rotation replaces the pool for the SUITES it is publishing, and only
+    // those. Today that is one suite (classic) and every stored row is classic,
+    // so this is exactly the old whole-device wipe. It matters from #454 P2 on,
+    // when a device keeps a classic and a hybrid pool side by side: an unscoped
+    // delete would make the second rotation silently destroy the first pool.
+    // An empty request keeps the historical whole-device semantics.
+    let mut suites: Vec<i64> = decoded.iter().map(|(_, _, s)| *s).collect();
+    suites.sort_unstable();
+    suites.dedup();
+
     let tx = conn.transaction().await?;
     // Remove unclaimed packages for THIS device only — their private keys may no
     // longer exist in the device's current local DB (e.g. after a wipe). Also
     // clear legacy packages with NULL device_id for this user.
-    tx.execute(
-        "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
-         AND (device_id = ?2 OR device_id IS NULL)",
-        libsql::params![actor.clone(), body.device_id.clone()],
-    )
-    .await?;
-    for (ref_hash, kp) in &decoded {
+    if suites.is_empty() {
         tx.execute(
-            "INSERT OR IGNORE INTO mls_key_package (ref_hash, user_id, key_package, device_id) \
-             VALUES (?1, ?2, ?3, ?4)",
-            libsql::params![ref_hash.clone(), actor.clone(), kp.clone(), body.device_id.clone()],
+            "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
+             AND (device_id = ?2 OR device_id IS NULL)",
+            libsql::params![actor.clone(), body.device_id.clone()],
+        )
+        .await?;
+    }
+    for suite in &suites {
+        tx.execute(
+            "DELETE FROM mls_key_package WHERE user_id = ?1 AND claimed = 0 \
+             AND (device_id = ?2 OR device_id IS NULL) AND ciphersuite = ?3",
+            libsql::params![actor.clone(), body.device_id.clone(), *suite],
+        )
+        .await?;
+    }
+    for (ref_hash, kp, suite) in &decoded {
+        tx.execute(
+            "INSERT OR IGNORE INTO mls_key_package \
+             (ref_hash, user_id, key_package, device_id, ciphersuite) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            libsql::params![
+                ref_hash.clone(),
+                actor.clone(),
+                kp.clone(),
+                body.device_id.clone(),
+                *suite,
+            ],
         )
         .await?;
     }
@@ -238,6 +298,18 @@ pub struct ClaimKeyPackageBody {
     /// `fetch_mls_key_package` path).
     #[serde(default)]
     pub target_device_id: Option<String>,
+    /// Narrow the claim to packages published in this MLS ciphersuite. Optional:
+    /// absent means [`CIPHERSUITE_CLASSIC`], so a pre-#454 client — which never
+    /// sends the field — gets exactly the package it gets today.
+    ///
+    /// The suite pools do not contaminate each other. Asking for a suite the
+    /// target has no unclaimed package in yields [`ClaimOutcome::NoKeyPackage`],
+    /// the same ordinary control-flow result as an exhausted pool — never a
+    /// package in the wrong suite. That is what lets #454 P4 state "a hybrid
+    /// group cannot contain a classic-only member" as a precondition instead of
+    /// discovering it when an Add commit fails.
+    #[serde(default)]
+    pub ciphersuite: Option<i64>,
 }
 
 /// The result of a key-package claim: either a package was claimed (carries the
@@ -314,7 +386,9 @@ pub fn claim_outcome_response(outcome: ClaimOutcome) -> Response {
 /// `UPDATE … RETURNING` the client ran directly before the DS seam: it selects
 /// the OLDEST unclaimed package (`ORDER BY created_at ASC LIMIT 1`) matching the
 /// target — `user_id` only, or `user_id AND device_id` when a device is named —
-/// and flips its `claimed` flag in one statement.
+/// and flips its `claimed` flag in one statement. The match is additionally
+/// narrowed to the requested ciphersuite (classic when unspecified), so the
+/// suite pools stay disjoint.
 ///
 /// Atomicity: the `WHERE claimed = 0` subquery is re-evaluated under the single
 /// libsql writer at statement-execution time, so two concurrent claims of the
@@ -325,6 +399,9 @@ pub async fn apply_claim_key_package(
     conn: &Connection,
     body: &ClaimKeyPackageBody,
 ) -> anyhow::Result<ClaimOutcome> {
+    // Absent suite = classic, so an old client's claim selects from exactly the
+    // rows it selected before the column existed (every one of which is classic).
+    let suite = body.ciphersuite.unwrap_or(CIPHERSUITE_CLASSIC);
     let mut rows = match &body.target_device_id {
         Some(device_id) => {
             conn.query(
@@ -333,10 +410,11 @@ pub async fn apply_claim_key_package(
                  WHERE ref_hash = ( \
                      SELECT ref_hash FROM mls_key_package \
                      WHERE user_id = ?1 AND device_id = ?2 AND claimed = 0 \
+                       AND ciphersuite = ?3 \
                      ORDER BY created_at ASC LIMIT 1 \
                  ) \
                  RETURNING ref_hash, key_package",
-                libsql::params![body.target_user_id.clone(), device_id.clone()],
+                libsql::params![body.target_user_id.clone(), device_id.clone(), suite],
             )
             .await?
         }
@@ -346,11 +424,11 @@ pub async fn apply_claim_key_package(
                  SET claimed = 1 \
                  WHERE ref_hash = ( \
                      SELECT ref_hash FROM mls_key_package \
-                     WHERE user_id = ?1 AND claimed = 0 \
+                     WHERE user_id = ?1 AND claimed = 0 AND ciphersuite = ?2 \
                      ORDER BY created_at ASC LIMIT 1 \
                  ) \
                  RETURNING ref_hash, key_package",
-                libsql::params![body.target_user_id.clone()],
+                libsql::params![body.target_user_id.clone(), suite],
             )
             .await?
         }
