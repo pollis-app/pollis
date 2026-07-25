@@ -155,6 +155,160 @@
       cursor: default;
     }
 
+    /* ── Grouped TOC: four tracks, a description, per-topic reading time ── */
+    .ln-toc {
+      gap: 0.85rem;
+    }
+
+    .ln-toc-track {
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+      padding: 0.85rem 1rem;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .ln-toc-head {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.4rem 0.75rem;
+      margin-bottom: 0.6rem;
+    }
+
+    .ln-toc-desc {
+      font-size: 0.8rem;
+      color: var(--c-text-muted);
+    }
+
+    .ln-toc-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 0.4rem;
+    }
+
+    .ln-toc-list li {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+
+    .ln-toc-time {
+      font-size: 0.72rem;
+      color: var(--c-text-muted);
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ln-toc-total {
+      font-size: 0.82rem;
+      color: var(--c-text-muted);
+      margin: 0.25rem 0 0;
+    }
+
+    /* ── Comparison table ─────────────────────────────────────── */
+    .ln-compare-wrap {
+      overflow-x: auto;
+      margin: 1.5rem 0;
+      border: 1px solid var(--c-border);
+      border-radius: 6px;
+    }
+
+    .ln-compare {
+      border-collapse: collapse;
+      width: 100%;
+      min-width: 40rem;
+      font-size: 0.82rem;
+    }
+
+    .ln-compare th,
+    .ln-compare td {
+      text-align: left;
+      padding: 0.6rem 0.8rem;
+      border-bottom: 1px solid var(--c-border);
+      vertical-align: top;
+      line-height: 1.5;
+    }
+
+    .ln-compare thead th {
+      color: var(--c-text-muted);
+      font-weight: 700;
+      font-size: 0.72rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .ln-compare tbody th {
+      font-weight: 700;
+      color: var(--c-text);
+      white-space: nowrap;
+    }
+
+    .ln-compare tr:last-child td,
+    .ln-compare tr:last-child th {
+      border-bottom: none;
+    }
+
+    .ln-compare .ln-yes {
+      color: var(--ln-ok);
+      font-weight: 700;
+    }
+
+    .ln-compare .ln-no {
+      color: var(--ln-bad);
+      font-weight: 700;
+    }
+
+    .ln-compare .ln-partial {
+      color: var(--c-accent);
+      font-weight: 700;
+    }
+
+    .ln-compare-pollis th,
+    .ln-compare-pollis td {
+      background: rgba(253, 186, 116, 0.06);
+    }
+
+    /* ── "What each party sees" list (attachments) ────────────── */
+    .ln-sees {
+      margin: 1.25rem 0;
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--c-border);
+      border-left: 3px solid var(--c-accent);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.02);
+      display: grid;
+      gap: 0.6rem;
+    }
+
+    .ln-sees-row {
+      display: grid;
+      grid-template-columns: 10rem 1fr;
+      gap: 0.75rem;
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+
+    .ln-sees-row dt {
+      color: var(--c-accent);
+      font-weight: 700;
+    }
+
+    .ln-sees-row dd {
+      margin: 0;
+      color: var(--c-text);
+    }
+
+    @media (max-width: 560px) {
+      .ln-sees-row {
+        grid-template-columns: 1fr;
+        gap: 0.15rem;
+      }
+    }
+
     /* ── A topic section ──────────────────────────────────────── */
     .ln-section {
       margin: 3.5rem 0;
@@ -884,34 +1038,89 @@
           rel="noopener noreferrer">design docs</a> for the rigorous version.
       </div>
 
-      <ul class="ln-toc">
-        <li><span class="ln-track">START HERE</span><a href="#the-problem">The problem with most
-            messaging apps</a></li>
-        <li><span class="ln-track">FOUNDATIONS</span><a href="#threat-model">Who can see what</a></li>
-        <li><span class="ln-track">FOUNDATIONS</span><a href="#vocabulary">Keys, encryption,
-            signatures, and hashes</a></li>
-        <li><span class="ln-track">MLS</span><a href="#mls-groups">Group chats, made efficient</a></li>
-        <li><span class="ln-track">MLS</span><a href="#joining-leaving">Joining, leaving, and your
-            history</a></li>
-        <li><span class="ln-track">MLS</span><a href="#window-not-door">A stolen key is a window, not
-            a door</a></li>
-        <li><span class="ln-track">IDENTITY</span><a href="#identity-keys">Making sure you have the
-            right person's key</a></li>
-        <li><span class="ln-track">IDENTITY</span><a href="#recovery">Losing a device, and getting
-            back in</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#merkle-trees">Merkle trees and
-            append-only logs</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#proofs-and-equivocation">Proving an
-            entry is really in the log</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#three-logs">Pollis's three logs, and
-            what each one protects</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#binary-transparency">Binary
-            transparency, and reproducible builds</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#verify-it-yourself">Verify it
-            yourself</a></li>
-        <li><span class="ln-track">TRANSPARENCY</span><a href="#reading-the-dashboards">Reading the
-            artifacts and Security pages</a></li>
-      </ul>
+      <div class="ln-toc">
+        <div class="ln-toc-track">
+          <div class="ln-toc-head">
+            <span class="ln-track">Start here</span>
+            <span class="ln-toc-desc">Why any of this matters</span>
+          </div>
+          <ul class="ln-toc-list">
+            <li><a href="#the-problem">The problem with most messaging apps</a><span class="ln-toc-time">3 min</span></li>
+          </ul>
+        </div>
+
+        <div class="ln-toc-track">
+          <div class="ln-toc-head">
+            <span class="ln-track">Foundations</span>
+            <span class="ln-toc-desc">The words and ideas everything else uses</span>
+          </div>
+          <ul class="ln-toc-list">
+            <li><a href="#threat-model">Who can see what</a><span class="ln-toc-time">3 min</span></li>
+            <li><a href="#vocabulary">Keys, encryption, signatures, and hashes</a><span class="ln-toc-time">6 min</span></li>
+          </ul>
+        </div>
+
+        <div class="ln-toc-track">
+          <div class="ln-toc-head">
+            <span class="ln-track">Group messaging (MLS)</span>
+            <span class="ln-toc-desc">How a whole group stays encrypted, efficiently</span>
+          </div>
+          <ul class="ln-toc-list">
+            <li><a href="#mls-groups">Group chats, made efficient</a><span class="ln-toc-time">3 min</span></li>
+            <li><a href="#joining-leaving">Joining, leaving, and your history</a><span class="ln-toc-time">3 min</span></li>
+            <li><a href="#window-not-door">A stolen key is a window, not a door</a><span class="ln-toc-time">3 min</span></li>
+          </ul>
+        </div>
+
+        <div class="ln-toc-track">
+          <div class="ln-toc-head">
+            <span class="ln-track">Files &amp; media</span>
+            <span class="ln-toc-desc">The same protection, applied to what you attach</span>
+          </div>
+          <ul class="ln-toc-list">
+            <li><a href="#attachments">Photos and files, encrypted before they leave</a><span class="ln-toc-time">4 min</span></li>
+          </ul>
+        </div>
+
+        <div class="ln-toc-track">
+          <div class="ln-toc-head">
+            <span class="ln-track">Identity</span>
+            <span class="ln-toc-desc">Making sure you are talking to the right person</span>
+          </div>
+          <ul class="ln-toc-list">
+            <li><a href="#identity-keys">Making sure you have the right person's key</a><span class="ln-toc-time">4 min</span></li>
+            <li><a href="#recovery">Losing a device, and getting back in</a><span class="ln-toc-time">3 min</span></li>
+          </ul>
+        </div>
+
+        <div class="ln-toc-track">
+          <div class="ln-toc-head">
+            <span class="ln-track">Transparency</span>
+            <span class="ln-toc-desc">Check the claims yourself, instead of trusting them</span>
+          </div>
+          <ul class="ln-toc-list">
+            <li><a href="#merkle-trees">Merkle trees and append-only logs</a><span class="ln-toc-time">3 min</span></li>
+            <li><a href="#proofs-and-equivocation">Proving an entry is really in the log</a><span class="ln-toc-time">4 min</span></li>
+            <li><a href="#three-logs">Pollis's three logs, and what each one protects</a><span class="ln-toc-time">3 min</span></li>
+            <li><a href="#binary-transparency">Binary transparency, and reproducible builds</a><span class="ln-toc-time">3 min</span></li>
+            <li><a href="#verify-it-yourself">Verify it yourself</a><span class="ln-toc-time">5 min</span></li>
+            <li><a href="#reading-the-dashboards">Reading the artifacts and Security pages</a><span class="ln-toc-time">4 min</span></li>
+          </ul>
+        </div>
+
+        <div class="ln-toc-track">
+          <div class="ln-toc-head">
+            <span class="ln-track">In context</span>
+            <span class="ln-toc-desc">How Pollis sits next to apps you already use</span>
+          </div>
+          <ul class="ln-toc-list">
+            <li><a href="#comparison">How Pollis compares to other apps</a><span class="ln-toc-time">4 min</span></li>
+          </ul>
+        </div>
+
+        <p class="ln-toc-total">About an hour cover to cover, but each track stands on its own; most
+          people read one, then come back. Or just start at the top and go straight down.</p>
+      </div>
 
       <!-- ═══ The Problem (intro) ═══════════════════════════════════════════ -->
       <section class="ln-section" id="the-problem">
@@ -1440,6 +1649,74 @@ Time runs left to right throughout: a one-way key chain that will not reverse, t
             target="_blank" rel="noopener noreferrer">the MLS wiki article</a>, and the local-storage
           caveat in <a href="https://github.com/actuallydan/pollis/blob/main/CLAUDE.md"
             target="_blank" rel="noopener noreferrer">CLAUDE.md</a> → "Storage".
+        </p>
+      </section>
+
+      <!-- ═══ Files & media — attachments (from #655) ══════════════════════ -->
+      <section class="ln-section" id="attachments">
+        <div class="ln-eyebrow">Files &amp; media</div>
+        <h2>Photos and files, encrypted before they leave</h2>
+
+        <div class="ln-prose">
+          <p>A message is not always text. When you send a photo, a voice clip, or a PDF, the same
+            rule has to hold: the company running Pollis should never see the contents. Files take a
+            slightly different path from text, so it is worth a short look at where they go.</p>
+          <p>When you attach a file, your device does three things before anything leaves it. It takes
+            a <strong>fingerprint</strong> of the file, a SHA-256 hash of the exact bytes (the same
+            kind of hash from <a href="#vocabulary">the vocabulary topic</a>). It <strong>derives a
+            key from that fingerprint</strong> and encrypts the file with AES-256-GCM, the same cipher
+            family used for your messages. And it uploads only the <strong>encrypted</strong> result
+            to storage, which is Cloudflare R2, an S3-style object store. Your device never holds the
+            storage's credentials: it asks the Delivery Service for a short-lived, pre-signed upload
+            link and uses that, so the file bytes and the storage login never meet.</p>
+          <p>The fingerprint travels a different road. It is placed <em>inside</em> the encrypted
+            message, so MLS protects it along with the text. Only the people in the conversation learn
+            which stored blob a message points at, and only they can re-derive the key to open it.
+            Storage sees an encrypted lump; the group sees a photo.</p>
+          <p><strong>Why derive the key from the file itself?</strong> Because it makes storage
+            cheaper without weakening the wall. If two people in a company both send the same 8 MB
+            slide deck, deriving the key from the file's fingerprint means both uploads produce the
+            byte-for-byte identical encrypted blob, so the second one never needs to be stored again.
+            This is called convergent encryption, and it is what lets one shared file be kept once
+            instead of once per sender.</p>
+          <p>Here is exactly who sees what:</p>
+        </div>
+
+        <dl class="ln-sees">
+          <div class="ln-sees-row"><dt>The storage (R2)</dt><dd>An encrypted blob, its size, and an
+            object name containing the file's fingerprint and its sanitized filename. It cannot read
+            the contents without a key it never receives.</dd></div>
+          <div class="ln-sees-row"><dt>The Delivery Service</dt><dd>The fingerprint and filename, so it
+            can record the file for dedup and mint the pre-signed link. It never sees the decryption
+            key or the plaintext.</dd></div>
+          <div class="ln-sees-row"><dt>People in the chat</dt><dd>The fingerprint arrives inside the
+            encrypted message, so they can fetch the blob and re-derive the key. They see the actual
+            photo or file.</dd></div>
+          <div class="ln-sees-row"><dt>Everyone else</dt><dd>Nothing useful. The link is short-lived
+            and the blob is meaningless without the key.</dd></div>
+        </dl>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">The trade this makes</div>
+          <p>Deriving the key from the file has one real consequence: it is deterministic, so identical
+            files produce identical blobs. That is what enables the storage saving, but it also means
+            someone who <em>already has a copy of a specific file</em> can compute its fingerprint and
+            check whether that exact file was uploaded. Convergent encryption keeps the contents of
+            files an observer does not have secret; it does not hide the presence of a file they can
+            already guess. It also places the filename in the storage object's name. For ordinary
+            attachments this is a fine trade; if even the existence of a known file would be sensitive,
+            it is worth knowing. Separately, the on-device cache re-encrypts every file at rest under a
+            different key tied to your local database, so a stolen, locked laptop still yields
+            nothing.</p>
+        </div>
+
+        <p class="ln-deeper">
+          The rigorous version: the upload, convergent key derivation, and cross-user dedup in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/r2.rs"
+            target="_blank" rel="noopener noreferrer">r2.rs</a>, and the loopback media server that
+          decrypts on demand in <a
+            href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/media_server.rs"
+            target="_blank" rel="noopener noreferrer">media_server.rs</a>.
         </p>
       </section>
 
@@ -2168,6 +2445,120 @@ Both dashboards labelled, a single release row taken apart, the same root shown 
           and <a
             href="https://github.com/actuallydan/pollis/blob/main/frontend/src/components/Security/BuildVerifyLine.tsx"
             target="_blank" rel="noopener noreferrer">BuildVerifyLine.tsx</a> for the four verdicts.
+        </p>
+      </section>
+
+      <!-- ═══ In context — comparison (from #655) ══════════════════════════ -->
+      <section class="ln-section" id="comparison">
+        <div class="ln-eyebrow">In context</div>
+        <h2>How Pollis compares to other apps</h2>
+
+        <div class="ln-prose">
+          <p>You do not have to take Pollis on its own terms. It is worth seeing where it sits next to
+            the apps you already use, including the things some of them do better. End-to-end
+            encryption is not unique to Pollis; several apps below have it, and a couple have carried
+            it far longer. What is less common is the combination: a Slack-shaped team messenger, built
+            on the modern group-encryption standard, that also publishes a log you can check instead of
+            a promise you have to trust.</p>
+        </div>
+
+        <div class="ln-compare-wrap">
+          <table class="ln-compare">
+            <thead>
+              <tr>
+                <th scope="col">App</th>
+                <th scope="col">Messages end-to-end encrypted?</th>
+                <th scope="col">Underlying approach</th>
+                <th scope="col">The main difference from Pollis</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="ln-compare-pollis">
+                <th scope="row">Pollis</th>
+                <td><span class="ln-yes">Yes</span></td>
+                <td>MLS (RFC 9420), the current group-encryption standard</td>
+                <td>This row is the baseline. Its distinctive part is the public, tamper-evident log
+                  that lets you verify the claims in this whole section.</td>
+              </tr>
+              <tr>
+                <th scope="row">Signal</th>
+                <td><span class="ln-yes">Yes</span></td>
+                <td>Signal Protocol (X3DH + Double Ratchet, from 2014)</td>
+                <td>The longest track record and the most-studied design of any of these, with a huge
+                  network. Pairwise rather than group-native, which MLS handles more efficiently at
+                  scale.</td>
+              </tr>
+              <tr>
+                <th scope="row">WhatsApp</th>
+                <td><span class="ln-yes">Yes</span></td>
+                <td>The same Signal Protocol as Signal</td>
+                <td>Unmatched reach: nearly everyone already has it. The servers are closed-source and
+                  it is owned by Meta, so you trust the operator rather than check it.</td>
+              </tr>
+              <tr>
+                <th scope="row">iMessage</th>
+                <td><span class="ln-yes">Yes</span></td>
+                <td>Apple's own scheme, pairwise rather than group-level</td>
+                <td>Seamless on Apple devices. By default the iCloud backup is readable by Apple unless
+                  you turn on Advanced Data Protection, which is opt-in.</td>
+              </tr>
+              <tr>
+                <th scope="row">Matrix / Element</th>
+                <td><span class="ln-yes">Yes</span></td>
+                <td>Megolm</td>
+                <td>Can back up message history through the server (Pollis deliberately does not) and
+                  can be self-hosted and federated. It trades away some of the post-compromise security
+                  MLS gives, in exchange for that backup.</td>
+              </tr>
+              <tr>
+                <th scope="row">Wire</th>
+                <td><span class="ln-yes">Yes</span></td>
+                <td>MLS via OpenMLS, close to Pollis's configuration</td>
+                <td>The closest cryptographic cousin here. The differences are mostly product and
+                  operational rather than in the message encryption itself.</td>
+              </tr>
+              <tr>
+                <th scope="row">Slack / Teams</th>
+                <td><span class="ln-no">No</span></td>
+                <td>The server reads message contents</td>
+                <td>Excellent search, history, and compliance because the server can read everything.
+                  Enterprise "key management" controls keys at rest, which is key custody, not
+                  end-to-end encryption. This is the product Pollis most resembles, minus the readable
+                  server.</td>
+              </tr>
+              <tr>
+                <th scope="row">Discord</th>
+                <td><span class="ln-partial">Calls only</span></td>
+                <td>Server reads chat; its 2024 DAVE protocol encrypts voice and video</td>
+                <td>Comparable to Pollis on the voice axis, where Pollis also encrypts calls with a key
+                  derived from the MLS group. Text chat is readable by the server.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="ln-prose">
+          <p><strong>What the others do better.</strong> Signal has the deepest scrutiny and the
+            simplest story. WhatsApp and iMessage have reach Pollis will not match, because the person
+            you want to message is probably already on them. Matrix lets you keep your history through
+            the server and run the whole thing yourself. Slack and Teams have years of product polish
+            and searchable archives. None of that is a trick; it is a genuinely different set of
+            trade-offs, and for some people the right one.</p>
+        </div>
+
+        <div class="ln-limit">
+          <div class="ln-limit-label">Reading the table fairly</div>
+          <p>This compares one axis, the confidentiality of message contents, and by that measure
+            Pollis is in good company rather than alone. The fair summary is not "we encrypt and they
+            do not." It is that Pollis pairs a team-messenger shape with the modern MLS standard and a
+            public log you can audit, so the claim that the operator cannot read your messages is one
+            you can check yourself rather than accept. Maturity, network size, and how much you rely on
+            server-side history are separate axes, and on several of those the incumbents lead.</p>
+        </div>
+
+        <p class="ln-deeper">
+          The rigorous version: the full app-by-app comparison, with the protocol details, is in the
+          <a href="security.html">Security whitepaper</a>.
         </p>
       </section>
 
