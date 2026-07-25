@@ -272,6 +272,67 @@
       line-height: 1.6;
     }
 
+    /* ── In-browser Ed25519 check of the live signed tree head (Topic 11) ── */
+    .ln-verifier {
+      margin: 1.25rem 0;
+      padding: 0.9rem 1rem;
+      border: 1px solid var(--c-border);
+      border-left: 3px solid var(--c-accent);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .ln-verifier-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.7rem;
+    }
+
+    .ln-verifier-title {
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--c-text-muted);
+    }
+
+    .ln-verifier-badge {
+      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 0.2rem 0.55rem;
+      border-radius: 4px;
+      border: 1px solid var(--c-border);
+    }
+
+    .ln-verifier-badge--pass {
+      color: var(--ln-ok);
+      border-color: var(--ln-ok);
+    }
+
+    .ln-verifier-badge--fail {
+      color: var(--ln-bad);
+      border-color: var(--ln-bad);
+    }
+
+    .ln-verifier-bad {
+      color: var(--ln-bad) !important;
+    }
+
+    .ln-verifier-actions {
+      margin-top: 0.7rem;
+    }
+
+    .ln-verifier-note {
+      font-size: 0.75rem;
+      color: var(--c-text-muted);
+      margin-top: 0.7rem;
+      line-height: 1.6;
+    }
+
     /* ── The honest-limit callout — load-bearing, per the epic ── */
     .ln-limit {
       border: 1px solid var(--c-border);
@@ -1901,7 +1962,39 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             rules the log enforces. It is the same checking code the app uses, not a
             separate version that might happen to agree by accident.
           </p>
-          <p>Four commands, four questions. Arguments come in this order:</p>
+          <p>
+            You can watch the first and most important part of that, the signature
+            check, happen right here. Your browser fetched the signed statement
+            above; below it has rebuilt the exact bytes the log signs and checked
+            the signature against a key printed on this page, using nothing but its
+            built-in cryptography. No terminal, no download.
+          </p>
+
+          <!-- In-browser Ed25519 verify of the live STH. Progressive enhancement:
+               ships hidden and reveals only once a genuine head verifies, so a
+               reader on a browser without Ed25519 (or with the fetch blocked) keeps
+               the curl + CLI, which teach the same thing. -->
+          <div class="ln-verifier" data-verifier hidden>
+            <div class="ln-verifier-head">
+              <span class="ln-verifier-title">Signature checked in your browser</span>
+              <span class="ln-verifier-badge" data-verifier-badge>&#8230;</span>
+            </div>
+            <div class="ln-live-row"><span>pinned key</span><b data-verifier-key>&#8230;</b></div>
+            <div class="ln-live-row"><span>tree_size</span><b data-verifier-size>&#8230;</b></div>
+            <div class="ln-live-row"><span>root</span><b data-verifier-root>&#8230;</b></div>
+            <div class="ln-live-row"><span>timestamp</span><b data-verifier-ts>&#8230;</b></div>
+            <div class="ln-live-row"><span>signature</span><b data-verifier-sig>&#8230;</b></div>
+            <div class="ln-verifier-actions">
+              <button type="button" class="ln-proof-btn ln-proof-btn--ghost" data-verifier-tamper>Flip one character of the root</button>
+            </div>
+            <div class="ln-verifier-note" data-verifier-note></div>
+          </div>
+          <p>
+            That is the signature only. It does not, on its own, rebuild the tree or
+            check that any particular entry is inside it, which is the rest of what
+            the verifier below does. Arguments come in this order:
+          </p>
+          <p>Four commands, four questions:</p>
           <pre class="ln-pre"><code># is the whole log consistent and append-only?
 pollis-verify remote  https://verify.pollis.com
 
