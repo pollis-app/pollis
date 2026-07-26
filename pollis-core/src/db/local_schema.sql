@@ -81,6 +81,23 @@ CREATE TABLE IF NOT EXISTS mls_self_update (
     last_at         TEXT NOT NULL
 );
 
+-- Which suite GENERATION of a conversation's MLS group this device is on
+-- (#454 P4). MLS binds the ciphersuite into the group, so upgrading a live
+-- conversation to the post-quantum hybrid suite means standing up a SUCCESSOR
+-- group and moving the roster into it — a second lineage, restarting at epoch 0.
+--
+-- Absence of a row means generation 0, which is every group that exists today,
+-- so this table is inert until a conversation actually migrates. The value is
+-- the lineage this device currently READS AND WRITES; a successor group that has
+-- been created locally but not yet adopted (its predecessor is still being
+-- drained) is stored under its own openmls GroupId and is invisible until this
+-- row advances. See `commands/mls/generation.rs`.
+CREATE TABLE IF NOT EXISTS mls_generation (
+    conversation_id TEXT PRIMARY KEY,
+    generation      INTEGER NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS user_cache (
     id         TEXT PRIMARY KEY,
     username   TEXT NOT NULL,

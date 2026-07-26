@@ -110,7 +110,7 @@ fn encrypt_decrypt_roundtrip() {
     let welcome_bytes: Vec<u8> = {
         let alice_provider = PollisProvider::new(&alice_db);
         let (mut alice_group, alice_signer) =
-            load_group_with_signer(&alice_provider, conv_id).unwrap();
+            load_group_with_signer(&alice_provider, conv_id, 0).unwrap();
 
         let mut kp_reader: &[u8] = &bob_kp_bytes;
         let kp_in = KeyPackageIn::tls_deserialize(&mut kp_reader).unwrap();
@@ -179,7 +179,7 @@ fn padded_text_roundtrip_through_mls() {
     let welcome_bytes: Vec<u8> = {
         let alice_provider = PollisProvider::new(&alice_db);
         let (mut alice_group, alice_signer) =
-            load_group_with_signer(&alice_provider, conv_id).unwrap();
+            load_group_with_signer(&alice_provider, conv_id, 0).unwrap();
         let mut kp_reader: &[u8] = &bob_kp_bytes;
         let kp_in = KeyPackageIn::tls_deserialize(&mut kp_reader).unwrap();
         let kp = kp_in.validate(alice_provider.crypto(), ProtocolVersion::Mls10).unwrap();
@@ -269,7 +269,7 @@ fn add_member_to_group(
     kp_bytes: &[u8],
 ) -> (Vec<u8>, Vec<u8>) {
     let provider = PollisProvider::new(adder_db);
-    let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+    let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
 
     let mut reader: &[u8] = kp_bytes;
     let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
@@ -328,7 +328,7 @@ fn remove_member(
     target_user_id: &str,
 ) -> Vec<u8> {
     let provider = PollisProvider::new(remover_db);
-    let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+    let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
 
     // Find all leaves for the target user (may have multiple devices).
     let leaf_indices: Vec<LeafNodeIndex> = group.members()
@@ -790,7 +790,7 @@ fn add_members_batch(
     kp_bytes_list: &[Vec<u8>],
 ) -> (Vec<u8>, Vec<u8>) {
     let provider = PollisProvider::new(adder_db);
-    let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+    let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
 
     let validated_kps: Vec<KeyPackage> = kp_bytes_list.iter().map(|kp_raw| {
         let mut reader: &[u8] = kp_raw;
@@ -1077,7 +1077,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     // tree from bob_kp_v1's still-present leaf.
     {
         let provider = PollisProvider::new(&alice_db);
-        let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+        let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
         let mut reader: &[u8] = &bob_kp_v2;
         let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
         let kp = kp_in.validate(provider.crypto(), ProtocolVersion::Mls10).unwrap();
@@ -1093,7 +1093,7 @@ fn reinvite_with_stable_signing_key_handles_stale_leaf() {
     // Apply the fix: combined remove+add commit via commit_builder.
     let welcome2_bytes: Vec<u8> = {
         let provider = PollisProvider::new(&alice_db);
-        let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+        let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
 
         // Find Bob's stale leaves.
         let stale: Vec<LeafNodeIndex> = group.members()
@@ -1159,7 +1159,7 @@ fn reconcile(
     actor_device_id: &str,
 ) -> (ReconcileOutcome, Option<ReconcileCommitData>) {
     let provider = PollisProvider::new(actor_db);
-    let (mut group, signer) = load_group_with_signer(&provider, conv_id).unwrap();
+    let (mut group, signer) = load_group_with_signer(&provider, conv_id, 0).unwrap();
 
     let roster: std::collections::HashSet<String> =
         roster_user_ids.iter().map(|s| s.to_string()).collect();
@@ -2053,14 +2053,14 @@ fn suite_seam_round_trip<CA, CB>(
     CA: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
     CB: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    create_mls_group_in_suite(alice, conversation_id, "alice", "alice_dev", suite)
+    create_mls_group_in_suite(alice, conversation_id, 0, "alice", "alice_dev", suite)
         .unwrap_or_else(|e| panic!("create group on {suite:?}: {e}"));
 
     let (_bob_ref, bob_kp_bytes) = build_key_package_in_suite(bob, "bob", "bob_dev", suite)
         .unwrap_or_else(|e| panic!("build key package on {suite:?}: {e}"));
 
     let (mut alice_group, alice_sig) =
-        load_group_with_signer(alice, conversation_id).expect("reload alice's group");
+        load_group_with_signer(alice, conversation_id, 0).expect("reload alice's group");
     assert_eq!(
         alice_group.ciphersuite(),
         suite,
@@ -2214,10 +2214,10 @@ fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
         let db = make_db();
         // Create through whichever backend serves the suite…
         if suite == CS_HYBRID {
-            create_mls_group_in_suite(&PollisPqProvider::new(&db), conv, "alice", "alice_dev", suite)
+            create_mls_group_in_suite(&PollisPqProvider::new(&db), conv, 0, "alice", "alice_dev", suite)
                 .unwrap();
         } else {
-            create_mls_group_in_suite(&PollisProvider::new(&db), conv, "alice", "alice_dev", suite)
+            create_mls_group_in_suite(&PollisProvider::new(&db), conv, 0, "alice", "alice_dev", suite)
                 .unwrap();
         }
 
@@ -2273,9 +2273,9 @@ where
     CA: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
     CB: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    create_mls_group_in_suite(alice, conversation_id, "alice", "alice_dev", suite).unwrap();
+    create_mls_group_in_suite(alice, conversation_id, 0, "alice", "alice_dev", suite).unwrap();
     let (_, bob_kp_bytes) = build_key_package_in_suite(bob, "bob", "bob_dev", suite).unwrap();
-    let (mut alice_group, alice_sig) = load_group_with_signer(alice, conversation_id).unwrap();
+    let (mut alice_group, alice_sig) = load_group_with_signer(alice, conversation_id, 0).unwrap();
 
     let mut reader: &[u8] = &bob_kp_bytes;
     let kp = KeyPackageIn::tls_deserialize(&mut reader)
@@ -2305,10 +2305,10 @@ fn a_hybrid_group_cannot_admit_a_classic_key_package() {
     let bob_db = make_db();
 
     let alice = PollisPqProvider::new(&alice_db);
-    create_mls_group_in_suite(&alice, "01JTESTNODOWNGRADE00000000", "alice", "alice_dev", CS_HYBRID)
+    create_mls_group_in_suite(&alice, "01JTESTNODOWNGRADE00000000", 0, "alice", "alice_dev", CS_HYBRID)
         .unwrap();
     let (mut alice_group, alice_sig) =
-        load_group_with_signer(&alice, "01JTESTNODOWNGRADE00000000").unwrap();
+        load_group_with_signer(&alice, "01JTESTNODOWNGRADE00000000", 0).unwrap();
     assert_eq!(alice_group.ciphersuite(), CS_HYBRID);
 
     // Bob is on an un-upgraded client: his only KeyPackage is classic.
@@ -2412,7 +2412,7 @@ where
     C: OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
     let alice = &providers[0];
-    create_mls_group_in_suite(alice, conversation_id, "m0", "m0_dev", suite).unwrap();
+    create_mls_group_in_suite(alice, conversation_id, 0, "m0", "m0_dev", suite).unwrap();
 
     // One batched add, which is how reconcile actually adds people — and the
     // reason every joiner starts life as an unmerged leaf.
@@ -2429,7 +2429,7 @@ where
         );
     }
     let welcome_bytes = {
-        let (mut group, signer) = load_group_with_signer(alice, conversation_id).unwrap();
+        let (mut group, signer) = load_group_with_signer(alice, conversation_id, 0).unwrap();
         let (_commit, welcome, _) = group.add_members(alice, &signer, &kps).unwrap();
         group.merge_pending_commit(alice).unwrap();
         welcome.tls_serialize_detached().unwrap()
@@ -2444,13 +2444,13 @@ where
     // Every member rotates its own leaf — the post-join self-update, applied by
     // the whole group exactly as the live path would.
     for i in 1..providers.len() {
-        let (_, commit_bytes, _) = stage_self_update(&providers[i], conversation_id)
+        let (_, commit_bytes, _) = stage_self_update(&providers[i], conversation_id, 0)
             .unwrap()
             .expect("a joined member can always self-update");
         for (j, p) in providers.iter().enumerate() {
             if i == j {
                 // Loading merges the pending commit — see `load_group_with_signer`.
-                load_group_with_signer(p, conversation_id).unwrap();
+                load_group_with_signer(p, conversation_id, 0).unwrap();
             } else {
                 apply_commit_in_suite(p, conversation_id, &commit_bytes);
             }
@@ -2468,7 +2468,7 @@ fn probe_self_update_size<C>(provider: &MlsProvider<'_, C>, conversation_id: &st
 where
     C: OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    let (_, commit_bytes, _) = stage_self_update(provider, conversation_id)
+    let (_, commit_bytes, _) = stage_self_update(provider, conversation_id, 0)
         .unwrap()
         .expect("group exists");
     // Deliberately NOT `load_group_with_signer`, which merges any pending commit
@@ -2531,18 +2531,18 @@ fn a_self_update_replaces_our_own_leaf_key() {
     let db = make_db();
     let provider = PollisPqProvider::new(&db);
     let conv = "01JT666LEAFROTATES00000000";
-    create_mls_group_in_suite(&provider, conv, "alice", "alice_dev", CS_HYBRID).unwrap();
+    create_mls_group_in_suite(&provider, conv, 0, "alice", "alice_dev", CS_HYBRID).unwrap();
 
     // openmls keeps the raw key bytes crate-private, so compare the key itself.
     let leaf_key_of = |p: &PollisPqProvider| {
-        let (group, _) = load_group_with_signer(p, conv).unwrap();
+        let (group, _) = load_group_with_signer(p, conv, 0).unwrap();
         group.own_leaf_node().unwrap().encryption_key().clone()
     };
 
     let before = leaf_key_of(&provider);
-    stage_self_update(&provider, conv).unwrap().expect("group exists");
+    stage_self_update(&provider, conv, 0).unwrap().expect("group exists");
     {
-        let (mut group, _) = load_group_with_signer(&provider, conv).unwrap();
+        let (mut group, _) = load_group_with_signer(&provider, conv, 0).unwrap();
         group.merge_pending_commit(&provider).unwrap();
     }
     let after = leaf_key_of(&provider);

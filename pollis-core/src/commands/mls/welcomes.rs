@@ -26,10 +26,16 @@ use super::provider::{
 /// `Welcome` via `MlsMessageIn::extract()`, then call
 /// `StagedWelcome::new_from_welcome`.
 ///
-/// Returns the conversation id we just joined, so the caller can follow up on
-/// the join — notably with the post-join self-update that merges this brand-new
-/// (and therefore unmerged) leaf into the tree (issue #666).
-pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Result<String> {
+/// Returns the `(conversation_id, generation)` we just joined, so the caller can
+/// follow up on the join — notably with the post-join self-update that merges
+/// this brand-new (and therefore unmerged) leaf into the tree (issue #666).
+///
+/// The generation is decoded from the GroupId rather than assumed to be the
+/// conversation's current one: a Welcome into a migrated group (#454 P4) admits
+/// us to the *successor* lineage, whose GroupId carries a `#gN` suffix. Returning
+/// the bare conversation id keeps every caller — catch-up, self-update, the
+/// dedupe below — addressing the conversation, not the lineage.
+pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Result<(String, i64)> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
@@ -55,19 +61,25 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
         ))
     })?;
 
-    with_suite_provider!(db.conn(), suite, |provider| {
+    let raw_group_id = with_suite_provider!(db.conn(), suite, |provider| {
         join_from_welcome(&provider, welcome)
-    })
+    })?;
+    Ok(super::generation::split_mls_group_id(&raw_group_id))
 }
 
 /// Materialise group state from an already-suite-matched `Welcome`, returning
-/// the joined conversation id (the GroupId is the conversation id's UTF-8
-/// bytes — see `GroupId::from_slice(conversation_id.as_bytes())` in
-/// `group_state`).
+/// the joined group's RAW GroupId string — the conversation id for generation 0,
+/// `"{conversation_id}#g{generation}"` for a successor lineage (see
+/// [`super::generation`]).
 ///
 /// Split into ProcessedWelcome → delete stale group → stage → into_group:
 /// openmls checks for duplicate GroupIds inside `into_staged_welcome`, so any
-/// existing group must be deleted *before* that call.
+/// existing group must be deleted *before* that call. Note the delete is scoped
+/// to the *incoming* GroupId, so a Welcome into a successor lineage leaves the
+/// predecessor group intact — under `max_past_epochs = 0` that group holds the
+/// only keys that can still decrypt envelopes sealed before the migration, and
+/// it is dropped only once the predecessor has been drained
+/// (`adopt_generation_locked`).
 fn join_from_welcome<C>(provider: &MlsProvider<'_, C>, welcome: Welcome) -> Result<String>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
@@ -131,16 +143,20 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // failed Welcome was likely orphaned by a DB wipe and will never succeed;
     // the repair mechanism generates a fresh Welcome. (Same semantics as before.)
     let mut processed_ids: Vec<String> = Vec::new();
-    // Conversations this pass actually joined — the post-join self-update targets
-    // (issue #666). Deduplicated because a repaired join can arrive as two
-    // Welcomes for the same group, and rotating twice buys nothing.
-    let mut joined: Vec<String> = Vec::new();
+    // Conversations this pass actually joined, with the LINEAGE each Welcome
+    // admitted us to — the post-join self-update targets (issue #666) and the
+    // generation-adoption input (#454 P4). Deduplicated on the conversation
+    // because a repaired join can arrive as two Welcomes for the same group, and
+    // rotating twice buys nothing; the highest generation wins, since a Welcome
+    // into a newer lineage supersedes one into an older.
+    let mut joined: Vec<(String, i64)> = Vec::new();
     for (id, bytes) in items {
         match apply_welcome(state, &bytes).await {
-            Ok(conversation_id) => {
+            Ok((conversation_id, generation)) => {
                 eprintln!("[mls] poll_mls_welcomes: applied welcome {id}");
-                if !joined.contains(&conversation_id) {
-                    joined.push(conversation_id);
+                match joined.iter_mut().find(|(c, _)| c == &conversation_id) {
+                    Some(entry) => entry.1 = entry.1.max(generation),
+                    None => joined.push((conversation_id, generation)),
                 }
             }
             Err(e) => {
@@ -173,9 +189,64 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         }
     }
 
+    adopt_undrainable_joins(state, &joined).await;
     self_update_joined_groups(state, user_id, &joined).await;
 
     Ok(())
+}
+
+/// Adopt a newly-joined lineage in the one case the catch-up backstop cannot
+/// reach: we hold **no group at all** on our recorded generation (#454 P4).
+///
+/// The normal path is the backstop in `process_pending_commits`: drain the
+/// predecessor to its head, then hop to the successor. That ordering is
+/// mandatory whenever a predecessor group exists, because adoption deletes its
+/// key material and under `max_past_epochs = 0` those are the only keys that can
+/// still open envelopes sealed before the migration.
+///
+/// But a member added to an ALREADY-migrated conversation never had the
+/// predecessor. Its recorded generation is 0, `process_pending_commits` finds no
+/// group there and stops before it can ever hop, and the device would sit
+/// permanently pointed at a lineage it does not have. Nothing can be lost by
+/// adopting immediately — there is no group to drain — so it adopts here.
+///
+/// Deliberately NOT capped like the self-update burst below: a rotation deferred
+/// to the next sweep costs efficiency, whereas a deferred adoption leaves the
+/// device unable to read the conversation at all, and no later sweep would fix
+/// it for exactly the reason above.
+async fn adopt_undrainable_joins(state: &Arc<AppState>, joined: &[(String, i64)]) {
+    for (conversation_id, generation) in joined {
+        let predecessor = {
+            let guard = state.local_db.lock().await;
+            match guard.as_ref() {
+                Some(db) => {
+                    let local = super::generation::local_generation(db.conn(), conversation_id);
+                    let drainable =
+                        super::provider::load_stored_group_at(db.conn(), conversation_id, local)
+                            .is_some();
+                    if *generation > local && !drainable {
+                        Some(local)
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            }
+        };
+        if let Some(predecessor) = predecessor {
+            eprintln!(
+                "[mls] poll_mls_welcomes: {conversation_id} joined at generation {generation} \
+                 with no group on {predecessor} — adopting immediately"
+            );
+            super::group_state::adopt_generation_locked(
+                state,
+                conversation_id,
+                predecessor,
+                *generation,
+            )
+            .await;
+        }
+    }
 }
 
 /// Post-join self-update (issue #666): rotate our own leaf in each group we just
@@ -191,11 +262,11 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
 /// Best-effort and strictly after the DS ack + KP replenish: a failure here
 /// costs efficiency (and delays PCS to the next periodic rotation), never
 /// correctness, so it must not be able to strand a Welcome as undelivered.
-async fn self_update_joined_groups(state: &Arc<AppState>, user_id: &str, joined: &[String]) {
+async fn self_update_joined_groups(state: &Arc<AppState>, user_id: &str, joined: &[(String, i64)]) {
     // A device recovering from a wipe re-processes every Welcome it ever
     // received, so cap the burst for the same reason the sweep does: rotation is
     // a deadline, not a heartbeat, and the rest are picked up by the next sweep.
-    for conversation_id in joined.iter().take(super::self_update::MAX_SELF_UPDATES_PER_SWEEP) {
+    for (conversation_id, _) in joined.iter().take(super::self_update::MAX_SELF_UPDATES_PER_SWEEP) {
         // Catch up first. Our Welcome names the epoch we were added at, but the
         // group may already have moved past it; committing from a stale epoch
         // would just lose the compare-and-swap. Interleaved, never a bare commit

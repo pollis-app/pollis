@@ -175,12 +175,32 @@ pub(crate) const SIGNATURE_SCHEME: SignatureScheme = SignatureScheme::ED25519;
 /// what epoch is it at?) and for the storage-only mutations `MlsGroup::delete`
 /// and `clear_pending_commit`: none of them need a backend, so none of them
 /// need to dispatch.
+///
+/// Resolves the conversation's **suite generation** (#454 P4) before loading, so
+/// a device that has migrated to the hybrid suite transparently reads and writes
+/// its successor group. Every caller that means "this conversation's live group"
+/// gets that for free; the handful that must name a specific lineage — the
+/// migrator standing up a successor, a joiner draining a predecessor — call
+/// [`load_stored_group_at`] instead.
 pub(crate) fn load_stored_group(
     conn: &rusqlite::Connection,
     conversation_id: &str,
 ) -> Option<MlsGroup> {
+    let generation = crate::commands::mls::generation::local_generation(conn, conversation_id);
+    load_stored_group_at(conn, conversation_id, generation)
+}
+
+/// [`load_stored_group`] pinned to an explicit suite generation, for the two
+/// paths that legitimately hold both lineages at once: migration (create the
+/// successor while the predecessor still serves traffic) and adoption (drain the
+/// predecessor after the successor's Welcome has landed).
+pub(crate) fn load_stored_group_at(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> Option<MlsGroup> {
     let store = MlsStore::new(conn);
-    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    let group_id = crate::commands::mls::generation::mls_group_id(conversation_id, generation);
     MlsGroup::load(&store, &group_id).ok().flatten()
 }
 
@@ -231,6 +251,16 @@ pub(crate) fn stored_group_ciphersuite(
     load_stored_group(conn, conversation_id).map(|g| g.ciphersuite())
 }
 
+/// [`stored_group_ciphersuite`] pinned to an explicit suite generation — the
+/// suite half of [`load_stored_group_at`].
+pub(crate) fn stored_group_ciphersuite_at(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> Option<Ciphersuite> {
+    load_stored_group_at(conn, conversation_id, generation).map(|g| g.ciphersuite())
+}
+
 /// Run `$body` against the [`MlsProvider`] that serves `$suite`.
 ///
 /// Dispatch has to be a macro rather than a `dyn` object or a closure:
@@ -270,11 +300,34 @@ macro_rules! with_group_provider {
             $conversation_id,
         )
         .unwrap_or($crate::commands::mls::provider::CS_CLASSIC);
+        // Fully qualified: this expands at the *caller's* site, which need not
+        // have `with_suite_provider` in scope.
+        $crate::commands::mls::provider::with_suite_provider!(__conn, __suite, |$p| $body)
+    }};
+}
+
+/// [`with_group_provider`] pinned to an explicit suite generation (#454 P4).
+///
+/// Needed by the two paths that hold both lineages at once, where "the suite of
+/// this conversation's live group" is the wrong question: a migrator publishing
+/// its successor's opening commit is still on generation `N` locally, so
+/// [`with_group_provider`] would hand it the *classic* provider for a hybrid
+/// group — and `RustCrypto` panics on [`CS_HYBRID`] rather than failing.
+macro_rules! with_lineage_provider {
+    ($conn:expr, $conversation_id:expr, $generation:expr, |$p:ident| $body:block) => {{
+        let __conn = $conn;
+        let __suite = $crate::commands::mls::provider::stored_group_ciphersuite_at(
+            __conn,
+            $conversation_id,
+            $generation,
+        )
+        .unwrap_or($crate::commands::mls::provider::CS_CLASSIC);
         with_suite_provider!(__conn, __suite, |$p| $body)
     }};
 }
 
 pub(crate) use with_group_provider;
+pub(crate) use with_lineage_provider;
 pub(crate) use with_suite_provider;
 
 // ── Credential helpers ───────────────────────────────────────────────────────

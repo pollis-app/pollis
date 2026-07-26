@@ -133,7 +133,11 @@ fn last_self_update(
 
 /// Record a landed self-update so the next one is a week out, not immediate.
 /// Written only on a confirmed win: a lost race did not rotate anything.
-fn record_self_update(conn: &rusqlite::Connection, conversation_id: &str, epoch: u64) {
+///
+/// `pub(super)` for migration (#454 P4): the device that creates a successor
+/// group is its founder, so its leaf is merged by construction and it starts the
+/// new lineage already rotated.
+pub(super) fn record_self_update(conn: &rusqlite::Connection, conversation_id: &str, epoch: u64) {
     let now = chrono::Utc::now().to_rfc3339();
     if let Err(e) = conn.execute(
         "INSERT INTO mls_self_update (conversation_id, last_epoch, last_at) VALUES (?1, ?2, ?3) \
@@ -141,6 +145,24 @@ fn record_self_update(conn: &rusqlite::Connection, conversation_id: &str, epoch:
         rusqlite::params![conversation_id, epoch as i64, now],
     ) {
         eprintln!("[mls] self-update: recording rotation for {conversation_id} failed: {e}");
+    }
+}
+
+/// Forget that this device ever rotated in `conversation_id`, making a
+/// self-update due immediately.
+///
+/// Called when adopting a new suite generation (#454 P4). A device that joins
+/// the successor group by Welcome is an unmerged leaf *there* regardless of how
+/// recently it rotated in the predecessor, and every commit in the new lineage
+/// pays for that leaf until it commits once. Keeping the old timestamp would
+/// suppress the post-join rotation for up to a week — exactly the linear
+/// commit-growth #666 exists to kill.
+pub(super) fn clear_self_update(conn: &rusqlite::Connection, conversation_id: &str) {
+    if let Err(e) = conn.execute(
+        "DELETE FROM mls_self_update WHERE conversation_id = ?1",
+        rusqlite::params![conversation_id],
+    ) {
+        eprintln!("[mls] self-update: clearing rotation for {conversation_id} failed: {e}");
     }
 }
 
@@ -170,11 +192,13 @@ pub async fn self_update_group(
             None => return Ok(false),
         };
         let suite = stored_group_ciphersuite(db.conn(), conversation_id).unwrap_or(CS_CLASSIC);
+        let generation = super::generation::local_generation(db.conn(), conversation_id);
         with_suite_provider!(db.conn(), suite, |provider| {
-            stage_self_update(&provider, conversation_id)
+            stage_self_update(&provider, conversation_id, generation)
         })?
+        .map(|staged| (generation, staged))
     };
-    let (epoch_before, commit_bytes, group_info_bytes) = match staged {
+    let (generation, (epoch_before, commit_bytes, group_info_bytes)) = match staged {
         Some(v) => v,
         None => return Ok(false),
     };
@@ -182,6 +206,8 @@ pub async fn self_update_group(
     let published = publish_staged_commit(
         state,
         conversation_id,
+        generation,
+        None,
         actor_user_id,
         epoch_before,
         &commit_bytes,
@@ -246,11 +272,12 @@ pub async fn self_update_group(
 pub(super) fn stage_self_update<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
+    generation: i64,
 ) -> Result<Option<(u64, Vec<u8>, Option<Vec<u8>>)>>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    let (mut group, signer) = match load_group_with_signer(provider, conversation_id) {
+    let (mut group, signer) = match load_group_with_signer(provider, conversation_id, generation) {
         Ok(pair) => pair,
         Err(e) => {
             eprintln!("[mls] self-update: no usable local group for {conversation_id}: {e}");

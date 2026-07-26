@@ -33,14 +33,23 @@ pub struct WelcomeOut {
     pub welcome: Vec<u8>,
 }
 
-/// Submit one commit at `epoch` for `conversation_id`, together with the
-/// resulting-epoch `group_info` (if any) and the `welcomes` for any devices the
-/// commit added. On a win, all three are written as one unit (atomically by the
-/// DS; mirrored by the Direct path). See the module docs.
+/// Submit one commit at `epoch` of suite `generation` for `conversation_id`,
+/// together with the resulting-epoch `group_info` (if any) and the `welcomes`
+/// for any devices the commit added. On a win, all three are written as one unit
+/// (atomically by the DS; mirrored by the Direct path). See the module docs.
+///
+/// `closes_epoch` is set **only** by a migration opening generation `N + 1`
+/// (#454 P4): it names the head of generation `N` that the migration closes,
+/// which is what turns "open a lineage" into a compare-and-swap on the old one.
+/// Every other caller passes `None`, and the DS rejects a `closes_epoch` on a
+/// same-generation commit.
+#[allow(clippy::too_many_arguments)]
 pub async fn submit_commit(
     state: &Arc<AppState>,
     conversation_id: &str,
+    generation: i64,
     epoch: i64,
+    closes_epoch: Option<i64>,
     sender_id: &str,
     commit: &[u8],
     added_user_id: Option<&str>,
@@ -51,7 +60,9 @@ pub async fn submit_commit(
     http_submit(
         state,
         conversation_id,
+        generation,
         epoch,
+        closes_epoch,
         sender_id,
         commit,
         added_user_id,
@@ -66,7 +77,9 @@ pub async fn submit_commit(
 async fn http_submit(
     state: &Arc<AppState>,
     conversation_id: &str,
+    generation: i64,
     epoch: i64,
+    closes_epoch: Option<i64>,
     sender_id: &str,
     commit: &[u8],
     added_user_id: Option<&str>,
@@ -88,7 +101,9 @@ async fn http_submit(
         .collect();
     let body = serde_json::json!({
         "conversation_id": conversation_id,
+        "generation": generation,
         "based_on_epoch": epoch,
+        "closes_epoch": closes_epoch,
         "sender_id": sender_id,
         "commit": b64(commit),
         "added_user_id": added_user_id,
