@@ -236,6 +236,10 @@ pub async fn is_member(
 #[derive(Deserialize)]
 pub struct GroupInfoBody {
     pub conversation_id: String,
+    /// The suite generation this GroupInfo belongs to (#454 P4). Absent (a
+    /// pre-hybrid client) → 0, the lineage such a client is in.
+    #[serde(default)]
+    pub generation: i64,
     pub epoch: i64,
     /// TLS-serialized MLS GroupInfo, base64 (STANDARD).
     pub group_info: String,
@@ -280,6 +284,7 @@ pub async fn group_info(
     upsert_group_info(
         &conn,
         &parsed.conversation_id,
+        parsed.generation,
         parsed.epoch,
         &gi,
         &parsed.updated_by_device_id,
@@ -299,6 +304,7 @@ pub async fn apply_group_info(log_conn: &Connection, body: &GroupInfoBody) -> an
     upsert_group_info(
         log_conn,
         &body.conversation_id,
+        body.generation,
         body.epoch,
         &gi,
         &body.updated_by_device_id,
@@ -306,28 +312,38 @@ pub async fn apply_group_info(log_conn: &Connection, body: &GroupInfoBody) -> an
     .await
 }
 
-/// Epoch-monotone UPSERT of a conversation's GroupInfo (W4). An older epoch can
-/// never clobber a newer one. Pure conn-level write so the integration harness
-/// can reuse it against its shared log connection.
+/// `(generation, epoch)`-monotone UPSERT of a conversation's GroupInfo (W4),
+/// compared lexicographically: older GroupInfo can never clobber newer. The
+/// generation term is load-bearing at a suite migration (#454 P4) — the successor
+/// lineage restarts at epoch 0, NUMERICALLY BELOW the retired lineage's last
+/// epoch, so an epoch-only guard would reject the successor's GroupInfo and
+/// strand every externally-joining device on the retired suite. Pure conn-level
+/// write so the integration harness can reuse it against its shared log
+/// connection.
 pub async fn upsert_group_info(
     log_conn: &Connection,
     conversation_id: &str,
+    generation: i64,
     epoch: i64,
     group_info: &[u8],
     updated_by_device_id: &str,
 ) -> anyhow::Result<u64> {
     let affected = log_conn
         .execute(
-            "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
-             VALUES (?1, ?2, ?3, ?4) \
+            "INSERT INTO mls_group_info (conversation_id, generation, epoch, group_info, updated_by_device_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
              ON CONFLICT(conversation_id) DO UPDATE SET \
+                 generation = excluded.generation, \
                  epoch = excluded.epoch, \
                  group_info = excluded.group_info, \
                  updated_by_device_id = excluded.updated_by_device_id, \
                  updated_at = datetime('now') \
-             WHERE excluded.epoch > mls_group_info.epoch",
+             WHERE excluded.generation > mls_group_info.generation \
+                OR (excluded.generation = mls_group_info.generation \
+                    AND excluded.epoch > mls_group_info.epoch)",
             libsql::params![
                 conversation_id.to_string(),
+                generation,
                 epoch,
                 group_info.to_vec(),
                 updated_by_device_id.to_string(),

@@ -409,6 +409,11 @@ async fn submit(
 struct Since {
     #[serde(default)]
     since: i64,
+    /// The suite generation being caught up on (#454 P4). Absent (a pre-hybrid
+    /// client) → 0, which is the lineage such a client is in, so its request and
+    /// the `head` it reads back are unchanged.
+    #[serde(default)]
+    generation: i64,
     /// When both are present, `since` is recorded as this device's catch-up
     /// high-water — the signal the retention floor is computed from (#539). The
     /// caller reports the epoch it is catching up FROM (its current local epoch),
@@ -419,11 +424,12 @@ struct Since {
     device_id: Option<String>,
 }
 
-/// GET /v1/commits/:conversation_id?since=N[&user_id=&device_id=] — the
-/// contiguous commit log from epoch N (default 0) to head. Reads are open
-/// (unauthenticated). When `user_id`+`device_id` are supplied, `since` is also
-/// recorded as that device's catch-up high-water and an EVENT-DRIVEN retention
-/// prune runs (#539, I4) — both best-effort so the read never fails on them.
+/// GET /v1/commits/:conversation_id?since=N[&generation=G][&user_id=&device_id=]
+/// — the contiguous commit log of generation G (default 0) from epoch N (default
+/// 0) to that lineage's head. Reads are open (unauthenticated). When
+/// `user_id`+`device_id` are supplied, `(generation, since)` is also recorded as
+/// that device's catch-up high-water and an EVENT-DRIVEN retention prune runs
+/// (#539, I4) — both best-effort so the read never fails on them.
 async fn commits(
     State(state): State<AppState>,
     Path(conversation_id): Path<String>,
@@ -437,9 +443,15 @@ async fn commits(
     // member just advanced. Best-effort: a failure here must not fail the read.
     if let (Some(user_id), Some(device_id)) = (q.user_id.as_deref(), q.device_id.as_deref()) {
         if !user_id.is_empty() && !device_id.is_empty() {
-            if let Err(e) =
-                commit::record_commit_since(&conn, &conversation_id, user_id, device_id, q.since)
-                    .await
+            if let Err(e) = commit::record_commit_since(
+                &conn,
+                &conversation_id,
+                user_id,
+                device_id,
+                q.generation,
+                q.since,
+            )
+            .await
             {
                 tracing::warn!(error = %e, conversation_id = %conversation_id, "record commit-since failed");
             } else if let Ok(main_conn) = state.db.conn() {
@@ -452,7 +464,15 @@ async fn commits(
         }
     }
 
-    let head = commit::head_epoch(&conn, &conversation_id).await?;
-    let commits = commit::fetch_commits(&conn, &conversation_id, q.since).await?;
-    Ok(Json(CommitsResponse { head, commits }))
+    // `head` is the head of the lineage the caller ASKED for — that is what it
+    // must drain — while `head_generation` is how it learns a newer one exists.
+    let head = commit::head_epoch_in(&conn, &conversation_id, q.generation).await?;
+    let head_generation = commit::head_generation(&conn, &conversation_id).await?;
+    let commits = commit::fetch_commits(&conn, &conversation_id, q.generation, q.since).await?;
+    Ok(Json(CommitsResponse {
+        head,
+        generation: q.generation,
+        head_generation,
+        commits,
+    }))
 }

@@ -41,15 +41,17 @@ CREATE TABLE mls_commit_log (\
   commit_data BLOB NOT NULL,\
   created_at TEXT NOT NULL DEFAULT (datetime('now')),\
   added_user_id TEXT,\
-  added_device_ids TEXT\
+  added_device_ids TEXT,\
+  generation INTEGER NOT NULL DEFAULT 0\
 );\
-CREATE UNIQUE INDEX idx_mls_commit_conv_epoch ON mls_commit_log (conversation_id, epoch);\
+CREATE UNIQUE INDEX idx_mls_commit_conv_gen_epoch ON mls_commit_log (conversation_id, generation, epoch);\
 CREATE TABLE mls_group_info (\
   conversation_id TEXT PRIMARY KEY,\
   epoch INTEGER NOT NULL,\
   group_info BLOB NOT NULL,\
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  updated_by_device_id TEXT NOT NULL\
+  updated_by_device_id TEXT NOT NULL,\
+  generation INTEGER NOT NULL DEFAULT 0\
 );\
 CREATE TABLE mls_welcome (\
   id TEXT PRIMARY KEY,\
@@ -58,7 +60,8 @@ CREATE TABLE mls_welcome (\
   welcome_data BLOB NOT NULL,\
   delivered INTEGER NOT NULL DEFAULT 0,\
   created_at TEXT NOT NULL DEFAULT (datetime('now')),\
-  recipient_device_id TEXT\
+  recipient_device_id TEXT,\
+  generation INTEGER NOT NULL DEFAULT 0\
 );\
 CREATE UNIQUE INDEX idx_mls_welcome_recipient ON mls_welcome (conversation_id, recipient_id, recipient_device_id);\
 CREATE TABLE group_member (\

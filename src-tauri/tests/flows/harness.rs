@@ -440,6 +440,9 @@ async fn delivery_submit(
 struct HarnessSince {
     #[serde(default)]
     since: i64,
+    /// The suite generation being caught up on (#454 P4); absent → 0.
+    #[serde(default)]
+    generation: i64,
     #[serde(default)]
     user_id: Option<String>,
     #[serde(default)]
@@ -464,6 +467,7 @@ async fn delivery_commits_get(
                 &conversation_id,
                 user_id,
                 device_id,
+                q.generation,
                 q.since,
             )
             .await
@@ -481,18 +485,35 @@ async fn delivery_commits_get(
         }
     }
 
-    let head = match pollis_delivery::commit::head_epoch(&conn, &conversation_id).await {
-        Ok(h) => h,
-        Err(e) => return ds_internal_error(format!("head_epoch: {e}")),
+    let head =
+        match pollis_delivery::commit::head_epoch_in(&conn, &conversation_id, q.generation).await {
+            Ok(h) => h,
+            Err(e) => return ds_internal_error(format!("head_epoch_in: {e}")),
+        };
+    let head_generation = match pollis_delivery::commit::head_generation(&conn, &conversation_id).await
+    {
+        Ok(g) => g,
+        Err(e) => return ds_internal_error(format!("head_generation: {e}")),
     };
-    let commits = match pollis_delivery::commit::fetch_commits(&conn, &conversation_id, q.since).await
+    let commits = match pollis_delivery::commit::fetch_commits(
+        &conn,
+        &conversation_id,
+        q.generation,
+        q.since,
+    )
+    .await
     {
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("fetch_commits: {e}")),
     };
     (
         axum::http::StatusCode::OK,
-        axum::Json(pollis_delivery::commit::CommitsResponse { head, commits }),
+        axum::Json(pollis_delivery::commit::CommitsResponse {
+            head,
+            generation: q.generation,
+            head_generation,
+            commits,
+        }),
     )
         .into_response()
 }
@@ -2271,7 +2292,10 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
     let conn = log.conn().await.expect("log conn for drop_commit_row");
     let affected = conn
         .execute(
-            "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND epoch = ?2",
+            "DELETE FROM mls_commit_log \
+             WHERE conversation_id = ?1 AND epoch = ?2 \
+               AND generation = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log \
+                                  WHERE conversation_id = ?1)",
             libsql::params![conversation_id.to_string(), epoch],
         )
         .await
@@ -2296,9 +2320,13 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
 pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u64 {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for prune_commits_below");
-    let pruned = pollis_delivery::commit::delete_commits_below(&conn, conversation_id, floor)
+    let generation = pollis_delivery::commit::head_generation(&conn, conversation_id)
         .await
-        .expect("delete_commits_below");
+        .expect("head_generation");
+    let pruned =
+        pollis_delivery::commit::delete_commits_below(&conn, conversation_id, generation, floor)
+            .await
+            .expect("delete_commits_below");
     assert!(
         pruned > 0,
         "prune_commits_below: expected to prune at least one commit below epoch \
@@ -2320,6 +2348,19 @@ pub(crate) async fn ds_head_epoch(conversation_id: &str) -> i64 {
     pollis_delivery::commit::head_epoch(&conn, conversation_id)
         .await
         .expect("head_epoch")
+}
+
+/// The Delivery Service's head SUITE GENERATION for a conversation (#454 P4) —
+/// `COALESCE(MAX(generation), 0)` over the commit log. 0 until the conversation
+/// migrates off the classic suite, so every pre-P4 assertion reads the same.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn ds_head_generation(conversation_id: &str) -> i64 {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for ds_head_generation");
+    pollis_delivery::commit::head_generation(&conn, conversation_id)
+        .await
+        .expect("head_generation")
 }
 
 /// The in-process Delivery Service base URL (e.g. `http://127.0.0.1:NNNNN`).
