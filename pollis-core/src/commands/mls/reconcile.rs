@@ -15,8 +15,8 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use crate::state::AppState;
 
 use super::provider::{
-    parse_credential_device_id, parse_credential_user_id, PollisProvider, CS_CLASSIC,
-    SIGNATURE_SCHEME,
+    load_stored_group, parse_credential_device_id, parse_credential_user_id, store_only,
+    with_group_provider, with_suite_provider, MlsProvider, CS_HYBRID, SIGNATURE_SCHEME,
 };
 
 /// Result of the compare-and-swap commit submission in `reconcile_group_mls_impl`.
@@ -96,17 +96,31 @@ async fn finalize_won_commit(
     // Scope the !Send provider/group so neither crosses an await.
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        let mut group = MlsGroup::load(provider.storage(), &group_id)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load for merge: {e}")))?
-            .ok_or_else(|| {
-                crate::error::Error::Other(anyhow::anyhow!("group missing at merge time"))
-            })?;
-        group
-            .merge_pending_commit(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
+        with_group_provider!(db.conn(), conversation_id, |provider| {
+            merge_pending_in_suite(&provider, conversation_id)
+        })?;
     }
+    Ok(())
+}
+
+/// Merge the still-staged pending commit for `conversation_id`, advancing the
+/// local epoch. Suite-generic half of [`finalize_won_commit`].
+fn merge_pending_in_suite<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+) -> crate::error::Result<()>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load for merge: {e}")))?
+        .ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("group missing at merge time"))
+        })?;
+    group
+        .merge_pending_commit(provider)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
     Ok(())
 }
 
@@ -115,11 +129,13 @@ async fn finalize_won_commit(
 async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str) {
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        let provider = PollisProvider::new(db.conn());
+        // Storage-only: dropping a staged commit touches no crypto, so this
+        // needs no suite dispatch.
+        let store = store_only(db.conn());
         let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        match MlsGroup::load(provider.storage(), &group_id) {
+        match MlsGroup::load(&store, &group_id) {
             Ok(Some(mut group)) => {
-                if let Err(e) = group.clear_pending_commit(provider.storage()) {
+                if let Err(e) = group.clear_pending_commit(&store) {
                     eprintln!("[mls] reconcile: clear_pending_commit failed: {e}");
                 }
             }
@@ -150,6 +166,14 @@ pub struct ReconcileOutcome {
     pub epoch_after: u64,
     /// True if the committer's own leaf was in `to_remove` and was skipped.
     pub skipped_self_removal: bool,
+    /// `(user_id, device_id)` pairs that belong on the roster but could not be
+    /// added because they have published no KeyPackage in the group's
+    /// ciphersuite — a classic-only client facing a hybrid group (#454 P3).
+    ///
+    /// Reported rather than silently dropped: these devices will not receive
+    /// messages until they run a client that publishes a hybrid pool, and
+    /// downgrading the group to admit them is never an option.
+    pub skipped_no_suite_kp: Vec<(String, String)>,
 }
 
 /// Raw bytes produced by a reconcile commit, needed for posting to Turso.
@@ -176,8 +200,8 @@ pub struct ReconcileCommitData {
 /// post to Turso. On the returned `ReconcileOutcome`, `epoch_after` reflects
 /// the epoch the commit WILL produce when merged (i.e. `epoch_before + 1`
 /// when a commit is staged, equal to `epoch_before` on no-op).
-pub fn reconcile_group_mls_core_staged(
-    provider: &PollisProvider<'_>,
+pub fn reconcile_group_mls_core_staged<C>(
+    provider: &MlsProvider<'_, C>,
     signer: &SignatureKeyPair,
     group: &mut MlsGroup,
     roster_user_ids: &std::collections::HashSet<String>,
@@ -185,7 +209,10 @@ pub fn reconcile_group_mls_core_staged(
     actor_user_id: &str,
     actor_device_id: &str,
     valid_devices: Option<&std::collections::HashSet<(String, String)>>,
-) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
+) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     use std::collections::{HashMap, HashSet};
 
     let epoch_before = group.epoch().as_u64();
@@ -343,6 +370,7 @@ pub fn reconcile_group_mls_core_staged(
             epoch_before,
             epoch_after,
             skipped_self_removal,
+            ..Default::default()
         },
         Some(ReconcileCommitData {
             commit_bytes,
@@ -363,8 +391,9 @@ pub fn reconcile_group_mls_core_staged(
 /// *before* the local merge, avoiding split-brain on remote failure. This
 /// thin wrapper exists for test helpers and any path that deliberately wants
 /// a local-only merge.
-pub fn reconcile_group_mls_core(
-    provider: &PollisProvider<'_>,
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_group_mls_core<C>(
+    provider: &MlsProvider<'_, C>,
     signer: &SignatureKeyPair,
     group: &mut MlsGroup,
     roster_user_ids: &std::collections::HashSet<String>,
@@ -372,7 +401,10 @@ pub fn reconcile_group_mls_core(
     actor_user_id: &str,
     actor_device_id: &str,
     valid_devices: Option<&std::collections::HashSet<(String, String)>>,
-) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
+) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     let (mut outcome, commit_data_opt) = reconcile_group_mls_core_staged(
         provider,
         signer,
@@ -396,6 +428,158 @@ pub fn reconcile_group_mls_core(
     Ok((outcome, commit_data_opt))
 }
 
+/// The set of user_ids that *should* have a leaf in `conversation_id`'s tree:
+/// `group_member` plus pending `group_invite` rows, falling back to
+/// `dm_channel_member` for DMs.
+///
+/// Pending invitees are included so their devices get a Welcome at invite time —
+/// the acceptor can join the MLS group without requiring any other member to be
+/// online simultaneously.
+///
+/// The single definition of "desired roster". `reconcile_group_mls_impl` diffs
+/// the tree against it and `suite_for_new_group` decides a new group's
+/// ciphersuite from it; the two must never disagree about who belongs.
+pub(super) async fn desired_roster_user_ids(
+    conn: &libsql::Connection,
+    conversation_id: &str,
+) -> crate::error::Result<std::collections::HashSet<String>> {
+    let mut roster_user_ids = std::collections::HashSet::new();
+    {
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM group_member WHERE group_id = ?1",
+                libsql::params![conversation_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            roster_user_ids.insert(row.get::<String>(0)?);
+        }
+    }
+    {
+        let mut rows = conn
+            .query(
+                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
+                libsql::params![conversation_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            roster_user_ids.insert(row.get::<String>(0)?);
+        }
+    }
+    if roster_user_ids.is_empty() {
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
+                libsql::params![conversation_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            roster_user_ids.insert(row.get::<String>(0)?);
+        }
+    }
+    Ok(roster_user_ids)
+}
+
+/// Load the group, read its signer, validate the claimed KeyPackages and stage
+/// the reconcile commit — the whole crypto-bearing half of
+/// [`reconcile_group_mls_impl`], generic over the crypto backend so the caller
+/// can dispatch on the group's ciphersuite.
+///
+/// `Ok(None)` means the local group is gone; the caller reports a no-op.
+#[allow(clippy::too_many_arguments)]
+fn stage_reconcile_commit<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    kp_tuples: &[(String, String, Vec<u8>)],
+    roster_user_ids: &std::collections::HashSet<String>,
+    actor_user_id: &str,
+    actor_device_id: &str,
+    valid_devices: &std::collections::HashSet<(String, String)>,
+) -> crate::error::Result<Option<(ReconcileOutcome, Option<ReconcileCommitData>)>>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    let group_opt = MlsGroup::load(provider.storage(), &group_id)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?;
+    let mut group = match group_opt {
+        Some(g) => g,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    // Read signer.
+    let sig_pub_bytes = group
+        .own_leaf_node()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
+        .signature_key()
+        .as_slice()
+        .to_vec();
+    let signer = SignatureKeyPair::read(provider.storage(), &sig_pub_bytes, SIGNATURE_SCHEME)
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
+
+    // Resolve pending commit.
+    group
+        .merge_pending_commit(provider)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
+
+    // Validate KPs.
+    let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
+    for (uid, did, kp_raw) in kp_tuples {
+        let mut reader: &[u8] = kp_raw;
+        let kp_in = match KeyPackageIn::tls_deserialize(&mut reader) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("[mls] reconcile: kp deserialize failed for {uid}:{did}: {e}");
+                continue;
+            }
+        };
+        let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("[mls] reconcile: kp validate failed for {uid}:{did}: {e}");
+                continue;
+            }
+        };
+        // Claiming is suite-scoped, but the DS is untrusted: re-check that the
+        // KeyPackage it handed us really is in the group's suite before it can
+        // reach `propose_adds`. A cross-suite KP would otherwise be a
+        // server-driven downgrade of an entire group.
+        if kp.ciphersuite() != group.ciphersuite() {
+            eprintln!(
+                "[mls] reconcile: kp suite {:?} != group suite {:?} for {uid}:{did} — refusing",
+                kp.ciphersuite(),
+                group.ciphersuite(),
+            );
+            continue;
+        }
+        let cred_user = parse_credential_user_id(kp.leaf_node().credential());
+        if cred_user != *uid {
+            eprintln!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
+            continue;
+        }
+        available_kps.push((uid.clone(), did.clone(), kp));
+    }
+
+    // Stage the commit: builds the commit locally and writes it as a
+    // PENDING commit on the group (persisted to MLS storage) WITHOUT
+    // advancing the local epoch. The merge is deferred until after the
+    // remote INSERTs succeed so a remote failure cannot leave the local
+    // group ahead of the remote commit log.
+    reconcile_group_mls_core_staged(
+        provider,
+        &signer,
+        &mut group,
+        roster_user_ids,
+        &available_kps,
+        actor_user_id,
+        actor_device_id,
+        Some(valid_devices),
+    )
+    .map(Some)
+}
+
 /// Async entry point: reads desired state from Turso, loads local MLS group,
 /// calls `reconcile_group_mls_core`, posts commit + welcome rows.
 pub async fn reconcile_group_mls_impl(
@@ -417,44 +601,7 @@ pub async fn reconcile_group_mls_impl(
     let conn = state.remote_db.conn().await?;
 
     // 1. Determine roster: group_member + pending invitees, or dm_channel_member.
-    //    Pending invitees are included so their devices get a Welcome at invite
-    //    time — the acceptor can join the MLS group without requiring any other
-    //    member to be online simultaneously.
-    let mut roster_user_ids = std::collections::HashSet::new();
-    {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM group_member WHERE group_id = ?1",
-                libsql::params![conversation_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
-    // Include pending invitees so they receive a Welcome pre-acceptance.
-    {
-        let mut rows = conn
-            .query(
-                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
-                libsql::params![conversation_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
-    if roster_user_ids.is_empty() {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
-                libsql::params![conversation_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
+    let roster_user_ids = desired_roster_user_ids(&conn, &conversation_id).await?;
 
     // 1b. TOFU-pin every roster member's account_id_pub before we use
     //     server-reported keys to add devices to the MLS tree. Without
@@ -539,7 +686,11 @@ pub async fn reconcile_group_mls_impl(
     // 3. Peek at the current tree to learn which devices are already members.
     //    This lets us skip claiming KPs for devices that don't need to be added,
     //    avoiding unnecessary KP exhaustion on repeated reconciles.
-    let already_in_tree: std::collections::HashSet<(String, String)> = {
+    //
+    //    The same peek yields the group's ciphersuite, which decides the suite
+    //    of every KeyPackage claimed below. Reading the tree is storage-only —
+    //    no crypto backend, hence no suite dispatch, is needed to learn it.
+    let (already_in_tree, group_suite): (std::collections::HashSet<(String, String)>, Ciphersuite) = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
             Some(db) => db,
@@ -547,18 +698,20 @@ pub async fn reconcile_group_mls_impl(
                 return Ok(ReconcileOutcome::default());
             }
         };
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        match MlsGroup::load(provider.storage(), &group_id) {
-            Ok(Some(group)) => group
-                .members()
-                .map(|m| {
-                    let uid = parse_credential_user_id(&m.credential);
-                    let did = parse_credential_device_id(&m.credential).unwrap_or_default();
-                    (uid, did)
-                })
-                .collect(),
-            _ => {
+        match load_stored_group(db.conn(), &conversation_id) {
+            Some(group) => {
+                let suite = group.ciphersuite();
+                let members = group
+                    .members()
+                    .map(|m| {
+                        let uid = parse_credential_user_id(&m.credential);
+                        let did = parse_credential_device_id(&m.credential).unwrap_or_default();
+                        (uid, did)
+                    })
+                    .collect();
+                (members, suite)
+            }
+            None => {
                 return Ok(ReconcileOutcome::default());
             }
         }
@@ -576,18 +729,32 @@ pub async fn reconcile_group_mls_impl(
     // Turso token a direct `UPDATE … RETURNING` would fail — it routes through the
     // Delivery Service. A target device with no unclaimed package is simply
     // skipped (the DS replies 404 → `Ok(None)`).
+    //
+    // The claim is scoped to the GROUP's ciphersuite, never a fixed one. This is
+    // what makes "a hybrid group can never contain a member without a hybrid
+    // KeyPackage" hold: a device that has published no KP in the group's suite
+    // has nothing to claim, so it is skipped rather than downgraded in.
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
+    let mut skipped_no_suite_kp: Vec<(String, String)> = Vec::new();
     for (uid, did) in &devices_to_claim {
         let claimed: Option<Vec<u8>> =
-            crate::commands::mls::ds_claim_key_package(state, uid, Some(did), CS_CLASSIC)
+            crate::commands::mls::ds_claim_key_package(state, uid, Some(did), group_suite)
                 .await?;
-        if let Some(kp) = claimed {
-            kp_tuples.push((uid.clone(), did.clone(), kp));
+        match claimed {
+            Some(kp) => kp_tuples.push((uid.clone(), did.clone(), kp)),
+            None => {
+                eprintln!(
+                    "[mls] reconcile: no {} KeyPackage for {uid}:{did} — skipping (never downgrading)",
+                    if group_suite == CS_HYBRID { "hybrid" } else { "classic" },
+                );
+                skipped_no_suite_kp.push((uid.clone(), did.clone()));
+            }
         }
     }
 
-    // 5. Validate KPs and call the sync core under the local_db lock.
-    let (outcome, commit_data_opt) = {
+    // 5. Validate KPs and call the sync core under the local_db lock, in the
+    //    group's own suite.
+    let staged = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
             Some(db) => db,
@@ -595,80 +762,25 @@ pub async fn reconcile_group_mls_impl(
                 return Ok(ReconcileOutcome::default());
             }
         };
-        let provider = PollisProvider::new(db.conn());
-
-        // Load group — early return if missing.
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        let group_opt = MlsGroup::load(provider.storage(), &group_id)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?;
-        let mut group = match group_opt {
-            Some(g) => g,
-            None => {
-                return Ok(ReconcileOutcome::default());
-            }
-        };
-
-        // Read signer.
-        let sig_pub_bytes = group
-            .own_leaf_node()
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
-            .signature_key()
-            .as_slice()
-            .to_vec();
-        let signer = SignatureKeyPair::read(
-            provider.storage(),
-            &sig_pub_bytes,
-            SIGNATURE_SCHEME,
-        )
-        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
-
-        // Resolve pending commit.
-        group
-            .merge_pending_commit(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
-
-        // Validate KPs.
-        let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
-        for (uid, did, kp_raw) in &kp_tuples {
-            let mut reader: &[u8] = kp_raw;
-            let kp_in = match KeyPackageIn::tls_deserialize(&mut reader) {
-                Ok(k) => k,
-                Err(e) => {
-                    eprintln!("[mls] reconcile: kp deserialize failed for {uid}:{did}: {e}");
-                    continue;
-                }
-            };
-            let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
-                Ok(k) => k,
-                Err(e) => {
-                    eprintln!("[mls] reconcile: kp validate failed for {uid}:{did}: {e}");
-                    continue;
-                }
-            };
-            let cred_user = parse_credential_user_id(kp.leaf_node().credential());
-            if cred_user != *uid {
-                eprintln!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
-                continue;
-            }
-            available_kps.push((uid.clone(), did.clone(), kp));
-        }
-
-        // Stage the commit: builds the commit locally and writes it as a
-        // PENDING commit on the group (persisted to MLS storage) WITHOUT
-        // advancing the local epoch. The merge is deferred until after the
-        // remote INSERTs succeed so a remote failure cannot leave the local
-        // group ahead of the remote commit log.
-        reconcile_group_mls_core_staged(
-            &provider,
-            &signer,
-            &mut group,
-            &roster_user_ids,
-            &available_kps,
-            &actor_user_id,
-            &actor_device_id,
-            Some(&valid_devices),
-        )?
+        with_suite_provider!(db.conn(), group_suite, |provider| {
+            stage_reconcile_commit(
+                &provider,
+                &conversation_id,
+                &kp_tuples,
+                &roster_user_ids,
+                &actor_user_id,
+                &actor_device_id,
+                &valid_devices,
+            )
+        })?
     };
+    let (mut outcome, commit_data_opt) = match staged {
+        Some(v) => v,
+        None => {
+            return Ok(ReconcileOutcome::default());
+        }
+    };
+    outcome.skipped_no_suite_kp = skipped_no_suite_kp;
 
     // 5. Post commit + welcome to Turso FIRST, then merge locally.
     //

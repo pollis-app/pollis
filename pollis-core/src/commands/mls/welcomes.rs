@@ -14,7 +14,9 @@ use crate::error::Result;
 use crate::state::AppState;
 
 use super::key_packages::replenish_key_packages;
-use super::provider::PollisProvider;
+use super::provider::{
+    welcome_ciphersuite, with_suite_provider, MlsProvider,
+};
 
 /// Internal: deserialise a TLS-encoded `MlsMessageOut` (welcome wire format)
 /// and persist the resulting MLS group state locally.
@@ -28,7 +30,6 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
     })?;
-    let provider = PollisProvider::new(db.conn());
 
     let mut reader: &[u8] = welcome_bytes;
     let msg_in = MlsMessageIn::tls_deserialize(&mut reader)
@@ -41,14 +42,34 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
         ))),
     };
 
+    // The joiner has no local group yet, so the suite comes off the Welcome
+    // itself. An unreadable/unknown code point is a hard failure, never a
+    // classic fallback: `PollisProvider` panics on a hybrid Welcome.
+    let suite = welcome_ciphersuite(&welcome).ok_or_else(|| {
+        crate::error::Error::Other(anyhow::anyhow!(
+            "welcome names a ciphersuite this build does not implement"
+        ))
+    })?;
+
+    with_suite_provider!(db.conn(), suite, |provider| {
+        join_from_welcome(&provider, welcome)
+    })
+}
+
+/// Materialise group state from an already-suite-matched `Welcome`.
+///
+/// Split into ProcessedWelcome → delete stale group → stage → into_group:
+/// openmls checks for duplicate GroupIds inside `into_staged_welcome`, so any
+/// existing group must be deleted *before* that call.
+fn join_from_welcome<C>(provider: &MlsProvider<'_, C>, welcome: Welcome) -> Result<()>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     let join_config = MlsGroupJoinConfig::builder()
         .use_ratchet_tree_extension(true)
         .build();
 
-    // Split into ProcessedWelcome → delete stale group → stage → into_group.
-    // openmls checks for duplicate GroupIds inside `into_staged_welcome`, so we
-    // must delete any existing group *before* that call.
-    let processed = ProcessedWelcome::new_from_welcome(&provider, &join_config, welcome)
+    let processed = ProcessedWelcome::new_from_welcome(provider, &join_config, welcome)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("process welcome: {e}")))?;
 
     let new_group_id = processed.unverified_group_info().group_id().clone();
@@ -57,10 +78,10 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
         let _ = old_group.delete(provider.storage());
     }
 
-    let staged = processed.into_staged_welcome(&provider, None)
+    let staged = processed.into_staged_welcome(provider, None)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("stage welcome: {e}")))?;
 
-    staged.into_group(&provider)
+    staged.into_group(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into group: {e}")))?;
 
     Ok(())

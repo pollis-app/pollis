@@ -38,12 +38,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use openmls::prelude::*;
-
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::provider::{parse_credential_device_id, parse_credential_user_id, PollisProvider};
+use super::provider::{load_stored_group, parse_credential_device_id, parse_credential_user_id};
 
 pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Result<()> {
     let device_id = state.device_id.lock().await.clone();
@@ -182,10 +180,10 @@ async fn local_tree_has_stale_leaf(
             // No local group open (never joined / already forgotten): nothing to evict.
             None => return Ok(false),
         };
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        match MlsGroup::load(provider.storage(), &group_id) {
-            Ok(Some(group)) => group
+        // Reading the tree is storage-only, so this needs no crypto backend
+        // and therefore no suite dispatch.
+        match load_stored_group(db.conn(), conversation_id) {
+            Some(group) => group
                 .members()
                 .map(|m| {
                     let uid = parse_credential_user_id(&m.credential);
@@ -194,7 +192,7 @@ async fn local_tree_has_stale_leaf(
                 })
                 .collect(),
             // Missing / unreadable local group: nothing this device can evict.
-            _ => return Ok(false),
+            None => return Ok(false),
         }
     };
     if tree_members.is_empty() {

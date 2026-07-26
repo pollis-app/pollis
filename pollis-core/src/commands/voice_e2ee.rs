@@ -23,7 +23,7 @@ use livekit::e2ee::{
 use openmls::prelude::*;
 use openmls_traits::OpenMlsProvider;
 
-use crate::commands::mls::PollisProvider;
+use crate::commands::mls::{with_group_provider, MlsProvider};
 use crate::error::{Error, Result};
 use crate::state::AppState;
 
@@ -381,7 +381,22 @@ async fn derive_voice_key_for_group(
     let db = guard
         .as_ref()
         .ok_or_else(|| Error::Other(anyhow::anyhow!("Not signed in")))?;
-    let provider = PollisProvider::new(db.conn());
+    // `export_secret` runs the group's KDF, so it must use the group's own
+    // crypto backend — hybrid groups derive their voice key under libcrux.
+    with_group_provider!(db.conn(), mls_group_id, |provider| {
+        export_voice_key(&provider, mls_group_id)
+    })
+}
+
+/// Export the LiveKit frame key from the group's exporter secret. Suite-generic
+/// half of [`derive_voice_key_for_group`].
+fn export_voice_key<C>(
+    provider: &MlsProvider<'_, C>,
+    mls_group_id: &str,
+) -> Result<(Vec<u8>, i32, u64)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     let group_id = GroupId::from_slice(mls_group_id.as_bytes());
 
     let group = MlsGroup::load(provider.storage(), &group_id)

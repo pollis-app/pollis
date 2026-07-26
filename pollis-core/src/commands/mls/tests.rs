@@ -2122,8 +2122,9 @@ fn suite_seam_round_trip<CA, CB>(
 
 /// The classic suite still round-trips through the (now parametrised) seams,
 /// and reports the classic code point. This is the no-behaviour-change half of
-/// P1b: production passes `CS_CLASSIC` everywhere, so this is the path every
-/// user is on.
+/// The suite a group falls back to whenever any roster device is still
+/// classic-only (`suite_for_new_group`), and the suite every pre-#454-P3 group
+/// is already in.
 #[test]
 fn classic_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();
@@ -2139,10 +2140,8 @@ fn classic_suite_round_trips_through_the_production_seams() {
 /// post-quantum group through the same production functions, with the PQ
 /// provider that serves that suite.
 ///
-/// No GROUP selects this yet — `init_mls_group` and every add path still pass
-/// `CS_CLASSIC` (#454 P2 gives devices a hybrid KeyPackage pool but keeps every
-/// group classic; making a real conversation hybrid is P3/P4). This test
-/// guarantees those later phases have a working group seam to use.
+/// Since #454 P3 this is the suite `init_mls_group` selects whenever every
+/// device on the new conversation's roster is `pq_capable`.
 #[test]
 fn hybrid_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();

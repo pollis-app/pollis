@@ -14,7 +14,8 @@ use crate::state::AppState;
 
 use super::device::{load_or_create_device_signer, verify_added_devices, VerifyOutcome};
 use super::provider::{
-    make_credential, parse_credential_user_id, MlsProvider, PollisProvider, CS_CLASSIC,
+    load_stored_group, make_credential, parse_credential_user_id, store_only,
+    with_group_provider, with_suite_provider, MlsProvider, CS_CLASSIC, CS_HYBRID,
     SIGNATURE_SCHEME,
 };
 
@@ -53,23 +54,9 @@ pub async fn publish_group_info(
         let Some(db) = guard.as_ref() else {
             return Ok(());
         };
-        let provider = PollisProvider::new(db.conn());
-        let (group, signer) = match load_group_with_signer(&provider, conversation_id) {
-            Ok(pair) => pair,
-            Err(_) => return Ok(()),
-        };
-        let epoch = group.epoch().as_u64();
-        let msg = match group.export_group_info(provider.crypto(), &signer, true) {
-            Ok(m) => m,
-            Err(e) => {
-                eprintln!("[mls] publish_group_info: export failed for {conversation_id}: {e}");
-                return Ok(());
-            }
-        };
-        let bytes = msg
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("group_info serialize: {e}")))?;
-        Some((epoch, bytes))
+        with_group_provider!(db.conn(), conversation_id, |provider| {
+            export_group_info_blob(&provider, conversation_id)?
+        })
     };
 
     let Some((epoch, bytes)) = exported else {
@@ -95,6 +82,35 @@ pub async fn publish_group_info(
     }
 
     Ok(())
+}
+
+/// Export the current `GroupInfo` for `conversation_id` as `(epoch, tls_bytes)`.
+///
+/// `Ok(None)` — not an error — when there is no usable local group or the export
+/// itself fails: `publish_group_info` is a best-effort durability backstop, and
+/// a device with nothing to publish has nothing to report.
+fn export_group_info_blob<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+) -> Result<Option<(u64, Vec<u8>)>>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let Ok((group, signer)) = load_group_with_signer(provider, conversation_id) else {
+        return Ok(None);
+    };
+    let epoch = group.epoch().as_u64();
+    let msg = match group.export_group_info(provider.crypto(), &signer, true) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[mls] publish_group_info: export failed for {conversation_id}: {e}");
+            return Ok(None);
+        }
+    };
+    let bytes = msg
+        .tls_serialize_detached()
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("group_info serialize: {e}")))?;
+    Ok(Some((epoch, bytes)))
 }
 
 /// Whether the durably-published GroupInfo is stale relative to our local epoch
@@ -156,11 +172,10 @@ async fn ensure_group_info_published(state: &Arc<AppState>, mls_group_id: &str) 
     let local_epoch = {
         let guard = state.local_db.lock().await;
         let Some(db) = guard.as_ref() else { return };
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-        match MlsGroup::load(provider.storage(), &group_id) {
-            Ok(Some(g)) => g.epoch().as_u64(),
-            _ => return,
+        // Reading an epoch is storage-only — no crypto backend, so no dispatch.
+        match load_stored_group(db.conn(), mls_group_id) {
+            Some(g) => g.epoch().as_u64(),
+            None => return,
         }
     };
 
@@ -325,20 +340,17 @@ async fn external_join_attempt(
     //    the commit and its resulting-epoch GroupInfo so they land atomically
     //    through the delivery seam (Slice 1). Welcomes are empty — an external
     //    join only adds self.
-    let (commit_bytes, new_group_info_bytes): (Vec<u8>, Option<Vec<u8>>) = {
-        let guard = state.local_db.lock().await;
-        let db = guard.as_ref().ok_or_else(|| {
-            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
-        })?;
-        let provider = PollisProvider::new(db.conn());
-
+    // Deserialising the stored GroupInfo touches no crypto, so it happens before
+    // (and outside) provider selection — and it is what tells us which suite the
+    // group runs, since a recovering device has no local group left to ask.
+    let verifiable_group_info: VerifiableGroupInfo = {
         let mut env_reader: &[u8] = &group_info_bytes;
         let msg_in = MlsMessageIn::tls_deserialize(&mut env_reader).map_err(|e| {
             crate::error::Error::Other(anyhow::anyhow!(
                 "stored group_info envelope failed to deserialize: {e}"
             ))
         })?;
-        let verifiable_group_info: VerifiableGroupInfo = match msg_in.extract() {
+        match msg_in.extract() {
             MlsMessageBodyIn::GroupInfo(gi) => gi,
             other => {
                 return Err(crate::error::Error::Other(anyhow::anyhow!(
@@ -346,67 +358,24 @@ async fn external_join_attempt(
                     std::mem::discriminant(&other)
                 )));
             }
-        };
-
-        // Load (or create) this device's stable MLS signing keypair.
-        let (sig_keys, sig_pub_bytes) =
-            load_or_create_device_signer(&provider, user_id, &device_id)?;
-
-        let credential = make_credential(user_id, &device_id);
-        let sig_pub = OpenMlsSignaturePublicKey::new(
-            sig_pub_bytes.into(),
-            SIGNATURE_SCHEME,
-        )
-        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
-        let cred_with_key = CredentialWithKey {
-            credential,
-            signature_key: sig_pub.into(),
-        };
-
-        // Drop any stale local group with the same ID so the external
-        // commit builder doesn't collide.
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
-            let _ = old.delete(provider.storage());
         }
+    };
+    let suite = verifiable_group_info.ciphersuite();
 
-        let join_config = MlsGroupJoinConfig::builder()
-            .use_ratchet_tree_extension(true)
-            .build();
-
-        let (_joined_group, commit_bundle) = MlsGroup::external_commit_builder()
-            .with_config(join_config)
-            .build_group(&provider, verifiable_group_info, cred_with_key)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
-                "external commit build_group: {e}"
-            )))?
-            .load_psks(provider.storage())
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
-                "external commit load_psks: {e}"
-            )))?
-            .create_group_info(true)
-            .build(provider.rand(), provider.crypto(), &sig_keys, |_| true)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
-                "external commit build: {e}"
-            )))?
-            .finalize(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
-                "external commit finalize: {e}"
-            )))?;
-
-        let (commit_msg, _welcome_msg, new_group_info) = commit_bundle.into_contents();
-        let commit_bytes = commit_msg
-            .tls_serialize_detached()
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
-        let group_info_bytes = match new_group_info {
-            Some(gi) => Some(
-                gi.tls_serialize_detached().map_err(|e| {
-                    crate::error::Error::Other(anyhow::anyhow!("external commit group_info serialize: {e}"))
-                })?,
-            ),
-            None => None,
-        };
-        (commit_bytes, group_info_bytes)
+    let (commit_bytes, new_group_info_bytes): (Vec<u8>, Option<Vec<u8>>) = {
+        let guard = state.local_db.lock().await;
+        let db = guard.as_ref().ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
+        })?;
+        with_suite_provider!(db.conn(), suite, |provider| {
+            build_external_commit(
+                &provider,
+                conversation_id,
+                user_id,
+                &device_id,
+                verifiable_group_info,
+            )?
+        })
     };
 
     // 3. Claim this epoch in mls_commit_log via compare-and-swap. If another
@@ -492,6 +461,81 @@ async fn external_join_attempt(
 
 // ── Phase 3: Group / DM creation ─────────────────────────────────────────────
 
+/// Build (and locally stage) an external commit joining the group described by
+/// `verifiable_group_info`, returning the serialised commit and the GroupInfo at
+/// the resulting epoch.
+///
+/// `provider` must serve the group's suite — the caller reads it off the
+/// GroupInfo and dispatches on it.
+///
+/// Sync: the caller owns the local-DB guard.
+fn build_external_commit<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    user_id: &str,
+    device_id: &str,
+    verifiable_group_info: VerifiableGroupInfo,
+) -> Result<(Vec<u8>, Option<Vec<u8>>)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    // Load (or create) this device's stable MLS signing keypair.
+    let (sig_keys, sig_pub_bytes) = load_or_create_device_signer(provider, user_id, device_id)?;
+
+    let credential = make_credential(user_id, device_id);
+    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), SIGNATURE_SCHEME)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+    let cred_with_key = CredentialWithKey {
+        credential,
+        signature_key: sig_pub.into(),
+    };
+
+    // Drop any stale local group with the same ID so the external commit builder
+    // doesn't collide.
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    if let Ok(Some(mut old)) = MlsGroup::load(provider.storage(), &group_id) {
+        let _ = old.delete(provider.storage());
+    }
+
+    let join_config = MlsGroupJoinConfig::builder()
+        .use_ratchet_tree_extension(true)
+        .build();
+
+    let (_joined_group, commit_bundle) = MlsGroup::external_commit_builder()
+        .with_config(join_config)
+        .build_group(provider, verifiable_group_info, cred_with_key)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+            "external commit build_group: {e}"
+        )))?
+        .load_psks(provider.storage())
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+            "external commit load_psks: {e}"
+        )))?
+        .create_group_info(true)
+        .build(provider.rand(), provider.crypto(), &sig_keys, |_| true)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+            "external commit build: {e}"
+        )))?
+        .finalize(provider)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!(
+            "external commit finalize: {e}"
+        )))?;
+
+    let (commit_msg, _welcome_msg, new_group_info) = commit_bundle.into_contents();
+    let commit_bytes = commit_msg
+        .tls_serialize_detached()
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("commit serialize: {e}")))?;
+    let group_info_bytes = match new_group_info {
+        Some(gi) => Some(gi.tls_serialize_detached().map_err(|e| {
+            crate::error::Error::Other(anyhow::anyhow!(
+                "external commit group_info serialize: {e}"
+            ))
+        })?),
+        None => None,
+    };
+    Ok((commit_bytes, group_info_bytes))
+}
+
 /// Create a fresh MLS group for `conversation_id` in an explicit ciphersuite,
 /// with `creator_user_id`:`device_id` as the sole initial member.
 ///
@@ -502,8 +546,8 @@ async fn external_join_attempt(
 /// stored group state, so nothing downstream needs a suite argument.
 ///
 /// The suite is a parameter rather than a constant so the choice is visible at
-/// the call site. It is NOT configurable: `init_mls_group`, the only production
-/// caller, always passes `CS_CLASSIC` (#454 P2 is what makes the choice real).
+/// the call site. `init_mls_group`, the only production caller, decides it with
+/// [`suite_for_new_group`].
 ///
 /// Sync: the caller owns the local-DB guard.
 pub(super) fn create_mls_group_in_suite<C>(
@@ -549,6 +593,74 @@ where
     Ok(())
 }
 
+/// The ciphersuite a brand-new group should be created in (#454 P3).
+///
+/// `CS_HYBRID` iff the conversation's desired roster resolves to at least one
+/// device and *every* one of those devices has published a hybrid KeyPackage
+/// pool (`user_device.pq_capable = 1`, derived server-side by the DS from the
+/// pool itself — a device cannot claim the flag). Otherwise `CS_CLASSIC`.
+///
+/// Deliberately conservative, and it fails closed toward *availability*: any
+/// read error, an empty roster, or a single classic-only device yields
+/// `CS_CLASSIC`. A hybrid group can only ever admit hybrid KeyPackages (#454's
+/// no-downgrade acceptance criterion), so choosing hybrid while a roster device
+/// still runs a classic-only client would lock that device out of its own
+/// conversation for as long as it stays un-upgraded. Starting classic costs
+/// nothing permanent: #454 P4 upgrades the group at an epoch boundary once the
+/// whole roster is capable.
+async fn suite_for_new_group(state: &Arc<AppState>, conversation_id: &str) -> Ciphersuite {
+    match roster_is_fully_pq_capable(state, conversation_id).await {
+        Ok(true) => CS_HYBRID,
+        Ok(false) => CS_CLASSIC,
+        Err(e) => {
+            eprintln!("[mls] suite_for_new_group: capability read failed ({e}) — using classic");
+            CS_CLASSIC
+        }
+    }
+}
+
+/// Does every registered device of every user on `conversation_id`'s desired
+/// roster advertise `pq_capable`? False for an empty device set — "nobody is
+/// incapable" must not read as "everybody is capable".
+async fn roster_is_fully_pq_capable(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+) -> Result<bool> {
+    let conn = state.remote_db.conn().await?;
+    let roster = super::reconcile::desired_roster_user_ids(&conn, conversation_id).await?;
+    if roster.is_empty() {
+        return Ok(false);
+    }
+
+    // Same id sanitisation as reconcile's device query: these are inlined into
+    // an IN clause because libsql has no array binding.
+    let safe_ids: Vec<String> = roster
+        .iter()
+        .map(|id| {
+            id.chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                .collect::<String>()
+        })
+        .collect();
+    let in_clause = safe_ids
+        .iter()
+        .map(|id| format!("'{id}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let query = format!(
+        "SELECT COUNT(*), SUM(CASE WHEN pq_capable = 1 THEN 1 ELSE 0 END) \
+         FROM user_device WHERE user_id IN ({in_clause})"
+    );
+    let mut rows = conn.query(&query, ()).await?;
+    let (total, capable): (i64, i64) = match rows.next().await? {
+        Some(row) => (row.get::<i64>(0)?, row.get::<Option<i64>>(1)?.unwrap_or(0)),
+        None => return Ok(false),
+    };
+
+    Ok(total > 0 && total == capable)
+}
+
 /// Internal: create a fresh MLS group for `conversation_id` with
 /// `creator_user_id` as the sole initial member.  Group state is persisted in
 /// the local `mls_kv` table via `MlsStore`.
@@ -564,6 +676,8 @@ pub async fn init_mls_group(
     let device_id = state.device_id.lock().await.clone()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
 
+    let suite = suite_for_new_group(state, conversation_id).await;
+
     // Scope the local_db guard so it is dropped before the async
     // publish_group_info call below (which re-acquires it).
     {
@@ -571,14 +685,15 @@ pub async fn init_mls_group(
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
-        let provider = PollisProvider::new(db.conn());
-        create_mls_group_in_suite(
-            &provider,
-            conversation_id,
-            creator_user_id,
-            &device_id,
-            CS_CLASSIC,
-        )?;
+        with_suite_provider!(db.conn(), suite, |provider| {
+            create_mls_group_in_suite(
+                &provider,
+                conversation_id,
+                creator_user_id,
+                &device_id,
+                suite,
+            )?;
+        });
     }
 
     // Publish the epoch-0 GroupInfo so a future device enrolling via the
@@ -657,11 +772,9 @@ pub async fn forget_local_mls_group(
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
     })?;
-    let provider = PollisProvider::new(db.conn());
-    let mls_group_id = GroupId::from_slice(group_id.as_bytes());
-
-    if let Ok(Some(mut group)) = MlsGroup::load(provider.storage(), &mls_group_id) {
-        group.delete(provider.storage())
+    // Deleting is storage-only — no crypto backend, so no suite dispatch.
+    if let Some(mut group) = load_stored_group(db.conn(), group_id) {
+        group.delete(&store_only(db.conn()))
             .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls delete group: {e}")))?;
     }
     // If the group wasn't found locally, nothing to clean up.
@@ -921,12 +1034,7 @@ async fn process_pending_commits_locked_impl(
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-        MlsGroup::load(provider.storage(), &group_id)
-            .ok()
-            .flatten()
-            .map(|g| g.epoch().as_u64())
+        load_stored_group(db.conn(), mls_group_id).map(|g| g.epoch().as_u64())
     };
     let initial_epoch = match has_group {
         Some(epoch) => epoch,
@@ -1169,102 +1277,13 @@ async fn process_pending_commits_locked_impl(
                 Some(db) => db,
                 None => break,
             };
-            let provider = PollisProvider::new(db.conn());
-            let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-            let mut group = match MlsGroup::load(provider.storage(), &group_id)
-                .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?
-            {
-                Some(g) => g,
-                None => break,
-            };
-
-            let mut reader: &[u8] = &commit_data;
-            let msg_in = match MlsMessageIn::tls_deserialize(&mut reader) {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
-                    break;
-                }
-            };
-            let protocol_msg = match msg_in.try_into_protocol_message() {
-                Ok(m) => m,
-                Err(e) => {
-                    eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
-                    break;
-                }
-            };
-
-            match group.process_message(&provider, protocol_msg) {
-                Ok(processed) => {
-                    if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
-                        if let Err(e) = group.merge_staged_commit(&provider, *staged) {
-                            eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {}: {e} — stopping", commit.epoch);
-                            break;
-                        }
-                    }
-                }
-                Err(e) => {
-                    let msg = format!("{e}");
-                    // Our OWN commit is canonical at this epoch — e.g. we
-                    // submitted it but a lost response made us converge instead
-                    // of merging (issue #411). openmls refuses to process its own
-                    // commit ("...created by this client"); the right move is to
-                    // ADOPT it by merging our pending commit, not delete the group
-                    // and try to re-join from a possibly-stale GroupInfo. This
-                    // advances us to the same epoch as everyone else.
-                    if msg.contains("created by this client") {
-                        if let Err(merge_err) = group.merge_pending_commit(&provider) {
-                            eprintln!(
-                                "[mls] process_pending_commits: own commit at epoch {} for {mls_group_id} but merge_pending failed ({merge_err}) — deleting to recover",
-                                commit.epoch
-                            );
-                            let _ = group.delete(provider.storage());
-                            break;
-                        }
-                        eprintln!(
-                            "[mls] process_pending_commits: adopted our own commit at epoch {} for {mls_group_id}",
-                            commit.epoch
-                        );
-                        // Fall through (no break) so this counts as applied and
-                        // the epoch advances.
-                    } else {
-                        // Two distinct recoverable failures, both handled by
-                        // dropping the local group so the external-rejoin below
-                        // rebuilds it from the latest published GroupInfo:
-                        //
-                        //   1. Eviction — we were removed; our keys can't open the
-                        //      commit. Re-join only if we're still a roster member
-                        //      (external_join no-ops cleanly if GroupInfo is gone).
-                        //
-                        //   2. Fork — the commit is at our CURRENT epoch (it passed
-                        //      the epoch-gap check above) yet still won't apply, so
-                        //      our local tree has diverged from the canonical
-                        //      branch. This is the residue of a historical
-                        //      concurrent-commit race (prod incident: group
-                        //      `01KQYX89…`); the UNIQUE(conversation_id, epoch)
-                        //      constraint stops new forks, but already-forked
-                        //      devices only heal by re-joining the live branch.
-                        //
-                        // Deleting drops only this device's MLS crypto state, not
-                        // its decrypted message history (that lives in the local
-                        // `message` table). The rejoin lands at the latest epoch,
-                        // so the next pass filters `epoch >= new_epoch` and can't
-                        // re-fail on the same commit — no recovery loop.
-                        if msg.contains("evicted") {
-                            eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
-                        } else {
-                            eprintln!(
-                                "[mls] process_pending_commits: commit at epoch {} for {mls_group_id} failed to apply ({e}) — local state diverged from canonical branch; deleting local group to re-join",
-                                commit.epoch
-                            );
-                        }
-                        let _ = group.delete(provider.storage());
-                        break;
-                    }
-                }
+            let outcome = with_group_provider!(db.conn(), mls_group_id, |provider| {
+                apply_one_commit(&provider, mls_group_id, commit.epoch, &commit_data)
+            });
+            match outcome {
+                CommitApply::Applied => true,
+                CommitApply::Stop => break,
             }
-
-            true
         };
 
         if applied {
@@ -1295,14 +1314,13 @@ async fn process_pending_commits_locked_impl(
     {
         let guard = state.local_db.lock().await;
         if let Some(db) = guard.as_ref() {
-            let provider = PollisProvider::new(db.conn());
-            let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-            if let Ok(Some(mut group)) = MlsGroup::load(provider.storage(), &group_id) {
+            // Clearing a pending commit is storage-only — no suite dispatch.
+            if let Some(mut group) = load_stored_group(db.conn(), mls_group_id) {
                 if group.pending_commit().is_some() {
                     eprintln!(
                         "[mls] process_pending_commits: clearing a dangling pending commit for {mls_group_id} (never landed) to avoid a phantom-epoch merge"
                     );
-                    let _ = group.clear_pending_commit(provider.storage());
+                    let _ = group.clear_pending_commit(&store_only(db.conn()));
                 }
             }
         }
@@ -1363,6 +1381,126 @@ async fn process_pending_commits_locked_impl(
     Ok(())
 }
 
+/// Outcome of applying one commit from the log — see [`apply_one_commit`].
+enum CommitApply {
+    /// Merged; the local epoch advanced.
+    Applied,
+    /// Stop replaying. Every reason is logged by `apply_one_commit` itself, and
+    /// on the unrecoverable ones it has already deleted the local group so the
+    /// caller's external-rejoin backstop rebuilds it.
+    Stop,
+}
+
+/// Apply a single commit from the log to the local group.
+///
+/// `provider` must serve the group's suite (the caller dispatches on the stored
+/// group's ciphersuite). Errors are handled in-place rather than returned
+/// because each has its own recovery, and none of them should abort the caller's
+/// replay loop with an `Err` — see [`CommitApply`].
+///
+/// Sync: the caller owns the local-DB guard.
+fn apply_one_commit<C>(
+    provider: &MlsProvider<'_, C>,
+    mls_group_id: &str,
+    commit_epoch: i64,
+    commit_data: &[u8],
+) -> CommitApply
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let group_id = GroupId::from_slice(mls_group_id.as_bytes());
+    let mut group = match MlsGroup::load(provider.storage(), &group_id) {
+        Ok(Some(g)) => g,
+        Ok(None) => return CommitApply::Stop,
+        Err(e) => {
+            eprintln!("[mls] process_pending_commits: mls load failed for {mls_group_id}: {e} — stopping");
+            return CommitApply::Stop;
+        }
+    };
+
+    let mut reader: &[u8] = commit_data;
+    let msg_in = match MlsMessageIn::tls_deserialize(&mut reader) {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[mls] process_pending_commits: deserialize failed for {mls_group_id} at epoch {commit_epoch}: {e} — stopping");
+            return CommitApply::Stop;
+        }
+    };
+    let protocol_msg = match msg_in.try_into_protocol_message() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("[mls] process_pending_commits: protocol msg failed for {mls_group_id} at epoch {commit_epoch}: {e} — stopping");
+            return CommitApply::Stop;
+        }
+    };
+
+    match group.process_message(provider, protocol_msg) {
+        Ok(processed) => {
+            if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
+                if let Err(e) = group.merge_staged_commit(provider, *staged) {
+                    eprintln!("[mls] process_pending_commits: merge failed for {mls_group_id} at epoch {commit_epoch}: {e} — stopping");
+                    return CommitApply::Stop;
+                }
+            }
+        }
+        Err(e) => {
+            let msg = format!("{e}");
+            // Our OWN commit is canonical at this epoch — e.g. we submitted it
+            // but a lost response made us converge instead of merging (issue
+            // #411). openmls refuses to process its own commit ("...created by
+            // this client"); the right move is to ADOPT it by merging our pending
+            // commit, not delete the group and try to re-join from a possibly-
+            // stale GroupInfo. This advances us to the same epoch as everyone else.
+            if msg.contains("created by this client") {
+                if let Err(merge_err) = group.merge_pending_commit(provider) {
+                    eprintln!(
+                        "[mls] process_pending_commits: own commit at epoch {commit_epoch} for {mls_group_id} but merge_pending failed ({merge_err}) — deleting to recover"
+                    );
+                    let _ = group.delete(provider.storage());
+                    return CommitApply::Stop;
+                }
+                eprintln!(
+                    "[mls] process_pending_commits: adopted our own commit at epoch {commit_epoch} for {mls_group_id}"
+                );
+                // Fall through so this counts as applied and the epoch advances.
+            } else {
+                // Two distinct recoverable failures, both handled by dropping the
+                // local group so the external-rejoin below rebuilds it from the
+                // latest published GroupInfo:
+                //
+                //   1. Eviction — we were removed; our keys can't open the commit.
+                //      Re-join only if we're still a roster member (external_join
+                //      no-ops cleanly if GroupInfo is gone).
+                //
+                //   2. Fork — the commit is at our CURRENT epoch (it passed the
+                //      epoch-gap check above) yet still won't apply, so our local
+                //      tree has diverged from the canonical branch. This is the
+                //      residue of a historical concurrent-commit race (prod
+                //      incident: group `01KQYX89…`); the UNIQUE(conversation_id,
+                //      epoch) constraint stops new forks, but already-forked
+                //      devices only heal by re-joining the live branch.
+                //
+                // Deleting drops only this device's MLS crypto state, not its
+                // decrypted message history (that lives in the local `message`
+                // table). The rejoin lands at the latest epoch, so the next pass
+                // filters `epoch >= new_epoch` and can't re-fail on the same
+                // commit — no recovery loop.
+                if msg.contains("evicted") {
+                    eprintln!("[mls] process_pending_commits: evicted from {mls_group_id} — deleting local group for recovery");
+                } else {
+                    eprintln!(
+                        "[mls] process_pending_commits: commit at epoch {commit_epoch} for {mls_group_id} failed to apply ({e}) — local state diverged from canonical branch; deleting local group to re-join"
+                    );
+                }
+                let _ = group.delete(provider.storage());
+                return CommitApply::Stop;
+            }
+        }
+    }
+
+    CommitApply::Applied
+}
+
 /// Read this device's current local MLS epoch for `mls_group_id` and report it to
 /// the DS as the retention high-water (`ds_client::ds_report_commit_since`). No-op
 /// when there is no local group (nothing applied to report). See #539.
@@ -1373,14 +1511,10 @@ async fn process_pending_commits_locked_impl(
 async fn report_applied_epoch(state: &Arc<AppState>, mls_group_id: &str, user_id: &str) {
     let epoch = {
         let guard = state.local_db.lock().await;
-        guard.as_ref().and_then(|db| {
-            let provider = PollisProvider::new(db.conn());
-            let group_id = GroupId::from_slice(mls_group_id.as_bytes());
-            MlsGroup::load(provider.storage(), &group_id)
-                .ok()
-                .flatten()
-                .map(|g| g.epoch().as_u64())
-        })
+        guard
+            .as_ref()
+            .and_then(|db| load_stored_group(db.conn(), mls_group_id))
+            .map(|g| g.epoch().as_u64())
     };
     if let Some(epoch) = epoch {
         let state = Arc::clone(state);
@@ -1430,9 +1564,7 @@ pub async fn process_pending_commits(
 
 /// Check whether an MLS group exists in the local database.
 pub fn has_local_group(conn: &rusqlite::Connection, conversation_id: &str) -> bool {
-    let provider = PollisProvider::new(conn);
-    let group_id = GroupId::from_slice(conversation_id.as_bytes());
-    matches!(MlsGroup::load(provider.storage(), &group_id), Ok(Some(_)))
+    load_stored_group(conn, conversation_id).is_some()
 }
 
 /// Try to encrypt `plaintext` with the MLS group for `conversation_id`.
@@ -1445,10 +1577,11 @@ pub fn try_mls_encrypt(
     conversation_id: &str,
     plaintext: &[u8],
 ) -> Option<Vec<u8>> {
-    let provider = PollisProvider::new(conn);
-    let (mut group, signer) = load_group_with_signer(&provider, conversation_id).ok()?;
-    let msg_out = group.create_message(&provider, &signer, plaintext).ok()?;
-    msg_out.tls_serialize_detached().ok()
+    with_group_provider!(conn, conversation_id, |provider| {
+        let (mut group, signer) = load_group_with_signer(&provider, conversation_id).ok()?;
+        let msg_out = group.create_message(&provider, &signer, plaintext).ok()?;
+        msg_out.tls_serialize_detached().ok()
+    })
 }
 
 /// Parse the MLS epoch a `message` / `edit` envelope was sealed at, WITHOUT
@@ -1494,24 +1627,24 @@ pub fn try_mls_decrypt(
     conversation_id: &str,
     ciphertext: &[u8],
 ) -> Option<(Vec<u8>, String)> {
-    let provider = PollisProvider::new(conn);
-    let group_id = GroupId::from_slice(conversation_id.as_bytes());
-    let mut group = MlsGroup::load(provider.storage(), &group_id).ok()??;
+    with_group_provider!(conn, conversation_id, |provider| {
+        let mut group = load_stored_group(conn, conversation_id)?;
 
-    let mut reader: &[u8] = ciphertext;
-    let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
-    let protocol_msg = msg_in.try_into_protocol_message().ok()?;
-    let processed = group.process_message(&provider, protocol_msg).ok()?;
+        let mut reader: &[u8] = ciphertext;
+        let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
+        let protocol_msg = msg_in.try_into_protocol_message().ok()?;
+        let processed = group.process_message(&provider, protocol_msg).ok()?;
 
-    // Grab the authenticated sender credential BEFORE `into_content` consumes it.
-    let sender_user_id = parse_credential_user_id(processed.credential());
+        // Grab the authenticated sender credential BEFORE `into_content` consumes it.
+        let sender_user_id = parse_credential_user_id(processed.credential());
 
-    match processed.into_content() {
-        ProcessedMessageContent::ApplicationMessage(app_msg) => {
-            Some((app_msg.into_bytes(), sender_user_id))
+        match processed.into_content() {
+            ProcessedMessageContent::ApplicationMessage(app_msg) => {
+                Some((app_msg.into_bytes(), sender_user_id))
+            }
+            _ => None,
         }
-        _ => None,
-    }
+    })
 }
 
 #[cfg(test)]

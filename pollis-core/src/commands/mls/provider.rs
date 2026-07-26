@@ -13,6 +13,7 @@ use openmls::prelude::*;
 use openmls_libcrux_crypto::CryptoProvider as LibcruxCrypto;
 use openmls_rust_crypto::RustCrypto;
 use openmls_traits::OpenMlsProvider;
+use tls_codec::Serialize as TlsSerialize;
 
 use crate::signal::mls_storage::MlsStore;
 
@@ -158,6 +159,123 @@ pub(crate) const CS_HYBRID: Ciphersuite =
 /// this constant, and `signature_scheme_is_suite_invariant` in `tests.rs` pins
 /// that both suites really do agree with it.
 pub(crate) const SIGNATURE_SCHEME: SignatureScheme = SignatureScheme::ED25519;
+
+// ── Suite dispatch ───────────────────────────────────────────────────────────
+
+/// Load a group from local storage **without** choosing a crypto backend.
+///
+/// This is what makes suite dispatch possible at all. `MlsGroup::load` is
+/// generic over `StorageProvider`, not `OpenMlsProvider`: it deserialises
+/// stored blobs and touches no crypto. `MlsStore` is the crypto-independent
+/// half of [`MlsProvider`], so it can be constructed alone — which resolves the
+/// chicken-and-egg of "you need the group to learn its suite, and the suite to
+/// pick the provider".
+///
+/// Also the right call for every read-only inspection (does the group exist?
+/// what epoch is it at?) and for the storage-only mutations `MlsGroup::delete`
+/// and `clear_pending_commit`: none of them need a backend, so none of them
+/// need to dispatch.
+pub(crate) fn load_stored_group(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+) -> Option<MlsGroup> {
+    let store = MlsStore::new(conn);
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    MlsGroup::load(&store, &group_id).ok().flatten()
+}
+
+/// The storage half on its own, for the storage-only mutations
+/// ([`MlsGroup::delete`], `clear_pending_commit`) that pair with
+/// [`load_stored_group`].
+pub(crate) fn store_only(conn: &rusqlite::Connection) -> MlsStore<'_> {
+    MlsStore::new(conn)
+}
+
+/// Read the ciphersuite of an inbound `Welcome` **before** any crypto touches it.
+///
+/// Joining is the one dispatch site with no local group to read a suite from and
+/// no crypto-free accessor to ask: `Welcome::ciphersuite()` is `pub(crate)` in
+/// openmls, and `ProcessedWelcome::new_from_welcome` — which would expose the
+/// suite via `unverified_group_info()` — already needs the provider we are
+/// trying to choose. So we read it off the wire.
+///
+/// This is safe to hardcode because it is the RFC 9420 §12.4.3.1 struct layout,
+/// not an openmls implementation detail:
+///
+/// ```text
+/// struct {
+///     CipherSuite cipher_suite;          // first field, 2 bytes, big-endian
+///     EncryptedGroupSecrets secrets<V>;
+///     opaque encrypted_group_info<V>;
+/// } Welcome;
+/// ```
+///
+/// Returns `None` if the Welcome fails to serialise or names a code point we do
+/// not implement — both of which the caller must treat as "cannot join", never
+/// as "fall back to classic": handing a hybrid Welcome to `PollisProvider`
+/// panics (`RustCrypto` `unimplemented!()`s on `CS_HYBRID`).
+/// `welcome_suite_is_readable_on_both_suites` in `tests.rs` pins this against
+/// real Welcomes of each suite.
+pub(crate) fn welcome_ciphersuite(welcome: &Welcome) -> Option<Ciphersuite> {
+    let bytes = welcome.tls_serialize_detached().ok()?;
+    let code = u16::from_be_bytes([*bytes.first()?, *bytes.get(1)?]);
+    Ciphersuite::try_from(code).ok()
+}
+
+/// Read a locally-stored group's ciphersuite. `None` when no group is stored for
+/// `conversation_id` (not yet joined, or forgotten) — callers decide the default.
+pub(crate) fn stored_group_ciphersuite(
+    conn: &rusqlite::Connection,
+    conversation_id: &str,
+) -> Option<Ciphersuite> {
+    load_stored_group(conn, conversation_id).map(|g| g.ciphersuite())
+}
+
+/// Run `$body` against the [`MlsProvider`] that serves `$suite`.
+///
+/// Dispatch has to be a macro rather than a `dyn` object or a closure:
+/// `OpenMlsProvider` has associated types (`CryptoProvider`, `RandProvider`,
+/// `StorageProvider`), so it is not object-safe, and Rust closures cannot be
+/// generic over the backend. The body is therefore monomorphised once per
+/// backend. **Keep bodies small** — the established shape is a one-line call to
+/// a `fn foo<C>(provider: &MlsProvider<'_, C>, …)` helper, so the duplicated
+/// code is a single call and the real work is compiled twice by the normal
+/// generic machinery instead of by macro expansion.
+macro_rules! with_suite_provider {
+    ($conn:expr, $suite:expr, |$p:ident| $body:block) => {{
+        let __conn = $conn;
+        if $suite == $crate::commands::mls::provider::CS_HYBRID {
+            let $p = $crate::commands::mls::provider::PollisPqProvider::new(__conn);
+            $body
+        } else {
+            let $p = $crate::commands::mls::provider::PollisProvider::new(__conn);
+            $body
+        }
+    }};
+}
+
+/// Run `$body` against the provider serving the ciphersuite of the group stored
+/// locally for `$conversation_id`.
+///
+/// A conversation with no local group falls back to [`CS_CLASSIC`]. That is the
+/// right default for every caller: paths that read existing state find nothing
+/// either way, and paths that *create* state (group creation, Welcome, external
+/// join) learn their suite from the wire and use [`with_suite_provider`]
+/// directly rather than this macro.
+macro_rules! with_group_provider {
+    ($conn:expr, $conversation_id:expr, |$p:ident| $body:block) => {{
+        let __conn = $conn;
+        let __suite = $crate::commands::mls::provider::stored_group_ciphersuite(
+            __conn,
+            $conversation_id,
+        )
+        .unwrap_or($crate::commands::mls::provider::CS_CLASSIC);
+        with_suite_provider!(__conn, __suite, |$p| $body)
+    }};
+}
+
+pub(crate) use with_group_provider;
+pub(crate) use with_suite_provider;
 
 // ── Credential helpers ───────────────────────────────────────────────────────
 

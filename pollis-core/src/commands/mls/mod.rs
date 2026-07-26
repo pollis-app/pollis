@@ -18,6 +18,10 @@ mod welcomes;
 pub use provider::{
     make_credential, parse_credential_device_id, parse_credential_user_id, PollisProvider,
 };
+// Suite dispatch for out-of-module MLS crypto (voice key export). Only the
+// `media` build has such a call site.
+#[cfg(feature = "media")]
+pub(crate) use provider::{with_group_provider, MlsProvider};
 
 // ── Per-device signing keys + cross-signing ──────────────────────────────────
 pub use device::{

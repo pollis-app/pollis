@@ -123,6 +123,8 @@ pub async fn ds_post(
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("not signed in for DS request signing")))?;
+        // Device-identity only: Ed25519 request signing is the same in both
+        // suites, so this is deliberately not suite-dispatched.
         let provider = PollisProvider::new(db.conn());
         let (signer, _pub_bytes) = load_or_create_device_signer(&provider, &user_id, &device_id)?;
         let sig = signer
