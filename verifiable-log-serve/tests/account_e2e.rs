@@ -35,6 +35,7 @@ fn commit_rows() -> Vec<CommitRow> {
         CommitRow {
             seq: 1,
             conversation_id: "conv-1".to_string(),
+            generation: 0,
             epoch: 0,
             sender_id: "u-alice".to_string(),
             commit_sha256: hex::encode([0x11u8; 32]),
@@ -42,6 +43,7 @@ fn commit_rows() -> Vec<CommitRow> {
         CommitRow {
             seq: 2,
             conversation_id: "conv-1".to_string(),
+            generation: 0,
             epoch: 1,
             sender_id: "u-bob".to_string(),
             commit_sha256: hex::encode([0x12u8; 32]),
@@ -49,6 +51,7 @@ fn commit_rows() -> Vec<CommitRow> {
         CommitRow {
             seq: 3,
             conversation_id: "conv-2".to_string(),
+            generation: 0,
             epoch: 0,
             sender_id: "u-bob".to_string(),
             commit_sha256: hex::encode([0x21u8; 32]),
@@ -56,6 +59,7 @@ fn commit_rows() -> Vec<CommitRow> {
         CommitRow {
             seq: 4,
             conversation_id: "conv-1".to_string(),
+            generation: 0,
             epoch: 2,
             sender_id: "u-alice".to_string(),
             commit_sha256: hex::encode([0x13u8; 32]),

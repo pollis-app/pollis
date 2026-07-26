@@ -13,7 +13,8 @@
 //!   account public key, public by design, is read out verbatim (hex).
 //! * [`commit_log`] — the **mls-commit-log** tenant: a frozen canonical leaf
 //!   encoding and [`commit_log::CommitLogInvariant`], the globally-auditable
-//!   form of #357 (no fork; no epoch regression per conversation). Pure, no IO.
+//!   form of #357 (no fork; no regression of the per-conversation
+//!   `(generation, epoch)` key; a suite lineage opens at epoch 0). Pure, no IO.
 //! * [`account_key`] — the **account-key** tenant: the canonical leaf encoding
 //!   and [`account_key::AccountKeyInvariant`] (no duplicate or regressing
 //!   `identity_version` per user). Its own tree, signed under the

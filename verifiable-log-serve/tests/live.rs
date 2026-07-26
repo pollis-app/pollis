@@ -146,8 +146,13 @@ fn http_group(base: &str, id: &str) -> (u16, Option<String>, GroupReport) {
 // ---------------------------------------------------------------------------
 
 fn leaf(conv: &str, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
+    leaf_at(conv, 0, epoch, seq, commit)
+}
+
+fn leaf_at(conv: &str, generation: u64, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
     CommitLeaf {
         conversation_id: conv.to_string(),
+        generation,
         epoch,
         sender_id: format!("u-{conv}"),
         seq,

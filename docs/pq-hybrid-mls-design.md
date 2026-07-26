@@ -895,13 +895,16 @@ the suite ships in the pinned `openmls_traits 0.5.0` and the libcrux provider (p
 building and running headless) implements it, so no upstream availability gate remains.
 The residual dependency is *pinning discipline* against code-point churn (§7.4) — pin the
 OpenMLS and `openmls_libcrux_crypto` versions, and track a future OpenMLS bump as a
-migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) a
-coordination point with the machine-checked-correctness program, which lands before this
-work in the program sequence: its M4 TLA+ spec (Gapless ∧ HeadMonotone per conversation,
-`docs/machine-checked-correctness-design.md`) and the transparency-log verifier both
-enforce per-conversation epoch monotonicity, and both must be extended from
-`(conversation, epoch)` to `(conversation, generation, epoch)` (§3.2, §3.4) before the
-P4 migration ships.
+migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) ~~a
+coordination point with the machine-checked-correctness program~~ — **resolved in P4**:
+its M4 TLA+ spec (`specs/tla/CommitLog.tla`,
+`docs/machine-checked-correctness-design.md`) and the transparency-log verifier
+(`verifiable-log-builder`'s `CommitLogInvariant`) both enforced per-conversation epoch
+monotonicity, and both were extended to `(conversation, generation, epoch)` (§3.2, §3.4)
+in the same PR that landed the migration. The spec gained the migration actions and
+`OpeningClosesTheHead`; the verifier's leaf encoding stayed byte-identical for
+generation 0, so every already-published Merkle root and cached inclusion proof
+remains valid.
 
 ---
 

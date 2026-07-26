@@ -8,7 +8,7 @@
 #
 # Usage:
 #   scripts/tlc-check.sh            # check both SOUND specs (all must PASS)
-#   scripts/tlc-check.sh --broken   # check both TEETH configs (each must FAIL)
+#   scripts/tlc-check.sh --broken   # check every TEETH config (each must FAIL)
 #
 # Requirements: a JRE (java on PATH, or JAVA_HOME set) and tla2tools.jar. If the
 # jar is absent it is downloaded to $TLA_TOOLS_DIR (default: this script's dir).
@@ -71,12 +71,14 @@ cd "$SPEC_DIR"
 # TLC's deadlock check for it. Delivery has a live action in every state.
 if [[ "${1:-}" == "--broken" ]]; then
   check_teeth "CommitLog (broken submit-guard)" CommitLog.tla CommitLogBroken.cfg -deadlock
+  check_teeth "CommitLog (broken migration compare-and-swap)" \
+    CommitLog.tla CommitLogMigrateBroken.cfg -deadlock
   check_teeth "Delivery (broken retention-guard)" Delivery.tla DeliveryBroken.cfg
-  echo "OK: both teeth configs produced the expected counterexamples."
+  echo "OK: all teeth configs produced the expected counterexamples."
   exit 0
 fi
 
-check_sound "CommitLog (OnePerEpoch, Gapless, HeadMonotone, NoForeignAdopt)" \
+check_sound "CommitLog (OnePerEpoch, Gapless, OpeningClosesTheHead, NoForeignAdopt, LineageMonotone)" \
   CommitLog.tla CommitLog.cfg -deadlock
 check_sound "Delivery (NoLossForCurrentMember, CursorMonotone, AcceptedLossesOnly)" \
   Delivery.tla Delivery.cfg

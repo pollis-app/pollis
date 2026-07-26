@@ -94,7 +94,7 @@ work is.
 
 | Inv | Property | Strongest current defense | Target machine-checked defense | Gap |
 |---|---|---|---|---|
-| **I1** | commit log gapless, append-only, one-per-epoch | `UNIQUE` index + DS `submit_commit` conditional-insert (`commit.rs:137`); proptest never forks | **TLA+**: model the DS `submit_commit` as an atomic action over N clients racing at a head; model-check "no two distinct commits at one epoch ∧ no gap ∧ head monotone" exhaustively. **Kani** on `head_epoch` arithmetic + the accept/reject decision extracted as a pure fn. | ✅ **Modelled (M4 Spec A, #481).** `specs/tla/CommitLog.tla` exhaustively TLC-checks `OnePerEpoch ∧ Gapless ∧ HeadMonotone` over the `Submit` conditional-insert-at-head under N-client concurrency; teeth: `CommitLogBroken.cfg` drops the head-guard → a real `OnePerEpoch` fork counterexample. The Kani arithmetic half (`head_epoch_of`/`accepts`) already shipped in M2 (`commit.rs`). |
+| **I1** | commit log gapless, append-only, one-per-epoch | `UNIQUE` index + DS `submit_commit` conditional-insert (`commit.rs:137`); proptest never forks | **TLA+**: model the DS `submit_commit` as an atomic action over N clients racing at a head; model-check "no two distinct commits at one epoch ∧ no gap ∧ head monotone" exhaustively. **Kani** on `head_epoch` arithmetic + the accept/reject decision extracted as a pure fn. | ✅ **Modelled (M4 Spec A, #481).** `specs/tla/CommitLog.tla` exhaustively TLC-checks `OnePerEpoch ∧ Gapless ∧ LineageMonotone ∧ OpeningClosesTheHead` over the `Submit` conditional-insert-at-head under N-client concurrency, and over the #454 P4 suite-generation migration; teeth: `CommitLogBroken.cfg` drops the head-guard → a real `OnePerEpoch` fork counterexample, `CommitLogMigrateBroken.cfg` drops the migration compare-and-swap → an `OpeningClosesTheHead` counterexample orphaning a commit on the retired lineage. The Kani arithmetic half (`head_epoch_of`/`accepts`) already shipped in M2 (`commit.rs`). |
 | **I2** | commits are a verifiable chain | MLS confirmation tag chains epochs (openmls); `our_commit_is_canonical` byte-compares (`reconcile.rs:35`) | Kani on the *canonicalization decision* (own-commit adoption vs rollback): given (submit outcome, stored bytes, our bytes), the adopt/rollback choice never adopts a foreign commit and never rolls back our own landed commit. | ✅ **Covered from both sides (#481).** `NoForeignAdopt` is TLC-checked in TLA+ Spec A (`CommitLog.tla`, M4); the pure own-commit `resolve` decision is Kani-proved (M2) and now continuously fuzzed (Track B `fuzz/resolve`). |
 | **I3** | delivery = monotonic per-(member,device) cursor; retention ≥ slowest member (no TTL) | **Kani-proved** — `next_watermark` (`messages/watermark.rs`) called by the real ingest path (`ingest.rs:337`); plus the `envelope_cleanup_ttl_or_watermark` flow test | **Kani** on the watermark function: prove *monotonicity* (advance never regresses) and the **safety property** — the watermark never advances to/past an un-handled envelope's `sent_at` (the F3 message-loss guard). This is the single highest-ROI target. | ✅ **Proved (M1, #467/#468).** `next_watermark` extracted + wired into production; harnesses `p1_no_skip` (anti-F3), `p2_monotone`, `p3_handled_liveness`, each with a `should_panic` mutant (`p{1,2,3}_mutant_refuted`) certifying teeth. Retention floor (I4) still deferred — see that row. |
 | **I4** | commits + welcomes retained until slowest member consumed | two-tier retention floor (`commit.rs` `prune_floor`), DS-only, event-driven | TLA+ retention model: with the cursor model, GC-below-floor is unreachable. Kani on the floor computation once it exists. | ✅ **Modelled + Kani-proved + fuzzed (M5 Spec B #481; floor #539).** `specs/tla/Delivery.tla` (+ `Delivery.cfg`) exhaustively TLC-checks `NoLossForCurrentMember` (GC never removes a message a current member-device still needs) with `DeliveryBroken.cfg` refuting it as teeth — authored **before** the floor code per the doctrine. The floor code now exists (`prune_floor`, `pollis-delivery/src/commit.rs`) and is **Kani-proved** (`i4_floor_non_negative` / `i4_tier1_never_past_slowest` = the code-level `NoLossForCurrentMember` / `i4_unreported_disables_tier1`, each paired with a `should_panic` mutant certifying teeth) and continuously **fuzzed** (Track-B `fuzz/prune_floor`). |
@@ -163,19 +163,35 @@ specs, kept small:
 **Invariants to check (TLC exhaustive):**
 - `OnePerEpoch`: `∀ conv, e: |{c ∈ log[conv] : c.epoch = e}| ≤ 1`.
 - `Gapless`: `log[conv]` epochs are `0..Head-1` with no hole.
-- `HeadMonotone`: `Head(log[conv])` never decreases.
+- `LineageMonotone`: the `(generation, epoch)` head never decreases
+  lexicographically (pre-#454-P4 this was the scalar `HeadMonotone`).
+- `OpeningClosesTheHead`: a commit opening generation `g > 0` sits at epoch 0
+  and names a `closes` epoch above every epoch of generation `g - 1`.
 - `NoForeignAdopt`: a client's adopted commit at epoch `e` byte-equals `log[e]`
   (abstracted as author/nonce equality) — the I2 property.
 
-**Forward-compatibility note (PQ hybrid MLS).** The PQ suite-migration program
-([`pq-hybrid-mls-design.md`](pq-hybrid-mls-design.md)) will introduce a
-suite-generation lineage: the per-conversation monotone key extends from
-`(conversation, epoch)` to `(conversation, generation, epoch)`, with epoch 0
-accepted only as the first commit of a newly-opened generation. When that
-ships, Spec A's invariants — and the transparency-log verifier — must be
-restated over that generation-keyed head. Parameterize the spec's head key from
-day one (model `Head` over an abstract key rather than hard-coding the
-per-conversation epoch) so the extension is a config change, not a rewrite.
+**Suite generations (PQ hybrid MLS #454 P4) — landed.** The PQ suite-migration
+program ([`pq-hybrid-mls-design.md`](pq-hybrid-mls-design.md)) extended the
+per-conversation monotone key from `(conversation, epoch)` to
+`(conversation, generation, epoch)`, with epoch 0 accepted only as the first
+commit of a newly-opened generation. Spec A and the transparency-log verifier
+were restated over that key before P4 shipped.
+
+This section used to promise the extension would be "a config change, not a
+rewrite" if the head key were parameterized from day one. That was wrong, and
+worth recording. The safety content of P4 is not a bigger key space — it is the
+*relationship between* lineages: a successor may open only at epoch 0, and only
+by closing the exact head epoch its predecessor had at that moment, a
+compare-and-swap that races a concurrent `Submit`. A relationship between two
+lineages cannot be expressed by instantiating a constant with two elements,
+because nothing in the spec related two keys; it needs actions and an invariant
+quantifying across them. Spec A was therefore rewritten (`MigratePrepare` /
+`MigrateCommit` split so the race window is a real interleaving point, plus
+`OpeningClosesTheHead` and `LineageMonotone`). Spec B genuinely was a config
+question — and measurement said don't: with no cross-key action or invariant, a
+two-key Delivery config is a product of two independent copies, sound but
+vacuous, at >10 minutes of TLC instead of seconds. It stays a singleton, with
+`k` re-read as one `(conversation, generation)` lineage.
 
 **Spec B — `Delivery` (I3/I4).** State: per-conversation ordered `msgs` each with
 `[epoch, sentAt]`; per-(member,device) `cursor`; `member` set with continuous
@@ -569,7 +585,7 @@ column is only where we also want it gated on every PR.
 | **M1 — Kani watermark (I3)** | extract `next_watermark`; P1 no-skip / P2 monotone / P3 liveness; rewire flow test to the extracted fn | ~4 d | ✅ | ✅ `cargo kani` job |
 | **M2 — Kani gate + canonicalization (I5/I2/I1)** | extract `may_rejoin`, `resolve`, `classify`; prove leak-freedom + no-foreign-adopt + no-gap-apply | ~3 d | ✅ | ✅ same job |
 | **M3 — continuous soak (Track A)** | promote marathon to `schedule:`/`loop`; "persist failing op sequence as regression" helper | ~2 d | ✅ | ✅ scheduled |
-| **M4 — TLA+ epoch model (I1/I2)** | ✅ **Done** (#481): `specs/tla/CommitLog.tla` + sound/teeth cfgs model-check `OnePerEpoch ∧ Gapless ∧ HeadMonotone ∧ NoForeignAdopt` over `Submit`/`Apply`/`ExternalJoin`; cross-ref comments in `submit_commit` (`commit.rs`) + the client apply/gap path (`group_state.rs`); wired into the `tla.yml` gate | ~1.5–2.5 wk | ✅ (JVM) | ✅ TLC small-config gate |
+| **M4 — TLA+ epoch model (I1/I2)** | ✅ **Done** (#481): `specs/tla/CommitLog.tla` + sound/teeth cfgs model-check `OnePerEpoch ∧ Gapless ∧ LineageMonotone ∧ OpeningClosesTheHead ∧ NoForeignAdopt` over `Submit`/`Apply`/`ExternalJoin` and the #454 P4 migration; cross-ref comments in `submit_commit` (`commit.rs`) + the client apply/gap path (`group_state.rs`); wired into the `tla.yml` gate | ~1.5–2.5 wk | ✅ (JVM) | ✅ TLC small-config gate |
 | **M5 — TLA+ delivery model + fuzz targets (I3/I4 + Track B)** | ✅ **Spec B done** (`specs/tla/Delivery.tla` + teeth cfg, TLC gate `.github/workflows/tla.yml`, #481) — landed before the #539 floor code. ✅ **Track-B `cargo-fuzz` done**: the detached `fuzz/` crate carries a target per §4 pure fn (`next_watermark`/`classify`/`resolve`/`may_rejoin`) plus the I4 floor (`prune_floor`), each asserting its Kani property with a `--cfg fuzz_mutant` teeth variant + a seed corpus (OSS-Fuzz-eligible), run via `scripts/fuzz-check.sh`. ✅ **I4 floor Kani-proved** (`prune_floor`, `pollis-delivery/src/commit.rs`, #539) once the code landed. ⏳ **Remaining:** optional OSS-Fuzz onboarding | ~1.5–2 wk | ✅ | ✅ fuzz smoke + TLC |
 
 **Recommended cut if budget is tight:** M0 + M1 + M2 + M3 deliver ~80% of the
@@ -596,8 +612,8 @@ be written (model it first).
 - **M3:** the marathon runs on a schedule headless; a synthetic injected
   divergence is caught *and* its op sequence is auto-emitted in a form that drops
   straight into `adversarial.rs`/`model.rs` as a regression.
-- **M4:** TLC exhaustively checks `OnePerEpoch ∧ Gapless ∧ HeadMonotone ∧
-  NoForeignAdopt` for N=3, K=4 with all fault interleavings and reports no
+- **M4:** TLC exhaustively checks `OnePerEpoch ∧ Gapless ∧ LineageMonotone ∧
+  OpeningClosesTheHead ∧ NoForeignAdopt` for N=3, K=4 with all fault interleavings and reports no
   violation; deliberately removing the head-guard from the `Submit` action
   produces a fork counterexample. `.tla` files re-checkable by a third party with
   public TLC.
