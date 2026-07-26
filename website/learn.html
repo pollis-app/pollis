@@ -1350,10 +1350,16 @@ One picture, built up step by step: a readable message, then a sealed one, then 
               rel="noopener noreferrer">ChaCha20</a>. For agreeing on that shared key over an
             untrusted network without meeting first, Pollis uses
             <a href="https://en.wikipedia.org/wiki/Curve25519" target="_blank"
-              rel="noopener noreferrer">X25519</a>, an elliptic-curve key exchange, which is also the
-            mechanism MLS uses under the hood (via
+              rel="noopener noreferrer">X25519</a>, an elliptic-curve key exchange, carried inside MLS
+            by
             <a href="https://en.wikipedia.org/wiki/Hybrid_Public_Key_Encryption" target="_blank"
-              rel="noopener noreferrer">HPKE</a>). For proving who wrote something, Pollis uses
+              rel="noopener noreferrer">HPKE</a>. In group chat, X25519 no longer does that job alone:
+            Pollis pairs it with
+            <a href="https://en.wikipedia.org/wiki/Kyber_(cryptosystem)" target="_blank"
+              rel="noopener noreferrer">ML-KEM-768</a>, a key exchange designed to resist quantum
+            computers, combined by a construction called X-Wing so that an attacker has to break both
+            to learn anything. The point is not that quantum computers exist — they do not — but that
+            someone can record traffic today and wait. For proving who wrote something, Pollis uses
             <a href="https://en.wikipedia.org/wiki/EdDSA" target="_blank"
               rel="noopener noreferrer">Ed25519</a> signatures; note that Ed25519 signs, it does not
             encrypt.

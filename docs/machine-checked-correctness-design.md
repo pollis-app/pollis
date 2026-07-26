@@ -71,7 +71,7 @@ The current enforcement is split across three physical writers/checkers:
 
 | Layer | Mechanism | Where |
 |---|---|---|
-| DB constraint | `UNIQUE(conversation_id, epoch)` | `pollis-core/src/db/migrations/000003_mls_commit_log_unique_epoch.sql:22` |
+| DB constraint | `UNIQUE(conversation_id, generation, epoch)` (widened from `(conversation_id, epoch)` by #454 P4) | `pollis-core/src/db/migrations/000003_mls_commit_log_unique_epoch.sql:22`, `migrations-log/000004` |
 | Serialization chokepoint | DS conditional-insert = head → append-only, gapless, one-per-epoch *by construction* | `pollis-delivery/src/commit.rs:137` (`submit_commit`) |
 | Client state machine | gap detection, own-commit adoption, external-join recovery, `#418` epoch-interleaved catch-up | `pollis-core/src/commands/mls/group_state.rs:770` (`process_pending_commits_locked_impl`) |
 | Client pure logic | watermark advance / stop-at ceiling — **Kani-proved (I3)** | `pollis-core/src/commands/messages/watermark.rs` (`next_watermark`; P1/P2/P3 harnesses), called by `ingest.rs:337` |

@@ -167,7 +167,9 @@ tree can never stand in for another:
 - **Commit-log tenant** (`pollis-verifiable-log:sth:v1`) — one leaf per MLS
   commit. Closes server-side fork / epoch-regression / replay on the MLS commit
   stream: replaying under its invariant proves no two commits share a
-  `(conversation_id, epoch)` and epochs only increase. See `docs/transparency.md`.
+  `(conversation_id, generation, epoch)`, that `(generation, epoch)` only
+  increases lexicographically, and that a new generation opens at epoch 0. The
+  `generation` term is the PQ suite lineage (#454 P4). See `docs/transparency.md`.
 - **Account-key tenant** (`pollis-verifiable-log:sth:v1:account-keys`) — one leaf
   per account identity-key version, sourced from the append-only
   `account_key_log` table (dual-written with `users.account_id_pub` at signup and

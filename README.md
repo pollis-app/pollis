@@ -54,7 +54,13 @@ on disk.
   commits happened).
 - **Forward secrecy:** MLS's key schedule rotates the group key on every epoch
   advance, and each message uses a unique derived key, so compromising one key
-  doesn't expose past or future messages.
+  doesn't expose past or future messages. Each device additionally rotates its own
+  leaf key on join and roughly weekly thereafter (launch-driven, not a timer), so
+  a compromised device heals rather than staying readable.
+- **Post-quantum confidentiality:** group key exchange is hybrid — X25519 **and**
+  ML-KEM-768 (FIPS 203) combined via X-Wing, so recorded traffic stays sealed
+  unless an attacker breaks *both*. Signatures remain classical Ed25519 (a forgery
+  must be made live, so it isn't a harvest-now exposure).
 - **Voice:** a second encryption layer sits on top of the standard DTLS-SRTP link
   to LiveKit. Each Opus frame is AES-128-GCM encrypted by libwebrtc's
   `FrameCryptor` before SRTP, keyed by a 32-byte secret derived from the channel's
@@ -69,9 +75,11 @@ on disk.
 communicating. The server and network still see connection metadata (IP address,
 timing, which accounts are in a channel). There is no sender anonymity, no
 IP-hiding relay (an optional overlay is designed but deferred —
-[docs/relay-overlay-design.md](docs/relay-overlay-design.md)), and the key
-exchange is classical X25519, not yet post-quantum (planned —
-[docs/pq-hybrid-mls-design.md](docs/pq-hybrid-mls-design.md)). The full,
+[docs/relay-overlay-design.md](docs/relay-overlay-design.md)). Key exchange *is*
+post-quantum hybrid ([docs/pq-hybrid-mls-design.md](docs/pq-hybrid-mls-design.md)),
+but signatures are still classical Ed25519, and traffic sealed before a group
+crossed to the hybrid suite stays classically sealed — nothing upgrades
+retroactively. The full,
 caveated threat model is in
 [docs/security-whitepaper.md](docs/security-whitepaper.md); a plain-language
 version is [docs/security-simple.md](docs/security-simple.md).
@@ -239,5 +247,7 @@ website/          # Static marketing site — plain HTML/CSS/JS, deployed to Clo
 
 - **Broader platform availability** — currently open pre-alpha; working toward a
   stable public release
-- **Post-quantum hybrid key exchange** (X25519 + ML-KEM-768) and an optional
-  IP-hiding relay overlay — designed, deferred; see the security docs above
+- **Post-quantum signatures** (ML-DSA / SLH-DSA) — the hybrid *key exchange* has
+  shipped; signatures are the remaining classical piece
+- **An optional IP-hiding relay overlay** — designed, deferred; see the security
+  docs above

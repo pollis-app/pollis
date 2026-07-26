@@ -215,7 +215,7 @@ that class of bug.
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
 - `mls_signature_pub` BLOB _(migration 13)_
-- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? Since #454 P2 the DS publish/replenish endpoints set it to 1 when a device publishes a hybrid KeyPackage pool — derived server-side from what landed in `mls_key_package`, never a client UPDATE.)_
+- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? Since #454 P2 the DS publish/replenish endpoints set it to 1 when a device publishes a hybrid KeyPackage pool — derived server-side from what landed in `mls_key_package`, never a client UPDATE. Since #454 P5 this column is read two ways: per-roster, by `roster_is_fully_pq_capable`; and **deployment-wide**, by `fleet_is_fully_pq_capable`, which requires that no row with `revoked_at IS NULL` and `last_seen` inside 90 days still has `pq_capable = 0`. Both must pass before any group is born hybrid or migrated — see `.codesight/wiki/mls.md`.)_
 
 ### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
 - `ref_hash` TEXT PK _(KeyPackageRef hash, hex)_

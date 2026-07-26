@@ -58,7 +58,9 @@ the invariant that makes it unrepresentable.
 ## Target invariants & where they're enforced
 
 ### I1 — The commit log is a gapless, append-only, single-writer-per-epoch chain
-- `UNIQUE(conversation_id, epoch)` (have it) → one writer per epoch.
+- `UNIQUE(conversation_id, generation, epoch)` (have it; `generation` added by
+  #454 P4, every pre-existing row generation 0) → one writer per epoch, per
+  suite lineage.
 - **`BEFORE INSERT` trigger**: reject `epoch > MAX(epoch)+1` for the
   conversation → can't skip ahead (kills F1). Compatible with the existing
   CAS (`ON CONFLICT(conv,epoch) DO NOTHING`): a stale committer inserts at

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Phase 0 curated canned answers — the zero-hallucination-risk path. Every answer is doc-faithful and MUST obey the NEVER-CLAIM list in issue #508: not post-quantum; sealed sender protects stored records not the live send moment; padding is text-only; binary transparency proves published-bytes-match not full source-reproducibility everywhere; no anonymity / no IP-hiding; the log trusts only the pinned Ed25519 key; no message-history backup by design; servers hold ciphertext + metadata, never plaintext or keys.",
+  "note": "Phase 0 curated canned answers — the zero-hallucination-risk path. Every answer is doc-faithful and MUST obey the NEVER-CLAIM list in issue #508: post-quantum for key exchange (X-Wing = X25519 + ML-KEM-768) but NOT for signatures, and only forward from the moment a group crossed to the hybrid suite; sealed sender protects stored records not the live send moment; padding is text-only; binary transparency proves published-bytes-match not full source-reproducibility everywhere; no anonymity / no IP-hiding; the log trusts only the pinned Ed25519 key; no message-history backup by design; servers hold ciphertext + metadata, never plaintext or keys.",
   "answers": [
     {
       "id": "can-read-messages",
@@ -15,11 +15,12 @@
     {
       "id": "quantum-safe",
       "question": "Is Pollis quantum-safe / post-quantum?",
-      "aliases": ["is it quantum safe", "is it post quantum", "post-quantum", "quantum resistant", "pqc", "quantum computer", "quantum proof", "is pollis pq", "future quantum attacks"],
-      "answer": "No. Pollis uses classical cryptography today — MLS cipher suite 1, built on X25519, HKDF-SHA256, AES-128-GCM, and Ed25519. None of these are post-quantum. A hybrid post-quantum MLS design is documented as future, aspirational work, but it is not shipped. If a large quantum computer existed, the key-agreement step (X25519) would not be safe against it.",
+      "aliases": ["is it quantum safe", "is it post quantum", "post-quantum", "quantum resistant", "pqc", "quantum computer", "quantum proof", "is pollis pq", "future quantum attacks", "ml-kem", "kyber", "x-wing", "harvest now decrypt later"],
+      "answer": "Yes for key exchange, not yet for signatures. Pollis group chat runs a hybrid post-quantum MLS cipher suite whose key agreement is X-Wing — X25519 combined with ML-KEM-768 (NIST FIPS 203) — so a recorded session stays sealed unless an attacker breaks BOTH the classical and the post-quantum algorithm. That is what defeats “harvest now, decrypt later”. Three honest limits. Signatures are still classical Ed25519; that is a much smaller exposure, because a forgery has to be made live and a future quantum computer cannot retroactively forge past messages the way it could retroactively decrypt them. The switch is forward-only: traffic sealed under the older classical suite before a group moved across stays sealed under the classical suite, because nothing re-encrypts history. And a group only moves across once no device anywhere in the service (seen in the last 90 days) is still on a version too old to speak the hybrid suite — otherwise the next person invited could not get in.",
       "cites": [
-        {"title": "MLS and cipher suite 1", "source": "security.html"},
-        {"title": "PQ-hybrid MLS design (future/aspirational)", "source": "https://github.com/actuallydan/pollis/blob/main/docs/pq-hybrid-mls-design.md"}
+        {"title": "MLS and the two cipher suites", "source": "security.html"},
+        {"title": "How a group moves to the post-quantum suite", "source": "security.html"},
+        {"title": "PQ-hybrid MLS design", "source": "https://github.com/actuallydan/pollis/blob/main/docs/pq-hybrid-mls-design.md"}
       ]
     },
     {
@@ -86,9 +87,9 @@
       "id": "forward-secrecy",
       "question": "What is forward secrecy — what if my keys are stolen?",
       "aliases": ["forward secrecy", "what if my keys are stolen", "post compromise security", "what if my key is compromised", "does the group heal", "key compromise", "future secrecy", "past messages protected"],
-      "answer": "MLS uses a key ratchet that gives forward secrecy — past messages stay protected even if a current key is later compromised — and post-compromise security, meaning the group heals: once new commits happen, an attacker who grabbed old key material is locked back out. One honest caveat from the docs: there is no automatic periodic key rotation when a group is idle, so post-compromise healing depends on the group being actively used.",
+      "answer": "MLS uses a key ratchet that gives forward secrecy — past messages stay protected even if a current key is later compromised — and post-compromise security, meaning the group heals: once new commits happen, an attacker who grabbed old key material is locked back out. One honest caveat from the docs: healing is driven by the app running, not by a background timer \u2014 a device rotates its key material when it joins a group and then whenever it starts up and finds that material more than about a week old, so a group whose members are all offline does not heal until one of them opens the app.",
       "cites": [
-        {"title": "MLS and cipher suite 1", "source": "security.html"},
+        {"title": "MLS and the two cipher suites", "source": "security.html"},
         {"title": "Documented limitations", "source": "security.html"}
       ]
     },
@@ -116,10 +117,10 @@
       "id": "what-is-e2ee",
       "question": "What does end-to-end encrypted actually mean here?",
       "aliases": ["what is end to end encryption", "what does e2ee mean", "what is e2ee", "how is it encrypted", "encryption meaning", "what encryption does pollis use", "is it encrypted"],
-      "answer": "It means your message is turned into ciphertext on your own device, and only the devices of the people in the conversation hold the keys to turn it back into readable text. Pollis implements this with MLS (RFC 9420) via the openmls library, using cipher suite 1 (X25519, HKDF-SHA256, AES-128-GCM, Ed25519). The servers in between only ever see ciphertext plus routing metadata — never plaintext and never your private keys.",
+      "answer": "It means your message is turned into ciphertext on your own device, and only the devices of the people in the conversation hold the keys to turn it back into readable text. Pollis implements this with MLS (RFC 9420) via the openmls library. It runs two MLS cipher suites: the classical one (X25519, HKDF-SHA256, AES-128-GCM, Ed25519) and a post-quantum hybrid one whose key agreement is X-Wing \u2014 X25519 combined with ML-KEM-768 \u2014 paired with ChaCha20-Poly1305. New groups are created on the hybrid suite, and existing groups move to it once every device in the service is new enough to speak it. The servers in between only ever see ciphertext plus routing metadata — never plaintext and never your private keys.",
       "cites": [
         {"title": "Is it really end-to-end encrypted?", "source": "faq.html"},
-        {"title": "MLS and cipher suite 1", "source": "security.html"}
+        {"title": "MLS and the two cipher suites", "source": "security.html"}
       ]
     },
     {
@@ -138,7 +139,7 @@
       "aliases": ["what is mls", "why mls", "messaging layer security", "why not signal protocol", "rfc 9420", "what protocol does pollis use", "mls vs signal"],
       "answer": "MLS (Messaging Layer Security, RFC 9420, finalized 2023) is a public standard for encrypting messages in groups that change over time. Pollis uses it because it's built around group chat: it provides a single group key ratchet with efficient membership changes, whereas Signal's Double Ratchet pairwise-ratchets between every member and gets expensive at group scale. Pollis implements MLS with the Rust library openmls.",
       "cites": [
-        {"title": "MLS and cipher suite 1", "source": "security.html"},
+        {"title": "MLS and the two cipher suites", "source": "security.html"},
         {"title": "Why MLS instead of Signal Protocol?", "source": "faq.html"}
       ]
     },
