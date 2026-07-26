@@ -546,6 +546,10 @@ pub async fn purge_welcomes(log_conn: &Connection, recipient: &str) -> anyhow::R
 #[derive(Deserialize)]
 pub struct ResubmitBody {
     pub conversation_id: String,
+    /// The suite generation of the group this Welcome admits the recipient to
+    /// (#454 P4). Absent → 0, the lineage every pre-hybrid group is in.
+    #[serde(default)]
+    pub generation: i64,
     pub recipient_id: String,
     pub recipient_device_id: String,
     /// TLS-serialized MLS Welcome, base64 (STANDARD).
@@ -593,6 +597,7 @@ pub async fn welcomes_resubmit(
     upsert_welcome(
         &conn,
         &parsed.conversation_id,
+        parsed.generation,
         &parsed.recipient_id,
         &parsed.recipient_device_id,
         &welcome,
@@ -611,6 +616,7 @@ pub async fn welcomes_resubmit(
 pub async fn upsert_welcome(
     log_conn: &Connection,
     conversation_id: &str,
+    generation: i64,
     recipient_id: &str,
     recipient_device_id: &str,
     welcome: &[u8],
@@ -618,14 +624,16 @@ pub async fn upsert_welcome(
     Ok(log_conn
         .execute(
             "INSERT INTO mls_welcome \
-                 (id, conversation_id, recipient_id, welcome_data, recipient_device_id, delivered) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 0) \
+                 (id, conversation_id, generation, recipient_id, welcome_data, recipient_device_id, delivered) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0) \
              ON CONFLICT(conversation_id, recipient_id, recipient_device_id) DO UPDATE SET \
+                 generation = excluded.generation, \
                  welcome_data = excluded.welcome_data, \
                  delivered = 0",
             libsql::params![
                 ulid::Ulid::new().to_string(),
                 conversation_id.to_string(),
+                generation,
                 recipient_id.to_string(),
                 welcome.to_vec(),
                 recipient_device_id.to_string(),
