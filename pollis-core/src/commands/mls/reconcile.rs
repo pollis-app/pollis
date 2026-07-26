@@ -124,6 +124,126 @@ where
     Ok(())
 }
 
+/// What happened to a commit we staged locally and offered to the log.
+pub(super) enum PublishOutcome {
+    /// We own `epoch_before`; the pending commit has been merged locally.
+    Won,
+    /// Another member claimed `epoch_before` first. Nothing was written and our
+    /// pending commit has been rolled back — the caller must converge.
+    LostRace,
+}
+
+/// Offer a locally-staged commit to the canonical log, resolve the outcome, and
+/// leave local state consistent either way.
+///
+/// The single publish path for every commit Pollis produces — roster reconcile
+/// and self-update alike — because the CAS resolution here is subtle enough
+/// that a second copy would drift:
+///
+/// - `Committed` → we own the epoch.
+/// - `LostRace` or a transport error → **ambiguous**. A network error may mean
+///   the commit LANDED and only the response was lost, and a stale `LostRace`
+///   can be a retry of our OWN already-accepted commit. The canonical log is the
+///   arbiter ([`our_commit_is_canonical`], whose decision core is Kani-proved):
+///   if our exact bytes sit at this epoch we WON and must adopt rather than roll
+///   back and wedge (issue #411).
+///
+/// On a win the pending commit is merged, advancing the local epoch. On a loss
+/// or a genuine failure it is cleared, so a later pass recomputes from scratch
+/// and the local group never sits ahead of the log. The caller owns convergence
+/// after a `LostRace` (it, not this function, holds the MLS lock that the
+/// catch-up needs to re-acquire).
+///
+/// `what` names the caller in logs ("reconcile", "self-update").
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn publish_staged_commit(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    actor_user_id: &str,
+    epoch_before: u64,
+    commit_bytes: &[u8],
+    group_info_bytes: Option<&[u8]>,
+    added_uid: Option<&str>,
+    added_dids: Option<&str>,
+    welcomes: &[super::delivery::WelcomeOut],
+    what: &str,
+) -> crate::error::Result<PublishOutcome> {
+    let epoch = epoch_before as i64;
+
+    // Claim this epoch through the delivery seam. On a win the seam also writes
+    // the resulting-epoch GroupInfo + the added members' Welcomes — atomically
+    // with the commit, so no Welcome can ever point at a doomed branch.
+    let remote_result: crate::error::Result<SubmitOutcome> = async {
+        match super::delivery::submit_commit(
+            state,
+            conversation_id,
+            epoch,
+            actor_user_id,
+            commit_bytes,
+            added_uid,
+            added_dids,
+            group_info_bytes,
+            welcomes,
+        )
+        .await?
+        {
+            super::delivery::SubmitResult::LostRace => Ok(SubmitOutcome::LostRace),
+            super::delivery::SubmitResult::Committed => Ok(SubmitOutcome::Committed),
+        }
+    }
+    .await;
+
+    enum Resolution {
+        Won,
+        LostRace,
+        Failed(crate::error::Error),
+    }
+    let resolution = match remote_result {
+        Ok(SubmitOutcome::Committed) => Resolution::Won,
+        Ok(SubmitOutcome::LostRace) => {
+            if our_commit_is_canonical(state, conversation_id, epoch, commit_bytes).await {
+                eprintln!(
+                    "[mls] {what}: LostRace at epoch {epoch} for {conversation_id} but our commit is canonical — adopting (lost success-response)"
+                );
+                Resolution::Won
+            } else {
+                Resolution::LostRace
+            }
+        }
+        Err(e) => {
+            if our_commit_is_canonical(state, conversation_id, epoch, commit_bytes).await {
+                eprintln!(
+                    "[mls] {what}: submit errored but our commit is canonical at epoch {epoch} for {conversation_id} — adopting (lost response): {e}"
+                );
+                Resolution::Won
+            } else {
+                Resolution::Failed(e)
+            }
+        }
+    };
+
+    match resolution {
+        Resolution::Won => {
+            finalize_won_commit(state, conversation_id).await?;
+            Ok(PublishOutcome::Won)
+        }
+        Resolution::LostRace => {
+            eprintln!(
+                "[mls] {what}: lost epoch {epoch} race for {conversation_id} — rolling back local pending commit and converging on the winner"
+            );
+            clear_pending_best_effort(state, conversation_id).await;
+            Ok(PublishOutcome::LostRace)
+        }
+        Resolution::Failed(e) => {
+            eprintln!(
+                "[mls] {what}: remote persist failed for {conversation_id}, clearing local pending commit: {e}"
+            );
+            clear_pending_best_effort(state, conversation_id).await;
+            Err(e)
+        }
+    }
+}
+
 /// Roll back a staged-but-unconfirmed pending commit (best effort; logs on
 /// failure). Used only when our commit genuinely did not land.
 async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str) {
@@ -835,85 +955,31 @@ pub async fn reconcile_group_mls_impl(
             None => Vec::new(),
         };
 
-        let remote_result: crate::error::Result<SubmitOutcome> = async {
-            // Claim this epoch through the delivery seam (Direct today, the
-            // Delivery Service once POLLIS_DELIVERY_URL is set). On a win, the
-            // seam also writes the resulting-epoch GroupInfo + the added
-            // members' Welcomes — atomically with the commit. LostRace →
-            // another member committed `epoch_before` first; report it (the
-            // caller rolls back the local pending commit) instead of forking —
-            // and nothing was written, so no Welcome points at a doomed branch.
-            match super::delivery::submit_commit(
-                state,
-                &conversation_id,
-                outcome.epoch_before as i64,
-                &actor_user_id,
-                &data.commit_bytes,
-                added_uid.as_deref(),
-                added_dids.as_deref(),
-                data.group_info_bytes.as_deref(),
-                &welcomes,
-            )
-            .await?
-            {
-                super::delivery::SubmitResult::LostRace => Ok(SubmitOutcome::LostRace),
-                super::delivery::SubmitResult::Committed => Ok(SubmitOutcome::Committed),
-            }
-        }
+        // Claim this epoch and resolve the (possibly ambiguous) outcome. On a
+        // win the pending commit is merged; on a loss or a genuine failure it is
+        // rolled back. See [`publish_staged_commit`].
+        let published = publish_staged_commit(
+            state,
+            &conversation_id,
+            &actor_user_id,
+            outcome.epoch_before,
+            &data.commit_bytes,
+            data.group_info_bytes.as_deref(),
+            added_uid.as_deref(),
+            added_dids.as_deref(),
+            &welcomes,
+            "reconcile",
+        )
         .await;
 
-        // Decide commit-or-abort. The submit outcome can be ambiguous: a network
-        // error may mean the commit landed and only the RESPONSE was lost, and a
-        // `LostRace` can be a stale retry of our OWN already-accepted commit. The
-        // canonical log is the arbiter — if our exact commit is at this epoch we
-        // WON and must adopt it (merge + Welcomes + GroupInfo) rather than roll
-        // back and wedge (issue #411). Roll back only when it truly didn't land.
-        enum Resolution {
-            Won,
-            LostRace,
-            Failed(crate::error::Error),
-        }
-        let epoch = outcome.epoch_before as i64;
-        let resolution = match remote_result {
-            Ok(SubmitOutcome::Committed) => Resolution::Won,
-            Ok(SubmitOutcome::LostRace) => {
-                if our_commit_is_canonical(state, &conversation_id, epoch, &data.commit_bytes).await {
-                    eprintln!(
-                        "[mls] reconcile: LostRace at epoch {epoch} for {conversation_id} but our commit is canonical — adopting (lost success-response)"
-                    );
-                    Resolution::Won
-                } else {
-                    Resolution::LostRace
-                }
-            }
-            Err(e) => {
-                if our_commit_is_canonical(state, &conversation_id, epoch, &data.commit_bytes).await {
-                    eprintln!(
-                        "[mls] reconcile: submit errored but our commit is canonical at epoch {epoch} for {conversation_id} — adopting (lost response): {e}"
-                    );
-                    Resolution::Won
-                } else {
-                    Resolution::Failed(e)
-                }
-            }
-        };
-
-        match resolution {
-            // We own this epoch (confirmed, or discovered canonical after an
-            // ambiguous failure). Write Welcomes, merge to advance, republish
-            // GroupInfo — then fall through to roster banners / voice rotation.
-            Resolution::Won => {
-                finalize_won_commit(state, &conversation_id).await?;
-            }
+        match published {
+            // We own this epoch. Fall through to roster banners / voice rotation.
+            Ok(PublishOutcome::Won) => {}
             // Another member committed this epoch first; our staged commit is on
-            // a branch no one will adopt. Roll it back and converge on the
-            // winner. The pending invite / membership row persists, so a later
-            // reconcile re-applies our change at the new epoch.
-            Resolution::LostRace => {
-                eprintln!(
-                    "[mls] reconcile: lost epoch {epoch} race for {conversation_id} — rolling back local pending commit and converging on the winner"
-                );
-                clear_pending_best_effort(state, &conversation_id).await;
+            // a branch no one will adopt. It has been rolled back — converge on
+            // the winner. The pending invite / membership row persists, so a
+            // later reconcile re-applies our change at the new epoch.
+            Ok(PublishOutcome::LostRace) => {
                 // Converge on the winner through the INTERLEAVED ingesting
                 // catch-up rather than a bare commit-only replay. This is a
                 // recovery-seam ADVANCE path: applying the winner's commit (or
@@ -941,14 +1007,10 @@ pub async fn reconcile_group_mls_impl(
                 }
                 return Ok(ReconcileOutcome::default());
             }
-            // The commit genuinely did not land. Clear the staged pending commit
-            // so a later reconcile doesn't merge a commit the remote never saw,
-            // then surface the error.
-            Resolution::Failed(e) => {
-                eprintln!(
-                    "[mls] reconcile: remote persist failed for {conversation_id}, clearing local pending commit: {e}"
-                );
-                clear_pending_best_effort(state, &conversation_id).await;
+            // The commit genuinely did not land; the staged pending commit was
+            // already cleared so a later reconcile doesn't merge a commit the
+            // remote never saw. Surface the error.
+            Err(e) => {
                 return Err(e);
             }
         }

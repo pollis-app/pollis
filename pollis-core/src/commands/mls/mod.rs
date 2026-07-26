@@ -11,6 +11,7 @@ pub mod invariants;
 mod key_packages;
 mod provider;
 mod reconcile;
+mod self_update;
 mod sweep;
 mod welcomes;
 
@@ -56,6 +57,9 @@ pub use group_state::{
 
 // ── Cold-launch / post-reconnect sweep ──────────────────────────────────────
 pub use sweep::catch_up_all_mls_groups;
+
+// ── Own-leaf rotation (post-join merge + periodic PCS) ───────────────────────
+pub use self_update::{self_update_group, self_update_if_due};
 
 // ── Reconcile + self-repair ──────────────────────────────────────────────────
 pub use reconcile::{

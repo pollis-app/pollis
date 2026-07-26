@@ -14,6 +14,7 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 use super::group_state::{create_mls_group_in_suite, load_group_with_signer};
 use super::key_packages::build_key_package_in_suite;
 use super::provider::{MlsProvider, PollisPqProvider, CS_CLASSIC, CS_HYBRID, SIGNATURE_SCHEME};
+use super::self_update::stage_self_update;
 
 /// Create an in-memory SQLite DB with the `mls_kv` table.
 fn make_db() -> rusqlite::Connection {
@@ -2330,4 +2331,301 @@ fn a_hybrid_group_cannot_admit_a_classic_key_package() {
     // cannot wedge the group.
     alice_group.clear_pending_commit(alice.storage()).unwrap();
     assert_eq!(alice_group.ciphersuite(), CS_HYBRID, "the group stays hybrid");
+}
+
+// ── #666: self-update, unmerged leaves, and commit growth ────────────────────
+
+/// The claim #666 rests on, measured rather than asserted: **commit size grows
+/// with the number of members only while their leaves are unmerged.**
+///
+/// A member added by someone else does not know the secrets of the nodes above
+/// it, so every one of those nodes stays blank and each such leaf lands in a
+/// copath resolution on its own — one HPKE ciphertext per member in every
+/// commit anyone issues. That is a linear cost, and it never decays on its own:
+/// only a commit *from that member* populates its direct path and collapses the
+/// resolution back to a single node.
+///
+/// So the test doubles the group and compares the marginal cost of that
+/// doubling. Unmerged, doubling the group roughly doubles the commit; merged,
+/// it adds a couple of ciphertexts — TreeKEM's logarithm, which Pollis was not
+/// getting before the post-join self-update. On the hybrid suite that is 8→16
+/// members costing +10.6 KB unmerged versus +2.4 KB merged (13.4→24.0 KB vs
+/// 8.7→11.1 KB).
+///
+/// Deliberately a ratio and not a byte ceiling: the *shape* is the invariant,
+/// and it must hold on both suites even though a post-quantum encapsulation is
+/// ~35× larger than X25519's. Absolute ceilings live in
+/// [`hybrid_payloads_stay_under_their_ceilings`].
+#[test]
+fn self_update_turns_linear_commit_growth_into_logarithmic() {
+    for suite in [CS_CLASSIC, CS_HYBRID] {
+        let (small_unmerged, small_merged) = commit_growth_probe(suite, 8, "01JT666GROWTHSMALL00000000");
+        let (large_unmerged, large_merged) = commit_growth_probe(suite, 16, "01JT666GROWTHLARGE00000000");
+
+        let unmerged_delta = large_unmerged as i64 - small_unmerged as i64;
+        let merged_delta = large_merged as i64 - small_merged as i64;
+        eprintln!(
+            "[test] {suite:?}: 8→16 members costs +{unmerged_delta} B unmerged, +{merged_delta} B merged \
+             (8: {small_unmerged}→{small_merged} B, 16: {large_unmerged}→{large_merged} B)"
+        );
+
+        // Merging can only ever help: a member that rotated its own leaf is
+        // strictly cheaper to address than one sitting in a blank subtree.
+        assert!(
+            large_merged < large_unmerged,
+            "{suite:?}: self-updates must shrink the commit ({large_merged} !< {large_unmerged})"
+        );
+
+        // The real invariant: the marginal cost of doubling the group collapses.
+        // Unmerged, 8→16 adds eight ciphertexts; merged, it adds two.
+        assert!(
+            merged_delta * 3 < unmerged_delta,
+            "{suite:?}: doubling the group must cost far less once every leaf is merged \
+             (+{merged_delta} B merged vs +{unmerged_delta} B unmerged)"
+        );
+    }
+}
+
+/// Size of a commit alice issues into a `members`-strong group, measured twice:
+/// once with every other leaf still unmerged (added by alice, never having
+/// committed), and once after every member has rotated its own leaf.
+///
+/// Both measurements are of the *same* commit under the *same* tree size, so
+/// the only variable is whether the leaves are merged.
+fn commit_growth_probe(suite: Ciphersuite, members: usize, conversation_id: &str) -> (usize, usize) {
+    let dbs: Vec<rusqlite::Connection> = (0..members).map(|_| make_db()).collect();
+    if suite == CS_HYBRID {
+        let providers: Vec<_> = dbs.iter().map(PollisPqProvider::new).collect();
+        measure_commit_growth(&providers, suite, conversation_id)
+    } else {
+        let providers: Vec<_> = dbs.iter().map(PollisProvider::new).collect();
+        measure_commit_growth(&providers, suite, conversation_id)
+    }
+}
+
+fn measure_commit_growth<C>(
+    providers: &[MlsProvider<'_, C>],
+    suite: Ciphersuite,
+    conversation_id: &str,
+) -> (usize, usize)
+where
+    C: OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let alice = &providers[0];
+    create_mls_group_in_suite(alice, conversation_id, "m0", "m0_dev", suite).unwrap();
+
+    // One batched add, which is how reconcile actually adds people — and the
+    // reason every joiner starts life as an unmerged leaf.
+    let mut kps = Vec::new();
+    for (i, p) in providers.iter().enumerate().skip(1) {
+        let (_, bytes) =
+            build_key_package_in_suite(p, &format!("m{i}"), &format!("m{i}_dev"), suite).unwrap();
+        let mut reader: &[u8] = &bytes;
+        kps.push(
+            KeyPackageIn::tls_deserialize(&mut reader)
+                .unwrap()
+                .validate(alice.crypto(), ProtocolVersion::Mls10)
+                .unwrap(),
+        );
+    }
+    let welcome_bytes = {
+        let (mut group, signer) = load_group_with_signer(alice, conversation_id).unwrap();
+        let (_commit, welcome, _) = group.add_members(alice, &signer, &kps).unwrap();
+        group.merge_pending_commit(alice).unwrap();
+        welcome.tls_serialize_detached().unwrap()
+    };
+    for p in providers.iter().skip(1) {
+        join_welcome_in_suite(p, &welcome_bytes);
+    }
+
+    // Measurement 1: every other leaf is unmerged.
+    let unmerged = probe_self_update_size(alice, conversation_id);
+
+    // Every member rotates its own leaf — the post-join self-update, applied by
+    // the whole group exactly as the live path would.
+    for i in 1..providers.len() {
+        let (_, commit_bytes, _) = stage_self_update(&providers[i], conversation_id)
+            .unwrap()
+            .expect("a joined member can always self-update");
+        for (j, p) in providers.iter().enumerate() {
+            if i == j {
+                // Loading merges the pending commit — see `load_group_with_signer`.
+                load_group_with_signer(p, conversation_id).unwrap();
+            } else {
+                apply_commit_in_suite(p, conversation_id, &commit_bytes);
+            }
+        }
+    }
+
+    // Measurement 2: same members, same tree size, every leaf merged.
+    let merged = probe_self_update_size(alice, conversation_id);
+    (unmerged, merged)
+}
+
+/// Stage a self-update, note how many bytes it is, and roll it back so the
+/// measurement itself does not move the tree.
+fn probe_self_update_size<C>(provider: &MlsProvider<'_, C>, conversation_id: &str) -> usize
+where
+    C: OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let (_, commit_bytes, _) = stage_self_update(provider, conversation_id)
+        .unwrap()
+        .expect("group exists");
+    // Deliberately NOT `load_group_with_signer`, which merges any pending commit
+    // as part of loading — that would make the measurement advance the epoch.
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
+        .unwrap()
+        .expect("group exists");
+    group.clear_pending_commit(provider.storage()).unwrap();
+    commit_bytes.len()
+}
+
+fn join_welcome_in_suite<C>(provider: &MlsProvider<'_, C>, welcome_bytes: &[u8])
+where
+    C: OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let mut reader: &[u8] = welcome_bytes;
+    let welcome = match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+        MlsMessageBodyIn::Welcome(w) => w,
+        _ => panic!("expected Welcome"),
+    };
+    let join_config = MlsGroupJoinConfig::builder()
+        .use_ratchet_tree_extension(true)
+        .build();
+    StagedWelcome::new_from_welcome(provider, &join_config, welcome, None)
+        .unwrap()
+        .into_group(provider)
+        .unwrap();
+}
+
+fn apply_commit_in_suite<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    commit_bytes: &[u8],
+) where
+    C: OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let group_id = GroupId::from_slice(conversation_id.as_bytes());
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
+        .unwrap()
+        .expect("group must exist");
+    let mut reader: &[u8] = commit_bytes;
+    let protocol_msg = MlsMessageIn::tls_deserialize(&mut reader)
+        .unwrap()
+        .try_into_protocol_message()
+        .unwrap();
+    let processed = group.process_message(provider, protocol_msg).unwrap();
+    if let ProcessedMessageContent::StagedCommitMessage(staged) = processed.into_content() {
+        group.merge_staged_commit(provider, *staged).unwrap();
+    }
+}
+
+/// A self-update must actually rotate this device's leaf key. If a future
+/// openmls decided an empty commit needs no path, the commit would still land
+/// and every caller would still think it had healed — silently giving up
+/// post-compromise security. `force_self_update(true)` is what prevents that,
+/// and this pins it.
+#[test]
+fn a_self_update_replaces_our_own_leaf_key() {
+    let db = make_db();
+    let provider = PollisPqProvider::new(&db);
+    let conv = "01JT666LEAFROTATES00000000";
+    create_mls_group_in_suite(&provider, conv, "alice", "alice_dev", CS_HYBRID).unwrap();
+
+    // openmls keeps the raw key bytes crate-private, so compare the key itself.
+    let leaf_key_of = |p: &PollisPqProvider| {
+        let (group, _) = load_group_with_signer(p, conv).unwrap();
+        group.own_leaf_node().unwrap().encryption_key().clone()
+    };
+
+    let before = leaf_key_of(&provider);
+    stage_self_update(&provider, conv).unwrap().expect("group exists");
+    {
+        let (mut group, _) = load_group_with_signer(&provider, conv).unwrap();
+        group.merge_pending_commit(&provider).unwrap();
+    }
+    let after = leaf_key_of(&provider);
+
+    assert_ne!(
+        before, after,
+        "a self-update that leaves the leaf key in place heals nothing"
+    );
+}
+
+/// Rotation jitter must be deterministic per conversation. A jitter re-rolled
+/// on every check would let a device that restarts often drift past its
+/// deadline indefinitely — the rotation would be perpetually "not quite due".
+#[test]
+fn self_update_jitter_is_stable_and_bounded() {
+    let a = super::self_update::jitter_for("01JT666JITTERCONVA00000000");
+    let b = super::self_update::jitter_for("01JT666JITTERCONVB00000000");
+
+    assert_eq!(
+        a,
+        super::self_update::jitter_for("01JT666JITTERCONVA00000000"),
+        "the same conversation must always get the same offset"
+    );
+    assert_ne!(a, b, "different conversations must not rotate in lockstep");
+    for j in [a, b] {
+        assert!(
+            j >= chrono::Duration::zero() && j < super::self_update::SELF_UPDATE_JITTER,
+            "jitter must stay inside its window, got {j}"
+        );
+    }
+}
+
+/// #454 P3 item 4: absolute byte ceilings for the post-quantum suite.
+///
+/// The growth *shape* is pinned by
+/// [`self_update_turns_linear_commit_growth_into_logarithmic`]; this pins the
+/// constants. Hybrid payloads are large by construction — an ML-KEM-768
+/// encapsulation is 1,088 B against X25519's 32 — and "large" quietly becoming
+/// "unusable" is the failure mode #454 has to defend against. A KEM swap, a
+/// codepoint change, or an accidental return to unmerged leaves should surface
+/// here as a failing number, not as a support ticket about a group that stopped
+/// working at forty members.
+///
+/// Measured today: KeyPackage 2,659 B (classic: 289 B), Welcome 5,463 B, and a
+/// commit into a merged 8-member group 8,745 B. Ceilings sit ~1.4× above each —
+/// tight enough that a doubling fails, loose enough to survive openmls padding
+/// and version churn. The classic KeyPackage is printed alongside so the
+/// multiplier the post-quantum suite costs stays visible and honest.
+#[test]
+fn hybrid_payloads_stay_under_their_ceilings() {
+    // A KeyPackage is published per device per suite and claimed on every add,
+    // so it is the most-transferred hybrid object there is.
+    let kp_db = make_db();
+    let (_, hybrid_kp) =
+        build_key_package_in_suite(&PollisPqProvider::new(&kp_db), "alice", "alice_dev", CS_HYBRID)
+            .unwrap();
+    let classic_db = make_db();
+    let (_, classic_kp) =
+        build_key_package_in_suite(&PollisProvider::new(&classic_db), "alice", "alice_dev", CS_CLASSIC)
+            .unwrap();
+    eprintln!(
+        "[test] KeyPackage: classic {} B, hybrid {} B",
+        classic_kp.len(),
+        hybrid_kp.len()
+    );
+    assert!(hybrid_kp.len() < 4_096, "hybrid KeyPackage: {} B", hybrid_kp.len());
+
+    // A Welcome carries the group secrets sealed to the joiner's init key —
+    // one hybrid encapsulation, plus the ratchet tree extension.
+    let (wa, wb) = (make_db(), make_db());
+    let welcome = welcome_for_suite(
+        &PollisPqProvider::new(&wa),
+        &PollisPqProvider::new(&wb),
+        CS_HYBRID,
+        "01JT454CEILINGWELCOME00000",
+    );
+    eprintln!("[test] hybrid Welcome (2 members): {} B", welcome.len());
+    assert!(welcome.len() < 8_192, "hybrid Welcome: {} B", welcome.len());
+
+    // The commit is the payload that scales, so it is the one with a real
+    // ceiling. Measured in the state the fleet actually runs in — every leaf
+    // merged, because every member self-updates on join (#666).
+    let (unmerged, merged) = commit_growth_probe(CS_HYBRID, 8, "01JT454CEILINGCOMMIT000000");
+    eprintln!("[test] hybrid commit at 8 members: {unmerged} B unmerged, {merged} B merged");
+    assert!(merged < 12_288, "hybrid commit at 8 members: {merged} B");
 }

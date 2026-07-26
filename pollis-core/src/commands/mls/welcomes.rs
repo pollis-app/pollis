@@ -25,7 +25,11 @@ use super::provider::{
 /// `MlsMessageOut`.  We deserialise to `MlsMessageIn`, extract the inner
 /// `Welcome` via `MlsMessageIn::extract()`, then call
 /// `StagedWelcome::new_from_welcome`.
-pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Result<()> {
+///
+/// Returns the conversation id we just joined, so the caller can follow up on
+/// the join — notably with the post-join self-update that merges this brand-new
+/// (and therefore unmerged) leaf into the tree (issue #666).
+pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Result<String> {
     let guard = state.local_db.lock().await;
     let db = guard.as_ref().ok_or_else(|| {
         crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
@@ -56,12 +60,15 @@ pub async fn apply_welcome(state: &Arc<AppState>, welcome_bytes: &[u8]) -> Resul
     })
 }
 
-/// Materialise group state from an already-suite-matched `Welcome`.
+/// Materialise group state from an already-suite-matched `Welcome`, returning
+/// the joined conversation id (the GroupId is the conversation id's UTF-8
+/// bytes — see `GroupId::from_slice(conversation_id.as_bytes())` in
+/// `group_state`).
 ///
 /// Split into ProcessedWelcome → delete stale group → stage → into_group:
 /// openmls checks for duplicate GroupIds inside `into_staged_welcome`, so any
 /// existing group must be deleted *before* that call.
-fn join_from_welcome<C>(provider: &MlsProvider<'_, C>, welcome: Welcome) -> Result<()>
+fn join_from_welcome<C>(provider: &MlsProvider<'_, C>, welcome: Welcome) -> Result<String>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
@@ -84,7 +91,9 @@ where
     staged.into_group(provider)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("into group: {e}")))?;
 
-    Ok(())
+    String::from_utf8(new_group_id.as_slice().to_vec()).map_err(|_| {
+        crate::error::Error::Other(anyhow::anyhow!("welcome carries a non-UTF-8 group id"))
+    })
 }
 
 /// Poll the remote `mls_welcome` table for undelivered Welcome messages
@@ -122,10 +131,17 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
     // failed Welcome was likely orphaned by a DB wipe and will never succeed;
     // the repair mechanism generates a fresh Welcome. (Same semantics as before.)
     let mut processed_ids: Vec<String> = Vec::new();
+    // Conversations this pass actually joined — the post-join self-update targets
+    // (issue #666). Deduplicated because a repaired join can arrive as two
+    // Welcomes for the same group, and rotating twice buys nothing.
+    let mut joined: Vec<String> = Vec::new();
     for (id, bytes) in items {
         match apply_welcome(state, &bytes).await {
-            Ok(()) => {
+            Ok(conversation_id) => {
                 eprintln!("[mls] poll_mls_welcomes: applied welcome {id}");
+                if !joined.contains(&conversation_id) {
+                    joined.push(conversation_id);
+                }
             }
             Err(e) => {
                 eprintln!("[mls] poll_mls_welcomes: failed to apply welcome {id}: {e}");
@@ -157,7 +173,57 @@ pub async fn poll_mls_welcomes_inner(state: &Arc<AppState>, user_id: &str, devic
         }
     }
 
+    self_update_joined_groups(state, user_id, &joined).await;
+
     Ok(())
+}
+
+/// Post-join self-update (issue #666): rotate our own leaf in each group we just
+/// joined, so it stops being an *unmerged* leaf.
+///
+/// A member added by someone else sits unmerged in every ancestor node on the
+/// adder's direct path until it commits for itself. Each unmerged leaf costs one
+/// extra HPKE ciphertext in every subsequent commit's copath resolution — which
+/// is how a group whose commits should grow with log(N) ends up growing with N.
+/// On #454's post-quantum suite each of those ciphertexts is ~1,270 B, so this
+/// one commit per join is what keeps large hybrid groups viable at all.
+///
+/// Best-effort and strictly after the DS ack + KP replenish: a failure here
+/// costs efficiency (and delays PCS to the next periodic rotation), never
+/// correctness, so it must not be able to strand a Welcome as undelivered.
+async fn self_update_joined_groups(state: &Arc<AppState>, user_id: &str, joined: &[String]) {
+    // A device recovering from a wipe re-processes every Welcome it ever
+    // received, so cap the burst for the same reason the sweep does: rotation is
+    // a deadline, not a heartbeat, and the rest are picked up by the next sweep.
+    for conversation_id in joined.iter().take(super::self_update::MAX_SELF_UPDATES_PER_SWEEP) {
+        // Catch up first. Our Welcome names the epoch we were added at, but the
+        // group may already have moved past it; committing from a stale epoch
+        // would just lose the compare-and-swap. Interleaved, never a bare commit
+        // replay, so messages sealed at the epochs we skip are still ingested.
+        if let Err(e) =
+            crate::commands::messages::catch_up_mls_group_interleaved(state, conversation_id, user_id)
+                .await
+        {
+            eprintln!("[mls] post-join self-update: catch-up for {conversation_id} failed: {e}");
+            continue;
+        }
+        match super::self_update::self_update_if_due(state, conversation_id, user_id).await {
+            Ok(true) => {
+                eprintln!("[mls] post-join self-update: merged own leaf in {conversation_id}");
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("[mls] post-join self-update for {conversation_id} failed: {e}");
+            }
+        }
+    }
+    if joined.len() > super::self_update::MAX_SELF_UPDATES_PER_SWEEP {
+        eprintln!(
+            "[mls] post-join self-update: {} of {} groups deferred to the next sweep",
+            joined.len() - super::self_update::MAX_SELF_UPDATES_PER_SWEEP,
+            joined.len()
+        );
+    }
 }
 
 /// Re-arm welcome delivery so `poll_mls_welcomes` re-processes Welcomes and a

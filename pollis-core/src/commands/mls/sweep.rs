@@ -87,6 +87,11 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         dm_ids.len()
     );
 
+    // Own-leaf rotations issued this sweep, capped at
+    // [`MAX_SELF_UPDATES_PER_SWEEP`] so a device that has been away long enough
+    // to be overdue everywhere doesn't turn one cold launch into a commit storm.
+    let mut self_updates = 0usize;
+
     // Regular groups: mls_group_id IS the group id. Route through the group-level
     // interleaved catch-up (not a bare commit-only replay) so a returning offline
     // member decrypts every message sealed at an epoch it's about to advance past,
@@ -103,6 +108,8 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         if let Err(e) = reconcile_backstop(state, gid, user_id).await {
             eprintln!("[mls-sweep] reconcile backstop for group {gid}: {e}");
         }
+        // Rotate our own leaf if it is overdue (issue #666).
+        self_update_backstop(state, gid, user_id, &mut self_updates).await;
     }
 
     // DMs: mls_group_id IS the dm_channel_id — a single-conversation MLS group.
@@ -116,9 +123,51 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         if let Err(e) = reconcile_backstop(state, did, user_id).await {
             eprintln!("[mls-sweep] reconcile backstop for dm {did}: {e}");
         }
+        // Rotate our own leaf if it is overdue (issue #666).
+        self_update_backstop(state, did, user_id, &mut self_updates).await;
     }
 
     Ok(())
+}
+
+/// Periodic own-leaf rotation for a single conversation (issue #666).
+///
+/// This is where post-compromise security actually comes from. MLS forward
+/// secrecy is free — the ratchet deletes old keys regardless of who commits —
+/// but healing *after* a device is compromised requires that device to publish
+/// fresh key material along its own direct path, which only its own commit can
+/// do. A member that only ever receives other people's commits never heals; an
+/// attacker who stole its leaf key keeps reading the group for as long as it
+/// stays a member. Rotating on a timer bounds that window.
+///
+/// It also catches the post-join rotation the live path
+/// (`poll_mls_welcomes_inner`) missed or deferred, which is what keeps unmerged
+/// leaves — and the linear commit growth they cause — from accumulating.
+///
+/// Best-effort and capped: `budget` is shared across the whole sweep so an
+/// overdue-everywhere device spreads its rotations over several launches instead
+/// of firing one commit per group at once.
+async fn self_update_backstop(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    budget: &mut usize,
+) {
+    if *budget >= super::self_update::MAX_SELF_UPDATES_PER_SWEEP {
+        return;
+    }
+    match super::self_update::self_update_if_due(state, conversation_id, user_id).await {
+        // Only a landed commit spends budget: a not-due group did no work, and a
+        // lost race left the rotation due for the next sweep to retry.
+        Ok(true) => {
+            *budget += 1;
+            eprintln!("[mls-sweep] {conversation_id}: rotated own leaf");
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("[mls-sweep] self-update for {conversation_id}: {e}");
+        }
+    }
 }
 
 /// Eviction/remove reconcile backstop for a single conversation (issue #430 P1).

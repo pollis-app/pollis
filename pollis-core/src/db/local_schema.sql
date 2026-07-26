@@ -70,6 +70,17 @@ CREATE TABLE IF NOT EXISTS mls_kv (
     PRIMARY KEY (scope, key)
 );
 
+-- When this device last rotated its OWN leaf in a group (issue #666).
+-- openmls keeps `unmerged_leaves` crate-private, so a device cannot ask the
+-- ratchet tree "is my leaf still unmerged?"; it tracks its own rotations here
+-- instead. Absence of a row means "never rotated" — which is exactly the
+-- post-join state whose unmerged leaf inflates every other member's commits.
+CREATE TABLE IF NOT EXISTS mls_self_update (
+    conversation_id TEXT PRIMARY KEY,
+    last_epoch      INTEGER NOT NULL,
+    last_at         TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS user_cache (
     id         TEXT PRIMARY KEY,
     username   TEXT NOT NULL,
