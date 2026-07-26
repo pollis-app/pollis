@@ -27,6 +27,8 @@ mod messages;
 mod model;
 #[path = "flows/pq_key_packages.rs"]
 mod pq_key_packages;
+#[path = "flows/pq_migration.rs"]
+mod pq_migration;
 #[path = "flows/rejoin.rs"]
 mod rejoin;
 #[path = "flows/sealed_sender.rs"]

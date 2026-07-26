@@ -3380,6 +3380,185 @@ pub(crate) async fn envelope_ciphertexts(conversation_id: &str) -> Vec<Vec<u8>> 
     out
 }
 
+// ─── Suite generations / PQ migration (#454 P4 + P5) ────────────────────────
+
+/// Turn every device of `user_id` back into a **classic-only** client, the way a
+/// device running a pre-PQ build looks to the server: no hybrid KeyPackages in
+/// the pool, and `pq_capable = 0`.
+///
+/// Stands in for an app version, which the harness cannot vary — every
+/// `TestClient` runs today's binary and publishes both pools on login. The two
+/// writes are exactly the server-side state a pre-PQ device produces, and they
+/// go through the WRITABLE handle because they model the DS's own bookkeeping
+/// (`pollis_delivery::devices::mark_pq_capable` is what sets the flag), not a
+/// client write.
+///
+/// Asserts it actually changed something: silently downgrading nobody would make
+/// every fleet-gate assertion below vacuous.
+pub(crate) async fn downgrade_to_classic_only(user_id: &str) {
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn for downgrade");
+    conn.execute(
+        "DELETE FROM mls_key_package WHERE user_id = ?1 AND ciphersuite = ?2",
+        libsql::params![
+            user_id.to_string(),
+            pollis_delivery::devices::CIPHERSUITE_HYBRID
+        ],
+    )
+    .await
+    .expect("delete hybrid key packages");
+    let affected = conn
+        .execute(
+            "UPDATE user_device SET pq_capable = 0 WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await
+        .expect("clear pq_capable");
+    assert!(
+        affected > 0,
+        "downgrade_to_classic_only: {user_id} has no registered device to downgrade — \
+         the scenario's setup is wrong"
+    );
+}
+
+/// The upgrade a classic-only user gets by updating their app: republish both
+/// KeyPackage pools, which lands a hybrid pool and flips `pq_capable` back on
+/// server-side.
+///
+/// This is production's own `ensure_mls_key_package`, the same call
+/// `initialize_identity` makes at login — not a harness shortcut.
+pub(crate) async fn upgrade_to_hybrid(client: &TestClient) {
+    let user_id = client.user_id().to_string();
+    let device_id = client
+        .state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .expect("client device_id set");
+    pollis_lib::commands::mls::ensure_mls_key_package(&client.state, &user_id, &device_id)
+        .await
+        .expect("republish key package pools");
+}
+
+/// Backdate every device of `user_id` past the fleet-completion dormancy window
+/// (`group_state::FLEET_DORMANCY_DAYS`, 90 days), so it stops counting against
+/// fleet completion.
+///
+/// Lets a scenario separate the two gates on going hybrid, which a live
+/// classic-only device fails simultaneously: a dormant classic-only device fails
+/// the *roster* gate for conversations it is in while leaving the *fleet* gate
+/// satisfied.
+pub(crate) async fn backdate_last_seen(user_id: &str, days: i64) {
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn for backdate");
+    let affected = conn
+        .execute(
+            "UPDATE user_device SET last_seen = datetime('now', ?2) WHERE user_id = ?1",
+            libsql::params![user_id.to_string(), format!("-{days} days")],
+        )
+        .await
+        .expect("backdate last_seen");
+    assert!(
+        affected > 0,
+        "backdate_last_seen: {user_id} has no registered device — setup is wrong"
+    );
+}
+
+/// This device's local suite generation for `conversation_id` (#454 P4) — which
+/// lineage it believes it is on. 0 until it adopts a successor.
+pub(crate) async fn local_generation_of(client: &TestClient, conversation_id: &str) -> i64 {
+    let guard = client.state.local_db.lock().await;
+    let db = guard.as_ref().expect("client local db open");
+    db.conn()
+        .query_row(
+            "SELECT generation FROM mls_generation WHERE conversation_id = ?1",
+            rusqlite::params![conversation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+}
+
+/// The ciphersuite of the `GroupInfo` the Delivery Service currently publishes
+/// for `conversation_id`, as a raw RFC 9420 code point.
+///
+/// Read off the server-visible blob rather than asked of a client, so it proves
+/// what actually travelled: `0x0001` = classic
+/// (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`), `0x004D` = the PQ hybrid
+/// (`MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519`).
+pub(crate) async fn ds_group_info_suite(conversation_id: &str) -> u16 {
+    use openmls::prelude::*;
+    use tls_codec::Deserialize as _;
+
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for group_info");
+    let mut rows = conn
+        .query(
+            "SELECT group_info FROM mls_group_info WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query mls_group_info");
+    let blob: Vec<u8> = rows
+        .next()
+        .await
+        .expect("group_info row")
+        .expect("a published GroupInfo")
+        .get(0)
+        .expect("group_info column");
+
+    let mut reader: &[u8] = &blob;
+    let msg = MlsMessageIn::tls_deserialize(&mut reader).expect("deserialize GroupInfo envelope");
+    match msg.extract() {
+        MlsMessageBodyIn::GroupInfo(gi) => u16::from(gi.ciphersuite()),
+        _ => panic!("mls_group_info holds something that is not a GroupInfo"),
+    }
+}
+
+/// Every undelivered-or-delivered `Welcome` blob the Delivery Service holds for
+/// `conversation_id`, oldest first.
+pub(crate) async fn welcome_blobs(conversation_id: &str) -> Vec<Vec<u8>> {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for welcomes");
+    let mut rows = conn
+        .query(
+            "SELECT welcome_data FROM mls_welcome WHERE conversation_id = ?1 \
+             ORDER BY created_at ASC, id ASC",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query mls_welcome");
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.expect("welcome row") {
+        out.push(row.get::<Vec<u8>>(0).expect("welcome column"));
+    }
+    out
+}
+
+/// The largest single commit the Delivery Service is storing for
+/// `conversation_id`, in bytes, across every lineage.
+///
+/// The payload-budget probe: #666's whole point is that commits stop growing
+/// with the roster, and #454's hybrid suite multiplies whatever that size is by
+/// roughly eight. A test that only proves convergence would happily pass on a
+/// group whose commits had quietly become unshippable.
+pub(crate) async fn max_commit_bytes(conversation_id: &str) -> usize {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for commit sizes");
+    let mut rows = conn
+        .query(
+            "SELECT MAX(LENGTH(commit_data)) FROM mls_commit_log WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query commit sizes");
+    rows.next()
+        .await
+        .expect("size row")
+        .and_then(|row| row.get::<Option<i64>>(0).ok().flatten())
+        .unwrap_or(0) as usize
+}
+
 impl TestClient {
     /// Rotate this device's own leaf in `conversation_id` (issue #666).
     ///

@@ -72,7 +72,28 @@
 //! - `Op::Sync(a)`     → `poll_mls_welcomes` + `process_pending_commits` +
 //!                       `get_channel_messages` (models "come back online"; an
 //!                       actor that hasn't Synced in a while is effectively offline).
+//! - `Op::Sweep(a)`    → `catch_up_all_mls_groups` (the cold-launch sweep). A
+//!                       superset of `Sync` that additionally reconciles the
+//!                       roster, rotates on the timer, and — since #454 P4 — opens
+//!                       or joins the next suite generation. It is the only op
+//!                       that can move a group across the suite boundary.
+//! - `Op::Upgrade`     → `ensure_mls_key_package` on the pre-PQ *holdout* device
+//!                       (#454 P5), i.e. "the deployment's last old client
+//!                       updated". Flips the fleet gate open exactly once.
 //! - `Op::Fault(v)`    → `arm_ds_fault` before the NEXT commit-producing op.
+//!
+//! ## The suite boundary (#454 P4/P5)
+//!
+//! Half the generated cases are born CLASSIC — a bystander holdout device holds
+//! the fleet gate shut — and cross to the hybrid suite mid-sequence when the
+//! generator draws `Upgrade` and a subsequent `Sweep`. A migration stands up a
+//! *successor group* at generation N+1 and moves the roster across by Welcome, so
+//! it is the single most disruptive thing that can happen to a member: every
+//! offline stint, fault, removal and rotation in the sequence can now interleave
+//! with it. The oracle is unchanged, which is the point — a boundary crossing must
+//! be invisible to the delivery invariant. Assertion 5 additionally pins that the
+//! crossing happened when and only when the gates said it could, and that no
+//! member was left behind on the retired lineage.
 //!
 //! Ops are guarded against the shadow model (no Send from a non-member, no Remove
 //! of an absent actor, no Add of a present one) by **skipping** them in execution
@@ -120,6 +141,7 @@
 //!   and logged nowhere else because there is no runtime seam to hide it behind.
 
 use std::collections::{BTreeSet, HashMap};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 
 use proptest::prelude::*;
@@ -127,7 +149,8 @@ use proptest::test_runner::{Config, TestCaseError, TestRunner};
 use serial_test::serial;
 
 use crate::harness::{
-    arm_ds_fault, clear_ds_fault, ds_head_epoch, wipe, DsFault, TestClient,
+    arm_ds_fault, clear_ds_fault, downgrade_to_classic_only, ds_head_epoch, ds_head_generation,
+    local_generation_of, max_commit_bytes, upgrade_to_hybrid, wipe, DsFault, TestClient,
 };
 
 // ─── tunables (CI budget knobs) ──────────────────────────────────────────────
@@ -143,6 +166,25 @@ const DEFAULT_CASES: u32 = 32;
 const MIN_OPS: usize = 4;
 const MAX_OPS: usize = 12;
 
+/// Payload-size sanity ceiling for a single commit, in bytes, as a function of
+/// the actor pool (§4.3 of `docs/pq-hybrid-mls-design.md`).
+///
+/// This is a **balloon detector**, not a tight budget. The thing it catches is a
+/// commit that stops being a commit — a ratchet tree or Welcome accidentally
+/// inlined per commit, a KeyPackage pool serialised into an UpdatePath — which
+/// shows up as hundreds of kilobytes, not a few. It is deliberately loose because
+/// the fuzzer cannot control how many leaves are merged at the moment it measures,
+/// and a tight ceiling would fail on a legitimately unmerged tree.
+///
+/// The *discriminating* proof — that commit growth is logarithmic in the roster
+/// rather than linear, on BOTH suites — is
+/// `pollis-core`'s `self_update_turns_linear_commit_growth_into_logarithmic`,
+/// which controls merge state exactly and compares marginal cost. Absolute
+/// hybrid ceilings for fixed small rosters live in `flows/pq_migration.rs`.
+fn commit_size_ceiling(nactors: usize) -> usize {
+    8 * 1024 + 4 * 1024 * nactors
+}
+
 /// Convergence rounds — how many times every ever-member polls + processes +
 /// fetches to drain welcomes, replay all pending commits (decrypting each epoch's
 /// envelopes via the interleave hook), and settle external-join recoveries. A
@@ -152,6 +194,15 @@ const CONVERGE_ROUNDS: usize = 4;
 /// Fewer rounds suffice after the final probe: it is an application message (no
 /// new epoch), so members already at the head only need to fetch its envelope.
 const PROBE_ROUNDS: usize = 2;
+
+// ─── suite-boundary coverage counter ─────────────────────────────────────────
+
+/// How many cases actually crossed the suite boundary. Whether a case crosses is
+/// up to the generator (it has to draw `Upgrade`, and the case has to be
+/// classic-born), so a run in which nothing crossed would satisfy assertion 5
+/// vacuously and report green while testing none of #454 P4. The driver reads
+/// this at the end and fails if it is zero.
+static BOUNDARY_CROSSINGS: AtomicUsize = AtomicUsize::new(0);
 
 // ─── one process-wide runtime for the sync→async bridge ──────────────────────
 
@@ -182,6 +233,14 @@ enum Op {
     Sync(u8),
     /// Current member `a` (0..NACTORS) rotates its own leaf (issue #666).
     Rotate(u8),
+    /// Actor `a` (0..NACTORS) runs the cold-launch sweep — the ONLY thing that
+    /// drives a PQ suite migration (#454 P4), because `maybe_advance_generation`
+    /// hangs off `catch_up_all_mls_groups`' epoch hook. Distinct from `Sync` so a
+    /// generated sequence can place a boundary crossing anywhere in the churn.
+    Sweep(u8),
+    /// The deployment's last pre-PQ device updates, completing the fleet (#454
+    /// P5). Only meaningful in a classic-born case, and only once.
+    Upgrade,
     /// Arm a landing DS fault (index into `fault_variant`) for the next
     /// commit-producing op.
     Fault(u8),
@@ -205,12 +264,22 @@ fn op_strategy(npool: u8) -> impl Strategy<Value = Op> {
         6 => (0u8..npool).prop_map(Op::Send),
         4 => (0u8..npool).prop_map(Op::Sync),
         3 => (0u8..npool).prop_map(Op::Rotate),
+        3 => (0u8..npool).prop_map(Op::Sweep),
+        2 => Just(Op::Upgrade),
         2 => (0u8..3u8).prop_map(Op::Fault),
     ]
 }
 
-fn ops_strategy() -> impl Strategy<Value = Vec<Op>> {
-    proptest::collection::vec(op_strategy(NACTORS as u8), MIN_OPS..=MAX_OPS)
+/// A case is `(start_classic, ops)`: half the cases are born on the classic suite
+/// with one pre-PQ holdout device keeping the fleet gate shut, so an `Op::Upgrade`
+/// followed by any `Op::Sweep` moves the group across the suite boundary in the
+/// middle of the generated churn. The other half are born hybrid and must never
+/// migrate at all.
+fn ops_strategy() -> impl Strategy<Value = (bool, Vec<Op>)> {
+    (
+        any::<bool>(),
+        proptest::collection::vec(op_strategy(NACTORS as u8), MIN_OPS..=MAX_OPS),
+    )
 }
 
 // ─── shared helpers (mirrors `flows/adversarial.rs`; kept local to avoid
@@ -270,10 +339,25 @@ fn fail_msg(ops: &[Op], detail: &str) -> String {
 
 // ─── the generated-case body ─────────────────────────────────────────────────
 
-async fn run_case(ops: &[Op], nactors: usize) -> Result<(), String> {
+async fn run_case(ops: &[Op], nactors: usize, start_classic: bool) -> Result<(), String> {
     // Fresh remote + no armed fault so cases can't bleed across the shared world.
     wipe().await;
     clear_ds_fault();
+
+    // The pre-PQ holdout (#454 P5). While one live device anywhere in the
+    // deployment is classic-only the fleet gate is shut, so every group is born
+    // on the classic suite and nothing may migrate. It is a *bystander* — never
+    // on any roster, never swept — because every `TestClient` runs today's binary
+    // and would republish its hybrid pool (and flip `pq_capable` back on) the
+    // moment it acted. `Op::Upgrade` is that device finally updating.
+    let holdout = if start_classic {
+        let mut c = TestClient::new().await;
+        let p = c.sign_up("holdout@test.local").await;
+        downgrade_to_classic_only(&p.id).await;
+        Some(c)
+    } else {
+        None
+    };
 
     // A pool of `nactors` pre-signed-up clients (index 0 = owner/committer) + one
     // group channel. Emails are generated so the pool can scale (the marathon
@@ -306,6 +390,9 @@ async fn run_case(ops: &[Op], nactors: usize) -> Result<(), String> {
     let mut messages: Vec<(String, BTreeSet<usize>, usize)> = Vec::new();
     let mut pending_fault: Option<DsFault> = None;
     let mut msg_seq: usize = 0;
+    // Has the holdout updated? Once it has, the fleet is complete and the group
+    // is *obliged* to migrate at the next sweep by any member.
+    let mut fleet_complete = !start_classic;
     // A logical clock that ticks once per op, so `joined_at` and each message's
     // `sent_at` are ordered and "continuous membership since M" is decidable.
     let mut clock: usize = 0;
@@ -412,6 +499,25 @@ async fn run_case(ops: &[Op], nactors: usize) -> Result<(), String> {
                     let _ = clients[a].fetch_channel_messages(&channel_id).await;
                 }
             }
+            Op::Sweep(a) => {
+                let a = a as usize;
+                // The production cold-launch path: catch every group up to head,
+                // reconcile the roster, rotate on the timer — and, since #454 P4,
+                // open or join the next suite generation if the gates allow it.
+                clients[a].poll().await;
+                clients[a].sweep().await;
+                if ever.contains(&a) {
+                    let _ = clients[a].fetch_channel_messages(&channel_id).await;
+                }
+            }
+            Op::Upgrade => {
+                // Idempotent by construction, but skip the round-trip once done.
+                let Some(h) = holdout.as_ref().filter(|_| !fleet_complete) else {
+                    continue;
+                };
+                upgrade_to_hybrid(h).await;
+                fleet_complete = true;
+            }
             Op::Fault(v) => {
                 pending_fault = Some(fault_variant(v));
             }
@@ -423,6 +529,18 @@ async fn run_case(ops: &[Op], nactors: usize) -> Result<(), String> {
     clear_ds_fault();
 
     // ── force convergence ───────────────────────────────────────────────────
+    // When the fleet completed, drive the sweep explicitly so EVERY such case
+    // crosses the suite boundary — not only the ones whose generator happened to
+    // draw a `Sweep` after the `Upgrade`. The crossing is the thing under test;
+    // leaving it to chance would silently thin the coverage.
+    if fleet_complete && start_classic {
+        for _ in 0..2 {
+            for &i in &ever {
+                clients[i].poll().await;
+                clients[i].sweep().await;
+            }
+        }
+    }
     converge(&clients, &ever, &channel_id, CONVERGE_ROUNDS).await;
 
     // Probe: a fresh alice-authored message every CURRENT member must decrypt —
@@ -529,9 +647,68 @@ async fn run_case(ops: &[Op], nactors: usize) -> Result<(), String> {
         }
     }
 
+    // ── Assertion 5: the suite boundary (#454 P4 + P5) ────────────────────────
+    // Three claims, one read of the DS head generation:
+    //  * a hybrid-born group never migrates — there is nowhere better to go, and a
+    //    spurious generation bump would be pure churn plus a re-Welcome of the
+    //    whole roster;
+    //  * a classic-born group whose fleet is still incomplete never migrates —
+    //    that is the P5 gate, and breaking it strands the holdout;
+    //  * a classic-born group whose fleet HAS completed must migrate, and every
+    //    current member must land on the same generation. A member left behind on
+    //    the retired lineage is the stranding failure in its purest form: the
+    //    predecessor accepts no further commits, so it is a permanent stall.
+    let head_generation = ds_head_generation(&group_id).await;
+    let expected_generation = i64::from(start_classic && fleet_complete);
+    if expected_generation > 0 {
+        BOUNDARY_CROSSINGS.fetch_add(1, Ordering::Relaxed);
+    }
+    if head_generation != expected_generation {
+        return Err(fail_msg(
+            ops,
+            &format!(
+                "SUITE GENERATION: head is {head_generation}, expected {expected_generation} \
+                 (born {}, fleet {})",
+                if start_classic { "classic" } else { "hybrid" },
+                if fleet_complete { "complete" } else { "incomplete" },
+            ),
+        ));
+    }
+    for &x in &current {
+        let local = local_generation_of(&clients[x], &group_id).await;
+        if local != head_generation {
+            return Err(fail_msg(
+                ops,
+                &format!(
+                    "STRANDED ON A RETIRED LINEAGE: current member {x} is on generation {local} \
+                     while the group's head is {head_generation}. The predecessor takes no \
+                     further commits, so this member is wedged forever."
+                ),
+            ));
+        }
+    }
+
+    // ── Assertion 6: payload size (§4.3) ──────────────────────────────────────
+    // A hybrid encapsulation is ~35× an X25519 one, so the boundary is exactly
+    // where a size regression would hide. See `commit_size_ceiling` for what this
+    // does and does not claim.
+    let ceiling = commit_size_ceiling(nactors);
+    let largest = max_commit_bytes(&group_id).await;
+    if largest > ceiling {
+        return Err(fail_msg(
+            ops,
+            &format!(
+                "COMMIT BALLOON: largest commit is {largest} B against a {ceiling} B ceiling for \
+                 {nactors} actors. A commit that size is carrying something that does not belong \
+                 in an UpdatePath."
+            ),
+        ));
+    }
+
     // Keep clients alive through the assertions (see harness docs: an early drop
     // can close a client's local DB mid-assertion).
     drop(clients);
+    drop(holdout);
     Ok(())
 }
 
@@ -558,8 +735,8 @@ fn model_based_convergence_is_bulletproof() {
 
     let rt = runtime();
     let mut runner = TestRunner::new(config);
-    let result = runner.run(&ops_strategy(), |ops| {
-        rt.block_on(run_case(&ops, NACTORS))
+    let result = runner.run(&ops_strategy(), |(start_classic, ops)| {
+        rt.block_on(run_case(&ops, NACTORS, start_classic))
             .map_err(|detail| TestCaseError::fail(detail))?;
         Ok(())
     });
@@ -570,6 +747,19 @@ fn model_based_convergence_is_bulletproof() {
         // best-effort.
         panic!("model-based proptest found a failing case: {err}");
     }
+
+    // Coverage, not correctness: assertion 5 is satisfied trivially by a case that
+    // never migrates, so a run where the generator drew no `Upgrade` at all would
+    // be green without exercising the suite boundary once. Roughly a quarter of
+    // cases cross (classic-born AND drawing `Upgrade`), so zero out of
+    // `DEFAULT_CASES` is a generator regression, not bad luck.
+    let crossings = BOUNDARY_CROSSINGS.swap(0, Ordering::Relaxed);
+    eprintln!("[model] {cases} cases, {crossings} crossed the PQ suite boundary");
+    assert!(
+        crossings > 0,
+        "no generated case crossed the PQ suite boundary in {cases} cases — #454 P4's \
+         migration went completely untested and assertion 5 passed vacuously"
+    );
 }
 
 /// Marathon soak: ONE crazy-long generated sequence — hundreds of ops over a
@@ -625,9 +815,12 @@ fn model_marathon_convergence() {
 
     let rt = runtime();
     let mut runner = TestRunner::new(config);
+    // The marathon always starts CLASSIC: one very long sequence gets exactly one
+    // shot at the suite boundary, and a hybrid-born run would spend all of it on
+    // the side of the boundary the short fuzzer already covers cheaply.
     let strat = proptest::collection::vec(op_strategy(actors as u8), ops_n..=ops_n);
     let result = runner.run(&strat, |ops| {
-        rt.block_on(run_case(&ops, actors))
+        rt.block_on(run_case(&ops, actors, true))
             .map_err(|detail| TestCaseError::fail(detail))?;
         Ok(())
     });
