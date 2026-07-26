@@ -366,6 +366,8 @@ async fn build_client_identity(state: &Arc<AppState>) -> anyhow::Result<ClientId
         let db = guard
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("overlay: not signed in (local DB closed)"))?;
+        // Device-identity only: Ed25519 signing is the same in both suites, so
+        // this is deliberately not suite-dispatched.
         let provider = crate::commands::mls::PollisProvider::new(db.conn());
         crate::commands::mls::load_device_signing_key(&provider, &user_id, &device_id)
             .map_err(|e| anyhow::anyhow!("overlay: device signing key unavailable ({e})"))?

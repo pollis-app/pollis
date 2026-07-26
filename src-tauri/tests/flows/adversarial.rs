@@ -16,8 +16,8 @@
 //! leaf would fail the decrypt assertions — those are the load-bearing checks.
 
 use crate::harness::{
-    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, prune_commits_below, wipe,
-    writable_remote, DsFault, TestClient,
+    arm_ds_fault, drop_commit_row, ds_fault_armed, ds_head_epoch, prune_commits_below, steal_leaf,
+    wipe, writable_remote, DsFault, TestClient,
 };
 use serial_test::serial;
 
@@ -705,38 +705,46 @@ async fn epoch_gap_recovers_via_external_join() {
     let group_id = alice.create_group("Gap").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Bob joins at the add commit (commit epoch 0 → group head 1). Bob's MLS
-    // epoch is now 1; he goes "offline" (no further poll/process/fetch until the
-    // very end).
+    // Bob joins (the add commit, then bob's own #666 post-join self-update). His
+    // MLS epoch is the head that leaves behind; he then goes "offline" (no further
+    // poll/process/fetch until the very end).
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
 
     // A message at bob's join epoch — the interleave hook decrypts this on his
     // return, BEFORE the replay reaches the gap, so it must survive.
     alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
 
-    // Churn while bob is offline, each membership change advancing one epoch:
-    //   commit epoch 1: carol add   (head 2)
-    //   commit epoch 2: carol remove(head 3)   <-- this row will be dropped
-    //   commit epoch 3: dave add    (head 4)
+    // Churn while bob is offline: carol joins, carol is removed, dave joins. The
+    // epoch the carol-remove commit lands at is READ off the log rather than
+    // counted, because the number of commits a join produces is not a constant —
+    // `join_member` costs the add plus the joiner's own #666 post-join
+    // self-update. What the scenario needs is the *identity* of the row to drop,
+    // not a commit census, and the head is exactly the epoch the next commit will
+    // be built from.
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
+    let remove_epoch = ds_head_epoch(&group_id).await;
     alice.remove_member(&group_id, carol_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
 
-    // Sanity: the log advanced to head 4 before we punch the gap.
-    assert_eq!(
-        ds_head_epoch(&group_id).await,
-        4,
-        "expected head epoch 4 after add/remove/add churn"
+    // Sanity: the log advanced past the row we are about to drop, so the gap will
+    // be INTERIOR (a higher epoch is present above it) — which is what makes the
+    // replay classify it as a gap instead of simply "nothing new yet".
+    let head_before_gap = ds_head_epoch(&group_id).await;
+    assert!(
+        head_before_gap > remove_epoch + 1,
+        "the dave add must sit above the carol-remove epoch {remove_epoch} for the gap to be \
+         interior, head is {head_before_gap}"
     );
 
-    // Punch the gap: delete the carol-remove commit (epoch 2). The log now reads
-    // 0,1,[gap],3 — a returning member replaying from epoch 1 sees 1 then 3.
-    drop_commit_row(&group_id, 2).await;
+    // Punch the gap: delete the carol-remove commit. The log now reads
+    // …,[gap],… — a returning member replaying from below sees the epochs either
+    // side of it and nothing at it.
+    drop_commit_row(&group_id, remove_epoch).await;
     assert_eq!(
         ds_head_epoch(&group_id).await,
-        4,
-        "dropping an interior row must not change the head (MAX(epoch)+1 = 4)"
+        head_before_gap,
+        "dropping an interior row must not change the head (MAX(epoch)+1)"
     );
 
     // Bob comes back. This single fetch drains his backlog: the hook decrypts
@@ -794,14 +802,17 @@ async fn epoch_gap_recovers_via_external_join() {
 /// on current membership.
 ///
 /// Sequence (bob is the straggler, carol is removed, dave is continuous):
-///   commit epoch 0: bob add    (head 1)  — bob's local epoch becomes 1, offline
-///   msg  "M1"       at epoch 1  — decrypted by bob's interleave hook on return
-///   commit epoch 1: carol add  (head 2)
-///   msg  "M2"       at epoch 2  — sent while bob offline; in the PRUNED gap
-///   commit epoch 2: carol remove(head 3)
-///   commit epoch 3: dave add   (head 4)
-/// Then prune every commit below epoch 3 (Tier-2 style) → the log holds only
-/// epoch 3. bob (epoch 1) and carol (epoch 2, removed) both read epoch 3 first.
+///   bob add    — bob's local epoch becomes the head, then he goes offline
+///   msg  "M1"  at bob's join epoch — decrypted by his interleave hook on return
+///   carol add
+///   msg  "M2"  sent while bob is offline; this one lands in the PRUNED gap
+///   carol remove
+///   dave add
+/// Then prune every commit below the epoch dave's add landed at (Tier-2 style),
+/// so bob and the removed carol both replay into a log whose earliest row is
+/// above their own epoch. Epoch numbers are read off the log rather than counted:
+/// `join_member` costs the add PLUS the joiner's own #666 post-join self-update,
+/// so a commit census here would be a second, silently-drifting spec.
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn commit_log_prune_recovers_via_external_join() {
@@ -820,34 +831,38 @@ async fn commit_log_prune_recovers_via_external_join() {
     let group_id = alice.create_group("Prune").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Bob joins at commit epoch 0 (head 1); his MLS epoch is 1. He goes offline.
+    // Bob joins; his MLS epoch is the head that leaves behind. He goes offline.
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
     alice.send_channel_message(&channel_id, "M1-at-join-epoch").await;
 
-    // Churn while bob is offline. Carol joins at commit epoch 1 (head 2); a
-    // message is then sent at epoch 2 — this is the one that lands in bob's
-    // pruned gap. Carol is removed at commit epoch 2 (head 3), dave added at
-    // commit epoch 3 (head 4).
+    // Churn while bob is offline. A message is sent after carol joins — that is
+    // the one that lands in bob's pruned gap. Carol is then removed and dave
+    // added; the epoch dave's add lands at becomes the prune floor.
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
     alice.send_channel_message(&channel_id, "M2-in-pruned-gap").await;
     alice.remove_member(&group_id, carol_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
+    let dave_add_epoch = ds_head_epoch(&group_id).await;
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
 
-    assert_eq!(
-        ds_head_epoch(&group_id).await,
-        4,
-        "expected head epoch 4 after bob/carol add, carol remove, dave add"
+    let head_before_prune = ds_head_epoch(&group_id).await;
+    assert!(
+        head_before_prune > dave_add_epoch,
+        "dave's add must have advanced the log past the prune floor {dave_add_epoch}, \
+         head is {head_before_prune}"
     );
 
-    // Prune the whole prefix below epoch 3 — the retention floor advanced past
-    // both bob (epoch 1) and the removed carol (epoch 2). The log now holds only
-    // epoch 3, so a member replaying from below sees epoch 3 first.
-    let pruned = prune_commits_below(&group_id, 3).await;
-    assert_eq!(pruned, 3, "epochs 0,1,2 pruned; only epoch 3 remains");
+    // Prune the whole prefix below dave's add — the retention floor advanced past
+    // both bob and the removed carol, so a member replaying from below now reads
+    // an earliest-available epoch above its own.
+    let pruned = prune_commits_below(&group_id, dave_add_epoch).await;
+    assert_eq!(
+        pruned, dave_add_epoch as u64,
+        "every epoch below {dave_add_epoch} must be pruned"
+    );
     assert_eq!(
         ds_head_epoch(&group_id).await,
-        4,
+        head_before_prune,
         "pruning below the head must not change MAX(epoch)+1"
     );
 
@@ -951,42 +966,53 @@ async fn continuous_member_keeps_mid_replay_message_through_rebuild() {
     let group_id = alice.create_group("MidReplay").await;
     let channel_id = alice.general_channel_id(&group_id).await;
 
-    // Bob joins at commit epoch 0 → head 1; his MLS epoch is 1. He then goes
+    // Bob joins; his MLS epoch is the head that leaves behind. He then goes
     // "offline" (no poll/process/fetch until the very end).
     join_member(&alice, &bob, &group_id, &channel_id, &bob_p.username).await;
+    let bob_join_epoch = ds_head_epoch(&group_id).await;
 
-    // (M1) at bob's JOIN epoch (1) — caught by the initial-epoch hook on his return.
+    // (M1) at bob's JOIN epoch — caught by the initial-epoch hook on his return.
     alice.send_channel_message(&channel_id, "M1-join-epoch").await;
 
-    // Carol add advances the shared group 1 → 2 (commit epoch 1, head 2).
+    // Carol's add advances the shared group past bob's join epoch.
     join_member(&alice, &carol, &group_id, &channel_id, &carol_p.username).await;
 
-    // (M2) at a MID-replay epoch (2) — bob only reaches epoch 2 AFTER applying the
-    // carol-add commit, so it exercises the post-commit hook, not the initial one.
+    // (M2) at a MID-replay epoch — bob only reaches this epoch AFTER applying the
+    // carol-add commits, so it exercises the post-commit hook, not the initial
+    // one. Asserted rather than assumed: if a future change made the carol join
+    // a no-op, M2 would silently collapse onto bob's join epoch and the
+    // load-bearing assertion below would go vacuous.
+    let m2_epoch = ds_head_epoch(&group_id).await;
+    assert!(
+        m2_epoch > bob_join_epoch,
+        "M2 must sit at an epoch bob reaches only by APPLYING a commit \
+         (join epoch {bob_join_epoch}, M2 epoch {m2_epoch}) — otherwise this scenario \
+         only re-tests the initial-epoch hook"
+    );
     alice.send_channel_message(&channel_id, "M2-mid-replay").await;
 
-    // More churn while bob is offline:
-    //   commit epoch 2: carol remove (head 3)  <-- this row will be dropped
-    //   commit epoch 3: dave add    (head 4)
+    // More churn while bob is offline. The carol-remove commit — the row this
+    // scenario drops — lands at M2's epoch, so the gap sits directly ABOVE both
+    // messages: bob can ingest them both and only then hit it.
     alice.remove_member(&group_id, carol_p.id.as_str()).await;
     alice.process_commits_for(&channel_id).await;
     join_member(&alice, &dave, &group_id, &channel_id, &dave_p.username).await;
 
-    assert_eq!(
-        ds_head_epoch(&group_id).await,
-        4,
-        "expected head epoch 4 after join/send/add/remove/add churn"
+    let head_before_gap = ds_head_epoch(&group_id).await;
+    assert!(
+        head_before_gap > m2_epoch + 1,
+        "dave's add must sit above the dropped row at epoch {m2_epoch} for the gap to be \
+         interior, head is {head_before_gap}"
     );
 
-    // Punch the gap ABOVE both messages: drop the carol-remove commit (epoch 2).
-    // The log now reads 0,1,[gap],3 — a member replaying from epoch 1 ingests M1
-    // (epoch 1), applies the epoch-1 commit to reach epoch 2 and ingests M2, THEN
-    // hits the gap at epoch 3 and rebuilds via external-join.
-    drop_commit_row(&group_id, 2).await;
+    // Punch the gap ABOVE both messages. A member replaying from bob's join epoch
+    // ingests M1 there, applies the carol-add commits to reach M2's epoch and
+    // ingests M2, THEN hits the gap and rebuilds via external-join.
+    drop_commit_row(&group_id, m2_epoch).await;
     assert_eq!(
         ds_head_epoch(&group_id).await,
-        4,
-        "dropping an interior row must not change the head (MAX(epoch)+1 = 4)"
+        head_before_gap,
+        "dropping an interior row must not change the head (MAX(epoch)+1)"
     );
 
     // Bob comes back. This single fetch drains his backlog and forces the rebuild.
@@ -1449,4 +1475,157 @@ async fn revoked_device_locked_out_of_every_recovery_path() {
     drop(alice);
     drop(bob);
     drop(carol);
+}
+
+// ─── Scenario — post-compromise security after a leaf steal (#666) ───────────
+
+/// **A stolen device state stops working once the victim rotates its leaf.**
+///
+/// This is the property #666 exists for, and until #666 Pollis did not have it.
+/// Forward secrecy — old keys are gone, so a *future* compromise cannot read
+/// *past* traffic — comes free from the ratchet and was never in doubt.
+/// Post-compromise security is the other direction: after a device is
+/// compromised, does the group *heal*? MLS says it heals when the compromised
+/// member publishes a fresh leaf secret along its direct path, and nothing but
+/// that member's own commit can do that. Pollis issued no such commit, so a
+/// member added by someone else and never committing anything of its own could
+/// be read forever by whoever took a copy of its state — for as long as it
+/// stayed in the group.
+///
+/// The adversary here is passive and honest about it: it exfiltrates bob's
+/// `mls_kv` (every MLS secret the device holds), then only listens. It is given
+/// the DS's entire envelope set for the conversation and runs the real
+/// production decrypt over all of it. It never writes, commits, or authenticates
+/// — an adversary that *acts* could use the stolen device signing key to
+/// external-join as bob, but that is device impersonation, which no key rotation
+/// defends against and which the roster/eviction tests cover instead.
+///
+/// Three-sided by construction, because a bare lockout assertion is worthless on
+/// its own — an attacker that could never read anything, or one that any epoch
+/// change would strand, passes it trivially:
+/// 1. Sealed at the compromised epoch → the attacker MUST read it. Proves the
+///    steal is real.
+/// 2. Sealed after **alice** commits → the attacker MUST STILL read it. This is
+///    the control that gives the test its teeth: it proves the adversary rides
+///    the commit chain forward (alice's UpdatePath is addressed to the copath,
+///    which contains bob's stolen leaf), so the lockout in (3) cannot be credited
+///    to "the epoch moved" — only to *whose* commit moved it.
+/// 3. Sealed after **bob** commits → the attacker MUST NOT read it. A committer's
+///    own leaf is the one position an UpdatePath carries no ciphertext for, so
+///    bob's fresh path secret is unreachable from his old state. This is
+///    post-compromise security, and #666 is what makes bob issue that commit.
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn a_stolen_leaf_is_locked_out_once_the_victim_rotates() {
+    wipe().await;
+
+    let mut alice = TestClient::new().await;
+    let mut bob = TestClient::new().await;
+    let alice_p = alice.sign_up("alice@test.local").await;
+    let bob_p = bob.sign_up("bob@test.local").await;
+
+    let group_id = alice.create_group("PCS").await;
+    let channel_id = alice.general_channel_id(&group_id).await;
+
+    alice.invite(&group_id, &bob_p.username).await;
+    let invite_id = bob
+        .first_pending_invite()
+        .await
+        .expect("bob has a pending invite")["id"]
+        .as_str()
+        .expect("invite id")
+        .to_string();
+    bob.accept_invite(&invite_id).await;
+    bob.poll().await;
+    alice.process_commits_for(&channel_id).await;
+    bob.process_commits_for(&channel_id).await;
+
+    // Bob joined, so the welcome poller already rotated his leaf once (#666 M2).
+    // The steal happens AFTER that, at a settled epoch — otherwise the lockout
+    // below could be credited to the join-time rotation rather than the one this
+    // test performs.
+    alice.send_channel_message(&channel_id, "before-steal").await;
+    bob.process_commits_for(&channel_id).await;
+    let _ = bob.fetch_channel_messages(&channel_id).await;
+
+    let attacker = steal_leaf(&bob).await;
+    assert_eq!(attacker.victim(), bob_p.id, "we stole the right device");
+
+    // (1) Teeth: at the compromised epoch, the attacker reads everything bob can.
+    alice.send_channel_message(&channel_id, "attacker-can-read-this").await;
+    assert!(
+        attacker
+            .can_read(&channel_id, &group_id, "attacker-can-read-this")
+            .await,
+        "the stolen state could not read traffic at the epoch it was stolen at — \
+         the compromise never happened, so the lockout below would prove nothing"
+    );
+
+    // (2) Control: someone ELSE rotates. Alice's UpdatePath re-keys every node on
+    // her direct path and is addressed to the copath — which contains bob's leaf,
+    // whose key the attacker holds. So the group advancing an epoch does NOT evict
+    // the attacker, and the lockout in (3) cannot be blamed on epoch churn.
+    assert!(
+        alice.self_update(&group_id).await,
+        "alice's rotation must land — she is the only committer at this point"
+    );
+    bob.process_commits_for(&channel_id).await;
+    alice.send_channel_message(&channel_id, "epoch-moved-but-still-readable").await;
+    assert!(
+        attacker
+            .can_read(&channel_id, &group_id, "epoch-moved-but-still-readable")
+            .await,
+        "the attacker fell off the commit chain after a commit by someone OTHER than \
+         its victim. That is not post-compromise security, it is a stalled replay — \
+         and it would make the lockout below vacuous, since any epoch change would \
+         produce it. Fix the model, not the assertion."
+    );
+
+    // Bob heals: his own commit replaces his leaf secret and refreshes every node
+    // on his direct path. A committer's own leaf is the one position an UpdatePath
+    // carries no ciphertext for, so the stolen state has no way to the new secret.
+    assert!(
+        bob.self_update(&group_id).await,
+        "bob's rotation must land — he is the only committer at this point"
+    );
+    alice.process_commits_for(&channel_id).await;
+
+    // (3) Post-compromise security. Observable mechanism, for anyone reading the
+    // captured log: the attacker's replay reaches bob's commit and openmls refuses
+    // it with "Cannot decrypt own messages" — the attacker sits at bob's leaf, and
+    // that leaf is the one the UpdatePath has no ciphertext for. The client's
+    // divergence recovery then deletes the diverged group and declines to
+    // external-join (the attacker's device is not registered to bob). Both steps
+    // are downstream of the same cryptographic fact: the new path secret is
+    // unreachable from bob's old state.
+    alice.send_channel_message(&channel_id, "attacker-must-not-read-this").await;
+    bob.process_commits_for(&channel_id).await;
+    assert!(
+        !attacker
+            .can_read(&channel_id, &group_id, "attacker-must-not-read-this")
+            .await,
+        "NO POST-COMPROMISE SECURITY: a stolen leaf still decrypted traffic sealed \
+         after the victim rotated. The self-update either did not rotate the leaf \
+         key or did not land."
+    );
+
+    // And the group is healthy for its real members — healing must not wedge it.
+    let bob_view = contents(&bob, &channel_id).await;
+    assert!(
+        bob_view.contains(&"attacker-must-not-read-this".to_string()),
+        "bob must still read his own group after rotating, got: {bob_view:?}"
+    );
+    assert!(
+        ds_head_epoch(&group_id).await >= 2,
+        "two rotations must have advanced the canonical log"
+    );
+    assert_eq!(
+        alice.group_member_ids(&group_id).await.len(),
+        2,
+        "rotation is not a membership change"
+    );
+    let _ = alice_p;
+
+    drop(alice);
+    drop(bob);
 }

@@ -418,12 +418,15 @@ can re-check with the public TLA+ tools.
 | Spec | Models | Invariants | Status |
 |---|---|---|---|
 | `Delivery.tla` (**Spec B**, I3+I4) | the delivery-watermark + retention-floor machine: `Advance` abstracts `next_watermark`, `GC` the retention floor | `NoLossForCurrentMember` (retention never drops a message a current member-device still needs), `CursorMonotone`, `AcceptedLossesOnly` (the two accepted losses, nothing weaker) | ✅ authored + TLC-checked |
-| `CommitLog.tla` (**Spec A**, I1/I2) | the DS `submit_commit` epoch machine under N-client concurrency: `Submit` (conditional-insert-at-head), `Apply`, `ExternalJoin` | `OnePerEpoch ∧ Gapless ∧ HeadMonotone ∧ NoForeignAdopt` | ✅ authored + TLC-checked |
+| `CommitLog.tla` (**Spec A**, I1/I2) | the DS `submit_commit` epoch machine under N-client concurrency: `Submit` (conditional-insert-at-head), `Apply`, `ExternalJoin`, plus the #454 P4 suite-generation migration (`MigratePrepare`/`MigrateCommit`/`MigrateAbandon`, `AdoptGeneration`) | `OnePerEpoch ∧ Gapless ∧ LineageMonotone ∧ OpeningClosesTheHead ∧ NoForeignAdopt` | ✅ authored + TLC-checked |
 
-Each spec ships with a **teeth** config that must FAIL (e.g. `DeliveryBroken.cfg`
-guards the floor by the *fastest* member instead of the slowest → TLC produces a
-concrete `NoLossForCurrentMember` counterexample), so a spec can't rot into a
-vacuous pass. The `.github/workflows/tla.yml` gate runs both the sound pass and
+Each spec ships with **teeth** configs that must FAIL, so a spec can't rot into a
+vacuous pass: `DeliveryBroken.cfg` guards the floor by the *fastest* member
+instead of the slowest → a concrete `NoLossForCurrentMember` counterexample;
+`CommitLogBroken.cfg` drops the conditional-insert guard → an `OnePerEpoch` fork;
+`CommitLogMigrateBroken.cfg` drops the migration compare-and-swap → an
+`OpeningClosesTheHead` counterexample where a racing commit is orphaned on the
+lineage a migration is retiring. The `.github/workflows/tla.yml` gate runs both the sound pass and
 the teeth-refutation on every PR touching the spec surface. Spec B was authored
 **before** the #539 retention-floor code, per the "model the floor before you
 ship it" rule.

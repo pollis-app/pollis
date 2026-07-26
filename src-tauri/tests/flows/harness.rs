@@ -440,6 +440,9 @@ async fn delivery_submit(
 struct HarnessSince {
     #[serde(default)]
     since: i64,
+    /// The suite generation being caught up on (#454 P4); absent → 0.
+    #[serde(default)]
+    generation: i64,
     #[serde(default)]
     user_id: Option<String>,
     #[serde(default)]
@@ -464,6 +467,7 @@ async fn delivery_commits_get(
                 &conversation_id,
                 user_id,
                 device_id,
+                q.generation,
                 q.since,
             )
             .await
@@ -481,18 +485,35 @@ async fn delivery_commits_get(
         }
     }
 
-    let head = match pollis_delivery::commit::head_epoch(&conn, &conversation_id).await {
-        Ok(h) => h,
-        Err(e) => return ds_internal_error(format!("head_epoch: {e}")),
+    let head =
+        match pollis_delivery::commit::head_epoch_in(&conn, &conversation_id, q.generation).await {
+            Ok(h) => h,
+            Err(e) => return ds_internal_error(format!("head_epoch_in: {e}")),
+        };
+    let head_generation = match pollis_delivery::commit::head_generation(&conn, &conversation_id).await
+    {
+        Ok(g) => g,
+        Err(e) => return ds_internal_error(format!("head_generation: {e}")),
     };
-    let commits = match pollis_delivery::commit::fetch_commits(&conn, &conversation_id, q.since).await
+    let commits = match pollis_delivery::commit::fetch_commits(
+        &conn,
+        &conversation_id,
+        q.generation,
+        q.since,
+    )
+    .await
     {
         Ok(c) => c,
         Err(e) => return ds_internal_error(format!("fetch_commits: {e}")),
     };
     (
         axum::http::StatusCode::OK,
-        axum::Json(pollis_delivery::commit::CommitsResponse { head, commits }),
+        axum::Json(pollis_delivery::commit::CommitsResponse {
+            head,
+            generation: q.generation,
+            head_generation,
+            commits,
+        }),
     )
         .into_response()
 }
@@ -2271,7 +2292,10 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
     let conn = log.conn().await.expect("log conn for drop_commit_row");
     let affected = conn
         .execute(
-            "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND epoch = ?2",
+            "DELETE FROM mls_commit_log \
+             WHERE conversation_id = ?1 AND epoch = ?2 \
+               AND generation = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log \
+                                  WHERE conversation_id = ?1)",
             libsql::params![conversation_id.to_string(), epoch],
         )
         .await
@@ -2296,9 +2320,13 @@ pub(crate) async fn drop_commit_row(conversation_id: &str, epoch: i64) {
 pub(crate) async fn prune_commits_below(conversation_id: &str, floor: i64) -> u64 {
     let log = world().await.log.clone();
     let conn = log.conn().await.expect("log conn for prune_commits_below");
-    let pruned = pollis_delivery::commit::delete_commits_below(&conn, conversation_id, floor)
+    let generation = pollis_delivery::commit::head_generation(&conn, conversation_id)
         .await
-        .expect("delete_commits_below");
+        .expect("head_generation");
+    let pruned =
+        pollis_delivery::commit::delete_commits_below(&conn, conversation_id, generation, floor)
+            .await
+            .expect("delete_commits_below");
     assert!(
         pruned > 0,
         "prune_commits_below: expected to prune at least one commit below epoch \
@@ -2320,6 +2348,19 @@ pub(crate) async fn ds_head_epoch(conversation_id: &str) -> i64 {
     pollis_delivery::commit::head_epoch(&conn, conversation_id)
         .await
         .expect("head_epoch")
+}
+
+/// The Delivery Service's head SUITE GENERATION for a conversation (#454 P4) —
+/// `COALESCE(MAX(generation), 0)` over the commit log. 0 until the conversation
+/// migrates off the classic suite, so every pre-P4 assertion reads the same.
+///
+/// `conversation_id` is the MLS group id (the `group_id` for a group channel).
+pub(crate) async fn ds_head_generation(conversation_id: &str) -> i64 {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for ds_head_generation");
+    pollis_delivery::commit::head_generation(&conn, conversation_id)
+        .await
+        .expect("head_generation")
 }
 
 /// The in-process Delivery Service base URL (e.g. `http://127.0.0.1:NNNNN`).
@@ -3156,4 +3197,395 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
     );
 
     new_client
+}
+
+// ─── Attacker model: a stolen leaf (issue #666) ──────────────────────────────
+
+/// A passive adversary holding an exfiltrated copy of one device's MLS state.
+///
+/// Everything openmls keeps for a device — leaf secret, epoch secrets, ratchet
+/// state, the group itself — lives in the local `mls_kv` table, so copying that
+/// table IS the compromise. The copy is planted in a *separate* client's local
+/// DB, which is what makes the adversary strong enough to be worth testing: it
+/// gets its own state that evolves independently of the victim's, so nothing it
+/// can (or cannot) read is an artefact of sharing the victim's live database.
+///
+/// Crucially the attacker **follows the commit chain**. A snapshot that only ever
+/// decrypted at its stolen epoch would be locked out by *any* epoch change, and a
+/// lockout assertion over it would prove nothing about rotation. A real adversary
+/// holding the victim's leaf key can decrypt the path secrets in every *other*
+/// member's commit — those commits are addressed to the copath, which contains the
+/// victim's leaf — and so rides the group forward indefinitely. Only a commit by
+/// the victim itself cuts it off, because a committer's own leaf is the one
+/// position an UpdatePath carries no ciphertext for. That gap is exactly what
+/// issue #666's self-update closes, and `catch_up` is what forces the test to
+/// prove it rather than assume it.
+///
+/// Passive is the honest scope. `mls_kv` also holds the device's *signing* key,
+/// so an adversary willing to act could authenticate to the DS and external-join
+/// as the victim — but that is a full device impersonation, and no amount of key
+/// rotation defends against it. Post-compromise security is the claim that a
+/// *listener* is evicted once the victim rotates, and that is what this models.
+pub(crate) struct StolenLeaf {
+    /// The attacker's own client. Its identity is its own (it never authenticates
+    /// as the victim); only the MLS key material is the victim's.
+    client: TestClient,
+    victim: String,
+}
+
+/// Exfiltrate `victim`'s entire MLS state as of right now onto an attacker-owned
+/// device.
+///
+/// The attacker signs up so it has an unlocked local DB to plant the stolen rows
+/// in; that signup is a bystander account which never joins any group. Its own
+/// `mls_kv` rows are dropped first — a stolen device holds the victim's key
+/// material and nothing else.
+pub(crate) async fn steal_leaf(victim: &TestClient) -> StolenLeaf {
+    let mut client = TestClient::new().await;
+    client.sign_up("attacker@test.local").await;
+
+    // Columns are read as dynamically-typed `Value`s because `mls_kv` genuinely
+    // holds a mix: openmls' own rows bind `scope` as the empty *blob*, while
+    // sibling modules writing through `raw_conn` bind it as text, and SQLite
+    // stores whatever it was given regardless of the declared affinity. Copying
+    // `Value`s keeps every row byte- and type-identical to the victim's.
+    type Row = (
+        rusqlite::types::Value,
+        rusqlite::types::Value,
+        rusqlite::types::Value,
+    );
+    let rows: Vec<Row> = {
+        let guard = victim.state.local_db.lock().await;
+        let db = guard.as_ref().expect("victim local db open");
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT scope, key, value FROM mls_kv")
+            .expect("read victim mls_kv");
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("query victim mls_kv")
+            .map(|r| r.expect("victim mls_kv row"))
+            .collect::<Vec<Row>>();
+        rows
+    };
+    assert!(!rows.is_empty(), "stealing an empty MLS state proves nothing");
+
+    {
+        let guard = client.state.local_db.lock().await;
+        let db = guard.as_ref().expect("attacker local db open");
+        db.conn()
+            .execute("DELETE FROM mls_kv", [])
+            .expect("clear attacker mls_kv");
+        for (scope, key, value) in &rows {
+            db.conn()
+                .execute(
+                    "INSERT INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![scope, key, value],
+                )
+                .expect("seed attacker mls_kv");
+        }
+    }
+
+    StolenLeaf {
+        client,
+        victim: victim.user_id().to_string(),
+    }
+}
+
+impl StolenLeaf {
+    /// Ride the commit chain forward as far as the stolen keys allow.
+    ///
+    /// Runs the real client replay (`process_pending_commits_inner`) as the
+    /// victim, which is what an adversary running the stolen device's own binary
+    /// would do. It succeeds through other members' commits and stalls at the
+    /// victim's own — the whole point of the model, so the result is deliberately
+    /// ignored here and judged by what [`can_read`](Self::can_read) sees.
+    pub(crate) async fn catch_up(&self, mls_group_id: &str) {
+        if let Err(e) = pollis_lib::commands::mls::process_pending_commits_inner(
+            &self.client.state,
+            mls_group_id,
+            &self.victim,
+        )
+        .await
+        {
+            eprintln!("[attacker] replay stalled for {mls_group_id}: {e}");
+        }
+    }
+
+    /// Can the attacker still read `body` out of `conversation_id`?
+    ///
+    /// Catches up first, then runs the real production decrypt
+    /// (`try_mls_decrypt`) against the stolen state over every envelope the DS
+    /// holds for the conversation — the exact capability a wiretap plus a stolen
+    /// device would have.
+    ///
+    /// Both ids are needed because they are not the same key: envelopes are
+    /// stored per *conversation* (a channel id, for group traffic), while the MLS
+    /// group every channel in a group shares is keyed by the group id. For a DM
+    /// the two coincide. Mirrors `send_message`'s own `mls_group_id` lookup.
+    pub(crate) async fn can_read(
+        &self,
+        conversation_id: &str,
+        mls_group_id: &str,
+        body: &str,
+    ) -> bool {
+        self.catch_up(mls_group_id).await;
+        let ciphertexts = envelope_ciphertexts(conversation_id).await;
+        let guard = self.client.state.local_db.lock().await;
+        let db = guard.as_ref().expect("attacker local db open");
+        for ciphertext in ciphertexts {
+            let Some((plain, _sender)) = pollis_lib::commands::mls::try_mls_decrypt(
+                db.conn(),
+                mls_group_id,
+                &ciphertext,
+            ) else {
+                continue;
+            };
+            // Plaintext is padded before sealing, so the body is a substring.
+            if plain
+                .windows(body.len())
+                .any(|w| w == body.as_bytes())
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(crate) fn victim(&self) -> &str {
+        &self.victim
+    }
+}
+
+/// Every MLS ciphertext the DS is holding for `conversation_id`, decoded from
+/// the `mls:<hex>` envelope framing. This is the wiretap half of the attacker.
+pub(crate) async fn envelope_ciphertexts(conversation_id: &str) -> Vec<Vec<u8>> {
+    let remote = world().await.remote.clone();
+    let conn = remote.conn().await.expect("remote conn for envelopes");
+    let mut rows = conn
+        .query(
+            "SELECT ciphertext FROM message_envelope WHERE conversation_id = ?1 ORDER BY sent_at ASC",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query message_envelope");
+
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.expect("envelope row") {
+        let ciphertext: String = row.get(0).expect("ciphertext column");
+        if let Some(bytes) = ciphertext.strip_prefix("mls:").and_then(|h| hex::decode(h).ok()) {
+            out.push(bytes);
+        }
+    }
+    out
+}
+
+// ─── Suite generations / PQ migration (#454 P4 + P5) ────────────────────────
+
+/// Turn every device of `user_id` back into a **classic-only** client, the way a
+/// device running a pre-PQ build looks to the server: no hybrid KeyPackages in
+/// the pool, and `pq_capable = 0`.
+///
+/// Stands in for an app version, which the harness cannot vary — every
+/// `TestClient` runs today's binary and publishes both pools on login. The two
+/// writes are exactly the server-side state a pre-PQ device produces, and they
+/// go through the WRITABLE handle because they model the DS's own bookkeeping
+/// (`pollis_delivery::devices::mark_pq_capable` is what sets the flag), not a
+/// client write.
+///
+/// Asserts it actually changed something: silently downgrading nobody would make
+/// every fleet-gate assertion below vacuous.
+pub(crate) async fn downgrade_to_classic_only(user_id: &str) {
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn for downgrade");
+    conn.execute(
+        "DELETE FROM mls_key_package WHERE user_id = ?1 AND ciphersuite = ?2",
+        libsql::params![
+            user_id.to_string(),
+            pollis_delivery::devices::CIPHERSUITE_HYBRID
+        ],
+    )
+    .await
+    .expect("delete hybrid key packages");
+    let affected = conn
+        .execute(
+            "UPDATE user_device SET pq_capable = 0 WHERE user_id = ?1",
+            libsql::params![user_id.to_string()],
+        )
+        .await
+        .expect("clear pq_capable");
+    assert!(
+        affected > 0,
+        "downgrade_to_classic_only: {user_id} has no registered device to downgrade — \
+         the scenario's setup is wrong"
+    );
+}
+
+/// The upgrade a classic-only user gets by updating their app: republish both
+/// KeyPackage pools, which lands a hybrid pool and flips `pq_capable` back on
+/// server-side.
+///
+/// This is production's own `ensure_mls_key_package`, the same call
+/// `initialize_identity` makes at login — not a harness shortcut.
+pub(crate) async fn upgrade_to_hybrid(client: &TestClient) {
+    let user_id = client.user_id().to_string();
+    let device_id = client
+        .state
+        .device_id
+        .lock()
+        .await
+        .clone()
+        .expect("client device_id set");
+    pollis_lib::commands::mls::ensure_mls_key_package(&client.state, &user_id, &device_id)
+        .await
+        .expect("republish key package pools");
+}
+
+/// Backdate every device of `user_id` past the fleet-completion dormancy window
+/// (`group_state::FLEET_DORMANCY_DAYS`, 90 days), so it stops counting against
+/// fleet completion.
+///
+/// Lets a scenario separate the two gates on going hybrid, which a live
+/// classic-only device fails simultaneously: a dormant classic-only device fails
+/// the *roster* gate for conversations it is in while leaving the *fleet* gate
+/// satisfied.
+pub(crate) async fn backdate_last_seen(user_id: &str, days: i64) {
+    let remote = writable_remote().await;
+    let conn = remote.conn().await.expect("remote conn for backdate");
+    let affected = conn
+        .execute(
+            "UPDATE user_device SET last_seen = datetime('now', ?2) WHERE user_id = ?1",
+            libsql::params![user_id.to_string(), format!("-{days} days")],
+        )
+        .await
+        .expect("backdate last_seen");
+    assert!(
+        affected > 0,
+        "backdate_last_seen: {user_id} has no registered device — setup is wrong"
+    );
+}
+
+/// This device's local suite generation for `conversation_id` (#454 P4) — which
+/// lineage it believes it is on. 0 until it adopts a successor.
+pub(crate) async fn local_generation_of(client: &TestClient, conversation_id: &str) -> i64 {
+    let guard = client.state.local_db.lock().await;
+    let db = guard.as_ref().expect("client local db open");
+    db.conn()
+        .query_row(
+            "SELECT generation FROM mls_generation WHERE conversation_id = ?1",
+            rusqlite::params![conversation_id],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+}
+
+/// The ciphersuite of the `GroupInfo` the Delivery Service currently publishes
+/// for `conversation_id`, as a raw RFC 9420 code point.
+///
+/// Read off the server-visible blob rather than asked of a client, so it proves
+/// what actually travelled: `0x0001` = classic
+/// (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`), `0x004D` = the PQ hybrid
+/// (`MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519`).
+pub(crate) async fn ds_group_info_suite(conversation_id: &str) -> u16 {
+    use openmls::prelude::*;
+    use tls_codec::Deserialize as _;
+
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for group_info");
+    let mut rows = conn
+        .query(
+            "SELECT group_info FROM mls_group_info WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query mls_group_info");
+    let blob: Vec<u8> = rows
+        .next()
+        .await
+        .expect("group_info row")
+        .expect("a published GroupInfo")
+        .get(0)
+        .expect("group_info column");
+
+    let mut reader: &[u8] = &blob;
+    let msg = MlsMessageIn::tls_deserialize(&mut reader).expect("deserialize GroupInfo envelope");
+    match msg.extract() {
+        MlsMessageBodyIn::GroupInfo(gi) => u16::from(gi.ciphersuite()),
+        _ => panic!("mls_group_info holds something that is not a GroupInfo"),
+    }
+}
+
+/// Every undelivered-or-delivered `Welcome` blob the Delivery Service holds for
+/// `conversation_id`, oldest first.
+pub(crate) async fn welcome_blobs(conversation_id: &str) -> Vec<Vec<u8>> {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for welcomes");
+    let mut rows = conn
+        .query(
+            "SELECT welcome_data FROM mls_welcome WHERE conversation_id = ?1 \
+             ORDER BY created_at ASC, id ASC",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query mls_welcome");
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.expect("welcome row") {
+        out.push(row.get::<Vec<u8>>(0).expect("welcome column"));
+    }
+    out
+}
+
+/// The largest single commit the Delivery Service is storing for
+/// `conversation_id`, in bytes, across every lineage.
+///
+/// The payload-budget probe: #666's whole point is that commits stop growing
+/// with the roster, and #454's hybrid suite multiplies whatever that size is by
+/// roughly eight. A test that only proves convergence would happily pass on a
+/// group whose commits had quietly become unshippable.
+pub(crate) async fn max_commit_bytes(conversation_id: &str) -> usize {
+    let log = world().await.log.clone();
+    let conn = log.conn().await.expect("log conn for commit sizes");
+    let mut rows = conn
+        .query(
+            "SELECT MAX(LENGTH(commit_data)) FROM mls_commit_log WHERE conversation_id = ?1",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query commit sizes");
+    rows.next()
+        .await
+        .expect("size row")
+        .and_then(|row| row.get::<Option<i64>>(0).ok().flatten())
+        .unwrap_or(0) as usize
+}
+
+impl TestClient {
+    /// Rotate this device's own leaf in `conversation_id` (issue #666).
+    ///
+    /// Calls production's [`self_update_group`] directly rather than through an
+    /// `invoke` shim because there is no user-facing command for it: rotation is
+    /// driven by the welcome poller on join and by the cold-launch sweep on a
+    /// timer. Tests need to place it at an exact point in a sequence, which
+    /// neither of those affords.
+    ///
+    /// Returns whether a commit actually landed (`false` = another member won
+    /// the epoch race, which the caller must treat as "not yet rotated").
+    pub(crate) async fn self_update(&self, conversation_id: &str) -> bool {
+        self.try_self_update(conversation_id)
+            .await
+            .unwrap_or_else(|e| panic!("self_update_group({conversation_id}): {e}"))
+    }
+
+    /// Fallible [`self_update`](Self::self_update), for the fuzzer.
+    ///
+    /// The landing DS faults are supposed to recover *internally* (the command
+    /// still returns `Ok`), so an `Err` here is a finding — and a generated case
+    /// needs to report it with its op sequence attached rather than panic out of
+    /// the proptest closure with no repro.
+    pub(crate) async fn try_self_update(&self, conversation_id: &str) -> Result<bool, String> {
+        let user_id = self.user_id().to_string();
+        pollis_lib::commands::mls::self_update_group(&self.state, conversation_id, &user_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }

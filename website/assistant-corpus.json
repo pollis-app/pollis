@@ -81,10 +81,17 @@
     },
     {
       "id": "sec-mls-suite1",
-      "title": "MLS and cipher suite 1",
+      "title": "MLS and the two cipher suites",
       "source": "Security (pollis.com)",
       "anchor": "security.html",
-      "text": "Pollis encrypts group chat with MLS (Messaging Layer Security, RFC 9420), implemented with the Rust library openmls, using what MLS calls cipher suite one. That suite combines X25519 (key agreement), HKDF-SHA256, AES-128-GCM (the cipher, with a built-in tamper check), and Ed25519 (signatures). These are classical algorithms — this is not post-quantum cryptography."
+      "text": "Pollis encrypts group chat with MLS (Messaging Layer Security, RFC 9420), implemented with the Rust library openmls. MLS groups pick a numbered bundle of algorithms called a cipher suite, and Pollis runs two. Cipher suite one is the classical bundle: X25519 (key agreement), HKDF-SHA256, AES-128-GCM (the cipher, with a built-in tamper check), and Ed25519 (signatures). The second is a post-quantum hybrid suite whose key agreement is X-Wing — X25519 combined with ML-KEM-768 (NIST FIPS 203) — paired with ChaCha20-Poly1305. Its shared secret is safe as long as either algorithm holds, so an attacker must break both. Signatures are still classical Ed25519 under both suites."
+    },
+    {
+      "id": "sec-pq-migration",
+      "title": "How a group moves to the post-quantum suite",
+      "source": "Security (pollis.com)",
+      "anchor": "security.html",
+      "text": "MLS does not let a running group change cipher suite — the suite is fixed at the group's birth. So Pollis does not convert a group: it stands up a successor group on the hybrid suite, moves the whole membership across by Welcome, and retires the old one, with a generation counter so everyone agrees which lineage is current. A group only crosses once no device anywhere in the service, seen in the last 90 days, is still too old to speak the hybrid suite — waiting only for current members would not be enough, because the group cannot know who gets invited tomorrow. If the check cannot be evaluated, the group stays classical rather than guessing. The change is forward-only: traffic sealed before the crossing stays sealed under the classical suite, because nothing re-encrypts history."
     },
     {
       "id": "sec-safety-numbers",
@@ -126,7 +133,7 @@
       "title": "Documented limitations",
       "source": "Security (pollis.com)",
       "anchor": "security.html",
-      "text": "Some bearer tokens the desktop app uses are baked into the binary; anyone taking the app apart can read metadata at the level the server already sees, but still can't decrypt anything. Cross-signing verification on inbound commits currently logs a warning rather than refusing. There is no automatic periodic key rotation when a group is idle, and no backup of message history of any kind — a new device can't read messages from before it joined. These are deliberate trade-offs."
+      "text": "Some bearer tokens the desktop app uses are baked into the binary; anyone taking the app apart can read metadata at the level the server already sees, but still can't decrypt anything. Cross-signing verification on inbound commits currently logs a warning rather than refusing. Key rotation for post-compromise healing is driven by the app running rather than by a background timer: a device rotates its key material when it joins a group and then whenever it starts up and finds that material more than about a week old, so a group whose members are all offline does not heal until someone opens the app. There is no backup of message history of any kind — a new device can't read messages from before it joined. These are deliberate trade-offs."
     },
     {
       "id": "sec-build-verify-caveat",
@@ -224,7 +231,7 @@
       "title": "Commit-log invariant: no fork, no rollback",
       "source": "Key Transparency (docs/transparency.md)",
       "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md",
-      "text": "Beyond raw Merkle inclusion, the commit log enforces two rules per conversation on replay: no fork (no two commits share the same conversation_id and epoch) and no epoch regression / replay (epoch strictly increases in sequence order). A fork or regression in the source data aborts the build rather than producing a bundle that hides it, and verifiers re-check it independently."
+      "text": "Beyond raw Merkle inclusion, the commit log enforces three rules per conversation on replay: no fork (no two commits share the same conversation, suite generation and epoch), no epoch regression / replay (the generation-epoch pair strictly increases in sequence order), and a new generation opens only at epoch 0. The generation term exists because moving a conversation to the post-quantum cipher suite restarts its epoch counter in a successor group. A fork or regression in the source data aborts the build rather than producing a bundle that hides it, and verifiers re-check it independently."
     },
     {
       "id": "verify-remote",

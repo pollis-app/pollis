@@ -99,3 +99,6 @@ db-backups/
 # static site (user chose self-contained over CDN). Exempt them from the blanket vendor/ ignore.
 !website/vendor/
 !website/vendor/**
+
+# TLA+ toolchain: scripts/tlc-check.sh downloads the pinned tla2tools.jar here.
+scripts/tla2tools.jar

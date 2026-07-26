@@ -40,7 +40,10 @@ use crate::remote::{build_agent, fetch_json};
 /// checked out against the signed head.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupCommit {
-    /// MLS epoch after this commit.
+    /// Suite generation of the lineage this commit belongs to (#454 P4). 0 for
+    /// a conversation that has never migrated to the post-quantum hybrid suite.
+    pub generation: u64,
+    /// MLS epoch after this commit, within `generation`'s lineage.
     pub epoch: u64,
     /// Global insertion order (`mls_commit_log.seq`).
     pub seq: i64,
@@ -231,11 +234,12 @@ pub fn verify_group_in_bundle(bundle: &Bundle, conversation_id: &str) -> GroupRe
         if !included {
             all_included = false;
             violations.push(format!(
-                "commit seq {} (epoch {}) is not provably included in the signed log",
-                leaf.seq, leaf.epoch
+                "commit seq {} (generation {}, epoch {}) is not provably included in the signed log",
+                leaf.seq, leaf.generation, leaf.epoch
             ));
         }
         commits.push(GroupCommit {
+            generation: leaf.generation,
             epoch: leaf.epoch,
             seq: leaf.seq,
             sender_id: leaf.sender_id.clone(),

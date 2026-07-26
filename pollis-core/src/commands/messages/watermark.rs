@@ -58,11 +58,14 @@ impl EnvKind {
 }
 
 /// Is this envelope definitively handled (so the watermark may advance over it),
-/// or must a later pass retry it? `max_fired_epoch` is the highest MLS epoch the
+/// or must a later pass retry it? `max_fired_epoch` is the furthest point the
 /// shared group's replay reached this pass (`None` = no local group, nothing
 /// could be decrypted). Kept private and byte-for-byte identical to the arms of
 /// the original inline `is_handled` closure.
-fn is_handled(kind: EnvKind, epoch: Option<u64>, max_fired_epoch: Option<u64>) -> bool {
+///
+/// Generic over the epoch key `E` (see [`next_watermark`]): the only thing this
+/// asks of it is `<=`.
+fn is_handled<E: Ord + Copy>(kind: EnvKind, epoch: Option<E>, max_fired_epoch: Option<E>) -> bool {
     match kind {
         EnvKind::Message | EnvKind::Edit => match (epoch, max_fired_epoch) {
             // Epoch within this pass's reach: decrypted now, or an unreachable
@@ -91,13 +94,30 @@ fn is_handled(kind: EnvKind, epoch: Option<u64>, max_fired_epoch: Option<u64>) -
 /// `&str`/`String` while the proofs pass bounded integers (Kani cannot make a
 /// `String` symbolic).
 ///
+/// ## Why the epoch key is generic too
+///
+/// Since #454 P4 a conversation's MLS position is a `(generation, epoch)` PAIR,
+/// not an epoch — a migrated group restarts at epoch 0 of the next generation, so
+/// an epoch-only comparison would read the successor lineage as being behind the
+/// one it replaced. The real caller therefore passes `(i64, u64)`, whose derived
+/// `Ord` is lexicographic and gives exactly the intended order: any position in an
+/// older generation is permanently handled, any position in a newer one must be
+/// retried.
+///
+/// The logic never inspects the key beyond `<=`, so it is generic over `E: Ord`
+/// and the Kani harnesses below keep proving it over a small `u64` domain. That
+/// is not a weakening: the proofs exercise `<`, `=` and `>` on a totally-ordered
+/// domain, which is the entire surface `E` is used through, and CBMC's cost is
+/// superlinear in the symbolic state space — widening the proof key to a pair
+/// would buy no additional coverage of *this* function's decision.
+///
 /// Abstracted by the `Advance` action / `NextWatermark` operator in the TLA+
 /// design model `specs/tla/Delivery.tla` (Spec B, I3+I4; see
 /// `docs/machine-checked-correctness-design.md` §3). Keep the "stop strictly
 /// below the first un-handled envelope" rule here in sync with that spec.
-pub fn next_watermark<S: Ord + Clone>(
-    envs: &[(S, EnvKind, Option<u64>)],
-    max_fired_epoch: Option<u64>,
+pub fn next_watermark<S: Ord + Clone, E: Ord + Copy>(
+    envs: &[(S, EnvKind, Option<E>)],
+    max_fired_epoch: Option<E>,
 ) -> Option<S> {
     // The `sent_at` of the first envelope we must retry is an EXCLUSIVE ceiling
     // on the watermark: advancing to (or, via a `sent_at` tie, past) it would
@@ -285,9 +305,9 @@ mod proofs {
     // un-handled envelope — exactly the F3 message-loss bug. `p1_mutant_refuted`
     // asserts P1 on it; Kani must find a counterexample (see the report). This is
     // test-only and unreachable from any runtime code.
-    fn next_watermark_mutant<S: Ord + Clone>(
-        envs: &[(S, EnvKind, Option<u64>)],
-        max_fired_epoch: Option<u64>,
+    fn next_watermark_mutant<S: Ord + Clone, E: Ord + Copy>(
+        envs: &[(S, EnvKind, Option<E>)],
+        max_fired_epoch: Option<E>,
     ) -> Option<S> {
         let stop_at: Option<&S> = envs
             .iter()
@@ -348,9 +368,9 @@ mod proofs {
     // it: a prefix that stops short of the un-handled envelope keeps its cursor,
     // while the full slice — which sees the un-handled envelope — collapses to
     // `None`, making `wm_prefix > wm_full`. Test-only, unreachable from runtime.
-    fn next_watermark_p2_mutant<S: Ord + Clone>(
-        envs: &[(S, EnvKind, Option<u64>)],
-        max_fired_epoch: Option<u64>,
+    fn next_watermark_p2_mutant<S: Ord + Clone, E: Ord + Copy>(
+        envs: &[(S, EnvKind, Option<E>)],
+        max_fired_epoch: Option<E>,
     ) -> Option<S> {
         let mut candidate: Option<S> = None;
         for (sent_at, kind, epoch) in envs {
@@ -394,9 +414,9 @@ mod proofs {
     // un-handled envelope), so ONLY P3 catches it: when every envelope is handled
     // the watermark must equal the max `sent_at`, but the mutant returns the
     // second-to-last (or `None` for a single element). Test-only.
-    fn next_watermark_p3_mutant<S: Ord + Clone>(
-        envs: &[(S, EnvKind, Option<u64>)],
-        max_fired_epoch: Option<u64>,
+    fn next_watermark_p3_mutant<S: Ord + Clone, E: Ord + Copy>(
+        envs: &[(S, EnvKind, Option<E>)],
+        max_fired_epoch: Option<E>,
     ) -> Option<S> {
         let stop_at: Option<&S> = envs
             .iter()

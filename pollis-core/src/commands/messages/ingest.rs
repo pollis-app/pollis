@@ -230,22 +230,29 @@ async fn ingest_group_envelopes_interleaved(
     mls_group_id: &str,
     per_conv: &[(String, Vec<EnvelopeRow>)],
 ) -> Result<Vec<(String, Option<String>)>> {
-    // Pre-parse each message/edit envelope's MLS epoch across ALL bound
+    // Pre-parse each message/edit envelope's MLS position across ALL bound
     // conversations (delete/unknown carry none) and index `(conv_idx, env_idx)`
-    // by epoch so the per-epoch hook decrypts exactly the ones sealed at the
-    // epoch the replay just reached, regardless of which conversation they're in.
-    let mut by_epoch: HashMap<u64, Vec<(usize, usize)>> = HashMap::new();
-    // epoch_of[ci][ei] mirrors per_conv[ci].1[ei]'s parsed epoch.
-    let mut epoch_of: Vec<Vec<Option<u64>>> = Vec::with_capacity(per_conv.len());
+    // by position so the per-epoch hook decrypts exactly the ones sealed at the
+    // point the replay just reached, regardless of which conversation they're in.
+    //
+    // The position is the `(generation, epoch)` PAIR, not the epoch (#454 P4).
+    // A migrated conversation restarts at epoch 0 in the next generation, so
+    // keying on the epoch alone would collide envelopes from two different
+    // lineages — sealed under different suites and different key schedules — into
+    // one bucket, and hand the successor group ciphertext only the retired group
+    // could ever open.
+    let mut by_epoch: HashMap<(i64, u64), Vec<(usize, usize)>> = HashMap::new();
+    // epoch_of[ci][ei] mirrors per_conv[ci].1[ei]'s parsed position.
+    let mut epoch_of: Vec<Vec<Option<(i64, u64)>>> = Vec::with_capacity(per_conv.len());
     for (ci, (_cid, envs)) in per_conv.iter().enumerate() {
-        let mut this: Vec<Option<u64>> = Vec::with_capacity(envs.len());
+        let mut this: Vec<Option<(i64, u64)>> = Vec::with_capacity(envs.len());
         for (ei, env) in envs.iter().enumerate() {
             let (_, _, ciphertext, _, _, _, env_type) = env;
             let epoch = match env_type.as_str() {
                 "message" | "edit" => ciphertext
                     .strip_prefix("mls:")
                     .and_then(|h| hex::decode(h).ok())
-                    .and_then(|b| crate::commands::mls::envelope_epoch(&b)),
+                    .and_then(|b| crate::commands::mls::envelope_lineage(&b)),
                 _ => None,
             };
             this.push(epoch);
@@ -262,11 +269,15 @@ async fn ingest_group_envelopes_interleaved(
     // up to it yet?" boundary. Scoped so the hook's borrows end before the
     // watermark loop. Runs even with zero envelopes so the group still advances
     // to head (the cold-launch sweep guarantee).
-    let mut max_fired_epoch: Option<u64> = None;
+    let mut max_fired_epoch: Option<(i64, u64)> = None;
     {
-        let mut on_epoch = |conn: &rusqlite::Connection, epoch: u64| {
-            max_fired_epoch = Some(max_fired_epoch.map_or(epoch, |m| m.max(epoch)));
-            if let Some(indices) = by_epoch.get(&epoch) {
+        let mut on_epoch = |conn: &rusqlite::Connection, generation: i64, epoch: u64| {
+            // Lexicographic on `(generation, epoch)`: a successor lineage restarts
+            // at epoch 0, numerically BELOW the retired lineage's last epoch, so a
+            // scalar max would run backwards across a migration.
+            let key = (generation, epoch);
+            max_fired_epoch = Some(max_fired_epoch.map_or(key, |m| m.max(key)));
+            if let Some(indices) = by_epoch.get(&key) {
                 for &(ci, ei) in indices {
                     decrypt_and_persist_one(
                         conn,
@@ -323,7 +334,7 @@ async fn ingest_group_envelopes_interleaved(
     // pre-parsed `epoch_of`; `&str` keys avoid cloning every `sent_at`.
     let mut out: Vec<(String, Option<String>)> = Vec::with_capacity(per_conv.len());
     for (ci, (cid, envs)) in per_conv.iter().enumerate() {
-        let items: Vec<(&str, super::watermark::EnvKind, Option<u64>)> = envs
+        let items: Vec<(&str, super::watermark::EnvKind, Option<(i64, u64)>)> = envs
             .iter()
             .enumerate()
             .map(|(ei, env)| {

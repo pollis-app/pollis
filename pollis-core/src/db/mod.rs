@@ -29,6 +29,11 @@ pub const POST_BASELINE_LOG_MIGRATIONS: &[(u32, &str, &str)] = &[
         "mls_commit_since",
         include_str!("migrations-log/000003_mls_commit_since.sql"),
     ),
+    (
+        4,
+        "commit_generation",
+        include_str!("migrations-log/000004_commit_generation.sql"),
+    ),
 ];
 
 /// Migrations applied on top of the baseline, in version order. CI's

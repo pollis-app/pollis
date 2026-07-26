@@ -1,8 +1,14 @@
 use rusqlite::{Connection, OptionalExtension};
 use crate::error::{Error, Result};
 
-// Bump this string whenever local_schema.sql changes OR encryption is added.
-// On mismatch the old DB file is deleted and recreated from scratch.
+// Bump this string when an existing table's shape changes incompatibly OR
+// encryption changes. On mismatch the old DB file is DELETED and recreated from
+// scratch — which throws away the device's MLS state and message history, so it
+// is a last resort, not routine hygiene.
+//
+// A purely additive `CREATE TABLE IF NOT EXISTS` needs no bump: `SCHEMA` is
+// re-applied on every open (see `open_at`), so the new table appears on existing
+// databases with nothing lost.
 // Version 4: per-user DB files (pollis_{user_id}.db), preferences + ui_state tables.
 // Version 5: mls_kv table for openmls StorageProvider.
 // Version 6: attachment table rewritten with convergent-encryption schema.

@@ -22,56 +22,91 @@ const KEY: [u8; 32] = [9u8; 32];
 struct Row {
     seq: i64,
     conv: &'static str,
+    generation: i64,
     epoch: i64,
     sender: &'static str,
     data: Vec<u8>,
 }
 
 fn row(seq: i64, conv: &'static str, epoch: i64, data: &str) -> Row {
+    row_at(seq, conv, 0, epoch, data)
+}
+
+fn row_at(seq: i64, conv: &'static str, generation: i64, epoch: i64, data: &str) -> Row {
     Row {
         seq,
         conv,
+        generation,
         epoch,
         sender: "u-sender",
         data: data.as_bytes().to_vec(),
     }
 }
 
-/// Create a fresh local libSQL file with the real `mls_commit_log` shape and the
-/// given rows. No UNIQUE index, so fork/regression rows can be injected exactly
-/// as a buggy/malicious server might have written them.
+/// Create a fresh local libSQL file with the **pre-#454-P4** `mls_commit_log`
+/// shape — no `generation` column — and the given rows. No UNIQUE index, so
+/// fork/regression rows can be injected exactly as a buggy/malicious server
+/// might have written them.
+///
+/// Most tests seed this shape deliberately: the builder deploys independently of
+/// the Delivery Service that migrates the log DB, so reading a log DB that
+/// predates `000004_commit_generation.sql` is a real operating state, not a
+/// legacy curiosity.
 async fn seed_db(path: &std::path::Path, rows: &[Row]) {
+    seed(path, rows, false).await
+}
+
+/// [`seed_db`] with the `generation` column migration `000004` adds.
+async fn seed_db_with_generation(path: &std::path::Path, rows: &[Row]) {
+    seed(path, rows, true).await
+}
+
+async fn seed(path: &std::path::Path, rows: &[Row], with_generation: bool) {
     let db = libsql::Builder::new_local(path).build().await.unwrap();
     let conn = db.connect().unwrap();
+    let generation_col = if with_generation {
+        "generation INTEGER NOT NULL DEFAULT 0, "
+    } else {
+        ""
+    };
     conn.execute(
-        "CREATE TABLE mls_commit_log (\
-            seq INTEGER PRIMARY KEY AUTOINCREMENT, \
-            conversation_id TEXT NOT NULL, \
-            epoch INTEGER NOT NULL, \
-            sender_id TEXT NOT NULL, \
-            commit_data BLOB NOT NULL, \
-            created_at TEXT NOT NULL, \
-            added_user_id TEXT, added_device_ids TEXT)",
+        &format!(
+            "CREATE TABLE mls_commit_log (\
+                seq INTEGER PRIMARY KEY AUTOINCREMENT, \
+                conversation_id TEXT NOT NULL, \
+                {generation_col}\
+                epoch INTEGER NOT NULL, \
+                sender_id TEXT NOT NULL, \
+                commit_data BLOB NOT NULL, \
+                created_at TEXT NOT NULL, \
+                added_user_id TEXT, added_device_ids TEXT)"
+        ),
         (),
     )
     .await
     .unwrap();
     for r in rows {
-        conn.execute(
+        let sql = if with_generation {
+            "INSERT INTO mls_commit_log \
+                (seq, conversation_id, epoch, sender_id, commit_data, created_at, generation) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)"
+        } else {
             "INSERT INTO mls_commit_log \
                 (seq, conversation_id, epoch, sender_id, commit_data, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            libsql::params![
-                r.seq,
-                r.conv.to_string(),
-                r.epoch,
-                r.sender.to_string(),
-                r.data.clone(),
-                "2026-01-01T00:00:00Z".to_string()
-            ],
-        )
-        .await
-        .unwrap();
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)"
+        };
+        let mut params = vec![
+            libsql::Value::from(r.seq),
+            libsql::Value::from(r.conv.to_string()),
+            libsql::Value::from(r.epoch),
+            libsql::Value::from(r.sender.to_string()),
+            libsql::Value::from(r.data.clone()),
+            libsql::Value::from("2026-01-01T00:00:00Z".to_string()),
+        ];
+        if with_generation {
+            params.push(libsql::Value::from(r.generation));
+        }
+        conn.execute(sql, params).await.unwrap();
     }
 }
 
@@ -226,6 +261,100 @@ async fn epoch_regression_is_rejected() {
     assert!(
         err.to_string().contains("regression"),
         "expected an epoch regression violation, got: {err}"
+    );
+}
+
+/// A log DB that predates migration `000004_commit_generation.sql` reads as
+/// generation 0 throughout — which is not a lossy fallback but the truth: such a
+/// DB cannot contain a migrated conversation, because nothing could have written
+/// one. The builder must not require a schema upgrade to keep running.
+#[tokio::test]
+async fn a_pre_p4_log_db_reads_as_the_classic_lineage() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("pre-p4.db");
+    let rows = vec![row(1, "conv-a", 0, "a-commit-0"), row(2, "conv-a", 1, "a-commit-1")];
+    seed_db(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+    assert!(read.iter().all(|r| r.generation == 0));
+    assert!(read.iter().all(|r| r.to_leaf().generation == 0));
+}
+
+/// The #454 P4 acceptance criterion for the transparency log: a conversation
+/// that migrates to the hybrid suite restarts at MLS epoch 0 in a successor
+/// lineage, and the builder must publish that as valid history. Before the
+/// monotone key widened to `(conversation, generation, epoch)`, this build
+/// aborted — every honest migration would have taken the transparency log down.
+#[tokio::test]
+async fn a_suite_migration_builds_and_verifies() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("migrate.db");
+    let rows = vec![
+        row_at(1, "conv-a", 0, 0, "a-g0-e0"),
+        row_at(2, "conv-a", 0, 1, "a-g0-e1"),
+        // The migration: same conversation, successor lineage, epoch restarts.
+        row_at(3, "conv-a", 1, 0, "a-g1-e0"),
+        row_at(4, "conv-a", 1, 1, "a-g1-e1"),
+        // A conversation that never migrated is untouched by any of this.
+        row_at(5, "conv-b", 0, 0, "b-g0-e0"),
+    ];
+    seed_db_with_generation(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+    assert_eq!(read.iter().map(|r| r.generation).collect::<Vec<_>>(), vec![0, 0, 1, 1, 0]);
+
+    let bundle = build_bundle(&read, &signing_key(), TS).unwrap();
+    assert_eq!(bundle.entries.len(), 5);
+    assert!(monitor_verify(&bundle), "a migrated history must verify");
+}
+
+/// Widening the key must not have bought the server a way to launder a fork as a
+/// migration: bumping the generation while picking an arbitrary epoch is caught
+/// because a successor lineage may only ever *open*, and it opens at epoch 0.
+#[tokio::test]
+async fn a_lineage_opening_mid_stream_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("bad-open.db");
+    let rows = vec![
+        row_at(1, "conv-a", 0, 0, "a-g0-e0"),
+        row_at(2, "conv-a", 0, 1, "a-g0-e1"),
+        row_at(3, "conv-a", 1, 7, "a-g1-e7"),
+    ];
+    seed_db_with_generation(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+
+    let err = build_bundle(&read, &signing_key(), TS).unwrap_err();
+    assert!(
+        err.to_string().contains("must start at epoch 0"),
+        "expected a lineage-opening violation, got: {err}"
+    );
+}
+
+/// Once a conversation has migrated, its old lineage is closed — every honest
+/// device has deleted that suite's key material. A commit appearing there is the
+/// server rewriting history, and it stays a regression under the widened key.
+#[tokio::test]
+async fn a_commit_on_a_retired_lineage_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("retired.db");
+    let rows = vec![
+        row_at(1, "conv-a", 0, 5, "a-g0-e5"),
+        row_at(2, "conv-a", 1, 0, "a-g1-e0"),
+        row_at(3, "conv-a", 0, 6, "a-g0-e6"),
+    ];
+    seed_db_with_generation(&db_path, &rows).await;
+
+    let conn = source::connect(db_path.to_str().unwrap()).await.unwrap();
+    let read = source::read_commit_log(&conn).await.unwrap();
+
+    let err = build_bundle(&read, &signing_key(), TS).unwrap_err();
+    assert!(
+        err.to_string().contains("regression"),
+        "expected a retired-lineage regression, got: {err}"
     );
 }
 

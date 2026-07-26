@@ -8,13 +8,18 @@
 //!     the MIN over member devices — `NoLossForCurrentMember`).
 //!   * A revoked device never pins the floor down (it can't rejoin — I5).
 //!   * An unreported member disables Tier-1 pruning (no unsafe lower bound).
-//!   * The DELETE leaves the UNIQUE(conversation_id, epoch) fork-dedup index
-//!     intact (migration 000003, main DB).
+//!   * The DELETE leaves the UNIQUE(conversation_id, generation, epoch)
+//!     fork-dedup index intact (migration 000004, log DB).
 //!   * `record_commit_since` is monotone (a stale report can't lower a device's
 //!     high-water and prune commits it still needs).
+//!
+//! Under suite generations (#454 P4) the same properties are exercised one key
+//! wider: a device still on a retired lineage must not be pruned past by Tier 1,
+//! and a fully-vacated lineage is retired outright.
 
 use pollis_delivery::commit::{
-    delete_commits_below, prune_commit_log, record_commit_since, PRUNE_SLACK_EPOCHS,
+    delete_commits_below, delete_generations_below, prune_commit_log, record_commit_since,
+    PRUNE_MAX_BEHIND_HEAD, PRUNE_SLACK_EPOCHS,
 };
 use pollis_delivery::db::Db;
 
@@ -33,15 +38,17 @@ CREATE TABLE mls_commit_log (\
   commit_data BLOB NOT NULL,\
   created_at TEXT NOT NULL DEFAULT (datetime('now')),\
   added_user_id TEXT,\
-  added_device_ids TEXT\
+  added_device_ids TEXT,\
+  generation INTEGER NOT NULL DEFAULT 0\
 );\
-CREATE UNIQUE INDEX idx_mls_commit_conv_epoch ON mls_commit_log (conversation_id, epoch);\
+CREATE UNIQUE INDEX idx_mls_commit_conv_gen_epoch ON mls_commit_log (conversation_id, generation, epoch);\
 CREATE TABLE mls_commit_since (\
   conversation_id TEXT NOT NULL,\
   user_id TEXT NOT NULL,\
   device_id TEXT NOT NULL,\
   since_epoch INTEGER NOT NULL,\
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),\
+  generation INTEGER NOT NULL DEFAULT 0,\
   PRIMARY KEY (conversation_id, user_id, device_id)\
 );";
 
@@ -81,27 +88,34 @@ async fn revoke_device(main: &Db, device_id: &str) {
         .unwrap();
 }
 
-/// Append commits at epochs `0..=up_to` for `conv`.
-async fn seed_commits(log: &Db, conv: &str, up_to: i64) {
+/// Append commits at epochs `0..=up_to` of generation `gen` for `conv`.
+async fn seed_commits_in(log: &Db, conv: &str, gen: i64, up_to: i64) {
     let conn = log.conn().unwrap();
     for e in 0..=up_to {
         conn.execute(
-            "INSERT INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
-             VALUES (?1, ?2, 'u', ?3)",
-            libsql::params![conv, e, vec![e as u8]],
+            "INSERT INTO mls_commit_log (conversation_id, generation, epoch, sender_id, commit_data) \
+             VALUES (?1, ?2, ?3, 'u', ?4)",
+            libsql::params![conv, gen, e, vec![e as u8]],
         )
         .await
         .unwrap();
     }
 }
 
-/// The surviving epochs for `conv`, ascending.
-async fn epochs(log: &Db, conv: &str) -> Vec<i64> {
+/// Append commits at epochs `0..=up_to` of generation 0 — the lineage every
+/// pre-P4 conversation is in.
+async fn seed_commits(log: &Db, conv: &str, up_to: i64) {
+    seed_commits_in(log, conv, 0, up_to).await;
+}
+
+/// The surviving epochs of generation `gen` for `conv`, ascending.
+async fn epochs_in(log: &Db, conv: &str, gen: i64) -> Vec<i64> {
     let conn = log.conn().unwrap();
     let mut rows = conn
         .query(
-            "SELECT epoch FROM mls_commit_log WHERE conversation_id = ?1 ORDER BY epoch ASC",
-            libsql::params![conv],
+            "SELECT epoch FROM mls_commit_log WHERE conversation_id = ?1 AND generation = ?2 \
+             ORDER BY epoch ASC",
+            libsql::params![conv, gen],
         )
         .await
         .unwrap();
@@ -110,6 +124,11 @@ async fn epochs(log: &Db, conv: &str) -> Vec<i64> {
         out.push(r.get::<i64>(0).unwrap());
     }
     out
+}
+
+/// The surviving epochs of generation 0 for `conv`, ascending.
+async fn epochs(log: &Db, conv: &str) -> Vec<i64> {
+    epochs_in(log, conv, 0).await
 }
 
 /// TIER 1: the slowest current member pins the floor — commits it still needs
@@ -125,8 +144,8 @@ async fn tier1_prunes_prefix_but_keeps_slowest_member() {
     // head = 25 (epochs 0..24). Alice caught up to 20, Bob (slowest) to 15.
     seed_commits(&log, conv, 24).await;
     let log_conn = log.conn().unwrap();
-    record_commit_since(&log_conn, conv, "alice", "a-dev", 20).await.unwrap();
-    record_commit_since(&log_conn, conv, "bob", "b-dev", 15).await.unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 0, 20).await.unwrap();
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 15).await.unwrap();
 
     let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
 
@@ -154,7 +173,7 @@ async fn unreported_member_blocks_tier1_pruning() {
     add_member(&main, conv, "bob", "b-dev").await;
     seed_commits(&log, conv, 24).await;
     // Only alice reports; bob is unaccounted for.
-    record_commit_since(&log.conn().unwrap(), conv, "alice", "a-dev", 20)
+    record_commit_since(&log.conn().unwrap(), conv, "alice", "a-dev", 0, 20)
         .await
         .unwrap();
 
@@ -191,8 +210,8 @@ async fn revoked_device_does_not_pin_the_floor() {
     seed_commits(&log, conv, 24).await;
     let log_conn = log.conn().unwrap();
     // The revoked device reported a low epoch; the live one is caught up.
-    record_commit_since(&log_conn, conv, "alice", "a-old", 2).await.unwrap();
-    record_commit_since(&log_conn, conv, "alice", "a-new", 20).await.unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-old", 0, 2).await.unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-new", 0, 20).await.unwrap();
 
     let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
 
@@ -201,7 +220,7 @@ async fn revoked_device_does_not_pin_the_floor() {
     assert!(!epochs(&log, conv).await.contains(&2), "the revoked laggard does not hold epoch 2");
 }
 
-/// The prune DELETE leaves the UNIQUE(conversation_id, epoch) fork-dedup index
+/// The prune DELETE leaves the UNIQUE(conversation_id, generation, epoch) fork-dedup index
 /// intact: a surviving epoch still rejects a duplicate INSERT (no fork), and a
 /// pruned epoch is genuinely free.
 #[tokio::test]
@@ -210,7 +229,7 @@ async fn prune_preserves_unique_epoch_index() {
     let conv = "grp1";
     seed_commits(&log, conv, 10).await;
 
-    let deleted = delete_commits_below(&log.conn().unwrap(), conv, 5).await.unwrap();
+    let deleted = delete_commits_below(&log.conn().unwrap(), conv, 0, 5).await.unwrap();
     assert_eq!(deleted, 5, "epochs 0..4 pruned");
 
     // A duplicate at a SURVIVING epoch must still conflict (fork-dedup holds).
@@ -218,8 +237,8 @@ async fn prune_preserves_unique_epoch_index() {
         .conn()
         .unwrap()
         .execute(
-            "INSERT OR IGNORE INTO mls_commit_log (conversation_id, epoch, sender_id, commit_data) \
-             VALUES (?1, 7, 'u', ?2)",
+            "INSERT OR IGNORE INTO mls_commit_log (conversation_id, generation, epoch, sender_id, commit_data) \
+             VALUES (?1, 0, 7, 'u', ?2)",
             libsql::params![conv, vec![7u8]],
         )
         .await
@@ -236,11 +255,11 @@ async fn record_commit_since_is_monotone() {
     let conv = "grp1";
     let conn = log.conn().unwrap();
 
-    record_commit_since(&conn, conv, "alice", "a-dev", 10).await.unwrap();
+    record_commit_since(&conn, conv, "alice", "a-dev", 0, 10).await.unwrap();
     // A stale/reordered report at a lower epoch must be ignored.
-    record_commit_since(&conn, conv, "alice", "a-dev", 3).await.unwrap();
+    record_commit_since(&conn, conv, "alice", "a-dev", 0, 3).await.unwrap();
     // A higher report advances it.
-    record_commit_since(&conn, conv, "alice", "a-dev", 14).await.unwrap();
+    record_commit_since(&conn, conv, "alice", "a-dev", 0, 14).await.unwrap();
 
     let mut rows = conn
         .query(
@@ -251,4 +270,187 @@ async fn record_commit_since_is_monotone() {
         .unwrap();
     let got: i64 = rows.next().await.unwrap().unwrap().get(0).unwrap();
     assert_eq!(got, 14, "high-water is MAX of reports, never lowered");
+}
+
+// ─── Suite generations (#454 P4) ─────────────────────────────────────────────
+
+/// A device still draining the RETIRED lineage is not pruned past by Tier 1. Its
+/// reported epoch belongs to generation 0 and says nothing about generation 1, so
+/// treating it as a bound on generation 1 would be a category error — it counts
+/// as unreported there instead, which disables Tier 1 outright.
+#[tokio::test]
+async fn a_device_on_the_old_lineage_disables_tier1_on_the_new_one() {
+    let main = fresh(MAIN_SCHEMA).await;
+    let log = fresh(LOG_SCHEMA).await;
+    let conv = "grp1";
+
+    add_member(&main, conv, "alice", "a-dev").await;
+    add_member(&main, conv, "bob", "b-dev").await;
+
+    // Generation 0 ran to epoch 24, then the conversation migrated and
+    // generation 1 has run to epoch 24 as well.
+    seed_commits_in(&log, conv, 0, 24).await;
+    seed_commits_in(&log, conv, 1, 24).await;
+
+    let log_conn = log.conn().unwrap();
+    // Alice is on the new lineage at epoch 20. Bob never left generation 0 —
+    // where he sits at a NUMERICALLY HIGHER epoch than alice.
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 1, 20).await.unwrap();
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 23).await.unwrap();
+
+    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+
+    assert_eq!(report.generation, 1, "the head lineage is the successor");
+    assert_eq!(
+        report.floor, 0,
+        "bob is not IN generation 1, so he is unreported there and Tier 1 must not prune it"
+    );
+    assert_eq!(
+        report.generation_floor, 0,
+        "bob still occupies generation 0, so it must not be retired"
+    );
+    assert_eq!(report.deleted, 0);
+    assert_eq!(epochs_in(&log, conv, 0).await.len(), 25, "the retired lineage is intact");
+    assert_eq!(epochs_in(&log, conv, 1).await.len(), 25);
+}
+
+/// Once EVERY current member device has reported itself in the successor lineage,
+/// the retired one is deleted outright — epoch pruning alone would keep it
+/// forever, since all its epochs are below its own head and never below the head
+/// generation's floor.
+#[tokio::test]
+async fn a_fully_vacated_lineage_is_retired() {
+    let main = fresh(MAIN_SCHEMA).await;
+    let log = fresh(LOG_SCHEMA).await;
+    let conv = "grp1";
+
+    add_member(&main, conv, "alice", "a-dev").await;
+    add_member(&main, conv, "bob", "b-dev").await;
+
+    seed_commits_in(&log, conv, 0, 24).await;
+    seed_commits_in(&log, conv, 1, 24).await;
+
+    let log_conn = log.conn().unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 1, 20).await.unwrap();
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 1, 15).await.unwrap();
+
+    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+
+    assert_eq!(report.generation_floor, 1, "generation 0 is fully vacated");
+    assert!(
+        epochs_in(&log, conv, 0).await.is_empty(),
+        "the retired lineage is gone in full — not just a prefix of it"
+    );
+    // And within the live lineage the ordinary Tier-1 floor still applies.
+    assert_eq!(report.floor, 15 - PRUNE_SLACK_EPOCHS);
+    let surviving = epochs_in(&log, conv, 1).await;
+    assert_eq!(*surviving.first().unwrap(), 15 - PRUNE_SLACK_EPOCHS);
+    assert!(
+        surviving.contains(&15),
+        "the slowest member's applied epoch survives (NoLossForCurrentMember)"
+    );
+}
+
+/// TIER 2 under generations: a device stranded on a retired lineage does not pin
+/// it forever. Once the successor has itself run `PRUNE_MAX_BEHIND_HEAD` epochs
+/// the straggler is by construction at least that far behind head — already the
+/// accepted-loss condition — so the closed lineage goes and it recovers by
+/// external join. The LIVE lineage is never retired, whatever the reports say.
+#[tokio::test]
+async fn tier2_retires_a_lineage_a_stranded_device_still_occupies() {
+    let main = fresh(MAIN_SCHEMA).await;
+    let log = fresh(LOG_SCHEMA).await;
+    let conv = "grp1";
+
+    add_member(&main, conv, "alice", "a-dev").await;
+    add_member(&main, conv, "bob", "b-dev").await;
+
+    seed_commits_in(&log, conv, 0, 4).await;
+    // The successor has run past the hard cap.
+    seed_commits_in(&log, conv, 1, PRUNE_MAX_BEHIND_HEAD).await;
+
+    let log_conn = log.conn().unwrap();
+    record_commit_since(&log_conn, conv, "alice", "a-dev", 1, PRUNE_MAX_BEHIND_HEAD)
+        .await
+        .unwrap();
+    // Bob never migrated.
+    record_commit_since(&log_conn, conv, "bob", "b-dev", 0, 1).await.unwrap();
+
+    let report = prune_commit_log(&main.conn().unwrap(), &log_conn, conv).await.unwrap();
+
+    assert_eq!(report.generation, 1);
+    assert_eq!(report.generation_floor, 1, "Tier 2 retires the closed lineage");
+    assert!(epochs_in(&log, conv, 0).await.is_empty());
+    assert!(
+        !epochs_in(&log, conv, 1).await.is_empty(),
+        "the LIVE lineage is never retired wholesale"
+    );
+}
+
+/// `record_commit_since` is monotone on the PAIR, compared lexicographically. The
+/// case that a per-column `MAX` would get wrong: moving to the successor lineage
+/// at epoch 0 is a step FORWARD even though the epoch drops, and a late report
+/// from the retired lineage at a higher epoch must not drag the device back.
+#[tokio::test]
+async fn record_commit_since_is_lexicographically_monotone() {
+    let log = fresh(LOG_SCHEMA).await;
+    let conv = "grp1";
+    let conn = log.conn().unwrap();
+
+    record_commit_since(&conn, conv, "alice", "a-dev", 0, 40).await.unwrap();
+    // Migrated: generation up, epoch DOWN. This is forward progress.
+    record_commit_since(&conn, conv, "alice", "a-dev", 1, 0).await.unwrap();
+    // A stale in-flight report from the retired lineage, at a much higher epoch.
+    record_commit_since(&conn, conv, "alice", "a-dev", 0, 44).await.unwrap();
+
+    let mut rows = conn
+        .query(
+            "SELECT generation, since_epoch FROM mls_commit_since WHERE device_id = 'a-dev'",
+            (),
+        )
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert_eq!(
+        (row.get::<i64>(0).unwrap(), row.get::<i64>(1).unwrap()),
+        (1, 0),
+        "the stale generation-0 report must not pull the device back off the successor lineage"
+    );
+
+    // Forward within the new lineage still advances.
+    record_commit_since(&conn, conv, "alice", "a-dev", 1, 3).await.unwrap();
+    let mut rows = conn
+        .query(
+            "SELECT generation, since_epoch FROM mls_commit_since WHERE device_id = 'a-dev'",
+            (),
+        )
+        .await
+        .unwrap();
+    let row = rows.next().await.unwrap().unwrap();
+    assert_eq!(
+        (row.get::<i64>(0).unwrap(), row.get::<i64>(1).unwrap()),
+        (1, 3)
+    );
+}
+
+/// `delete_generations_below` is scoped: it retires closed lineages and leaves the
+/// live one untouched, including its epoch 0 (which an epoch-based DELETE with the
+/// same numeric bound would have taken).
+#[tokio::test]
+async fn delete_generations_below_only_touches_closed_lineages() {
+    let log = fresh(LOG_SCHEMA).await;
+    let conv = "grp1";
+    seed_commits_in(&log, conv, 0, 4).await;
+    seed_commits_in(&log, conv, 1, 4).await;
+
+    let deleted = delete_generations_below(&log.conn().unwrap(), conv, 1).await.unwrap();
+    assert_eq!(deleted, 5, "generation 0's five commits");
+    assert!(epochs_in(&log, conv, 0).await.is_empty());
+    assert_eq!(epochs_in(&log, conv, 1).await, vec![0, 1, 2, 3, 4]);
+
+    // Floor 0 is a no-op — there is no closed lineage below generation 0.
+    assert_eq!(
+        delete_generations_below(&log.conn().unwrap(), conv, 0).await.unwrap(),
+        0
+    );
 }

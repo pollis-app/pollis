@@ -1,14 +1,15 @@
 # Post-Quantum Hybrid MLS — Design
 
-**Status:** design accepted; implementation started. **P0 (spike) is complete**,
-**P1a (crypto-provider routing) has landed** — the hybrid suite is reachable through a
-second, hybrid-only provider, while every production path stays on the existing RustCrypto
-backend for security reasons set out in §7.3
-(`pollis-core/src/commands/mls/provider.rs`) — and **P1b (suite parametrisation) has
-landed**: the ciphersuite is now an explicit argument to the two functions that mint
-suite-bound material, `mls_key_package.ciphersuite` and `user_device.pq_capable` exist as
-additive columns, and the DS claims key packages from a per-suite pool. Every production
-caller still passes `CS_CLASSIC`, so no group has changed suite (§8).
+**Status: COMPLETE — P0 through P5 all shipped (§8).** The hybrid suite is reachable
+through a second, hybrid-only provider that classic traffic is *routed away from* for the
+security reasons in §7.3 (`pollis-core/src/commands/mls/provider.rs`); the ciphersuite is
+an explicit argument to the two functions that mint suite-bound material; every device
+publishes both key-package pools and the DS derives `user_device.pq_capable` from what
+lands; new groups are born on `CS_HYBRID` and existing ones migrate to it by successor
+generation — both behind the same two gates (full roster PQ-capable **and** the whole live
+fleet PQ-capable). What remains outside this design's scope, deliberately: post-quantum
+*signatures* (§2.4) and retiring classic key-package publication, which cannot begin until
+an app that no longer needs classic has full uptake.
 **Scope:** migrate Pollis's MLS key exchange from classical X25519 to a hybrid
 X25519 + ML-KEM-768 construction, transparently, without breaking existing
 groups, existing devices, or the "messages must work" doctrine.
@@ -59,11 +60,13 @@ the code as it is today.
   Ed25519 signatures are unchanged. (§7.)
 
 - **Recommendation: do it, in phases, gated behind the box's headless MLS harness.
-  Phase 0 is DONE** — the pinned route above is proven (two clients: KeyPackage → Add →
-  Welcome → join → application message → `export_secret`, all green). Ship new groups on
-  the hybrid suite first; migrate existing groups at an epoch boundary via a
-  ciphersuite-transition commit; publish key packages in **both** suites during a
-  long overlap window so an old-app device is never un-addable. Never a flag day.
+  All phases are now DONE (§8)** — new groups are born hybrid, existing groups migrate,
+  and key packages publish in **both** suites so an old-app device is never un-addable.
+  Never a flag day. Two things landed differently from the sketch here and are worth
+  reading in §8: migration is *not* a ciphersuite-transition commit at an epoch boundary
+  (RFC 9420 has no such commit) but a **successor group** under a generation counter; and
+  the crypto-provider change is a **route**, not a swap, because putting classic traffic
+  on libcrux would have been a security regression (§7.3).
   The live risk is no longer availability but **code-point churn** — `0x004D` is an
   experimental X-Wing draft-06 point that OpenMLS `main` has since moved behind a feature
   flag and the IETF has since dropped; pin both dependency versions and budget
@@ -351,6 +354,20 @@ this for a member whose app is old. The rule that guarantees it:
 > hybrid KeyPackage.** Until then, the group stays classic and every member — old app
 > or new — keeps sending/receiving on the classic suite.
 
+**As shipped, this rule was necessary but not sufficient, and a second gate was added.**
+A roster is not a fixed set: it grows. A group that satisfied the rule above at migration
+time is still one invite away from having to admit a classic-only device, and at that
+point reconcile can only skip the device (locking it out of its own conversation) or the
+group must be rebuilt classic (the downgrade the suite routing exists to prevent). Neither
+is acceptable, and neither is knowable by looking at the group. So both birth (Front A) and
+migration (Front C) additionally require **fleet completeness**: no `user_device` with
+`revoked_at IS NULL` and `last_seen` within 90 days may still be classic-only
+(`fleet_is_fully_pq_capable`). That also settles Front A's "deployed to *enough* of the
+fleet" hedge below — the answer is not a percentage, it is *all of the live fleet*, with a
+90-day dormancy window so a laptop in a drawer cannot hold the deployment hostage. Both
+gates fail toward availability: a check that cannot be evaluated keeps the group classic.
+See §8, Phase 5.
+
 This makes the transition *safe by construction* rather than by discipline (the
 CLAUDE.md "invalid states unrepresentable" principle):
 
@@ -366,10 +383,12 @@ CLAUDE.md "invalid states unrepresentable" principle):
   classic *if it is a member*, because Front A only fires hybrid when the whole invited
   roster is hybrid-capable. An old app simply keeps living in the classic world until
   it updates.
-- **When the last laggard updates**, the next natural touch of the group migrates it.
-  If the group is idle, a low-priority scheduled self-update-style migration commit
-  moves it (bounded, so idle groups still heal — this also closes the "no periodic
-  self-update" gap noted in whitepaper §6.7 as a side benefit).
+- **When the last laggard updates**, the next sweep migrates the group — as shipped,
+  migration is driven only by the cold-launch sweep (`migrate_to_hybrid_if_due`, bounded
+  to `MAX_MIGRATIONS_PER_SWEEP = 2`), not by a natural commit, so an idle group heals the
+  next time any member opens the app. The "no periodic self-update" gap in whitepaper §6.7
+  was **not** closed as a side benefit of this; it was closed on its own terms by #666,
+  which also turned out to be what keeps hybrid commit size logarithmic (§4.1).
 
 The consequence for the "4-years-300-commits" acceptance test: a returning member
 catches up their *classic* group state exactly as today; if the group has since
@@ -496,10 +515,21 @@ at `group_state.rs:508`), a single committer, TLS-serialised bytes:
   Turso. For a large hybrid group the commit is now the dominant metadata write — a
   ~168 KB base64 body per churn commit at N=100 — no longer dwarfed by anything but an
   attachment (R2, whitepaper §9).
-- **Open decision for P3/P4 (§8):** the linear commit cost forces a real choice on this
-  measured data, not on an estimate — either a **group-size threshold above which groups
-  stay classic**, or an **explicitly accepted cost** for large hybrid groups. This
-  document does not pre-decide it; it flags it as owned by the P3/P4 phases (§4.3, §8).
+- **RESOLVED in P3/P4: no group-size threshold; the cost was mis-attributed.** The
+  linearity above is not a property of hybrid MLS at size N — it is a property of a tree
+  full of **unmerged leaves**. Every measurement in the table was taken with a single
+  committer, so every *other* member's parent node was blank and each copath resolution
+  fell back to one HPKE ciphertext per leaf. Once each member has committed once, those
+  parents are populated and a copath resolution collapses to a single subtree key, which
+  is the `log2(N)` behaviour the earlier draft assumed and this table appeared to refute.
+  Re-measured with that variable controlled: growing a hybrid group 8 → 16 members costs
+  **+10.6 KB with unmerged leaves and +2.4 KB once every member has committed.** The
+  remedy is therefore periodic self-update (#666), which makes every member commit on its
+  own schedule, not a size cap that would have permanently stranded large groups on the
+  classic suite for a reason that was never really about size. Pinned by
+  `self_update_turns_linear_commit_growth_into_logarithmic`, which controls merge state
+  exactly, and by the absolute small-roster ceilings in `flows/pq_migration.rs`
+  (`MAX_HYBRID_COMMIT_BYTES`).
 
 ### 4.2 Latency: negligible
 
@@ -522,23 +552,23 @@ MLS crypto already runs in the Rust core off the render thread
   (The AEAD is *not* a lever we hold: the hybrid suite is ChaCha20-Poly1305 by
   construction — §2.3 — but that swap is roughly size-neutral versus AES-128-GCM, so it
   does not move the commit-size numbers; the KEM does.)
-- **Decide the large-group policy on measured data** (§4.1): the commit cost is linear in
-  N and ~8× classic, so P3/P4 must either cap hybrid at a group-size threshold or accept
-  the cost explicitly. This is the dominant size lever, and disabling the ratchet-tree
-  extension is *not* an alternative to it (it only shrinks Welcomes, §4.1).
+- **Keep leaves merged, don't cap group size** (§4.1, resolved): the apparent linearity
+  was unmerged leaves, not N. Periodic self-update (#666) is the lever — it restores
+  `log2(N)` copath resolution — and no group-size threshold was introduced. Disabling the
+  ratchet-tree extension is *not* an alternative here either (it only shrinks Welcomes,
+  §4.1).
 - **KP pool size stays at 5 per suite** — resist inflating it; replenishment already
   tops up after each Welcome (`key_packages.rs:141`).
-- **Measure in-box** (§5): the marathon fuzzer already exercises large, churny groups
-  headless; add commit/Welcome byte-size assertions so a regression that balloons
-  payloads is caught before it ships.
+- **Measure in-box** (§5): shipped. `flows/pq_migration.rs` pins absolute small-roster
+  commit/Welcome ceilings, and the marathon fuzzer carries a pool-scaled balloon detector
+  across the suite boundary — it cannot control merge state at measurement time, so it is
+  deliberately loose and the discriminating proof lives in the self-update test that can.
 
-Net: hybrid MLS costs Pollis **microseconds per op**, but its commit size is **linear in
-group size and ~8× the classic commit** — a ~168 KB base64 DS write for a 100-member churn
-commit (§4.1). That is a defensible price for post-quantum confidentiality in small and
-mid-size groups, but it is a real cost that grows with the group, which is why the
-large-group policy is an explicit P3/P4 decision, not a rounding error. The "fast"
-positioning holds as long as we keep signatures classical and make that group-size call
-deliberately.
+Net: hybrid MLS costs Pollis **microseconds per op** and roughly **8× the classic commit
+in constant factor**, growing `log2(N)` in group size provided leaves stay merged — which
+is what periodic self-update (#666) now guarantees. That is a defensible price for
+post-quantum confidentiality at any group size Pollis targets, and it holds as long as
+signatures stay classical (§2.4) and self-update keeps running.
 
 ---
 
@@ -812,22 +842,20 @@ bump and no fork — keep `openmls = "0.8"`, add a direct dependency on
 versions, and treat a future OpenMLS bump as a tracked migration.
 **No remaining upstream gate.**
 
-**Phase 1a — Provider swap (no suite change, no behaviour change).** Move `PollisProvider`
-from `RustCrypto` to `openmls_libcrux_crypto::CryptoProvider`, keeping the custom
-`MlsStore` (§7.3). The suite is unchanged, so behaviour is byte-identical. **Do not** adopt
-the crate's bundled `Provider` type (it hardcodes in-memory storage — §7.3).
-**Acceptance:** the entire existing `flows` suite + marathon fuzzer pass headless on
-`ci/mls-test-gate` under the new crypto backend; plus a regression test pinning the
-`supports()` self-contradiction (§7.3) so no future call site can silently break classic
-groups.
+**Phase 1a — Provider routing: DONE.** ✅ Landed as *routing*, not the swap this phase
+originally proposed. `PollisProvider` (RustCrypto) serves `CS_CLASSIC` and `PollisPqProvider`
+(`openmls_libcrux_crypto`) serves `CS_HYBRID`, both over the custom `MlsStore`; the crate's
+bundled `Provider` type is not used (it hardcodes in-memory storage — §7.3). The swap was
+rejected because libcrux's AES-GCM decryption has an unpatched non-constant-time tag check
+(RUSTSEC-2026-0211), which would have put *classic* traffic on vulnerable code; the hybrid
+suite's AEAD is ChaCha20-Poly1305, which the advisory does not touch. The routing is
+therefore security-load-bearing and is pinned by `classic_provider_never_routes_to_libcrux`
+alongside the `supports()` self-contradiction regression test (§7.3).
 
-**Phase 1b — Suite parametrisation (no behaviour change).** Introduce `CS_CLASSIC` /
-`CS_HYBRID`, make every `CS` call site suite-aware (the 31 references in §7.5), add the
-additive migrations (§3.4), and the DS claim-by-suite parameter — all defaulting to classic
-so runtime behaviour is byte-identical to today.
-**Acceptance:** full existing `flows` suite + marathon fuzzer pass unchanged, headless, on
-`ci/mls-test-gate`; a schema diff shows only additive migrations; no group's observed suite
-changes.
+**Phase 1b — Suite parametrisation: DONE.** ✅ `CS_CLASSIC` / `CS_HYBRID` introduced, every
+`CS` call site made suite-aware (the 31 references in §7.5), the additive migrations landed
+(§3.4), and the DS gained its claim-by-suite parameter — all defaulting to classic, so the
+phase itself changed no group's observed suite.
 
 **Phase 2 — Hybrid key packages (Front B): DONE.** ✅ Hybrid-capable devices publish both KP
 pools; DS claims by suite; `pq_capable` set. Still no group goes hybrid.
@@ -858,29 +886,50 @@ within budget (§4.3).
   → no-KP outcome) and the `the_two_suites_produce_structurally_different_key_packages`
   KP-size pins (classic init key 32 B, hybrid 1216 B).
 
-**Phase 3 — New groups hybrid (Front A).** New groups whose full invited roster is
-hybrid-capable are created on `CS_HYBRID`; old-app-inclusive rosters stay classic.
-**Acceptance:** S1 passes; an old app invited into a mixed roster gets a classic group
-and reads every message; voice-key export works on hybrid groups; the large-group cost
-decision (§4.1 — group-size threshold vs. explicitly accepted cost) is made on the
-measured commit data and recorded here.
+**Phase 3 — New groups hybrid (Front A): DONE.** ✅ `suite_for_new_group`
+(`mls/group_state.rs`) decides the suite at birth instead of `init_mls_group` passing a
+constant. **No group-size threshold was set** — that §4.1 decision is resolved as
+"explicitly accepted cost", because the measured driver of hybrid commit size turned out
+to be *unmerged leaves*, not membership: at 8→16 members a hybrid commit grows +10.6 KB
+with unmerged leaves and +2.4 KB once every member has committed. The fix is therefore
+self-update (#666, shipped alongside), which makes growth logarithmic, not a size cap that
+would have permanently stranded large groups on classic.
+**What shipped:** S1 (`flows/pq_migration.rs`) covers birth-hybrid plus membership churn
+on the hybrid suite; `pq_key_packages.rs` pins the absolute Welcome/commit byte ceilings;
+`export_secret` on hybrid (the voice-key path) is proved in pollis-core's MLS unit tests,
+since the media-gated `voice_e2ee` surface cannot build headless.
 
-**Phase 4 — Migrate existing groups (Front C).** The epoch-boundary suite-transition
-commit, gated by the §3.3 "every member hybrid-capable" rule, plus the bounded
-scheduled migration for idle groups.
-**Acceptance:** S2, S4, S5, S6 all pass headless; the fuzzer's convergence invariant
-holds across the suite boundary with zero dropped/undecryptable messages for any
-throughout-member; payload-size budget holds under churn; the P3 large-group policy (§4.1)
-is honoured by the migration path (a group above the threshold, if one is set, is not
-migrated to hybrid).
+**Phase 4 — Migrate existing groups (Front C): DONE.** ✅ Implemented as **suite
+generations** rather than an epoch-boundary transition commit, because RFC 9420 provides
+no way to change a running group's suite: `migrate_to_hybrid_if_due` (`mls/migrate.rs`)
+stands up a **successor group** in `CS_HYBRID`, moves the roster by Welcome, and retires
+the predecessor. The monotone key widens to `(conversation_id, generation, epoch)` compared
+lexicographically; the DS accepts generation N+1 at epoch 0 only when `closes_epoch` names
+the head of generation N (`pollis_delivery::commit::accepts()`, Kani-proved), making the
+whole migration one compare-and-swap and two competing successors unrepresentable. Bounded
+at `MAX_MIGRATIONS_PER_SWEEP = 2`; eligibility does not expire, so spreading them is free.
+**What shipped:** S2/S3 (each gate holding on its own), S4 (a stolen pre-migration leaf is
+evicted at the suite boundary), S6 (a dropped successor Welcome recovers by external join),
+and S5 — the `model` fuzzer now draws `Sweep`/`Upgrade` ops, crosses the boundary mid-run,
+and asserts no client is stranded on a retired lineage plus a pool-scaled commit-size
+balloon detector. A `BOUNDARY_CROSSINGS` counter fails the driver if no generated case
+actually crossed, so the invariant cannot pass vacuously.
 
-**Phase 5 — Fleet completion & (optional) hardening.** Once telemetry/heuristics show
-the fleet is effectively all-hybrid, consider retiring classic KP publication (a
-multi-release additive→drop dance, per CLAUDE.md) and, separately, evaluate AES-256 and
-ML-DSA as *distinct future tracks* (§2.3, §2.4) — not on this HNDL critical path.
-**Acceptance:** a defined, measured fleet-hybrid threshold before any classic retirement
-begins; no classic drop lands until an app that stopped *needing* classic has full
-uptake.
+**Phase 5 — Fleet completion: DONE (gate), classic retirement NOT started.** ✅ What
+shipped is the **fleet-completeness gate**, not the retirement: `fleet_is_fully_pq_capable`
+requires that deployment-wide no `user_device` with `revoked_at IS NULL` and `last_seen`
+within `FLEET_DORMANCY_DAYS` (90) still has `pq_capable = 0`, and it gates **birth and
+migration alike** — one switch, one meaning. The per-roster rule of §3.3 is necessary but
+nearly vacuous on its own: a roster grows, and a hybrid group that must later admit a
+classic-only device has only two options, both bad. The dormancy window is what makes
+"the fleet has updated" a reachable condition rather than one hostage to a laptop in a
+drawer; the gate fails *toward availability*, so a check that cannot be evaluated keeps the
+group classic.
+**Still open, deliberately:** classic KP publication is *not* retired — pre-migration
+lineages and any client that has not yet updated still need it, and dropping it is a
+multi-release additive→drop dance (CLAUDE.md) that cannot begin until an app that stopped
+*needing* classic has full uptake. AES-256 and ML-DSA remain *distinct future tracks*
+(§2.3, §2.4), off this HNDL critical path.
 
 **Cross-cutting acceptance invariants (all phases):**
 - No migration is ever a rename/drop/tightening (CLAUDE.md).
@@ -895,13 +944,16 @@ the suite ships in the pinned `openmls_traits 0.5.0` and the libcrux provider (p
 building and running headless) implements it, so no upstream availability gate remains.
 The residual dependency is *pinning discipline* against code-point churn (§7.4) — pin the
 OpenMLS and `openmls_libcrux_crypto` versions, and track a future OpenMLS bump as a
-migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) a
-coordination point with the machine-checked-correctness program, which lands before this
-work in the program sequence: its M4 TLA+ spec (Gapless ∧ HeadMonotone per conversation,
-`docs/machine-checked-correctness-design.md`) and the transparency-log verifier both
-enforce per-conversation epoch monotonicity, and both must be extended from
-`(conversation, epoch)` to `(conversation, generation, epoch)` (§3.2, §3.4) before the
-P4 migration ships.
+migration. (2) DS write endpoints extended for suite-tagged KP claim/publish; (3) ~~a
+coordination point with the machine-checked-correctness program~~ — **resolved in P4**:
+its M4 TLA+ spec (`specs/tla/CommitLog.tla`,
+`docs/machine-checked-correctness-design.md`) and the transparency-log verifier
+(`verifiable-log-builder`'s `CommitLogInvariant`) both enforced per-conversation epoch
+monotonicity, and both were extended to `(conversation, generation, epoch)` (§3.2, §3.4)
+in the same PR that landed the migration. The spec gained the migration actions and
+`OpeningClosesTheHead`; the verifier's leaf encoding stayed byte-identical for
+generation 0, so every already-published Merkle root and cached inclusion proof
+remains valid.
 
 ---
 

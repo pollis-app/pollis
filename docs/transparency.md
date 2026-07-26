@@ -118,13 +118,28 @@ different verdicts for the same input.
 
 ### The commit-log invariant
 
-Beyond raw Merkle inclusion, the log enforces two rules per conversation when the
+Beyond raw Merkle inclusion, the log enforces three rules per conversation when the
 commits are replayed (the publicly-auditable mirror of the live DB's
-`UNIQUE(conversation_id, epoch)` constraint):
+`UNIQUE(conversation_id, generation, epoch)` constraint):
 
-- **No fork** — no two commits share the same `(conversation_id, epoch)`.
-- **No epoch regression / replay** — within a conversation, `epoch` strictly
-  increases in `seq` order.
+- **No fork** — no two commits share the same `(conversation_id, generation, epoch)`.
+- **No epoch regression / replay** — within a conversation, `(generation, epoch)`
+  strictly increases **lexicographically** in `seq` order.
+- **A lineage opens at epoch 0** — the first commit of a generation higher than any
+  seen before must be at epoch 0.
+
+The `generation` term is the post-quantum suite lineage (#454 P4). MLS binds the
+ciphersuite at group creation, so migrating a conversation to the hybrid suite is not
+a commit — it stands up a *successor* group whose epoch counter restarts at 0. A
+scalar epoch key would read every honest migration as a regression; ordering the pair
+lexicographically fixes that, because the successor's epoch 0 sorts above the retired
+lineage's last epoch on the higher generation. Rule three exists because rule two
+alone would then be too weak: a server could open generation N+1 at a fabricated
+mid-lineage epoch and make a fork look like a migration. Together they prove a
+conversation's lineages are contiguous, non-overlapping, and totally ordered.
+`generation` is omitted from the leaf encoding when it is 0, so every leaf written
+before P4 — and every conversation that has never migrated — is byte-identical to
+what it was.
 
 A fork or regression in the source data **aborts the build** rather than producing
 a bundle that hides it, and the verifiers re-check it independently on replay.

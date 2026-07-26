@@ -215,7 +215,7 @@ that class of bug.
 - `cert_issued_at` TEXT _(migration 13)_
 - `cert_identity_version` INTEGER _(migration 13)_
 - `mls_signature_pub` BLOB _(migration 13)_
-- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? Since #454 P2 the DS publish/replenish endpoints set it to 1 when a device publishes a hybrid KeyPackage pool — derived server-side from what landed in `mls_key_package`, never a client UPDATE.)_
+- `pq_capable` INTEGER NOT NULL DEFAULT 0 _(post-baseline 000010; can this device join a post-quantum hybrid group? Since #454 P2 the DS publish/replenish endpoints set it to 1 when a device publishes a hybrid KeyPackage pool — derived server-side from what landed in `mls_key_package`, never a client UPDATE. Since #454 P5 this column is read two ways: per-roster, by `roster_is_fully_pq_capable`; and **deployment-wide**, by `fleet_is_fully_pq_capable`, which requires that no row with `revoked_at IS NULL` and `last_seen` inside 90 days still has `pq_capable = 0`. Both must pass before any group is born hybrid or migrated — see `.codesight/wiki/mls.md`.)_
 
 ### mls_key_package _(migration 3 + 11 + post-baseline 000010)_
 - `ref_hash` TEXT PK _(KeyPackageRef hash, hex)_
@@ -235,6 +235,26 @@ that class of bug.
 - `created_at` TEXT NOT NULL DEFAULT now
 - `added_user_id` TEXT _(migration 14, NULL if no adds)_
 - `added_device_ids` TEXT _(migration 14, comma-separated)_
+- `generation` INTEGER NOT NULL DEFAULT 0 _(commit-log-DB migration 000004, #454 P4 — the **suite generation**)_
+- UNIQUE INDEX `idx_mls_commit_conv_gen_epoch` on `(conversation_id, generation, epoch)` _(migration 000004, replacing `idx_mls_commit_conv_epoch`)_
+
+**Suite generations (#454 P4).** MLS binds the ciphersuite into the group, so a
+classic conversation cannot be switched to the PQ-hybrid suite in place: the
+migration stands up a *successor* group for the same conversation and moves the
+roster into it by Welcome. A successor restarts at MLS epoch 0, so the monotone
+key widens from `(conversation_id, epoch)` to `(conversation_id, generation,
+epoch)`, ordered **lexicographically**. Every row that exists today is
+generation 0, and a pre-hybrid client — which sends no generation field — is a
+generation-0 writer, so nothing about its behaviour changes. The DS accept rule
+(`pollis_delivery::commit::submit_commit` / the pure `accepts`) has exactly two
+branches:
+- **Continue** the head lineage: `generation = MAX(generation)` and
+  `based_on_epoch` = that lineage's head. Byte-for-byte the pre-P4 rule.
+- **Open** the next lineage: `epoch = 0`, `generation = MAX(generation) + 1`, and
+  the submitter must name the head it closes in `closes_epoch`. That makes a
+  migration a compare-and-swap on the OLD head too, so a commit landing on the old
+  lineage between the migrator's read and its submit invalidates the migration
+  rather than being orphaned by it. A generation can never be opened twice.
 
 ### mls_welcome _(migration 3 + 11; now on the commit-log DB)_
 - `id` TEXT PK _(ULID)_
@@ -244,6 +264,7 @@ that class of bug.
 - `delivered` INTEGER NOT NULL DEFAULT 0
 - `created_at` TEXT NOT NULL DEFAULT now
 - `recipient_device_id` TEXT _(migration 11)_
+- `generation` INTEGER NOT NULL DEFAULT 0 _(migration 000004, #454 P4)_ — the lineage this Welcome **admits into**, so a recipient can tell "added to the group you're in" from "moved to the successor group" BEFORE applying the blob. It needs that before, not after: `max_past_epochs = 0` means it must finish draining its current lineage first.
 - UNIQUE INDEX `idx_mls_welcome_recipient` on `(conversation_id, recipient_id, recipient_device_id)` _(commit-log-DB migration 000002, #430 P2)_ — one live Welcome per recipient device. It is the conflict target the DS submit bundle's and `/v1/welcomes/resubmit`'s idempotent `ON CONFLICT … DO UPDATE` upserts key on, so a re-sent Welcome refreshes the blob and re-arms delivery (`delivered = 0`) instead of stacking a duplicate row. The migration collapses any pre-existing duplicates (keeping the newest per tuple) before adding the index.
 
 `mls_welcome`, `mls_commit_log`, and `mls_group_info` live on the **separate
@@ -258,6 +279,14 @@ desktop-release workflow's second `db-apply` step (`MIGRATIONS_DIR=…/migration
 - `group_info` BLOB NOT NULL _(TLS-serialized MlsMessage containing GroupInfo)_
 - `updated_at` TEXT NOT NULL DEFAULT now
 - `updated_by_device_id` TEXT NOT NULL
+- `generation` INTEGER NOT NULL DEFAULT 0 _(migration 000004, #454 P4)_
+
+Both writers (`writes::upsert_group_info` and the inline write in the DS submit
+bundle) guard the upsert on `(generation, epoch)` **lexicographically**, not on
+`epoch` alone. The generation term is load-bearing at a migration: the successor
+lineage's epoch 1 is numerically BELOW the retired lineage's last epoch, so an
+epoch-only guard would reject the successor's GroupInfo and strand every
+externally-joining device on the retired suite.
 
 ### mls_commit_since _(commit-log-DB migration 000003, #539)_
 Per-device commit-log catch-up high-water — the signal the **retention floor** is
@@ -268,6 +297,7 @@ the floor. Lives on the commit-log DB; the DS is the sole writer.
 - `user_id` TEXT NOT NULL _(FK users dropped — cross-DB, like the sibling log tables)_
 - `device_id` TEXT NOT NULL
 - `since_epoch` INTEGER NOT NULL _(the device's applied MLS epoch; it still needs commits `>= this`)_
+- `generation` INTEGER NOT NULL DEFAULT 0 _(migration 000004, #454 P4)_ — the reported high-water is the PAIR `(generation, since_epoch)`, upserted monotone **lexicographically**. A per-column `MAX` would get the migration backwards: moving to the successor lineage at epoch 0 is forward progress even though the epoch drops.
 - `updated_at` TEXT NOT NULL DEFAULT now
 - PRIMARY KEY `(conversation_id, user_id, device_id)`; INDEX `idx_mls_commit_since_conv` on `(conversation_id)`
 
@@ -289,6 +319,23 @@ Two tiers (`pollis_delivery::commit::prune_floor`, modelled in
   (`invariants::classify` → `GapRecover`), and external-joins at head — forfeiting
   only the pruned-gap messages (accepted loss #1). `may_rejoin` (I5) still blocks a
   removed/revoked device from that rejoin.
+
+Under suite generations the floor becomes a **pair** — a generation floor plus an
+epoch floor within the head generation (`closed_generation_floor` alongside
+`prune_floor`):
+- The epoch floor is the two-tier floor above, computed strictly WITHIN the head
+  generation over devices that have reported themselves in it. A device still on
+  an older lineage has no comparable epoch there, so it counts as *unreported* —
+  which conservatively disables Tier 1 rather than letting a stale lower epoch
+  masquerade as a bound.
+- The generation floor retires whole CLOSED lineages, which epoch pruning alone
+  would keep forever (all their epochs sit below their own head, never below the
+  head generation's floor). Tier 1: delete generations below the MIN reported
+  generation — every current member device has moved past them, so zero loss.
+  Tier 2: once the head generation has itself run `PRUNE_MAX_BEHIND_HEAD` epochs,
+  a device stranded on an older lineage is by construction at least that far
+  behind head, which is already the accepted-loss condition. The LIVE lineage is
+  never retired wholesale, whatever the reports say.
 
 Distinct from `conversation_watermark` (main DB), which tracks message-envelope
 FETCH progress, not applied MLS epoch — the two GC floors are computed

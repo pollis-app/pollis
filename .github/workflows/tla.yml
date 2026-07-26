@@ -42,13 +42,16 @@ jobs:
           java-version: '21'
 
       # Sound specs — every invariant must hold exhaustively over the small
-      # config: CommitLog (OnePerEpoch ∧ Gapless ∧ HeadMonotone ∧ NoForeignAdopt)
-      # and Delivery (NoLossForCurrentMember ∧ CursorMonotone ∧ AcceptedLossesOnly).
+      # config: CommitLog (OnePerEpoch ∧ Gapless ∧ LineageMonotone ∧
+      # OpeningClosesTheHead ∧ NoForeignAdopt) and Delivery
+      # (NoLossForCurrentMember ∧ CursorMonotone ∧ AcceptedLossesOnly).
       - name: TLC — CommitLog + Delivery (sound, all invariants pass)
         run: scripts/tlc-check.sh
 
-      # Teeth: each broken variant (CommitLog's dropped submit-guard forking an
-      # epoch; Delivery's fastest-member retention guard) MUST fail — a clean
-      # pass here means an invariant lost its teeth and is a regression.
+      # Teeth: each broken variant MUST fail — CommitLog's dropped submit-guard
+      # forking an epoch, CommitLog's dropped migration compare-and-swap
+      # orphaning a commit on the retired lineage (#454 P4), and Delivery's
+      # fastest-member retention guard. A clean pass here means an invariant
+      # lost its teeth and is a regression.
       - name: TLC — CommitLog + Delivery (broken variants must be refuted)
         run: scripts/tlc-check.sh --broken

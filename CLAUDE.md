@@ -34,6 +34,7 @@ Secrets: Doppler → GH Actions; locally `.env.development` (scripts source it a
 ## Rules
 
 - **NEVER commit on local `main`** — always create a `fix/*` or `feature/*` branch first. Absolute.
+- **One ticket = one PR. Absolute.** Phase labels (P1/P2/M1…) are a *commit* structure, never a PR structure — break a large effort into phases to reason about it, then land every phase in a single PR with a commit per phase. Never open a PR that leaves part of its ticket outstanding, never close a ticket that has follow-up work filed against it, and never pause an effort to "bookmark progress". Work discovered mid-ticket that belongs to the same feature ships in the same PR, whether or not it also gets its own issue for tracking. Sole exception: a later phase genuinely cannot be verified until an earlier one is deployed (e.g. a client release must reach the fleet before the server may rely on it) — split at exactly that boundary, state the reason in the PR, and open the follow-up PR immediately, not later. Partially-landed efforts get forgotten and are the main source of stale, half-true docs and dead code.
 - Always `pnpm`, never `npm`. Prefer editing existing files over creating new ones.
 - No Claude attribution in commits (no `Co-Authored-By`). Single-line commit messages and terse PR descriptions unless the scope is large.
 - Renderer imports `invoke`/`Channel`/window/dialog/etc. only from `frontend/src/bridge` — never `@tauri-apps/*` directly, never `fetch()` to a local server.

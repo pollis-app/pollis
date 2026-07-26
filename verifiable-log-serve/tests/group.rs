@@ -29,8 +29,13 @@ use verifiable_log_serve::{layout, DevServer, Manifest};
 const TS: u64 = 1_700_000_000_000;
 
 fn leaf(conv: &str, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
+    leaf_at(conv, 0, epoch, seq, commit)
+}
+
+fn leaf_at(conv: &str, generation: u64, epoch: u64, seq: i64, commit: &str) -> CommitLeaf {
     CommitLeaf {
         conversation_id: conv.to_string(),
+        generation,
         epoch,
         sender_id: format!("u-{conv}"),
         seq,
@@ -343,6 +348,76 @@ fn options_preflight_has_cors_headers() {
     assert_eq!(resp.status(), 204);
     assert_eq!(resp.header("Access-Control-Allow-Origin"), Some("*"));
     assert!(resp.header("Access-Control-Allow-Methods").is_some());
+
+    server.shutdown();
+}
+
+// ---------------------------------------------------------------------------
+// Suite generations (#454 P4). Kept in their own leaf set rather than folded
+// into `mixed_leaves` so the manifest/report assertions above keep pinning the
+// exact pre-P4 conversation list.
+// ---------------------------------------------------------------------------
+
+/// `conv-m` migrates to the hybrid suite (a successor lineage restarting at
+/// epoch 0); `conv-x` fakes one by bumping the generation mid-lineage.
+fn migrated_leaves() -> Vec<CommitLeaf> {
+    vec![
+        leaf_at("conv-m", 0, 0, 1, "m-g0-e0"),
+        leaf_at("conv-m", 0, 1, 2, "m-g0-e1"),
+        // The migration: epoch restarts under the successor generation.
+        leaf_at("conv-m", 1, 0, 3, "m-g1-e0"),
+        leaf_at("conv-m", 1, 1, 4, "m-g1-e1"),
+        // conv-x opens generation 1 at epoch 9 — a fork wearing a migration's
+        // clothes.
+        leaf_at("conv-x", 0, 0, 5, "x-g0-e0"),
+        leaf_at("conv-x", 1, 9, 6, "x-g1-e9"),
+    ]
+}
+
+/// The user-visible half of the #454 P4 acceptance criterion: after a real suite
+/// migration, "verify this conversation" must still say **valid**. A verifier
+/// that reported every migrated group as tampered would be worse than no
+/// verifier — it trains people to ignore it.
+#[test]
+fn a_migrated_group_still_verifies() {
+    let dir = tempfile::tempdir().unwrap();
+    build_tree(dir.path(), &migrated_leaves());
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+
+    let (status, _, report) = http_group(&server.base_url(), "conv-m");
+    assert_eq!(status, 200);
+    assert!(report.found);
+    assert!(
+        report.chain_valid,
+        "a migrated group must verify: {:?}",
+        report.violations
+    );
+    // The report exposes the lineage, so a reader can see *why* the epoch
+    // counter restarts instead of concluding the log lost commits.
+    let lineage: Vec<(u64, u64)> =
+        report.commits.iter().map(|c| (c.generation, c.epoch)).collect();
+    assert_eq!(lineage, vec![(0, 0), (0, 1), (1, 0), (1, 1)]);
+    assert!(report.commits.iter().all(|c| c.included));
+
+    server.shutdown();
+}
+
+/// …and the widened key still has teeth: a generation bump is not a licence to
+/// pick an arbitrary epoch.
+#[test]
+fn a_forged_migration_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    build_tree(dir.path(), &migrated_leaves());
+    let server = DevServer::spawn(dir.path().to_path_buf(), 0).unwrap();
+
+    let (_, _, report) = http_group(&server.base_url(), "conv-x");
+    assert!(report.found);
+    assert!(!report.chain_valid, "a forged migration must fail");
+    assert!(
+        report.violations.iter().any(|v| v.contains("must start at epoch 0")),
+        "expected a lineage-opening violation, got: {:?}",
+        report.violations
+    );
 
     server.shutdown();
 }

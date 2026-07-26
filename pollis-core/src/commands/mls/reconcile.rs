@@ -14,8 +14,10 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 
 use crate::state::AppState;
 
+use super::generation::mls_group_id;
 use super::provider::{
-    parse_credential_device_id, parse_credential_user_id, PollisProvider, CS_CLASSIC,
+    load_stored_group, parse_credential_device_id, parse_credential_user_id, store_only,
+    with_lineage_provider, with_suite_provider, MlsProvider, CS_HYBRID,
     SIGNATURE_SCHEME,
 };
 
@@ -38,6 +40,7 @@ enum SubmitOutcome {
 pub(super) async fn our_commit_is_canonical(
     state: &Arc<AppState>,
     conversation_id: &str,
+    generation: i64,
     epoch: i64,
     our_commit: &[u8],
 ) -> bool {
@@ -46,7 +49,7 @@ pub(super) async fn our_commit_is_canonical(
     // adopts IFF the log holds OUR exact bytes; a missing row / read failure →
     // `None` → Rollback → `false` (fall back to the converge path), byte-for-byte
     // the original behavior.
-    let stored = fetch_commit_at_epoch(state, conversation_id, epoch).await;
+    let stored = fetch_commit_at_epoch(state, conversation_id, generation, epoch).await;
     matches!(
         crate::commands::mls::invariants::resolve(
             crate::commands::mls::invariants::SubmitOutcome::LostRace,
@@ -64,14 +67,16 @@ pub(super) async fn our_commit_is_canonical(
 async fn fetch_commit_at_epoch(
     state: &Arc<AppState>,
     conversation_id: &str,
+    generation: i64,
     epoch: i64,
 ) -> Option<Vec<u8>> {
     // Read-only commit-log lookup → log_db (falls back to remote_db pre-cutover).
     let conn = state.log_db.conn().await.ok()?;
     let mut rows = conn
         .query(
-            "SELECT commit_data FROM mls_commit_log WHERE conversation_id = ?1 AND epoch = ?2",
-            libsql::params![conversation_id.to_string(), epoch],
+            "SELECT commit_data FROM mls_commit_log \
+             WHERE conversation_id = ?1 AND generation = ?2 AND epoch = ?3",
+            libsql::params![conversation_id.to_string(), generation, epoch],
         )
         .await
         .ok()?;
@@ -89,6 +94,7 @@ async fn fetch_commit_at_epoch(
 async fn finalize_won_commit(
     state: &Arc<AppState>,
     conversation_id: &str,
+    generation: i64,
 ) -> crate::error::Result<()> {
     // Welcomes + the resulting-epoch GroupInfo were already written atomically
     // with the commit by `submit_commit` (Slice 1), so finalizing a won commit
@@ -96,30 +102,179 @@ async fn finalize_won_commit(
     // Scope the !Send provider/group so neither crosses an await.
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        let mut group = MlsGroup::load(provider.storage(), &group_id)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load for merge: {e}")))?
-            .ok_or_else(|| {
-                crate::error::Error::Other(anyhow::anyhow!("group missing at merge time"))
-            })?;
-        group
-            .merge_pending_commit(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
+        with_lineage_provider!(db.conn(), conversation_id, generation, |provider| {
+            merge_pending_in_suite(&provider, conversation_id, generation)
+        })?;
     }
     Ok(())
 }
 
+/// Merge the still-staged pending commit for `conversation_id`, advancing the
+/// local epoch. Suite-generic half of [`finalize_won_commit`].
+fn merge_pending_in_suite<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    generation: i64,
+) -> crate::error::Result<()>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let group_id = mls_group_id(conversation_id, generation);
+    let mut group = MlsGroup::load(provider.storage(), &group_id)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load for merge: {e}")))?
+        .ok_or_else(|| {
+            crate::error::Error::Other(anyhow::anyhow!("group missing at merge time"))
+        })?;
+    group
+        .merge_pending_commit(provider)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("reconcile merge: {e}")))?;
+    Ok(())
+}
+
+/// What happened to a commit we staged locally and offered to the log.
+pub(super) enum PublishOutcome {
+    /// We own `epoch_before`; the pending commit has been merged locally.
+    Won,
+    /// Another member claimed `epoch_before` first. Nothing was written and our
+    /// pending commit has been rolled back — the caller must converge.
+    LostRace,
+}
+
+/// Offer a locally-staged commit to the canonical log, resolve the outcome, and
+/// leave local state consistent either way.
+///
+/// The single publish path for every commit Pollis produces — roster reconcile
+/// and self-update alike — because the CAS resolution here is subtle enough
+/// that a second copy would drift:
+///
+/// - `Committed` → we own the epoch.
+/// - `LostRace` or a transport error → **ambiguous**. A network error may mean
+///   the commit LANDED and only the response was lost, and a stale `LostRace`
+///   can be a retry of our OWN already-accepted commit. The canonical log is the
+///   arbiter ([`our_commit_is_canonical`], whose decision core is Kani-proved):
+///   if our exact bytes sit at this epoch we WON and must adopt rather than roll
+///   back and wedge (issue #411).
+///
+/// On a win the pending commit is merged, advancing the local epoch. On a loss
+/// or a genuine failure it is cleared, so a later pass recomputes from scratch
+/// and the local group never sits ahead of the log. The caller owns convergence
+/// after a `LostRace` (it, not this function, holds the MLS lock that the
+/// catch-up needs to re-acquire).
+///
+/// `what` names the caller in logs ("reconcile", "self-update").
+///
+/// `generation` is the suite lineage the commit belongs to (#454 P4), and
+/// `closes_epoch` is set only by a migration opening the next one. Both are
+/// carried through every step of the resolution, because after a migration the
+/// *same* conversation has two lineages and "is our commit canonical at epoch
+/// 3?" has a different answer in each.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn publish_staged_commit(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    generation: i64,
+    closes_epoch: Option<i64>,
+    actor_user_id: &str,
+    epoch_before: u64,
+    commit_bytes: &[u8],
+    group_info_bytes: Option<&[u8]>,
+    added_uid: Option<&str>,
+    added_dids: Option<&str>,
+    welcomes: &[super::delivery::WelcomeOut],
+    what: &str,
+) -> crate::error::Result<PublishOutcome> {
+    let epoch = epoch_before as i64;
+
+    // Claim this epoch through the delivery seam. On a win the seam also writes
+    // the resulting-epoch GroupInfo + the added members' Welcomes — atomically
+    // with the commit, so no Welcome can ever point at a doomed branch.
+    let remote_result: crate::error::Result<SubmitOutcome> = async {
+        match super::delivery::submit_commit(
+            state,
+            conversation_id,
+            generation,
+            epoch,
+            closes_epoch,
+            actor_user_id,
+            commit_bytes,
+            added_uid,
+            added_dids,
+            group_info_bytes,
+            welcomes,
+        )
+        .await?
+        {
+            super::delivery::SubmitResult::LostRace => Ok(SubmitOutcome::LostRace),
+            super::delivery::SubmitResult::Committed => Ok(SubmitOutcome::Committed),
+        }
+    }
+    .await;
+
+    enum Resolution {
+        Won,
+        LostRace,
+        Failed(crate::error::Error),
+    }
+    let resolution = match remote_result {
+        Ok(SubmitOutcome::Committed) => Resolution::Won,
+        Ok(SubmitOutcome::LostRace) => {
+            if our_commit_is_canonical(state, conversation_id, generation, epoch, commit_bytes).await
+            {
+                eprintln!(
+                    "[mls] {what}: LostRace at epoch {epoch} for {conversation_id} but our commit is canonical — adopting (lost success-response)"
+                );
+                Resolution::Won
+            } else {
+                Resolution::LostRace
+            }
+        }
+        Err(e) => {
+            if our_commit_is_canonical(state, conversation_id, generation, epoch, commit_bytes).await
+            {
+                eprintln!(
+                    "[mls] {what}: submit errored but our commit is canonical at epoch {epoch} for {conversation_id} — adopting (lost response): {e}"
+                );
+                Resolution::Won
+            } else {
+                Resolution::Failed(e)
+            }
+        }
+    };
+
+    match resolution {
+        Resolution::Won => {
+            finalize_won_commit(state, conversation_id, generation).await?;
+            Ok(PublishOutcome::Won)
+        }
+        Resolution::LostRace => {
+            eprintln!(
+                "[mls] {what}: lost epoch {epoch} race for {conversation_id} — rolling back local pending commit and converging on the winner"
+            );
+            clear_pending_best_effort(state, conversation_id, generation).await;
+            Ok(PublishOutcome::LostRace)
+        }
+        Resolution::Failed(e) => {
+            eprintln!(
+                "[mls] {what}: remote persist failed for {conversation_id}, clearing local pending commit: {e}"
+            );
+            clear_pending_best_effort(state, conversation_id, generation).await;
+            Err(e)
+        }
+    }
+}
+
 /// Roll back a staged-but-unconfirmed pending commit (best effort; logs on
 /// failure). Used only when our commit genuinely did not land.
-async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str) {
+async fn clear_pending_best_effort(state: &Arc<AppState>, conversation_id: &str, generation: i64) {
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        match MlsGroup::load(provider.storage(), &group_id) {
+        // Storage-only: dropping a staged commit touches no crypto, so this
+        // needs no suite dispatch.
+        let store = store_only(db.conn());
+        let group_id = mls_group_id(conversation_id, generation);
+        match MlsGroup::load(&store, &group_id) {
             Ok(Some(mut group)) => {
-                if let Err(e) = group.clear_pending_commit(provider.storage()) {
+                if let Err(e) = group.clear_pending_commit(&store) {
                     eprintln!("[mls] reconcile: clear_pending_commit failed: {e}");
                 }
             }
@@ -150,6 +305,14 @@ pub struct ReconcileOutcome {
     pub epoch_after: u64,
     /// True if the committer's own leaf was in `to_remove` and was skipped.
     pub skipped_self_removal: bool,
+    /// `(user_id, device_id)` pairs that belong on the roster but could not be
+    /// added because they have published no KeyPackage in the group's
+    /// ciphersuite — a classic-only client facing a hybrid group (#454 P3).
+    ///
+    /// Reported rather than silently dropped: these devices will not receive
+    /// messages until they run a client that publishes a hybrid pool, and
+    /// downgrading the group to admit them is never an option.
+    pub skipped_no_suite_kp: Vec<(String, String)>,
 }
 
 /// Raw bytes produced by a reconcile commit, needed for posting to Turso.
@@ -176,8 +339,8 @@ pub struct ReconcileCommitData {
 /// post to Turso. On the returned `ReconcileOutcome`, `epoch_after` reflects
 /// the epoch the commit WILL produce when merged (i.e. `epoch_before + 1`
 /// when a commit is staged, equal to `epoch_before` on no-op).
-pub fn reconcile_group_mls_core_staged(
-    provider: &PollisProvider<'_>,
+pub fn reconcile_group_mls_core_staged<C>(
+    provider: &MlsProvider<'_, C>,
     signer: &SignatureKeyPair,
     group: &mut MlsGroup,
     roster_user_ids: &std::collections::HashSet<String>,
@@ -185,7 +348,10 @@ pub fn reconcile_group_mls_core_staged(
     actor_user_id: &str,
     actor_device_id: &str,
     valid_devices: Option<&std::collections::HashSet<(String, String)>>,
-) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
+) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     use std::collections::{HashMap, HashSet};
 
     let epoch_before = group.epoch().as_u64();
@@ -343,6 +509,7 @@ pub fn reconcile_group_mls_core_staged(
             epoch_before,
             epoch_after,
             skipped_self_removal,
+            ..Default::default()
         },
         Some(ReconcileCommitData {
             commit_bytes,
@@ -363,8 +530,9 @@ pub fn reconcile_group_mls_core_staged(
 /// *before* the local merge, avoiding split-brain on remote failure. This
 /// thin wrapper exists for test helpers and any path that deliberately wants
 /// a local-only merge.
-pub fn reconcile_group_mls_core(
-    provider: &PollisProvider<'_>,
+#[allow(clippy::too_many_arguments)]
+pub fn reconcile_group_mls_core<C>(
+    provider: &MlsProvider<'_, C>,
     signer: &SignatureKeyPair,
     group: &mut MlsGroup,
     roster_user_ids: &std::collections::HashSet<String>,
@@ -372,7 +540,10 @@ pub fn reconcile_group_mls_core(
     actor_user_id: &str,
     actor_device_id: &str,
     valid_devices: Option<&std::collections::HashSet<(String, String)>>,
-) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)> {
+) -> crate::error::Result<(ReconcileOutcome, Option<ReconcileCommitData>)>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
     let (mut outcome, commit_data_opt) = reconcile_group_mls_core_staged(
         provider,
         signer,
@@ -396,6 +567,204 @@ pub fn reconcile_group_mls_core(
     Ok((outcome, commit_data_opt))
 }
 
+/// Every `(user_id, device_id)` still registered in `user_device` for `roster`.
+///
+/// The counterpart to [`desired_roster_user_ids`] one level down: the roster says
+/// which *users* belong, this says which of their *devices* still exist. Reconcile
+/// diffs the tree against it to drop leaves whose device row was revoked while the
+/// user remained a member, and migration (#454 P4) uses the same set as the list
+/// of devices the successor lineage must be able to admit — the two must never
+/// disagree about who belongs, which is why there is one query, not two.
+///
+/// Ids are sanitised into the `IN` clause because libsql has no array binding.
+pub(super) async fn registered_devices(
+    conn: &libsql::Connection,
+    roster: &std::collections::HashSet<String>,
+) -> crate::error::Result<std::collections::HashSet<(String, String)>> {
+    let mut devices = std::collections::HashSet::new();
+    let safe_ids: Vec<String> = roster
+        .iter()
+        .map(|id| {
+            id.chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+                .collect::<String>()
+        })
+        .collect();
+    if safe_ids.is_empty() {
+        return Ok(devices);
+    }
+    let in_clause = safe_ids
+        .iter()
+        .map(|id| format!("'{id}'"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let query = format!("SELECT user_id, device_id FROM user_device WHERE user_id IN ({in_clause})");
+    let mut rows = conn.query(&query, ()).await?;
+    while let Some(row) = rows.next().await? {
+        devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
+    }
+    Ok(devices)
+}
+
+/// The set of user_ids that *should* have a leaf in `conversation_id`'s tree:
+/// `group_member` plus pending `group_invite` rows, falling back to
+/// `dm_channel_member` for DMs.
+///
+/// Pending invitees are included so their devices get a Welcome at invite time —
+/// the acceptor can join the MLS group without requiring any other member to be
+/// online simultaneously.
+///
+/// The single definition of "desired roster". `reconcile_group_mls_impl` diffs
+/// the tree against it and `suite_for_new_group` decides a new group's
+/// ciphersuite from it; the two must never disagree about who belongs.
+pub(super) async fn desired_roster_user_ids(
+    conn: &libsql::Connection,
+    conversation_id: &str,
+) -> crate::error::Result<std::collections::HashSet<String>> {
+    let mut roster_user_ids = std::collections::HashSet::new();
+    {
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM group_member WHERE group_id = ?1",
+                libsql::params![conversation_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            roster_user_ids.insert(row.get::<String>(0)?);
+        }
+    }
+    {
+        let mut rows = conn
+            .query(
+                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
+                libsql::params![conversation_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            roster_user_ids.insert(row.get::<String>(0)?);
+        }
+    }
+    if roster_user_ids.is_empty() {
+        let mut rows = conn
+            .query(
+                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
+                libsql::params![conversation_id.to_string()],
+            )
+            .await?;
+        while let Some(row) = rows.next().await? {
+            roster_user_ids.insert(row.get::<String>(0)?);
+        }
+    }
+    Ok(roster_user_ids)
+}
+
+/// Load the group, read its signer, validate the claimed KeyPackages and stage
+/// the reconcile commit — the whole crypto-bearing half of
+/// [`reconcile_group_mls_impl`], generic over the crypto backend so the caller
+/// can dispatch on the group's ciphersuite.
+///
+/// `Ok(None)` means the local group is gone; the caller reports a no-op.
+///
+/// `generation` names which lineage's group to stage against. Migration (#454
+/// P4) reuses this against the freshly-created successor at generation `N + 1`,
+/// which is why it is `pub(super)`: standing up a successor is exactly "add the
+/// whole roster to an empty group", and a second copy of the KeyPackage
+/// validation — including the cross-suite refusal below — would drift.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn stage_reconcile_commit<C>(
+    provider: &MlsProvider<'_, C>,
+    conversation_id: &str,
+    generation: i64,
+    kp_tuples: &[(String, String, Vec<u8>)],
+    roster_user_ids: &std::collections::HashSet<String>,
+    actor_user_id: &str,
+    actor_device_id: &str,
+    valid_devices: &std::collections::HashSet<(String, String)>,
+) -> crate::error::Result<Option<(ReconcileOutcome, Option<ReconcileCommitData>)>>
+where
+    C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    let group_id = mls_group_id(conversation_id, generation);
+    let group_opt = MlsGroup::load(provider.storage(), &group_id)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?;
+    let mut group = match group_opt {
+        Some(g) => g,
+        None => {
+            return Ok(None);
+        }
+    };
+
+    // Read signer.
+    let sig_pub_bytes = group
+        .own_leaf_node()
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
+        .signature_key()
+        .as_slice()
+        .to_vec();
+    let signer = SignatureKeyPair::read(provider.storage(), &sig_pub_bytes, SIGNATURE_SCHEME)
+        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
+
+    // Resolve pending commit.
+    group
+        .merge_pending_commit(provider)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
+
+    // Validate KPs.
+    let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
+    for (uid, did, kp_raw) in kp_tuples {
+        let mut reader: &[u8] = kp_raw;
+        let kp_in = match KeyPackageIn::tls_deserialize(&mut reader) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("[mls] reconcile: kp deserialize failed for {uid}:{did}: {e}");
+                continue;
+            }
+        };
+        let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
+            Ok(k) => k,
+            Err(e) => {
+                eprintln!("[mls] reconcile: kp validate failed for {uid}:{did}: {e}");
+                continue;
+            }
+        };
+        // Claiming is suite-scoped, but the DS is untrusted: re-check that the
+        // KeyPackage it handed us really is in the group's suite before it can
+        // reach `propose_adds`. A cross-suite KP would otherwise be a
+        // server-driven downgrade of an entire group.
+        if kp.ciphersuite() != group.ciphersuite() {
+            eprintln!(
+                "[mls] reconcile: kp suite {:?} != group suite {:?} for {uid}:{did} — refusing",
+                kp.ciphersuite(),
+                group.ciphersuite(),
+            );
+            continue;
+        }
+        let cred_user = parse_credential_user_id(kp.leaf_node().credential());
+        if cred_user != *uid {
+            eprintln!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
+            continue;
+        }
+        available_kps.push((uid.clone(), did.clone(), kp));
+    }
+
+    // Stage the commit: builds the commit locally and writes it as a
+    // PENDING commit on the group (persisted to MLS storage) WITHOUT
+    // advancing the local epoch. The merge is deferred until after the
+    // remote INSERTs succeed so a remote failure cannot leave the local
+    // group ahead of the remote commit log.
+    reconcile_group_mls_core_staged(
+        provider,
+        &signer,
+        &mut group,
+        roster_user_ids,
+        &available_kps,
+        actor_user_id,
+        actor_device_id,
+        Some(valid_devices),
+    )
+    .map(Some)
+}
+
 /// Async entry point: reads desired state from Turso, loads local MLS group,
 /// calls `reconcile_group_mls_core`, posts commit + welcome rows.
 pub async fn reconcile_group_mls_impl(
@@ -417,44 +786,7 @@ pub async fn reconcile_group_mls_impl(
     let conn = state.remote_db.conn().await?;
 
     // 1. Determine roster: group_member + pending invitees, or dm_channel_member.
-    //    Pending invitees are included so their devices get a Welcome at invite
-    //    time — the acceptor can join the MLS group without requiring any other
-    //    member to be online simultaneously.
-    let mut roster_user_ids = std::collections::HashSet::new();
-    {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM group_member WHERE group_id = ?1",
-                libsql::params![conversation_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
-    // Include pending invitees so they receive a Welcome pre-acceptance.
-    {
-        let mut rows = conn
-            .query(
-                "SELECT invitee_id FROM group_invite WHERE group_id = ?1",
-                libsql::params![conversation_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
-    if roster_user_ids.is_empty() {
-        let mut rows = conn
-            .query(
-                "SELECT user_id FROM dm_channel_member WHERE dm_channel_id = ?1",
-                libsql::params![conversation_id.clone()],
-            )
-            .await?;
-        while let Some(row) = rows.next().await? {
-            roster_user_ids.insert(row.get::<String>(0)?);
-        }
-    }
+    let roster_user_ids = desired_roster_user_ids(&conn, &conversation_id).await?;
 
     // 1b. TOFU-pin every roster member's account_id_pub before we use
     //     server-reported keys to add devices to the MLS tree. Without
@@ -510,24 +842,7 @@ pub async fn reconcile_group_mls_impl(
     //     `user_device` for the current roster. Used by reconcile to drop
     //     leaves whose device row was revoked even though the user is still
     //     a roster member (single-device revoke flow).
-    let mut valid_devices: std::collections::HashSet<(String, String)> =
-        std::collections::HashSet::new();
-    {
-        let safe_ids: Vec<String> = roster_user_ids
-            .iter()
-            .map(|id| id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>())
-            .collect();
-        if !safe_ids.is_empty() {
-            let in_clause = safe_ids.iter().map(|id| format!("'{id}'")).collect::<Vec<_>>().join(",");
-            let query = format!(
-                "SELECT user_id, device_id FROM user_device WHERE user_id IN ({in_clause})"
-            );
-            let mut rows = conn.query(&query, ()).await?;
-            while let Some(row) = rows.next().await? {
-                valid_devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
-            }
-        }
-    }
+    let valid_devices = registered_devices(&conn, &roster_user_ids).await?;
 
     let actor_device_id = state
         .device_id
@@ -539,7 +854,20 @@ pub async fn reconcile_group_mls_impl(
     // 3. Peek at the current tree to learn which devices are already members.
     //    This lets us skip claiming KPs for devices that don't need to be added,
     //    avoiding unnecessary KP exhaustion on repeated reconciles.
-    let already_in_tree: std::collections::HashSet<(String, String)> = {
+    //
+    //    The same peek yields the group's ciphersuite, which decides the suite
+    //    of every KeyPackage claimed below. Reading the tree is storage-only —
+    //    no crypto backend, hence no suite dispatch, is needed to learn it.
+    //
+    //    It also pins the suite GENERATION for the rest of this pass. Migration
+    //    takes the same per-conversation MLS lock we hold here, so the lineage
+    //    cannot move underneath us: every KeyPackage claimed, every commit
+    //    staged, and the epoch claim itself all belong to this one generation.
+    let (already_in_tree, group_suite, generation): (
+        std::collections::HashSet<(String, String)>,
+        Ciphersuite,
+        i64,
+    ) = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
             Some(db) => db,
@@ -547,18 +875,21 @@ pub async fn reconcile_group_mls_impl(
                 return Ok(ReconcileOutcome::default());
             }
         };
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        match MlsGroup::load(provider.storage(), &group_id) {
-            Ok(Some(group)) => group
-                .members()
-                .map(|m| {
-                    let uid = parse_credential_user_id(&m.credential);
-                    let did = parse_credential_device_id(&m.credential).unwrap_or_default();
-                    (uid, did)
-                })
-                .collect(),
-            _ => {
+        let generation = super::generation::local_generation(db.conn(), &conversation_id);
+        match load_stored_group(db.conn(), &conversation_id) {
+            Some(group) => {
+                let suite = group.ciphersuite();
+                let members = group
+                    .members()
+                    .map(|m| {
+                        let uid = parse_credential_user_id(&m.credential);
+                        let did = parse_credential_device_id(&m.credential).unwrap_or_default();
+                        (uid, did)
+                    })
+                    .collect();
+                (members, suite, generation)
+            }
+            None => {
                 return Ok(ReconcileOutcome::default());
             }
         }
@@ -576,18 +907,32 @@ pub async fn reconcile_group_mls_impl(
     // Turso token a direct `UPDATE … RETURNING` would fail — it routes through the
     // Delivery Service. A target device with no unclaimed package is simply
     // skipped (the DS replies 404 → `Ok(None)`).
+    //
+    // The claim is scoped to the GROUP's ciphersuite, never a fixed one. This is
+    // what makes "a hybrid group can never contain a member without a hybrid
+    // KeyPackage" hold: a device that has published no KP in the group's suite
+    // has nothing to claim, so it is skipped rather than downgraded in.
     let mut kp_tuples: Vec<(String, String, Vec<u8>)> = Vec::new();
+    let mut skipped_no_suite_kp: Vec<(String, String)> = Vec::new();
     for (uid, did) in &devices_to_claim {
         let claimed: Option<Vec<u8>> =
-            crate::commands::mls::ds_claim_key_package(state, uid, Some(did), CS_CLASSIC)
+            crate::commands::mls::ds_claim_key_package(state, uid, Some(did), group_suite)
                 .await?;
-        if let Some(kp) = claimed {
-            kp_tuples.push((uid.clone(), did.clone(), kp));
+        match claimed {
+            Some(kp) => kp_tuples.push((uid.clone(), did.clone(), kp)),
+            None => {
+                eprintln!(
+                    "[mls] reconcile: no {} KeyPackage for {uid}:{did} — skipping (never downgrading)",
+                    if group_suite == CS_HYBRID { "hybrid" } else { "classic" },
+                );
+                skipped_no_suite_kp.push((uid.clone(), did.clone()));
+            }
         }
     }
 
-    // 5. Validate KPs and call the sync core under the local_db lock.
-    let (outcome, commit_data_opt) = {
+    // 5. Validate KPs and call the sync core under the local_db lock, in the
+    //    group's own suite.
+    let staged = {
         let guard = state.local_db.lock().await;
         let db = match guard.as_ref() {
             Some(db) => db,
@@ -595,80 +940,26 @@ pub async fn reconcile_group_mls_impl(
                 return Ok(ReconcileOutcome::default());
             }
         };
-        let provider = PollisProvider::new(db.conn());
-
-        // Load group — early return if missing.
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        let group_opt = MlsGroup::load(provider.storage(), &group_id)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("mls load: {e}")))?;
-        let mut group = match group_opt {
-            Some(g) => g,
-            None => {
-                return Ok(ReconcileOutcome::default());
-            }
-        };
-
-        // Read signer.
-        let sig_pub_bytes = group
-            .own_leaf_node()
-            .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("no own leaf node")))?
-            .signature_key()
-            .as_slice()
-            .to_vec();
-        let signer = SignatureKeyPair::read(
-            provider.storage(),
-            &sig_pub_bytes,
-            SIGNATURE_SCHEME,
-        )
-        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
-
-        // Resolve pending commit.
-        group
-            .merge_pending_commit(&provider)
-            .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("merge pending: {e}")))?;
-
-        // Validate KPs.
-        let mut available_kps: Vec<(String, String, KeyPackage)> = Vec::new();
-        for (uid, did, kp_raw) in &kp_tuples {
-            let mut reader: &[u8] = kp_raw;
-            let kp_in = match KeyPackageIn::tls_deserialize(&mut reader) {
-                Ok(k) => k,
-                Err(e) => {
-                    eprintln!("[mls] reconcile: kp deserialize failed for {uid}:{did}: {e}");
-                    continue;
-                }
-            };
-            let kp = match kp_in.validate(provider.crypto(), ProtocolVersion::Mls10) {
-                Ok(k) => k,
-                Err(e) => {
-                    eprintln!("[mls] reconcile: kp validate failed for {uid}:{did}: {e}");
-                    continue;
-                }
-            };
-            let cred_user = parse_credential_user_id(kp.leaf_node().credential());
-            if cred_user != *uid {
-                eprintln!("[mls] reconcile: credential user '{cred_user}' != '{uid}' for device {did}");
-                continue;
-            }
-            available_kps.push((uid.clone(), did.clone(), kp));
-        }
-
-        // Stage the commit: builds the commit locally and writes it as a
-        // PENDING commit on the group (persisted to MLS storage) WITHOUT
-        // advancing the local epoch. The merge is deferred until after the
-        // remote INSERTs succeed so a remote failure cannot leave the local
-        // group ahead of the remote commit log.
-        reconcile_group_mls_core_staged(
-            &provider,
-            &signer,
-            &mut group,
-            &roster_user_ids,
-            &available_kps,
-            &actor_user_id,
-            &actor_device_id,
-            Some(&valid_devices),
-        )?
+        with_suite_provider!(db.conn(), group_suite, |provider| {
+            stage_reconcile_commit(
+                &provider,
+                &conversation_id,
+                generation,
+                &kp_tuples,
+                &roster_user_ids,
+                &actor_user_id,
+                &actor_device_id,
+                &valid_devices,
+            )
+        })?
     };
+    let (mut outcome, commit_data_opt) = match staged {
+        Some(v) => v,
+        None => {
+            return Ok(ReconcileOutcome::default());
+        }
+    };
+    outcome.skipped_no_suite_kp = skipped_no_suite_kp;
 
     // 5. Post commit + welcome to Turso FIRST, then merge locally.
     //
@@ -723,85 +1014,33 @@ pub async fn reconcile_group_mls_impl(
             None => Vec::new(),
         };
 
-        let remote_result: crate::error::Result<SubmitOutcome> = async {
-            // Claim this epoch through the delivery seam (Direct today, the
-            // Delivery Service once POLLIS_DELIVERY_URL is set). On a win, the
-            // seam also writes the resulting-epoch GroupInfo + the added
-            // members' Welcomes — atomically with the commit. LostRace →
-            // another member committed `epoch_before` first; report it (the
-            // caller rolls back the local pending commit) instead of forking —
-            // and nothing was written, so no Welcome points at a doomed branch.
-            match super::delivery::submit_commit(
-                state,
-                &conversation_id,
-                outcome.epoch_before as i64,
-                &actor_user_id,
-                &data.commit_bytes,
-                added_uid.as_deref(),
-                added_dids.as_deref(),
-                data.group_info_bytes.as_deref(),
-                &welcomes,
-            )
-            .await?
-            {
-                super::delivery::SubmitResult::LostRace => Ok(SubmitOutcome::LostRace),
-                super::delivery::SubmitResult::Committed => Ok(SubmitOutcome::Committed),
-            }
-        }
+        // Claim this epoch and resolve the (possibly ambiguous) outcome. On a
+        // win the pending commit is merged; on a loss or a genuine failure it is
+        // rolled back. See [`publish_staged_commit`].
+        let published = publish_staged_commit(
+            state,
+            &conversation_id,
+            generation,
+            None,
+            &actor_user_id,
+            outcome.epoch_before,
+            &data.commit_bytes,
+            data.group_info_bytes.as_deref(),
+            added_uid.as_deref(),
+            added_dids.as_deref(),
+            &welcomes,
+            "reconcile",
+        )
         .await;
 
-        // Decide commit-or-abort. The submit outcome can be ambiguous: a network
-        // error may mean the commit landed and only the RESPONSE was lost, and a
-        // `LostRace` can be a stale retry of our OWN already-accepted commit. The
-        // canonical log is the arbiter — if our exact commit is at this epoch we
-        // WON and must adopt it (merge + Welcomes + GroupInfo) rather than roll
-        // back and wedge (issue #411). Roll back only when it truly didn't land.
-        enum Resolution {
-            Won,
-            LostRace,
-            Failed(crate::error::Error),
-        }
-        let epoch = outcome.epoch_before as i64;
-        let resolution = match remote_result {
-            Ok(SubmitOutcome::Committed) => Resolution::Won,
-            Ok(SubmitOutcome::LostRace) => {
-                if our_commit_is_canonical(state, &conversation_id, epoch, &data.commit_bytes).await {
-                    eprintln!(
-                        "[mls] reconcile: LostRace at epoch {epoch} for {conversation_id} but our commit is canonical — adopting (lost success-response)"
-                    );
-                    Resolution::Won
-                } else {
-                    Resolution::LostRace
-                }
-            }
-            Err(e) => {
-                if our_commit_is_canonical(state, &conversation_id, epoch, &data.commit_bytes).await {
-                    eprintln!(
-                        "[mls] reconcile: submit errored but our commit is canonical at epoch {epoch} for {conversation_id} — adopting (lost response): {e}"
-                    );
-                    Resolution::Won
-                } else {
-                    Resolution::Failed(e)
-                }
-            }
-        };
-
-        match resolution {
-            // We own this epoch (confirmed, or discovered canonical after an
-            // ambiguous failure). Write Welcomes, merge to advance, republish
-            // GroupInfo — then fall through to roster banners / voice rotation.
-            Resolution::Won => {
-                finalize_won_commit(state, &conversation_id).await?;
-            }
+        match published {
+            // We own this epoch. Fall through to roster banners / voice rotation.
+            Ok(PublishOutcome::Won) => {}
             // Another member committed this epoch first; our staged commit is on
-            // a branch no one will adopt. Roll it back and converge on the
-            // winner. The pending invite / membership row persists, so a later
-            // reconcile re-applies our change at the new epoch.
-            Resolution::LostRace => {
-                eprintln!(
-                    "[mls] reconcile: lost epoch {epoch} race for {conversation_id} — rolling back local pending commit and converging on the winner"
-                );
-                clear_pending_best_effort(state, &conversation_id).await;
+            // a branch no one will adopt. It has been rolled back — converge on
+            // the winner. The pending invite / membership row persists, so a
+            // later reconcile re-applies our change at the new epoch.
+            Ok(PublishOutcome::LostRace) => {
                 // Converge on the winner through the INTERLEAVED ingesting
                 // catch-up rather than a bare commit-only replay. This is a
                 // recovery-seam ADVANCE path: applying the winner's commit (or
@@ -829,14 +1068,10 @@ pub async fn reconcile_group_mls_impl(
                 }
                 return Ok(ReconcileOutcome::default());
             }
-            // The commit genuinely did not land. Clear the staged pending commit
-            // so a later reconcile doesn't merge a commit the remote never saw,
-            // then surface the error.
-            Resolution::Failed(e) => {
-                eprintln!(
-                    "[mls] reconcile: remote persist failed for {conversation_id}, clearing local pending commit: {e}"
-                );
-                clear_pending_best_effort(state, &conversation_id).await;
+            // The commit genuinely did not land; the staged pending commit was
+            // already cleared so a later reconcile doesn't merge a commit the
+            // remote never saw. Surface the error.
+            Err(e) => {
                 return Err(e);
             }
         }

@@ -70,6 +70,34 @@ CREATE TABLE IF NOT EXISTS mls_kv (
     PRIMARY KEY (scope, key)
 );
 
+-- When this device last rotated its OWN leaf in a group (issue #666).
+-- openmls keeps `unmerged_leaves` crate-private, so a device cannot ask the
+-- ratchet tree "is my leaf still unmerged?"; it tracks its own rotations here
+-- instead. Absence of a row means "never rotated" — which is exactly the
+-- post-join state whose unmerged leaf inflates every other member's commits.
+CREATE TABLE IF NOT EXISTS mls_self_update (
+    conversation_id TEXT PRIMARY KEY,
+    last_epoch      INTEGER NOT NULL,
+    last_at         TEXT NOT NULL
+);
+
+-- Which suite GENERATION of a conversation's MLS group this device is on
+-- (#454 P4). MLS binds the ciphersuite into the group, so upgrading a live
+-- conversation to the post-quantum hybrid suite means standing up a SUCCESSOR
+-- group and moving the roster into it — a second lineage, restarting at epoch 0.
+--
+-- Absence of a row means generation 0, which is every group that exists today,
+-- so this table is inert until a conversation actually migrates. The value is
+-- the lineage this device currently READS AND WRITES; a successor group that has
+-- been created locally but not yet adopted (its predecessor is still being
+-- drained) is stored under its own openmls GroupId and is invisible until this
+-- row advances. See `commands/mls/generation.rs`.
+CREATE TABLE IF NOT EXISTS mls_generation (
+    conversation_id TEXT PRIMARY KEY,
+    generation      INTEGER NOT NULL,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS user_cache (
     id         TEXT PRIMARY KEY,
     username   TEXT NOT NULL,

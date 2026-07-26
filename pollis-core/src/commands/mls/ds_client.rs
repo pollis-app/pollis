@@ -123,6 +123,8 @@ pub async fn ds_post(
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("not signed in for DS request signing")))?;
+        // Device-identity only: Ed25519 request signing is the same in both
+        // suites, so this is deliberately not suite-dispatched.
         let provider = PollisProvider::new(db.conn());
         let (signer, _pub_bytes) = load_or_create_device_signer(&provider, &user_id, &device_id)?;
         let sig = signer
@@ -370,11 +372,16 @@ pub async fn ds_post_signed_or_session_ok(
 }
 
 /// Report this device's applied MLS `since` epoch for a conversation to the DS
-/// commits endpoint (`GET /v1/commits/{conv}?since=&user_id=&device_id=`), the
-/// signal the server-side retention floor is the MIN of across current members
+/// commits endpoint (`GET /v1/commits/{conv}?generation=&since=&user_id=&device_id=`),
+/// the signal the server-side retention floor is the MIN of across current members
 /// (#539, I4 Tier 1). `since` is the client's current local epoch — it still
 /// needs every commit `>= since`, so a truthful report can only ever PROTECT its
 /// own history from pruning.
+///
+/// `generation` scopes that position to one suite lineage (#454 P4). The DS keeps
+/// the pair monotone lexicographically, which is what stops a migrated device's
+/// report — epoch 0 of generation `N + 1`, numerically *below* the retired
+/// lineage's last epoch — from reading as a regression and being dropped.
 ///
 /// Reads are open on the DS, so this is an unauthenticated GET. Fully best-effort
 /// and EVENT-DRIVEN (fires once per catch-up, never polls): any failure — no DS
@@ -385,6 +392,7 @@ pub async fn ds_report_commit_since(
     state: &Arc<AppState>,
     conversation_id: &str,
     user_id: &str,
+    generation: i64,
     since: i64,
 ) {
     let base = match state.config.pollis_delivery_url.as_deref() {
@@ -400,6 +408,7 @@ pub async fn ds_report_commit_since(
     let _ = crate::net::overlay::http_client(overlay.as_deref())
         .get(&url)
         .query(&[
+            ("generation", generation.to_string()),
             ("since", since.to_string()),
             ("user_id", user_id.to_string()),
             ("device_id", device_id),

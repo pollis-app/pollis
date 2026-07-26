@@ -28,11 +28,16 @@ The canned-answer and corpus-chunk embeddings are precomputed with the **same** 
 import { pipeline, env } from '@huggingface/transformers';
 env.allowRemoteModels = false;
 env.localModelPath = 'website/vendor/models/';
-const ext = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
+// transformers.js 4.x: `dtype: 'q8'` — the v2-era `{ quantized: true }` is gone.
+const ext = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { dtype: 'q8' });
 const emb = async (t) => (await ext(t, { pooling: 'mean', normalize: true })).data; // Float32
 // For each answer: emb(question + ' ' + answer); for each chunk: emb(title + ' ' + text)
 // Quantize each to int8 (round(x*127)) and base64-encode into assistant-vectors.json {dim:384,...}.
 ```
 
-Regenerate whenever `assistant-answers.json` or `assistant-corpus.json` change, or the answers/excerpts
-will be retrieved against stale vectors.
+Regenerate **every** vector in one pass whenever `assistant-answers.json` or `assistant-corpus.json`
+change, or the answers/excerpts will be retrieved against stale vectors. Regenerate all of them, not
+just the entries you edited: the Node (onnxruntime-node) and browser (onnxruntime-web) int8 backends
+agree only to about cos ≈ 0.99 on identical text, which is harmless when every stored vector comes
+from the same pass — the query is compared against all of them equally — and is not harmless if one
+pass's vectors are mixed with another's.

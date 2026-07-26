@@ -17,6 +17,32 @@
 //!     service is the only writer and never issues such statements. **Append-only.**
 //!
 //! These invariants are properties of *this code*, not of DB triggers.
+//!
+//! ## Suite generations (issue #454 P4)
+//!
+//! MLS binds the ciphersuite into the group, so migrating a conversation from the
+//! classic suite to the PQ-hybrid one cannot be done in place: a *successor*
+//! group is stood up for the same conversation and the roster is moved into it by
+//! Welcome. A successor starts at MLS epoch 0, which would read as an epoch reset
+//! under the rule above.
+//!
+//! It is not a reset — it is a **lineage**. The monotone key widens from
+//! `(conversation_id, epoch)` to `(conversation_id, generation, epoch)`, ordered
+//! lexicographically, and everything above holds one key wider:
+//!   - **Within** a generation the rule is byte-for-byte the head+1 rule above.
+//!   - Epoch 0 is accepted **only** as the opening commit of generation `N + 1`,
+//!     and only when the submitter also names the **closed head of generation
+//!     `N`** (`closes_epoch`) and that name is still correct. So a migration is a
+//!     compare-and-swap on the OLD lineage's head as well as a claim on the new
+//!     one: a commit that lands in generation `N` between the migrator's read and
+//!     its submit invalidates the migration rather than being orphaned by it.
+//!   - A generation can never be opened twice — the second opener sees
+//!     `MAX(generation)` already advanced, and the unique index is the backstop.
+//!
+//! Old rows carry `generation = 0` by default, so every conversation that exists
+//! today is generation 0 and nothing about its history is reinterpreted. A
+//! pre-hybrid client that sends no generation field is likewise a generation-0
+//! writer.
 
 use std::collections::HashMap;
 
@@ -29,8 +55,21 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Deserialize)]
 pub struct SubmitBody {
     pub conversation_id: String,
+    /// The suite generation this commit belongs to. Absent (pre-hybrid client) →
+    /// `0`, which is exactly the lineage such a client is in.
+    #[serde(default)]
+    pub generation: i64,
     /// The epoch this commit was built from = the head the client believes it's at.
     pub based_on_epoch: i64,
+    /// Migration only (`generation = N + 1`, `based_on_epoch = 0`): the head the
+    /// submitter observed on generation `N`, which this migration CLOSES. Making
+    /// the migrator name it turns "open the next lineage" into a compare-and-swap
+    /// on the old one, so a commit that lands in generation `N` after the
+    /// migrator read the roster invalidates the migration instead of being
+    /// silently orphaned by it. Ignored (and must be absent) for a same-generation
+    /// commit.
+    #[serde(default)]
+    pub closes_epoch: Option<i64>,
     pub sender_id: String,
     /// TLS-serialized MLS Commit, base64.
     pub commit: String,
@@ -59,15 +98,28 @@ pub struct WelcomeBody {
 #[derive(Debug, Serialize)]
 #[serde(tag = "status", rename_all = "lowercase")]
 pub enum SubmitResponse {
-    /// The commit won its epoch. The group head is now `epoch + 1`.
-    Accepted { epoch: i64 },
+    /// The commit won its epoch. The lineage head is now `epoch + 1`.
+    Accepted { generation: i64, epoch: i64 },
     /// The client wasn't at the head. Here's the current head and the commits
     /// it's missing so it can re-base and resubmit — no fork possible.
-    Rejected { head: i64, missing: Vec<CommitWire> },
+    ///
+    /// `head` and `missing` are scoped to the SUBMITTER's generation, so a
+    /// pre-hybrid client sees byte-for-byte the response it sees today (its
+    /// generation is 0 and `head_generation` is a field it ignores).
+    /// `head_generation` is the extra bit a hybrid-aware client needs: if it
+    /// exceeds the submitter's generation, the conversation has migrated and the
+    /// client must drain its lineage and pick up the Welcome rather than keep
+    /// re-basing.
+    Rejected {
+        head: i64,
+        head_generation: i64,
+        missing: Vec<CommitWire>,
+    },
 }
 
 #[derive(Debug, Serialize)]
 pub struct CommitWire {
+    pub generation: i64,
     pub epoch: i64,
     pub seq: i64,
     pub sender_id: String,
@@ -80,7 +132,13 @@ pub struct CommitWire {
 
 #[derive(Debug, Serialize)]
 pub struct CommitsResponse {
+    /// Head epoch WITHIN `generation` — what a pre-hybrid client already reads.
     pub head: i64,
+    /// The generation the returned commits belong to (the one that was asked for).
+    pub generation: i64,
+    /// The conversation's newest lineage. `head_generation > generation` is how a
+    /// client learns it has been migrated off the suite it is still running.
+    pub head_generation: i64,
     pub commits: Vec<CommitWire>,
 }
 
@@ -113,26 +171,71 @@ pub fn head_epoch_of(max_epoch: Option<u64>) -> u64 {
     }
 }
 
-/// The Delivery Service's accept decision as a **pure** predicate: a submitted
-/// commit is accepted IFF its `based_on_epoch` equals the current `head`. This
-/// models the atomic `WHERE ?2 = (SELECT COALESCE(MAX(epoch), -1) + 1 …)` guard
-/// in [`submit_commit`]. It is NOT wired into `submit_commit` — the real decision
-/// must stay inside the single conditional `INSERT` to be race-free (two racing
-/// writers are serialized by SQLite; a Rust-side check would reintroduce a
-/// read/write TOCTOU). It is proved here as the model of record: `accepts` is
-/// total, deterministic, and for a fixed head admits exactly ONE epoch, so no two
-/// distinct epochs are ever both accepted at one head — no fork.
-pub fn accepts(based_on_epoch: u64, head: u64) -> bool {
-    based_on_epoch == head
+/// The Delivery Service's accept decision as a **pure** predicate over the
+/// widened `(generation, epoch)` key. This models the atomic two-branch `WHERE`
+/// guard in [`submit_commit`]. It is NOT wired into `submit_commit` — the real
+/// decision must stay inside the single conditional `INSERT` to be race-free (two
+/// racing writers are serialized by SQLite; a Rust-side check would reintroduce a
+/// read/write TOCTOU). It is proved here as the model of record.
+///
+/// Two accept branches, and only two:
+///   * **Continue** the head lineage — `generation == head_generation` and
+///     `based_on_epoch == head_epoch`. Byte-for-byte the pre-P4 rule.
+///   * **Open** the next lineage — `generation == head_generation + 1`,
+///     `based_on_epoch == 0`, and `closes_epoch == Some(head_epoch)`: the
+///     migrator must correctly name the head it is closing, so a commit that
+///     lands on the old lineage first invalidates the migration.
+///
+/// Note what is deliberately NOT provable here: at a fixed head BOTH branches
+/// can be satisfiable (by different submissions), so unlike the pre-P4 predicate
+/// this one does not admit a single key. That is correct — the atomic INSERT,
+/// not the predicate, is what picks one. What IS proved (see `proofs`) is that
+/// every accepted key is lexicographically `>=` the head, never a downgrade, and
+/// that opening a lineage requires naming the closed head.
+pub fn accepts(
+    generation: u64,
+    based_on_epoch: u64,
+    closes_epoch: Option<u64>,
+    head_generation: u64,
+    head_epoch: u64,
+) -> bool {
+    if generation == head_generation {
+        based_on_epoch == head_epoch
+    } else if generation == head_generation + 1 {
+        based_on_epoch == 0 && closes_epoch == Some(head_epoch)
+    } else {
+        // Neither the head lineage nor its immediate successor: a downgrade to a
+        // closed generation, or a jump over one that was never opened.
+        false
+    }
 }
 
-/// The group's head epoch = `MAX(epoch) + 1` (0 for an empty/unknown group).
-/// Reads `MAX(epoch)` and applies the pure, Kani-proved [`head_epoch_of`].
-pub async fn head_epoch(conn: &Connection, conversation_id: &str) -> Result<i64> {
+/// The conversation's newest lineage = `COALESCE(MAX(generation), 0)`. An empty
+/// log is generation 0 — the same lineage a brand-new conversation starts in and
+/// the one every pre-P4 conversation is already in.
+pub async fn head_generation(conn: &Connection, conversation_id: &str) -> Result<i64> {
     let mut rows = conn
         .query(
-            "SELECT MAX(epoch) FROM mls_commit_log WHERE conversation_id = ?1",
+            "SELECT MAX(generation) FROM mls_commit_log WHERE conversation_id = ?1",
             libsql::params![conversation_id],
+        )
+        .await?;
+    let row = rows.next().await?.ok_or_else(|| anyhow!("no head row"))?;
+    Ok(row.get::<Option<i64>>(0)?.unwrap_or(0))
+}
+
+/// The head epoch WITHIN one lineage = `MAX(epoch) + 1` over that generation's
+/// rows (0 for an empty/unknown one). Reads `MAX(epoch)` and applies the pure,
+/// Kani-proved [`head_epoch_of`].
+pub async fn head_epoch_in(
+    conn: &Connection,
+    conversation_id: &str,
+    generation: i64,
+) -> Result<i64> {
+    let mut rows = conn
+        .query(
+            "SELECT MAX(epoch) FROM mls_commit_log WHERE conversation_id = ?1 AND generation = ?2",
+            libsql::params![conversation_id, generation],
         )
         .await?;
     let row = rows.next().await?.ok_or_else(|| anyhow!("no head row"))?;
@@ -142,19 +245,36 @@ pub async fn head_epoch(conn: &Connection, conversation_id: &str) -> Result<i64>
     Ok(head_epoch_of(max_epoch) as i64)
 }
 
-/// Commits with `epoch >= since`, contiguous, in apply order.
-pub async fn fetch_commits(conn: &Connection, conversation_id: &str, since: i64) -> Result<Vec<CommitWire>> {
+/// The group's head epoch, in its CURRENT lineage. Pre-P4 this was the only
+/// notion of head, and for every conversation that has never migrated (head
+/// generation 0) it returns exactly what it always did.
+pub async fn head_epoch(conn: &Connection, conversation_id: &str) -> Result<i64> {
+    let gen = head_generation(conn, conversation_id).await?;
+    head_epoch_in(conn, conversation_id, gen).await
+}
+
+/// Commits in `generation` with `epoch >= since`, contiguous, in apply order.
+/// Scoped to ONE lineage: commits from different generations are encrypted under
+/// different suites and different groups, so they are never interleaved.
+pub async fn fetch_commits(
+    conn: &Connection,
+    conversation_id: &str,
+    generation: i64,
+    since: i64,
+) -> Result<Vec<CommitWire>> {
     let mut rows = conn
         .query(
             "SELECT epoch, seq, sender_id, commit_data, added_user_id, added_device_ids, created_at \
-             FROM mls_commit_log WHERE conversation_id = ?1 AND epoch >= ?2 ORDER BY epoch ASC, seq ASC",
-            libsql::params![conversation_id, since],
+             FROM mls_commit_log WHERE conversation_id = ?1 AND generation = ?2 AND epoch >= ?3 \
+             ORDER BY epoch ASC, seq ASC",
+            libsql::params![conversation_id, generation, since],
         )
         .await?;
     let mut out = Vec::new();
     while let Some(r) = rows.next().await? {
         let commit: Vec<u8> = r.get(3)?;
         out.push(CommitWire {
+            generation,
             epoch: r.get(0)?,
             seq: r.get(1)?,
             sender_id: r.get(2)?,
@@ -200,22 +320,53 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         .transaction_with_behavior(libsql::TransactionBehavior::Immediate)
         .await?;
 
-    // The atomic decision: insert this commit at `based_on_epoch` ONLY IF that
-    // equals the current head. One statement → no read/write race.
+    // The atomic decision, one statement → no read/write race. Two accept
+    // branches, exactly mirroring the pure [`accepts`] predicate:
+    //
+    //   (a) CONTINUE the head lineage — the submitter is in the head generation
+    //       and its `based_on_epoch` is that lineage's head. Byte-for-byte the
+    //       pre-P4 rule, and the branch every commit that exists today takes.
+    //
+    //   (b) OPEN the next lineage — `epoch = 0` in `head_generation + 1`, and the
+    //       submitter names the old lineage's head in `closes_epoch`. Naming it
+    //       makes the migration a compare-and-swap on the OLD head too: if any
+    //       commit lands in the old generation between the migrator's read and
+    //       this INSERT, `closes_epoch` is stale and the whole migration is
+    //       rejected rather than silently orphaning that commit. `?8 IS NOT NULL`
+    //       is what stops an omitted `closes_epoch` from being read as "closes
+    //       epoch NULL" and comparing away to no rows — it is an explicit reject,
+    //       not an accident of SQL NULL semantics.
+    //
+    // A generation can never be opened twice: the second opener re-evaluates
+    // `MAX(generation)`, sees it already advanced, and matches neither branch.
+    // The UNIQUE(conversation_id, generation, epoch) index is the backstop.
     let affected = tx
         .execute(
             "INSERT INTO mls_commit_log \
-                 (conversation_id, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
-             SELECT ?1, ?2, ?3, ?4, ?5, ?6 \
-             WHERE ?2 = (SELECT COALESCE(MAX(epoch), -1) + 1 FROM mls_commit_log WHERE conversation_id = ?1) \
-             ON CONFLICT(conversation_id, epoch) DO NOTHING",
+                 (conversation_id, generation, epoch, sender_id, commit_data, added_user_id, added_device_ids) \
+             SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7 \
+             WHERE \
+               ( ?2 = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log WHERE conversation_id = ?1) \
+                 AND ?3 = (SELECT COALESCE(MAX(epoch), -1) + 1 FROM mls_commit_log \
+                            WHERE conversation_id = ?1 AND generation = ?2) ) \
+               OR \
+               ( ?3 = 0 \
+                 AND ?2 = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log WHERE conversation_id = ?1) + 1 \
+                 AND ?8 IS NOT NULL \
+                 AND ?8 = (SELECT COALESCE(MAX(epoch), -1) + 1 FROM mls_commit_log \
+                            WHERE conversation_id = ?1 \
+                              AND generation = (SELECT COALESCE(MAX(generation), 0) FROM mls_commit_log \
+                                                 WHERE conversation_id = ?1)) ) \
+             ON CONFLICT(conversation_id, generation, epoch) DO NOTHING",
             libsql::params![
                 body.conversation_id.clone(),
+                body.generation,
                 body.based_on_epoch,
                 body.sender_id.clone(),
                 commit,
                 body.added_user_id.clone(),
                 body.added_device_ids.clone(),
+                body.closes_epoch,
             ],
         )
         .await?;
@@ -223,11 +374,20 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
     if affected == 0 {
         // Not at the head: nothing was written. Read the current head + the
         // commits the client is missing within this same view, then roll back
-        // (no-op — the bundle wrote nothing) and reject.
-        let head = head_epoch(&tx, &body.conversation_id).await?;
-        let missing = fetch_commits(&tx, &body.conversation_id, body.based_on_epoch).await?;
+        // (no-op — the bundle wrote nothing) and reject. The head + missing set
+        // are scoped to the SUBMITTER's generation — that is the lineage it must
+        // finish draining, whether or not a newer one exists — and
+        // `head_generation` is what tells it a newer one does.
+        let head = head_epoch_in(&tx, &body.conversation_id, body.generation).await?;
+        let head_gen = head_generation(&tx, &body.conversation_id).await?;
+        let missing =
+            fetch_commits(&tx, &body.conversation_id, body.generation, body.based_on_epoch).await?;
         tx.rollback().await?;
-        return Ok(SubmitResponse::Rejected { head, missing });
+        return Ok(SubmitResponse::Rejected {
+            head,
+            head_generation: head_gen,
+            missing,
+        });
     }
 
     // Won the epoch. Publish the resulting-epoch GroupInfo + any Welcomes so a
@@ -235,20 +395,28 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
     // transaction as the commit above, so a failure here rolls the commit back
     // too — the recipient never sees a commit with no matching Welcome.
     if let Some(gi) = &group_info {
-        // Epoch-monotone guard (matches the standalone /v1/group-info upsert in
-        // `writes::upsert_group_info`): an older epoch can never clobber a newer
-        // one, so both writers of `mls_group_info` obey one rule.
+        // Lexicographic (generation, epoch)-monotone guard (matches the standalone
+        // /v1/group-info upsert in `writes::upsert_group_info`): older GroupInfo
+        // can never clobber newer, so both writers of `mls_group_info` obey one
+        // rule. The generation term is load-bearing at a migration: the successor
+        // lineage's epoch 1 is NUMERICALLY BELOW the retired lineage's last epoch,
+        // so an epoch-only guard would reject the successor's GroupInfo and strand
+        // every externally-joining device on the retired suite.
         tx.execute(
-            "INSERT INTO mls_group_info (conversation_id, epoch, group_info, updated_by_device_id) \
-             VALUES (?1, ?2, ?3, ?4) \
+            "INSERT INTO mls_group_info (conversation_id, generation, epoch, group_info, updated_by_device_id) \
+             VALUES (?1, ?2, ?3, ?4, ?5) \
              ON CONFLICT(conversation_id) DO UPDATE SET \
+                 generation = excluded.generation, \
                  epoch = excluded.epoch, \
                  group_info = excluded.group_info, \
                  updated_by_device_id = excluded.updated_by_device_id, \
                  updated_at = datetime('now') \
-             WHERE excluded.epoch > mls_group_info.epoch",
+             WHERE excluded.generation > mls_group_info.generation \
+                OR (excluded.generation = mls_group_info.generation \
+                    AND excluded.epoch > mls_group_info.epoch)",
             libsql::params![
                 body.conversation_id.clone(),
+                body.generation,
                 body.based_on_epoch + 1,
                 gi.clone(),
                 body.sender_id.clone(),
@@ -262,16 +430,25 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
         // the same recipient/device refreshes the blob and re-arms delivery
         // (`delivered = 0`) instead of erroring or stacking a duplicate row — so
         // a resubmit/retry of this commit bundle can never wedge on a dup.
+        //
+        // The generation stamped here is the LINEAGE THE WELCOME ADMITS INTO, so a
+        // recipient can tell "you were added to the group you're already in" from
+        // "you are being moved to the successor group" BEFORE it applies the blob.
+        // It needs that distinction because `max_past_epochs = 0` means it must
+        // finish draining its current lineage first; a Welcome it cannot place is
+        // a Welcome it might apply too early, and messages get dropped.
         tx.execute(
             "INSERT INTO mls_welcome \
-                 (id, conversation_id, recipient_id, welcome_data, recipient_device_id, delivered) \
-             VALUES (?1, ?2, ?3, ?4, ?5, 0) \
+                 (id, conversation_id, generation, recipient_id, welcome_data, recipient_device_id, delivered) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0) \
              ON CONFLICT(conversation_id, recipient_id, recipient_device_id) DO UPDATE SET \
+                 generation = excluded.generation, \
                  welcome_data = excluded.welcome_data, \
                  delivered = 0",
             libsql::params![
                 ulid::Ulid::new().to_string(),
                 body.conversation_id.clone(),
+                body.generation,
                 w.recipient_id.clone(),
                 welcome.clone(),
                 w.recipient_device_id.clone(),
@@ -283,6 +460,7 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
     tx.commit().await?;
 
     Ok(SubmitResponse::Accepted {
+        generation: body.generation,
         epoch: body.based_on_epoch,
     })
 }
@@ -311,6 +489,28 @@ pub async fn submit_commit(conn: &Connection, body: &SubmitBody) -> Result<Submi
 //     `GapRecover`), and external-joins at head — forfeiting only the pruned-gap
 //     messages (accepted loss #1, "messages sent before you joined the tree").
 //     `may_rejoin` (I5) still blocks a removed/revoked device from that rejoin.
+//
+// Under suite generations (#454 P4) both tiers keep their meaning one key wider,
+// and the floor becomes a PAIR — a generation floor plus an epoch floor within
+// the head generation:
+//
+//   * The EPOCH floor is the existing two-tier floor, computed and applied
+//     strictly WITHIN the head generation, over the devices that have reported
+//     themselves to be in it. A device still on an older generation is not
+//     "behind at epoch X" in any comparable sense, so it counts as UNREPORTED —
+//     which conservatively disables Tier 1 entirely (see `prune_floor`'s
+//     `all_reported`) rather than letting a stale lower epoch look like a bound.
+//
+//   * The GENERATION floor retires whole CLOSED lineages, which epoch pruning
+//     alone would keep forever (their commits are all below their own head, never
+//     below the head generation's floor). Tier 1: delete generations below the
+//     MIN reported generation — every current member device has moved past them,
+//     so nobody can still need them; zero loss. Tier 2: once the head generation
+//     has itself accumulated `PRUNE_MAX_BEHIND_HEAD` epochs, a device still
+//     stranded on an older lineage is by construction at least that many commits
+//     behind head, which is exactly the condition Tier 2 already calls accepted
+//     loss — so closed generations go, and the straggler recovers by external
+//     join at the head generation like any other Tier-2 casualty.
 
 /// Tier-1 slack: retain this many epochs BELOW the slowest current member's
 /// applied epoch. Pure conservative buffer — a member at `min_since` needs
@@ -355,28 +555,75 @@ pub fn prune_floor(min_since: Option<i64>, all_reported: bool, head: i64) -> i64
     tier1.max(tier2)
 }
 
+/// The generation floor (EXCLUSIVE): whole lineages with `generation < floor` are
+/// closed and safe to delete outright. Pure, for the same reasons as
+/// [`prune_floor`]. Inputs:
+///   * `head_generation` — the conversation's newest lineage.
+///   * `head_epoch` — the head epoch WITHIN that lineage.
+///   * `min_reported_generation` — MIN reported generation over current member
+///     devices, or `None` when no member has reported.
+///   * `all_reported` — whether EVERY current member device has reported.
+///
+/// `floor = min(max(tier1, tier2), head_generation)`, clamped `>= 0`:
+///   * `tier1 = min_reported_generation` when `all_reported`, else 0. Every
+///     current member device is at or above it, so nothing below it is needed by
+///     anyone — zero loss.
+///   * `tier2 = head_generation` once `head_epoch >= PRUNE_MAX_BEHIND_HEAD`. A
+///     device still on a closed lineage when the successor has run that far is at
+///     least `PRUNE_MAX_BEHIND_HEAD` commits behind head, which is already the
+///     accepted-loss condition Tier 2 exists to bound.
+///
+/// The final clamp to `head_generation` is the safety property that matters most:
+/// the LIVE lineage is never retired wholesale, whatever the reports say.
+pub fn closed_generation_floor(
+    head_generation: i64,
+    head_epoch: i64,
+    min_reported_generation: Option<i64>,
+    all_reported: bool,
+) -> i64 {
+    let tier1 = match (all_reported, min_reported_generation) {
+        (true, Some(g)) => g.max(0),
+        _ => 0,
+    };
+    let tier2 = if head_epoch >= PRUNE_MAX_BEHIND_HEAD {
+        head_generation
+    } else {
+        0
+    };
+    tier1.max(tier2).min(head_generation).max(0)
+}
+
 /// Record device `device_id`'s commit-catch-up high-water for a conversation.
-/// `since` is the epoch the client is caught up FROM — its current local MLS
-/// epoch — so it still needs every commit `>= since`. Monotone: the upsert keeps
-/// `MAX(existing, since)`, so a stale/reordered report can never LOWER a device's
-/// recorded epoch (which would raise the floor and prune commits it still needs).
+/// `since` is the epoch the client is caught up FROM within `generation` — its
+/// current local MLS epoch — so it still needs every commit `>= since` in that
+/// lineage. Monotone on the PAIR, compared lexicographically: a stale/reordered
+/// report can never LOWER a device's recorded position (which would raise the
+/// floor and prune commits it still needs). The pair — not `MAX` on each column
+/// independently — is what keeps it honest across a migration, where the
+/// successor lineage's epoch 0 is numerically below the retired lineage's last.
 pub async fn record_commit_since(
     conn: &Connection,
     conversation_id: &str,
     user_id: &str,
     device_id: &str,
+    generation: i64,
     since: i64,
 ) -> Result<()> {
     conn.execute(
-        "INSERT INTO mls_commit_since (conversation_id, user_id, device_id, since_epoch) \
-         VALUES (?1, ?2, ?3, ?4) \
+        "INSERT INTO mls_commit_since (conversation_id, user_id, device_id, generation, since_epoch) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
          ON CONFLICT(conversation_id, user_id, device_id) DO UPDATE SET \
-             since_epoch = MAX(since_epoch, excluded.since_epoch), \
-             updated_at  = datetime('now')",
+             generation  = excluded.generation, \
+             since_epoch = excluded.since_epoch, \
+             updated_at  = datetime('now') \
+         WHERE excluded.generation > mls_commit_since.generation \
+            OR (excluded.generation = mls_commit_since.generation \
+                AND excluded.since_epoch > mls_commit_since.since_epoch)",
         libsql::params![
             conversation_id.to_string(),
             user_id.to_string(),
             device_id.to_string(),
+            generation,
             since,
         ],
     )
@@ -413,29 +660,57 @@ async fn current_member_devices(main: &Connection, conversation_id: &str) -> Res
     Ok(out)
 }
 
-/// Every reported `(device_id -> since_epoch)` high-water for a conversation,
-/// read from the LOG DB.
-async fn recorded_since(log: &Connection, conversation_id: &str) -> Result<HashMap<String, i64>> {
+/// Every reported `(device_id -> (generation, since_epoch))` high-water for a
+/// conversation, read from the LOG DB.
+async fn recorded_since(
+    log: &Connection,
+    conversation_id: &str,
+) -> Result<HashMap<String, (i64, i64)>> {
     let mut rows = log
         .query(
-            "SELECT device_id, since_epoch FROM mls_commit_since WHERE conversation_id = ?1",
+            "SELECT device_id, generation, since_epoch FROM mls_commit_since WHERE conversation_id = ?1",
             libsql::params![conversation_id.to_string()],
         )
         .await?;
     let mut out = HashMap::new();
     while let Some(r) = rows.next().await? {
-        out.insert(r.get::<String>(0)?, r.get::<i64>(1)?);
+        out.insert(r.get::<String>(0)?, (r.get::<i64>(1)?, r.get::<i64>(2)?));
     }
     Ok(out)
 }
 
-/// Delete commits below `floor` (EXCLUSIVE) for a conversation. The single
-/// retention write, kept small + public so it can be driven with an explicit
-/// floor from tests. Never touches the UNIQUE(conversation_id, epoch) index
-/// (fork-dedup, migration 000003 main DB) — a pure row DELETE leaves the
-/// remaining epochs and their one-per-epoch guarantee intact. `floor <= 0` is a
-/// no-op (nothing to prune below epoch 0).
+/// Delete commits below `floor` (EXCLUSIVE) WITHIN one lineage. The single
+/// epoch-retention write, kept small + public so it can be driven with an
+/// explicit floor from tests. Never touches the
+/// UNIQUE(conversation_id, generation, epoch) index (fork-dedup) — a pure row
+/// DELETE leaves the remaining epochs and their one-per-epoch guarantee intact.
+/// `floor <= 0` is a no-op (nothing to prune below epoch 0).
 pub async fn delete_commits_below(
+    conn: &Connection,
+    conversation_id: &str,
+    generation: i64,
+    floor: i64,
+) -> Result<u64> {
+    if floor <= 0 {
+        return Ok(0);
+    }
+    let deleted = conn
+        .execute(
+            "DELETE FROM mls_commit_log \
+             WHERE conversation_id = ?1 AND generation = ?2 AND epoch < ?3",
+            libsql::params![conversation_id.to_string(), generation, floor],
+        )
+        .await?;
+    Ok(deleted)
+}
+
+/// Delete every commit in a CLOSED lineage below `floor` (EXCLUSIVE generation).
+/// Separate from [`delete_commits_below`] because it retires whole generations
+/// rather than a prefix of one: epoch pruning can never reach them (their epochs
+/// are all below their own head, never below the head generation's floor).
+/// `floor <= 0` is a no-op — generation 0 is never retired by this rule, since
+/// there is no closed lineage below it.
+pub async fn delete_generations_below(
     conn: &Connection,
     conversation_id: &str,
     floor: i64,
@@ -445,7 +720,7 @@ pub async fn delete_commits_below(
     }
     let deleted = conn
         .execute(
-            "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND epoch < ?2",
+            "DELETE FROM mls_commit_log WHERE conversation_id = ?1 AND generation < ?2",
             libsql::params![conversation_id.to_string(), floor],
         )
         .await?;
@@ -455,9 +730,14 @@ pub async fn delete_commits_below(
 /// Outcome of a prune pass.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PruneReport {
-    /// The computed retention floor (exclusive).
+    /// The computed epoch floor (exclusive) within the head generation.
     pub floor: i64,
-    /// Commit rows deleted this pass.
+    /// The head generation the epoch floor was applied to.
+    pub generation: i64,
+    /// The computed generation floor (exclusive) — closed lineages below it were
+    /// retired outright.
+    pub generation_floor: i64,
+    /// Commit rows deleted this pass, across both rules.
     pub deleted: u64,
 }
 
@@ -471,29 +751,57 @@ pub async fn prune_commit_log(
     log: &Connection,
     conversation_id: &str,
 ) -> Result<PruneReport> {
-    let head = head_epoch(log, conversation_id).await?;
+    let generation = head_generation(log, conversation_id).await?;
+    let head = head_epoch_in(log, conversation_id, generation).await?;
     let members = current_member_devices(main, conversation_id).await?;
     let recorded = recorded_since(log, conversation_id).await?;
 
-    let (min_since, all_reported) = if members.is_empty() {
+    // Two independent roster summaries, both over the SAME device list:
+    //   * epoch-wise, restricted to devices reported IN the head generation — a
+    //     device on an older lineage has no comparable epoch, so it is treated as
+    //     unreported (which disables Tier 1) rather than as a bound;
+    //   * generation-wise, over every device that has reported at all.
+    let (min_since, all_reported_in_head_gen, min_generation, all_reported) = if members.is_empty() {
         // No current members (everyone left / the group was deleted): Tier 1 has
         // no lower bound to protect, so only Tier 2 bounds the orphaned log.
-        (None, false)
+        (None, false, None, false)
     } else {
-        let mut min: Option<i64> = None;
-        let mut all = true;
+        let mut min_epoch: Option<i64> = None;
+        let mut all_epoch = true;
+        let mut min_gen: Option<i64> = None;
+        let mut all_gen = true;
         for d in &members {
             match recorded.get(d) {
-                Some(&s) => min = Some(min.map_or(s, |m: i64| m.min(s))),
-                None => all = false,
+                Some(&(g, s)) => {
+                    min_gen = Some(min_gen.map_or(g, |m: i64| m.min(g)));
+                    if g == generation {
+                        min_epoch = Some(min_epoch.map_or(s, |m: i64| m.min(s)));
+                    } else {
+                        // Behind on the lineage itself: its epoch says nothing
+                        // about what it still needs from THIS one.
+                        all_epoch = false;
+                    }
+                }
+                None => {
+                    all_epoch = false;
+                    all_gen = false;
+                }
             }
         }
-        (min, all)
+        (min_epoch, all_epoch, min_gen, all_gen)
     };
 
-    let floor = prune_floor(min_since, all_reported, head);
-    let deleted = delete_commits_below(log, conversation_id, floor).await?;
-    Ok(PruneReport { floor, deleted })
+    let floor = prune_floor(min_since, all_reported_in_head_gen, head);
+    let generation_floor = closed_generation_floor(generation, head, min_generation, all_reported);
+
+    let mut deleted = delete_generations_below(log, conversation_id, generation_floor).await?;
+    deleted += delete_commits_below(log, conversation_id, generation, floor).await?;
+    Ok(PruneReport {
+        floor,
+        generation,
+        generation_floor,
+        deleted,
+    })
 }
 
 // ─── Kani proof harnesses (I1 — DS head arithmetic + accept decision) ─────────
@@ -524,26 +832,103 @@ mod proofs {
         assert!(head > m);
     }
 
-    /// I1: the accept decision admits exactly one epoch per head — no two distinct
-    /// epochs are ever both accepted (no fork), and any stale/forward submit is
-    /// rejected.
+    /// I1 (within a lineage): at a fixed head the accept decision admits exactly
+    /// one epoch of the HEAD generation — no two distinct same-generation epochs
+    /// are ever both accepted (no fork), and any stale/forward submit in that
+    /// generation is rejected. This is the pre-P4 property, restated one key
+    /// wider and unchanged in substance.
     #[kani::proof]
     fn i1_accept_single_epoch() {
+        let head_gen: u64 = kani::any();
         let head: u64 = kani::any();
         let a: u64 = kani::any();
         let b: u64 = kani::any();
+        kani::assume(head_gen <= 3);
         kani::assume(head <= 3);
         kani::assume(a <= 3);
         kani::assume(b <= 3);
 
-        // Two accepted submits at one head must be the same epoch.
-        if accepts(a, head) && accepts(b, head) {
+        // Two accepted same-generation submits at one head must be the same epoch.
+        if accepts(head_gen, a, None, head_gen, head) && accepts(head_gen, b, None, head_gen, head) {
             assert!(a == b);
         }
         // A stale (`based_on < head`) or forward-gap (`based_on > head`) submit is
-        // rejected — the only accepted epoch is the head itself.
+        // rejected — the only accepted epoch in the head generation is the head.
+        // `closes_epoch` is symbolic here: naming a closed head must not buy a
+        // same-generation submit anything.
+        let closes: Option<u64> = if kani::any() {
+            let c: u64 = kani::any();
+            kani::assume(c <= 3);
+            Some(c)
+        } else {
+            None
+        };
         if a != head {
-            assert!(!accepts(a, head));
+            assert!(!accepts(head_gen, a, closes, head_gen, head));
+        }
+    }
+
+    /// A symbolic `(generation, epoch, closes_epoch)` submission and a symbolic
+    /// `(head_generation, head_epoch)`, all bounded so CBMC stays instantaneous.
+    /// Bounds must allow `head_gen + 1` to be expressible, or the migration branch
+    /// goes unreachable and every property below is vacuous.
+    fn symbolic_submission() -> (u64, u64, Option<u64>, u64, u64) {
+        let g: u64 = kani::any();
+        let e: u64 = kani::any();
+        let head_gen: u64 = kani::any();
+        let head: u64 = kani::any();
+        kani::assume(g <= 4);
+        kani::assume(e <= 3);
+        kani::assume(head_gen <= 3);
+        kani::assume(head <= 3);
+        let closes: Option<u64> = if kani::any() {
+            let c: u64 = kani::any();
+            kani::assume(c <= 3);
+            Some(c)
+        } else {
+            None
+        };
+        (g, e, closes, head_gen, head)
+    }
+
+    /// P4-L1 (lexicographic monotonicity): every accepted `(generation, epoch)` is
+    /// `>=` the head pair in lexicographic order. This is the widened form of the
+    /// "the head only ever moves forward" property — a successor lineage's epoch 0
+    /// is numerically below the old head but lexicographically above it, which is
+    /// exactly the distinction generations exist to make.
+    #[kani::proof]
+    fn p4_accept_is_lexicographically_monotone() {
+        let (g, e, closes, head_gen, head) = symbolic_submission();
+        if accepts(g, e, closes, head_gen, head) {
+            assert!(g > head_gen || (g == head_gen && e >= head));
+        }
+    }
+
+    /// P4-L2 (no downgrade): a commit is never accepted into a CLOSED lineage, nor
+    /// into one that was never opened. The accepted generation is the head's or
+    /// its immediate successor — never below, never a jump.
+    #[kani::proof]
+    fn p4_accept_never_downgrades_generation() {
+        let (g, e, closes, head_gen, head) = symbolic_submission();
+        if accepts(g, e, closes, head_gen, head) {
+            assert!(g >= head_gen);
+            assert!(g <= head_gen + 1);
+        }
+    }
+
+    /// P4-L3 (opening a lineage is a compare-and-swap on the old one): accepting a
+    /// commit in a NEW generation forces it to be that generation's epoch 0 AND to
+    /// correctly name the closed head of the previous generation. Without the
+    /// `closes_epoch` term a migrator that read the roster before someone else's
+    /// commit landed would orphan that commit; with it, the migration is rejected
+    /// instead.
+    #[kani::proof]
+    fn p4_opening_requires_naming_closed_head() {
+        let (g, e, closes, head_gen, head) = symbolic_submission();
+        if accepts(g, e, closes, head_gen, head) && g != head_gen {
+            assert!(g == head_gen + 1);
+            assert!(e == 0);
+            assert!(closes == Some(head));
         }
     }
 
@@ -564,6 +949,69 @@ mod proofs {
         // Empty log drives the mutant's `u64::MAX + 1` overflow.
         let head = head_epoch_of_mutant(None);
         assert!(head == 0);
+    }
+
+    /// P4-L3 mutant: opens the next generation on `epoch == 0` alone, without
+    /// requiring the submitter to name the closed head. This is the "stale
+    /// migrator" bug — a migration built before someone else's commit landed still
+    /// succeeds, orphaning that commit in a lineage nobody will ever read again.
+    fn accepts_no_closes_mutant(
+        generation: u64,
+        based_on_epoch: u64,
+        _closes_epoch: Option<u64>,
+        head_generation: u64,
+        head_epoch: u64,
+    ) -> bool {
+        if generation == head_generation {
+            based_on_epoch == head_epoch
+        } else if generation == head_generation + 1 {
+            // BUG: dropped the `closes_epoch == Some(head_epoch)` compare-and-swap.
+            based_on_epoch == 0
+        } else {
+            false
+        }
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn p4_opening_requires_naming_closed_head_mutant_refuted() {
+        let (g, e, closes, head_gen, head) = symbolic_submission();
+        if accepts_no_closes_mutant(g, e, closes, head_gen, head) && g != head_gen {
+            // A migration with `closes_epoch = None` (or naming the wrong epoch)
+            // is accepted by the mutant → Kani finds the violation.
+            assert!(closes == Some(head));
+        }
+    }
+
+    /// P4-L2 mutant: accepts epoch 0 in ANY generation other than the head's,
+    /// including a closed one. Models "a successor may start at epoch 0" written
+    /// without pinning WHICH successor — a device still running the retired suite
+    /// could then append to the lineage everyone else has left.
+    fn accepts_downgrade_mutant(
+        generation: u64,
+        based_on_epoch: u64,
+        _closes_epoch: Option<u64>,
+        head_generation: u64,
+        head_epoch: u64,
+    ) -> bool {
+        if generation == head_generation {
+            based_on_epoch == head_epoch
+        } else {
+            // BUG: no `generation == head_generation + 1` bound, so a LOWER
+            // generation is opened just as readily as the next one.
+            based_on_epoch == 0
+        }
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn p4_accept_never_downgrades_generation_mutant_refuted() {
+        let (g, e, closes, head_gen, head) = symbolic_submission();
+        if accepts_downgrade_mutant(g, e, closes, head_gen, head) {
+            // `g < head_gen` with `e == 0` is accepted by the mutant → violation.
+            assert!(g >= head_gen);
+            assert!(g <= head_gen + 1);
+        }
     }
 
     // ─── I4 — retention-floor harnesses (prune_floor) ─────────────────────────
@@ -723,6 +1171,156 @@ mod proofs {
         // exceed `(head - 512).max(0)` → Kani finds the violation.
         assert!(floor == (head - PRUNE_MAX_BEHIND_HEAD).max(0));
     }
+
+    // ─── I4 under generations — closed-lineage retirement ─────────────────────
+    //
+    // `closed_generation_floor` is the one rule that deletes commits WHOLESALE
+    // rather than a prefix, so its safety properties are the ones worth machine
+    // checking: it never touches the live lineage (G1), it retires nothing without
+    // evidence (G2), and Tier 1 never retires a lineage a current member device is
+    // still in (G3). `GEN_MAX` is small — generations advance once per suite
+    // migration, not per commit.
+    const GEN_MAX: i64 = 4;
+
+    fn symbolic_min_generation() -> Option<i64> {
+        if kani::any() {
+            let g: i64 = kani::any();
+            kani::assume((0..=GEN_MAX).contains(&g));
+            Some(g)
+        } else {
+            None
+        }
+    }
+
+    /// G1 (live_lineage_never_retired): the generation floor is always in
+    /// `0..=head_generation`, so the lineage the group is actually running is
+    /// never deleted out from under it, for ANY combination of reports.
+    #[kani::proof]
+    fn i4_generation_floor_never_retires_live_lineage() {
+        let head_gen: i64 = kani::any();
+        kani::assume((0..=GEN_MAX).contains(&head_gen));
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+        let min_gen = symbolic_min_generation();
+        let all_reported: bool = kani::any();
+
+        let floor = closed_generation_floor(head_gen, head, min_gen, all_reported);
+        assert!(floor >= 0);
+        assert!(floor <= head_gen);
+    }
+
+    /// G2 (no_retirement_without_evidence): with the roster NOT fully reported and
+    /// the head lineage still short of the Tier-2 cap, nothing is retired at all.
+    /// Neither tier has grounds, so the floor is exactly 0.
+    #[kani::proof]
+    fn i4_generation_floor_needs_evidence() {
+        let head_gen: i64 = kani::any();
+        kani::assume((0..=GEN_MAX).contains(&head_gen));
+        let head: i64 = kani::any();
+        kani::assume((0..PRUNE_MAX_BEHIND_HEAD).contains(&head));
+        let min_gen = symbolic_min_generation();
+
+        let floor = closed_generation_floor(head_gen, head, min_gen, false);
+        assert!(floor == 0);
+    }
+
+    /// G3 (tier1_never_retires_an_occupied_lineage): with the whole roster reported
+    /// and the slowest device in generation `g`, the ONLY way the floor can exceed
+    /// `g` — i.e. delete the lineage that device is still living in — is the
+    /// documented Tier-2 accepted-loss path (`head_epoch >= PRUNE_MAX_BEHIND_HEAD`).
+    /// This is `NoLossForCurrentMember` lifted from epochs to lineages.
+    #[kani::proof]
+    fn i4_generation_tier1_never_retires_occupied() {
+        let head_gen: i64 = kani::any();
+        kani::assume((0..=GEN_MAX).contains(&head_gen));
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+        let g: i64 = kani::any();
+        kani::assume((0..=GEN_MAX).contains(&g));
+
+        let floor = closed_generation_floor(head_gen, head, Some(g), true);
+        if floor > g {
+            assert!(head >= PRUNE_MAX_BEHIND_HEAD);
+        }
+    }
+
+    /// G1 mutant: drops the `.min(head_generation)` clamp, so a bogus report at a
+    /// generation above the head (or Tier 2 on a head that has since been
+    /// superseded) retires the LIVE lineage — every commit in the group, gone.
+    fn closed_generation_floor_g1_mutant(
+        head_generation: i64,
+        head_epoch: i64,
+        min_reported_generation: Option<i64>,
+        all_reported: bool,
+    ) -> i64 {
+        let tier1 = match (all_reported, min_reported_generation) {
+            (true, Some(g)) => g.max(0),
+            _ => 0,
+        };
+        let tier2 = if head_epoch >= PRUNE_MAX_BEHIND_HEAD {
+            head_generation
+        } else {
+            0
+        };
+        // BUG: dropped `.min(head_generation)`.
+        tier1.max(tier2).max(0)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_generation_floor_never_retires_live_lineage_mutant_refuted() {
+        let head_gen: i64 = kani::any();
+        kani::assume((0..=GEN_MAX).contains(&head_gen));
+        let head: i64 = kani::any();
+        kani::assume((0..=EPOCH_MAX).contains(&head));
+        let min_gen = symbolic_min_generation();
+        let all_reported: bool = kani::any();
+
+        let floor = closed_generation_floor_g1_mutant(head_gen, head, min_gen, all_reported);
+        // A reported generation above the head drives the mutant past it → Kani
+        // finds the violation.
+        assert!(floor <= head_gen);
+    }
+
+    /// G3 mutant: uses `+ 1` on the min reported generation — retires the lineage
+    /// the slowest device is CURRENTLY in, with Tier 2 not even binding.
+    fn closed_generation_floor_g3_mutant(
+        head_generation: i64,
+        head_epoch: i64,
+        min_reported_generation: Option<i64>,
+        all_reported: bool,
+    ) -> i64 {
+        let tier1 = match (all_reported, min_reported_generation) {
+            // BUG: `g + 1` retires generation `g` itself.
+            (true, Some(g)) => (g + 1).max(0),
+            _ => 0,
+        };
+        let tier2 = if head_epoch >= PRUNE_MAX_BEHIND_HEAD {
+            head_generation
+        } else {
+            0
+        };
+        tier1.max(tier2).min(head_generation).max(0)
+    }
+
+    #[kani::proof]
+    #[kani::should_panic]
+    fn i4_generation_tier1_never_retires_occupied_mutant_refuted() {
+        let head_gen: i64 = kani::any();
+        kani::assume((0..=GEN_MAX).contains(&head_gen));
+        // Keep Tier 2 idle so the mutant's Tier 1 is the only thing pruning.
+        let head: i64 = kani::any();
+        kani::assume((0..PRUNE_MAX_BEHIND_HEAD).contains(&head));
+        let g: i64 = kani::any();
+        kani::assume((0..=GEN_MAX).contains(&g));
+        // A lineage below the head must exist for `g + 1` to survive the clamp.
+        kani::assume(g < head_gen);
+
+        let floor = closed_generation_floor_g3_mutant(head_gen, head, Some(g), true);
+        if floor > g {
+            assert!(head >= PRUNE_MAX_BEHIND_HEAD);
+        }
+    }
 }
 
 // ─── Retention-floor unit tests (I4, issue #539) ─────────────────────────────
@@ -784,5 +1382,65 @@ mod retention_tests {
         assert_eq!(prune_floor(None, false, 0), 0);
         assert_eq!(prune_floor(Some(0), true, 0), 0);
         assert_eq!(prune_floor(Some(3), true, 3), 0); // min(3)-8 → clamp 0; head 3 < cap
+    }
+
+    /// A conversation that has never migrated (head generation 0) never retires a
+    /// lineage — there is none below it to retire — no matter what the roster
+    /// reports or how long the log gets. This is the ONLY case that exists in the
+    /// deployed fleet today, so it is the one that must be exactly a no-op.
+    #[test]
+    fn generation_floor_is_inert_before_any_migration() {
+        assert_eq!(closed_generation_floor(0, 0, None, false), 0);
+        assert_eq!(closed_generation_floor(0, 50, Some(0), true), 0);
+        // Even with Tier 2 wide open.
+        assert_eq!(
+            closed_generation_floor(0, PRUNE_MAX_BEHIND_HEAD + 1, Some(0), true),
+            0
+        );
+    }
+
+    /// TIER 1 (zero loss): once every current member device has reported itself in
+    /// the successor lineage, the retired one goes. Until then it stays, even
+    /// though the head has moved on — one member still draining generation 0 is
+    /// enough to hold it.
+    #[test]
+    fn generation_tier1_retires_only_fully_vacated_lineages() {
+        // Everyone has moved to generation 1 → generation 0 is retired.
+        assert_eq!(closed_generation_floor(1, 3, Some(1), true), 1);
+        // One device still in generation 0 → nothing retired.
+        assert_eq!(closed_generation_floor(1, 3, Some(0), true), 0);
+        // A device that has not reported at all → no bound, nothing retired.
+        assert_eq!(closed_generation_floor(1, 3, Some(1), false), 0);
+    }
+
+    /// TIER 2 (hard cap): a device stranded on a retired lineage does not pin it
+    /// forever. Once the successor has itself run `PRUNE_MAX_BEHIND_HEAD` epochs
+    /// that device is at least that far behind head — already the accepted-loss
+    /// condition — so the closed lineages go and it recovers by external join.
+    #[test]
+    fn generation_tier2_bounds_a_stranded_device() {
+        let stuck_in_gen = 0i64;
+        let head_gen = 2i64;
+        // Just below the cap: Tier 2 idle, the straggler still holds its lineage.
+        assert_eq!(
+            closed_generation_floor(head_gen, PRUNE_MAX_BEHIND_HEAD - 1, Some(stuck_in_gen), true),
+            0
+        );
+        // At the cap: everything below the live lineage is retired.
+        assert_eq!(
+            closed_generation_floor(head_gen, PRUNE_MAX_BEHIND_HEAD, Some(stuck_in_gen), true),
+            head_gen
+        );
+    }
+
+    /// The live lineage is never retired wholesale, whatever the reports say —
+    /// including a nonsensical report from a generation above the head.
+    #[test]
+    fn generation_floor_never_exceeds_head_generation() {
+        assert_eq!(closed_generation_floor(1, 3, Some(9), true), 1);
+        assert_eq!(
+            closed_generation_floor(2, PRUNE_MAX_BEHIND_HEAD * 4, Some(9), true),
+            2
+        );
     }
 }

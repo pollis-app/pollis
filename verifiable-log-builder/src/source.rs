@@ -19,18 +19,24 @@ use crate::error::{BuilderError, Result};
 pub struct CommitRow {
     pub seq: i64,
     pub conversation_id: String,
+    /// Suite generation of the lineage this commit belongs to (#454 P4). 0 for
+    /// every conversation that has never migrated, and for any log DB predating
+    /// migration `000004_commit_generation.sql`.
+    pub generation: i64,
     pub epoch: i64,
     pub sender_id: String,
     pub commit_sha256: String,
 }
 
 impl CommitRow {
-    /// Project this row into its canonical leaf. `epoch` is stored as a signed
-    /// INTEGER in SQLite but is logically non-negative; we keep it as `u64` in
-    /// the leaf and clamp a (never-expected) negative to 0 rather than panic.
+    /// Project this row into its canonical leaf. `epoch` and `generation` are
+    /// stored as signed INTEGERs in SQLite but are logically non-negative; we
+    /// keep them as `u64` in the leaf and clamp a (never-expected) negative to 0
+    /// rather than panic.
     pub fn to_leaf(&self) -> CommitLeaf {
         CommitLeaf {
             conversation_id: self.conversation_id.clone(),
+            generation: self.generation.max(0) as u64,
             epoch: self.epoch.max(0) as u64,
             sender_id: self.sender_id.clone(),
             seq: self.seq,
@@ -82,19 +88,45 @@ pub async fn connect(db: &str) -> Result<libsql::Connection> {
     connect_with_token(db, &token).await
 }
 
+/// Does `table` have a column named `column`?
+///
+/// The builder ships and deploys independently of the Delivery Service that owns
+/// the log DB's migrations, so it cannot assume the two are in lockstep. Probing
+/// beats catching a "no such column" error: the query below fails cleanly on a
+/// genuinely unreachable DB instead of silently degrading to the narrow read.
+async fn has_column(conn: &libsql::Connection, table: &str, column: &str) -> Result<bool> {
+    let mut rows = conn
+        .query(&format!("PRAGMA table_info({table})"), ())
+        .await?;
+    while let Some(row) = rows.next().await? {
+        // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk.
+        if row.get::<String>(1)? == column {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Read every `mls_commit_log` row in ascending `seq` order, hashing each
 /// `commit_data` blob to hex and discarding the raw bytes.
+///
+/// `generation` (#454 P4) is read when the log DB has it and reported as 0 when
+/// it does not — which is correct, not a fallback approximation: a log DB
+/// predating migration `000004_commit_generation.sql` cannot contain a migrated
+/// conversation, so every commit in it genuinely belongs to generation 0.
 pub async fn read_commit_log(conn: &libsql::Connection) -> Result<Vec<CommitRow>> {
     // Only the structural columns plus the blob (to hash it). `created_at`,
     // `added_user_id`, `added_device_ids` are intentionally not read — the leaf
     // commits to commit identity, not delivery metadata.
-    let mut rows = conn
-        .query(
-            "SELECT seq, conversation_id, epoch, sender_id, commit_data \
-             FROM mls_commit_log ORDER BY seq ASC",
-            (),
-        )
-        .await?;
+    let has_generation = has_column(conn, "mls_commit_log", "generation").await?;
+    let sql = if has_generation {
+        "SELECT seq, conversation_id, epoch, sender_id, commit_data, generation \
+         FROM mls_commit_log ORDER BY seq ASC"
+    } else {
+        "SELECT seq, conversation_id, epoch, sender_id, commit_data, 0 \
+         FROM mls_commit_log ORDER BY seq ASC"
+    };
+    let mut rows = conn.query(sql, ()).await?;
 
     let mut out = Vec::new();
     while let Some(row) = rows.next().await? {
@@ -103,6 +135,7 @@ pub async fn read_commit_log(conn: &libsql::Connection) -> Result<Vec<CommitRow>
         let epoch: i64 = row.get(2)?;
         let sender_id: String = row.get(3)?;
         let commit_data: Vec<u8> = row.get(4)?;
+        let generation: i64 = row.get(5)?;
 
         // Hash and drop the raw blob immediately — it is never retained.
         let commit_sha256 = sha256_hex(&commit_data);
@@ -111,6 +144,7 @@ pub async fn read_commit_log(conn: &libsql::Connection) -> Result<Vec<CommitRow>
         out.push(CommitRow {
             seq,
             conversation_id,
+            generation,
             epoch,
             sender_id,
             commit_sha256,

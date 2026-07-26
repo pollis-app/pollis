@@ -38,12 +38,10 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use openmls::prelude::*;
-
 use crate::error::Result;
 use crate::state::AppState;
 
-use super::provider::{parse_credential_device_id, parse_credential_user_id, PollisProvider};
+use super::provider::{load_stored_group, parse_credential_device_id, parse_credential_user_id};
 
 pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Result<()> {
     let device_id = state.device_id.lock().await.clone();
@@ -89,38 +87,140 @@ pub async fn catch_up_all_mls_groups(state: &Arc<AppState>, user_id: &str) -> Re
         dm_ids.len()
     );
 
-    // Regular groups: mls_group_id IS the group id. Route through the group-level
-    // interleaved catch-up (not a bare commit-only replay) so a returning offline
-    // member decrypts every message sealed at an epoch it's about to advance past,
-    // rather than losing anything sent before a membership change during its
-    // offline window. Interleaved ingest still advances the group to head, so the
-    // cold-launch guarantee (#371) is preserved.
+    // Own-leaf rotations issued this sweep, capped at
+    // [`MAX_SELF_UPDATES_PER_SWEEP`] so a device that has been away long enough
+    // to be overdue everywhere doesn't turn one cold launch into a commit storm.
+    let mut self_updates = 0usize;
+    // Suite migrations issued this sweep, capped for the same reason and more
+    // sharply: a migration claims a KeyPackage per roster device and publishes a
+    // full add-everyone hybrid commit, so it is the most expensive thing the
+    // sweep can do (#454 P4).
+    let mut migrations = 0usize;
+
+    // Regular groups: mls_group_id IS the group id.
     for gid in &group_ids {
-        if let Err(e) =
-            crate::commands::messages::catch_up_mls_group_interleaved(state, gid, user_id).await
-        {
-            eprintln!("[mls-sweep] catch_up_mls_group for group {gid}: {e}");
-        }
-        // Backstop a dropped remove/eviction commit (issue #430 P1).
-        if let Err(e) = reconcile_backstop(state, gid, user_id).await {
-            eprintln!("[mls-sweep] reconcile backstop for group {gid}: {e}");
-        }
+        sweep_conversation(state, gid, user_id, "group", &mut self_updates, &mut migrations).await;
     }
 
     // DMs: mls_group_id IS the dm_channel_id — a single-conversation MLS group.
     for did in &dm_ids {
-        if let Err(e) =
-            crate::commands::messages::catch_up_mls_group_interleaved(state, did, user_id).await
-        {
-            eprintln!("[mls-sweep] catch_up_mls_group for dm {did}: {e}");
-        }
-        // Backstop a dropped remove/eviction commit (issue #430 P1).
-        if let Err(e) = reconcile_backstop(state, did, user_id).await {
-            eprintln!("[mls-sweep] reconcile backstop for dm {did}: {e}");
-        }
+        sweep_conversation(state, did, user_id, "dm", &mut self_updates, &mut migrations).await;
     }
 
     Ok(())
+}
+
+/// One conversation's full sweep pass. Ordering is load-bearing:
+///
+/// 1. **Catch up**, through the group-level *interleaved* path (not a bare
+///    commit-only replay) so a returning offline member decrypts every message
+///    sealed at an epoch it is about to advance past, rather than losing anything
+///    sent before a membership change during its offline window. It still
+///    advances to head, so the cold-launch guarantee (#371) is preserved.
+/// 2. **Reconcile backstop** — retry a dropped remove/eviction (#430 P1). Before
+///    migration, so a roster that has just shed a member is settled before we
+///    decide who has to come across.
+/// 3. **Migration backstop** — move to the hybrid suite if the whole roster can
+///    now follow (#454 P4).
+/// 4. **Self-update backstop** — rotate our own leaf if overdue (#666). Last,
+///    because a successful migration founds a group where our leaf is already
+///    merged and records the rotation, making this a no-op instead of a wasted
+///    commit on a lineage we just retired.
+///
+/// Best-effort throughout: every step logs and continues so one bad conversation
+/// never blocks the rest of the sweep.
+async fn sweep_conversation(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    kind: &str,
+    self_updates: &mut usize,
+    migrations: &mut usize,
+) {
+    if let Err(e) =
+        crate::commands::messages::catch_up_mls_group_interleaved(state, conversation_id, user_id)
+            .await
+    {
+        eprintln!("[mls-sweep] catch_up_mls_group for {kind} {conversation_id}: {e}");
+    }
+    if let Err(e) = reconcile_backstop(state, conversation_id, user_id).await {
+        eprintln!("[mls-sweep] reconcile backstop for {kind} {conversation_id}: {e}");
+    }
+    migrate_backstop(state, conversation_id, user_id, migrations).await;
+    self_update_backstop(state, conversation_id, user_id, self_updates).await;
+}
+
+/// Post-quantum suite migration for a single conversation (#454 P4).
+///
+/// The only driver of migration: there is no user-facing "upgrade this group"
+/// action and no server push. A conversation moves when every device on its
+/// roster can follow — which is a property that becomes true silently, as the
+/// fleet updates — so the sweep re-asks the question on every cold launch and
+/// reconnect until the answer changes.
+///
+/// Best-effort and capped: `budget` is shared across the sweep, so a device that
+/// is suddenly eligible in twenty conversations migrates a couple per launch
+/// rather than firing twenty add-everyone hybrid commits at once.
+async fn migrate_backstop(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    budget: &mut usize,
+) {
+    if *budget >= super::migrate::MAX_MIGRATIONS_PER_SWEEP {
+        return;
+    }
+    match super::migrate::migrate_to_hybrid_if_due(state, conversation_id, user_id).await {
+        // Only a landed migration spends budget: an ineligible conversation did
+        // no work, and a lost race left it eligible for the next sweep to retry.
+        Ok(true) => {
+            *budget += 1;
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("[mls-sweep] hybrid migration for {conversation_id}: {e}");
+        }
+    }
+}
+
+/// Periodic own-leaf rotation for a single conversation (issue #666).
+///
+/// This is where post-compromise security actually comes from. MLS forward
+/// secrecy is free — the ratchet deletes old keys regardless of who commits —
+/// but healing *after* a device is compromised requires that device to publish
+/// fresh key material along its own direct path, which only its own commit can
+/// do. A member that only ever receives other people's commits never heals; an
+/// attacker who stole its leaf key keeps reading the group for as long as it
+/// stays a member. Rotating on a timer bounds that window.
+///
+/// It also catches the post-join rotation the live path
+/// (`poll_mls_welcomes_inner`) missed or deferred, which is what keeps unmerged
+/// leaves — and the linear commit growth they cause — from accumulating.
+///
+/// Best-effort and capped: `budget` is shared across the whole sweep so an
+/// overdue-everywhere device spreads its rotations over several launches instead
+/// of firing one commit per group at once.
+async fn self_update_backstop(
+    state: &Arc<AppState>,
+    conversation_id: &str,
+    user_id: &str,
+    budget: &mut usize,
+) {
+    if *budget >= super::self_update::MAX_SELF_UPDATES_PER_SWEEP {
+        return;
+    }
+    match super::self_update::self_update_if_due(state, conversation_id, user_id).await {
+        // Only a landed commit spends budget: a not-due group did no work, and a
+        // lost race left the rotation due for the next sweep to retry.
+        Ok(true) => {
+            *budget += 1;
+            eprintln!("[mls-sweep] {conversation_id}: rotated own leaf");
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("[mls-sweep] self-update for {conversation_id}: {e}");
+        }
+    }
 }
 
 /// Eviction/remove reconcile backstop for a single conversation (issue #430 P1).
@@ -182,10 +282,10 @@ async fn local_tree_has_stale_leaf(
             // No local group open (never joined / already forgotten): nothing to evict.
             None => return Ok(false),
         };
-        let provider = PollisProvider::new(db.conn());
-        let group_id = GroupId::from_slice(conversation_id.as_bytes());
-        match MlsGroup::load(provider.storage(), &group_id) {
-            Ok(Some(group)) => group
+        // Reading the tree is storage-only, so this needs no crypto backend
+        // and therefore no suite dispatch.
+        match load_stored_group(db.conn(), conversation_id) {
+            Some(group) => group
                 .members()
                 .map(|m| {
                     let uid = parse_credential_user_id(&m.credential);
@@ -194,7 +294,7 @@ async fn local_tree_has_stale_leaf(
                 })
                 .collect(),
             // Missing / unreadable local group: nothing this device can evict.
-            _ => return Ok(false),
+            None => return Ok(false),
         }
     };
     if tree_members.is_empty() {
@@ -243,31 +343,9 @@ async fn local_tree_has_stale_leaf(
 
     // 3. Valid (user_id, device_id) pairs still registered for the roster — the
     //    same `user_device` snapshot reconcile uses to drop revoked single
-    //    devices of a still-present user.
-    let mut valid_devices: HashSet<(String, String)> = HashSet::new();
-    {
-        let safe_ids: Vec<String> = roster
-            .iter()
-            .map(|id| {
-                id.chars()
-                    .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-                    .collect::<String>()
-            })
-            .collect();
-        if !safe_ids.is_empty() {
-            let in_clause = safe_ids
-                .iter()
-                .map(|id| format!("'{id}'"))
-                .collect::<Vec<_>>()
-                .join(",");
-            let query =
-                format!("SELECT user_id, device_id FROM user_device WHERE user_id IN ({in_clause})");
-            let mut rows = conn.query(&query, ()).await?;
-            while let Some(row) = rows.next().await? {
-                valid_devices.insert((row.get::<String>(0)?, row.get::<String>(1)?));
-            }
-        }
-    }
+    //    devices of a still-present user, read through reconcile's own helper so
+    //    the pre-check can never disagree with the reconcile it gates.
+    let valid_devices = super::reconcile::registered_devices(&conn, &roster).await?;
 
     // 4. A leaf is stale iff its user left the roster OR its device row is gone —
     //    exactly the leaves reconcile would remove. Any such leaf means a
