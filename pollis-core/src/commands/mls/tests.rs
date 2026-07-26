@@ -2121,10 +2121,9 @@ fn suite_seam_round_trip<CA, CB>(
 }
 
 /// The classic suite still round-trips through the (now parametrised) seams,
-/// and reports the classic code point. This is the no-behaviour-change half of
-/// The suite a group falls back to whenever any roster device is still
-/// classic-only (`suite_for_new_group`), and the suite every pre-#454-P3 group
-/// is already in.
+/// and reports the classic code point. This is the suite a group falls back to
+/// whenever any roster device is still classic-only (`suite_for_new_group`),
+/// and the suite every pre-#454-P3 group is already in.
 #[test]
 fn classic_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();
@@ -2193,4 +2192,142 @@ fn the_two_suites_produce_structurally_different_key_packages() {
         1216,
         "the hybrid init key must be ML-KEM-768 (1184) + X25519 (32)"
     );
+}
+
+// ── #454 P3: the suite-dispatch seam ─────────────────────────────────────────
+
+/// The foundation of the whole seam: a group's ciphersuite is readable from
+/// STORAGE ALONE, with no crypto backend picked yet.
+///
+/// Without this, suite dispatch is circular — you would need a provider to
+/// learn which provider to use, and `PollisProvider` cannot even load a hybrid
+/// group. `MlsGroup::load` is generic over `StorageProvider`, not
+/// `OpenMlsProvider`, which is what makes `stored_group_ciphersuite` (and hence
+/// `with_group_provider!`) possible.
+#[test]
+fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
+    for (suite, conv) in [
+        (CS_CLASSIC, "01JTESTSUITEREADCLASSIC000"),
+        (CS_HYBRID, "01JTESTSUITEREADHYBRID0000"),
+    ] {
+        let db = make_db();
+        // Create through whichever backend serves the suite…
+        if suite == CS_HYBRID {
+            create_mls_group_in_suite(&PollisPqProvider::new(&db), conv, "alice", "alice_dev", suite)
+                .unwrap();
+        } else {
+            create_mls_group_in_suite(&PollisProvider::new(&db), conv, "alice", "alice_dev", suite)
+                .unwrap();
+        }
+
+        // …then read the suite back with no crypto backend at all.
+        assert_eq!(
+            super::provider::stored_group_ciphersuite(&db, conv),
+            Some(suite),
+            "the stored group's suite must be readable through MlsStore alone"
+        );
+    }
+}
+
+/// A joiner has no local group, so `apply_welcome` reads the suite off the
+/// Welcome itself. `Welcome::ciphersuite()` is `pub(crate)` in openmls, so
+/// `welcome_ciphersuite` parses the wire format per RFC 9420 §12.4.3.1
+/// (cipher_suite is the first field, 2 bytes big-endian) — this pins that
+/// parse against real Welcomes on both suites.
+#[test]
+fn welcome_suite_is_readable_on_both_suites() {
+    for (suite, conv) in [
+        (CS_CLASSIC, "01JTESTWELCOMESUITECLASSIC"),
+        (CS_HYBRID, "01JTESTWELCOMESUITEHYBRID0"),
+    ] {
+        let alice_db = make_db();
+        let bob_db = make_db();
+        let welcome_bytes = if suite == CS_HYBRID {
+            welcome_for_suite(&PollisPqProvider::new(&alice_db), &PollisPqProvider::new(&bob_db), suite, conv)
+        } else {
+            welcome_for_suite(&PollisProvider::new(&alice_db), &PollisProvider::new(&bob_db), suite, conv)
+        };
+
+        let mut reader: &[u8] = &welcome_bytes;
+        let welcome = match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
+            MlsMessageBodyIn::Welcome(w) => w,
+            _ => panic!("expected a Welcome"),
+        };
+        assert_eq!(
+            super::provider::welcome_ciphersuite(&welcome),
+            Some(suite),
+            "a joiner must be able to route a Welcome to the right provider"
+        );
+    }
+}
+
+/// Build a real Welcome by adding bob to a group alice creates, both on `suite`.
+fn welcome_for_suite<CA, CB>(
+    alice: &MlsProvider<'_, CA>,
+    bob: &MlsProvider<'_, CB>,
+    suite: Ciphersuite,
+    conversation_id: &str,
+) -> Vec<u8>
+where
+    CA: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+    CB: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
+{
+    create_mls_group_in_suite(alice, conversation_id, "alice", "alice_dev", suite).unwrap();
+    let (_, bob_kp_bytes) = build_key_package_in_suite(bob, "bob", "bob_dev", suite).unwrap();
+    let (mut alice_group, alice_sig) = load_group_with_signer(alice, conversation_id).unwrap();
+
+    let mut reader: &[u8] = &bob_kp_bytes;
+    let kp = KeyPackageIn::tls_deserialize(&mut reader)
+        .unwrap()
+        .validate(alice.crypto(), ProtocolVersion::Mls10)
+        .unwrap();
+    let (_commit, welcome, _) = alice_group.add_members(alice, &alice_sig, &[kp]).unwrap();
+    alice_group.merge_pending_commit(alice).unwrap();
+    welcome.tls_serialize_detached().unwrap()
+}
+
+/// #454's acceptance criterion, encoded as an invalid state that cannot be
+/// created: **a hybrid group can never contain a member without a hybrid
+/// KeyPackage.**
+///
+/// Pollis blocks this at three depths, and the deepest one is the protocol
+/// itself. `reconcile` claims KeyPackages scoped to the group's own suite (so a
+/// classic-only device has nothing to claim and is reported in
+/// `ReconcileOutcome::skipped_no_suite_kp`), `stage_reconcile_commit`
+/// re-checks the claimed package's suite against the group's because the DS is
+/// untrusted, and — asserted here — openmls itself refuses the add. There is no
+/// code path, and no compromised server, that can silently downgrade a hybrid
+/// conversation by grafting in a classic leaf.
+#[test]
+fn a_hybrid_group_cannot_admit_a_classic_key_package() {
+    let alice_db = make_db();
+    let bob_db = make_db();
+
+    let alice = PollisPqProvider::new(&alice_db);
+    create_mls_group_in_suite(&alice, "01JTESTNODOWNGRADE00000000", "alice", "alice_dev", CS_HYBRID)
+        .unwrap();
+    let (mut alice_group, alice_sig) =
+        load_group_with_signer(&alice, "01JTESTNODOWNGRADE00000000").unwrap();
+    assert_eq!(alice_group.ciphersuite(), CS_HYBRID);
+
+    // Bob is on an un-upgraded client: his only KeyPackage is classic.
+    let bob = PollisProvider::new(&bob_db);
+    let (_, bob_kp_bytes) =
+        build_key_package_in_suite(&bob, "bob", "bob_dev", CS_CLASSIC).unwrap();
+    let mut reader: &[u8] = &bob_kp_bytes;
+    let bob_kp = KeyPackageIn::tls_deserialize(&mut reader)
+        .unwrap()
+        .validate(alice.crypto(), ProtocolVersion::Mls10)
+        .expect("a classic package is well-formed; it is the SUITE that must reject it");
+    assert_eq!(bob_kp.ciphersuite(), CS_CLASSIC);
+
+    let err = alice_group
+        .add_members(&alice, &alice_sig, &[bob_kp])
+        .expect_err("adding a classic leaf to a hybrid group must be impossible");
+    eprintln!("[test] hybrid group rejected the classic KeyPackage: {err}");
+
+    // The rejected add must leave nothing staged — a failed downgrade attempt
+    // cannot wedge the group.
+    alice_group.clear_pending_commit(alice.storage()).unwrap();
+    assert_eq!(alice_group.ciphersuite(), CS_HYBRID, "the group stays hybrid");
 }
