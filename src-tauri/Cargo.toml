@@ -137,6 +137,9 @@ axum = "0.7"
 # Used by the flows harness's `signed_post_status` to base64-encode the Ed25519
 # request signature when driving the DS over raw HTTP (server-side authz tests).
 base64 = "0.22"
+# The flows attacker model (`StolenLeaf`) decodes the `mls:<hex>` envelope
+# framing straight off the DS, the way a wiretap would.
+hex = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 # setrlimit(RLIMIT_NOFILE, ...) at startup so we don't hit the macOS default

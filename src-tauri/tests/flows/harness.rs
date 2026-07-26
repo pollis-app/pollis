@@ -3157,3 +3157,215 @@ pub(crate) async fn enroll_second_device(primary: &TestClient, email: &str) -> T
 
     new_client
 }
+
+// ─── Attacker model: a stolen leaf (issue #666) ──────────────────────────────
+
+/// A passive adversary holding an exfiltrated copy of one device's MLS state.
+///
+/// Everything openmls keeps for a device — leaf secret, epoch secrets, ratchet
+/// state, the group itself — lives in the local `mls_kv` table, so copying that
+/// table IS the compromise. The copy is planted in a *separate* client's local
+/// DB, which is what makes the adversary strong enough to be worth testing: it
+/// gets its own state that evolves independently of the victim's, so nothing it
+/// can (or cannot) read is an artefact of sharing the victim's live database.
+///
+/// Crucially the attacker **follows the commit chain**. A snapshot that only ever
+/// decrypted at its stolen epoch would be locked out by *any* epoch change, and a
+/// lockout assertion over it would prove nothing about rotation. A real adversary
+/// holding the victim's leaf key can decrypt the path secrets in every *other*
+/// member's commit — those commits are addressed to the copath, which contains the
+/// victim's leaf — and so rides the group forward indefinitely. Only a commit by
+/// the victim itself cuts it off, because a committer's own leaf is the one
+/// position an UpdatePath carries no ciphertext for. That gap is exactly what
+/// issue #666's self-update closes, and `catch_up` is what forces the test to
+/// prove it rather than assume it.
+///
+/// Passive is the honest scope. `mls_kv` also holds the device's *signing* key,
+/// so an adversary willing to act could authenticate to the DS and external-join
+/// as the victim — but that is a full device impersonation, and no amount of key
+/// rotation defends against it. Post-compromise security is the claim that a
+/// *listener* is evicted once the victim rotates, and that is what this models.
+pub(crate) struct StolenLeaf {
+    /// The attacker's own client. Its identity is its own (it never authenticates
+    /// as the victim); only the MLS key material is the victim's.
+    client: TestClient,
+    victim: String,
+}
+
+/// Exfiltrate `victim`'s entire MLS state as of right now onto an attacker-owned
+/// device.
+///
+/// The attacker signs up so it has an unlocked local DB to plant the stolen rows
+/// in; that signup is a bystander account which never joins any group. Its own
+/// `mls_kv` rows are dropped first — a stolen device holds the victim's key
+/// material and nothing else.
+pub(crate) async fn steal_leaf(victim: &TestClient) -> StolenLeaf {
+    let mut client = TestClient::new().await;
+    client.sign_up("attacker@test.local").await;
+
+    // Columns are read as dynamically-typed `Value`s because `mls_kv` genuinely
+    // holds a mix: openmls' own rows bind `scope` as the empty *blob*, while
+    // sibling modules writing through `raw_conn` bind it as text, and SQLite
+    // stores whatever it was given regardless of the declared affinity. Copying
+    // `Value`s keeps every row byte- and type-identical to the victim's.
+    type Row = (
+        rusqlite::types::Value,
+        rusqlite::types::Value,
+        rusqlite::types::Value,
+    );
+    let rows: Vec<Row> = {
+        let guard = victim.state.local_db.lock().await;
+        let db = guard.as_ref().expect("victim local db open");
+        let mut stmt = db
+            .conn()
+            .prepare("SELECT scope, key, value FROM mls_kv")
+            .expect("read victim mls_kv");
+        let rows = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .expect("query victim mls_kv")
+            .map(|r| r.expect("victim mls_kv row"))
+            .collect::<Vec<Row>>();
+        rows
+    };
+    assert!(!rows.is_empty(), "stealing an empty MLS state proves nothing");
+
+    {
+        let guard = client.state.local_db.lock().await;
+        let db = guard.as_ref().expect("attacker local db open");
+        db.conn()
+            .execute("DELETE FROM mls_kv", [])
+            .expect("clear attacker mls_kv");
+        for (scope, key, value) in &rows {
+            db.conn()
+                .execute(
+                    "INSERT INTO mls_kv (scope, key, value) VALUES (?1, ?2, ?3)",
+                    rusqlite::params![scope, key, value],
+                )
+                .expect("seed attacker mls_kv");
+        }
+    }
+
+    StolenLeaf {
+        client,
+        victim: victim.user_id().to_string(),
+    }
+}
+
+impl StolenLeaf {
+    /// Ride the commit chain forward as far as the stolen keys allow.
+    ///
+    /// Runs the real client replay (`process_pending_commits_inner`) as the
+    /// victim, which is what an adversary running the stolen device's own binary
+    /// would do. It succeeds through other members' commits and stalls at the
+    /// victim's own — the whole point of the model, so the result is deliberately
+    /// ignored here and judged by what [`can_read`](Self::can_read) sees.
+    pub(crate) async fn catch_up(&self, mls_group_id: &str) {
+        if let Err(e) = pollis_lib::commands::mls::process_pending_commits_inner(
+            &self.client.state,
+            mls_group_id,
+            &self.victim,
+        )
+        .await
+        {
+            eprintln!("[attacker] replay stalled for {mls_group_id}: {e}");
+        }
+    }
+
+    /// Can the attacker still read `body` out of `conversation_id`?
+    ///
+    /// Catches up first, then runs the real production decrypt
+    /// (`try_mls_decrypt`) against the stolen state over every envelope the DS
+    /// holds for the conversation — the exact capability a wiretap plus a stolen
+    /// device would have.
+    ///
+    /// Both ids are needed because they are not the same key: envelopes are
+    /// stored per *conversation* (a channel id, for group traffic), while the MLS
+    /// group every channel in a group shares is keyed by the group id. For a DM
+    /// the two coincide. Mirrors `send_message`'s own `mls_group_id` lookup.
+    pub(crate) async fn can_read(
+        &self,
+        conversation_id: &str,
+        mls_group_id: &str,
+        body: &str,
+    ) -> bool {
+        self.catch_up(mls_group_id).await;
+        let ciphertexts = envelope_ciphertexts(conversation_id).await;
+        let guard = self.client.state.local_db.lock().await;
+        let db = guard.as_ref().expect("attacker local db open");
+        for ciphertext in ciphertexts {
+            let Some((plain, _sender)) = pollis_lib::commands::mls::try_mls_decrypt(
+                db.conn(),
+                mls_group_id,
+                &ciphertext,
+            ) else {
+                continue;
+            };
+            // Plaintext is padded before sealing, so the body is a substring.
+            if plain
+                .windows(body.len())
+                .any(|w| w == body.as_bytes())
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub(crate) fn victim(&self) -> &str {
+        &self.victim
+    }
+}
+
+/// Every MLS ciphertext the DS is holding for `conversation_id`, decoded from
+/// the `mls:<hex>` envelope framing. This is the wiretap half of the attacker.
+pub(crate) async fn envelope_ciphertexts(conversation_id: &str) -> Vec<Vec<u8>> {
+    let remote = world().await.remote.clone();
+    let conn = remote.conn().await.expect("remote conn for envelopes");
+    let mut rows = conn
+        .query(
+            "SELECT ciphertext FROM message_envelope WHERE conversation_id = ?1 ORDER BY sent_at ASC",
+            libsql::params![conversation_id.to_string()],
+        )
+        .await
+        .expect("query message_envelope");
+
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().await.expect("envelope row") {
+        let ciphertext: String = row.get(0).expect("ciphertext column");
+        if let Some(bytes) = ciphertext.strip_prefix("mls:").and_then(|h| hex::decode(h).ok()) {
+            out.push(bytes);
+        }
+    }
+    out
+}
+
+impl TestClient {
+    /// Rotate this device's own leaf in `conversation_id` (issue #666).
+    ///
+    /// Calls production's [`self_update_group`] directly rather than through an
+    /// `invoke` shim because there is no user-facing command for it: rotation is
+    /// driven by the welcome poller on join and by the cold-launch sweep on a
+    /// timer. Tests need to place it at an exact point in a sequence, which
+    /// neither of those affords.
+    ///
+    /// Returns whether a commit actually landed (`false` = another member won
+    /// the epoch race, which the caller must treat as "not yet rotated").
+    pub(crate) async fn self_update(&self, conversation_id: &str) -> bool {
+        self.try_self_update(conversation_id)
+            .await
+            .unwrap_or_else(|e| panic!("self_update_group({conversation_id}): {e}"))
+    }
+
+    /// Fallible [`self_update`](Self::self_update), for the fuzzer.
+    ///
+    /// The landing DS faults are supposed to recover *internally* (the command
+    /// still returns `Ok`), so an `Err` here is a finding — and a generated case
+    /// needs to report it with its op sequence attached rather than panic out of
+    /// the proptest closure with no repro.
+    pub(crate) async fn try_self_update(&self, conversation_id: &str) -> Result<bool, String> {
+        let user_id = self.user_id().to_string();
+        pollis_lib::commands::mls::self_update_group(&self.state, conversation_id, &user_id)
+            .await
+            .map_err(|e| e.to_string())
+    }
+}

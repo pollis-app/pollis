@@ -6366,6 +6366,7 @@ dependencies = [
  "chrono",
  "cocoa",
  "dotenvy",
+ "hex",
  "image",
  "libc",
  "libsql",

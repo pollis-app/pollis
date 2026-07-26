@@ -44,13 +44,27 @@
 //! ## Ops → real client commands (NO invented seams)
 //!
 //! Every op maps to a method already exercised by the green flows suite, so this
-//! layer invents no new client surface (there is deliberately no rotate/self-update
-//! op — `self_update` does not exist anywhere in this repo):
+//! layer invents no new client surface:
 //! - `Op::Add(t)`      → `join_member` (invite → accept → poll → process), i.e.
 //!                       `send_group_invite` / `accept_group_invite` /
 //!                       `poll_mls_welcomes` / `process_pending_commits`.
 //! - `Op::Remove(t)`   → `TestClient::remove_member` (`remove_member_from_group`)
 //!                       + committer `process_pending_commits`.
+//! - `Op::Rotate(a)`   → `TestClient::self_update` (`self_update_group`, issue
+//!                       #666). Production drives it from the welcome poller on
+//!                       join and from the cold-launch sweep on a timer; here it is
+//!                       placed at arbitrary points so a rotation can interleave
+//!                       with every membership op, offline stint, and DS fault.
+//!                       This is the op that matters for #666's *risk*: rotation
+//!                       adds a commit producer that is not the owner, so it is the
+//!                       first thing in this suite that can fork the commit log
+//!                       from two directions at once. Whether rotation delivers
+//!                       post-compromise security is proved separately and
+//!                       deterministically by
+//!                       `a_stolen_leaf_is_locked_out_once_the_victim_rotates` —
+//!                       that needs a stolen-state adversary and a control commit
+//!                       to be non-vacuous, neither of which a random op sequence
+//!                       can arrange.
 //! - `Op::Send(a)`     → `TestClient::send_channel_message` (`send_message`) from
 //!                       a CURRENT member (the sender syncs first — a real client
 //!                       processes pending commits when it acts — so the send is at
@@ -166,6 +180,8 @@ enum Op {
     Send(u8),
     /// Actor `a` (0..NACTORS) comes online (poll + process + fetch).
     Sync(u8),
+    /// Current member `a` (0..NACTORS) rotates its own leaf (issue #666).
+    Rotate(u8),
     /// Arm a landing DS fault (index into `fault_variant`) for the next
     /// commit-producing op.
     Fault(u8),
@@ -188,6 +204,7 @@ fn op_strategy(npool: u8) -> impl Strategy<Value = Op> {
         2 => (1u8..npool).prop_map(Op::Remove),
         6 => (0u8..npool).prop_map(Op::Send),
         4 => (0u8..npool).prop_map(Op::Sync),
+        3 => (0u8..npool).prop_map(Op::Rotate),
         2 => (0u8..3u8).prop_map(Op::Fault),
     ]
 }
@@ -354,6 +371,36 @@ async fn run_case(ops: &[Op], nactors: usize) -> Result<(), String> {
                 clients[a].send_channel_message(&channel_id, &body).await;
                 // ORACLE: sealed at the membership snapshot + clock at send time.
                 messages.push((body, current.clone(), clock));
+            }
+            Op::Rotate(a) => {
+                let a = a as usize;
+                // Well-formed guard: only a current member has a leaf to rotate.
+                if !current.contains(&a) {
+                    continue;
+                }
+                if let Some(f) = pending_fault.take() {
+                    arm_ds_fault(f);
+                }
+                // Catch up first, exactly as production does: the sweep rotates
+                // only after `catch_up_mls_group_interleaved`, because a commit
+                // staged at a stale epoch just loses the compare-and-swap.
+                clients[a].poll().await;
+                clients[a].process_commits_for(&channel_id).await;
+                // A lost race is a legitimate outcome (someone else's commit won
+                // the epoch), not a failure — it simply means this op produced no
+                // new epoch, so it must not count toward `commit_ops`. An *error*
+                // is a different matter: the landing faults are supposed to
+                // recover internally, so surfacing one is a finding.
+                match clients[a].try_self_update(&group_id).await {
+                    Ok(true) => commit_ops += 1,
+                    Ok(false) => {}
+                    Err(e) => {
+                        return Err(fail_msg(
+                            ops,
+                            &format!("ROTATION FAILED: actor {a} could not rotate its own leaf: {e}"),
+                        ));
+                    }
+                }
             }
             Op::Sync(a) => {
                 let a = a as usize;
