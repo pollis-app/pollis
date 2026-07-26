@@ -36,6 +36,16 @@
 //! creates anything if a single roster device cannot supply one: a mixed fleet is
 //! a no-op that retries, never a partial move that locks the un-upgraded device
 //! out of its own conversation.
+//!
+//! The roster is not the whole question, though, because a conversation's roster
+//! grows. A group that migrates while a classic-only device still exists anywhere
+//! in the fleet is one invite away from stranding that device just as completely
+//! — reconcile can only skip it, and rebuilding the group classic to admit it is
+//! the downgrade the suite routing exists to prevent. So migration takes the same
+//! second gate `group_state::suite_for_new_group` does: the whole live fleet must
+//! be hybrid-capable (#454 P5). One switch, one meaning — until the fleet
+//! completes, everything stays classic; after it completes, new groups are born
+//! hybrid and existing ones migrate here.
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -45,7 +55,8 @@ use crate::state::AppState;
 
 use super::delivery::WelcomeOut;
 use super::group_state::{
-    create_mls_group_in_suite, forget_local_mls_group_at, roster_is_fully_pq_capable,
+    create_mls_group_in_suite, fleet_is_fully_pq_capable, forget_local_mls_group_at,
+    roster_is_fully_pq_capable,
 };
 use super::provider::{load_stored_group_at, with_suite_provider, CS_CLASSIC, CS_HYBRID};
 use super::reconcile::{
@@ -87,12 +98,18 @@ pub(super) async fn migrate_to_hybrid_if_due(
         }
     };
 
-    // 2. Would every roster device survive the move? `pq_capable` is derived
-    //    server-side from each device's published KeyPackage pool, so this is the
-    //    fleet-completion test #454 P5 gates classic retirement on, asked one
-    //    conversation at a time. One classic-only device anywhere on the roster
-    //    means this conversation stays classic — see the module docs.
-    if !roster_is_fully_pq_capable(state, conversation_id).await? {
+    // 2. Would every roster device survive the move, and would every device that
+    //    may be invited *later*? `pq_capable` is derived server-side from each
+    //    device's published KeyPackage pool, so both are real capability tests
+    //    rather than advertised intent. One classic-only device on the roster
+    //    means this conversation stays classic (it could not follow us across —
+    //    see the module docs); one classic-only device anywhere else in the live
+    //    fleet means the same, because a hybrid group can never admit it and
+    //    inviting it after the migration would strand it exactly as surely
+    //    (#454 P5, the same gate `suite_for_new_group` applies to new groups).
+    if !roster_is_fully_pq_capable(state, conversation_id).await?
+        || !fleet_is_fully_pq_capable(state).await?
+    {
         return Ok(false);
     }
 

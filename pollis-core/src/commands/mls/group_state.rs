@@ -651,30 +651,114 @@ where
     Ok(())
 }
 
-/// The ciphersuite a brand-new group should be created in (#454 P3).
+/// How long a device may go unseen before [`fleet_is_fully_pq_capable`] stops
+/// counting it against fleet completion (#454 P5).
 ///
-/// `CS_HYBRID` iff the conversation's desired roster resolves to at least one
-/// device and *every* one of those devices has published a hybrid KeyPackage
-/// pool (`user_device.pq_capable = 1`, derived server-side by the DS from the
-/// pool itself — a device cannot claim the flag). Otherwise `CS_CLASSIC`.
+/// A dormancy window is what makes "the fleet is fully hybrid" a reachable state
+/// at all: without one, a single abandoned device would hold the whole deployment
+/// on the classic suite forever. Ninety days is long enough that a device inside
+/// it is genuinely in use, and a device outside it republishes its hybrid
+/// KeyPackage pool on its very next login (`initialize_identity` →
+/// `ensure_mls_key_package`) *before* it can be invited anywhere — so returning
+/// from dormancy on a current build costs nothing. Returning on a pre-PQ build
+/// sets `pq_capable = 0` with a fresh `last_seen`, which re-opens the gate and
+/// sends new groups back to classic; only the groups created during that device's
+/// dormancy are out of its reach, which is the residual — and bounded — cost of
+/// ever retiring the classic suite at all.
+const FLEET_DORMANCY_DAYS: i64 = 90;
+
+/// The ciphersuite a brand-new group should be created in (#454 P3, gated by P5).
 ///
-/// Deliberately conservative, and it fails closed toward *availability*: any
-/// read error, an empty roster, or a single classic-only device yields
-/// `CS_CLASSIC`. A hybrid group can only ever admit hybrid KeyPackages (#454's
-/// no-downgrade acceptance criterion), so choosing hybrid while a roster device
-/// still runs a classic-only client would lock that device out of its own
-/// conversation for as long as it stays un-upgraded. Starting classic costs
-/// nothing permanent: #454 P4 upgrades the group at an epoch boundary once the
-/// whole roster is capable.
+/// `CS_HYBRID` iff BOTH hold — see [`super::invariants::may_birth_hybrid`], the
+/// pure, Kani-proved core of this decision, for the full rationale:
+///
+/// 1. every registered device of every user on the conversation's desired roster
+///    has published a hybrid KeyPackage pool ([`roster_is_fully_pq_capable`]);
+/// 2. no live device anywhere in the deployment is still classic-only
+///    ([`fleet_is_fully_pq_capable`]).
+///
+/// Gate 1 alone is nearly vacuous here, which is exactly why gate 2 exists:
+/// `init_mls_group` runs while the roster is only the creator, so a PQ-capable
+/// creator passes gate 1 trivially and every new group would be born hybrid —
+/// locking out the first classic-only device invited afterwards, permanently,
+/// because reconcile refuses to downgrade and MLS offers no other way in.
+///
+/// Fails toward *availability*: any read error, an empty roster, or one
+/// classic-only device yields `CS_CLASSIC`, which anyone can join and which #454
+/// P4's migration upgrades at an epoch boundary once its roster is capable.
 async fn suite_for_new_group(state: &Arc<AppState>, conversation_id: &str) -> Ciphersuite {
-    match roster_is_fully_pq_capable(state, conversation_id).await {
-        Ok(true) => CS_HYBRID,
-        Ok(false) => CS_CLASSIC,
+    let roster_capable = match roster_is_fully_pq_capable(state, conversation_id).await {
+        Ok(v) => v,
         Err(e) => {
-            eprintln!("[mls] suite_for_new_group: capability read failed ({e}) — using classic");
-            CS_CLASSIC
+            eprintln!(
+                "[mls] suite_for_new_group: roster capability read failed ({e}) — using classic"
+            );
+            false
         }
+    };
+    // Short-circuit: the fleet read is a second round-trip and cannot rescue a
+    // roster that already can't take hybrid.
+    if !roster_capable {
+        return CS_CLASSIC;
     }
+
+    let fleet_complete = match fleet_is_fully_pq_capable(state).await {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "[mls] suite_for_new_group: fleet capability read failed ({e}) — using classic"
+            );
+            false
+        }
+    };
+    if !fleet_complete {
+        eprintln!(
+            "[mls] suite_for_new_group: {conversation_id}'s roster is hybrid-capable but the fleet \
+             is not — starting classic (#454 P4 migrates the group once the fleet completes)"
+        );
+    }
+
+    if super::invariants::may_birth_hybrid(roster_capable, fleet_complete) {
+        CS_HYBRID
+    } else {
+        CS_CLASSIC
+    }
+}
+
+/// Has the whole live fleet finished adopting the hybrid suite (#454 P5)?
+///
+/// True iff there is at least one live device and *every* live device advertises
+/// `pq_capable`. "Live" excludes revoked devices (`revoked_at IS NOT NULL` —
+/// tombstoned by `revoke_device`, never coming back) and devices unseen for
+/// longer than [`FLEET_DORMANCY_DAYS`].
+///
+/// Deployment-wide on purpose, not scoped to any roster: it answers "may a group
+/// being created right now assume everyone it could later invite is able to
+/// join", and a new group's own roster — its creator, alone — cannot answer that.
+/// Because `pq_capable` is set server-side by the DS from a landed hybrid pool
+/// (`pollis_delivery::devices::mark_pq_capable`), a device cannot claim the flag,
+/// so this counts real capability rather than advertised intent.
+///
+/// One indexed aggregate over a table this path already reads, and it runs only
+/// after the roster gate has passed — never on a fleet with obvious stragglers.
+/// False for an empty live set: "nobody is incapable" must not read as "everybody
+/// is capable".
+pub(super) async fn fleet_is_fully_pq_capable(state: &Arc<AppState>) -> Result<bool> {
+    let conn = state.remote_db.conn().await?;
+    let mut rows = conn
+        .query(
+            "SELECT COUNT(*), SUM(CASE WHEN pq_capable = 1 THEN 1 ELSE 0 END) \
+             FROM user_device \
+             WHERE revoked_at IS NULL AND last_seen >= datetime('now', ?1)",
+            libsql::params![format!("-{FLEET_DORMANCY_DAYS} days")],
+        )
+        .await?;
+    let (total, capable): (i64, i64) = match rows.next().await? {
+        Some(row) => (row.get::<i64>(0)?, row.get::<Option<i64>>(1)?.unwrap_or(0)),
+        None => return Ok(false),
+    };
+
+    Ok(total > 0 && total == capable)
 }
 
 /// Does every registered device of every user on `conversation_id`'s desired
