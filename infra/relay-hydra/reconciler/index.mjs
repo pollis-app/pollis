@@ -1,6 +1,6 @@
 // Pollis relay-pool reconciler ("the hydra") — issue #616.
 //
-// Runs as a Node.js 20 Lambda on an EventBridge schedule (and on-demand).
+// Runs as a Node.js 24 Lambda on an EventBridge schedule (and on-demand).
 // Each run is idempotent and converges reality to the desired-state config:
 //   1. Read desired-state (region -> node count) from SSM Parameter Store.
 //   2. For each managed region, set the ASG desired capacity (clamped to
@@ -14,7 +14,7 @@
 //   6. Emit CloudWatch metrics (healthy nodes per region, reconcile failures).
 //
 // Zero third-party deps: the AWS SDK v3 clients and node:crypto are provided by
-// the Lambda Node 20 runtime. The Ed25519 signature is produced with
+// the Lambda Node 24 runtime. The Ed25519 signature is produced with
 // crypto.sign(null, ...), i.e. pure EdDSA over the raw payload bytes — the exact
 // bytes the client base64-decodes and verifies (see scripts/verify-directory.mjs
 // and test/directory-contract.test.mjs, which run the client's verification path).

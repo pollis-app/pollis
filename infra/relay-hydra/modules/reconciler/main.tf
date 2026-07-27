@@ -1,4 +1,4 @@
-# The reconciler: a Node 20 Lambda on an EventBridge schedule that converges the
+# The reconciler: a Node 24 Lambda on an EventBridge schedule that converges the
 # pool to desired-state, health-checks nodes, and re-signs + publishes the
 # directory. Least-privilege IAM; a handful of CloudWatch alarms (no dashboards).
 
@@ -133,7 +133,11 @@ resource "aws_cloudwatch_log_group" "reconciler" {
 resource "aws_lambda_function" "reconciler" {
   function_name    = local.function_name
   role             = aws_iam_role.reconciler.arn
-  runtime          = "nodejs20.x"
+  # Node 20 reached EOL 2026-04-30 and Lambda stopped patching it the same day
+  # (create blocked 2027-02-01, update blocked 2027-03-03). Node 24 is the current
+  # active-LTS Lambda runtime, supported to ~April 2028 — chosen over 22 (EOL
+  # 2027-04) so this doesn't come round again inside a year.
+  runtime          = "nodejs24.x"
   handler          = "index.handler"
   filename         = data.archive_file.reconciler.output_path
   source_code_hash = data.archive_file.reconciler.output_base64sha256
