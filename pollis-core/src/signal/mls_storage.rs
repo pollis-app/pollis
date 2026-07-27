@@ -10,7 +10,7 @@
 
 use openmls_traits::storage::{traits, Entity, StorageProvider, CURRENT_VERSION};
 use rusqlite::Connection;
-use serde::{de::DeserializeOwned, Serialize};
+use serde::Serialize;
 
 // ── label constants (match openmls_memory_storage) ───────────────────────────
 

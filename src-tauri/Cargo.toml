@@ -127,8 +127,8 @@ proptest = "1"
 openmls = "0.8"
 openmls_traits = "0.5"
 openmls_basic_credential = "0.5"
-tls_codec = "0.4"
-rusqlite = { version = "0.31", features = ["bundled-sqlcipher"] }
+tls_codec = "0.5"
+rusqlite = { version = "0.37", features = ["bundled-sqlcipher"] }
 # In-process MLS Delivery Service for the flows harness: the real DS router
 # (build_router) bound on a loopback port against the SAME test libsql file the
 # clients use, so flows exercise the deployed DS submission path end to end.
