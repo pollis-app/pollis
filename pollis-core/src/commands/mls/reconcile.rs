@@ -16,9 +16,8 @@ use crate::state::AppState;
 
 use super::generation::mls_group_id;
 use super::provider::{
-    load_stored_group, parse_credential_device_id, parse_credential_user_id, store_only,
-    with_lineage_provider, with_suite_provider, MlsProvider, CS_HYBRID,
-    SIGNATURE_SCHEME,
+    load_stored_group, parse_credential_device_id, parse_credential_user_id, signature_scheme,
+    store_only, MlsProvider, PollisProvider, CS_HYBRID,
 };
 
 /// Result of the compare-and-swap commit submission in `reconcile_group_mls_impl`.
@@ -102,9 +101,8 @@ async fn finalize_won_commit(
     // Scope the !Send provider/group so neither crosses an await.
     let guard = state.local_db.lock().await;
     if let Some(db) = guard.as_ref() {
-        with_lineage_provider!(db.conn(), conversation_id, generation, |provider| {
-            merge_pending_in_suite(&provider, conversation_id, generation)
-        })?;
+        let provider = PollisProvider::new(db.conn());
+        merge_pending_in_suite(&provider, conversation_id, generation)?;
     }
     Ok(())
 }
@@ -701,8 +699,12 @@ where
         .signature_key()
         .as_slice()
         .to_vec();
-    let signer = SignatureKeyPair::read(provider.storage(), &sig_pub_bytes, SIGNATURE_SCHEME)
-        .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
+    let signer = SignatureKeyPair::read(
+        provider.storage(),
+        &sig_pub_bytes,
+        signature_scheme(group.ciphersuite()),
+    )
+    .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
 
     // Resolve pending commit.
     group
@@ -940,18 +942,17 @@ pub async fn reconcile_group_mls_impl(
                 return Ok(ReconcileOutcome::default());
             }
         };
-        with_suite_provider!(db.conn(), group_suite, |provider| {
-            stage_reconcile_commit(
-                &provider,
-                &conversation_id,
-                generation,
-                &kp_tuples,
-                &roster_user_ids,
-                &actor_user_id,
-                &actor_device_id,
-                &valid_devices,
-            )
-        })?
+        let provider = PollisProvider::new(db.conn());
+        stage_reconcile_commit(
+            &provider,
+            &conversation_id,
+            generation,
+            &kp_tuples,
+            &roster_user_ids,
+            &actor_user_id,
+            &actor_device_id,
+            &valid_devices,
+        )?
     };
     let (mut outcome, commit_data_opt) = match staged {
         Some(v) => v,

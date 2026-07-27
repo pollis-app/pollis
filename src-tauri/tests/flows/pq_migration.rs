@@ -37,8 +37,10 @@ use serial_test::serial;
 /// `MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519` — the classic suite every
 /// group runs today.
 const SUITE_CLASSIC: u16 = 0x0001;
-/// `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` — the PQ hybrid suite.
-const SUITE_HYBRID: u16 = 0x004D;
+/// `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44` — the PQ suite.
+/// #668 moved this from `0x004D`; the KEM is the same X-Wing, the signature is
+/// now ML-DSA-44.
+const SUITE_HYBRID: u16 = 0x0052;
 
 /// X25519 HPKE encapsulation: one ephemeral public key.
 const KEM_OUTPUT_X25519: usize = 32;
@@ -50,13 +52,14 @@ const KEM_OUTPUT_XWING: usize = 1120;
 
 /// Ceiling for a single commit on the hybrid suite, in bytes.
 ///
-/// A hybrid commit runs roughly 8× its classic counterpart (every HPKE
-/// encapsulation in the tree carries an ML-KEM-768 ciphertext), so the number is
-/// large — but it must still be a *number*, because the failure this guards is
-/// commits that grow without bound. Matches the 12 KiB ceiling
-/// `hybrid_payloads_stay_under_their_ceilings` pins for an 8-member merged
-/// commit in `pollis-core`'s unit suite.
-const MAX_HYBRID_COMMIT_BYTES: usize = 12_288;
+/// A PQ commit runs an order of magnitude above its classic counterpart — every
+/// HPKE encapsulation in the tree carries an ML-KEM-768 ciphertext, and since
+/// #668 every leaf carries a 1,312 B ML-DSA-44 key and every signature is
+/// 2,420 B — so the number is large. But it must still be a *number*, because the
+/// failure this guards is commits that grow without bound. Matches the 20 KiB
+/// ceiling `hybrid_payloads_stay_under_their_ceilings` pins for an 8-member
+/// merged commit in `pollis-core`'s unit suite.
+const MAX_HYBRID_COMMIT_BYTES: usize = 20_480;
 
 async fn contents(client: &TestClient, channel_id: &str) -> Vec<String> {
     client

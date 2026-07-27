@@ -76,6 +76,5 @@ strip = true
 openmls = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
 openmls_traits = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
 openmls_rust_crypto = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
-openmls_libcrux_crypto = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
 openmls_basic_credential = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }
 openmls_memory_storage = { git = "https://github.com/openmls/openmls", rev = "34222ef632c87df58baaa7614c8a72ac235c5f07" }

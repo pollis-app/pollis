@@ -6696,7 +6696,6 @@ dependencies = [
  "nnnoiseless",
  "openmls",
  "openmls_basic_credential",
- "openmls_libcrux_crypto",
  "openmls_rust_crypto",
  "openmls_traits",
  "pollis-capture-proto",

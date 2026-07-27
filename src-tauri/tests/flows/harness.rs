@@ -2440,9 +2440,15 @@ pub(crate) async fn signed_post_status(client: &TestClient, path: &str, body: &[
         let guard = client.state.local_db.lock().await;
         let db = guard.as_ref().expect("client local db open");
         let provider = pollis_lib::commands::mls::PollisProvider::new(db.conn());
-        let (signer, _pub) =
-            pollis_lib::commands::mls::load_or_create_device_signer(&provider, &user_id, &device_id)
-                .expect("load device signer");
+        // DS request auth is still Ed25519 — the certified device identity, not
+        // an MLS leaf key. #668 P5 moves it to ML-DSA-44.
+        let (signer, _pub) = pollis_lib::commands::mls::load_or_create_device_signer(
+            &provider,
+            &user_id,
+            &device_id,
+            openmls::prelude::SignatureScheme::ED25519,
+        )
+        .expect("load device signer");
         let sig = signer.sign(&message).expect("sign request");
         use base64::Engine as _;
         base64::engine::general_purpose::STANDARD.encode(sig)
@@ -3484,8 +3490,8 @@ pub(crate) async fn local_generation_of(client: &TestClient, conversation_id: &s
 ///
 /// Read off the server-visible blob rather than asked of a client, so it proves
 /// what actually travelled: `0x0001` = classic
-/// (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`), `0x004D` = the PQ hybrid
-/// (`MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519`).
+/// (`MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519`), `0x0052` = the PQ suite
+/// (`MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`).
 pub(crate) async fn ds_group_info_suite(conversation_id: &str) -> u16 {
     use openmls::prelude::*;
     use tls_codec::Deserialize as _;

@@ -123,10 +123,15 @@ pub async fn ds_post(
         let db = guard
             .as_ref()
             .ok_or_else(|| Error::Other(anyhow::anyhow!("not signed in for DS request signing")))?;
-        // Device-identity only: Ed25519 request signing is the same in both
-        // suites, so this is deliberately not suite-dispatched.
+        // The certified device identity, so Ed25519 — not any MLS suite's leaf
+        // scheme. See `device::load_device_signing_key`.
         let provider = PollisProvider::new(db.conn());
-        let (signer, _pub_bytes) = load_or_create_device_signer(&provider, &user_id, &device_id)?;
+        let (signer, _pub_bytes) = load_or_create_device_signer(
+            &provider,
+            &user_id,
+            &device_id,
+            openmls::prelude::SignatureScheme::ED25519,
+        )?;
         let sig = signer
             .sign(&message)
             .map_err(|e| Error::Other(anyhow::anyhow!("ds_post sign: {e:?}")))?;

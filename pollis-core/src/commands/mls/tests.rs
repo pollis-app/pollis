@@ -4,7 +4,6 @@ use super::*;
 use openmls::prelude::*;
 use openmls_basic_credential::SignatureKeyPair;
 use openmls_traits::crypto::OpenMlsCrypto;
-use openmls_traits::types::CryptoError;
 use openmls_traits::OpenMlsProvider;
 use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 
@@ -13,7 +12,7 @@ use tls_codec::{Deserialize as TlsDeserialize, Serialize as TlsSerialize};
 // single-file module) can keep referencing them by short name.
 use super::group_state::{create_mls_group_in_suite, load_group_with_signer};
 use super::key_packages::build_key_package_in_suite;
-use super::provider::{MlsProvider, PollisPqProvider, CS_CLASSIC, CS_HYBRID, SIGNATURE_SCHEME};
+use super::provider::{signature_scheme, MlsProvider, PollisProvider, CS_CLASSIC, CS_HYBRID};
 use super::self_update::stage_self_update;
 
 /// Create an in-memory SQLite DB with the `mls_kv` table.
@@ -1532,281 +1531,54 @@ fn reconcile_e2e_remove_then_communicate() {
     );
 }
 
-// ── libcrux-provider / post-quantum readiness (#454 P1a) ─────────────────────
+// ── Post-quantum suite (#454, #668) ──────────────────────────────────────────
 //
-// These tests pin the properties that make the RustCrypto→libcrux crypto-provider
-// swap (see `provider.rs`) safe to ship and useful for later PQ phases:
-//   T1 — a RustCrypto app and a libcrux app share ONE classic MLS group, both
-//        directions, so a STAGED desktop rollout can never split a group.
-//   T2 — the libcrux `supports()` self-contradiction is documented and pinned,
-//        so a future OpenMLS bump that starts consulting it fails loudly HERE
-//        rather than bricking classic groups in production.
-//   T3 — the PQ hybrid suite stays reachable through the exact provider Pollis
-//        ships, with a structural proof the key exchange is genuinely hybrid.
+// #454 shipped two crypto backends: its hybrid suite was X-Wing / `0x004D`,
+// which only `openmls_libcrux_crypto` implemented, and the classic AES-GCM
+// suite had to stay on RustCrypto because libcrux's AES-GCM tag check is not
+// constant-time (RUSTSEC-2026-0211). Three tests pinned that split — a
+// cross-provider interop flow proving a staged rollout could not brick a group,
+// a pin on libcrux's `supports()` / `supported_ciphersuites()` self-
+// contradiction, and the routing invariant itself.
+//
+// #668 deleted all three along with the second backend. The suite it moves to
+// (`0x0052`) keeps X-Wing as its KEM but signs ML-DSA-44, which RustCrypto
+// implements and libcrux does not, so there is no second provider to interop
+// with, no `supports()` trap to trip, and nothing to route away from. What
+// survives is the part that was never about libcrux: that the PQ suite really
+// is post-quantum, in the key exchange AND now in the signature, through the
+// exact provider Pollis ships.
 
-/// Build a `CredentialWithKey` for `user`/`device` from an existing signer.
-fn cred_with_key(sig: &SignatureKeyPair, user: &str, device: &str) -> CredentialWithKey {
-    let sig_pub = OpenMlsSignaturePublicKey::new(
-        sig.to_public_vec().into(),
-        CS_CLASSIC.signature_algorithm(),
-    )
-    .unwrap();
-    CredentialWithKey {
-        credential: make_credential(user, device),
-        signature_key: sig_pub.into(),
-    }
-}
-
-/// A FULL two-party MLS flow in the CLASSIC suite between two clients backed by
-/// DIFFERENT crypto providers (`creator` and `joiner` are distinct concrete
-/// `OpenMlsProvider` types). Exercises, across the provider boundary:
-///   - a KeyPackage built by the joiner and validated + consumed by the creator,
-///   - Welcome / join,
-///   - an application message in EACH direction,
-///   - a self-update commit produced by the joiner and applied by the creator,
-///   - `export_secret` on both sides, asserted EQUAL (the voice-frame-key path).
+/// The PQ suite is reachable through the provider Pollis ships, and is
+/// genuinely post-quantum in BOTH halves.
 ///
-/// Bare in-memory storage is intentional — this is a crypto-backend
-/// compatibility test, not a Pollis-storage test (P1a task note).
-fn cross_provider_classic_flow<A: OpenMlsProvider, B: OpenMlsProvider>(
-    creator: &A,
-    joiner: &B,
-) {
-    let group_id = GroupId::from_slice(b"01JTEST0000000000CROSSPROV");
-
-    // Creator ("alice") identity.
-    let alice_sig = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
-    alice_sig.store(creator.storage()).unwrap();
-    let alice_cwk = cred_with_key(&alice_sig, "alice", "alice_dev");
-
-    // Joiner ("bob") identity + KeyPackage, built with the JOINER's provider.
-    let bob_sig = SignatureKeyPair::new(CS_CLASSIC.signature_algorithm()).unwrap();
-    bob_sig.store(joiner.storage()).unwrap();
-    let bob_cwk = cred_with_key(&bob_sig, "bob", "bob_dev");
-    let bob_kp_bytes = KeyPackage::builder()
-        .build(CS_CLASSIC, joiner, &bob_sig, bob_cwk)
-        .unwrap()
-        .key_package()
-        .tls_serialize_detached()
-        .unwrap();
-
-    // Creator creates the group.
-    let config = MlsGroupCreateConfig::builder()
-        .ciphersuite(CS_CLASSIC)
-        .use_ratchet_tree_extension(true)
-        .build();
-    let mut alice_group = MlsGroup::new_with_group_id(
-        creator,
-        &alice_sig,
-        &config,
-        group_id.clone(),
-        alice_cwk,
-    )
-    .unwrap();
-
-    // Creator VALIDATES the joiner-built KeyPackage with ITS OWN crypto, then adds.
-    let bob_kp = {
-        let mut reader: &[u8] = &bob_kp_bytes;
-        let kp_in = KeyPackageIn::tls_deserialize(&mut reader).unwrap();
-        kp_in
-            .validate(creator.crypto(), ProtocolVersion::Mls10)
-            .expect("joiner-built KeyPackage must validate under the creator's crypto")
-    };
-    let (_commit, welcome, _) = alice_group
-        .add_members(creator, &alice_sig, &[bob_kp])
-        .unwrap();
-    alice_group.merge_pending_commit(creator).unwrap();
-
-    // Joiner processes the Welcome and joins.
-    let welcome_bytes = welcome.tls_serialize_detached().unwrap();
-    let mut bob_group = {
-        let mut reader: &[u8] = &welcome_bytes;
-        let msg_in = MlsMessageIn::tls_deserialize(&mut reader).unwrap();
-        let welcome = match msg_in.extract() {
-            MlsMessageBodyIn::Welcome(w) => w,
-            _ => panic!("expected Welcome"),
-        };
-        let join_config = MlsGroupJoinConfig::builder()
-            .use_ratchet_tree_extension(true)
-            .build();
-        StagedWelcome::new_from_welcome(joiner, &join_config, welcome, None)
-            .unwrap()
-            .into_group(joiner)
-            .unwrap()
-    };
-
-    // Application message: creator → joiner.
-    {
-        let out = alice_group
-            .create_message(creator, &alice_sig, b"hello from creator")
-            .unwrap();
-        let bytes = out.tls_serialize_detached().unwrap();
-        let mut reader: &[u8] = &bytes;
-        let pm = MlsMessageIn::tls_deserialize(&mut reader)
-            .unwrap()
-            .try_into_protocol_message()
-            .unwrap();
-        let processed = bob_group.process_message(joiner, pm).unwrap();
-        match processed.into_content() {
-            ProcessedMessageContent::ApplicationMessage(m) => {
-                assert_eq!(m.into_bytes(), b"hello from creator");
-            }
-            _ => panic!("expected application message creator→joiner"),
-        }
-    }
-
-    // Application message: joiner → creator.
-    {
-        let out = bob_group
-            .create_message(joiner, &bob_sig, b"hello from joiner")
-            .unwrap();
-        let bytes = out.tls_serialize_detached().unwrap();
-        let mut reader: &[u8] = &bytes;
-        let pm = MlsMessageIn::tls_deserialize(&mut reader)
-            .unwrap()
-            .try_into_protocol_message()
-            .unwrap();
-        let processed = alice_group.process_message(creator, pm).unwrap();
-        match processed.into_content() {
-            ProcessedMessageContent::ApplicationMessage(m) => {
-                assert_eq!(m.into_bytes(), b"hello from joiner");
-            }
-            _ => panic!("expected application message joiner→creator"),
-        }
-    }
-
-    // Self-update commit produced by the JOINER, applied by the CREATOR.
-    {
-        let bundle = bob_group
-            .self_update(joiner, &bob_sig, LeafNodeParameters::default())
-            .unwrap();
-        let commit_bytes = bundle.commit().tls_serialize_detached().unwrap();
-        bob_group.merge_pending_commit(joiner).unwrap();
-
-        let mut reader: &[u8] = &commit_bytes;
-        let pm = MlsMessageIn::tls_deserialize(&mut reader)
-            .unwrap()
-            .try_into_protocol_message()
-            .unwrap();
-        let processed = alice_group.process_message(creator, pm).unwrap();
-        match processed.into_content() {
-            ProcessedMessageContent::StagedCommitMessage(staged) => {
-                alice_group.merge_staged_commit(creator, *staged).unwrap();
-            }
-            _ => panic!("expected staged commit from cross-provider self-update"),
-        }
-    }
-
-    // Both sides now at the same epoch → `export_secret` MUST match exactly.
-    // This is the voice-frame-key derivation path (`commands/voice_e2ee.rs`).
-    let label = "pollis/voice/v1";
-    let context = b"cross-provider-context";
-    let alice_secret = alice_group
-        .export_secret(creator.crypto(), label, context, 32)
-        .unwrap();
-    let bob_secret = bob_group
-        .export_secret(joiner.crypto(), label, context, 32)
-        .unwrap();
-    assert_eq!(
-        alice_secret, bob_secret,
-        "cross-provider export_secret must be byte-identical (voice frame key)"
-    );
-}
-
-/// T1. Cross-provider interop — the rollout-safety test.
+/// Asserts the suite is advertised, runs a full two-party round-trip on it, and
+/// then makes two structural checks that no amount of "the suite constant says
+/// so" can fake:
 ///
-/// Runs the full classic-suite two-party flow BOTH ways: a RustCrypto client
-/// (the "old app") with a libcrux client (the "new app") in the SAME group,
-/// old→new and new→old. This is what proves a STAGED desktop rollout cannot
-/// split a group: old and new binaries coexist in one MLS group during the
-/// update window. If this ever fails, the crypto swap in `provider.rs` is NOT
-/// safe to ship and the rollout must be halted.
+///   - the joiner's `hpke_init_key` is 1216 bytes — ML-KEM-768 public key
+///     (1184) + X25519 (32). A classical X25519-only init key is 32 bytes, so
+///     this is the proof the KEM did not silently fall back.
+///   - the leaf signature key is 1312 bytes — an ML-DSA-44 public key. Ed25519
+///     is 32, so this is the #668 half: authentication, not just
+///     confidentiality, is post-quantum.
 #[test]
-fn cross_provider_rustcrypto_libcrux_interop() {
-    // old (RustCrypto) creates → new (libcrux) joins.
-    {
-        let old_app = openmls_rust_crypto::OpenMlsRustCrypto::default();
-        let new_app = openmls_libcrux_crypto::Provider::new()
-            .expect("libcrux provider must initialise");
-        cross_provider_classic_flow(&old_app, &new_app);
-    }
-    // new (libcrux) creates → old (RustCrypto) joins.
-    {
-        let new_app = openmls_libcrux_crypto::Provider::new()
-            .expect("libcrux provider must initialise");
-        let old_app = openmls_rust_crypto::OpenMlsRustCrypto::default();
-        cross_provider_classic_flow(&new_app, &old_app);
-    }
-}
-
-/// T2. The `supports()` trap.
-///
-/// The libcrux provider's `OpenMlsCrypto::supports()` returns
-/// `Err(UnsupportedCiphersuite)` for Pollis's CURRENT classic AES-GCM suite —
-/// its `supports()` demands `hpke_aead == ChaCha20Poly1305` — YET its own
-/// `supported_ciphersuites()` lists that exact suite. This is an upstream
-/// self-contradiction (openmls_libcrux_crypto 0.3.1, `crypto.rs`).
-///
-/// It is harmless TODAY only because NO code path in the full MLS flow consults
-/// `supports()` (KeyPackage build, add, welcome, join, app messages, commits,
-/// and export_secret all work — see T1 and every existing test above). This
-/// test pins BOTH halves so the hazard cannot regress silently: if a future
-/// OpenMLS bump starts calling `supports()` during any flow, classic groups
-/// would brick in production — and THIS test must be the thing that fails first,
-/// loudly, pointing right back at this note. Either an upstream FIX (supports()
-/// starts returning Ok) or an upstream CHANGE (suite dropped from the list) trips
-/// an assertion here.
-#[test]
-fn libcrux_supports_self_contradiction_is_pinned() {
-    let db = make_db();
-    let provider = PollisPqProvider::new(&db);
-    let crypto = provider.crypto();
-
-    // Half 1: `supports()` REJECTS the very suite Pollis ships on.
-    assert!(
-        matches!(crypto.supports(CS_CLASSIC), Err(CryptoError::UnsupportedCiphersuite)),
-        "upstream changed: libcrux supports() now accepts our AES-GCM suite — \
-         re-evaluate whether any flow consults supports() before relying on it"
-    );
-
-    // Half 2: …yet `supported_ciphersuites()` INCLUDES that same suite.
-    assert!(
-        crypto.supported_ciphersuites().contains(&CS_CLASSIC),
-        "upstream changed: libcrux dropped our AES-GCM suite from \
-         supported_ciphersuites() — classic groups may no longer be serviceable"
-    );
-}
-
-/// T3. Hybrid suite reachability — landing the P0 proof as a permanent test.
-///
-/// Pollis does NOT yet use the post-quantum hybrid suite: every production call
-/// site passes `CS_CLASSIC`, and choosing `CS_HYBRID` for a real conversation is
-/// #454 P2. This test guards only that the CAPABILITY stays reachable through
-/// the exact PQ provider Pollis would use (`PollisPqProvider` = libcrux crypto +
-/// our `MlsStore`), since every later phase depends on it.
-///
-/// It asserts the suite is advertised, runs a full two-party round-trip on it,
-/// and — the structural proof that the key exchange is GENUINELY hybrid and not
-/// silently falling back to classical X25519 — asserts the joiner's
-/// `hpke_init_key` is 1216 bytes: ML-KEM-768 public key (1184) + X25519 (32).
-#[test]
-fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
+fn pq_suite_reachable_and_genuinely_post_quantum() {
     let alice_db = make_db();
     let bob_db = make_db();
 
     // The suite must be advertised by the PQ provider.
     {
-        let provider = PollisPqProvider::new(&alice_db);
+        let provider = PollisProvider::new(&alice_db);
         assert!(
             provider.crypto().supported_ciphersuites().contains(&CS_HYBRID),
-            "libcrux provider must advertise the PQ hybrid suite — later #454 \
-             phases depend on it"
+            "the shipped provider must advertise the PQ suite"
         );
     }
 
     // Bob builds a KeyPackage on the CS_HYBRID suite.
-    let (bob_kp_bytes, bob_hpke_init_len) = {
-        let provider = PollisPqProvider::new(&bob_db);
+    let (bob_kp_bytes, bob_hpke_init_len, bob_sig_pub_len) = {
+        let provider = PollisProvider::new(&bob_db);
         let sig = SignatureKeyPair::new(CS_HYBRID.signature_algorithm()).unwrap();
         sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
@@ -1822,9 +1594,16 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
             .build(CS_HYBRID, &provider, &sig, cwk)
             .unwrap();
         let init_len = bundle.key_package().hpke_init_key().as_slice().len();
+        let sig_pub_len = bundle
+            .key_package()
+            .leaf_node()
+            .signature_key()
+            .as_slice()
+            .len();
         (
             bundle.key_package().tls_serialize_detached().unwrap(),
             init_len,
+            sig_pub_len,
         )
     };
 
@@ -1836,10 +1615,17 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
         "hybrid hpke_init_key must be ML-KEM-768 (1184) + X25519 (32) = 1216 bytes"
     );
 
+    // Structural PQ-signature proof (#668): an ML-DSA-44 public key is 1312
+    // bytes. Ed25519 — what this suite signed with under #454 — is 32.
+    assert_eq!(
+        bob_sig_pub_len, 1312,
+        "PQ leaf signature key must be an ML-DSA-44 public key (1312 bytes)"
+    );
+
     // Alice creates the group on the hybrid suite and adds Bob.
     let alice_sig = SignatureKeyPair::new(CS_HYBRID.signature_algorithm()).unwrap();
     let (welcome_bytes, mut alice_group) = {
-        let provider = PollisPqProvider::new(&alice_db);
+        let provider = PollisProvider::new(&alice_db);
         alice_sig.store(provider.storage()).unwrap();
         let sig_pub = OpenMlsSignaturePublicKey::new(
             alice_sig.to_public_vec().into(),
@@ -1879,12 +1665,11 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
     // decrypt end-to-end on the hybrid suite.
     //
     // Driven through openmls directly rather than through `try_mls_encrypt` /
-    // `try_mls_decrypt`: those production helpers construct `PollisProvider`
-    // (RustCrypto), which is CORRECT — no production path selects the hybrid
-    // suite until #454 P2. Reaching for them here would only prove that
-    // RustCrypto panics on X-Wing.
+    // `try_mls_decrypt`: those read the group from `mls_kv` under a Pollis group
+    // id, and this test builds its group by hand to keep the assertions above
+    // structural. `suite_seam_round_trip` covers the production seams.
     {
-        let provider = PollisPqProvider::new(&bob_db);
+        let provider = PollisProvider::new(&bob_db);
         let mut reader: &[u8] = &welcome_bytes;
         let welcome = match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
             MlsMessageBodyIn::Welcome(w) => w,
@@ -1901,7 +1686,7 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
         assert_eq!(bob_group.ciphersuite(), CS_HYBRID);
 
         let ct = {
-            let provider = PollisPqProvider::new(&alice_db);
+            let provider = PollisProvider::new(&alice_db);
             alice_group
                 .create_message(&provider, &alice_sig, b"pq hello")
                 .unwrap()
@@ -1934,7 +1719,7 @@ fn hybrid_xwing_suite_reachable_and_genuinely_hybrid() {
 /// real hybrid KeyPackages, validating one would have aborted the process
 /// rather than returning an error. The signature is now generic over
 /// `OpenMlsCrypto`, so each caller passes the backend that matches the suite it
-/// is serving — `PollisProvider` for classic, `PollisPqProvider` for hybrid.
+/// is serving — `PollisProvider` for classic, `PollisProvider` for hybrid.
 ///
 /// Asserts the returned `KeyPackageRef` equals the one openmls computes, so this
 /// proves validation actually happened rather than merely not crashing, and pins
@@ -1976,65 +1761,68 @@ fn validate_key_package_handles_both_suites() {
     validate_key_package_round_trip(&PollisProvider::new(&classic_db), CS_CLASSIC);
 
     let hybrid_db = make_db();
-    validate_key_package_round_trip(&PollisPqProvider::new(&hybrid_db), CS_HYBRID);
+    validate_key_package_round_trip(&PollisProvider::new(&hybrid_db), CS_HYBRID);
 }
 
-/// T5. **The routing invariant.** `PollisProvider` — the provider EVERY
-/// production path constructs — must be backed by RustCrypto, never libcrux.
+/// **One backend, and it stays RustCrypto.**
 ///
-/// This is not stylistic. `deny.toml` carries an ignore for RUSTSEC-2026-0211
-/// (libcrux AES-GCM decryption uses a non-constant-time authentication-tag
-/// check, unpatched in `libcrux-aesgcm`) whose stated reason is that Pollis
-/// never routes AES-GCM through libcrux. Pollis's classic suite IS AES-128-GCM,
-/// so if someone "simplifies" the two providers into one libcrux-backed
-/// provider, that ignore silently becomes a lie and every message decrypt picks
-/// up a timing side channel.
+/// #454 needed this as a *routing* invariant: `deny.toml` carried an ignore for
+/// RUSTSEC-2026-0211 (libcrux's AES-GCM tag check is not constant-time) whose
+/// stated reason was that Pollis never routed AES-GCM through libcrux, and a
+/// well-meaning "simplify the two providers into one" would have turned that
+/// reason into a lie.
+///
+/// #668 removed `openmls_libcrux_crypto` from the tree, so the advisory is gone
+/// from `deny.toml` rather than argued away. What is worth pinning now is the
+/// weaker but still load-bearing fact underneath: the single provider every
+/// path constructs is RustCrypto-backed, and the classic suite it serves is
+/// AES-GCM — so reintroducing a backend is a decision that has to face this
+/// test, not a silent type change.
 ///
 /// Type-level, so it cannot be satisfied by accident at runtime.
 #[test]
-fn classic_provider_never_routes_to_libcrux() {
+fn mls_backend_is_rustcrypto() {
     fn backend_of<P: OpenMlsProvider>(_: &P) -> &'static str {
         std::any::type_name::<P::CryptoProvider>()
     }
 
     let db = make_db();
-    let classic = PollisProvider::new(&db);
+    let provider = PollisProvider::new(&db);
     assert!(
-        backend_of(&classic).contains("openmls_rust_crypto"),
-        "PollisProvider must stay RustCrypto-backed (RUSTSEC-2026-0211: libcrux \
-         AES-GCM decrypt is not constant-time and our classic suite is AES-GCM); \
-         got {}",
-        backend_of(&classic)
+        backend_of(&provider).contains("openmls_rust_crypto"),
+        "PollisProvider must stay RustCrypto-backed; got {}",
+        backend_of(&provider)
     );
     assert_eq!(
         CS_CLASSIC.aead_algorithm(),
         AeadType::Aes128Gcm,
-        "the classic suite is AES-GCM — the premise of the routing split above"
+        "the classic suite is AES-GCM — check the advisory status of any \
+         AES-GCM implementation before routing it to a different backend"
     );
 
-    // …and the PQ provider is the libcrux one, since it is the only backend
-    // that implements X-Wing.
-    let pq = PollisPqProvider::new(&db);
+    // One backend must serve BOTH suites, or the deleted dispatch has to come
+    // back. This is the property that made #668's collapse possible at all.
+    let advertised = provider.crypto().supported_ciphersuites();
     assert!(
-        backend_of(&pq).contains("libcrux"),
-        "PollisPqProvider must stay libcrux-backed; got {}",
-        backend_of(&pq)
+        advertised.contains(&CS_CLASSIC) && advertised.contains(&CS_HYBRID),
+        "RustCrypto must advertise both Pollis suites; got {advertised:?}"
     );
 }
 
-// ── #454 P1b: the ciphersuite is a real parameter, not a constant ────────────
+// ── The ciphersuite is a real parameter, not a constant (#454 P1b) ──────────
 
-/// The signature scheme is shared by both suites, which is why the many call
-/// sites that only need `signature_algorithm()` take no suite argument and use
-/// `SIGNATURE_SCHEME` instead (see `provider.rs`).
+/// The signature scheme is per-suite since #668, and these are the two answers
+/// every call site depends on.
 ///
-/// If a future suite ever signs with something other than Ed25519, this fails
-/// first and points at every site that assumed otherwise — including the device
-/// cross-signing cert, which certifies ONE key per device, not one per suite.
+/// It was a single constant under #454, when both suites signed Ed25519 and a
+/// device presented one signing key everywhere. Pinning both values here means
+/// a suite swap that quietly changed a scheme — which would change which stored
+/// key a leaf is signed with, and therefore whether the device can still open
+/// its own groups — fails first and loudly.
 #[test]
-fn signature_scheme_is_suite_invariant() {
-    assert_eq!(CS_CLASSIC.signature_algorithm(), SIGNATURE_SCHEME);
-    assert_eq!(CS_HYBRID.signature_algorithm(), SIGNATURE_SCHEME);
+fn signature_scheme_per_suite() {
+    assert_eq!(signature_scheme(CS_CLASSIC), SignatureScheme::ED25519);
+    assert_eq!(signature_scheme(CS_HYBRID), SignatureScheme::MLDSA44);
 }
 
 /// Drive a full two-party flow — create group, build KeyPackage, validate, add,
@@ -2137,20 +1925,24 @@ fn classic_suite_round_trips_through_the_production_seams() {
 }
 
 /// The seam is REAL, not cosmetic: passing `CS_HYBRID` produces a genuinely
-/// post-quantum group through the same production functions, with the PQ
-/// provider that serves that suite.
+/// post-quantum group through the same production functions.
 ///
 /// Since #454 P3 this is the suite `init_mls_group` selects whenever every
 /// device on the new conversation's roster is `pq_capable`.
+///
+/// The code point is asserted literally because it is the wire contract: the DS
+/// stores it as the `key_packages.ciphersuite` routing label
+/// (`CIPHERSUITE_HYBRID`), so a silent change here would strand every published
+/// pool. #668 moved it from `0x004D` to `0x0052`.
 #[test]
 fn hybrid_suite_round_trips_through_the_production_seams() {
     let alice_db = make_db();
     let bob_db = make_db();
-    let alice = PollisPqProvider::new(&alice_db);
-    let bob = PollisPqProvider::new(&bob_db);
+    let alice = PollisProvider::new(&alice_db);
+    let bob = PollisProvider::new(&bob_db);
 
     suite_seam_round_trip(&alice, &bob, CS_HYBRID, "01JTESTSEAMHYBRID000000000");
-    assert_eq!(u16::from(CS_HYBRID), 0x004D);
+    assert_eq!(u16::from(CS_HYBRID), 0x0052);
 }
 
 /// The two suites are genuinely different key exchanges, which is the entire
@@ -2165,7 +1957,7 @@ fn the_two_suites_produce_structurally_different_key_packages() {
     let classic = PollisProvider::new(&classic_db);
     let (_, classic_kp) =
         build_key_package_in_suite(&classic, "bob", "bob_dev", CS_CLASSIC).unwrap();
-    let hybrid = PollisPqProvider::new(&hybrid_db);
+    let hybrid = PollisProvider::new(&hybrid_db);
     let (_, hybrid_kp) =
         build_key_package_in_suite(&hybrid, "bob", "bob_dev", CS_HYBRID).unwrap();
 
@@ -2197,14 +1989,16 @@ fn the_two_suites_produce_structurally_different_key_packages() {
 
 // ── #454 P3: the suite-dispatch seam ─────────────────────────────────────────
 
-/// The foundation of the whole seam: a group's ciphersuite is readable from
-/// STORAGE ALONE, with no crypto backend picked yet.
+/// A group's ciphersuite is readable from STORAGE ALONE, with no crypto backend
+/// picked yet — `MlsGroup::load` is generic over `StorageProvider`, not
+/// `OpenMlsProvider`, which is what makes `stored_group_ciphersuite` possible.
 ///
-/// Without this, suite dispatch is circular — you would need a provider to
-/// learn which provider to use, and `PollisProvider` cannot even load a hybrid
-/// group. `MlsGroup::load` is generic over `StorageProvider`, not
-/// `OpenMlsProvider`, which is what makes `stored_group_ciphersuite` (and hence
-/// `with_group_provider!`) possible.
+/// #454 needed this to break a circularity in suite→backend dispatch: you would
+/// otherwise need a provider to learn which provider to use. #668 collapsed the
+/// backends to one, so nothing dispatches on the answer any more — but callers
+/// that must know a group's suite *before* touching crypto still exist (suite
+/// selection, migration, the `pq_capable` gate), so the property is still load-
+/// bearing and still worth pinning.
 #[test]
 fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
     for (suite, conv) in [
@@ -2212,16 +2006,10 @@ fn a_groups_suite_is_readable_from_storage_without_a_crypto_backend() {
         (CS_HYBRID, "01JTESTSUITEREADHYBRID0000"),
     ] {
         let db = make_db();
-        // Create through whichever backend serves the suite…
-        if suite == CS_HYBRID {
-            create_mls_group_in_suite(&PollisPqProvider::new(&db), conv, 0, "alice", "alice_dev", suite)
-                .unwrap();
-        } else {
-            create_mls_group_in_suite(&PollisProvider::new(&db), conv, 0, "alice", "alice_dev", suite)
-                .unwrap();
-        }
+        create_mls_group_in_suite(&PollisProvider::new(&db), conv, 0, "alice", "alice_dev", suite)
+            .unwrap();
 
-        // …then read the suite back with no crypto backend at all.
+        // Read the suite back with no crypto backend at all.
         assert_eq!(
             super::provider::stored_group_ciphersuite(&db, conv),
             Some(suite),
@@ -2243,11 +2031,12 @@ fn welcome_suite_is_readable_on_both_suites() {
     ] {
         let alice_db = make_db();
         let bob_db = make_db();
-        let welcome_bytes = if suite == CS_HYBRID {
-            welcome_for_suite(&PollisPqProvider::new(&alice_db), &PollisPqProvider::new(&bob_db), suite, conv)
-        } else {
-            welcome_for_suite(&PollisProvider::new(&alice_db), &PollisProvider::new(&bob_db), suite, conv)
-        };
+        let welcome_bytes = welcome_for_suite(
+            &PollisProvider::new(&alice_db),
+            &PollisProvider::new(&bob_db),
+            suite,
+            conv,
+        );
 
         let mut reader: &[u8] = &welcome_bytes;
         let welcome = match MlsMessageIn::tls_deserialize(&mut reader).unwrap().extract() {
@@ -2304,7 +2093,7 @@ fn a_hybrid_group_cannot_admit_a_classic_key_package() {
     let alice_db = make_db();
     let bob_db = make_db();
 
-    let alice = PollisPqProvider::new(&alice_db);
+    let alice = PollisProvider::new(&alice_db);
     create_mls_group_in_suite(&alice, "01JTESTNODOWNGRADE00000000", 0, "alice", "alice_dev", CS_HYBRID)
         .unwrap();
     let (mut alice_group, alice_sig) =
@@ -2394,13 +2183,8 @@ fn self_update_turns_linear_commit_growth_into_logarithmic() {
 /// the only variable is whether the leaves are merged.
 fn commit_growth_probe(suite: Ciphersuite, members: usize, conversation_id: &str) -> (usize, usize) {
     let dbs: Vec<rusqlite::Connection> = (0..members).map(|_| make_db()).collect();
-    if suite == CS_HYBRID {
-        let providers: Vec<_> = dbs.iter().map(PollisPqProvider::new).collect();
-        measure_commit_growth(&providers, suite, conversation_id)
-    } else {
-        let providers: Vec<_> = dbs.iter().map(PollisProvider::new).collect();
-        measure_commit_growth(&providers, suite, conversation_id)
-    }
+    let providers: Vec<_> = dbs.iter().map(PollisProvider::new).collect();
+    measure_commit_growth(&providers, suite, conversation_id)
 }
 
 fn measure_commit_growth<C>(
@@ -2529,12 +2313,12 @@ fn apply_commit_in_suite<C>(
 #[test]
 fn a_self_update_replaces_our_own_leaf_key() {
     let db = make_db();
-    let provider = PollisPqProvider::new(&db);
+    let provider = PollisProvider::new(&db);
     let conv = "01JT666LEAFROTATES00000000";
     create_mls_group_in_suite(&provider, conv, 0, "alice", "alice_dev", CS_HYBRID).unwrap();
 
     // openmls keeps the raw key bytes crate-private, so compare the key itself.
-    let leaf_key_of = |p: &PollisPqProvider| {
+    let leaf_key_of = |p: &PollisProvider| {
         let (group, _) = load_group_with_signer(p, conv, 0).unwrap();
         group.own_leaf_node().unwrap().encryption_key().clone()
     };
@@ -2579,17 +2363,20 @@ fn self_update_jitter_is_stable_and_bounded() {
 ///
 /// The growth *shape* is pinned by
 /// [`self_update_turns_linear_commit_growth_into_logarithmic`]; this pins the
-/// constants. Hybrid payloads are large by construction — an ML-KEM-768
-/// encapsulation is 1,088 B against X25519's 32 — and "large" quietly becoming
-/// "unusable" is the failure mode #454 has to defend against. A KEM swap, a
-/// codepoint change, or an accidental return to unmerged leaves should surface
-/// here as a failing number, not as a support ticket about a group that stopped
-/// working at forty members.
+/// constants. PQ payloads are large by construction — an ML-KEM-768
+/// encapsulation is 1,088 B against X25519's 32, and since #668 every leaf also
+/// carries a 1,312 B ML-DSA-44 public key and every signature is 2,420 B against
+/// Ed25519's 64 — and "large" quietly becoming "unusable" is the failure mode
+/// this has to defend against. A KEM swap, a codepoint change, or an accidental
+/// return to unmerged leaves should surface here as a failing number, not as a
+/// support ticket about a group that stopped working at forty members.
 ///
-/// Measured today: KeyPackage 2,659 B (classic: 289 B), Welcome 5,463 B, and a
-/// commit into a merged 8-member group 8,745 B. Ceilings sit ~1.4× above each —
-/// tight enough that a doubling fails, loose enough to survive openmls padding
-/// and version churn. The classic KeyPackage is printed alongside so the
+/// Measured after #668: KeyPackage 8,670 B (classic: 307 B), Welcome 15,241 B,
+/// and a commit into a merged 8-member group 14,839 B. Moving the signature to
+/// ML-DSA-44 roughly tripled all three — a KeyPackage carries one leaf key and
+/// two signatures, so it alone went 2,659 → 8,670 B. Ceilings sit ~1.4× above
+/// each: tight enough that a doubling fails, loose enough to survive openmls
+/// padding and version churn. The classic KeyPackage is printed alongside so the
 /// multiplier the post-quantum suite costs stays visible and honest.
 #[test]
 fn hybrid_payloads_stay_under_their_ceilings() {
@@ -2597,7 +2384,7 @@ fn hybrid_payloads_stay_under_their_ceilings() {
     // so it is the most-transferred hybrid object there is.
     let kp_db = make_db();
     let (_, hybrid_kp) =
-        build_key_package_in_suite(&PollisPqProvider::new(&kp_db), "alice", "alice_dev", CS_HYBRID)
+        build_key_package_in_suite(&PollisProvider::new(&kp_db), "alice", "alice_dev", CS_HYBRID)
             .unwrap();
     let classic_db = make_db();
     let (_, classic_kp) =
@@ -2608,24 +2395,24 @@ fn hybrid_payloads_stay_under_their_ceilings() {
         classic_kp.len(),
         hybrid_kp.len()
     );
-    assert!(hybrid_kp.len() < 4_096, "hybrid KeyPackage: {} B", hybrid_kp.len());
+    assert!(hybrid_kp.len() < 12_288, "hybrid KeyPackage: {} B", hybrid_kp.len());
 
     // A Welcome carries the group secrets sealed to the joiner's init key —
     // one hybrid encapsulation, plus the ratchet tree extension.
     let (wa, wb) = (make_db(), make_db());
     let welcome = welcome_for_suite(
-        &PollisPqProvider::new(&wa),
-        &PollisPqProvider::new(&wb),
+        &PollisProvider::new(&wa),
+        &PollisProvider::new(&wb),
         CS_HYBRID,
         "01JT454CEILINGWELCOME00000",
     );
     eprintln!("[test] hybrid Welcome (2 members): {} B", welcome.len());
-    assert!(welcome.len() < 8_192, "hybrid Welcome: {} B", welcome.len());
+    assert!(welcome.len() < 21_504, "hybrid Welcome: {} B", welcome.len());
 
     // The commit is the payload that scales, so it is the one with a real
     // ceiling. Measured in the state the fleet actually runs in — every leaf
     // merged, because every member self-updates on join (#666).
     let (unmerged, merged) = commit_growth_probe(CS_HYBRID, 8, "01JT454CEILINGCOMMIT000000");
     eprintln!("[test] hybrid commit at 8 members: {unmerged} B unmerged, {merged} B merged");
-    assert!(merged < 12_288, "hybrid commit at 8 members: {merged} B");
+    assert!(merged < 20_480, "hybrid commit at 8 members: {merged} B");
 }

@@ -15,9 +15,8 @@ use crate::state::AppState;
 use super::device::{load_or_create_device_signer, verify_added_devices, VerifyOutcome};
 use super::generation::{local_generation, mls_group_id, set_local_generation};
 use super::provider::{
-    load_stored_group, load_stored_group_at, make_credential, parse_credential_user_id, store_only,
-    with_group_provider, with_lineage_provider, with_suite_provider, MlsProvider, CS_CLASSIC,
-    CS_HYBRID, SIGNATURE_SCHEME,
+    load_stored_group, load_stored_group_at, make_credential, parse_credential_user_id,
+    signature_scheme, store_only, MlsProvider, PollisProvider, CS_CLASSIC, CS_HYBRID,
 };
 
 // ── GroupInfo publishing ─────────────────────────────────────────────────────
@@ -56,10 +55,9 @@ pub async fn publish_group_info(
             return Ok(());
         };
         let generation = local_generation(db.conn(), conversation_id);
-        with_group_provider!(db.conn(), conversation_id, |provider| {
-            export_group_info_blob(&provider, conversation_id, generation)?
-                .map(|(epoch, bytes)| (generation, epoch, bytes))
-        })
+        let provider = PollisProvider::new(db.conn());
+        export_group_info_blob(&provider, conversation_id, generation)?
+            .map(|(epoch, bytes)| (generation, epoch, bytes))
     };
 
     let Some((generation, epoch, bytes)) = exported else {
@@ -392,16 +390,16 @@ async fn external_join_attempt(
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
-        with_suite_provider!(db.conn(), suite, |provider| {
-            build_external_commit(
-                &provider,
-                conversation_id,
-                stored_generation,
-                user_id,
-                &device_id,
-                verifiable_group_info,
-            )?
-        })
+        let provider = PollisProvider::new(db.conn());
+        build_external_commit(
+            &provider,
+            conversation_id,
+            stored_generation,
+            user_id,
+            &device_id,
+            suite,
+            verifiable_group_info,
+        )?
     };
 
     // 3. Claim this epoch in mls_commit_log via compare-and-swap. If another
@@ -518,26 +516,31 @@ async fn external_join_attempt(
 /// `verifiable_group_info`, returning the serialised commit and the GroupInfo at
 /// the resulting epoch.
 ///
-/// `provider` must serve the group's suite — the caller reads it off the
-/// GroupInfo and dispatches on it.
+/// `suite` is the group's, read off the GroupInfo by the caller. It decides the
+/// scheme the joining leaf signs under, so passing the wrong one produces a
+/// commit the group rejects rather than a silently weaker signature.
 ///
 /// Sync: the caller owns the local-DB guard.
+#[allow(clippy::too_many_arguments)]
 fn build_external_commit<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
     generation: i64,
     user_id: &str,
     device_id: &str,
+    suite: Ciphersuite,
     verifiable_group_info: VerifiableGroupInfo,
 ) -> Result<(Vec<u8>, Option<Vec<u8>>)>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    // Load (or create) this device's stable MLS signing keypair.
-    let (sig_keys, sig_pub_bytes) = load_or_create_device_signer(provider, user_id, device_id)?;
+    // Load (or create) this device's stable MLS signing keypair for the suite.
+    let scheme = signature_scheme(suite);
+    let (sig_keys, sig_pub_bytes) =
+        load_or_create_device_signer(provider, user_id, device_id, scheme)?;
 
     let credential = make_credential(user_id, device_id);
-    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), SIGNATURE_SCHEME)
+    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), scheme)
         .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
     let cred_with_key = CredentialWithKey {
         credential,
@@ -594,11 +597,9 @@ where
 /// Create a fresh MLS group for `conversation_id` in an explicit ciphersuite,
 /// with `creator_user_id`:`device_id` as the sole initial member.
 ///
-/// `suite` and `provider` must agree — `CS_CLASSIC` with `PollisProvider`,
-/// `CS_HYBRID` with `PollisPqProvider` — because each crypto backend implements
-/// only one of the two (see `provider.rs`). This is the one place a group's
-/// suite is decided; every later operation on the group inherits it from the
-/// stored group state, so nothing downstream needs a suite argument.
+/// This is the one place a group's suite is decided; every later operation on
+/// the group inherits it from the stored group state, so nothing downstream
+/// needs a suite argument.
 ///
 /// The suite is a parameter rather than a constant so the choice is visible at
 /// the call site. `init_mls_group`, the only production caller, decides it with
@@ -616,14 +617,13 @@ pub(super) fn create_mls_group_in_suite<C>(
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
+    let scheme = signature_scheme(suite);
     let (sig_keys, sig_pub_bytes) =
-        load_or_create_device_signer(provider, creator_user_id, device_id)?;
+        load_or_create_device_signer(provider, creator_user_id, device_id, scheme)?;
 
     let credential = make_credential(creator_user_id, device_id);
-    let sig_pub = OpenMlsSignaturePublicKey::new(
-        sig_pub_bytes.into(),
-        SIGNATURE_SCHEME,
-    ).map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
+    let sig_pub = OpenMlsSignaturePublicKey::new(sig_pub_bytes.into(), scheme)
+        .map_err(|e| crate::error::Error::Other(anyhow::anyhow!("sig pub key: {e}")))?;
     let cred_with_key = CredentialWithKey {
         credential,
         signature_key: sig_pub.into(),
@@ -827,19 +827,18 @@ pub async fn init_mls_group(
         let db = guard.as_ref().ok_or_else(|| {
             crate::error::Error::Other(anyhow::anyhow!("Not signed in"))
         })?;
-        with_suite_provider!(db.conn(), suite, |provider| {
-            create_mls_group_in_suite(
-                &provider,
-                conversation_id,
-                // A brand-new conversation starts on generation 0: there is no
-                // history to migrate, so `suite_for_new_group` already picked
-                // hybrid if the roster could take it.
-                0,
-                creator_user_id,
-                &device_id,
-                suite,
-            )?;
-        });
+        let provider = PollisProvider::new(db.conn());
+        create_mls_group_in_suite(
+            &provider,
+            conversation_id,
+            // A brand-new conversation starts on generation 0: there is no
+            // history to migrate, so `suite_for_new_group` already picked
+            // hybrid if the roster could take it.
+            0,
+            creator_user_id,
+            &device_id,
+            suite,
+        )?;
     }
 
     // Publish the epoch-0 GroupInfo so a future device enrolling via the
@@ -859,9 +858,10 @@ pub async fn init_mls_group(
 /// connection was passed to `PollisProvider::new`.
 ///
 /// Takes no ciphersuite: a group's suite is part of the stored group state, and
-/// the signer is `SIGNATURE_SCHEME` under either suite (see `provider.rs`).
-/// Generic over the crypto backend so a hybrid group reloads through this same
-/// path with `PollisPqProvider`.
+/// since #668 the signature scheme follows from it — so the signer is looked up
+/// under `group.ciphersuite()`'s scheme, not a constant. A leaf key of the
+/// wrong scheme is simply absent from storage, which surfaces as "signer not
+/// found" rather than as a signature nobody can verify.
 pub(super) fn load_group_with_signer<C>(
     provider: &MlsProvider<'_, C>,
     conversation_id: &str,
@@ -890,7 +890,7 @@ where
     let signer = SignatureKeyPair::read(
         provider.storage(),
         &sig_pub_bytes,
-        SIGNATURE_SCHEME,
+        signature_scheme(group.ciphersuite()),
     )
     .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("signer not found in mls_kv")))?;
 
@@ -1492,9 +1492,9 @@ async fn process_one_generation<'h>(
                 Some(db) => db,
                 None => break,
             };
-            let outcome = with_lineage_provider!(db.conn(), mls_group_id, generation, |provider| {
-                apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data)
-            });
+            let provider = PollisProvider::new(db.conn());
+            let outcome =
+                apply_one_commit(&provider, mls_group_id, generation, commit.epoch, &commit_data);
             match outcome {
                 CommitApply::Applied => true,
                 CommitApply::Stop => break,
@@ -1956,12 +1956,11 @@ pub fn try_mls_encrypt(
     plaintext: &[u8],
 ) -> Option<Vec<u8>> {
     let generation = local_generation(conn, conversation_id);
-    with_group_provider!(conn, conversation_id, |provider| {
-        let (mut group, signer) =
-            load_group_with_signer(&provider, conversation_id, generation).ok()?;
-        let msg_out = group.create_message(&provider, &signer, plaintext).ok()?;
-        msg_out.tls_serialize_detached().ok()
-    })
+    let provider = PollisProvider::new(conn);
+    let (mut group, signer) =
+        load_group_with_signer(&provider, conversation_id, generation).ok()?;
+    let msg_out = group.create_message(&provider, &signer, plaintext).ok()?;
+    msg_out.tls_serialize_detached().ok()
 }
 
 /// Parse the MLS epoch a `message` / `edit` envelope was sealed at, WITHOUT
@@ -2017,31 +2016,30 @@ pub fn try_mls_decrypt(
     conversation_id: &str,
     ciphertext: &[u8],
 ) -> Option<(Vec<u8>, String)> {
-    with_group_provider!(conn, conversation_id, |provider| {
-        let mut group = load_stored_group(conn, conversation_id)?;
+    let provider = PollisProvider::new(conn);
+    let mut group = load_stored_group(conn, conversation_id)?;
 
-        let mut reader: &[u8] = ciphertext;
-        let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
-        let protocol_msg = msg_in.try_into_protocol_message().ok()?;
-        // Envelopes from a RETIRED lineage cannot be decrypted by the successor,
-        // and their predecessor group is gone. Fail fast rather than handing a
-        // foreign-group message to `process_message`, whose error would be
-        // indistinguishable from a genuine decrypt failure.
-        if protocol_msg.group_id() != group.group_id() {
-            return None;
+    let mut reader: &[u8] = ciphertext;
+    let msg_in = MlsMessageIn::tls_deserialize(&mut reader).ok()?;
+    let protocol_msg = msg_in.try_into_protocol_message().ok()?;
+    // Envelopes from a RETIRED lineage cannot be decrypted by the successor,
+    // and their predecessor group is gone. Fail fast rather than handing a
+    // foreign-group message to `process_message`, whose error would be
+    // indistinguishable from a genuine decrypt failure.
+    if protocol_msg.group_id() != group.group_id() {
+        return None;
+    }
+    let processed = group.process_message(&provider, protocol_msg).ok()?;
+
+    // Grab the authenticated sender credential BEFORE `into_content` consumes it.
+    let sender_user_id = parse_credential_user_id(processed.credential());
+
+    match processed.into_content() {
+        ProcessedMessageContent::ApplicationMessage(app_msg) => {
+            Some((app_msg.into_bytes(), sender_user_id))
         }
-        let processed = group.process_message(&provider, protocol_msg).ok()?;
-
-        // Grab the authenticated sender credential BEFORE `into_content` consumes it.
-        let sender_user_id = parse_credential_user_id(processed.credential());
-
-        match processed.into_content() {
-            ProcessedMessageContent::ApplicationMessage(app_msg) => {
-                Some((app_msg.into_bytes(), sender_user_id))
-            }
-            _ => None,
-        }
-    })
+        _ => None,
+    }
 }
 
 #[cfg(test)]

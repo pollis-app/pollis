@@ -156,28 +156,22 @@ openmls = { version = "0.8", features = [
   "0-8-1-storage-format",
 ] }
 openmls_traits = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites"] }
-# The crypto backend for the CLASSIC suite Pollis ships today, and the only one
-# any production path constructs (`PollisProvider`). Its `aes-gcm` compares
-# authentication tags in constant time via `subtle` — see the libcrux note below
-# for why that decides the split.
-openmls_rust_crypto = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites"] }
-# The crypto backend for the POST-QUANTUM HYBRID suite only (`PollisPqProvider`,
-# #454). It is the sole released provider implementing X-Wing; RustCrypto
-# `unimplemented!()`-panics on that suite.
+# The crypto backend for BOTH suites Pollis ships (`PollisProvider`). Its
+# `aes-gcm` compares authentication tags in constant time via `subtle`.
 #
-# It is deliberately NOT used for the classic suite even though it supports it:
-# the classic AEAD is AES-128-GCM and libcrux's AES-GCM has an UNPATCHED
-# non-constant-time tag check (RUSTSEC-2026-0211, `libcrux-aesgcm <= 0.0.8`; the
-# fix ships only as the renamed `libcrux-aes` 0.0.9, which `libcrux-aead 0.0.6`
-# — and therefore this crate — does not use). Routing today's message decrypts
-# through it would be a side-channel regression. The hybrid suite is
-# ChaCha20-Poly1305-based, so that advisory does not reach it. `deny.toml`
-# records the reachability argument for each libcrux advisory.
+# #454 also depended on `openmls_libcrux_crypto`, because its hybrid suite was
+# X-Wing / `0x004D` and libcrux was the only provider implementing it — while
+# the classic suite had to stay on RustCrypto, since libcrux's AES-GCM has an
+# unpatched non-constant-time tag check (RUSTSEC-2026-0211). #668 moved the
+# hybrid suite to `0x0052`, which keeps the same X-Wing KEM but signs ML-DSA-44;
+# RustCrypto implements it and libcrux implements no ML-DSA suite at all. So the
+# second backend is gone, and with it a dozen libcrux advisories `deny.toml` had
+# to carry reachability arguments for.
 #
-# We compose its `CryptoProvider` with our own SQLite-backed `MlsStore`; we
+# We compose its `RustCrypto` with our own SQLite-backed `MlsStore`; we
 # deliberately do NOT use its bundled `Provider`, which hardcodes in-memory
 # storage and would silently drop all MLS group state on restart.
-openmls_libcrux_crypto = { version = "0.3", features = ["draft-ietf-mls-pq-ciphersuites"] }
+openmls_rust_crypto = { version = "0.5", features = ["draft-ietf-mls-pq-ciphersuites"] }
 # `test-utils` exposes `SignatureKeyPair::private()` — the ONLY accessor for the
 # raw device signing seed. The overlay relay handshake (`net::overlay`) must sign
 # with the SAME Ed25519 device key the cert chain certifies, so it needs the seed

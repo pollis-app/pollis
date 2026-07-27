@@ -86,15 +86,24 @@ fn b64_decode(s: &str) -> anyhow::Result<Vec<u8>> {
 /// exactly the behaviour they have today.
 pub const CIPHERSUITE_CLASSIC: i64 = 0x0001;
 
-/// The MLS code point of `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` — the
-/// post-quantum hybrid suite (#454). A device that publishes a pool in this suite
-/// is, by that act, `pq_capable`: it holds hybrid KeyPackage private keys and can
-/// join a hybrid group. Publishing hybrid packages is therefore what flips
-/// `user_device.pq_capable` on (see [`mark_pq_capable`]).
+/// The MLS code point of `MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44`
+/// — the post-quantum suite. A device that publishes a pool in this suite is, by
+/// that act, `pq_capable`: it holds PQ KeyPackage private keys and can join a PQ
+/// group. Publishing PQ packages is therefore what flips `user_device.pq_capable`
+/// on (see [`mark_pq_capable`]).
 ///
 /// Like [`CIPHERSUITE_CLASSIC`] the DS only uses this as a routing/label value; it
 /// never parses the opaque `key_package` blob to confirm the suite.
-pub const CIPHERSUITE_HYBRID: i64 = 0x004D;
+///
+/// #454 shipped this as `0x004D` (X-Wing KEM, Ed25519 signatures); #668 moved it
+/// to `0x0052`, which keeps the same X-Wing KEM but signs ML-DSA-44, so the
+/// authentication half is post-quantum too. Both are provisional
+/// `draft-ietf-mls-pq-ciphersuites` code points and the draft may renumber them
+/// again — this constant and `CS_HYBRID` in `pollis-core` must move together,
+/// because the client tags its published pool with exactly what the DS matches
+/// on. Pools published under the old point are simply never claimed and age out;
+/// changing it in place was safe only because #668 landed with no active users.
+pub const CIPHERSUITE_HYBRID: i64 = 0x0052;
 
 /// One published key package: its hex hash-ref and the TLS-serialized
 /// `KeyPackage` bytes, base64 (STANDARD) since they are binary.

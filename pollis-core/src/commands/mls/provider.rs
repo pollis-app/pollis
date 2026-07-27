@@ -1,16 +1,16 @@
 //! MLS provider and credential helpers.
 //!
 //! Houses `PollisProvider` (the OpenMls provider wiring crypto + storage), the
-//! ciphersuite constants and the suite-invariant signature scheme, and the
-//! credential format used in MLS leaves.
+//! ciphersuite constants, and the credential format used in MLS leaves.
 //!
-//! Suite and provider are chosen together — `CS_CLASSIC` with `PollisProvider`,
-//! `CS_HYBRID` with `PollisPqProvider` — because each crypto backend implements
-//! only one of the two. The functions that create suite-bound material take
-//! both as arguments so a caller cannot silently mismatch them.
+//! One backend serves both suites (#668), so there is no suite→provider
+//! dispatch: every MLS operation runs through `PollisProvider`. What *is*
+//! per-suite is the signature scheme — [`CS_CLASSIC`] signs with Ed25519,
+//! [`CS_HYBRID`] with ML-DSA-44 — so anything that loads or creates a signing
+//! key takes the scheme from the suite (or from the stored group) rather than
+//! from a constant.
 
 use openmls::prelude::*;
-use openmls_libcrux_crypto::CryptoProvider as LibcruxCrypto;
 use openmls_rust_crypto::RustCrypto;
 use openmls_traits::OpenMlsProvider;
 use tls_codec::Serialize as TlsSerialize;
@@ -23,11 +23,12 @@ use crate::signal::mls_storage::MlsStore;
 /// `MlsStore`. Storage is ciphersuite- and backend-agnostic (it stores opaque
 /// blobs in `mls_kv`), so only the crypto half varies.
 ///
-/// **The crypto backend is chosen by ciphersuite, and that choice is load-bearing
-/// for security — see `PollisProvider` and `PollisPqProvider` below.** We compose
-/// a backend with our own store rather than using either crate's bundled
-/// `Provider` type: those hardcode in-memory storage, which would silently drop
-/// all MLS group state on restart.
+/// Still generic over `C` although [`PollisProvider`] is its only instantiation:
+/// `OpenMlsProvider` composes a crypto backend with a storage backend, and
+/// keeping that shape means swapping backends stays a one-line change here
+/// rather than a signature change everywhere. We compose a backend with our own
+/// store rather than using the crate's bundled `Provider` type, which hardcodes
+/// in-memory storage and would silently drop all MLS group state on restart.
 pub struct MlsProvider<'a, C> {
     crypto: C,
     store: MlsStore<'a>,
@@ -46,8 +47,8 @@ impl<'a, C> OpenMlsProvider for MlsProvider<'a, C>
 where
     C: openmls_traits::crypto::OpenMlsCrypto + openmls_traits::random::OpenMlsRand,
 {
-    // Both backends serve as crypto AND rand provider (each holds its own
-    // CSPRNG), so both associated types point at the same value.
+    // The backend serves as crypto AND rand provider (it holds its own CSPRNG),
+    // so both associated types point at the same value.
     type CryptoProvider = C;
     type RandProvider = C;
     type StorageProvider = MlsStore<'a>;
@@ -65,56 +66,33 @@ where
     }
 }
 
-/// **The provider every production path uses.** Backed by
-/// `openmls_rust_crypto::RustCrypto`, which serves [`CS_CLASSIC`].
+/// **The provider every path uses**, for both suites. Backed by
+/// `openmls_rust_crypto::RustCrypto`.
 ///
-/// Why not libcrux for everything, when libcrux serves the classic suite too and
-/// would spare us a second backend? Because the classic suite's AEAD is
-/// AES-128-GCM, and libcrux's AES-GCM implementation has an **unpatched**
+/// #454 needed a second backend: its hybrid suite was X-Wing / `0x004D`, which
+/// only `openmls_libcrux_crypto` implemented, and routing the *classic* suite
+/// there too was not an option — libcrux's AES-GCM has an unpatched
 /// non-constant-time authentication-tag check (RUSTSEC-2026-0211,
-/// `libcrux-aesgcm <= 0.0.8`; the fix exists only in the renamed `libcrux-aes`
-/// 0.0.9, which no released `openmls_libcrux_crypto` depends on). Routing every
-/// message decrypt through that would be a real side-channel regression against
-/// today's shipping behaviour, traded for a post-quantum capability nothing yet
-/// uses. RustCrypto's `aes-gcm` compares tags with `subtle`'s constant-time
-/// primitives, so classic traffic stays where it is.
+/// `libcrux-aesgcm <= 0.0.8`), and the classic suite's AEAD is AES-128-GCM. So
+/// the suite→backend routing existed to keep classic traffic away from that tag
+/// check.
 ///
-/// This routing is what makes the `RUSTSEC-2026-0211` entry in `deny.toml`
-/// truthful. It is pinned by `classic_provider_never_routes_to_libcrux` in
-/// `commands/mls/tests.rs` — do not "simplify" the two providers into one
-/// without re-reading that test and the advisory.
+/// #668 dissolved the problem rather than routing around it. The suite it moves
+/// to — `0x0052`, see [`CS_HYBRID`] — keeps X-Wing as its KEM but pairs it with
+/// ChaCha20-Poly1305 and ML-DSA-44, and RustCrypto implements it while libcrux
+/// implements no ML-DSA suite at all. `openmls_libcrux_crypto` is therefore out
+/// of the dependency tree entirely, and with it the advisory: there is nothing
+/// left to route away from. RustCrypto's `aes-gcm` compares tags with `subtle`'s
+/// constant-time primitives.
+///
+/// Adding a backend back is a security decision, not a plumbing one. Check the
+/// advisory status of every primitive it would serve before reintroducing one.
 pub type PollisProvider<'a> = MlsProvider<'a, RustCrypto>;
-
-/// The provider for the post-quantum hybrid suite (#454). Backed by
-/// `openmls_libcrux_crypto::CryptoProvider`, the only released backend that
-/// implements `MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519` — `RustCrypto`
-/// `unimplemented!()`-panics on it.
-///
-/// **Nothing in production constructs this yet.** It exists so the hybrid suite
-/// stays reachable and tested while the phased rollout (#454 P2-P4) lands. Its
-/// suite is ChaCha20-Poly1305-based, so the AES-GCM advisory above does not
-/// apply to it.
-pub type PollisPqProvider<'a> = MlsProvider<'a, LibcruxCrypto>;
 
 impl<'a> PollisProvider<'a> {
     pub fn new(conn: &'a rusqlite::Connection) -> Self {
         Self {
             crypto: RustCrypto::default(),
-            store: MlsStore::new(conn),
-        }
-    }
-}
-
-impl<'a> PollisPqProvider<'a> {
-    pub fn new(conn: &'a rusqlite::Connection) -> Self {
-        Self {
-            // `CryptoProvider::new()` is fallible only because it seeds a CSPRNG
-            // from the OS RNG. If the OS RNG is unavailable every other crypto
-            // path in the app is already fatally broken, so panicking here (vs.
-            // rippling a `Result` through every call site) surfaces the same
-            // unrecoverable condition without weakening any signature.
-            crypto: LibcruxCrypto::new()
-                .expect("OS RNG unavailable — no crypto path in the app can work"),
             store: MlsStore::new(conn),
         }
     }
@@ -131,50 +109,57 @@ impl<'a> PollisPqProvider<'a> {
 pub(crate) const CS_CLASSIC: Ciphersuite =
     Ciphersuite::MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
 
-/// The post-quantum hybrid suite (#454): MLS code point `0x004D` — X-Wing
-/// (X25519 + ML-KEM-768) + ChaCha20-Poly1305 + SHA-256 + Ed25519.
+/// The post-quantum suite: MLS code point `0x0052` — X-Wing (X25519 +
+/// ML-KEM-768) + ChaCha20-Poly1305 + SHA-384 + **ML-DSA-44**. Served by
+/// [`PollisProvider`].
 ///
-/// Served ONLY by [`PollisPqProvider`]; `RustCrypto` `unimplemented!()`-panics
-/// on it, so pairing this suite with [`PollisProvider`] is a crash, not a
-/// fallback. **Nothing in production selects it yet** — it exists so the suite
-/// stays compiled, reachable and tested while #454 P2-P4 land.
+/// #454 shipped this constant as X-Wing / `0x004D`, which is post-quantum in
+/// *confidentiality* only: its leaves still signed with Ed25519, so a quantum
+/// adversary could forge group membership even though it could not read the
+/// traffic. #668 moves it to `0x0052`, which keeps exactly the same KEM
+/// (`HpkeKemType::XWingKemDraft6`, so the hybrid secrecy #454 argued for is
+/// unchanged) and replaces the signature with ML-DSA-44.
 ///
-/// The code point is still a moving target upstream (`draft-ietf-mls-pq-
-/// ciphersuites-06` dropped X-Wing in favour of `0x004E`/`0x004F`/`0x0052`), so
-/// treat `0x004D` as experimental until the draft settles — see
-/// `docs/pq-hybrid-mls-design.md` §7.
-/// Unused outside tests until #454 P2 — that is the whole point of this phase:
-/// the seam exists and is exercised, but no production path selects it yet.
-#[allow(dead_code)]
+/// The code point is provisional — `draft-ietf-mls-pq-ciphersuites` has already
+/// renumbered once (`-06` dropped the standalone X-Wing code point in favour of
+/// `0x004E`/`0x004F`/`0x0052`), and it may renumber again. A code point change
+/// is a wire-format break for every group already on this suite, so treat it as
+/// a migration, not a version bump; see the `[patch.crates-io]` note in the
+/// workspace `Cargo.toml` and `docs/pq-hybrid-mls-design.md` §7.
+///
+/// The name stays `CS_HYBRID` because the property it names is still true and
+/// still the point: the KEM is a hybrid of X25519 and ML-KEM-768, so the suite
+/// is no weaker than X25519 even if ML-KEM falls.
 pub(crate) const CS_HYBRID: Ciphersuite =
-    Ciphersuite::MLS_256_XWING_CHACHA20POLY1305_SHA256_Ed25519;
+    Ciphersuite::MLS_128_MLKEM768X25519_CHACHA20POLY1305_SHA384_MLDSA44;
 
-/// The signature scheme, which is deliberately NOT a per-suite parameter.
+/// The signature scheme a suite's leaves sign with.
 ///
-/// Both suites above sign with Ed25519, so a device's stable signing key — the
-/// same key that signs DS requests and that `user_device.device_cert` certifies
-/// — is shared across them by design. Sites that only need
-/// `Ciphersuite::signature_algorithm()` (device signer load/create, group
-/// reload, credential construction) therefore take no suite argument; they use
-/// this constant, and `signature_scheme_is_suite_invariant` in `tests.rs` pins
-/// that both suites really do agree with it.
-pub(crate) const SIGNATURE_SCHEME: SignatureScheme = SignatureScheme::ED25519;
+/// Under #454 this was a constant, because both suites signed Ed25519 — a
+/// device presented one signing key everywhere and the device cert certified
+/// exactly that key. #668 ends that: [`CS_CLASSIC`] still signs Ed25519 and
+/// [`CS_HYBRID`] signs ML-DSA-44, so a device holds one signing key *per
+/// scheme* (see `device::load_or_create_device_signer`).
+///
+/// A thin wrapper over `Ciphersuite::signature_algorithm()` on purpose — it
+/// gives the call sites a name to point at, and `signature_scheme_per_suite` in
+/// `tests.rs` pins the two answers so a suite swap cannot silently change which
+/// key a leaf is signed with.
+pub(crate) fn signature_scheme(suite: Ciphersuite) -> SignatureScheme {
+    suite.signature_algorithm()
+}
 
-// ── Suite dispatch ───────────────────────────────────────────────────────────
+// ── Storage-only access ──────────────────────────────────────────────────────
 
-/// Load a group from local storage **without** choosing a crypto backend.
+/// Load a group from local storage **without** constructing a provider.
 ///
-/// This is what makes suite dispatch possible at all. `MlsGroup::load` is
-/// generic over `StorageProvider`, not `OpenMlsProvider`: it deserialises
-/// stored blobs and touches no crypto. `MlsStore` is the crypto-independent
-/// half of [`MlsProvider`], so it can be constructed alone — which resolves the
-/// chicken-and-egg of "you need the group to learn its suite, and the suite to
-/// pick the provider".
+/// `MlsGroup::load` is generic over `StorageProvider`, not `OpenMlsProvider`:
+/// it deserialises stored blobs and touches no crypto. `MlsStore` is the
+/// crypto-independent half of [`MlsProvider`], so it can be constructed alone.
 ///
-/// Also the right call for every read-only inspection (does the group exist?
-/// what epoch is it at?) and for the storage-only mutations `MlsGroup::delete`
-/// and `clear_pending_commit`: none of them need a backend, so none of them
-/// need to dispatch.
+/// The right call for every read-only inspection (does the group exist? what
+/// epoch is it at? which suite is it in?) and for the storage-only mutations
+/// `MlsGroup::delete` and `clear_pending_commit`: none of them need a backend.
 ///
 /// Resolves the conversation's **suite generation** (#454 P4) before loading, so
 /// a device that has migrated to the hybrid suite transparently reads and writes
@@ -230,10 +215,11 @@ pub(crate) fn store_only(conn: &rusqlite::Connection) -> MlsStore<'_> {
 /// } Welcome;
 /// ```
 ///
+/// Since #668 one backend serves both suites, so this no longer chooses a
+/// provider — but it still decides whether a Welcome is joinable at all, and
+/// callers still need it to name the scheme the joining leaf signs under.
 /// Returns `None` if the Welcome fails to serialise or names a code point we do
-/// not implement — both of which the caller must treat as "cannot join", never
-/// as "fall back to classic": handing a hybrid Welcome to `PollisProvider`
-/// panics (`RustCrypto` `unimplemented!()`s on `CS_HYBRID`).
+/// not implement; both mean "cannot join", never "fall back to classic".
 /// `welcome_suite_is_readable_on_both_suites` in `tests.rs` pins this against
 /// real Welcomes of each suite.
 pub(crate) fn welcome_ciphersuite(welcome: &Welcome) -> Option<Ciphersuite> {
@@ -251,84 +237,17 @@ pub(crate) fn stored_group_ciphersuite(
     load_stored_group(conn, conversation_id).map(|g| g.ciphersuite())
 }
 
-/// [`stored_group_ciphersuite`] pinned to an explicit suite generation — the
-/// suite half of [`load_stored_group_at`].
-pub(crate) fn stored_group_ciphersuite_at(
-    conn: &rusqlite::Connection,
-    conversation_id: &str,
-    generation: i64,
-) -> Option<Ciphersuite> {
-    load_stored_group_at(conn, conversation_id, generation).map(|g| g.ciphersuite())
-}
-
-/// Run `$body` against the [`MlsProvider`] that serves `$suite`.
-///
-/// Dispatch has to be a macro rather than a `dyn` object or a closure:
-/// `OpenMlsProvider` has associated types (`CryptoProvider`, `RandProvider`,
-/// `StorageProvider`), so it is not object-safe, and Rust closures cannot be
-/// generic over the backend. The body is therefore monomorphised once per
-/// backend. **Keep bodies small** — the established shape is a one-line call to
-/// a `fn foo<C>(provider: &MlsProvider<'_, C>, …)` helper, so the duplicated
-/// code is a single call and the real work is compiled twice by the normal
-/// generic machinery instead of by macro expansion.
-macro_rules! with_suite_provider {
-    ($conn:expr, $suite:expr, |$p:ident| $body:block) => {{
-        let __conn = $conn;
-        if $suite == $crate::commands::mls::provider::CS_HYBRID {
-            let $p = $crate::commands::mls::provider::PollisPqProvider::new(__conn);
-            $body
-        } else {
-            let $p = $crate::commands::mls::provider::PollisProvider::new(__conn);
-            $body
-        }
-    }};
-}
-
-/// Run `$body` against the provider serving the ciphersuite of the group stored
-/// locally for `$conversation_id`.
-///
-/// A conversation with no local group falls back to [`CS_CLASSIC`]. That is the
-/// right default for every caller: paths that read existing state find nothing
-/// either way, and paths that *create* state (group creation, Welcome, external
-/// join) learn their suite from the wire and use [`with_suite_provider`]
-/// directly rather than this macro.
-macro_rules! with_group_provider {
-    ($conn:expr, $conversation_id:expr, |$p:ident| $body:block) => {{
-        let __conn = $conn;
-        let __suite = $crate::commands::mls::provider::stored_group_ciphersuite(
-            __conn,
-            $conversation_id,
-        )
-        .unwrap_or($crate::commands::mls::provider::CS_CLASSIC);
-        // Fully qualified: this expands at the *caller's* site, which need not
-        // have `with_suite_provider` in scope.
-        $crate::commands::mls::provider::with_suite_provider!(__conn, __suite, |$p| $body)
-    }};
-}
-
-/// [`with_group_provider`] pinned to an explicit suite generation (#454 P4).
-///
-/// Needed by the two paths that hold both lineages at once, where "the suite of
-/// this conversation's live group" is the wrong question: a migrator publishing
-/// its successor's opening commit is still on generation `N` locally, so
-/// [`with_group_provider`] would hand it the *classic* provider for a hybrid
-/// group — and `RustCrypto` panics on [`CS_HYBRID`] rather than failing.
-macro_rules! with_lineage_provider {
-    ($conn:expr, $conversation_id:expr, $generation:expr, |$p:ident| $body:block) => {{
-        let __conn = $conn;
-        let __suite = $crate::commands::mls::provider::stored_group_ciphersuite_at(
-            __conn,
-            $conversation_id,
-            $generation,
-        )
-        .unwrap_or($crate::commands::mls::provider::CS_CLASSIC);
-        with_suite_provider!(__conn, __suite, |$p| $body)
-    }};
-}
-
-pub(crate) use with_group_provider;
-pub(crate) use with_lineage_provider;
-pub(crate) use with_suite_provider;
+// #454 put three `with_*_provider!` macros here — `with_suite_provider!`,
+// `with_group_provider!`, `with_lineage_provider!` — that picked a crypto
+// backend from a suite. Dispatch had to be a macro because `OpenMlsProvider`
+// has associated types and so is not object-safe, and closures cannot be
+// generic over the backend; each one expanded its body once per backend.
+//
+// #668 deleted them along with the second backend. Two of the three had to read
+// the caller's suite before they could dispatch, and reading a suite means
+// deserialising the whole stored group — work every call site then repeated
+// inside the body. With one backend that read bought nothing, so the call sites
+// now construct `PollisProvider::new(conn)` directly.
 
 // ── Credential helpers ───────────────────────────────────────────────────────
 

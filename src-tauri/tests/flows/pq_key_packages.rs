@@ -1,8 +1,9 @@
 //! #454 P2 — hybrid key packages, end to end through the real command pipeline.
 //!
 //! A hybrid-capable device (every P2 build) publishes TWO KeyPackage pools on
-//! login — classic (`CS_CLASSIC` via `PollisProvider`) and hybrid (`CS_HYBRID`
-//! via `PollisPqProvider`) — and advertises `user_device.pq_capable = 1` once the
+//! login — `CS_CLASSIC` and `CS_HYBRID`, both through `PollisProvider` since
+//! #668 collapsed the two crypto backends into one — and advertises
+//! `user_device.pq_capable = 1` once the
 //! hybrid pool has actually landed. This exercises that through
 //! `sign_up` → `initialize_identity` → `ensure_mls_key_package` against the real
 //! in-process Delivery Service, then asserts the mixed-fleet invariant: an old
