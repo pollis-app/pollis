@@ -135,14 +135,17 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
 
 data "aws_caller_identity" "current" {}
 
-# Read ONLY the two QUIC identity params, and decrypt them via the SSM-scoped KMS key.
+# Read ONLY the two QUIC identity params, and decrypt them via the SSM-scoped KMS
+# key. Both are scoped to param_region, NOT this shard's region: SSM Parameter
+# Store is regional and the pool identity is minted once, in the control-plane
+# region. A node in us-east-1 reads it cross-region from us-west-2.
 data "aws_iam_policy_document" "node_identity" {
   statement {
     sid     = "ReadQuicIdentity"
     actions = ["ssm:GetParameter", "ssm:GetParameters"]
     resources = [
-      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.identity_key_param}",
-      "arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter${var.identity_cert_param}",
+      "arn:aws:ssm:${var.param_region}:${data.aws_caller_identity.current.account_id}:parameter${var.identity_key_param}",
+      "arn:aws:ssm:${var.param_region}:${data.aws_caller_identity.current.account_id}:parameter${var.identity_cert_param}",
     ]
   }
   statement {
@@ -152,7 +155,7 @@ data "aws_iam_policy_document" "node_identity" {
     condition {
       test     = "StringEquals"
       variable = "kms:ViaService"
-      values   = ["ssm.${var.region}.amazonaws.com"]
+      values   = ["ssm.${var.param_region}.amazonaws.com"]
     }
   }
 }
@@ -202,7 +205,7 @@ resource "aws_launch_template" "relay" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user-data.sh.tftpl", {
-    region              = var.region
+    param_region        = var.param_region
     relay_image         = var.relay_image
     relay_port          = var.relay_port
     health_port         = var.health_port
@@ -223,10 +226,15 @@ resource "aws_launch_template" "relay" {
 }
 
 resource "aws_autoscaling_group" "relay" {
-  name                = local.name
-  min_size            = var.node_floor
+  name = local.name
+  # min 0 / desired 0: every allowed region keeps a shard standing by, and the
+  # reconciler's random placement decides which of them actually hold nodes. An
+  # empty shard costs nothing. The pool-wide floor is enforced by the reconciler
+  # (it clamps desired-state up to node_floor before drawing), not by ASG minimums
+  # — a per-region minimum would multiply the floor by the number of regions.
+  min_size            = 0
   max_size            = var.node_max
-  desired_capacity    = var.node_floor
+  desired_capacity    = 0
   vpc_zone_identifier = [for s in aws_subnet.public : s.id]
   health_check_type   = "EC2"
 
@@ -239,9 +247,11 @@ resource "aws_autoscaling_group" "relay" {
 
   mixed_instances_policy {
     instances_distribution {
-      # Guarantee `node_floor` on-demand nodes; everything above is Spot. Spot
-      # reclamation can therefore never take the pool below the floor.
-      on_demand_base_capacity                  = var.node_floor
+      # The first `on_demand_base` nodes in this region are on-demand, the rest
+      # Spot. With placement spread at random across regions, this bounds the
+      # blast radius of a regional Spot capacity event: it can never take THIS
+      # region's share to zero, and the other regions are uncorrelated with it.
+      on_demand_base_capacity                  = var.on_demand_base
       on_demand_percentage_above_base_capacity = 0
       spot_allocation_strategy                 = "price-capacity-optimized"
       spot_max_price                           = var.spot_max_price

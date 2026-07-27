@@ -7,16 +7,26 @@ the **§3 signed-directory contract** (`lib/directory-verify.mjs`), proven byte-
 exact by `test/directory-contract.test.mjs`.
 
 ```
-Terraform ──> per-region VPC + locked SG + mixed-instances ASG (t4g.nano, Spot floor on-demand)
+Terraform ──> per-region VPC + locked SG + mixed-instances ASG (t4g.nano, Spot), one per
+              ALLOWED region, all standing by at desired capacity 0
           ──> S3 (private) + CloudFront (OAC)  ── serves the signed directory
-          ──> reconciler Lambda (EventBridge every 2 min) ── scales ASG, health-checks /version,
+          ──> reconciler Lambda (EventBridge every 2 min) ── draws random placement, scales the
+                                                              ASGs, health-checks /version,
                                                               signs + publishes the directory
           ──> Budgets $20 alert + CloudWatch alarms
-SSM (free, SecureString) ── signing private key · pool QUIC identity · desired-state
+SSM (free) ── signing private key · pool QUIC identity (SecureString) · desired-state · placement
 ```
 
 There is **no load balancer**: clients fetch the signed directory and do their own
 health/failover. Each relay is just a node with a public UDP port.
+
+**Placement is random and rotates.** Desired-state is a pool-wide *count*, not a
+per-region map: every `rotation_interval_hours` (default 24) the reconciler draws
+each node's region uniformly at random from the allowed set, persists the draw to
+SSM, and converges the ASGs to it. Draws sample **with replacement**, so two nodes
+landing in the same region is expected, not a bug. Nothing in the client needs to
+change when a node moves — the whole pool shares one pinned QUIC identity, so the
+client pins the cert, never the address.
 
 ## What you hand back to the client build (§6 outputs)
 
@@ -120,28 +130,57 @@ node scripts/verify-directory.mjs "$(terraform output -raw POLLIS_OVERLAY_DIRECT
 ## Runbook
 
 ### Scale the pool (set desired-state)
-The reconciler reads desired-state from SSM and converges within one cycle (~2 min).
-Terraform seeds it once, then leaves it alone.
+Desired-state is a **pool-wide count**; the reconciler picks the regions. It reads
+the param from SSM and converges within one cycle (~2 min). Terraform seeds it once,
+then leaves it alone.
 ```bash
 aws ssm put-parameter --region us-west-2 --overwrite \
   --name /pollis/relay-hydra/desired-state --type String \
-  --value '{"us-west-2": 3}'
+  --value '{"total": 3}'
 # force an immediate reconcile instead of waiting for the schedule:
 aws lambda invoke --function-name "$(terraform output -raw reconciler_function_name)" /dev/stdout
 ```
 Counts are clamped to `[node_floor, node_max]`. To raise the ceiling, bump
 `node_max` in tfvars and re-apply (mind the $20 cap — see cost below).
 
-### Add / remove a region
-1. Confirm the region's US state is **clean** (no age-verification / device-OS
-   age-registration law) and present in `region_state_map` (variables.tf).
-2. Add an **aliased provider** for the region in `providers.tf`, and a second
-   `module "relay_region_<r>"` block passing that provider (the module is fully
-   region-parameterized — that's the only code edit).
-3. Add it to `region_node_counts` and apply.
+> The pre-multi-region per-region shape (`{"us-west-2": 3}`) is still accepted and
+> summed into a pool total, so the live param did not need editing during the
+> upgrade. Write the `{"total": N}` shape for anything new.
 
-The jurisdiction guard (`jurisdiction.tf`) **fails the plan** if a requested region
-maps to a denied or unmapped state — this is the enforced default-deny.
+### See / force the random placement
+```bash
+# where the current draw put the pool, and when it was drawn:
+aws ssm get-parameter --region us-west-2 \
+  --name "$(terraform output -raw placement_param)" --query Parameter.Value --output text
+# → {"drawn_at":1753574400,"placement":{"us-east-2":2,"us-west-1":1}}
+```
+The reconciler re-draws when the interval has elapsed, when the pool size changed,
+or **immediately** when a region leaves the allowed set (a tightened denylist moves
+nodes now, not at the next scheduled rotation). To force a rotation early, zero the
+`drawn_at` and invoke:
+```bash
+aws ssm put-parameter --region us-west-2 --overwrite --type String \
+  --name "$(terraform output -raw placement_param)" --value '{"drawn_at":0,"placement":{}}'
+aws lambda invoke --function-name "$(terraform output -raw reconciler_function_name)" /dev/stdout
+```
+A rotation terminates nodes in regions that lost a slot and launches replacements
+where the draw sent them, so expect a brief dip in healthy nodes — the client
+fails over across the directory while it happens.
+
+### Add / remove a region
+1. Confirm the region's US state is acceptable under `state_denylist` (currently
+   empty — see Jurisdiction below) and present in `region_state_map` (variables.tf).
+2. Add an **aliased provider** for the region in `providers.tf`, and a matching
+   `module "relay_region_<r>"` block passing that provider (the module is fully
+   region-parameterized — that's the only code edit). Terraform cannot synthesize a
+   provider per `for_each` element, which is why these are static blocks.
+3. Apply. The new region's ASG stands by at capacity 0 and starts receiving nodes at
+   the next draw. To **remove** one, add its state to `state_denylist` and apply: the
+   next reconcile re-draws immediately and drains it.
+
+`jurisdiction.tf` **fails the plan** if a candidate region maps to a denied or
+unmapped state, or if it lacks provider/module wiring — the allowed set and the set
+the reconciler can actually drive are kept identical by construction.
 
 ### Rotate the directory signing key
 Coordinated with a client rebuild (the client pins the public key).
@@ -182,9 +221,11 @@ cat > test.tfvars <<'EOF'
 env                   = "test"
 directory_domain      = ""          # raw *.cloudfront.net — skips ACM/DNS/CAA
 relay_allowlist       = "*.turso.io,*.pollis.com,*.cloudflarestorage.com"
-region_node_counts    = { "us-west-2" = 1 }
+pool_node_count       = 1
 node_floor            = 1
 node_max              = 1
+# Pin a test pool to one region so you know where to look; prod draws at random.
+state_denylist        = ["Virginia", "Ohio", "California"]
 alarm_email_addresses = []
 EOF
 terraform init
@@ -216,7 +257,7 @@ aws ssm delete-parameters --region us-west-2 --names \
 
 ## Cost (§0 hard target: < $20/month)
 
-Per-node, us-west-2, all-in:
+Per-node, all-in (us-west-2 pricing; the other US regions are within a few cents):
 
 | Item | On-demand node | Spot node |
 | --- | --- | --- |
@@ -225,35 +266,53 @@ Per-node, us-west-2, all-in:
 | 8 GiB gp3 EBS | ~$0.64 | ~$0.64 |
 | **Per node** | **~$7.36** | **~$5.24** |
 
-Default config = `node_floor = 2` (on-demand, guaranteed) + up to 1 Spot at
-`node_max = 3`:
+Default config = `pool_node_count = 3`, `node_floor = 2`, `node_max = 3`, and
+`on_demand_base_per_region = 0` (all Spot):
 
-- **Steady state (floor, 2 nodes): ~$14.7/mo** — comfortably under.
-- **Full burst (3 nodes = 2 on-demand + 1 Spot): ~$19.9/mo** — at the cap.
+- **Steady state (floor, 2 nodes): ~$10.5/mo.**
+- **Full pool (3 nodes): ~$15.7/mo** — under the cap *whatever the draw does*.
 - Lambda + S3 + CloudFront + SSM (standard tier, free) + EventBridge + a handful of
   CloudWatch alarms ($0.10 each): **< $1/mo**.
+
+**Why all Spot now.** `on_demand_base_per_region` is per-REGION, so its cost scales
+with how wide the random draw spreads: at `1`, a 3-node pool that lands in three
+different regions is three on-demand nodes, **~$22/mo — over the §0 cap, breached by
+a dice roll rather than by a decision**. The thing an on-demand base used to buy was
+protection against single-region concentration, and random multi-region placement is
+now itself that diversification: a Spot capacity event is scoped to one region, the
+reconciler self-heals, and the client fails over across the directory. Set the
+variable to `1` (and raise `monthly_budget_usd` with it) if you want the anchoring
+back.
 
 The public IPv4 address is the biggest line item per node, which is why the pool
 is small and there is no NAT gateway (~$32/mo/region would blow the budget alone).
 The **Budgets alert fires at 80% forecast ($16) and 100% actual ($20)**; `node_max`
-and the on-demand floor are the hard structural caps.
+and `on_demand_base_per_region` are the hard structural caps.
 
 ---
 
 ## Jurisdiction (§4)
 
-Placement is denied **by US state**, not by AWS region: a region is excluded iff
-the state its AZs sit in has an age-verification or device/OS age-registration law.
-As of mid-2026 that denies Virginia (`us-east-1`), Ohio (`us-east-2`), California
-(`us-west-1`) — leaving **Oregon (`us-west-2`)** as the only clean US region. The
-map lives in `region_state_map` and the denylist in `state_denylist` (variables.tf);
-`jurisdiction.tf` enforces it at plan time. **Re-check the state-law landscape
-before adding any region.**
+The mechanism denies **by US state**, not by AWS region: a region is excluded iff
+the state its AZs sit in appears in `state_denylist`. The map lives in
+`region_state_map` and the denylist in `state_denylist` (variables.tf);
+`jurisdiction.tf` enforces it at plan time, and the reconciler re-draws immediately
+when a region drops out of the allowed set.
+
+**The denylist is now empty — all four US regions are allowed.** It originally
+denied Virginia (`us-east-1`), Ohio (`us-east-2`) and California (`us-west-1`) over
+age-verification / device-level age-assurance laws, leaving Oregon as the only
+candidate. That was placement **hygiene, not compliance**: those laws attach to
+content services and to their users, never to server racks, so nothing was being
+violated by hosting there. It was traded away deliberately — a pool that rotates
+unpredictably across four regions is worth more than one pinned to a single state.
+Re-denying is one line in `state_denylist`; the mechanism is unchanged.
 
 ## Testing
 
 ```bash
-node --test                 # the §3 directory contract, byte-exact + every reject case
+node --test                 # §3 directory contract (byte-exact + every reject case)
+                            # + the random placement / rotation policy (seeded rng)
 terraform validate          # config validity
 terraform fmt -recursive -check
 ```

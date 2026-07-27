@@ -2,16 +2,23 @@
 //
 // Runs as a Node.js 24 Lambda on an EventBridge schedule (and on-demand).
 // Each run is idempotent and converges reality to the desired-state config:
-//   1. Read desired-state (region -> node count) from SSM Parameter Store.
-//   2. For each managed region, set the ASG desired capacity (clamped to
-//      [floor, max]) so Spot reclamation can never take the pool to zero.
-//   3. Discover the ASG's InService instances and their public IPs.
-//   4. Health-check each node at GET http://<ip>:<health-port>/version and
+//   1. Read the desired POOL-WIDE node count from SSM Parameter Store.
+//   2. Load the persisted random region placement; re-draw it if the rotation
+//      interval elapsed, the pool size changed, or a region left the allowed
+//      set (see placement.mjs). Persist a fresh draw back to SSM.
+//   3. Set every managed region's ASG desired capacity from that placement —
+//      including 0 for regions the draw skipped this rotation.
+//   4. Discover each ASG's InService instances and their public IPs.
+//   5. Health-check each node at GET http://<ip>:<health-port>/version and
 //      keep only the ones that answer 200.
-//   5. Assemble the healthy set into the signed Directory (§3 of the ticket),
+//   6. Assemble the healthy set into the signed Directory (§3 of the ticket),
 //      sign the exact payload bytes with the Ed25519 private key from SSM, and
 //      publish the envelope to S3 (CloudFront serves it at the stable URL).
-//   6. Emit CloudWatch metrics (healthy nodes per region, reconcile failures).
+//   7. Emit CloudWatch metrics (healthy nodes per region and pool-wide,
+//      reconcile failures).
+//
+// Nodes move between regions without a client rebuild because the whole pool
+// shares ONE pinned QUIC identity — the client pins the cert, not the address.
 //
 // Zero third-party deps: the AWS SDK v3 clients and node:crypto are provided by
 // the Lambda Node 24 runtime. The Ed25519 signature is produced with
@@ -21,15 +28,17 @@
 
 import { AutoScalingClient, DescribeAutoScalingGroupsCommand, UpdateAutoScalingGroupCommand, SetInstanceHealthCommand } from "@aws-sdk/client-auto-scaling";
 import { EC2Client, DescribeInstancesCommand } from "@aws-sdk/client-ec2";
-import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
+import { SSMClient, GetParameterCommand, PutParameterCommand } from "@aws-sdk/client-ssm";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import { CloudWatchClient, PutMetricDataCommand } from "@aws-sdk/client-cloudwatch";
 import { createPrivateKey, sign } from "node:crypto";
+import { readDesiredTotal, drawPlacement, placementNeedsRedraw, placementTotal, clamp } from "./placement.mjs";
 
 // --- Config from the Lambda environment (set by Terraform) -------------------
 
 const REGIONS = JSON.parse(env("MANAGED_REGIONS")); // { "us-west-2": "<asg-name>" }
-const DESIRED_STATE_PARAM = env("DESIRED_STATE_PARAM"); // SSM param holding {region:count}
+const DESIRED_STATE_PARAM = env("DESIRED_STATE_PARAM"); // SSM param holding {"total": N}
+const PLACEMENT_PARAM = env("PLACEMENT_PARAM"); // SSM param holding the current random draw
 const SIGNING_KEY_PARAM = env("SIGNING_KEY_PARAM"); // SSM SecureString: Ed25519 private PKCS8 PEM
 const IDENTITY_CERT_PARAM = env("IDENTITY_CERT_PARAM"); // SSM SecureString: base64(DER) of the pool QUIC cert
 const DIRECTORY_BUCKET = env("DIRECTORY_BUCKET");
@@ -38,6 +47,7 @@ const RELAY_PORT = Number(env("RELAY_PORT", "9444"));
 const HEALTH_PORT = Number(env("HEALTH_PORT", "9445"));
 const NODE_FLOOR = Number(env("NODE_FLOOR", "2"));
 const NODE_MAX = Number(env("NODE_MAX", "3"));
+const ROTATION_INTERVAL_SECONDS = Number(env("ROTATION_INTERVAL_HOURS", "24")) * 3600;
 const DIRECTORY_TTL_SECONDS = Number(env("DIRECTORY_TTL_SECONDS", "3600"));
 const HEALTH_TIMEOUT_MS = Number(env("HEALTH_TIMEOUT_MS", "2500"));
 const METRIC_NAMESPACE = env("METRIC_NAMESPACE", "PollisRelayHydra");
@@ -50,35 +60,21 @@ export const handler = async () => {
   const perRegionHealthy = {};
   const relays = [];
 
-  const desired = await readDesiredState();
+  const placement = await resolvePlacement();
   const certB64 = await readParam(IDENTITY_CERT_PARAM, true);
+
+  const unhealthyByRegion = {};
 
   for (const [region, asgName] of Object.entries(REGIONS)) {
     try {
-      const target = clamp(desired[region] ?? NODE_FLOOR, NODE_FLOOR, NODE_MAX);
+      // 0 is a legitimate target: this region simply lost the draw this rotation.
+      const target = placement[region] ?? 0;
       await setDesiredCapacity(region, asgName, target);
 
       const nodes = await discoverInServiceNodes(region, asgName);
       const { healthy, unhealthy } = await healthCheck(nodes);
       perRegionHealthy[region] = healthy.length;
-
-      // Self-heal: an instance that's InService (EC2-reachable) but whose relay
-      // container is dead answers no /version, so the ASG's EC2 health check would
-      // never replace it — it would linger and bill while serving nothing. Mark it
-      // Unhealthy so the ASG terminates + relaunches it. ShouldRespectGracePeriod
-      // shields nodes still pulling the image on first boot (see the ASG's
-      // health_check_grace_period).
-      //
-      // Guard: only self-heal when at least one node in the region is healthy. If
-      // EVERY node is failing it's almost certainly systemic (a bad image push, bad
-      // config, an SSM/identity problem) — replacing them all just churns instances
-      // into the same failure and bills for it. Leave them for the alarms (healthy-
-      // nodes floor + reconcile failures, both now paging) to surface instead.
-      if (unhealthy.length > 0 && healthy.length > 0) {
-        await markUnhealthy(region, unhealthy);
-      } else if (unhealthy.length > 0) {
-        console.error(`${region}: all ${unhealthy.length} node(s) unhealthy — NOT self-healing (looks systemic, not per-node); leaving for the alarms`);
-      }
+      unhealthyByRegion[region] = unhealthy;
 
       for (const { ip } of healthy) {
         relays.push({ addr: `${ip}:${RELAY_PORT}`, region, cert_b64: certB64 });
@@ -87,6 +83,33 @@ export const handler = async () => {
       reconcileFailures += 1;
       console.error(`reconcile failed for ${region}:`, err);
     }
+  }
+
+  // Self-heal: an instance that's InService (EC2-reachable) but whose relay
+  // container is dead answers no /version, so the ASG's EC2 health check would
+  // never replace it — it would linger and bill while serving nothing. Mark it
+  // Unhealthy so the ASG terminates + relaunches it. ShouldRespectGracePeriod
+  // shields nodes still pulling the image on first boot (see the ASG's
+  // health_check_grace_period).
+  //
+  // Guard: only self-heal when at least one node SOMEWHERE IN THE POOL is healthy.
+  // If every node everywhere is failing it's almost certainly systemic (a bad image
+  // push, bad config, an SSM/identity problem) — replacing them all just churns
+  // instances into the same failure and bills for it. Leave those for the alarms.
+  //
+  // The guard is pool-wide, not per-region, precisely because random placement
+  // routinely puts a SINGLE node in a region: a per-region test would read that
+  // node's dead container as "systemic" and never replace it.
+  const totalHealthy = Object.values(perRegionHealthy).reduce((a, b) => a + b, 0);
+  const totalUnhealthy = Object.values(unhealthyByRegion).reduce((a, n) => a + n.length, 0);
+  if (totalUnhealthy > 0 && totalHealthy > 0) {
+    for (const [region, unhealthy] of Object.entries(unhealthyByRegion)) {
+      if (unhealthy.length > 0) {
+        await markUnhealthy(region, unhealthy);
+      }
+    }
+  } else if (totalUnhealthy > 0) {
+    console.error(`all ${totalUnhealthy} node(s) across the whole pool are unhealthy — NOT self-healing (looks systemic, not per-node); leaving for the alarms`);
   }
 
   // §3: the client REJECTS an empty relays[]. Never publish an empty directory —
@@ -101,8 +124,53 @@ export const handler = async () => {
 
   await emitMetrics(perRegionHealthy, reconcileFailures);
 
-  return { published: relays.length > 0, healthy: perRegionHealthy, reconcileFailures };
+  return { published: relays.length > 0, healthy: perRegionHealthy, placement, reconcileFailures };
 };
+
+// --- Random region placement (see placement.mjs) -----------------------------
+
+// Load the persisted draw and decide whether it still holds; re-draw + persist if
+// not. Returns a region -> node-count map covering this rotation.
+async function resolvePlacement() {
+  const allowedRegions = Object.keys(REGIONS);
+  const total = clamp(await readDesiredTotalFromSsm(), NODE_FLOOR, NODE_MAX);
+  const now = Math.floor(Date.now() / 1000);
+
+  let current = null;
+  try {
+    current = JSON.parse(await readParam(PLACEMENT_PARAM, false));
+  } catch (err) {
+    console.error("failed to read placement parameter, will re-draw:", err);
+  }
+
+  const reason = placementNeedsRedraw(current, {
+    allowedRegions,
+    total,
+    now,
+    rotationIntervalSeconds: ROTATION_INTERVAL_SECONDS,
+  });
+  if (!reason) {
+    return current.placement;
+  }
+
+  const placement = drawPlacement(allowedRegions, total, Math.random);
+  console.log(`rotating placement (${reason}): ${JSON.stringify(placement)}`);
+
+  // Persist BEFORE acting on it. If the write fails we throw rather than scale:
+  // scaling to an unrecorded draw would re-randomize on the very next reconcile
+  // and churn the pool every two minutes.
+  await writeParam(PLACEMENT_PARAM, JSON.stringify({ drawn_at: now, placement }));
+  return placement;
+}
+
+async function readDesiredTotalFromSsm() {
+  try {
+    return readDesiredTotal(await readParam(DESIRED_STATE_PARAM, false), NODE_FLOOR);
+  } catch (err) {
+    console.error("failed to read desired-state, falling back to the floor:", err);
+    return NODE_FLOOR;
+  }
+}
 
 // --- Directory assembly + signing (§3 frozen contract) -----------------------
 
@@ -235,7 +303,18 @@ async function emitMetrics(perRegionHealthy, reconcileFailures) {
   const timestamp = new Date();
   const data = [
     { MetricName: "ReconcileFailures", Value: reconcileFailures, Unit: "Count", Timestamp: timestamp },
+    // Pool-wide healthy count. This is what the floor alarm watches: with random
+    // placement an individual region legitimately holds zero nodes, so a
+    // per-region floor alarm would page on every rotation that skipped it.
+    {
+      MetricName: "HealthyNodesTotal",
+      Value: Object.values(perRegionHealthy).reduce((a, b) => a + b, 0),
+      Unit: "Count",
+      Timestamp: timestamp,
+    },
   ];
+  // Still emitted per region, for visibility into where the draw put things — but
+  // deliberately un-alarmed.
   for (const [region, count] of Object.entries(perRegionHealthy)) {
     data.push({
       MetricName: "HealthyNodes",
@@ -254,19 +333,13 @@ async function emitMetrics(perRegionHealthy, reconcileFailures) {
 
 // --- SSM helpers -------------------------------------------------------------
 
-async function readDesiredState() {
-  try {
-    const raw = await readParam(DESIRED_STATE_PARAM, false);
-    return JSON.parse(raw);
-  } catch (err) {
-    console.error("failed to read desired-state, falling back to floor everywhere:", err);
-    return {};
-  }
-}
-
 async function readParam(name, decrypt) {
   const out = await ssm.send(new GetParameterCommand({ Name: name, WithDecryption: decrypt }));
   return out.Parameter.Value;
+}
+
+async function writeParam(name, value) {
+  await ssm.send(new PutParameterCommand({ Name: name, Value: value, Type: "String", Overwrite: true }));
 }
 
 // --- utils -------------------------------------------------------------------
@@ -280,8 +353,4 @@ function env(name, fallback) {
     throw new Error(`missing required env var ${name}`);
   }
   return v;
-}
-
-function clamp(n, lo, hi) {
-  return Math.max(lo, Math.min(hi, n));
 }

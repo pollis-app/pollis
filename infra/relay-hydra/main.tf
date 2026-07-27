@@ -8,35 +8,144 @@ locals {
   node_name_prefix = local.is_prod ? "pollis-relay" : "pollis-relay-${var.env}"
   # CloudWatch metric namespace: PascalCase, per-env so alarms never cross wires.
   metric_namespace = local.is_prod ? "PollisRelayHydra" : "PollisRelayHydra${title(var.env)}"
+
+  # Regions that have a static aliased provider (providers.tf) AND a module block
+  # below. jurisdiction.tf asserts region_state_map is a subset of this, so a
+  # region added to the map without the wiring fails the plan instead of silently
+  # never being drawn.
+  region_providers_wired = {
+    "us-east-1" = true
+    "us-east-2" = true
+    "us-west-1" = true
+    "us-west-2" = true
+  }
 }
 
-# ── Relay nodes: one module instance per allowed region ─────────────────────
+# ── Relay nodes: one shard per allowed region ───────────────────────────────
 #
-# for_each over the jurisdiction-filtered region set. All allowed regions must
-# equal primary_region for now (Terraform can't synthesize a provider per region
-# dynamically, and §4 leaves us-west-2 as the only clean US region anyway). To
-# add a second clean region later: add an aliased provider for it (providers.tf),
-# then a second `module "relay_region_<r>"` block passing that provider. The
-# module itself is fully region-parameterized, so that is the only edit.
-module "relay_region" {
-  source   = "./modules/relay-region"
-  for_each = toset(local.allowed_regions)
+# Every allowed region gets a full shard (VPC + SG + IAM + ASG) standing by at
+# desired_capacity 0. Idle shards are free — VPCs, security groups, launch
+# templates and empty ASGs cost nothing; only running instances bill. The
+# reconciler then draws each node's region at random on rotation and moves ASG
+# desired capacities to match, so a node can appear in any allowed region without
+# a Terraform apply.
+#
+# These are four near-identical static blocks rather than a for_each because
+# Terraform cannot assign a provider dynamically per module instance. Adding a
+# region = an entry in region_state_map + an alias in providers.tf + a block here.
 
-  name_prefix     = local.node_name_prefix
-  region          = each.value
-  node_floor      = var.node_floor
-  node_max        = var.node_max
-  instance_type   = var.instance_type
-  spot_max_price  = var.spot_max_price
-  relay_image     = var.relay_image
-  relay_port      = var.relay_port
-  health_port     = var.health_port
-  relay_allowlist = var.relay_allowlist
+module "relay_region_us_east_1" {
+  source = "./modules/relay-region"
+  count  = contains(local.allowed_regions, "us-east-1") ? 1 : 0
 
+  providers = { aws = aws.us_east_1 }
+
+  name_prefix         = local.node_name_prefix
+  region              = "us-east-1"
+  param_region        = var.primary_region
+  node_max            = var.node_max
+  on_demand_base      = var.on_demand_base_per_region
+  instance_type       = var.instance_type
+  spot_max_price      = var.spot_max_price
+  relay_image         = var.relay_image
+  relay_port          = var.relay_port
+  health_port         = var.health_port
+  relay_allowlist     = var.relay_allowlist
   identity_key_param  = local.identity_key_param
   identity_cert_param = local.identity_cert_param
 
   depends_on = [terraform_data.jurisdiction_guard]
+}
+
+module "relay_region_us_east_2" {
+  source = "./modules/relay-region"
+  count  = contains(local.allowed_regions, "us-east-2") ? 1 : 0
+
+  providers = { aws = aws.us_east_2 }
+
+  name_prefix         = local.node_name_prefix
+  region              = "us-east-2"
+  param_region        = var.primary_region
+  node_max            = var.node_max
+  on_demand_base      = var.on_demand_base_per_region
+  instance_type       = var.instance_type
+  spot_max_price      = var.spot_max_price
+  relay_image         = var.relay_image
+  relay_port          = var.relay_port
+  health_port         = var.health_port
+  relay_allowlist     = var.relay_allowlist
+  identity_key_param  = local.identity_key_param
+  identity_cert_param = local.identity_cert_param
+
+  depends_on = [terraform_data.jurisdiction_guard]
+}
+
+module "relay_region_us_west_1" {
+  source = "./modules/relay-region"
+  count  = contains(local.allowed_regions, "us-west-1") ? 1 : 0
+
+  providers = { aws = aws.us_west_1 }
+
+  name_prefix = local.node_name_prefix
+  region      = "us-west-1"
+  # N. California exposes only two AZs to most accounts; the module's default of
+  # three would fail the apply here.
+  az_count            = 2
+  param_region        = var.primary_region
+  node_max            = var.node_max
+  on_demand_base      = var.on_demand_base_per_region
+  instance_type       = var.instance_type
+  spot_max_price      = var.spot_max_price
+  relay_image         = var.relay_image
+  relay_port          = var.relay_port
+  health_port         = var.health_port
+  relay_allowlist     = var.relay_allowlist
+  identity_key_param  = local.identity_key_param
+  identity_cert_param = local.identity_cert_param
+
+  depends_on = [terraform_data.jurisdiction_guard]
+}
+
+module "relay_region_us_west_2" {
+  source = "./modules/relay-region"
+  count  = contains(local.allowed_regions, "us-west-2") ? 1 : 0
+
+  providers = { aws = aws.us_west_2 }
+
+  name_prefix         = local.node_name_prefix
+  region              = "us-west-2"
+  param_region        = var.primary_region
+  node_max            = var.node_max
+  on_demand_base      = var.on_demand_base_per_region
+  instance_type       = var.instance_type
+  spot_max_price      = var.spot_max_price
+  relay_image         = var.relay_image
+  relay_port          = var.relay_port
+  health_port         = var.health_port
+  relay_allowlist     = var.relay_allowlist
+  identity_key_param  = local.identity_key_param
+  identity_cert_param = local.identity_cert_param
+
+  depends_on = [terraform_data.jurisdiction_guard]
+}
+
+# The original single-region pool was `module.relay_region` keyed by region, with
+# us-west-2 as the only allowed region. Without this the rename would read as
+# "destroy the live pool, create a new one" — the VPC, ASG and nodes are the same
+# resources, only the module address changed.
+moved {
+  from = module.relay_region["us-west-2"]
+  to   = module.relay_region_us_west_2[0]
+}
+
+locals {
+  # region -> ASG name, for every shard that actually got created.
+  managed_regions = merge(
+    { for m in module.relay_region_us_east_1 : "us-east-1" => m.asg_name },
+    { for m in module.relay_region_us_east_2 : "us-east-2" => m.asg_name },
+    { for m in module.relay_region_us_west_1 : "us-west-1" => m.asg_name },
+    { for m in module.relay_region_us_west_2 : "us-west-2" => m.asg_name },
+  )
 }
 
 # ── Signed-directory hosting: S3 (private) + CloudFront (OAC) ────────────────
@@ -58,11 +167,13 @@ module "reconciler" {
   source = "./modules/reconciler"
 
   primary_region     = var.primary_region
-  managed_regions    = { for r, m in module.relay_region : r => m.asg_name }
+  managed_regions    = local.managed_regions
   reconcile_schedule = var.reconcile_schedule
 
   desired_state_param     = local.desired_state_param
   desired_state_param_arn = local.desired_state_param_arn
+  placement_param         = local.placement_param
+  placement_param_arn     = local.placement_param_arn
   signing_key_param       = local.signing_key_param
   identity_cert_param     = local.identity_cert_param
   secret_param_arns       = local.secret_param_arns
@@ -72,10 +183,11 @@ module "reconciler" {
   directory_object_key  = var.directory_object_key
   directory_ttl_seconds = var.directory_ttl_seconds
 
-  relay_port  = var.relay_port
-  health_port = var.health_port
-  node_floor  = var.node_floor
-  node_max    = var.node_max
+  relay_port              = var.relay_port
+  health_port             = var.health_port
+  node_floor              = var.node_floor
+  node_max                = var.node_max
+  rotation_interval_hours = var.rotation_interval_hours
 
   name_prefix      = local.name_prefix
   metric_namespace = local.metric_namespace

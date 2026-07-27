@@ -17,44 +17,107 @@ variable "env" {
 # ── Pool sizing & placement ─────────────────────────────────────────────────
 
 variable "primary_region" {
-  description = "AWS region the whole stack (VPC/ASG/Lambda/S3) is created in. Must be an allowed region (see jurisdiction.tf)."
+  description = <<-EOT
+    AWS region the CONTROL PLANE lives in — the reconciler Lambda, the directory
+    S3 bucket, and every SSM parameter (secrets + desired-state + placement).
+    Relay NODES are no longer confined to it: they are placed across the allowed
+    regions at random (see region_placement below). Must itself be an allowed
+    region, since the control plane sees relay IPs.
+  EOT
   type        = string
   default     = "us-west-2"
 }
 
-variable "region_node_counts" {
+variable "pool_node_count" {
   description = <<-EOT
-    Desired-state: per-region relay node count. This SEEDS the SSM desired-state
-    parameter; after apply the reconciler owns runtime scaling and Terraform
-    ignores drift on the seeded value (edit the SSM param to scale — see README).
-    Each key must be an allowed region. Each value is clamped to [node_floor, node_max].
+    Desired-state: the POOL-WIDE relay node count, across all regions. This SEEDS
+    the SSM desired-state parameter; after apply the reconciler owns runtime
+    scaling and Terraform ignores drift on the seeded value (edit the SSM param to
+    scale — see README). Clamped to [node_floor, node_max].
+
+    Regions are NOT specified here. The reconciler draws each node's region at
+    random from the allowed set on every rotation; two nodes may land in the same
+    region.
   EOT
-  type        = map(number)
-  default     = { "us-west-2" = 3 }
+  type        = number
+  default     = 3
 }
 
 variable "node_floor" {
-  description = "Minimum always-on nodes per region. Wired to the ASG min size AND on_demand_base_capacity so Spot reclamation can never take the pool below it."
+  description = "Minimum POOL-WIDE nodes. The reconciler clamps desired-state up to this, so the pool can never be scaled to zero by an edit."
   type        = number
   default     = 2
 }
 
 variable "node_max" {
-  description = "Hard per-region ASG max. Sized to the §0 budget math (~$5-6/node all-in). Do not raise without re-checking the $20/mo cap."
+  description = "Hard POOL-WIDE cap, and each region's ASG max (one region may legitimately hold the whole pool after a random draw). Sized to the §0 budget math (~$5-6/node all-in). Do not raise without re-checking the $20/mo cap."
   type        = number
   default     = 3
+}
+
+variable "on_demand_base_per_region" {
+  description = <<-EOT
+    Per-region on_demand_base_capacity: the first N nodes in any occupied region
+    are on-demand, the rest Spot.
+
+    DEFAULT IS 0 (all Spot) because the §0 <$20/mo target is hard and this knob is
+    per-REGION, so its cost scales with how wide the draw spreads: at 1, a 3-node
+    pool that lands in three different regions is three on-demand nodes, ~$22/mo —
+    over the cap, and the cap would be breached by a dice roll rather than by a
+    decision. All-Spot is ~$15.7/mo at three nodes regardless of the draw.
+
+    What used to justify an on-demand base was single-region concentration: one
+    Spot capacity event could take the whole pool. Random multi-region placement is
+    now itself the diversification — a capacity event is scoped to one region, the
+    reconciler self-heals, and the client fails over across the directory. Set this
+    to 1 to buy back per-region on-demand anchoring, and raise monthly_budget_usd
+    with it. See the README cost table.
+  EOT
+  type        = number
+  default     = 0
+}
+
+variable "rotation_interval_hours" {
+  description = <<-EOT
+    How often the reconciler re-draws the random region placement. Between draws
+    the placement is stable (persisted in SSM), so nodes are not churned on every
+    2-minute reconcile. A re-draw terminates nodes in regions that lost a slot and
+    launches them where the draw sent them — that IS the rotation.
+  EOT
+  type        = number
+  default     = 24
 }
 
 # ── Jurisdiction (state-based denylist, §4) ─────────────────────────────────
 
 variable "state_denylist" {
-  description = "US states denied for placement: any state with an age-verification or device/OS-level age-registration law. A region is excluded iff its AZs sit in a denied state."
+  description = <<-EOT
+    US states denied for relay placement. A region is excluded iff the state its
+    AZs sit in appears here.
+
+    DEFAULT IS NOW EMPTY — all four US regions are allowed. The original denylist
+    (Virginia/Ohio/California, for age-verification and device-level age-assurance
+    laws) was placement HYGIENE, not compliance: those laws attach to content
+    services and users, never to server racks, so nothing was ever being broken by
+    hosting there. It was traded away deliberately for a wider random-placement
+    pool — unpredictable, rotating placement across four regions is the property
+    being bought. To re-deny, put the state names back here; jurisdiction.tf still
+    enforces it mechanically and region_state_map below still records the mapping.
+  EOT
   type        = set(string)
-  default     = ["Virginia", "Ohio", "California"]
+  default     = []
 }
 
 variable "region_state_map" {
-  description = "AWS region -> US state its AZs sit in. This is the policy source of truth: a future region add/remove is a one-line edit here, re-checked against state_denylist."
+  description = <<-EOT
+    AWS region -> US state its AZs sit in, for every region the pool may use. This
+    is BOTH the candidate-region set (its keys) and the jurisdiction policy source
+    of truth (its values, checked against state_denylist).
+
+    Adding a region here is not enough on its own: each candidate needs a statically
+    declared aliased provider and module block in providers.tf/main.tf, because
+    Terraform cannot synthesize a provider per region dynamically.
+  EOT
   type        = map(string)
   default = {
     "us-east-1" = "Virginia"

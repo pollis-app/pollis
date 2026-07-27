@@ -1,54 +1,61 @@
-# §4 Jurisdiction enforcement — default-deny by US state.
+# §4 Jurisdiction enforcement — a state denylist over the candidate regions.
 #
 # The jurisdiction unit is the US STATE, not the AWS region: a region is denied
-# only because the state its AZs sit in is on the denylist. The deny criterion is
-# "any state with an age-verification or a device/OS-level age-registration law."
-# As of mid-2026 that denies Virginia (us-east-1), Ohio (us-east-2), and
-# California (us-west-1) — leaving Oregon (us-west-2) as the only clean US region.
+# only because the state its AZs sit in is on the denylist. `region_state_map` is
+# both the candidate set (its keys) and the region->state mapping; `state_denylist`
+# is the policy.
 #
-# To add/remove a region later: edit region_state_map (variables.tf), re-check the
-# state-law landscape, and — if the state is clean — it becomes selectable. This
-# file mechanically refuses to place a node in any denied or unmapped state.
+# The denylist now defaults to EMPTY, so all four US regions are allowed and the
+# reconciler draws placement across them at random. The original list (Virginia /
+# Ohio / California, for age-verification and device-level age-assurance laws) was
+# placement hygiene rather than compliance — see the state_denylist description in
+# variables.tf for why it was opened up, and how to close it again.
+#
+# This file still mechanically refuses to place a node in a denied state, so
+# re-denying is a one-line edit that Terraform then enforces on the next apply.
 
 locals {
-  requested_regions = keys(var.region_node_counts)
+  candidate_regions = keys(var.region_state_map)
 
-  region_state = { for r in local.requested_regions : r => lookup(var.region_state_map, r, "UNMAPPED") }
-
-  denied_requested = [
-    for r in local.requested_regions : r
-    if contains(var.state_denylist, local.region_state[r]) || local.region_state[r] == "UNMAPPED"
+  denied_regions = [
+    for r in local.candidate_regions : r
+    if contains(var.state_denylist, var.region_state_map[r])
   ]
 
-  allowed_regions = [
-    for r in local.requested_regions : r
-    if !contains(var.state_denylist, local.region_state[r]) && local.region_state[r] != "UNMAPPED"
-  ]
+  # The region set the reconciler may draw placement from.
+  allowed_regions = sort([
+    for r in local.candidate_regions : r
+    if !contains(var.state_denylist, var.region_state_map[r])
+  ])
 
   primary_region_state = lookup(var.region_state_map, var.primary_region, "UNMAPPED")
 }
 
-# Fail `plan`/`apply` hard if any requested region maps to a denied/unmapped state.
 resource "terraform_data" "jurisdiction_guard" {
   input = local.allowed_regions
 
   lifecycle {
+    # An empty allowed set would leave the reconciler with nowhere to place nodes,
+    # and it would publish no directory at all.
     precondition {
-      condition     = length(local.denied_requested) == 0
-      error_message = "Jurisdiction denylist violation — these requested regions map to a denied or unmapped US state and must not host relays: ${join(", ", [for r in local.denied_requested : "${r} (${local.region_state[r]})"])}. Fix region_node_counts or region_state_map."
+      condition     = length(local.allowed_regions) > 0
+      error_message = "state_denylist denies every candidate region (${join(", ", local.denied_regions)}). At least one region in region_state_map must be allowed."
     }
 
+    # The control plane (reconciler Lambda, directory bucket, all SSM params) sits
+    # in primary_region and sees every relay's IP, so it is subject to the same
+    # jurisdiction policy as the nodes.
     precondition {
       condition     = !contains(var.state_denylist, local.primary_region_state) && local.primary_region_state != "UNMAPPED"
-      error_message = "primary_region ${var.primary_region} maps to denied/unmapped state ${local.primary_region_state}."
+      error_message = "primary_region ${var.primary_region} maps to denied/unmapped state ${local.primary_region_state}. It must be an allowed region — the control plane sees relay IPs."
     }
 
-    # Every allowed region must equal primary_region until multi-provider wiring
-    # is added (Terraform can't synthesize a provider per region dynamically).
-    # See the module "relay_region" comment in main.tf and the README.
+    # Each candidate region needs a statically declared aliased provider + module
+    # block (Terraform can't synthesize providers dynamically). This catches a
+    # region added to region_state_map without the matching wiring in main.tf.
     precondition {
-      condition     = alltrue([for r in local.allowed_regions : r == var.primary_region])
-      error_message = "Multi-region expansion needs an aliased provider. Regions other than primary_region (${var.primary_region}) present: ${join(", ", [for r in local.allowed_regions : r if r != var.primary_region])}."
+      condition     = length(setsubtract(toset(local.candidate_regions), toset(keys(local.region_providers_wired)))) == 0
+      error_message = "region_state_map contains regions with no provider/module wiring in providers.tf + main.tf: ${join(", ", setsubtract(toset(local.candidate_regions), toset(keys(local.region_providers_wired))))}. Add an aliased provider and a module block for each."
     }
   }
 }
