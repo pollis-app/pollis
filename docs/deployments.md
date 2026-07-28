@@ -58,6 +58,7 @@ There are **4 shipped executables/sites**, **4 running backend services**, and
 - **From:** `verifiable-log-serve/` (+ `verifiable-log*`)
 - **Pipeline:** `.github/workflows/verifier-release.yml` — triggered by a `pollis-verify-v*` tag push (a `workflow_dispatch` builds run artifacts only, no Release). Builds the standalone verifier binaries, each with a per-asset `.sha256` checksum file, with the **pinned log public key** in the release body (ML-DSA-44 since #668, and being rotated — while the rotation is in flight there is no key to pin and verifiers report *unverified*). Lets any analyst independently verify the transparency log.
 - **Ships to:** GitHub release assets. Subcommands: `remote` / `group` / `account` / `release` (verify the whole log, a conversation's commit chain, a user's key history, or a released version's binaries).
+- **Versioning (#670):** this is the one output whose version lives in its own manifest. `verifiable-log-serve/Cargo.toml` carries a concrete `version` — deliberately **not** `version.workspace = true`, which would inherit the frozen `1.1.0` placeholder — so `--version` names the release tag an auditor downloaded. **Bump it in the PR that cuts the tag**; the workflow asserts `pollis-verify-v<version>` matches the manifest and fails the release if they drift. `--version` also prints the build's commit (`POLLIS_VERIFY_GIT_SHA`, set by `verifier-release.yml` and `rebuild-verify.yml`), or `source build` for a plain `cargo build` — so a local build is never mistaken for a release.
 
 ### (in development) Mobile app
 - **From:** `mobile/` + `pollis-core/` (uniffi). Epics #342 (RN/Expo) + #339/#340/#341 (App Store / Play Store distribution). Not yet a released output.
@@ -219,7 +220,7 @@ For every affected output below, pick one: **`— redeploy` / `— defer (reason
     #454 capability gates would still be required.
 - [ ] **Relay pool** — `pollis-relay` / `pollis-device-cert` change? rebuild the GHCR image (`relay-image.yml`) and roll the pool nodes (`docs/relay-operations.md`); verify each `GET /version` reports the new SHA. No auto-deploy exists, so this is always a manual roll.
 - [ ] **Mobile** — in development; not a released output yet, but note if a `pollis-core` change needs a `#[cfg]`/uniffi follow-up (`mobile-core-check.yml` gates gate-rot).
-- [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? `verifier-release.yml` (`pollis-verify-v*` tag).
+- [ ] **pollis-verify CLI** — `verifiable-log*` change affecting verification? Bump `version` in `verifiable-log-serve/Cargo.toml`, then tag `pollis-verify-v<that version>` to fire `verifier-release.yml`. The workflow refuses to release if the two disagree (#670).
 - [ ] **Transparency log** — tree/STH behavior changed? it rebuilds daily, but force `transparency-publish.yml` if correctness depends on it now.
 - [ ] **DB migration** — pending on prod until a client release or DS deploy runs? Note it, or trigger one.
 - [ ] **Website / LiveKit** — only if you touched `website/` / `livekit/`.
