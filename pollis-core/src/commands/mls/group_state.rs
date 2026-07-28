@@ -15,8 +15,8 @@ use crate::state::AppState;
 use super::device::{load_or_create_device_signer, verify_added_devices, VerifyOutcome};
 use super::generation::{local_generation, mls_group_id, set_local_generation};
 use super::provider::{
-    load_stored_group, load_stored_group_at, make_credential, parse_credential_user_id,
-    signature_scheme, store_only, MlsProvider, PollisProvider, CS_CLASSIC, CS_HYBRID,
+    current_suite, load_stored_group, load_stored_group_at, make_credential,
+    parse_credential_user_id, signature_scheme, store_only, MlsProvider, PollisProvider,
 };
 
 // ── GroupInfo publishing ─────────────────────────────────────────────────────
@@ -601,9 +601,9 @@ where
 /// the group inherits it from the stored group state, so nothing downstream
 /// needs a suite argument.
 ///
-/// The suite is a parameter rather than a constant so the choice is visible at
-/// the call site. `init_mls_group`, the only production caller, decides it with
-/// [`suite_for_new_group`].
+/// The suite is a parameter rather than a constant so it is visible at the call
+/// site, and so `super::migrate` can build a successor group on a suite that is
+/// not the one `init_mls_group` births on.
 ///
 /// Sync: the caller owns the local-DB guard.
 pub(super) fn create_mls_group_in_suite<C>(
@@ -651,158 +651,6 @@ where
     Ok(())
 }
 
-/// How long a device may go unseen before [`fleet_is_fully_pq_capable`] stops
-/// counting it against fleet completion (#454 P5).
-///
-/// A dormancy window is what makes "the fleet is fully hybrid" a reachable state
-/// at all: without one, a single abandoned device would hold the whole deployment
-/// on the classic suite forever. Ninety days is long enough that a device inside
-/// it is genuinely in use, and a device outside it republishes its hybrid
-/// KeyPackage pool on its very next login (`initialize_identity` →
-/// `ensure_mls_key_package`) *before* it can be invited anywhere — so returning
-/// from dormancy on a current build costs nothing. Returning on a pre-PQ build
-/// sets `pq_capable = 0` with a fresh `last_seen`, which re-opens the gate and
-/// sends new groups back to classic; only the groups created during that device's
-/// dormancy are out of its reach, which is the residual — and bounded — cost of
-/// ever retiring the classic suite at all.
-const FLEET_DORMANCY_DAYS: i64 = 90;
-
-/// The ciphersuite a brand-new group should be created in (#454 P3, gated by P5).
-///
-/// `CS_HYBRID` iff BOTH hold — see [`super::invariants::may_birth_hybrid`], the
-/// pure, Kani-proved core of this decision, for the full rationale:
-///
-/// 1. every registered device of every user on the conversation's desired roster
-///    has published a hybrid KeyPackage pool ([`roster_is_fully_pq_capable`]);
-/// 2. no live device anywhere in the deployment is still classic-only
-///    ([`fleet_is_fully_pq_capable`]).
-///
-/// Gate 1 alone is nearly vacuous here, which is exactly why gate 2 exists:
-/// `init_mls_group` runs while the roster is only the creator, so a PQ-capable
-/// creator passes gate 1 trivially and every new group would be born hybrid —
-/// locking out the first classic-only device invited afterwards, permanently,
-/// because reconcile refuses to downgrade and MLS offers no other way in.
-///
-/// Fails toward *availability*: any read error, an empty roster, or one
-/// classic-only device yields `CS_CLASSIC`, which anyone can join and which #454
-/// P4's migration upgrades at an epoch boundary once its roster is capable.
-async fn suite_for_new_group(state: &Arc<AppState>, conversation_id: &str) -> Ciphersuite {
-    let roster_capable = match roster_is_fully_pq_capable(state, conversation_id).await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!(
-                "[mls] suite_for_new_group: roster capability read failed ({e}) — using classic"
-            );
-            false
-        }
-    };
-    // Short-circuit: the fleet read is a second round-trip and cannot rescue a
-    // roster that already can't take hybrid.
-    if !roster_capable {
-        return CS_CLASSIC;
-    }
-
-    let fleet_complete = match fleet_is_fully_pq_capable(state).await {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!(
-                "[mls] suite_for_new_group: fleet capability read failed ({e}) — using classic"
-            );
-            false
-        }
-    };
-    if !fleet_complete {
-        eprintln!(
-            "[mls] suite_for_new_group: {conversation_id}'s roster is hybrid-capable but the fleet \
-             is not — starting classic (#454 P4 migrates the group once the fleet completes)"
-        );
-    }
-
-    if super::invariants::may_birth_hybrid(roster_capable, fleet_complete) {
-        CS_HYBRID
-    } else {
-        CS_CLASSIC
-    }
-}
-
-/// Has the whole live fleet finished adopting the hybrid suite (#454 P5)?
-///
-/// True iff there is at least one live device and *every* live device advertises
-/// `pq_capable`. "Live" excludes revoked devices (`revoked_at IS NOT NULL` —
-/// tombstoned by `revoke_device`, never coming back) and devices unseen for
-/// longer than [`FLEET_DORMANCY_DAYS`].
-///
-/// Deployment-wide on purpose, not scoped to any roster: it answers "may a group
-/// being created right now assume everyone it could later invite is able to
-/// join", and a new group's own roster — its creator, alone — cannot answer that.
-/// Because `pq_capable` is set server-side by the DS from a landed hybrid pool
-/// (`pollis_delivery::devices::mark_pq_capable`), a device cannot claim the flag,
-/// so this counts real capability rather than advertised intent.
-///
-/// One indexed aggregate over a table this path already reads, and it runs only
-/// after the roster gate has passed — never on a fleet with obvious stragglers.
-/// False for an empty live set: "nobody is incapable" must not read as "everybody
-/// is capable".
-pub(super) async fn fleet_is_fully_pq_capable(state: &Arc<AppState>) -> Result<bool> {
-    let conn = state.remote_db.conn().await?;
-    let mut rows = conn
-        .query(
-            "SELECT COUNT(*), SUM(CASE WHEN pq_capable = 1 THEN 1 ELSE 0 END) \
-             FROM user_device \
-             WHERE revoked_at IS NULL AND last_seen >= datetime('now', ?1)",
-            libsql::params![format!("-{FLEET_DORMANCY_DAYS} days")],
-        )
-        .await?;
-    let (total, capable): (i64, i64) = match rows.next().await? {
-        Some(row) => (row.get::<i64>(0)?, row.get::<Option<i64>>(1)?.unwrap_or(0)),
-        None => return Ok(false),
-    };
-
-    Ok(total > 0 && total == capable)
-}
-
-/// Does every registered device of every user on `conversation_id`'s desired
-/// roster advertise `pq_capable`? False for an empty device set — "nobody is
-/// incapable" must not read as "everybody is capable".
-pub(super) async fn roster_is_fully_pq_capable(
-    state: &Arc<AppState>,
-    conversation_id: &str,
-) -> Result<bool> {
-    let conn = state.remote_db.conn().await?;
-    let roster = super::reconcile::desired_roster_user_ids(&conn, conversation_id).await?;
-    if roster.is_empty() {
-        return Ok(false);
-    }
-
-    // Same id sanitisation as reconcile's device query: these are inlined into
-    // an IN clause because libsql has no array binding.
-    let safe_ids: Vec<String> = roster
-        .iter()
-        .map(|id| {
-            id.chars()
-                .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
-                .collect::<String>()
-        })
-        .collect();
-    let in_clause = safe_ids
-        .iter()
-        .map(|id| format!("'{id}'"))
-        .collect::<Vec<_>>()
-        .join(",");
-
-    let query = format!(
-        "SELECT COUNT(*), SUM(CASE WHEN pq_capable = 1 THEN 1 ELSE 0 END) \
-         FROM user_device WHERE user_id IN ({in_clause})"
-    );
-    let mut rows = conn.query(&query, ()).await?;
-    let (total, capable): (i64, i64) = match rows.next().await? {
-        Some(row) => (row.get::<i64>(0)?, row.get::<Option<i64>>(1)?.unwrap_or(0)),
-        None => return Ok(false),
-    };
-
-    Ok(total > 0 && total == capable)
-}
-
 /// Internal: create a fresh MLS group for `conversation_id` with
 /// `creator_user_id` as the sole initial member.  Group state is persisted in
 /// the local `mls_kv` table via `MlsStore`.
@@ -818,8 +666,6 @@ pub async fn init_mls_group(
     let device_id = state.device_id.lock().await.clone()
         .ok_or_else(|| crate::error::Error::Other(anyhow::anyhow!("device_id not set")))?;
 
-    let suite = suite_for_new_group(state, conversation_id).await;
-
     // Scope the local_db guard so it is dropped before the async
     // publish_group_info call below (which re-acquires it).
     {
@@ -832,12 +678,18 @@ pub async fn init_mls_group(
             &provider,
             conversation_id,
             // A brand-new conversation starts on generation 0: there is no
-            // history to migrate, so `suite_for_new_group` already picked
-            // hybrid if the roster could take it.
+            // history to migrate.
             0,
             creator_user_id,
             &device_id,
-            suite,
+            // Every new group is born on the one suite this build ships (#669).
+            // #454 chose per group, behind a fleet-capability gate, because a
+            // classic-only device invited afterwards could never join a hybrid
+            // group — reconcile refuses to downgrade and MLS offers no other
+            // way in. With the classic suite retired there is no such device to
+            // lock out, so the gate and its two capability reads are gone
+            // rather than pinned open.
+            current_suite(),
         )?;
     }
 
@@ -929,7 +781,7 @@ pub async fn forget_local_mls_group(
 ///
 /// The lineage matters whenever a device holds two groups for one conversation:
 /// a migrator that lost its compare-and-swap must delete the *successor* it
-/// speculatively built and keep the classic group it is still reading from, and
+/// speculatively built and keep the predecessor it is still reading from, and
 /// a device adopting a successor deletes the *predecessor* once it is drained.
 /// Deleting "the group" without saying which would, in both cases, destroy the
 /// one that is still needed.
