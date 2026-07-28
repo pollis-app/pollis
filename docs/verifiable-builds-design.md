@@ -1,6 +1,6 @@
 # Verifiable / Reproducible Builds + Binary Transparency
 
-**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned Ed25519 key (`175ebfef…7148`). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P5 (full reproducibility + independent rebuilder) is SHIPPED for Linux (#484)** — see §1.5 / §6 Phase 5. **P3 (cosign/SLSA keyless provenance) is now SHIPPED (#484)** — every released installer + updater bundle carries a keyless SLSA build-provenance attestation *and* a cosign signature anchored in the **public Rekor** log via the GitHub Actions OIDC identity (no Pollis key on that verification path), a second independent anchor; see §3 / §6 Phase 3. The full design of record follows.
+**Status:** Partly shipped. **P0–P2 are SHIPPED** — the `binaries` tenant tree + `BinaryRecord` schema + `BinaryInvariant` (`verifiable-log-builder/src/binaries.rs`), `serve` emitting `/v1/binaries/...` and `/verify/release/<tag>` (`verifiable-log-serve/src/release.rs`), the `pollis-verify release <tag>` auditor subcommand, and the release-pipeline append job that logs each artifact's payload + signed hashes to **verify.pollis.com/v1/binaries** trusting only the pinned log key (ML-DSA-44; rotating per #668). What P2 delivers is a **correct leaf structure (both hashes + the pinned build recipe) and a working publish/verify pipeline** — **not** yet bit-for-bit reproducibility, cosign/SLSA provenance, or an in-app verify button. **P4 (in-app "verify this build") is now SHIPPED** — the optional Security-page affordance (`verify_own_build` in `pollis-core`, `BuildVerifyLine` + "This build" section on `SecurityPage`) reusing the account-key self-audit path. **P5 (full reproducibility + independent rebuilder) is SHIPPED for Linux (#484)** — see §1.5 / §6 Phase 5. **P3 (cosign/SLSA keyless provenance) is now SHIPPED (#484)** — every released installer + updater bundle carries a keyless SLSA build-provenance attestation *and* a cosign signature anchored in the **public Rekor** log via the GitHub Actions OIDC identity (no Pollis key on that verification path), a second independent anchor; see §3 / §6 Phase 3. The full design of record follows.
 **Author lens:** performance, security, and *zero user burden* are first-class
 constraints, called out explicitly at each decision.
 **Audience:** maintainers deciding whether/how to build this, plus the security
@@ -49,9 +49,9 @@ key-transparency machinery already shipped**, extended from keys to binaries.
 | RFC 6962 Merkle-log core + offline verifier | `verifiable-log/` (`src/merkle.rs`, `src/sth.rs`, `src/log.rs`, `src/proof.rs`) | Append-only tree, STH signing/verify, inclusion + consistency proofs, equivocation detection, `TenantInvariant` hook, `monitor` CLI — **never panics, no clock, no network** (`verifiable-log/README.md`). |
 | Tenant → signed bundle builder | `verifiable-log-builder/` | Reads a real libSQL table, hashes each row's payload, drops raw bytes, emits a signed monitor bundle deterministically (timestamp is passed in, never `SystemTime::now`). |
 | Static read API + auditor CLI | `verifiable-log-serve/` (`serve`, `pollis-verify`) | Immutable `/v1/...` JSON directory served from any dumb host; `pollis-verify remote|group|account` verifies trusting only the pinned Ed25519 key. |
-| Domain-separated multi-tree publishing | `docs/transparency.md` §"Two domain-separated trees" | Two trees today (commit log `…:sth:v1`, account keys `…:sth:v1:account-keys`) under one signing key, one static site. **Adding a third tree is a solved pattern.** |
+| Domain-separated multi-tree publishing | `docs/transparency.md` §"Two domain-separated trees" | Two trees today (commit log `…:sth:v2`, account keys `…:sth:v2:account-keys`) under one signing key, one static site. **Adding a third tree is a solved pattern.** |
 | Daily publish + self-audit + tripwire | `.github/workflows/transparency-publish.yml` | Builds signed bundles, syncs to R2 (`verify.pollis.com`), re-verifies what's actually served, and runs an across-run equivocation tripwire from cache. |
-| Auditor CLI release | `.github/workflows/verifier-release.yml` | Ships `pollis-verify` binaries + SHA256SUMS with the **pinned public key** in the release body: `175ebfef…7148`. |
+| Auditor CLI release | `.github/workflows/verifier-release.yml` | Ships `pollis-verify` binaries + SHA256SUMS with the **pinned public key** in the release body (ML-DSA-44; rotating, #668). |
 | Desktop release pipeline | `.github/workflows/desktop-release.yml` | Per-OS Tauri build, Apple notarization, Azure Trusted Signing (`.codesight/wiki/windows-signing.md`), **minisign** updater `.sig` + `update-*.json` manifests, R2 upload, GitHub release, AUR. |
 | In-app audit surface | `frontend/src/pages/SecurityPage.tsx` (Account-key section, `useSelfAuditAccountKey`, `AccountKeyAuditLine`) | A page where the running app *already* self-audits its identity key against the public log. The natural home for a "verify this build" line. |
 
@@ -248,16 +248,18 @@ tenant, a new domain-separation context, a new `/v1/...` path prefix, and a new
 ### 2.1 Domain separation
 
 Following the existing pattern (`transparency.md`: commit log signs under
-`…:sth:v1`, account keys under `…:sth:v1:account-keys`), the binary tree signs
+`…:sth:v2`, account keys under `…:sth:v2:account-keys`), the binary tree signs
 STHs under a new context:
 
 ```
-"pollis-verifiable-log:sth:v1:binaries"
+"pollis-verifiable-log:sth:v2:binaries"
 ```
 
 so a binary STH can never be replayed as a commit-log or account-key STH, and
 vice-versa. It reuses the **same** Ed25519 signing key already pinned in
-`verifier-release.yml` (`175ebfef…7148`) — one key, three trees, three contexts.
+`verifier-release.yml` — one key, three trees, three contexts. That key is being
+rotated from Ed25519 to ML-DSA-44 (#668); until all three trees are republished
+under it, nothing pins a key and every verifier reports *unverified*.
 The tree is served under `/v1/binaries/...` mirroring `/v1/account-keys/...`.
 
 ### 2.2 Log entry schema (the `binaries` tenant)
@@ -482,7 +484,7 @@ must not fight:
 |---|---|---|---|---|
 | OS code-signing (Developer ID / Authenticode) | installer bytes | Apple / Azure HSM | Gatekeeper / SmartScreen at install | install-time integrity + OS trust UX |
 | minisign updater `.sig` | updater bundle bytes | `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater before applying | auto-update integrity |
-| **binary transparency STH** | *hash* of payload+artifact | Pollis Ed25519 (`175ebfef…`) | `pollis-verify`, in-app | equivocation / targeted-build / "what source is this" |
+| **binary transparency STH** | *hash* of payload+artifact | Pollis ML-DSA-44 (key rotating, #668) | `pollis-verify`, in-app | equivocation / targeted-build / "what source is this" |
 | **SLSA/cosign (new)** | artifact digest + build facts | keyless (Fulcio/Rekor) | `cosign`, SLSA verifier | build-provenance + a *non-Pollis* anchor |
 
 They **compose, don't conflict**, because each signs a different thing at a

@@ -51,6 +51,9 @@ config.background_color = BG
 
 LIVE_ROOT = "37945cb2f61ee43782259a3893336b8ba8b8679d3af1612742deeec75e46cc0c"
 LIVE_SIZE = 60
+# STALE: this is the log's retired Ed25519 key. The log now signs with
+# ML-DSA-44 (#668) and the new 2624-hex-char key does not fit this layout —
+# these scenes need re-rendering with an elided key once rotation completes.
 PINNED_KEY = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
 
 

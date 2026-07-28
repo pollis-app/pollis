@@ -27,7 +27,7 @@ could still try to misbehave with that ordering:
 A transparency log closes this. Every commit is added as a leaf to a single
 global **Merkle tree** (RFC 6962 / RFC 9162, the same construction Certificate
 Transparency uses). The log periodically publishes a **Signed Tree Head (STH)** —
-an Ed25519 signature over `(tree_size, root_hash, timestamp)`. From that one
+an ML-DSA-44 signature over `(tree_size, root_hash, timestamp)`. From that one
 signed root, anyone can demand:
 
 - an **inclusion proof** that a specific commit really is in the tree, and
@@ -40,7 +40,7 @@ verify — and that failure is detectable by anyone running the verifier.
 
 ## Trust model (the load-bearing idea)
 
-> A verifier trusts **only** the log's published Ed25519 **public key**, plus the
+> A verifier trusts **only** the log's published ML-DSA-44 **public key**, plus the
 > **signed tree head** and the **Merkle proofs** that are checked against it. It
 > trusts **nothing else** — not the server, not the Turso database, not the host
 > serving the files, not the network.
@@ -69,7 +69,7 @@ entries, its own Signed Tree Heads, and its own append-only history:
 - **the MLS commit log** — every membership/key-change commit, the tree described
   throughout this document;
 - **the account-key directory** — one leaf per account identity-key version
-  (`user_id`, `identity_version`, the Ed25519 account public key), so anyone can
+  (`user_id`, `identity_version`, the ML-DSA-44 account public key), so anyone can
   audit that a user's published key history is append-only and that
   `identity_version` only ever increases (no silent key substitution, no replay
   of a revoked key). A single user is verified with
@@ -88,9 +88,9 @@ entries, its own Signed Tree Heads, and its own append-only history:
   calls, so the CLI and the served report can never disagree. The leaf commits to
   a hash + recipe, **never** the binary bytes.
 
-The three trees are **never interleaved**. They are signed by the same Ed25519 key
-but under **different domain-separation contexts** (`…:sth:v1` for the commit log,
-`…:sth:v1:account-keys` for the account keys, `…:sth:v1:binaries` for the released
+The three trees are **never interleaved**. They are signed by the same ML-DSA-44 key
+but under **different domain-separation contexts** (`…:sth:v2` for the commit log,
+`…:sth:v2:account-keys` for the account keys, `…:sth:v2:binaries` for the released
 binaries), so an STH minted for one tree **cannot** be replayed as another's — a
 verifier checks each head under its own context. The commit-log tree and every one
 of its `/v1/...` bytes are exactly as before; the account-key tree lives entirely
@@ -174,7 +174,7 @@ served as plain static assets. The URL path mirrors the file path exactly.
 
 | URL | Contents | Cache |
 |-----|----------|-------|
-| `/v1/public_key.json` | the log's Ed25519 public key | immutable |
+| `/v1/public_key.json` | the log's ML-DSA-44 public key (1312 bytes, 2624 hex chars) | immutable |
 | `/v1/index.json` | discovery manifest | short (`no-cache`) |
 | `/v1/sth/latest.json` | newest STH | short (`no-cache`) |
 | `/v1/sth/<tree_size>.json` | STH at that tree size | immutable |

@@ -67,7 +67,7 @@
       "id": "transparency-log-proves",
       "question": "What does the transparency log actually prove?",
       "aliases": ["what does the transparency log prove", "what is the transparency log", "what does the log prove", "key transparency", "merkle log", "append only log", "what does verify prove", "transparency proofs"],
-      "answer": "It proves no-fork, no-rollback, and no-equivocation of three append-only histories: the MLS commit log, the directory of published account keys, and the released binaries. A verifier trusts only the log's pinned Ed25519 public key (175ebfef…7148), the signed tree head, and the Merkle proofs checked against it — nothing else: not the server, not the database, not the host, not the network. If a single byte is altered, a proof or signature fails and the verifier exits non-zero. That's all it proves; it is not itself a claim about source-reproducibility.",
+      "answer": "It proves no-fork, no-rollback, and no-equivocation of three append-only histories: the MLS commit log, the directory of published account keys, and the released binaries. A verifier trusts only the log's pinned ML-DSA-44 public key, the signed tree head, and the Merkle proofs checked against it — nothing else: not the server, not the database, not the host, not the network. If a single byte is altered, a proof or signature fails and the verifier exits non-zero. That's all it proves; it is not itself a claim about source-reproducibility.",
       "cites": [
         {"title": "Transparency log trust model", "source": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"},
         {"title": "Three domain-separated trees", "source": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"}

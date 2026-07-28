@@ -210,7 +210,7 @@
       "title": "Transparency log trust model",
       "source": "Key Transparency (docs/transparency.md)",
       "anchor": "https://github.com/actuallydan/pollis/blob/main/docs/transparency.md",
-      "text": "A verifier trusts only the log's published Ed25519 public key, plus the signed tree head and the Merkle proofs checked against it — nothing else: not the server, not the database, not the host, not the network. If a single byte of an entry, proof, or head is altered, a signature or proof check fails and the verifier exits non-zero. The read API is public and unauthenticated by design. The pinned key is 175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148."
+      "text": "A verifier trusts only the log's published ML-DSA-44 public key, plus the signed tree head and the Merkle proofs checked against it — nothing else: not the server, not the database, not the host, not the network. If a single byte of an entry, proof, or head is altered, a signature or proof check fails and the verifier exits non-zero. The read API is public and unauthenticated by design. The pinned key is mid-rotation to ML-DSA-44 and is published on the artifacts page."
     },
     {
       "id": "trans-three-trees",

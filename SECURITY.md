@@ -21,5 +21,9 @@ Every release is recorded in a public append-only transparency log and carries
 keyless cosign / SLSA build provenance. To check our work from your own
 machine, start at [docs/verify-transparency-log.md](docs/verify-transparency-log.md).
 
-Pinned transparency-log public key (Ed25519):
-`175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148`
+Pinned transparency-log public key (ML-DSA-44): **being rotated** (#668). The
+log's Ed25519 key is retired; the new post-quantum key is published here, in the
+`pollis-verify` release body, and on <https://pollis.com/artifacts.html> once
+every tree has been republished under it. Until then no build pins a key, and
+`pollis-verify` reports *unverified* — it never falls back to trusting whatever
+the server serves.

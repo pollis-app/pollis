@@ -945,7 +945,7 @@ mod tests {
     /// [`PINNED_LOG_PUBLIC_KEY`] is `None` while the key rotates to ML-DSA-44,
     /// so these tests inject their own pin — the derivation logic is what is
     /// under test, not the constant's current value.
-    const LOG_PIN: &str = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148";
+    const LOG_PIN: &str = "10900000000000000000000000000000000000000000000000000000000000ff";
 
     const KEY_A: &str = "aa00000000000000000000000000000000000000000000000000000000000000";
     const KEY_B: &str = "bb00000000000000000000000000000000000000000000000000000000000000";

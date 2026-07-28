@@ -1,7 +1,7 @@
 # Safety Numbers & TOFU Pinning
 
 Signal-style contact verification layered on top of MLS. The cryptographic anchor
-for *who someone is* in Pollis is `users.account_id_pub` (32-byte Ed25519,
+for *who someone is* in Pollis is `users.account_id_pub` (1312-byte ML-DSA-44,
 per-user, never rotates unless the user resets their identity). Every device
 cert chains to it, so verifying that one value out-of-band transitively covers
 every device the user owns now or in the future.
@@ -160,17 +160,17 @@ Renderer plumbing:
 ## Key transparency (verifiable logs)
 
 Implemented in #330 (was the top Roadmap item below). Append-only,
-Ed25519-signed Merkle trees (RFC 6962/9162) published at
+ML-DSA-44-signed Merkle trees (RFC 6962/9162) published at
 **https://verify.pollis.com**, domain-separated by STH context so a head for one
 tree can never stand in for another:
 
-- **Commit-log tenant** (`pollis-verifiable-log:sth:v1`) — one leaf per MLS
+- **Commit-log tenant** (`pollis-verifiable-log:sth:v2`) — one leaf per MLS
   commit. Closes server-side fork / epoch-regression / replay on the MLS commit
   stream: replaying under its invariant proves no two commits share a
   `(conversation_id, generation, epoch)`, that `(generation, epoch)` only
   increases lexicographically, and that a new generation opens at epoch 0. The
   `generation` term is the PQ suite lineage (#454 P4). See `docs/transparency.md`.
-- **Account-key tenant** (`pollis-verifiable-log:sth:v1:account-keys`) — one leaf
+- **Account-key tenant** (`pollis-verifiable-log:sth:v2:account-keys`) — one leaf
   per account identity-key version, sourced from the append-only
   `account_key_log` table (dual-written with `users.account_id_pub` at signup and
   `reset_identity`). Closes selective targeting + key-history accountability: a
@@ -179,7 +179,7 @@ tree can never stand in for another:
   either absent from the published history (caught) or a visible, accountable
   rotation.
 
-- **Binaries tenant** (`pollis-verifiable-log:sth:v1:binaries`, #453) — one leaf
+- **Binaries tenant** (`pollis-verifiable-log:sth:v2:binaries`, #453) — one leaf
   per released build artifact on the SAME log infrastructure, a third independent
   tenant with its own tree and domain-separated STH context (so a binaries head
   can never be presented as a commit-log or account-key head). Each leaf commits

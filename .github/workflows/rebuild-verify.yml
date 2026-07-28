@@ -17,11 +17,13 @@ name: Rebuild & Verify (independent reproducer)
 #     needs no credentials from Pollis to run it.
 #   * It only READS the public log at https://verify.pollis.com and rebuilds
 #     PUBLIC source at the tag. It never writes anything, anywhere.
-#   * It trusts ONLY the pinned Ed25519 log key
-#     175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148
-#     — not Pollis, not Turso, not the host serving verify.pollis.com. The key
-#     is asserted against the served public_key.json before any verdict is
-#     trusted, so a substituted key is caught, not silently believed.
+#   * It trusts ONLY the pinned log key `PINNED_LOG_KEY` below — not Pollis,
+#     not Turso, not the host serving verify.pollis.com. The key is asserted
+#     against the served public_key.json before any verdict is trusted, so a
+#     substituted key is caught, not silently believed. `PINNED_LOG_KEY` is
+#     EMPTY while the log rotates from Ed25519 to ML-DSA-44 (#668): with no
+#     anchor this workflow cannot establish trust in anything, so it fails
+#     loudly at the assert step rather than proceeding on an unpinned log.
 #
 # HONEST LIMIT — the "reproducible modulo a documented list" caveat is real and
 # lives in docs/reproducible-builds-residuals.md. The client bakes its build
@@ -57,10 +59,12 @@ on:
 permissions:
   contents: read
 
-# Pinned so the reproduced key can never silently change under us.
+# Pinned so the reproduced key can never silently change under us. Set this to
+# the log's ML-DSA-44 public key (2624 hex chars) once the operator has minted
+# it and republished all three trees under the `sth:v2` contexts (#668).
 env:
   VERIFY_BASE_URL: "https://verify.pollis.com"
-  PINNED_LOG_KEY: "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
+  PINNED_LOG_KEY: ""
 
 jobs:
   # Log-inclusion proof — deliberately its OWN job with NO build inputs and no
@@ -91,11 +95,18 @@ jobs:
           set -euo pipefail
           served="$(curl -fsSL "${VERIFY_BASE_URL}/v1/binaries/public_key.json" | jq -r '.public_key')"
           echo "served binaries log key: ${served}"
+          if [ -z "${PINNED_LOG_KEY}" ]; then
+            echo "::error::no pinned log key is set — the log's signing key is being rotated to"
+            echo "::error::ML-DSA-44 (#668). Without an anchor obtained independently of the host,"
+            echo "::error::nothing this workflow computes would mean anything. Set PINNED_LOG_KEY"
+            echo "::error::to the new key once all three trees are republished under it."
+            exit 1
+          fi
           if [ "${served}" != "${PINNED_LOG_KEY}" ]; then
             echo "::error::served log key ${served} != pinned ${PINNED_LOG_KEY} — refusing to trust this log"
             exit 1
           fi
-          echo "served key matches the pinned Ed25519 key."
+          echo "served key matches the pinned log key."
 
       # Log-inclusion proof for the tag: pollis-verify checks every artifact for
       # the tag is included under the binaries-domain STH, the tree satisfies the

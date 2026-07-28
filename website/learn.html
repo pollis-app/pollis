@@ -426,67 +426,6 @@
       line-height: 1.6;
     }
 
-    /* ── In-browser Ed25519 check of the live signed tree head (Topic 11) ── */
-    .ln-verifier {
-      margin: 1.25rem 0;
-      padding: 0.9rem 1rem;
-      border: 1px solid var(--c-border);
-      border-left: 3px solid var(--c-accent);
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.02);
-    }
-
-    .ln-verifier-head {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.6rem;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 0.7rem;
-    }
-
-    .ln-verifier-title {
-      font-size: 0.72rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--c-text-muted);
-    }
-
-    .ln-verifier-badge {
-      font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      padding: 0.2rem 0.55rem;
-      border-radius: 4px;
-      border: 1px solid var(--c-border);
-    }
-
-    .ln-verifier-badge--pass {
-      color: var(--ln-ok);
-      border-color: var(--ln-ok);
-    }
-
-    .ln-verifier-badge--fail {
-      color: var(--ln-bad);
-      border-color: var(--ln-bad);
-    }
-
-    .ln-verifier-bad {
-      color: var(--ln-bad) !important;
-    }
-
-    .ln-verifier-actions {
-      margin-top: 0.7rem;
-    }
-
-    .ln-verifier-note {
-      font-size: 0.75rem;
-      color: var(--c-text-muted);
-      margin-top: 0.7rem;
-      line-height: 1.6;
-    }
-
     /* ── The honest-limit callout — load-bearing, per the epic ── */
     .ln-limit {
       border: 1px solid var(--c-border);
@@ -1360,9 +1299,12 @@ One picture, built up step by step: a readable message, then a sealed one, then 
             computers, combined by a construction called X-Wing so that an attacker has to break both
             to learn anything. The point is not that quantum computers exist — they do not — but that
             someone can record traffic today and wait. For proving who wrote something, Pollis uses
+            <a href="https://en.wikipedia.org/wiki/Dilithium_(cryptography)" target="_blank"
+              rel="noopener noreferrer">ML-DSA-44</a> signatures, picked for that same reason; the
+            classic scheme it replaced,
             <a href="https://en.wikipedia.org/wiki/EdDSA" target="_blank"
-              rel="noopener noreferrer">Ed25519</a> signatures; note that Ed25519 signs, it does not
-            encrypt.
+              rel="noopener noreferrer">Ed25519</a>, is still what most of the internet signs with.
+            Note that a signature scheme signs, it does not encrypt.
             <a href="https://en.wikipedia.org/wiki/RSA_(cryptosystem)" target="_blank"
               rel="noopener noreferrer">RSA</a> is an older algorithm that can do both key exchange and
             signatures. For fingerprints, the standard family is
@@ -1454,7 +1396,7 @@ Four short scenes, no formulas: the size of a key, a lock with no "almost", the 
         </div>
 
         <p class="ln-deeper">
-          The rigorous version: the Ed25519 keys and OS-keystore storage in <a
+          The rigorous version: the ML-DSA-44 keys and OS-keystore storage in <a
             href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/auth.rs"
             target="_blank" rel="noopener noreferrer">auth.rs</a>, the device-signed writes in <a
             href="https://github.com/actuallydan/pollis/blob/main/pollis-core/src/commands/mls/ds_client.rs"
@@ -1976,9 +1918,9 @@ Building the tree from the bottom up, then changing one entry and watching the r
           <p><strong>Is my entry actually in there?</strong> This is the inclusion proof. You do not need the whole list. You only need the fingerprints of the neighbours along the path from your entry up to the root. Hash your entry, combine it with the neighbour you were given, hash that, combine with the next neighbour, and keep climbing. If you land on the published root, your entry is in the tree. If you land on anything else, it is not.</p>
           <p>For a list of a thousand entries, that is about ten hashes. For a million, about twenty. The proof grows very slowly: double the list, add one step. That is why this keeps working for logs that never stop growing.</p>
           <p><strong>Is this the same list as before, only longer?</strong> This is the consistency proof, and it is what makes "append-only" real. You saw a root last week and there is a new root today. A consistency proof is a small set of fingerprints showing that last week's list sits unchanged inside today's, with new entries only added on the end. If an old entry had been edited or removed, no such proof could exist. Append-only stops being a policy we state and becomes something you can confirm.</p>
-          <p><strong>Who says which root is the real one?</strong> We sign it. Periodically we publish a signed statement, called a signed tree head, that ties together the root, the number of entries, a timestamp, and a signature over all of it. The signature uses one specific key, and the Pollis apps and the verifier tool carry that key's public half built in:</p>
-          <p><code class="ln-root">pinned key: 175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148</code></p>
+          <p><strong>Who says which root is the real one?</strong> We sign it. Periodically we publish a signed statement, called a signed tree head, that ties together the root, the number of entries, a timestamp, and a signature over all of it. The signature uses one specific key, and the Pollis apps and the verifier tool carry that key's public half built in. The scheme is <strong>ML-DSA-44</strong>, a post-quantum one, for a reason particular to logs: a signed statement about history has to stay meaningful for as long as anyone might want to re-check the past, which is a much longer horizon than any single message needs.</p>
           <p>Building the key into the app matters. If the app simply downloaded the key from a server, a bad server could hand over its own key alongside a self-consistent fake list, and everything would appear to check out. Because the key is compiled in, a substituted key is spotted immediately.</p>
+          <p>That key is currently being rotated to ML-DSA-44, so no build pins one yet. An app with no pinned key does not fall back to trusting whatever the server sends; it reports that it <em>could not check</em>, which is the only safe reading of an absent pin. The new key, 2,624 characters of it, will be published here and built into the apps once every tree has been republished under it.</p>
           <p><strong>One question remains: could different people be shown different lists?</strong> This is called equivocation, and it is the case the whole design is built to catch. Even a perfectly signed, append-only log could in principle show one clean list to auditors and a slightly different one to a single person, each internally consistent. The defence is refreshingly simple. Any two people who compare the signed heads they were shown will spot the difference at once, and because each head is signed, that difference is permanent, undeniable proof of a problem. Nobody has to trust anybody; they just have to compare. Our own publishing job checks what is actually being served for exactly this.</p>
           <p>So the chain is: a root fingerprints the list, an inclusion proof puts your entry in it, a consistency proof stops it being rewritten, a signature under a built-in key says it is ours, and comparison between people stops two different versions being served.</p>
         </div>
@@ -2246,36 +2188,26 @@ A valid signature on a tampered app, the three levels a release is recorded at, 
             separate version that might happen to agree by accident.
           </p>
           <p>
-            You can watch the first and most important part of that, the signature
-            check, happen right here. Your browser fetched the signed statement
-            above; below it has rebuilt the exact bytes the log signs and checked
-            the signature against a key printed on this page, using nothing but its
-            built-in cryptography. No terminal, no download.
+            <strong>Why your browser cannot do that check for you.</strong> This
+            page used to verify the signature live, in the page, with the browser's
+            own built-in cryptography. It no longer can, and the reason is worth
+            more than the demonstration was. The log now signs with
+            <strong>ML-DSA-44</strong>, a post-quantum signature scheme, because a
+            statement about history has to stay meaningful for as long as anyone
+            might want to re-check the past &mdash; including after a quantum
+            computer exists that could forge an Ed25519 signature. Browsers ship
+            Ed25519; none of them ship ML-DSA yet. So the check moves out of the web
+            page and into a program that carries its own cryptography. That is the
+            whole migration in one paragraph: the guarantee gets stronger, and for a
+            while the number of places that can check it gets smaller.
           </p>
-
-          <!-- In-browser Ed25519 verify of the live STH. Progressive enhancement:
-               ships hidden and reveals only once a genuine head verifies, so a
-               reader on a browser without Ed25519 (or with the fetch blocked) keeps
-               the curl + CLI, which teach the same thing. -->
-          <div class="ln-verifier" data-verifier hidden>
-            <div class="ln-verifier-head">
-              <span class="ln-verifier-title">Signature checked in your browser</span>
-              <span class="ln-verifier-badge" data-verifier-badge>&#8230;</span>
-            </div>
-            <div class="ln-live-row"><span>pinned key</span><b data-verifier-key>&#8230;</b></div>
-            <div class="ln-live-row"><span>tree_size</span><b data-verifier-size>&#8230;</b></div>
-            <div class="ln-live-row"><span>root</span><b data-verifier-root>&#8230;</b></div>
-            <div class="ln-live-row"><span>timestamp</span><b data-verifier-ts>&#8230;</b></div>
-            <div class="ln-live-row"><span>signature</span><b data-verifier-sig>&#8230;</b></div>
-            <div class="ln-verifier-actions">
-              <button type="button" class="ln-proof-btn ln-proof-btn--ghost" data-verifier-tamper>Flip one character of the root</button>
-            </div>
-            <div class="ln-verifier-note" data-verifier-note></div>
-          </div>
           <p>
-            That is the signature only. It does not, on its own, rebuild the tree or
-            check that any particular entry is inside it, which is the rest of what
-            the verifier below does. Arguments come in this order:
+            The property being checked has not changed. The signature covers the
+            root, rather than being merely attached to it, so altering one character
+            of the history changes the signed bytes and no edited log can keep a
+            valid signature. The hash widget earlier on this page shows why one
+            changed character is enough. The verifier below does the real check, on
+            the real signature. Arguments come in this order:
           </p>
           <p>Four commands, four questions:</p>
           <pre class="ln-pre"><code># is the whole log consistent and append-only?

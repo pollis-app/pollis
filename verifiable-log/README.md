@@ -67,10 +67,10 @@ Length-prefixing the tenant makes the encoding unambiguous, so two different
 
 ### Signed Tree Head signing message
 
-An STH is an Ed25519 signature over:
+An STH is an ML-DSA-44 signature over:
 
 ```
-"pollis-verifiable-log:sth:v1"  ||  tree_size (u64 BE)  ||  root_hash (32 bytes)  ||  timestamp (u64 BE)
+"pollis-verifiable-log:sth:v2"  ||  tree_size (u64 BE)  ||  root_hash (32 bytes)  ||  timestamp (u64 BE)
 ```
 
 The domain tag prevents the signature from being reused as a signature over anything
@@ -102,7 +102,7 @@ consumes. All binary fields are **lowercase hex**. (serde definitions live in
 }
 ```
 
-`root_hash` is 32 bytes hex; `signature` is 64 bytes hex; `timestamp` is a
+`root_hash` is 32 bytes hex; `signature` is 2420 bytes hex; `timestamp` is a
 caller-supplied `u64` (milliseconds since epoch, by convention).
 
 ### Inclusion proof
@@ -136,7 +136,7 @@ instance.
 
 ```json
 {
-  "public_key": "<ed25519 public key, 32 bytes hex>",
+  "public_key": "<ML-DSA-44 public key, 1312 bytes hex>",
   "sths": [ STH, ... ],                          // oldest first
   "entries": [ Entry, ... ],                     // full ordered log (optional)
   "enforce_unique": ["commits"],                 // tenants the example invariant applies to

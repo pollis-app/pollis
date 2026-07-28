@@ -491,7 +491,7 @@
           history), <strong>account keys</strong> (published identity keys), and <strong>binaries</strong> (shipped
           release hashes). A scheduled job re-audits all three every day and republishes their signed tree heads. Those
           signed heads are what prove each log is append-only and fork-free (no rollback, no equivocation) trusting
-          <strong>only</strong> the one pinned Ed25519 key. This displays the current published heads; it does not, and
+          <strong>only</strong> the one pinned log key. This displays the current published heads; it does not, and
           cannot, prove consistency in your browser, the
           <a class="art-inline" href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md"
             target="_blank" rel="noopener noreferrer">verification docs</a> and the
@@ -509,21 +509,25 @@
       <section class="art-section">
         <h2 class="art-section-title">The one key you trust</h2>
         <p class="art-section-lede">
-          All of the above trusts exactly one thing: a single pinned Ed25519 public key. Every signature, on every
-          tree head, on every release, is checked against it. If you trust this key, you can verify everything; if you
-          don't, verify nothing.
+          All of the above trusts exactly one thing: a single pinned public key. Every signature, on every tree head, on
+          every release, is checked against it. If you trust this key, you can verify everything; if you don't, verify
+          nothing. That key is being rotated from Ed25519 to <strong>ML-DSA-44</strong>, a post-quantum signature
+          scheme, so a signed statement about history stays meaningful for as long as anyone might want to re-check
+          the past (#668). Until the new key is minted and all three trees are republished under it, this page pins
+          nothing and checks nothing — it says so plainly below rather than showing you a match that isn't one.
         </p>
         <div class="art-card">
           <div class="art-key-block">
-            <span class="art-key-label">PINNED ED25519 PUBLIC KEY</span>
+            <span class="art-key-label">PINNED LOG PUBLIC KEY</span>
             <div class="art-key-hex" id="art-key-hex">
               <p class="art-loading">Checking served key against the pinned constant…</p>
             </div>
             <p class="art-note">
-              The check above is the <strong>only</strong> verification your browser performs: it fetches the key the
-              server serves and compares it, character by character, to the constant baked into this page. Everything
-              else on this page is a <strong>server-computed</strong> verdict, re-run it with <code>pollis-verify</code>
-              to make it trustless.
+              That comparison is the <strong>only</strong> verification your browser ever performs: it fetches the key
+              the server serves and compares it, character by character, to the constant baked into this page. While
+              the constant is absent, as it is during the ML-DSA-44 rotation, the browser performs no verification at
+              all. Everything else on this page is a <strong>server-computed</strong> verdict, re-run it with
+              <code>pollis-verify</code> to make it trustless.
             </p>
 
             <p class="art-key-label" style="margin-top: 1.5rem;">WHAT AN AUDITOR RUNS</p>
@@ -571,7 +575,7 @@
           </p>
           <p style="margin-top: 0.6rem;">
             The transparency logs prove <strong>no fork, no rollback, no equivocation</strong> of commit history and
-            published keys and binaries, trusting only the one pinned Ed25519 key, nothing more. They do
+            published keys and binaries, trusting only the one pinned log key, nothing more. They do
             <strong>not</strong> prove the server behaves correctly in real time, and they are <strong>not</strong>
             anonymity.
           </p>

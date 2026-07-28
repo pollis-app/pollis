@@ -305,8 +305,10 @@
           target="_blank" rel="noopener noreferrer">guide here</a>), or query our
         <a href="https://github.com/actuallydan/pollis/blob/main/docs/transparency.md" target="_blank"
           rel="noopener noreferrer">public verification API</a> directly (rate limits apply).
-        The only thing you have to trust is the log's pinned Ed25519 public key:
-        <code>175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148</code>
+        The only thing you have to trust is the log's pinned public key. That key is being rotated to
+        <strong>ML-DSA-44</strong>, a post-quantum signature scheme, so that a signed statement about history stays
+        checkable for as long as anyone might want to re-check the past; it will be published here once every tree
+        has been republished under it.
       </div>
 
       <form class="kt-form" id="kt-form">

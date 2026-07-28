@@ -13,10 +13,16 @@
 const BACKEND_BASE = "https://verify.pollis.com";
 // Static release pointers — the same source of truth index.html uses.
 const CDN_BASE = "https://cdn.pollis.com";
-// The one Ed25519 public key everything on this page trusts. This constant is
-// the only thing the browser checks: it string-compares the served key to it.
-const PINNED_KEY =
-  "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148";
+// The one public key everything on this page trusts. This constant is the only
+// thing the browser checks: it string-compares the served key to it.
+//
+// `null` while the log's signing key is being rotated from Ed25519 to ML-DSA-44
+// (#668) — mirrors `PINNED_LOG_PUBLIC_KEY` in pollis-core, and for the same
+// reason: an absent pin must WITHHOLD trust ("cannot check"), never raise a
+// false alarm against a served key that is legitimately new. Set this to the
+// 2624-hex-char ML-DSA-44 key once the operator has minted it and republished
+// all three trees under the `sth:v2` contexts.
+const PINNED_KEY = null;
 
 // ── DOM helpers ─────────────────────────────────────────────────────────────
 function byId(id) {
@@ -437,7 +443,21 @@ function loadTrees() {
 }
 
 // ── D. Pinned-key cross-check (the ONLY local verification) ─────────────────
+// Shown in place of the pin while it is absent: the served key is still worth
+// displaying, it simply is not being checked against anything.
+function renderKeyPending(served) {
+  byId("art-key-hex").innerHTML =
+    (served ? copyChip(served, served) : "") +
+    '<span class="art-badge art-badge--info">' +
+    "no pinned key yet — rotating to ML-DSA-44, nothing is being checked" +
+    "</span>";
+}
+
 function renderKey(served) {
+  if (PINNED_KEY === null) {
+    renderKeyPending(served);
+    return;
+  }
   const match = served === PINNED_KEY;
   byId("art-key-hex").innerHTML =
     copyChip(PINNED_KEY, PINNED_KEY) +
@@ -449,6 +469,10 @@ function renderKey(served) {
 }
 
 function renderKeyUnavailable() {
+  if (PINNED_KEY === null) {
+    renderKeyPending("");
+    return;
+  }
   byId("art-key-hex").innerHTML =
     copyChip(PINNED_KEY, PINNED_KEY) +
     '<span class="art-badge art-badge--info">served key unavailable</span>';

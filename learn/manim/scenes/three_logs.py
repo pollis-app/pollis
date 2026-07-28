@@ -49,6 +49,9 @@ MONO = "Cascadia Code, DejaVu Sans Mono, monospace"
 
 config.background_color = BG
 
+# STALE: this is the log's retired Ed25519 key. The log now signs with
+# ML-DSA-44 (#668) and the new 2624-hex-char key does not fit this layout —
+# these scenes need re-rendering with an elided key once rotation completes.
 PINNED_KEY = "175ebfef98fc6b20c67c4cba9d4a36a4f85f05afa4e31f707e7d7e3c02227148"
 
 # The real domain-separation contexts each tree signs under.
